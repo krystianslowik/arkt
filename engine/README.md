@@ -1,13 +1,14 @@
 # Arkt engine
 
 `$CHROMIUM_ROOT` is the directory that holds the Chromium build environment: `depot_tools/` and the checkout in
-`chromium/src` (pinned to tag 156.0.8078.48). It needs well over 100 GB free; any local or external disk works.
+`chromium/src` (pinned to the tag in `$PIN`). It needs well over 100 GB free; any local or external disk works.
 Every doc in this repo uses these variables:
 
     export REPO=/path/to/arkt                      # root of this repository
     export CHROMIUM_ROOT=/path/to/arkt-chromium    # depot_tools/ and chromium/src live here
     export CR=$CHROMIUM_ROOT/chromium/src
     export PATH=$CHROMIUM_ROOT/depot_tools:$PATH
+    export PIN=156.0.8078.48                       # pinned Chromium tag; changed only by a rebase (REBASE.md)
 
 - `arkt/` is symlinked into the Chromium checkout as `src/arkt`. Our own sources only.
 - `patches/chromium/*.patch` are the only upstream edits, applied in the order listed in `.patches`.
@@ -24,12 +25,12 @@ Once per checkout (both commands are safe to re-run):
 
 Fresh checkout at the pinned tag; stops at the first patch that fails to apply. It refuses to run if branch `arkt` already exists and its commit count differs from `.patches`, because `checkout -B` would discard commits that were never exported. It compares counts only, so an amended commit that was not exported is not detected; always run Export after editing upstream files.
 
-    n_commits=$(git -C $CR rev-list --count 156.0.8078.48..arkt 2>/dev/null || echo 0)
+    n_commits=$(git -C $CR rev-list --count $PIN..arkt 2>/dev/null || echo 0)
     n_patches=$(wc -l < $REPO/engine/patches/chromium/.patches | tr -d ' ')
     if git -C $CR rev-parse -q --verify arkt >/dev/null && [ "$n_commits" != "$n_patches" ]; then
       echo "arkt has unexported commits; run Export first"
     else
-      git -C $CR checkout -B arkt 156.0.8078.48
+      git -C $CR checkout -B arkt $PIN
       for p in $(cat $REPO/engine/patches/chromium/.patches); do
         git -C $CR am -3 "$REPO/engine/patches/chromium/$p" || { echo "stopped at $p"; break; }
       done
@@ -40,7 +41,7 @@ Fresh checkout at the pinned tag; stops at the first patch that fails to apply. 
 After editing upstream files (one commit per patch on branch `arkt`). Patches are written to a temp dir first and replace the old ones only if `format-patch` succeeds and produced at least one patch; otherwise the existing patches are kept:
 
     tmp=$(mktemp -d)
-    if git -C $CR format-patch --no-numbered --zero-commit --no-signature -o $tmp 156.0.8078.48..arkt; then
+    if git -C $CR format-patch --no-numbered --zero-commit --no-signature -o $tmp $PIN..arkt; then
       if [ -z "$(find $tmp -name '*.patch')" ]; then
         echo "no commits to export"
       else
@@ -50,6 +51,25 @@ After editing upstream files (one commit per patch on branch `arkt`). Patches ar
       fi
     fi
     rm -rf $tmp
+
+## Rebase onto a new Chromium tag
+
+The pin moves by rebase only, following `engine/REBASE.md` step by step, tracked in an issue opened from the
+"Chromium rebase" template. In short:
+
+- Trigger: every Chrome Stable security release of the pinned milestone is rebased, merged and installed within
+  7 days of the Chrome release (maintainer decision, #138); milestone rebases follow the roadmap (#30). A security
+  release whose patches apply cleanly and whose overlay builds unchanged takes the fast path (fewer checks).
+- Procedure: save branch `arkt` as `arkt-<old tag>`, fetch the new tag (shallow), create a new `arkt` on it and
+  apply `.patches` with `git am -3`, resolving conflicts inside each patch's own commit; `gclient sync`; set `PIN`
+  above to the new tag and run Export. A rebase re-exports every patch, so announce it like any `.patches` change
+  (`CONTRIBUTING.md`, section 8).
+- Gate: `git -C $CR rev-list --count $PIN..arkt` equals the `.patches` line count, the patch budget holds (under 30
+  patch files, no new patch, hot-file hunks not grown) and the budget table is updated.
+- Checks: rebuild `out/Spike` and `out/Arkt`, then the engine smoke (design section 5, testing item 5), the W5b
+  smoke matrix, Web Store install and extension popup, web identity (below), the keychain item string, and
+  1Password once #23 records a GO. Re-sign (notarize once #125 lands), keep the previous bundle for rollback,
+  install, record time and disk in the rebase log.
 
 ## Launch flags (every test launch)
 
