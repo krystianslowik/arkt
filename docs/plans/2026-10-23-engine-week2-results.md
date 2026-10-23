@@ -17,7 +17,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W5c | Arkt-owned tab list and visibility (finding 2) | DONE | no upstream patch; week-1 blackout repro passes (CDP `visibilityState`, `ARKT: visibility` lines, AX row selection); `arkt_browser_window.mm` split; affected W5b rows pass; see "W5c" below |
 | W6 | Extension window identity, extension-created tabs and windows (finding 3) | DONE | no upstream patch; `ArktExtensionsContainer` makes `chrome.action.openPopup()` open our popover; every extension-created tab and window lands in an Arkt window (`views=0`), 1Password welcome page included; popup closes on `window.close()` and on unload; see "W6" below |
 | W7 | Web Store install on the native window | DONE | uBO Lite installed on the native window (`views=0`), actions 1 -> 2, popup through the menu; post-install dialog crash on close fixed in patch 0006; see "W7" below |
-| W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | DONE (user steps open) | patch 0003; see below |
+| W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | DONE (one maintainer launch after W10) | patch 0003; release bundle names its item "Arkt Safe Storage"; maintainer keeps the old "Chromium Safe Storage" item; see "W8" below |
 | W9 | Native window as default; try dropping patch 0002 | DONE (0002 kept) | `ArktBrowserWindow` is the default, `--arkt-views-window` keeps the week-1 path; W5b matrix 17/17, W5c Step 3 and W6 Steps 3-4 pass with no switch; W7 not re-run (see below); dropping 0002 blanks a tab moved in from a Views popup window and the week-1 path, so it stays; patch set unchanged; see "W9" below |
 | W10 | Release bundle rebuild, re-sign, final smoke, housekeeping | TODO | |
 | WE | Embedding spike (lane C) | DONE: GO (framework copied into the app bundle) | see below; branch `spike/embedding` |
@@ -1101,13 +1101,51 @@ that is throwaway test data.
 
 Both compiled in the W8 build above.
 
-### Needs the user (open)
+### Release bundle check (2026-10-24, strings and build config only)
 
-1. Decide about the existing "Chromium Safe Storage" item (created 2026-10-23 08:04:51Z, account `Chromium`). It was
-   not deleted. If you know only Arkt test builds created it, delete it yourself in Keychain Access.
-2. After W10 installs the rebuilt `/Applications/Arkt.app`, launch it once without `--use-mock-keychain` (plan W8,
-   "Needs the user" step 2). Expected: no prompt about "Chromium Safe Storage", and an "Arkt Safe Storage" item
-   (account `Arkt`) afterwards.
+The product build is `out/Arkt` (W1, non-component, Arkt branding) and its signed copy in `/Applications/Arkt.app`
+(W2). Both contain patch 0003 (`git -C $CR log refs/heads/arkt` has `24b83bf9f1 Arkt: use the Arkt Safe Storage
+keychain item`). Nothing in this check reads, creates or changes a keychain item, and nothing was launched.
+
+```
+FW="Contents/Frameworks/Arkt Framework.framework/Versions/Current/Arkt Framework"
+grep -a -o -E "(Arkt|Chromium|Chrome) Safe Storage" "$REL/Arkt.app/$FW" | sort | uniq -c
+   1 Arkt Safe Storage
+grep -a -o -E "(Arkt|Chromium|Chrome) Safe Storage" "/Applications/Arkt.app/$FW" | sort | uniq -c
+   1 Arkt Safe Storage
+find /Applications/Arkt.app -type f -perm +111 -print0 | xargs -0 grep -l -a -E "(Chromium|Chrome) Safe Storage"
+                                                                   # no output
+grep -E "GOOGLE_CHROME_BRANDING|CHROMIUM_BRANDING" $REL/gen/build/branding_buildflags.h
+#define BUILDFLAG_INTERNAL_CHROMIUM_BRANDING() (1)
+#define BUILDFLAG_INTERNAL_GOOGLE_CHROME_BRANDING() (0)
+```
+
+- The literal sits in the framework as `saltysalt` `Arkt Safe Storage\0` `Arkt\0` `mock_password\0`: service name,
+  account name, and the mock keychain's password, so the `--use-mock-keychain` path is compiled into the release
+  build too.
+- `GOOGLE_CHROME_BRANDING` is 0, so the non-Chrome arm of `keychain_password_mac.mm` ("Arkt Safe Storage" /
+  "Arkt") is the one compiled; `out/Arkt/args.gn` sets no `is_chrome_branded`.
+- No other Mac code path names a Safe Storage item: outside tests, `git -C $CR grep -n "Safe Storage" -- '*.mm'
+  '*.cc' '*.h'` lists `keychain_password_mac.mm` and a comment in its header, the Linux
+  `freedesktop_secret_key_provider.h` (not built on Mac) and two enterprise-reporting constants (a Windows registry
+  value and "Endpoint Verification Safe Storage", neither os_crypt). `KeychainPassword`'s names have no runtime
+  override outside tests.
+- The two framework binaries are not byte-identical (`cmp` exit 1) because `/Applications/Arkt.app` is the re-signed
+  copy (W2); both carry the same single name.
+
+### Decision: the old "Chromium Safe Storage" item stays
+
+Maintainer decision (2026-10-23, #20): the existing "Chromium Safe Storage" item in the login keychain (account
+`Chromium`, created 2026-10-23 08:04:51Z) is kept. It is not deleted or migrated, and no build with patch 0003 reads
+it: those builds look up "Arkt Safe Storage" only. Test runs never touch either item (`--use-mock-keychain`, see
+`engine/README.md`, "Launch flags").
+
+### Needs the maintainer (handed to W10, #22)
+
+Once, after W10 installs the rebuilt `/Applications/Arkt.app` (W10 "Needs the user"): launch it without
+`--use-mock-keychain` (plan W8, "Needs the user" step 2). Expected: no prompt about "Chromium Safe Storage", and an
+"Arkt Safe Storage" item (account `Arkt`) afterwards. If macOS asks for access to "Arkt Safe Storage", report it.
+Week 3 repeats the same launch for the embedded app (W3-11, "Needs the maintainer").
 
 ## W5c: Arkt-owned tab list and visibility
 
