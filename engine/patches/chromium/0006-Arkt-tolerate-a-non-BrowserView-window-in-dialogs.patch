@@ -7,12 +7,28 @@ Permission bubbles anchor through GetPageInfoAnchorConfiguration and
 GetPageInfoAnchorRect, which dereferenced the window's BrowserView. For a
 normal window that is not a BrowserView, the configuration is empty and the
 anchor rect is the window's top-left corner. The pointer and keyboard lock
-prompt no longer assumes the location bar has a chip controller.
+prompt no longer assumes the location bar has a chip controller. The
+post-install dialog's pinned-by-default hint is skipped when the window is
+not a BrowserView instead of dereferencing it when the dialog closes.
 ---
+ .../ui/extensions/extension_install_ui_desktop.cc   |  2 +-
  chrome/browser/ui/views/bubble_anchor_util_views.cc | 13 +++++++++++++
  .../exclusive_access_permission_prompt.cc           |  3 ++-
- 2 files changed, 15 insertions(+), 1 deletion(-)
+ 3 files changed, 16 insertions(+), 2 deletions(-)
 
+diff --git a/chrome/browser/ui/extensions/extension_install_ui_desktop.cc b/chrome/browser/ui/extensions/extension_install_ui_desktop.cc
+index c9e2a59c3e..3959e16a71 100644
+--- a/chrome/browser/ui/extensions/extension_install_ui_desktop.cc
++++ b/chrome/browser/ui/extensions/extension_install_ui_desktop.cc
+@@ -160,7 +160,7 @@ void ExtensionInstallUIDesktop::OnInstallSuccess(
+               }
+               BrowserView* browser_view =
+                   BrowserView::GetBrowserViewForBrowser(browser_interface);
+-              if (!browser_view->toolbar()) {
++              if (!browser_view || !browser_view->toolbar()) {
+                 return;
+               }
+               ExtensionsToolbarDesktop* extensions_toolbar =
 diff --git a/chrome/browser/ui/views/bubble_anchor_util_views.cc b/chrome/browser/ui/views/bubble_anchor_util_views.cc
 index bd418d5445..9d14d4429f 100644
 --- a/chrome/browser/ui/views/bubble_anchor_util_views.cc

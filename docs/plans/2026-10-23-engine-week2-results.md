@@ -16,7 +16,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W5b | Seam fixes found by the smoke matrix (GATE) | DONE: gate passes | 17/17 scenarios pass; patches 0005-0006 (2 patch files, 3 upstream files, 0 hot-file hunks); close, quit, NTP, main-menu commands and the extension popup fixed on our side; see "W5b" below |
 | W5c | Arkt-owned tab list and visibility (finding 2) | DONE | no upstream patch; week-1 blackout repro passes (CDP `visibilityState`, `ARKT: visibility` lines, AX row selection); `arkt_browser_window.mm` split; affected W5b rows pass; see "W5c" below |
 | W6 | Extension window identity, extension-created tabs and windows (finding 3) | TODO | |
-| W7 | Web Store install on the native window | TODO | |
+| W7 | Web Store install on the native window | DONE | uBO Lite installed on the native window (`views=0`), actions 1 -> 2, popup through the menu; post-install dialog crash on close fixed in patch 0006; see "W7" below |
 | W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | DONE (user steps open) | patch 0003; see below |
 | W9 | Native window as default; try dropping patch 0002 | TODO | |
 | W10 | Release bundle rebuild, re-sign, final smoke, housekeeping | TODO | |
@@ -31,9 +31,9 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | 0003 | Arkt keychain item name (W8) | exists | 1 (`keychain_password_mac.mm`) | 0 |
 | 0004 | `BrowserWindow` factory hook for Arkt (W5a) | exists | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
 | 0005 | Tolerate a non-`BrowserView` window in tab features (W5b) | exists | 1 (`sad_tab_controller.cc`) | 0 |
-| 0006 | Tolerate a non-`BrowserView` window in dialogs (W5b) | exists | 2 (`bubble_anchor_util_views.cc`, `exclusive_access_permission_prompt.cc`) | 0 |
+| 0006 | Tolerate a non-`BrowserView` window in dialogs (W5b, W7) | exists | 3 (`bubble_anchor_util_views.cc`, `exclusive_access_permission_prompt.cc`, `extension_install_ui_desktop.cc`) | 0 |
 
-Current totals: 6 patch files, 12 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 12 files changed, 56 insertions, 4 deletions). Seam patches (W5b): 2 patch files, 3 upstream files, 0 hot-file hunks, no header.
+Current totals: 6 patch files, 13 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 13 files changed, 57 insertions, 5 deletions). Seam patches (W5b, W7): 2 patch files, 4 upstream files, 0 hot-file hunks, no header.
 
 ## W0
 
@@ -1043,3 +1043,104 @@ is counted above except the dump count.
 - Pinned tabs, tab groups and split tabs are not in the events; `OnTabPinnedStateChanged`, `OnTabGroupChanged` and
   `OnSplitTabChanged` are the hooks when ShellUI needs them.
 - The placeholder table is fixed at the sidebar width and does not show favicons or loading state.
+
+## W7: Web Store install on the native window
+
+Date 2026-10-23. Branch `engine/19-web-store-install`, issue #19. Variant P. Every run: a fresh profile of its own,
+`--arkt-native-window`, `--load-extension=action-probe`, `--arkt-extensions-menu-dump` (not in the lldb run), CDP port 9351, the uBO Lite
+detail page as the start URL, and the window moved to 0,60 1000x860 with `chrome.windows.update` right after launch.
+The Google consent interstitial ("Before you continue") was rejected over CDP (`Reject all`, `--user-gesture`), and
+"Add to Chrome" was pressed with `cdp.mjs --user-gesture`, as in week-1 Task 6.
+
+### Install prompt (Step 2)
+
+| Check | Result |
+|---|---|
+| Census while the prompt is up | `ARKT: browsers normal=1 arkt=1 views=0` |
+| Owner | the browser process; a separate top-level window, AX role `AXWindow` / `AXStandardWindow`, title `Add "uBlock Origin Lite"?`, CG layer 0. Not a sheet on the Arkt window |
+| Position | 676,258 448x196 (the same in both runs): horizontally centred on the 1800-wide screen, not on the Arkt window (0,60 1000x860) |
+| Accept | one AXPress on `button "Add extension"` of the prompt, after the checks: our process frontmost, the prompt is window 1 |
+
+Screenshot `$PROF/shots/w7-prompt.png` (window-only). The prompt's own header row ("Add "uBlock Origin Lite"?" and
+the icon) is partly covered by the system title bar strip: `CreateBrowserModalDialogViews` makes a window-modal
+dialog, which on Mac is shown as a sheet of a Views parent; the Arkt `NSWindow` is not a Views window (not
+investigated further), and the dialog comes up as a free standard window instead.
+
+### After accepting (Step 3)
+
+```
+ARKT: toolbar actions 1
+ARKT action ceojeochoeiibbkbcnnidcahamphllac Arkt action probe
+...
+ARKT: toolbar actions 2
+ARKT action ceojeochoeiibbkbcnnidcahamphllac Arkt action probe
+ARKT action ddkjiahejlhfcafbddmgiahcphecmpfh uBlock Origin Lite
+ARKT: menu item 0 Arkt action probe enabled=1
+ARKT: menu item 1 uBlock Origin Lite enabled=1
+```
+
+The Web Store button changed to "Remove from Chrome". Chrome then shows the post-install dialog ("uBlock Origin Lite
+has been added to Chromium"), also a free standard window, at -224,39 448x132: centred on the window's top-left
+corner (the patch 0006 anchor point) and half off-screen. Screenshot `$PROF/shots/w7-postinstall.png`.
+
+### Crash: post-install dialog closed (fixed in patch 0006)
+
+Closing that dialog (Escape, after the frontmost and window-1 checks) crashed the browser on the build before this
+task (`$PROF/w7-run1.log`): `Received signal 11 SEGV_ACCERR 0000000005b8`, one new Crashpad dump (86 -> 87). Symbolized with `lldb -p`
+attached to a second run (`$PROF/w7-lldb.log`):
+
+```
+stop reason = EXC_BAD_ACCESS (code=1, address=0x5b8)
+frame #0: libchrome_dll.dylib`base::internal::Invoker<...ExtensionInstallUIDesktop::OnInstallSuccess(
+          scoped_refptr<extensions::Extension const>, SkBitmap const*)::$_1&&, ...>
+frame #1: libchrome_dll.dylib`...OnceCallback<void (base::WeakPtr<ui::TrackedElementHandler>)>...
+frame #2: libbase.dylib`base::TaskAnnotator::RunTaskImpl(base::PendingTask&) + 308
+```
+
+This is the seam W3 listed: `ExtensionInstallUIDesktop::OnInstallSuccess` binds a callback that the post-install
+dialog posts when it is destroyed (`extension_post_install_dialog.cc`, `SetDialogDestroyingCallback`); it calls
+`BrowserView::GetBrowserViewForBrowser` and dereferences the result (`browser_view->toolbar()`) to show the
+"pinned by default" IPH. No Arkt-side route: the lambda is bound inside `OnInstallSuccess`, and skipping the
+post-install UI would drop the dialog too. Fix: the W5b dialogs theme patch 0006 gains
+`if (!browser_view || !browser_view->toolbar()) return;` in `extension_install_ui_desktop.cc` (commit amended on branch
+`arkt`, author `Arkt contributors <noreply@arkt.invalid>`, re-exported; only the 0006 file changed, `.patches`
+unchanged). Without a `BrowserView` the IPH is skipped; Arkt has no toolbar to pin to.
+
+Build: `nice -n 15 autoninja -C out/Spike chrome`, `The build has finished successfully.`, 0 `FAILED:`.
+
+### Verification on the fixed build
+
+Fresh profile, the whole flow again: prompt at 676,258 448x196 with `views=0`, AXPress "Add extension", actions
+1 -> 2 with the two menu items above, post-install dialog shown, Escape. The browser was alive 10 s later, 0
+`FATAL`/`Check failed`/`Received signal` lines, Crashpad dumps 87 -> 87 (also after the stop by PID).
+
+Popup through the menu path (W4 Step 7 wiring): AXPress on `button "Extensions"` run in the background (it blocks
+while the menu tracks), then Down, Down, Return to our frontmost process:
+
+```
+ARKT: extensions menu shown 2 items
+ARKT: run action ddkjiahejlhfcafbddmgiahcphecmpfh source 2
+ARKT: TriggerPopup ddkjiahejlhfcafbddmgiahcphecmpfh by_user=1 url=chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/popup.html
+ARKT: extensions menu closed
+ARKT: popup loaded chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/popup.html
+ARKT: popup auto-resize 273x374
+```
+
+Source 2 is `InvocationSource::kMenuEntry`. `cdp.mjs ddkjiahejlhfcafbddmgiahcphecmpfh/popup.html 'document.title'`:
+`uBlock Origin Lite`, with the filtering mode panel for `chromewebstore.google.com`. Screenshot
+`$PROF/shots/w7-popup.png`: the popover at the sidebar Extensions button.
+
+### Gate re-check
+
+Seam patches: 2 patch files (limit 8), 4 upstream files (limit 25), 0 hot-file hunks (limit 6; `git -C $CR diff
+156.0.8078.48..arkt -- <hot files> | grep -c '^@@'` = 0), no header. Totals: 6 patch files, 13 upstream files
+(`13 files changed, 57 insertions(+), 5 deletions(-)`). The gate still passes in variant P.
+
+### Known gaps (week 3, not fixed here)
+
+- The install prompt and the post-install dialog are free standard windows, not sheets on the Arkt window; the
+  prompt's header sits partly under the system title bar strip, and the post-install dialog is placed half
+  off-screen at the window's top-left. Same class as W5b rows 10 and 11. The native sheet through
+  `ShowDialogCallback` (or attaching the widget to the Arkt window) is the week-3 fix.
+- The "pinned by default" IPH is skipped on Arkt windows.
+- The Web Store shows its "Switch to Chrome?" banner and dialog; it does not block the install.
