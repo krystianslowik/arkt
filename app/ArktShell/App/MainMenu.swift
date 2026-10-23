@@ -26,9 +26,11 @@ enum MainMenu {
       item("Select All", #selector(NSText.selectAll(_:)), "a"),
     ]))
     // KB-018, BH-032: Cmd-Shift-D. ShellWindowController.validateMenuItem titles it Show / Hide Toolbar.
+    // Split View (S5): Arc's four View menu items plus a Split View submenu, built by ShellUI's SplitMenu.
     main.addItem(submenu(title: "View", items: [
       item("Show Toolbar", #selector(ShellWindowController.toggleToolbar(_:)), "D"),
-    ]))
+      .separator(),
+    ] + SplitMenu.items()))
     // KB-033, KB-034 (Cmd-Opt-Right / Left) and KB-035, BH-041 (Ctrl-1 ... Ctrl-9).
     let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)
     let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
