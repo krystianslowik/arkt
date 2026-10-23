@@ -296,6 +296,30 @@ struct ArchiveCoordinatorTests {
     #expect(await harness.store.stored[first.id] == second)
   }
 
+  /// The post-write cleanup stops at the first non-add: an add queued behind a remove while the batch was in flight
+  /// is not mistaken for a written one, even when it equals a written entry (same id, same clock).
+  @Test func anEqualAddQueuedBehindARemoveDuringTheWriteIsStillSent() async throws {
+    let harness = try Harness(todayTabs: 3)
+    await harness.store.holdAdds()
+    let first = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    let middle = try #require(harness.coordinator.archive([harness.today[1]], reason: .manual).first)
+    harness.coordinator.archive([harness.today[2]], reason: .manual)
+    await eventually { await harness.store.addCalls.count == 1 }
+    #expect(await harness.store.addCalls.first?.ids == harness.today)
+
+    _ = try harness.coordinator.restore(first, fallbackSpace: nil)
+    let second = try #require(harness.coordinator.archive([first.id], reason: .manual).first)
+    #expect(second == first)
+    _ = try harness.coordinator.restore(middle, fallbackSpace: nil)
+    await harness.store.releaseAdds()
+    await harness.drain()
+
+    #expect(await harness.store.calls == [
+      .add(harness.today), .remove([first.id]), .add([first.id]), .remove([middle.id]),
+    ])
+    #expect(await harness.store.stored[first.id] == second)
+  }
+
   @Test func restoringTheSameItemTwiceIsANoOp() async throws {
     let harness = try Harness()
     let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
@@ -366,6 +390,105 @@ struct ArchiveCoordinatorTests {
     await harness.store.releaseAdds()
     await eventually { await harness.store.removeCalls == [[item.id]] }
     #expect(await harness.store.stored[item.id] == nil)  // no stale entry left behind
+  }
+
+  // MARK: - Auto-archive (E5d)
+
+  /// Ids of an auto-archive sidebar: Today tabs, pinned tabs, a Favorite and a foldered tab, all in Space "Work"
+  /// of `profile` unless noted.
+  private struct AutoArchiveIDs {
+    var space: UUID
+    var today: [UUID]
+    var pinned: [UUID]
+    var favorite: UUID
+    var foldered: UUID
+  }
+
+  /// One Space with Today tabs idle `idleHours` (top first), pinned tabs idle `pinnedIdleHours`, a Favorite and a
+  /// Today folder holding one tab, both idle 400 h. Idle means `lastActiveAt = now - hours`.
+  private static func sidebarWithTodayTabs(
+    idleHours: [Double], pinnedIdleHours: [Double] = [], profile: String = "default", now: Date
+  ) throws -> (ModelSidebarSource, AutoArchiveIDs) {
+    let source = ModelSidebarSource(now: { now })
+    let ago = { (hours: Double) in now.addingTimeInterval(-hours * 3600) }
+    let ids = try source.mutate { sidebar -> AutoArchiveIDs in
+      let space = sidebar.addSpace(title: "Work", profile: profile)
+      let old = ago(400)
+      let today = try idleHours.map {
+        try sidebar.addTab(url: url, title: "T", lastActiveAt: ago($0), in: .today(space), createdAt: old)
+      }
+      let pinned = try pinnedIdleHours.map {
+        try sidebar.addTab(url: url, title: "P", lastActiveAt: ago($0), in: .pinned(space), createdAt: old)
+      }
+      let favorite = try sidebar.addTab(
+        url: url, title: "F", lastActiveAt: old, in: .favorites(profile: profile), createdAt: old)
+      let folder = try sidebar.addFolder(title: "Folder", in: .today(space), createdAt: old)
+      let foldered = try sidebar.addTab(url: url, title: "In", lastActiveAt: old, in: .folder(folder), createdAt: old)
+      return AutoArchiveIDs(space: space, today: today, pinned: pinned, favorite: favorite, foldered: foldered)
+    }
+    return (source, ids)
+  }
+
+  @Test func autoArchiveUsesPolicyClampAndExemptions() async throws {  // BH-080, BH-084, BH-054, BH-048
+    let now = Self.now
+    let (source, ids) = try Self.sidebarWithTodayTabs(idleHours: [13, 2, 40], pinnedIdleHours: [400], now: now)
+    let store = FakeArchiveStore()
+    let coordinator = ArchiveCoordinator(source: source, store: store, now: { now })
+
+    let archived = coordinator.runAutoArchive(
+      startedAt: now.addingTimeInterval(-100 * 3600), settings: ArchiveSettings(), exempt: [ids.today[2]])
+
+    #expect(archived.map(\.id) == [ids.today[0]])  // 13 h idle; 2 h too fresh; 40 h exempt; pinned never
+    #expect(archived.allSatisfy { $0.reason == .auto })
+    #expect(archived.allSatisfy { $0.archivedAt == now })
+    let sidebar = source.sidebar
+    #expect(sidebar.children(of: .today(ids.space)).prefix(2) == [ids.today[1], ids.today[2]])
+    for kept in ids.pinned + [ids.favorite, ids.foldered] { #expect(sidebar.nodes[kept] != nil) }
+    let drained = coordinator
+    await eventually { !drained.hasPendingWrites }
+    #expect(await store.addCalls == [.init(ids: [ids.today[0]], policy: .replace)])
+  }
+
+  @Test func startedAtClampProtectsFreshImports() throws {  // plan decision 7
+    let now = Self.now
+    let (source, ids) = try Self.sidebarWithTodayTabs(idleHours: [400, 400], now: now)
+    let coordinator = ArchiveCoordinator(source: source, store: FakeArchiveStore(), now: { now })
+
+    let archived = coordinator.runAutoArchive(
+      startedAt: now.addingTimeInterval(-3600), settings: ArchiveSettings(), exempt: [])
+
+    #expect(archived.isEmpty)
+    #expect(source.sidebar.children(of: .today(ids.space)).prefix(2) == ids.today[...])
+    #expect(!coordinator.hasPendingWrites)
+  }
+
+  @Test func perProfileThreshold() throws {  // BH-083, BH-179
+    let now = Self.now
+    let (source, defaultIDs) = try Self.sidebarWithTodayTabs(idleHours: [2], now: now)
+    let workTab = try source.mutate { sidebar -> UUID in
+      let work = sidebar.addSpace(title: "Other", profile: "work")
+      return try sidebar.addTab(
+        url: Self.url, title: "W", lastActiveAt: now.addingTimeInterval(-2 * 3600), in: .today(work),
+        createdAt: now.addingTimeInterval(-2 * 3600))
+    }
+    var settings = ArchiveSettings()
+    settings.setTabThreshold(.oneHour, forProfile: "work", scope: .thisProfile)
+    let coordinator = ArchiveCoordinator(source: source, store: FakeArchiveStore(), now: { now })
+
+    let archived = coordinator.runAutoArchive(startedAt: .distantPast, settings: settings, exempt: [])
+
+    #expect(archived.map(\.id) == [workTab])  // the default profile keeps 12 h
+    #expect(source.sidebar.nodes[defaultIDs.today[0]] != nil)
+  }
+
+  @Test func neverThresholdArchivesNothing() throws {  // BH-081
+    let now = Self.now
+    let (source, _) = try Self.sidebarWithTodayTabs(idleHours: [400], now: now)
+    var settings = ArchiveSettings()
+    settings.setTabThreshold(.never, forProfile: "default", scope: .thisProfile)
+    let coordinator = ArchiveCoordinator(source: source, store: FakeArchiveStore(), now: { now })
+
+    #expect(coordinator.runAutoArchive(startedAt: .distantPast, settings: settings, exempt: []).isEmpty)
   }
 }
 

@@ -230,6 +230,33 @@ public struct Sidebar: Hashable, Sendable {
     removeSubtree(id)
   }
 
+  /// Removes a split pane and shrinks its split (user decision 4, PARITY(NEEDS-RUNTIME-CHECK BH-123)): the pane's
+  /// width factor goes and the others are rescaled to the old total; a split left with one pane is replaced by that
+  /// tab (same id) at the split's position, and a split left with none is removed. For a node that is not a pane this
+  /// is `remove(_:)`; an unknown `id` is a no-op.
+  public mutating func removePane(_ id: NodeID) {
+    guard case .split(let splitID)? = nodes[id]?.parent, case .split(var split)? = nodes[splitID]?.kind,
+      let splitParent = nodes[splitID]?.parent
+    else { return remove(id) }
+    let index = children(of: .split(splitID)).firstIndex(of: id)
+    remove(id)
+    let panes = children(of: .split(splitID))
+    guard let survivor = panes.first else { return remove(splitID) }
+    if panes.count == 1 {
+      let position = children(of: splitParent).firstIndex(of: splitID) ?? 0
+      // The parent already holds the split, so a tab is valid there and lands shallower: `move` cannot throw here.
+      guard (try? move(survivor, to: splitParent, at: position)) != nil else { return }
+      return remove(splitID)
+    }
+    if let index, split.widthFactors.indices.contains(index) {
+      let total = split.widthFactors.reduce(0, +)
+      split.widthFactors.remove(at: index)
+      let rest = split.widthFactors.reduce(0, +)
+      if rest > 0 { split.widthFactors = split.widthFactors.map { $0 * total / rest } }
+      nodes[splitID]?.kind = .split(split)
+    }
+  }
+
   /// Changes a tab's own fields; nil leaves a field as it is. Throws `.unknownNode` when `id` is not a tab (unknown
   /// ids and folders or splits alike); the sidebar is unchanged on throw. Never moves the node.
   public mutating func updateTab(_ id: NodeID, url: URL? = nil, title: String? = nil, lastActiveAt: Date? = nil) throws {

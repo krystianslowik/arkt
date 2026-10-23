@@ -14,7 +14,8 @@ import Synchronization
 /// On failure the operation stays at the head of the outbox and the writer retries after `retryDelays` (the last one
 /// repeats), so an archived item never vanishes because the store was unavailable. A failed remove is retried the
 /// same way, except for ids a later queued add of the same id supersedes: that `.replace` add overwrites the entry
-/// anyway, so those ids are dropped and the add goes next instead of waiting behind a retry.
+/// anyway, so those ids are dropped and the add goes next instead of waiting behind a retry. Outside a flush, a remove
+/// that keeps failing therefore holds back every add queued behind it (FIFO) until it succeeds.
 ///
 /// `flush()` is for termination: it stops a retry wait, waits for a write in flight, then sends the outbox in order
 /// until it is empty or an add fails, bounded by `flushTimeout`. A remove that fails during the flush is dropped (a
@@ -100,6 +101,19 @@ public final class ArchiveCoordinator {
     outbox.append(.add(items))
     startWriter(delayFirst: false)
     return items
+  }
+
+  /// One auto-archive pass (BH-080, BH-084, BH-054, BH-048, BH-083): archives, with reason `.auto`, the Today tabs
+  /// `AutoArchivePolicy` picks for `settings`' per-profile thresholds, idle time clamped to `startedAt`, minus
+  /// `exempt` (visible tabs; media-playing ones once the engine reports them, BH-076). Returns what was archived;
+  /// the caller shows the BH-085 toast when it is not empty.
+  @discardableResult
+  public func runAutoArchive(startedAt: Date, settings: ArchiveSettings, exempt: Set<UUID>) -> [ArchivedItem] {
+    let input = AutoArchiveInput(
+      now: now(), startedAt: startedAt, exempt: exempt, threshold: { settings.tabThreshold(forProfile: $0) })
+    let ids = AutoArchivePolicy.itemsToArchive(in: source.sidebar, input)
+    guard !ids.isEmpty else { return [] }
+    return archive(ids, reason: .auto)
   }
 
   /// Puts `item` back into the sidebar (`Archiver.restore` rules: top of Today in its source Space, folders at the
@@ -227,9 +241,12 @@ public final class ArchiveCoordinator {
       }
     }.value
     guard written else { return recordFailure() }
+    // Only the adds still leading the outbox: during the write a restore can put a remove in front of a newer add
+    // (even one equal to a written entry), so the count taken before the write is stale.
     let done = Set(batch)
-    for index in outbox.indices.prefix(leading) {
-      if case .add(let items) = outbox[index] { outbox[index] = .add(items.filter { !done.contains($0) }) }
+    for index in outbox.indices {
+      guard case .add(let items) = outbox[index] else { break }
+      outbox[index] = .add(items.filter { !done.contains($0) })
     }
     dropEmptyAdds()
     consecutiveFailures = 0

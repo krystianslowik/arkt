@@ -10,7 +10,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W0 | Branch, baselines, results file, CDP helper, key-window log | DONE | see below |
 | W1 | Arkt-branded non-component build | STOPPED | build stopped on low swap; config done, see below |
 | W2 | Sign `Arkt.app`, install in /Applications, smoke | TODO | |
-| W3 | Inventory of non-`BrowserView` window seams, variant decision | TODO | |
+| W3 | Inventory of non-`BrowserView` window seams, variant decision | DONE | variant P (plain `NSWindow`); this week 3 seam patch files, 4-8 upstream files, 0 hot-file hunks (W: 3 / 4 / 0); see "W3" below |
 | W4 | Extensions menu lists every action (finding 1) | DONE | no upstream patch; see below |
 | W5a | `ArktBrowserWindow` skeleton behind `--arkt-native-window` | TODO | |
 | W5b | Seam fixes found by the smoke matrix (GATE) | TODO | |
@@ -28,11 +28,11 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 |---|---|---|---|---|
 | 0001 | Register in-process browser hook | exists | 2 | 0 |
 | 0002 | Let a WebContents view draw again after leaving Views | exists; W9 tries to drop it | 4 | 0 |
-| 0003 | `BrowserWindow` factory hook for Arkt (W5a) | new | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
-| 0004+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new, measured in W3/W5b | W3 estimate | W3 estimate |
 | 0003 | Arkt keychain item name (W8) | exists | 1 (`keychain_password_mac.mm`) | 0 |
+| 0004 | `BrowserWindow` factory hook for Arkt (W5a) | new | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
+| 0005+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new; W3 projects 3 patch files (P) | 4-8 (W3 estimate, P; 8-13 with week-3 rows) | 0 (W3 estimate) |
 
-Current totals: 3 patch files, 7 upstream files, 0 hot-file hunks. The W5a factory hook takes the next free number.
+Current totals: 3 patch files, 7 upstream files, 0 hot-file hunks.
 
 ## W0
 
@@ -403,6 +403,247 @@ processes were left.
 - `out/Arkt` was configured before W4; the next `out/Arkt` build regenerates and compiles the W4 overlay
   (incremental).
 - Keyboard commands for actions, the context menu, pinning and ordering are later work.
+
+## W3: Seam inventory and window variant decision
+
+Date 2026-10-23. Doc only; read-only `git grep`/`sed` on `$CR` at `156.0.8078.48-2-g2bda3d5a86` (branch `arkt`, patches
+0001-0002 applied). No build. `$CR/out/Spike/args.gn` has `is_debug=false`, `dcheck_always_on=false`, so a
+`DCHECK(ptr)` followed by a dereference is a null dereference (crash), not a `DCHECK` failure.
+
+### The eight inventory commands
+
+`X=(-- chrome ':!*test*' ':!chrome/browser/ui/webui_browser/*')`, run from `$CR`. All counts match the plan.
+
+| # | Command (abridged) | Hits | Files |
+|---|---|---|---|
+| 1 | `git grep -n 'GetBrowserViewForBrowser([^;]*)->' $X` | 8 | 8 |
+| 2 | `git grep -n 'GetBrowserViewForBrowser' $X \| wc -l` | 166 | 119 |
+| 3 | `git grep -n 'IsWebUIBrowserEnabled()' $X` | 13 | 12 |
+| 4 | `git grep -n 'GetWidgetForNativeWindow(.*GetNativeWindow' $X` | 11 | 10 |
+| 5 | `git grep -n 'static_cast<BrowserView\*>' $X` | 1 | 1 |
+| 6a | `git grep -n 'FindBrowserWindowWithWebContents' $X` | 11 | 8 |
+| 6b | `git grep -n 'GetBrowserViewForNativeWindow' $X` | 30 | 16 |
+| 7 | `git grep -n -A1 'GetTopLevelWidgetForNativeView' $X \| grep 'GetNativeView'` | 13 | 11 |
+| 8 | `git grep -n -E 'if \(browser_view\|browser_view &&\|webui_browser_window\)\|IsWebUIBrowserEnabled' -- <hot files>` | 39 | 2 |
+
+Grep 8 splits into 27 `browser_view` arm lines, 10 Webium arm lines and the `IsWebUIBrowserEnabled()` branch at
+`browser_window_features.cc:352` in `browser_window_features.cc`, plus one Webium-gated arm in `tab_features.cc`
+(`SadTabHelper`, :646) and no `browser_view` arm there.
+
+### How the lookups behave for an `ArktBrowserWindow`
+
+These four facts decide most rows below; they are the same for both variants unless stated.
+
+- `BrowserView::GetBrowserViewForBrowser` reads `kBrowserViewKey` from the Widget of `GetNativeWindow()`
+  (`browser_view.cc:1193-1217`). Variant P: no Widget, nullptr. Variant W: a Widget without `kBrowserViewKey`,
+  nullptr. **Every grep 1/2 hit is identical in P and W.**
+- `BrowserWindow::FindBrowserWindowWithWebContents` returns only a `BrowserView` (`browser_view.cc:1173-1190`: the
+  top-level Widget's `kBrowserViewKey`, else `GetBrowserViewForBrowser`), so it is nullptr for Arkt tabs in both
+  variants. `BrowserWindow::FromBrowser` is safe: it falls back to `browser->GetWindow()`
+  (`browser_window_factory.cc:98-111`).
+- `GetWidgetForNativeWindow`/`GetTopLevelWidgetForNativeView` (greps 4, 7) are nullptr in P and a Widget in W.
+- A Views dialog or bubble whose `params.parent` is a view of a plain `NSWindow` gets no parent host
+  (`native_widget_mac.mm:277-278`, `SetParent(parent_host)` at :316): it becomes an unparented top-level window. A
+  browser-modal (`kWindow`) dialog then falls back to a non-modal window by design (comment and `DCHECK` at
+  `native_widget_mac.mm:585-589`); a tab-modal (`kChild`) dialog trips that `DCHECK` (off in our builds) and is only
+  sized, never positioned (`constrained_window_views.cc:167-176`, "If the host view is not backed by a
+  Views::Widget, just update the widget size").
+
+Classes: **(a)** reached this week (normal-window startup, tab add/close/activate, extension popup/action,
+`chrome.tabs`/`chrome.windows`, Web Store install, keyboard shortcuts, W5b scenarios 1-17); **(b)** only by features
+Arkt does not use this week; **(b\*)** a (b) row that is product-critical for week 3+; **(c)** null-safe already;
+**(n)** not a call on macOS (comment, declaration, `BUILD.gn`/`PRESUBMIT.py` text, or `IS_WIN`/Ash/Aura-only code).
+
+### Grep 2 (and 1): all 166 `GetBrowserViewForBrowser` lines
+
+| Class | Lines | Files |
+|---|---|---|
+| (a) | 3 | 3 |
+| (b) | 78 | 53 |
+| (c) | 67 | 56 |
+| (n) | 18 | 14 |
+| total | 166 | 119 (a file with lines in two classes is counted in both) |
+
+(a) rows, the same in P and W:
+
+| Site | Check | Reached by | Fix |
+|---|---|---|---|
+| `chrome/browser/ui/sad_tab_controller.cc:31-34` | `DCHECK(browser_view)` then `->GetAllVisibleContentsWebViews()` | renderer crash, W5b scenario 9 (`SadTabHelper` is created whenever Webium is off, `tab_features.cc:646`) | patch: return nullptr when `browser_view` is null; `ReinstallInWebView` already tolerates a null `ContentsWebView` (`sad_tab_controller.cc:76-80`). Sad tab UI `not shown` |
+| `chrome/browser/ui/views/bubble_anchor_util_views.cc:185-187` | unchecked `browser_view->GetMirroredXInView` in `GetPageInfoAnchorRect` | permission prompt, scenario 11: the stub `LocationBar` is not drawn, so no chip (`permission_prompt_factory.cc:142-145`, :237-238), `PermissionPromptBubble` anchors with a null configuration and calls `GetPageInfoAnchorRect` (`permission_prompt_base_view.cc:152-153`); also chooser bubbles (`chooser_bubble_ui.cc:59`) and page info | patch: fall back to the browser window bounds when `browser_view` is null |
+| `chrome/browser/ui/extensions/extension_install_ui_desktop.cc:161-163` | unchecked `browser_view->toolbar()` in the post-install IPH callback | Web Store install (W7): the post-install dialog runs this callback when it closes (`extension_post_install_dialog.cc:156-161`) | patch: `if (!browser_view \|\| !browser_view->toolbar()) return;` |
+
+The 8 direct `GetBrowserViewForBrowser(...)->` dereferences of grep 1 are all (b): extension dialog
+anchoring `extension_dialog_utils_views.cc:90` (only the `BrowserWindowInterface*` overload, not the native-window
+overload the install dialogs use), autofill popup `popup_base_view.cc:179` (null-checked on the next line, so (c) in
+fact), file system access usage bubble, HaTS, Cast dialog, back/forward button, Chrome Labs, ambient WebAuthn
+sign-in.
+
+(b) by theme (53 files): Views tab strip, tab groups, tab drag, vertical tabs; Views toolbar, location bar,
+omnibox, app menu, extensions toolbar; glic (including the latent `CHECK_DEREF` in
+`glic/widget/browser_conditions.cc:191`, reached only for a glic-enabled signed-in profile); side panel and page
+info side panels; Cast/media router; sign-in, profile and promo bubbles (`batch_upload_service.cc:382`,
+`dice_web_signin_interception_bubble_view.cc:504`, iOS promos); web apps; HaTS, Chrome Labs, idle, relaunch,
+storage pressure, memory saver, Lens region search, Indigo, compose, data sharing, file system access, WebAuthn
+ambient; `browser_actions.cc` (8 `CHECK_DEREF`s, run from the Views app menu, toolbar and page actions only);
+`tab_search_bubble_host.cc:243` (iterates every browser and dereferences: a mixed-window hazard once Views tab
+search is used while an Arkt window exists).
+
+(c) (56 files) includes everything this week touches besides the three (a) rows: `browser_window_features.cc:692`
+(the arms below), `browser_window_factory.cc:98`, `browser_web_contents_delegate.cc:1176`,
+`browser_command_controller.cc:2682`, autofill popups (`popup_view_views.cc:212`, `popup_view_utils.cc:289`),
+download bubble rows, `chrome_omnibox_client.cc:663`, Lens overlay, permission prompt base and scrim views,
+`share_menu_controller.mm:210` (Share menu does nothing), `accelerator_utils_cocoa.mm:56` (no non-test caller),
+translate, session-crashed and default-browser bubbles.
+
+### Greps 3-7
+
+For grep 7 the line number is the argument line the command prints.
+
+| Grep | Site | Class | P | W |
+|---|---|---|---|---|
+| 3 | `toast_controller.cc:323-328`: no anchor view and Webium off is `CHECK_IS_TEST()` (fatal in the product) | (b\*) | seam | seam |
+| 3 | `new_tab_page_handler.cc:871`, :1200: the Webium early return guards `CHECK(footer_controller)` at :884-885 and :1214-1215; `NewTabFooterController` is a `browser_view` arm (`browser_window_features.cc:878-879`) | (a) | seam | seam |
+| 3 | `browser_tabrestore.cc:125-130`: only `DCHECK`s that `GetContentsSize()` equals the restored tab's size (off in our builds, so this site cannot crash) | (a) | ours (real `GetContentsSize`) | ours |
+| 3 | `tab_features.cc:646` (`SadTabHelper`) | (a) | see sad tab | see sad tab |
+| 3 | `browser_window_features.cc:352` (`BrowserElementsViewsImpl`, returns no views for us) | (c) | | |
+| 3 | `read_anything_side_panel_controller.cc:246` (`CHECK_IS_TEST()` without a side panel), `side_panel_helper.cc:38`, `customize_chrome_page_handler.cc:550`, `reading_list_ui.cc:70`, `chrome_browser_interface_binders_webui_parts_desktop.cc:635` | (b) | | |
+| 3 | `session_restore.cc:859` (Ash), `browser_window_factory.cc:35` (the factory, patch 0004) | (n) | | |
+| 4 | `browser_focus_controller.cc:42` (`RotatePaneFocus`, null-checked) | (c) | F6 does nothing | works |
+| 4 | `permission_prompt_base_view.cc:91`, :299, `permission_prompt_bubble_base_view.cc:225`, `embedded_permission_prompt_system_settings_view.cc:27` | (c) | prompt shown inactive | as Chrome |
+| 4 | `webui_permission_chip.cc:297`, `profile_dynamic_menu.cc:455`, `glic_widget.cc:228` | (b) | | |
+| 4 | Ash/ChromeOS (3 hits) | (n) | | |
+| 5 | `browser_help_bubble.cc:66` (`IsViewClass<BrowserView>` first) | (c) | | |
+| 6a | `address_bubbles_controller.cc:61`, :75, :86, :316: unchecked, and Webium's `GetAutofillBubbleHandler` is nullptr too | (b\*) | seam | seam |
+| 6a | `managed_profile_required_navigation_throttle.cc:215`, `access_code_cast_dialog.cc:65`, `webui_contents_wrapper.cc:195`: unchecked | (b) | | |
+| 6a | `theme_colors_source_manager.cc:58`, `webui_util_desktop.cc:137` (null-checked, fall back to defaults) | (c) | | |
+| 6a | `browser_window.h:134`, `browser_view.cc:1173` | (n) | | |
+| 6b | `extension_view_utils.cc:18` (W7 post-install: no container, falls back to a browser-modal dialog), `display_media_access_handler.cc:547`, `web_textfield_touch_bar_controller.mm:22`, `browser_feature_promo_controller.cc:184`, `browser_user_education_context.cc:210` | (c) | | |
+| 6b | tab drag (11 hits), omnibox (5), `at_memory_promo_bubble_view.cc:100`, `desktop_media_list_view.cc:40` | (b) | | |
+| 6b | `browser_view.{h,cc}` (4), `javascript_app_modal_event_blocker_aura.cc` (2), Ash comment | (n) | | |
+| 7 | `render_view_context_menu_mac_cocoa.mm:77-82` (in-process) and `render_view_context_menu_mac_remote_cocoa.mm:32-37`: no top-level Widget returns before showing the menu | (b\*) | **page context menu not shown** | works |
+| 7 | `chrome_authenticator_request_delegate.cc:1253-1259`: the passkey `NSWindow` is taken from the top-level Widget | (b\*) | platform passkey sheet has no window | works |
+| 7 | `external_protocol_dialog.cc:187` (observation only) | (c) | | |
+| 7 | `payment_request_dialog_view.cc:74`, `caption_bubble_context_views.cc:46`, :82, `rounded_omnibox_results_frame.cc:124`, :127, `visual_guided_setter_page_handler.cc:51`, `tab_groups_organizer_page_handler.cc:164` | (b) | | |
+| 7 | `chrome_media_app_ui_delegate.cc:69` (Ash), `browser_view.cc:1183` | (n) | | |
+
+Found while reading, outside the eight greps: the autofill and `<datalist>` popup (scenario 17) needs only a
+top-level `NSWindow` on Mac (`popup_view_views.cc:144-149`) and tolerates a null parent Widget, kept from the Cocoa
+browser (`popup_base_view.cc:302-312`): (c), shown in both variants. Tab-modal dialogs (scenario 10) are a P-only
+seam (the parenting rule above): shown, but unparented and unpositioned in P; W parents them to the Widget.
+
+Also outside the eight greps (both variants, week 3, (b\*)): Webium's `GetAutofillBubbleHandler()` returns nullptr,
+and these callers dereference `BrowserWindow::FromBrowser(browser)->GetAutofillBubbleHandler()` without a check:
+`mandatory_reauth_bubble_controller_impl.cc:298`, `filled_card_information_bubble_controller_impl.cc:428`,
+`virtual_card_enroll_bubble_controller_impl.cc:389`, :396, `autofill_ai_import_data_controller_impl.cc:242` and
+`omnibox_autofill_bubble_controller.cc:130`. The greps miss them because they go through `FromBrowser`, which is
+non-null for Arkt. Fix on our side: `ArktBrowserWindow` returns a non-null no-op handler (no upstream file).
+
+### Grep 8: features a third window type does not get
+
+The 27 `browser_view` arms and 10 Webium arms leave Arkt (both variants) without: bookmark bar delegate (:709),
+`BrowserFocusControllerViews` (Arkt gets `StubBrowserFocusController`, :726), `ColorProviderBrowserHelper` (:742),
+contents border (:748), data protection UI (:753), DSE extension checks (:766), `DevtoolsUIController` (:792:
+scenario 16 not docked; callers null-check it, `devtools_window.cc:1079`, :1404), the Webium exclusive access
+context (:801: Arkt supplies its own, W5a), `DownloadToolbarUIController` (:823: scenario 14 has no bubble; callers
+null-check it, `download_bubble_ui_controller.cc:97-99`), `ExtensionKeybindingRegistryViews` (:833, no focus
+manager: extension keyboard commands are a known gap), extension side panels (:840), find bar owner (:849-856: not
+needed, `ArktBrowserWindow::CreateFindBar` returns its own bar), `FullscreenControlHost` (:859), NTP footer
+(:878-879, the NTP `CHECK` above), omnibox popup closer (:889), scrim (:899), side panel (:909-916), skills (:918),
+user education (:941), zoom bubble (:952-963), and in the `TYPE_NORMAL` block actor UI, `AiModePageActionController`, Cast, memory saver
+IPH, shared tab group feedback, split tab highlight (:973-1083). None of them is needed for this week's scenarios
+beyond the rows already listed, so **no Arkt arm in either hot file is projected**.
+
+### `BrowserWindow` overrides where Webium returns real objects
+
+Webium has 56 `NOTIMPLEMENTED_LOG_ONCE()` stubs in `webui_browser_window.cc`; the overrides below return real
+objects or values. "Callers" names the caller that fails or misbehaves without it.
+
+| Override (Webium line) | Webium returns | `ArktBrowserWindow` returns (W5a) | Callers |
+|---|---|---|---|
+| `GetNativeWindow` (:419) | the Widget's window | the host's `NSWindow` | every lookup above; `sad_tab_controller.cc:26-29` |
+| `Show`, `ShowInactive`, `Close` (:290, :382), `Activate`, `Deactivate`, `IsActive` (:394-402), `IsVisible` (:374) | Widget state | `NSWindow` state; `Close` orders out, then `BrowserWindowDeleter` | `chrome::Navigate`, `windows.update/remove`, scenario 7 |
+| `GetBounds`, `GetRestoredBounds`, `SetBounds`, `IsMaximized`, `IsMinimized`, `IsFullscreen`, `Maximize`, `Minimize`, `Restore`, `GetWindowShowState` (:378, :1192-1246) | Widget state | `NSWindow` frame and style mask | `chrome.windows.*`, session save |
+| `GetContentsSize` (:820), `SetContentsSize` (:829) | contents element bounds | card view size | `browser_tabrestore.cc:125-130` |
+| `GetNativeTheme`, `GetThemeProvider`, `GetColorProvider`, `GetColorProviderKey`, `GetRendererColorMap` (:454-606) | real | real (`ui::NativeTheme::GetInstanceForNativeUi()`, the profile's `ThemeService`, `ColorProviderManager`) | WebUI colours, `theme_colors_source_manager.cc:58` |
+| `GetLocationBar` (:858, `WebUIStubLocationBar`, :152) | stub | `ArktStubLocationBar`, non-null, `IsDrawn()` false | 22 unchecked `GetLocationBar()->` call sites in `chrome/` |
+| `GetWebContentsModalDialogHost`, `...For` (:1104, :1109) | `WebUIBrowserModalDialogHost` (:188) | Arkt host over the card view | tab-modal dialogs, scenario 10 |
+| `GetExclusiveAccessContext` (:1138) | Webium context, built before `ExclusiveAccessManager` (`browser_window_features.cc:801-811`) | `ArktExclusiveAccessContext`, built in the constructor | scenario 12 |
+| `CreateFindBar` (:1099, `FindBarHost`) | real | **`ArktFindBar` (no UI), never nullptr**: `FindBarController::GetOrCreateFindBar` dereferences it (`find_bar_controller.cc:58-60`); `FindBarHost` needs a `FindBarOwner`, which Arkt does not get | scenario 13 |
+| `ExtensionsContainer` (:190-194) | `WebUIToolbarExtensionsContainer` | Arkt container (W6) | `chrome.action.openPopup`, scenario 4 |
+| `GetAcceleratorProvider` (:862), `GetAcceleratorForCommandId` (:604), `PreHandleKeyboardEvent` (:1035) | real (accelerator table) | menu equivalents to `NSApp.mainMenu`; `GetAcceleratorProvider` may stay nullptr | keyboard shortcuts |
+| `IsTabStripEditable` (:925) | `true` | **`true`**: `TabListBridge::IsThisTabListEditable` (`tab_list_bridge.cc:664-667`) gates every extension tab edit | scenario 6, W6 |
+| `IsLocationBarVisible` (:943) | `true` | `false` (no omnibox); revisit if an extension API needs `true` | |
+| `IsToolbarVisible` | stub | `true` | `extension_action_api.cc:150` (`action.openPopup`) |
+| `UpdateTitleBar` (:761), `ZoomChangedForActiveTab` (:1002), `UserChangedTheme` (:996), `OnActiveTabChanged` (:775) | real (Webium UI) | forward to the host or log | |
+| `GetStatusBubbles` (:756) | empty vector | one `ArktStatusBubble` (W5a Step 3) | `browser_ui_controller.cc:86`, `browser_web_contents_delegate.cc:800` |
+| `DeleteBrowserWindow` (:667) | `delete this` | same | `BrowserWindowDeleter` |
+
+### Can `NativeWidgetMac` adopt ShellUI's existing `NSWindow`?
+
+No, not without upstream changes. `NativeWidgetMac::CreateNSWindow` (`native_widget_mac.h:261`) is a supported
+virtual (`BrowserNativeWidgetMac` overrides it, `browser_native_widget_mac.mm:746`), but it must return a
+`NativeWidgetMacNSWindow` (`native_widget_mac_nswindow.h:41`) and is called only while the Widget initialises
+(`native_widget_mac.mm:298-300`). The bridge then takes the window over: it sets its own `ViewsNSWindowDelegate` as
+the window delegate (`native_widget_ns_window_bridge.mm:466-475`) and replaces the content view with
+`BridgedContentView` (:860). Variant W therefore means ShellUI's window class derives from Chromium's
+`NativeWidgetMacNSWindow`, is created by Views, and ShellUI's views live under `BridgedContentView` with Views as
+the window delegate. That contradicts Decision 1's ownership rule (ShellUI owns its borderless `NSWindow`).
+
+### Per-variant projection (seam patches only, against the W5b gate)
+
+| Theme (one patch file each) | P upstream files | W upstream files |
+|---|---|---|
+| Browser features: `new_tab_page_handler.cc` (NTP footer `CHECK`s), `extension_install_ui_desktop.cc` (post-install IPH) | 2 | 2 |
+| Tab features: `sad_tab_controller.cc` | 1 | 1 |
+| Dialogs and anchoring: `bubble_anchor_util_views.cc`; P also tab-modal dialog parenting: either the Arkt modal dialog host attaches the dialog's `NSWindow` with `addChildWindow:` when it appears (0 upstream files), or an upstream fix in the bridge (`NativeWidgetMacNSWindowHost::SetParent` takes a host and the bridge works from bridge ids, so 2-4 files under `ui/views/` and `components/remote_cocoa/`) | 1-5 | 1 |
+| **This week, category (a)** | **3 patch files, 4-8 upstream files, 0 hot-file hunks** | **3 patch files, 4 upstream files, 0 hot-file hunks** |
+| Week 3+ (b\*): `toast_controller.cc`, `address_bubbles_controller.cc` or `browser_view.cc` (`FindBrowserWindowWithWebContents` fallback); `GetAutofillBubbleHandler` callers (ours: non-null no-op handler, no file); P also `render_view_context_menu_mac_cocoa.mm` (+ `_remote_cocoa.mm`), `chrome_authenticator_request_delegate.cc` | +4 to 5 | +2 |
+| **Including week 3+ (b\*)** | **3 patch files, 8-13 upstream files, 0 hot-file hunks** | **3 patch files, 6 upstream files, 0 hot-file hunks** |
+
+Category (a) files: 6 in both variants (`sad_tab_controller.cc`, `bubble_anchor_util_views.cc`,
+`extension_install_ui_desktop.cc`, `new_tab_page_handler.cc`, `browser_tabrestore.cc`, `find_bar_controller.cc`),
+plus in P the tab-modal parenting fix (0 files on the Arkt side, 2-4 upstream); two of them (`browser_tabrestore.cc`,
+`find_bar_controller.cc`) are fixed on our side and need no patch. A single upstream predicate does not cover these:
+they are null dereferences in unrelated files, each a one-line null check, so extending the
+`IsWebUIBrowserEnabled()` branches with an Arkt check would only add hot-file hunks (`tab_features.cc:646`) for no
+saving. The gate is 8 patch files, 25 upstream files, 6 hot-file hunks: both variants stay well inside it, before
+and after the week-3 rows.
+
+### Strategy decision (Decision 1)
+
+**Variant P (plain `NSWindow`).** Rule: P unless P's projection exceeds the W5b gate and W's does not. P projects
+3 seam patch files, 4-8 upstream files and 0 hot-file hunks this week (8-13 upstream files with the week-3 rows); the
+gate is 8 / 25 / 6. W saves up to four upstream files this week and up to seven by week 3, at the cost of handing
+ShellUI's window, content view and delegate to Views (previous section). The P-only costs are known and small:
+tab-modal dialog parenting (this week: 0 upstream files if the Arkt modal dialog host calls `addChildWindow:`,
+else 2-4 in the bridge), page context menus and the passkey window (week 3).
+
+W5a builds P. The W5b gate switch to W stays available but is not projected to trigger.
+
+### Methods W5a must make real
+
+Beyond W5a Step 3's list, this inventory adds or confirms:
+
+1. `CreateFindBar`: return an `ArktFindBar` (no UI, logs); nullptr crashes Cmd-F (`find_bar_controller.cc:58-60`).
+2. `IsTabStripEditable`: `true`; a neutral `false` makes every `chrome.tabs` edit fail (`tab_list_bridge.cc:664-667`).
+3. `GetContentsSize`: the card view size, equal to the active tab's size. `browser_tabrestore.cc:125-130` only
+   `DCHECK`s it (off in our builds), so that site cannot crash, but restored tabs should get the right size.
+4. `GetLocationBar`: non-null stub with `IsDrawn()` false. A null bar would also take the permission bubble path
+   (`IsLocationBarDisplayed` is `lb && lb->IsDrawn() && ...`); the stub is needed because 22 call sites in
+   `chrome/` dereference `GetLocationBar()->` without a check.
+5. `GetExclusiveAccessContext`: created in the constructor, before `BrowserWindowFeatures` builds
+   `ExclusiveAccessManager` (`browser_window_features.cc:809-811`).
+6. `GetWebContentsModalDialogHost` and `GetWebContentsModalDialogHostFor`: real (scenario 10).
+7. `IsToolbarVisible`: `true` (`extension_action_api.cc:150`).
+8. `GetNativeWindow`, the window state and bounds methods, `GetNativeTheme`, `GetThemeProvider`,
+   `GetColorProvider`, `GetStatusBubbles`, `HandleKeyboardEvent`/`PreHandleKeyboardEvent` and
+   `DeleteBrowserWindow`, as in the overrides table.
+9. `GetAutofillBubbleHandler` (week 3): a non-null no-op handler; nullptr crashes the payments and Autofill AI
+   bubbles (six unchecked callers, listed under "Found while reading").
+
+Known gaps recorded for W5b (both variants, no fix this week): sad tab UI, download bubble, docked DevTools, zoom
+bubble, fullscreen exit control, extension keyboard commands, Share menu. If item 9 is not done, payments and Autofill AI bubbles join this list for
+week 3.
 
 ## W8
 
