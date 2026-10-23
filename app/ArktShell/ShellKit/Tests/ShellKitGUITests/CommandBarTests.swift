@@ -447,7 +447,46 @@ final class CommandBarTests: XCTestCase {
     bar.toggle(.newTab)
   }
 
-  /// A closed bar does no work while the parent moves; the next show places it.
+  /// #212: when the open bar's parent moves to a display of another backing scale (didChangeBackingProperties or
+  /// didChangeScreen), result icons are re-rendered at the new scale immediately without waiting for the next show,
+  /// and the selected row is preserved.
+  func testOpenBarReRendersIconsWhenBackingScaleChanges() throws {
+    let window = try XCTUnwrap(shell.window)
+    let tabs: [CommandBarResults.OpenTab] = [
+      .init(node: UUID(), title: "One", url: URL(string: "https://one.example")!),
+      .init(node: UUID(), title: "Two", url: URL(string: "https://two.example")!),
+    ]
+    bar.openTabsProvider = { tabs }
+    bar.backingScaleOverride = 2
+    defer { bar.backingScaleOverride = nil }
+    bar.toggle(.newTab)
+    let table = bar.barView.table
+    table.selectRowIndexes([1], byExtendingSelection: false)
+    func iconPixels() -> Int? {
+      guard let cell = table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CommandBarCellView,
+            let rep = cell.icon.image?.representations.first as? NSBitmapImageRep else { return nil }
+      return rep.pixelsWide
+    }
+    XCTAssertEqual(iconPixels(), Int(CommandBarCellView.iconSize * 2))
+
+    bar.backingScaleOverride = 1
+    NotificationCenter.default.post(name: NSWindow.didChangeBackingPropertiesNotification, object: window)
+    waitUntil("open bar icons re-rendered at 1x on didChangeBackingProperties") {
+      iconPixels() == Int(CommandBarCellView.iconSize)
+    }
+    XCTAssertEqual(table.selectedRow, 1, "scale reload keeps the selected row")
+
+    bar.backingScaleOverride = 2
+    NotificationCenter.default.post(name: NSWindow.didChangeScreenNotification, object: window)
+    waitUntil("open bar icons re-rendered at 2x on didChangeScreen") {
+      iconPixels() == Int(CommandBarCellView.iconSize * 2)
+    }
+    XCTAssertEqual(table.selectedRow, 1)
+    bar.toggle(.newTab)
+  }
+
+  /// A closed bar does no work while the parent moves or resizes, but follows the parent on `didChangeScreen` (frame
+  /// only, still hidden at alpha 0) so the first show after a display change is not a cross-display move (#212).
   func testClosedBarDoesNotFollowTheParent() throws {
     let window = try XCTUnwrap(shell.window)
     bar.toggle(.newTab)
@@ -455,13 +494,19 @@ final class CommandBarTests: XCTestCase {
     let before = bar.panel.frame
     var moved = false
     let token = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: window,
-                                                       queue: nil) { _ in moved = true }
+                                                       queue: .main) { _ in MainActor.assumeIsolated { moved = true } }
     defer { NotificationCenter.default.removeObserver(token) }
     window.setFrameOrigin(NSPoint(x: window.frame.minX + 40, y: window.frame.minY + 30))
     waitUntil("the parent's move notification") { moved }
-    XCTAssertEqual(bar.panel.frame, before)
+    XCTAssertEqual(bar.panel.frame, before, "ordinary moves while closed do not touch the panel")
+
+    NotificationCenter.default.post(name: NSWindow.didChangeScreenNotification, object: window)
+    waitUntil("closed panel follows parent on didChangeScreen") { barIsOverTheParent() }
+    XCTAssertFalse(bar.isVisible)
+    XCTAssertEqual(bar.panel.alphaValue, 0)
+
     bar.toggle(.newTab)
-    XCTAssertTrue(barIsOverTheParent(), "the next show places it")
+    XCTAssertTrue(barIsOverTheParent())
     bar.toggle(.newTab)
   }
 
