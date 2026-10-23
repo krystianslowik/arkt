@@ -84,6 +84,19 @@ targets:
         product: Archive
       - package: ArktCore
         product: ArcImport
+  # XCUITest suite (track U, docs/plans/2026-10-23-ui-tests.md). Drives the Debug ArktShell.app through
+  # accessibility only; every launch uses a throwaway sandbox (UITests/Harness/Sandbox.swift).
+  ArktShellUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [UITests]
+    dependencies:
+      - target: ArktShell
+    settings:
+      base:
+        TEST_TARGET_NAME: ArktShell
+        PRODUCT_BUNDLE_IDENTIFIER: dev.arkt.ArktShellUITests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   ArktShell:
     build:
@@ -93,3 +106,13 @@ schemes:
       config: Debug
     profile:
       config: Profile
+  ArktShellUITests:
+    build:
+      targets:
+        ArktShell: all
+        ArktShellUITests: [test]
+    test:
+      # The ARKT_* overrides exist only in Debug (and Profile) builds.
+      config: Debug
+      gatherCoverageData: false
+      targets: [ArktShellUITests]
