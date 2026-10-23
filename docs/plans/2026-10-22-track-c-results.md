@@ -879,9 +879,9 @@ follows the current Space when Spaces move or an earlier one is removed. Removin
 Not in this change: the menu entry and the confirmation sheet (no Space context menu exists yet), and BH-158 (routes
 to a removed Space are deleted), which waits for link routing in #113.
 
-Checks: `nice -n 10 swift test -j 4` in ArktCore: 342 tests (336 + 6: 2 in `SidebarTests`, 4 in `ArchiverTests`), 0
-failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 432 tests (423 + 9: 4 in `SidebarDiffTests`, 2 in
-`SidebarModelStubTests`, 1 in `ModelSidebarSourceTests`, 2 in `ArchiveCoordinatorTests`), 0 failures. ShellKit
-`--filter ShellKitGUITests`: XCTest 298 tests (293 + 5: 4 in `SpaceListChangeTests`, 1 in `CloseTabTests`), 0
-failures; pacing asserted, `space-swipe` and `space-key` 0 frames over 8.6 ms (load 7.81 on 10 cores). Debug app
-build: `** BUILD SUCCEEDED **`.
+Checks (rebased on #192, #195, #197 and #200): `nice -n 10 swift test -j 4` in ArktCore: 342 tests (336 + 6: 2 in
+`SidebarTests`, 4 in `ArchiverTests`), 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 433 tests
+(424 + 9: 4 in `SidebarDiffTests`, 2 in `SidebarModelStubTests`, 1 in `ModelSidebarSourceTests`, 2 in
+`ArchiveCoordinatorTests`), 0 failures. ShellKit `--filter ShellKitGUITests`: XCTest 315 tests (310 + 5: 4 in
+`SpaceListChangeTests`, 1 in `CloseTabTests`), 0 failures; pacing asserted, `space-swipe` and `space-key` 0 frames
+over 8.6 ms, command bar earliest frame asserted (load 5.65 on 10 cores). Debug app build: `** BUILD SUCCEEDED **`.
