@@ -610,3 +610,35 @@ are TODO(measure).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 359 tests, XCTest 193 tests (GUI included, 11 new in
 `FavoriteTileCloseTests`, baseline 182), 0 failures. Debug app build: `** BUILD SUCCEEDED **`.
+
+## Command bar keys and hover selection (#95)
+
+RT-08 (KB-084, KB-085) has not been run against Arc, and the spec has no `[S]` or `[O]` evidence for these keys,
+so every rule below is `[I]` and marked as such in the code:
+
+| Key | Behavior | Source |
+|---|---|---|
+| Esc | closes the bar (unchanged) | KB-084 [I] |
+| Enter on an empty query | takes the first result, which is the first open tab; closes the bar when there are no tabs (unchanged, now pinned by tests) | [I] |
+| Cmd-Enter, Opt-Enter | open the selected result in a new tab from Cmd-T and Cmd-L alike; never reload on an unedited Cmd-L; a "Switch to Tab" result still switches | KB-085 [I], Chromium omnibox convention |
+| Up / Down (Ctrl-P / Ctrl-N) | move by one and wrap at both ends | KB-085 [I] |
+| PageUp / PageDown | move by `maxVisibleRows` and stop at the ends | [I] |
+| Pointer | a pointer move over a row selects it; a pointer resting where the bar appears changes nothing | [I] |
+
+Cmd-Return has no field editor binding, so the panel's `sendEvent` hands Return / keypad Enter with exactly Cmd or
+Opt to the controller (not during IME composition); menu key equivalents still run first. Shift-Return (KB-086,
+Arc Max) is not taken over. The selection math is the pure `CommandBarSelection` (Swift Testing). Hover uses one
+tracking area installed in `CommandBarView.init`; `show()` and `reloadResults()` are unchanged.
+
+Menu routing: `testMenuActionsReachTheShellWhileTheBarIsKey` checks that nothing in the panel's responder chain
+takes `newTab:` / `openLocation:`, that the panel cannot become main, and that the shell window's chain reaches
+`ShellWindowController`, which closes the bar (KB-003). The test runner cannot activate itself, so the nil-target
+`NSApp.sendAction` path runs only when the app is active.
+
+Remaining: run RT-08 and adjust the `[I]` rules (Esc, empty-query Enter, Cmd-Enter vs Opt-Enter, wrap). If Arc's
+Cmd-Enter opens a background tab (Chromium's Mac convention), the shell needs a background-open hook in
+`ShellWindowController`.
+
+Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 368 tests (359 + 9), XCTest 208 tests (193 + 15,
+GUI included), 0 failures. `commandbar.showcpu.ms median=0.92 p95=1.18`; earliest-frame not asserted (load 33.6 on
+10 cores). Debug app build: `** BUILD SUCCEEDED **`.

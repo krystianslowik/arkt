@@ -3,7 +3,9 @@ import os
 
 /// Arc's command bar: a pre-warmed floating panel over the shell window.
 /// Parity: KB-001/BH-100 (Cmd-T), KB-002/BH-101 (Cmd-L), KB-003/BH-103 (Cmd-T/L closes),
-/// KB-004/BH-102 (Cmd-L + unedited Enter reloads), KB-084 (Esc closes).
+/// KB-004/BH-102 (Cmd-L + unedited Enter reloads), KB-084 (Esc closes), KB-085 (Cmd-Enter, Opt-Enter, arrow wrap).
+/// RT-08 has not been run against Arc: Esc, Enter on an empty query, Cmd-Enter / Opt-Enter, arrow wrap, PageUp /
+/// PageDown and hover selection follow the [I] rules noted where they are handled.
 @MainActor
 public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate,
   NSWindowDelegate {
@@ -65,6 +67,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.table.delegate = self
     barView.table.target = self
     barView.table.action = #selector(rowClicked(_:))
+    barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
+    panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
   }
 
   /// Creates the window-server backing store, lays out and draws once off-screen, and leaves the panel ordered
@@ -217,23 +221,44 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     switch selector {
     case #selector(NSResponder.cancelOperation(_:)): hide(); return true          // Esc, KB-084
     case #selector(NSResponder.insertNewline(_:)): commit(); return true
+    // Opt-Return's standard binding; normally handled earlier in handleKeyDown, kept for other bindings.
+    case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)): commit(inNewTab: true); return true
     case #selector(NSResponder.moveDown(_:)): moveSelection(+1); return true
     case #selector(NSResponder.moveUp(_:)): moveSelection(-1); return true
+    case #selector(NSResponder.scrollPageDown(_:)), #selector(NSResponder.pageDown(_:)): movePage(+1); return true
+    case #selector(NSResponder.scrollPageUp(_:)), #selector(NSResponder.pageUp(_:)): movePage(-1); return true
     default: return false
     }
   }
 
-  /// Enter. Cmd-L + Enter without editing reloads (KB-004, BH-102).
-  public func commit() {
-    let text = barView.field.stringValue
-    if case .currentTab = mode, let prefill, text == prefill { hide(); onReload?(); return }
-    commit(row: max(barView.table.selectedRow, 0))
+  /// Cmd-Return and Opt-Return (KB-085) [I]: open the selected result in a new tab, from Cmd-T and from Cmd-L
+  /// alike (Chromium's omnibox opens Opt-Return in a new tab; Arc unverified, RT-08). Any other modifier, or
+  /// Return during IME composition, goes on to the field editor.
+  private func handleKeyDown(_ event: NSEvent) -> Bool {
+    guard isVisible, event.keyCode == 36 || event.keyCode == 76 else { return false }   // Return, keypad Enter
+    let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+    guard mods == .command || mods == .option else { return false }
+    if let editor = barView.field.currentEditor() as? NSTextView, editor.hasMarkedText() { return false }
+    commit(inNewTab: true)
+    return true
   }
 
-  private func commit(row: Int) {
+  /// Enter. Cmd-L + Enter without editing reloads (KB-004, BH-102). On an empty query Enter takes the first
+  /// result, which is the first open tab, and closes the bar when there is none [I] (RT-08).
+  public func commit() { commit(inNewTab: nil) }
+
+  /// `inNewTab` nil: the mode decides (Cmd-T new tab, Cmd-L current tab). true: Cmd-Enter / Opt-Enter, which
+  /// open in a new tab and never reload.
+  private func commit(inNewTab: Bool?) {
+    let text = barView.field.stringValue
+    if inNewTab == nil, case .currentTab = mode, let prefill, text == prefill { hide(); onReload?(); return }
+    commit(row: max(barView.table.selectedRow, 0), inNewTab: inNewTab)
+  }
+
+  private func commit(row: Int, inNewTab forced: Bool? = nil) {
     guard row < results.count else { hide(); return }
     let kind = results[row].kind
-    let inNewTab = (mode == .newTab)
+    let inNewTab = forced ?? (mode == .newTab)
     hide()
     switch kind {
     case .open(let url), .search(let url): onOpen?(url, inNewTab)
@@ -277,12 +302,25 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     if !results.isEmpty { barView.table.selectRowIndexes([0], byExtendingSelection: false) }
   }
 
-  /// Clamps at the ends. Arc's wrap behavior is unverified (parity spec RT-08), so no wrap.
+  /// Up / Down wrap at the ends [I] (KB-085; Arc unverified, RT-08).
   private func moveSelection(_ delta: Int) {
-    guard !results.isEmpty else { return }
-    let next = min(max(barView.table.selectedRow + delta, 0), results.count - 1)
-    barView.table.selectRowIndexes([next], byExtendingSelection: false)
-    barView.table.scrollRowToVisible(next)
+    guard let next = CommandBarSelection.step(from: barView.table.selectedRow, by: delta, count: results.count)
+    else { return }
+    select(next, scroll: true)
+  }
+
+  /// PageUp / PageDown move by the visible row count and stop at the ends [I].
+  private func movePage(_ pages: Int) {
+    guard let next = CommandBarSelection.page(from: barView.table.selectedRow, by: pages, count: results.count)
+    else { return }
+    select(next, scroll: true)
+  }
+
+  /// `scroll` is false for hover: the row under the pointer is already visible.
+  private func select(_ row: Int, scroll: Bool) {
+    guard row >= 0, row < results.count else { return }
+    if barView.table.selectedRow != row { barView.table.selectRowIndexes([row], byExtendingSelection: false) }
+    if scroll { barView.table.scrollRowToVisible(row) }
   }
 
   // MARK: Table

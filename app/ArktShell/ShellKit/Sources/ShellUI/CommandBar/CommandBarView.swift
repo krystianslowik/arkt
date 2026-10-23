@@ -52,6 +52,10 @@ final class CommandBarView: NSView {
     table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
     table.setAccessibilityIdentifier("commandBar.results")
 
+    // One tracking area for the life of the view (never per show): pointer moves select the row under them.
+    table.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                         owner: self, userInfo: nil))
+
     scrollView.documentView = table
     scrollView.drawsBackground = false
     scrollView.borderType = .noBorder
@@ -63,6 +67,15 @@ final class CommandBarView: NSView {
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  /// Called with the result row under the pointer when it moves over one [I]. Only moves select, so a pointer
+  /// that already rests where the bar appears does not change the selection.
+  var onHoverRow: ((Int) -> Void)?
+
+  override func mouseMoved(with event: NSEvent) {
+    let row = table.row(at: table.convert(event.locationInWindow, from: nil))
+    if row >= 0 { onHoverRow?(row) }
+  }
 
   override func layout() {
     super.layout()

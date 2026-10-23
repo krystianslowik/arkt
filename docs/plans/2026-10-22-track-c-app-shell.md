@@ -3218,10 +3218,10 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
   (`commandbar.earliestframe ... asserted=no`) and only that assertion is skipped, because under saturation
   (measured at load ~300) the main run loop misses vsyncs after `show()` returns. The test also needs the display
   awake (a display link does not tick while the display is off).
-- Enter on an empty query (RT-08): currently switches to the first listed open tab (the empty-query results are the open tabs); it closes the bar only when there are no tabs. Verify against Arc (RT-08).
+- Enter on an empty query (RT-08): currently switches to the first listed open tab (the empty-query results are the open tabs); it closes the bar only when there are no tabs. Verify against Arc (RT-08). #95 keeps this [I] behavior and pins it with tests; RT-08 is still open.
 - Reposition the open bar when the parent moves or changes screen; prewarm on `parent.screen`.
-- Cmd-Enter / Opt-Enter (KB-085, RT-08), hover selection, PageUp/PageDown, arrow wrap (RT-08).
-- Menu routing test through `NSApp.sendAction` (Cmd-T/Cmd-L reach `ShellWindowController` while the bar is key).
+- Cmd-Enter / Opt-Enter (KB-085, RT-08), hover selection, PageUp/PageDown, arrow wrap (RT-08). Done in #95 as [I] rules until RT-08 runs: Cmd-Enter and Opt-Enter open the selected result in a new tab from Cmd-T and Cmd-L (no reload; a "Switch to Tab" result still switches); Up / Down wrap; PageUp / PageDown move by `maxVisibleRows` and stop at the ends; pointer moves select the row under them.
+- Menu routing test through `NSApp.sendAction` (Cmd-T/Cmd-L reach `ShellWindowController` while the bar is key). Done in #95 (`testMenuActionsReachTheShellWhileTheBarIsKey`).
 - URL parsing: trailing-dot hosts (`example.com.`), underscore hosts, user-info (`user@host`).
 - Cmd-L on a URL shows the same text in the "open" and "Search Google" rows; dedupe or relabel.
 - IPv4 octets with leading zeros (`010.0.0.1`) are accepted but Chromium reads them as octal; reject or canonicalise (C5 re-review minor).
