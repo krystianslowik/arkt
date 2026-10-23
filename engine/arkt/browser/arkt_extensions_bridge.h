@@ -26,6 +26,9 @@ void ShowPopover(std::unique_ptr<extensions::ExtensionViewHost> host,
 // Whether the current popup belongs to `extension_id`.
 bool IsShowingPopover(const extensions::ExtensionId& extension_id);
 
+// Whether any popup is showing (or loading).
+bool IsShowingAnyPopover();
+
 // Closes the current popup if it belongs to `extension_id`.
 void HidePopover(const extensions::ExtensionId& extension_id);
 

@@ -21,6 +21,8 @@ source_set("browser") {
     "arkt_browser_window_parts.mm",
     "arkt_extensions_bridge.h",
     "arkt_extensions_bridge.mm",
+    "arkt_extensions_container.h",
+    "arkt_extensions_container.mm",
     "arkt_extensions_menu.h",
     "arkt_extensions_menu.mm",
     "arkt_placeholder_window_host.h",

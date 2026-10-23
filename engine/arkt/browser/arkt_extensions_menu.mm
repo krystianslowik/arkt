@@ -106,8 +106,7 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
     LOG(WARNING) << "ARKT: action disabled on this tab; no context menu yet";
   }
 
-  // The menu has already closed when an item runs, so there is nothing to do.
-  void CloseExtensionsMenuIfOpen() override {}
+  void CloseExtensionsMenuIfOpen() override { menu_->CloseIfOpen(); }
 
   content::WebContents* GetActiveWebContents() const override {
     return menu_->active_web_contents();
@@ -200,10 +199,38 @@ void ArktExtensionsMenu::Show() {
                afterDelay:kDumpMenuCloseDelay
                   inModes:@[ NSRunLoopCommonModes ]];
   }
+  shown_menu_ = menu;
   [menu popUpMenuPositioningItem:nil
                       atLocation:NSMakePoint(0, NSMaxY(anchor.bounds) + 4)
                           inView:anchor];
+  shown_menu_ = nil;
   LOG(WARNING) << "ARKT: extensions menu closed";
+}
+
+bool ArktExtensionsMenu::IsShowing() const {
+  return shown_menu_ != nil;
+}
+
+void ArktExtensionsMenu::CloseIfOpen() {
+  [shown_menu_ cancelTracking];
+}
+
+ExtensionActionViewModel* ArktExtensionsMenu::GetViewModel(
+    const extensions::ExtensionId& extension_id) const {
+  auto it = view_models_.find(extension_id);
+  return it != view_models_.end() ? it->second.get() : nullptr;
+}
+
+bool ArktExtensionsMenu::HasAnyActions() const {
+  return !view_models_.empty();
+}
+
+void ArktExtensionsMenu::HideActivePopup() {
+  for (auto& [id, view_model] : view_models_) {
+    if (view_model->IsShowingPopup()) {
+      view_model->HidePopup();
+    }
+  }
 }
 
 content::WebContents* ArktExtensionsMenu::active_web_contents() const {
