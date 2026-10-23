@@ -82,8 +82,13 @@ final class SplitShortcutTests: XCTestCase {
       menu.performKeyEquivalent(with: try SplitShortcutTests.controlShiftKey(keyCode))
     }
 
-    /// Lets deferred work (the re-show after a source change) run.
-    func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    /// Lets deferred work (the re-show after a source change) run: turns the run loop until no re-show is queued,
+    /// not for a fixed time, so a stalled runner cannot pass the deadline before the re-show runs.
+    func settle() {
+      let deadline = Date().addingTimeInterval(5)
+      repeat { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+      while controller.splitState.resyncPending && Date() < deadline
+    }
 
     func close() {
       controller.commandBar.hide(restoreFocus: false)
