@@ -27,6 +27,29 @@ public struct TabSnapshot: Equatable, Sendable {
   }
 }
 
+/// One entry in a tab's back or forward history (#81, GS-024, GS-025).
+public struct HistoryEntry: Equatable, Sendable {
+  public var url: URL
+  public var title: String
+
+  public init(url: URL, title: String = "") {
+    self.url = url
+    self.title = title
+  }
+}
+
+/// Back and forward history of a tab, ordered nearest-first (`back.first` is one step back; `forward.first` is one
+/// step forward; #81, GS-024, GS-025).
+public struct TabHistory: Equatable, Sendable {
+  public var back: [HistoryEntry]
+  public var forward: [HistoryEntry]
+
+  public init(back: [HistoryEntry] = [], forward: [HistoryEntry] = []) {
+    self.back = back
+    self.forward = forward
+  }
+}
+
 public enum EngineEvent: Equatable, Sendable {
   case tabCreated(TabID)
   case tabClosed(TabID)
@@ -72,6 +95,14 @@ public protocol EngineClient: AnyObject {
   func goBack(_ id: TabID)
   /// Moves one entry forward in the tab's history (Toolbar Forward); no-op when there is none (contract rule 7).
   func goForward(_ id: TabID)
+  /// Moves `offset` entries in the tab's history (`-1` is one step back, `+1` is one step forward); `0` or an
+  /// out-of-range offset is a no-op (#81, GS-024, contract rule 9).
+  func goToHistory(_ id: TabID, offset: Int)
+  /// The tab's back and forward entries (nearest-first); nil once closed (#81, GS-024, GS-025, contract rule 9).
+  func history(of id: TabID) -> TabHistory?
+  /// Creates a new tab copying `id`'s current URL, title and back/forward history (#81, GS-026, BH-027, contract rule
+  /// 10); nil when `id` is unknown or closed.
+  @discardableResult func duplicateTab(_ id: TabID) -> TabID?
   func snapshot(of id: TabID) -> TabSnapshot?
   /// The view that draws the tab's page. Same instance for the tab's whole life; nil once closed.
   func contentView(for id: TabID) -> NSView?

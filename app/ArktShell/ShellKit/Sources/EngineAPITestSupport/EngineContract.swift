@@ -60,6 +60,11 @@ public struct EngineHarness {
 /// 8. `snapshot(of:)` carries `canGoBack` / `canGoForward`: false for a new tab, Back available once a second page
 ///    is shown, Forward available after `goBack`. Every change is announced with `.historyChanged`, and the snapshot
 ///    agrees with the last one. Its position relative to `.urlChanged` and `.loadingChanged` is not fixed.
+/// 9. `history(of:)` lists `back` and `forward` entries nearest-first (nil once closed), and `goToHistory(_:offset:)`
+///    jumps across multiple entries (`-2` = two steps back, `+2` = two steps forward); `0` or out-of-range offsets do
+///    nothing (#81, GS-024).
+/// 10. `duplicateTab(_:)` creates a new tab with the source tab's URL, title and back/forward history (#81, BH-027,
+///     GS-026); nil for an unknown or closed tab.
 @MainActor
 public enum EngineContract {
   static func require(_ condition: Bool, _ message: @autoclosure () -> String) throws {
@@ -264,6 +269,80 @@ public enum EngineContract {
       return nil
     }
     try require(announced.contains { $0 == (false, true) }, "Forward becoming available was not announced")
+  }
+
+  public static func historyEntriesAndOffsetNavigation(_ h: EngineHarness) async throws {
+    let engine = h.makeEngine()
+    let (first, second, third) = (
+      try h.pageURL("HistoryOne"), try h.pageURL("HistoryTwo"), try h.pageURL("HistoryThree"))
+    let id = engine.createTab(url: nil)
+    try require(engine.history(of: id) == TabHistory(), "a new tab starts with empty history")
+    engine.navigate(id, to: first)
+    try await h.settle(engine, id)
+    engine.navigate(id, to: second)
+    try await h.settle(engine, id)
+    engine.navigate(id, to: third)
+    try await h.settle(engine, id)
+    let atThird = try requireValue(engine.history(of: id), "history at third")
+    try require(atThird.back.map(\.url) == [second, first], "back must be nearest-first: \(atThird.back)")
+    try require(atThird.back.map(\.title) == ["HistoryTwo", "HistoryOne"],
+                "back entries must carry titles: \(atThird.back)")
+    try require(atThird.forward.isEmpty, "forward must be empty at third: \(atThird.forward)")
+
+    // Jump two steps back in one move (`offset = -2`).
+    engine.goToHistory(id, offset: -2)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.url == first }
+    try await h.settle(engine, id)
+    let atFirst = try requireValue(engine.history(of: id), "history at first")
+    try require(atFirst.back.isEmpty, "back must be empty at first: \(atFirst.back)")
+    try require(atFirst.forward.map(\.url) == [second, third], "forward must be nearest-first: \(atFirst.forward)")
+
+    // Jump two steps forward (`offset = 2`), and check 0 / out-of-range offsets are no-ops.
+    engine.goToHistory(id, offset: 2)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.url == third }
+    try await h.settle(engine, id)
+    engine.goToHistory(id, offset: 0)
+    engine.goToHistory(id, offset: 5)
+    engine.goToHistory(id, offset: -5)
+    try await Task.sleep(for: .milliseconds(50))
+    try require(engine.snapshot(of: id)?.url == third, "out-of-range offsets must do nothing")
+
+    engine.closeTab(id)
+    try require(engine.history(of: id) == nil, "closed tab history must be nil")
+  }
+
+  public static func duplicateTabCopiesURLTitleAndHistory(_ h: EngineHarness) async throws {
+    let engine = h.makeEngine()
+    let recorder = EventRecorder(engine)
+    try require(engine.duplicateTab(TabID()) == nil, "duplicating an unknown tab must return nil")
+
+    let (first, second, third) = (
+      try h.pageURL("DupOne"), try h.pageURL("DupTwo"), try h.pageURL("DupThree"))
+    let id = engine.createTab(url: first)
+    try await h.settle(engine, id)
+    engine.navigate(id, to: second)
+    try await h.settle(engine, id)
+    engine.navigate(id, to: third)
+    try await h.settle(engine, id)
+    engine.goBack(id)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.url == second }
+    try await h.settle(engine, id)
+
+    let copy = try requireValue(engine.duplicateTab(id), "duplicateTab of a live tab")
+    try require(copy != id && engine.tabIDs == [id, copy], "duplicate must be listed after original: \(engine.tabIDs)")
+    try require(recorder.events(for: copy).first == .tabCreated(copy), "first event for duplicate must be tabCreated")
+    try await h.settle(engine, copy)
+    let copySnap = try requireValue(engine.snapshot(of: copy), "duplicate snapshot")
+    try require(copySnap.url == second && copySnap.canGoBack && copySnap.canGoForward,
+                "duplicate snapshot must carry URL and history flags: \(copySnap)")
+    let copyHistory = try requireValue(engine.history(of: copy), "duplicate history")
+    try require(copyHistory.back.map(\.url) == [first] && copyHistory.forward.map(\.url) == [third],
+                "duplicate must copy back and forward stacks: \(copyHistory)")
+
+    // Moving in the duplicate leaves the original tab untouched.
+    engine.goBack(copy)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: copy)?.url == first }
+    try require(engine.snapshot(of: id)?.url == second, "original tab must stay on second")
   }
 
   /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.

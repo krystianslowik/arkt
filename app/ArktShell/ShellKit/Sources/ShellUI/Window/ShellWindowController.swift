@@ -236,20 +236,84 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       bar.onPress = { [weak self] in self?.openLocation(nil) }                        // same as Cmd-L, KB-002
       bar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
     }
+    wireToolbarActions(toolbar) { [weak self] in self?.toolbarTab }
+    toolbarSetting.addObserver(self)
+    applyToolbarVisibility()
+  }
+
+  /// Wires Back, Forward, Reload, history menus (`GS-024`, `BH-166`) and modifier / middle clicks (`GS-025`, `GS-026`,
+  /// `BH-027`, `BH-165`) on `toolbar` for the tab resolved by `tabProvider` (#81).
+  func wireToolbarActions(_ toolbar: ContentToolbarView, tabProvider: @escaping @MainActor () -> TabID?) {
     toolbar.onBack = { [weak self] in
-      guard let self, let tab = self.toolbarTab else { return }
+      guard let self, let tab = tabProvider() else { return }
       self.engine.goBack(tab)
     }
     toolbar.onForward = { [weak self] in
-      guard let self, let tab = self.toolbarTab else { return }
+      guard let self, let tab = tabProvider() else { return }
       self.engine.goForward(tab)
     }
     toolbar.onReload = { [weak self] in
-      guard let self, let tab = self.toolbarTab else { return }
+      guard let self, let tab = tabProvider() else { return }
       self.engine.reload(tab)
     }
-    toolbarSetting.addObserver(self)
-    applyToolbarVisibility()
+    toolbar.historyProvider = { [weak self] in
+      guard let self, let tab = tabProvider() else { return nil }
+      return self.engine.history(of: tab)
+    }
+    toolbar.onSelectHistory = { [weak self] offset in
+      guard let self, let tab = tabProvider() else { return }
+      self.engine.goToHistory(tab, offset: offset)
+    }
+    toolbar.onBackInNewTab = { [weak self] in
+      guard let self, let tab = tabProvider(), let entry = self.engine.history(of: tab)?.back.first else { return }
+      self.openHistoryEntryInBackgroundTab(entry)
+    }
+    toolbar.onForwardInNewTab = { [weak self] in
+      guard let self, let tab = tabProvider(), let entry = self.engine.history(of: tab)?.forward.first else { return }
+      self.openHistoryEntryInBackgroundTab(entry)
+    }
+    toolbar.onDuplicateTab = { [weak self] in
+      guard let self, let tab = tabProvider() else { return }
+      self.duplicateTabWithHistory(tab)
+    }
+  }
+
+  /// GS-025, BH-165: Cmd-click or middle-click on Back / Forward opens that history entry in a new background Today
+  /// tab in the current Space without changing the active tab (#81).
+  private func openHistoryEntryInBackgroundTab(_ entry: HistoryEntry) {
+    guard let space = sidebarController.currentSpace ?? createSpace() else { return }
+    let title = entry.title.isEmpty ? (entry.url.host() ?? entry.url.absoluteString) : entry.title
+    do {
+      _ = try sidebar.addTab(url: entry.url, title: title, in: .today(space))
+    } catch {
+      onError?(.addTab, error)
+    }
+  }
+
+  /// GS-026, BH-027: Cmd-click Reload duplicates `tab` into a new Today tab including its back/forward history and
+  /// activates the duplicate (#81).
+  private func duplicateTabWithHistory(_ tab: TabID) {
+    guard let snapshot = engine.snapshot(of: tab),
+          let url = snapshot.url ?? nodeByTab[tab].flatMap({ sidebar.node($0) }).flatMap({
+            if case .tab(_, let u, _) = $0 { return u }; return nil
+          }),
+          let space = sidebarController.currentSpace ?? createSpace() else { return }
+    let fallbackTitle = nodeByTab[tab].flatMap({ sidebar.node($0) }).flatMap({
+      if case .tab(_, _, let t) = $0 { return t }; return nil
+    }) ?? (url.host() ?? url.absoluteString)
+    let title = snapshot.title.isEmpty ? fallbackTitle : snapshot.title
+    do {
+      let copyNode = try sidebar.addTab(url: url, title: title, in: .today(space))
+      if let copyTab = engine.duplicateTab(tab) {
+        tabsByNode[copyNode] = copyTab
+        nodeByTab[copyTab] = copyNode
+        sidebarController.markLoaded(node: copyNode)
+        if let copySnapshot = engine.snapshot(of: copyTab) { replay(copySnapshot, into: copyNode) }
+      }
+      activate(node: copyNode)
+    } catch {
+      onError?(.addTab, error)
+    }
   }
 
   /// Both URL bars show the current tab's URL from the engine snapshot (nil: no tab shown). In a split that is the

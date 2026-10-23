@@ -144,18 +144,7 @@ extension ShellWindowController {
         self.openLocation(nil)
       }
       toolbar.urlBar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
-      toolbar.onBack = { [weak self] in
-        guard let self, let tab = self.focusPaneForToolbar(index) else { return }
-        self.engine.goBack(tab)
-      }
-      toolbar.onForward = { [weak self] in
-        guard let self, let tab = self.focusPaneForToolbar(index) else { return }
-        self.engine.goForward(tab)
-      }
-      toolbar.onReload = { [weak self] in
-        guard let self, let tab = self.focusPaneForToolbar(index) else { return }
-        self.engine.reload(tab)
-      }
+      wireToolbarActions(toolbar) { [weak self] in self?.focusPaneForToolbar(index) }
       let pane = splitState.panes.indices.contains(index) ? splitState.panes[index] : nil
       refreshToolbar(toolbar, tab: pane.flatMap { engineTab(of: $0) })
     }
