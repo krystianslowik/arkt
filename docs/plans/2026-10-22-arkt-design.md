@@ -66,6 +66,7 @@ way down, dark surface; `NSTableView` with ~50 pt rows. Results from Chromium's 
 suggestions, open tabs, bookmarks) blended with tab switching, commands and Spaces. Must appear in < 16 ms.
 
 **Theming**: tokens follow Arc's approach (black/white at low opacity over the theme); our own values and brand.
+The brand accent comes from `BrandTokens` in ShellUI, kept apart from the Arc-parity `ShellTokens`.
 
 ## 3. Split view, Little Arkt, Peek, auto-archive
 
