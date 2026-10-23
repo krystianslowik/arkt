@@ -33,15 +33,16 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public static let newSpaceTitle = "Space"               // [I] product wording, see open questions
   public var isShowingEmptyState: Bool { sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
-  public private(set) var currentTab: TabID?
+  /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7).
+  public internal(set) var currentTab: TabID?
   /// The engine reported a favicon for a sidebar node (nil: cleared); the app persists it. Called for favicons
   /// caught up from the snapshot when a tab is created and for later `.faviconChanged` events.
   public var onFaviconChanged: (@MainActor (NodeID, Data?) -> Void)?
   /// A sidebar mutation failed (for example `addTab` into a location the model refuses). Default: a toast whose
   /// text names the failed mutation (`errorText(for:error:)`).
   public var onError: (@MainActor (SidebarMutation, any Error) -> Void)?
-  /// Engine tabs are created lazily, on first activation of a sidebar node.
-  private var tabsByNode: [NodeID: TabID] = [:]
+  /// Engine tabs are created lazily, when a sidebar node is first shown (`openEngineTab(for:)`).
+  private(set) var tabsByNode: [NodeID: TabID] = [:]
   private var nodeByTab: [TabID: NodeID] = [:]
   private var observation: EngineObservation?
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
@@ -52,9 +53,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A tab stopped being visible in this window: another tab became current, or the window closed (decision 10; the
   /// app stamps `lastActiveAt`).
   public var onTabHidden: (@MainActor (NodeID) -> Void)?
-  /// The tabs this window shows: the current one, or none.
-  public var visibleNodes: Set<NodeID> { currentNode.map { [$0] } ?? [] }
-  private var currentNode: NodeID? { currentTab.flatMap { nodeByTab[$0] } }
+  /// The tabs this window shows: the current one, every pane with a page of a shown split, or none.
+  public var visibleNodes: Set<NodeID> { Set(shownNodes) }
+  /// `visibleNodes` in pane order; changed only through `setShown(_:)` and `.tabClosed`.
+  private var shownNodes: [NodeID] = []
+  var currentNode: NodeID? { currentTab.flatMap { nodeByTab[$0] } }
+  /// Split View window state (S4): the shown split, last focused and closed panes. Window lifetime, not persisted.
+  var splitState = SplitWindowState()
   /// Toolbar on or off (KB-018, BH-032). The app passes one backed by user defaults; the default is ephemeral.
   public let toolbarSetting: ToolbarSetting
 
@@ -100,6 +105,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     commandBar.onSwitch = { [weak self] node in self?.activate(node: node) }
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
     wireAddressBars()
+    wireSplit()
     observation = engine.observe { [weak self] event in self?.handle(event) }
     // A removed Space's nodes emit no structure change, so `.spaces` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
@@ -107,6 +113,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       case .structure, .spaces: self?.closeEngineTabsOfRemovedNodes()
       case .node: break
       }
+      self?.splitSourceDidChange(change)
     }
     // Space theme: the pager's continuous position drives the crossfade (design section 2).
     sidebarController.onSpacePosition = { [weak self, weak root] position in
@@ -199,6 +206,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     rootView.card.showsToolbar = visible
     urlBar.isToolbarVisible = visible
     rootView.card.toolbar.urlBar.isToolbarVisible = visible
+    configurePaneToolbars()
   }
 
   private func wireAddressBars() {
@@ -223,16 +231,18 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     applyToolbarVisibility()
   }
 
-  /// Both URL bars show the current tab's URL from the engine snapshot (nil: no tab shown).
-  private func refreshAddress() {
+  /// Both URL bars show the current tab's URL from the engine snapshot (nil: no tab shown). In a split that is the
+  /// focused pane; each pane card's own Toolbar is refreshed by `configurePaneToolbars()`.
+  func refreshAddress() {
     let url = currentTab.flatMap { engine.snapshot(of: $0)?.url }
     urlBar.url = url
     rootView.card.toolbar.urlBar.url = url
     refreshToolbarHistory()
   }
 
-  /// The tab the Toolbar's Back, Forward and Reload act on and show the history of. Split View will point this at
-  /// the focused pane.
+  /// The tab the Toolbar's Back, Forward and Reload act on and show the history of: the current tab, which in a split
+  /// is the focused pane, so the history follows the same tab as `refreshAddress()`'s URL (#79). A pane card's own
+  /// Toolbar acts on its own pane (`configurePaneToolbars()`).
   private var toolbarTab: TabID? { currentTab }
 
   /// Back and Forward follow `toolbarTab`'s `canGoBack` / `canGoForward` (engine contract rule 8).
@@ -333,22 +343,45 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     return CommandBarResults.openTabs(in: sidebar, space: space)
   }
 
-  private func show(node: NodeID) {
-    let tab: TabID
-    if let existing = tabsByNode[node] {
-      tab = existing
-    } else {
-      guard case .tab(_, let url, _)? = sidebar.node(node) else { return }
-      tab = engine.createTab(url: url)
-      tabsByNode[node] = tab
-      nodeByTab[tab] = node
-      // Events emitted inside createTab arrived before the mapping existed; catch up from the snapshot.
-      if let snapshot = engine.snapshot(of: tab) { replay(snapshot, into: node) }
+  /// Shows `node` in the content area: a pane shows its whole split (`showSplit`), anything else the single card.
+  func show(node: NodeID) {
+    if case .split(let split)? = sidebar.parent(of: node) {
+      showSplit(split, focus: node)
+      return
     }
-    if let old = currentNode, old != node { onTabHidden?(old) }   // only once the card really switches
+    guard let tab = openEngineTab(for: node) else { return }
+    hideSplit()
     currentTab = tab
     rootView.card.setContent(engine.contentView(for: tab))
+    setShown([node])                                            // only once the card really switches
     refreshAddress()
+  }
+
+  /// The engine tab of `node`, created on first use. Every engine tab the window creates comes from here, so the
+  /// sidebar's loaded state (Favorite X, #82) stays exact: created pages are marked loaded, and `.tabClosed` calls
+  /// `deactivate(node:)` (#156 review).
+  func openEngineTab(for node: NodeID) -> TabID? {
+    if let existing = tabsByNode[node] { return existing }
+    guard case .tab(_, let url, _)? = sidebar.node(node) else { return nil }
+    let tab = engine.createTab(url: url)
+    tabsByNode[node] = tab
+    nodeByTab[tab] = node
+    sidebarController.markLoaded(node: node)
+    // Events emitted inside createTab arrived before the mapping existed; catch up from the snapshot.
+    if let snapshot = engine.snapshot(of: tab) { replay(snapshot, into: node) }
+    return tab
+  }
+
+  /// The engine tab already open for `node`, if any.
+  func engineTab(of node: NodeID) -> TabID? { tabsByNode[node] }
+
+  /// Records what the content area shows and reports the nodes that left it (decision 10). The sidebar draws the
+  /// shown nodes other than the current one as `.contentVisible`.
+  func setShown(_ nodes: [NodeID]) {
+    let hidden = shownNodes.filter { !nodes.contains($0) }
+    shownNodes = nodes
+    sidebarController.visible = Set(nodes)
+    for node in hidden { onTabHidden?(node) }
   }
 
   private func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -372,15 +405,26 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .urlChanged(let tab, let url):
       if let url { sidebar.updateTab(node, url: url, title: nil) }
       if tab == currentTab { refreshAddress() }
+      refreshPaneToolbar(of: node)
     case .faviconChanged(_, let data):
       faviconChanged(data, for: node)
     case .historyChanged(let tab, _, _):
       if tab == toolbarTab { refreshToolbarHistory() }
+      refreshPaneToolbar(of: node)
     case .tabClosed(let tab):
       tabsByNode[node] = nil
       nodeByTab[tab] = nil
-      if currentTab == tab { currentTab = nil; rootView.card.setContent(nil); refreshAddress() }
-      sidebarController.deactivate(node: node)
+      let wasCurrent = currentTab == tab
+      shownNodes.removeAll { $0 == node }                     // a closed page is not hidden, it is gone
+      sidebarController.visible.remove(node)
+      if wasCurrent { currentTab = nil }
+      if splitState.panes.contains(node) {
+        sidebarController.deactivate(node: node)
+        paneDidClose(node, wasFocused: wasCurrent)
+      } else {
+        if wasCurrent { rootView.card.setContent(nil); refreshAddress() }
+        sidebarController.deactivate(node: node)
+      }
     default:
       break
     }
@@ -408,10 +452,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     if let scale = window?.backingScaleFactor { SymbolImageCache.shared.prewarm(scale: scale) }   // cache hits if warm
   }
   public func windowDidDeminiaturize(_ notification: Notification) { reapplyTrafficLights() }
-  /// The current tab stops being visible (decision 10). The command bar's display link retains its controller;
-  /// release it with the window.
+  /// The shown tabs, every pane of a split, stop being visible (decision 10). The command bar's display link retains
+  /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
-    if let node = currentNode { onTabHidden?(node) }
+    for node in shownNodes { onTabHidden?(node) }
+    removePaneMouseMonitor()
     commandBar.invalidate()
     pager.stopInteraction()        // a closed window's views keep their display links
   }
