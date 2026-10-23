@@ -1,0 +1,349 @@
+import Foundation
+
+public enum SidebarModelVersion { public static let current = 1 }
+
+public typealias NodeID = UUID
+public typealias SpaceID = UUID
+
+public struct RGBA: Hashable, Sendable, Codable {
+  public var red: Double
+  public var green: Double
+  public var blue: Double
+  public var alpha: Double
+
+  public init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
+    self.red = red
+    self.green = green
+    self.blue = blue
+    self.alpha = alpha
+  }
+}
+
+public struct SpaceTheme: Hashable, Sendable, Codable {
+  public var baseColors: [RGBA]
+  public var overlayColors: [RGBA]
+  public var texture: String?
+  public var isDark: Bool
+
+  public init(baseColors: [RGBA], overlayColors: [RGBA] = [], texture: String? = nil, isDark: Bool = false) {
+    self.baseColors = baseColors
+    self.overlayColors = overlayColors
+    self.texture = texture
+    self.isDark = isDark
+  }
+}
+
+public struct Space: Hashable, Sendable, Codable, Identifiable {
+  public var id: SpaceID
+  public var title: String
+  public var profile: String
+  public var theme: SpaceTheme?
+
+  public init(id: SpaceID = SpaceID(), title: String, profile: String = "default", theme: SpaceTheme? = nil) {
+    self.id = id
+    self.title = title
+    self.profile = profile
+    self.theme = theme
+  }
+}
+
+public struct TabItem: Hashable, Sendable, Codable {
+  public var url: URL
+  public var title: String
+  public var customTitle: String?
+  public var lastActiveAt: Date?
+
+  public init(url: URL, title: String, customTitle: String? = nil, lastActiveAt: Date? = nil) {
+    self.url = url
+    self.title = title
+    self.customTitle = customTitle
+    self.lastActiveAt = lastActiveAt
+  }
+}
+
+public struct FolderItem: Hashable, Sendable, Codable {
+  public var title: String
+
+  public init(title: String) { self.title = title }
+}
+
+public enum Orientation: String, Hashable, Sendable, Codable {
+  case horizontal
+  case vertical
+}
+
+public struct SplitItem: Hashable, Sendable, Codable {
+  public var orientation: Orientation
+  public var widthFactors: [Double]
+
+  public init(orientation: Orientation, widthFactors: [Double]) {
+    self.orientation = orientation
+    self.widthFactors = widthFactors
+  }
+}
+
+public enum NodeKind: Hashable, Sendable {
+  case tab(TabItem)
+  case folder(FolderItem)
+  case split(SplitItem)
+}
+
+/// Where a node lives: a top-level section of the sidebar or inside a container node.
+public enum Location: Hashable, Sendable {
+  case favorites(profile: String)
+  case pinned(SpaceID)
+  case today(SpaceID)
+  case folder(NodeID)
+  case split(NodeID)
+
+  /// The node that owns this location, if it is a container node.
+  public var containerNode: NodeID? {
+    switch self {
+    case .folder(let id), .split(let id): id
+    case .favorites, .pinned, .today: nil
+    }
+  }
+}
+
+public struct Node: Hashable, Sendable, Identifiable {
+  public var id: NodeID
+  public var kind: NodeKind
+  public var parent: Location
+  public var createdAt: Date
+
+  public init(id: NodeID = NodeID(), kind: NodeKind, parent: Location, createdAt: Date = .now) {
+    self.id = id
+    self.kind = kind
+    self.parent = parent
+    self.createdAt = createdAt
+  }
+}
+
+public enum SidebarError: Error, Hashable, Sendable {
+  case unknownNode(NodeID)
+  /// The location does not exist or cannot hold this kind of node: `pinned`/`today` need an existing space,
+  /// `folder` needs a folder node, and `split` needs a split node and accepts only tabs.
+  case invalidDestination(Location)
+  /// The destination is the moved node itself or one of its descendants.
+  case cycle
+  /// A space or node with this id already exists (or appears twice in an inserted snapshot).
+  case duplicateID(UUID)
+  /// Placing this node (with its subtree) would nest deeper than `Sidebar.maximumNestingDepth`. For a new node from
+  /// `addFolder`/`addTab`/`addSplit` it is the new node's id, for `move` the moved node, for `insert` the first node
+  /// of the snapshot that would land too deep.
+  case nestingTooDeep(NodeID)
+}
+
+/// Arkt's sidebar: spaces plus a forest of tab, folder and split nodes, as a value type.
+public struct Sidebar: Hashable, Sendable {
+  /// The deepest a node may sit: a node directly in a section (Favorites, Pinned, Today) has depth 1, its children
+  /// depth 2, and so on; tabs inside a split count too. Every mutation enforces it, so any sidebar the model holds can
+  /// be stored and loaded again, and recursion over a tree is bounded.
+  public static let maximumNestingDepth = 32
+
+  public private(set) var spaces: [SpaceID: Space] = [:]
+  public private(set) var spaceOrder: [SpaceID] = []
+  public private(set) var nodes: [NodeID: Node] = [:]
+  public private(set) var childOrder: [Location: [NodeID]] = [:]
+
+  public init() {}
+
+  @discardableResult
+  public mutating func addSpace(title: String, profile: String = "default", theme: SpaceTheme? = nil) -> SpaceID {
+    let space = Space(title: title, profile: profile, theme: theme)
+    spaces[space.id] = space
+    spaceOrder.append(space.id)
+    return space.id
+  }
+
+  /// Adds `space` keeping its id, for decoding and restore. Throws `.duplicateID` if the id is taken.
+  public mutating func addSpace(_ space: Space) throws {
+    guard spaces[space.id] == nil else { throw SidebarError.duplicateID(space.id) }
+    spaces[space.id] = space
+    spaceOrder.append(space.id)
+  }
+
+  @discardableResult
+  public mutating func addFolder(title: String, in location: Location, createdAt: Date = .now) throws -> NodeID {
+    try insert(.folder(FolderItem(title: title)), in: location, createdAt: createdAt)
+  }
+
+  @discardableResult
+  public mutating func addTab(
+    url: URL,
+    title: String,
+    customTitle: String? = nil,
+    lastActiveAt: Date? = nil,
+    in location: Location,
+    createdAt: Date = .now
+  ) throws -> NodeID {
+    let tab = TabItem(url: url, title: title, customTitle: customTitle, lastActiveAt: lastActiveAt)
+    return try insert(.tab(tab), in: location, createdAt: createdAt)
+  }
+
+  @discardableResult
+  public mutating func addSplit(
+    orientation: Orientation,
+    widthFactors: [Double],
+    in location: Location,
+    createdAt: Date = .now
+  ) throws -> NodeID {
+    let split = SplitItem(orientation: orientation, widthFactors: widthFactors)
+    return try insert(.split(split), in: location, createdAt: createdAt)
+  }
+
+  public func children(of location: Location) -> [NodeID] {
+    childOrder[location] ?? []
+  }
+
+  /// Moves `id` into `location` so that it lands at `index`.
+  ///
+  /// `index` is the proposed position measured BEFORE the node is removed from its current place, the same
+  /// convention as `Array.move(fromOffsets:toOffset:)` and `NSOutlineView` drops: in `[x, y, z]`, moving `x` to 2
+  /// gives `[y, x, z]` and moving `x` to 3 gives `[y, z, x]`. Out-of-range indexes are clamped.
+  ///
+  /// Throws `SidebarError.unknownNode` for an unknown `id`, `.invalidDestination` when `location` cannot hold the
+  /// node, and `.cycle` when `location` is the node itself or inside its subtree. The sidebar is unchanged on throw.
+  public mutating func move(_ id: NodeID, to location: Location, at index: Int) throws {
+    guard let node = nodes[id] else { throw SidebarError.unknownNode(id) }
+    try validate(location, accepting: node.kind)
+    if isInSubtree(location, of: id) { throw SidebarError.cycle }
+    if depth(ofChildIn: location) + height(of: id) - 1 > Self.maximumNestingDepth {
+      throw SidebarError.nestingTooDeep(id)
+    }
+    var target = index
+    if node.parent == location, let oldIndex = childOrder[location]?.firstIndex(of: id), oldIndex < index {
+      target -= 1
+    }
+    detach(id, from: node.parent)
+    var siblings = childOrder[location] ?? []
+    siblings.insert(id, at: min(max(target, 0), siblings.count))
+    childOrder[location] = siblings
+    nodes[id]?.parent = location
+  }
+
+  /// Removes `id` and all of its descendants, and detaches it from its parent.
+  /// An unknown `id` is a silent no-op, deliberately, so UI deletes of already-gone nodes need no special casing.
+  public mutating func remove(_ id: NodeID) {
+    guard let node = nodes[id] else { return }
+    detach(id, from: node.parent)
+    removeSubtree(id)
+  }
+
+  /// The subtree rooted at `id`, in child order, or nil for an unknown id.
+  public func snapshot(of id: NodeID) -> NodeSnapshot? {
+    guard let node = nodes[id] else { return nil }
+    let childLocation: Location? = switch node.kind {
+    case .folder: .folder(id)
+    case .split: .split(id)
+    case .tab: nil
+    }
+    let children = childLocation.map { self.children(of: $0).compactMap { snapshot(of: $0) } } ?? []
+    return NodeSnapshot(id: id, kind: node.kind, createdAt: node.createdAt, children: children)
+  }
+
+  /// The top-level section (`.favorites`, `.pinned`, `.today`) that holds `id`, directly or through folders and
+  /// splits. Nil for an unknown id, or when the parent chain is dangling (a container id with no node), which the
+  /// model's own mutations never produce.
+  public func section(of id: NodeID) -> Location? {
+    var location = nodes[id]?.parent
+    while let current = location, let container = current.containerNode {
+      location = nodes[container]?.parent
+    }
+    return location
+  }
+
+  /// Inserts `snapshot` with its whole subtree into `location`, keeping every id and `createdAt`.
+  /// `index` follows `Array.insert` (clamped); nil appends.
+  /// Throws `.duplicateID` when an id is already used or repeats inside the snapshot, `.invalidDestination` when a
+  /// node cannot live where it would land (same rules as `move`; children under a tab report `.folder(tabID)`), and
+  /// `.nestingTooDeep` for the first node that would sit deeper than `maximumNestingDepth`.
+  /// The sidebar is unchanged on throw.
+  public mutating func insert(_ snapshot: NodeSnapshot, in location: Location, at index: Int? = nil) throws {
+    var copy = self
+    try copy.insertTree(snapshot, in: location, depth: copy.depth(ofChildIn: location))
+    if let index, var siblings = copy.childOrder[location] {
+      siblings.removeLast()
+      siblings.insert(snapshot.id, at: min(max(index, 0), siblings.count))
+      copy.childOrder[location] = siblings
+    }
+    self = copy
+  }
+
+  /// `depth` is the depth `snapshot` lands at; checking it per node stops the recursion at the cap.
+  private mutating func insertTree(_ snapshot: NodeSnapshot, in location: Location, depth: Int) throws {
+    guard nodes[snapshot.id] == nil else { throw SidebarError.duplicateID(snapshot.id) }
+    try validate(location, accepting: snapshot.kind)
+    guard depth <= Self.maximumNestingDepth else { throw SidebarError.nestingTooDeep(snapshot.id) }
+    nodes[snapshot.id] = Node(id: snapshot.id, kind: snapshot.kind, parent: location, createdAt: snapshot.createdAt)
+    childOrder[location, default: []].append(snapshot.id)
+    // A tab has no child location; `.folder(tabID)` fails validation, which is the error we want.
+    let childLocation: Location = if case .split = snapshot.kind { .split(snapshot.id) } else { .folder(snapshot.id) }
+    for child in snapshot.children { try insertTree(child, in: childLocation, depth: depth + 1) }
+  }
+
+  private func validate(_ location: Location, accepting kind: NodeKind) throws {
+    let isValid: Bool
+    switch location {
+    case .favorites:
+      isValid = true
+    case .pinned(let space), .today(let space):
+      isValid = spaces[space] != nil
+    case .folder(let id):
+      if case .folder = nodes[id]?.kind { isValid = true } else { isValid = false }
+    case .split(let id):
+      if case .split = nodes[id]?.kind, case .tab = kind { isValid = true } else { isValid = false }
+    }
+    if !isValid { throw SidebarError.invalidDestination(location) }
+  }
+
+  private mutating func insert(_ kind: NodeKind, in location: Location, createdAt: Date) throws -> NodeID {
+    try validate(location, accepting: kind)
+    let node = Node(kind: kind, parent: location, createdAt: createdAt)
+    guard depth(ofChildIn: location) <= Self.maximumNestingDepth else { throw SidebarError.nestingTooDeep(node.id) }
+    nodes[node.id] = node
+    childOrder[location, default: []].append(node.id)
+    return node.id
+  }
+
+  private mutating func detach(_ id: NodeID, from location: Location) {
+    guard var siblings = childOrder[location] else { return }
+    siblings.removeAll { $0 == id }
+    childOrder[location] = siblings.isEmpty ? nil : siblings
+  }
+
+  private mutating func removeSubtree(_ id: NodeID) {
+    for location in [Location.folder(id), .split(id)] {
+      for child in childOrder.removeValue(forKey: location) ?? [] {
+        removeSubtree(child)
+      }
+    }
+    nodes[id] = nil
+  }
+
+  /// The depth a node placed directly in `location` would have: 1 in a section, one more than its container otherwise.
+  private func depth(ofChildIn location: Location) -> Int {
+    var depth = 1
+    var current = location.containerNode
+    while let id = current, let node = nodes[id] {
+      depth += 1
+      current = node.parent.containerNode
+    }
+    return depth
+  }
+
+  /// Levels in the subtree rooted at `id`: 1 for a leaf.
+  private func height(of id: NodeID) -> Int {
+    let children = children(of: .folder(id)) + children(of: .split(id))
+    return 1 + (children.map { height(of: $0) }.max() ?? 0)
+  }
+
+  private func isInSubtree(_ location: Location, of root: NodeID) -> Bool {
+    var current = location.containerNode
+    while let id = current {
+      if id == root { return true }
+      current = nodes[id]?.parent.containerNode
+    }
+    return false
+  }
+}

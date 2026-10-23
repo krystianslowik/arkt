@@ -1,0 +1,169 @@
+import AppKit
+
+/// Root view of the command bar: input row, divider, results table. Frames are set in `layout()`.
+@MainActor
+final class CommandBarView: NSView {
+  let field = NSTextField()
+  let divider = NSView()
+  let scrollView = NSScrollView()
+  let table = NSTableView()
+
+  override var isFlipped: Bool { true }
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    wantsLayer = true
+    layer?.cornerRadius = CommandBarGeometry.cornerRadius
+    layer?.cornerCurve = .continuous
+    layer?.masksToBounds = true
+    layer?.backgroundColor = ShellTokens.commandBarSurface.cgColor
+    layer?.borderWidth = 1
+    layer?.borderColor = ShellTokens.commandBarBorder.cgColor
+
+    field.isBordered = false
+    field.isBezeled = false
+    field.drawsBackground = false
+    field.focusRingType = .none
+    field.font = .systemFont(ofSize: 18)
+    field.textColor = ShellTokens.commandBarText.nsColor()
+    field.cell?.isScrollable = true
+    field.cell?.wraps = false
+    field.cell?.usesSingleLineMode = true
+    field.placeholderAttributedString = NSAttributedString(string: "Search or Enter URL...", attributes: [
+      .font: NSFont.systemFont(ofSize: 18),
+      .foregroundColor: ShellTokens.commandBarSecondaryText.nsColor(),
+    ])
+    field.setAccessibilityIdentifier("commandBar.field")
+    addSubview(field)
+
+    divider.wantsLayer = true
+    divider.layer?.backgroundColor = ShellTokens.commandBarDivider.cgColor
+    addSubview(divider)
+
+    let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result"))
+    table.addTableColumn(column)
+    table.headerView = nil
+    table.style = .plain
+    table.rowHeight = CommandBarGeometry.rowHeight
+    table.intercellSpacing = .zero
+    table.selectionHighlightStyle = .none
+    table.backgroundColor = .clear
+    table.refusesFirstResponder = true            // the field keeps focus; arrows are routed by the controller
+    table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+    table.setAccessibilityIdentifier("commandBar.results")
+
+    scrollView.documentView = table
+    scrollView.drawsBackground = false
+    scrollView.borderType = .noBorder
+    scrollView.hasVerticalScroller = true
+    scrollView.autohidesScrollers = true
+    scrollView.automaticallyAdjustsContentInsets = false
+    addSubview(scrollView)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override func layout() {
+    super.layout()
+    let g = CommandBarGeometry.self
+    let fieldHeight = ceil(field.intrinsicContentSize.height)
+    field.frame = NSRect(x: g.inputLeading, y: (g.inputHeight - fieldHeight) / 2,
+                         width: bounds.width - 2 * g.inputLeading, height: fieldHeight)
+    let hasResults = bounds.height > g.inputHeight
+    divider.isHidden = !hasResults
+    scrollView.isHidden = !hasResults
+    divider.frame = NSRect(x: 0, y: g.inputHeight, width: bounds.width, height: 1)
+    let listTop = g.inputHeight + 1 + g.listPadding
+    scrollView.frame = NSRect(x: 0, y: listTop, width: bounds.width,
+                              height: max(0, bounds.height - listTop - g.listPadding))
+    table.tableColumns.first?.width = scrollView.contentSize.width
+  }
+}
+
+/// Row background: the selected row gets a lighter rounded fill, inset from the panel edges.
+@MainActor
+final class CommandBarRowView: NSTableRowView {
+  static let identifier = NSUserInterfaceItemIdentifier("commandBar.row")
+
+  override var isSelected: Bool { didSet { if isSelected != oldValue { needsDisplay = true } } }
+
+  override func drawBackground(in dirtyRect: NSRect) {
+    guard isSelected else { return }
+    let r = CommandBarGeometry.selectedRowRadius
+    let rect = bounds.insetBy(dx: CommandBarGeometry.listPadding, dy: 0)
+    ShellTokens.commandBarSelectedRow.nsColor().setFill()
+    NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).fill()
+  }
+
+  override func drawSelection(in dirtyRect: NSRect) {}
+}
+
+/// One result: 16 pt icon, title, subtitle on the same baseline, trailing hint ("Switch to Tab ->").
+@MainActor
+final class CommandBarCellView: NSTableCellView {
+  static let identifier = NSUserInterfaceItemIdentifier("commandBar.cell")
+  static let iconSize: CGFloat = 16
+
+  let icon = NSImageView()
+  let title = CommandBarCellView.label(size: 14, color: ShellTokens.commandBarText)
+  let subtitle = CommandBarCellView.label(size: 12, color: ShellTokens.commandBarSecondaryText)
+  let hint = CommandBarCellView.label(size: 12, color: ShellTokens.commandBarSecondaryText)
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    identifier = Self.identifier
+    icon.imageScaling = .scaleProportionallyUpOrDown
+    [icon, title, subtitle, hint].forEach(addSubview)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  private static func label(size: CGFloat, color: RGBA) -> NSTextField {
+    let label = NSTextField(labelWithString: "")
+    label.font = .systemFont(ofSize: size)
+    label.textColor = color.nsColor()
+    label.lineBreakMode = .byTruncatingTail
+    label.cell?.usesSingleLineMode = true
+    return label
+  }
+
+  /// `scale`: pixels per point for the icon bitmap (the bar's backing scale, which the cell's own window may
+  /// not report yet while the panel is still on the previous display).
+  func configure(_ result: CommandBarResults.Result, scale: CGFloat) {
+    let symbol = switch result.kind {
+    case .open: "globe"
+    case .switchTo: "square.on.square"
+    case .search: "magnifyingglass"
+    }
+    icon.image = SymbolImageCache.shared.symbol(symbol, box: Self.iconSize, color: ShellTokens.commandBarText,
+                                                scale: scale)
+    title.stringValue = result.title
+    subtitle.stringValue = result.subtitle
+    hint.stringValue = result.trailingHint.map { $0 + " \u{2192}" } ?? ""
+    hint.isHidden = result.trailingHint == nil
+    needsLayout = true
+  }
+
+  override func layout() {
+    super.layout()
+    let leading = CommandBarGeometry.listPadding + 16       // matches the 8 pt inset of the selected fill
+    let trailing = bounds.width - leading
+    let iconSize = Self.iconSize
+    icon.frame = NSRect(x: leading, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
+    let hintWidth = hint.isHidden ? 0 : ceil(hint.fittingSize.width)
+    hint.frame = centered(x: trailing - hintWidth, width: hintWidth, field: hint)
+    let textX = icon.frame.maxX + 12
+    let textLimit = (hint.isHidden ? trailing : hint.frame.minX - 12)
+    let titleWidth = min(ceil(title.fittingSize.width), max(0, textLimit - textX))
+    title.frame = centered(x: textX, width: titleWidth, field: title)
+    let subtitleX = title.frame.maxX + 8
+    subtitle.frame = centered(x: subtitleX, width: max(0, textLimit - subtitleX), field: subtitle)
+  }
+
+  private func centered(x: CGFloat, width: CGFloat, field: NSTextField) -> NSRect {
+    let h = ceil(field.intrinsicContentSize.height)
+    return NSRect(x: x, y: (bounds.height - h) / 2, width: width, height: h)
+  }
+}

@@ -1,0 +1,262 @@
+import Archive
+import Foundation
+import Testing
+import SidebarModel
+
+struct ArchiverTests {
+  static let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+  static func url(_ path: String) -> URL { URL(string: "https://example.com/\(path)")! }
+
+  struct World {
+    var sidebar = Sidebar()
+    var work: SpaceID
+    var folder: NodeID
+    var nested: NodeID
+    var today: [NodeID]
+    var favorite: NodeID
+  }
+
+  static func makeWorld() throws -> World {
+    var sidebar = Sidebar()
+    let work = sidebar.addSpace(title: "Work")
+    let folder = try sidebar.addFolder(title: "Docs", in: .pinned(work))
+    let nested = try sidebar.addTab(url: url("n"), title: "Nested", in: .folder(folder))
+    let t1 = try sidebar.addTab(url: url("1"), title: "One", customTitle: "Uno", in: .today(work))
+    let t2 = try sidebar.addTab(url: url("2"), title: "Two", in: .today(work))
+    let favorite = try sidebar.addTab(url: url("f"), title: "Fav", in: .favorites(profile: "default"))
+    return World(sidebar: sidebar, work: work, folder: folder, nested: nested, today: [t1, t2], favorite: favorite)
+  }
+
+  static func tab(_ path: String) -> NodeSnapshot {
+    NodeSnapshot(kind: .tab(TabItem(url: url(path), title: path.uppercased())), createdAt: now)
+  }
+
+  // MARK: Archive
+
+  /// BH-071: Cmd-W on a Today tab removes it from the sidebar and archives it with reason manual.
+  @Test func archivingATodayTabRemovesItAndRecordsTheSpace() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.today[0], from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(world.sidebar.nodes[world.today[0]] == nil)
+    #expect(world.sidebar.children(of: .today(world.work)) == [world.today[1]])
+    #expect(item.id == world.today[0])
+    #expect(item.reason == .manual)
+    #expect(item.archivedAt == Self.now)
+    #expect(item.source == .space(world.work))
+    #expect(item.section == .today)
+  }
+
+  @Test func archivingAFolderSnapshotsTheWholeSubtree() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.folder, from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(item.snapshot.allIDs == [world.folder, world.nested])
+    #expect(world.sidebar.nodes[world.nested] == nil)
+    #expect(item.section == .pinned)
+  }
+
+  @Test func nestedNodeSourceIsItsSpace() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.nested, from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(item.source == .space(world.work))
+    #expect(item.section == .pinned)
+  }
+
+  @Test func favoriteSourceIsUnknownAndSectionKeepsTheProfile() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.favorite, from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(item.source == .unknown)
+    #expect(item.section == .favorites(profile: "default"))
+  }
+
+  @Test func archivingAnUnknownNodeThrows() throws {
+    var world = try Self.makeWorld()
+    let id = NodeID()
+    #expect(throws: SidebarError.unknownNode(id)) {
+      try Archiver.archive(id, from: &world.sidebar, reason: .auto, at: Self.now)
+    }
+  }
+
+  /// Precondition pinned as current behavior: archiving one pane (not the split root) leaves the split in place with
+  /// stale `widthFactors`. Callers archive the split root (BH-122/123 pane removal is a separate, unresolved action).
+  @Test func archivingASinglePaneLeavesTheSplitWithStaleWidths() throws {
+    var world = try Self.makeWorld()
+    let split = try world.sidebar.addSplit(
+      orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(world.work))
+    let left = try world.sidebar.addTab(url: Self.url("l"), title: "Left", in: .split(split))
+    let right = try world.sidebar.addTab(url: Self.url("r"), title: "Right", in: .split(split))
+    let item = try Archiver.archive(left, from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(item.section == .today)
+    #expect(world.sidebar.children(of: .split(split)) == [right])
+    #expect(world.sidebar.nodes[split]?.kind == .split(SplitItem(orientation: .horizontal, widthFactors: [0.5, 0.5])))
+  }
+
+  // MARK: Restore
+
+  /// BH-086: a restored tab returns to its original Space (top of Today [I]) with its original id.
+  @Test func restoredTabGoesToTheTopOfTodayInItsSpace() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.today[1], from: &world.sidebar, reason: .auto, at: Self.now)
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(restored == RestoredItem(nodeID: world.today[1], space: world.work, location: .today(world.work)))
+    #expect(world.sidebar.children(of: .today(world.work)) == [world.today[1], world.today[0]])
+  }
+
+  /// BH-086, BH-090: a restored folder returns to its Space's Pinned section (appended [I]) with its children.
+  @Test func restoredFolderGoesToTheEndOfPinned() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.folder, from: &world.sidebar, reason: .manual, at: Self.now)
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(restored.location == .pinned(world.work))
+    #expect(world.sidebar.children(of: .pinned(world.work)).last == world.folder)
+    #expect(world.sidebar.children(of: .folder(world.folder)) == [world.nested])
+  }
+
+  /// A tab archived from Pinned (here from inside a folder) returns to the end of Pinned [I], not into the folder.
+  @Test func restoredPinnedTabGoesToTheEndOfPinned() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.nested, from: &world.sidebar, reason: .manual, at: Self.now)
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(restored == RestoredItem(nodeID: world.nested, space: world.work, location: .pinned(world.work)))
+    #expect(world.sidebar.children(of: .pinned(world.work)) == [world.folder, world.nested])
+    #expect(world.sidebar.children(of: .folder(world.folder)).isEmpty)
+  }
+
+  /// A folder archived from Today returns to the top of Today [I].
+  @Test func restoredTodayFolderGoesToTheTopOfToday() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "Loose", in: .today(world.work))
+    let item = try Archiver.archive(folder, from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(item.section == .today)
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(restored.location == .today(world.work))
+    #expect(world.sidebar.children(of: .today(world.work)).first == folder)
+  }
+
+  /// A Favorite returns to the end of its profile's Favorites [I]; it has no Space.
+  @Test func restoredFavoriteGoesToTheEndOfItsProfileFavorites() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.favorite, from: &world.sidebar, reason: .manual, at: Self.now)
+    let other = try world.sidebar.addTab(url: Self.url("g"), title: "G", in: .favorites(profile: "default"))
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(restored == RestoredItem(nodeID: world.favorite, space: nil, location: .favorites(profile: "default")))
+    #expect(world.sidebar.children(of: .favorites(profile: "default")) == [other, world.favorite])
+  }
+
+  /// A split in Today archives as one unit (both panes in one entry) and restores to the top of Today [I].
+  @Test func splitInTodayArchivesAndRestoresAsOneUnit() throws {
+    var world = try Self.makeWorld()
+    let split = try world.sidebar.addSplit(
+      orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(world.work))
+    let left = try world.sidebar.addTab(url: Self.url("l"), title: "Left", in: .split(split))
+    let right = try world.sidebar.addTab(url: Self.url("r"), title: "Right", in: .split(split))
+    let item = try Archiver.archive(split, from: &world.sidebar, reason: .auto, at: Self.now)
+    #expect(item.snapshot.allIDs == [split, left, right])
+    #expect(item.title == "Left | Right")
+    #expect(item.url == nil)
+    #expect(world.sidebar.nodes[left] == nil && world.sidebar.nodes[right] == nil)
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(restored.location == .today(world.work))
+    #expect(world.sidebar.children(of: .today(world.work)).first == split)
+    #expect(world.sidebar.children(of: .split(split)) == [left, right])
+  }
+
+  /// Without a recorded section (e.g. an imported entry) the default rules apply: folders to the end of Pinned,
+  /// everything else to the top of Today, in the source Space when it exists.
+  @Test func itemWithoutASectionUsesTheDefaultRules() throws {
+    var world = try Self.makeWorld()
+    let folder = NodeSnapshot(kind: .folder(FolderItem(title: "Imported")), createdAt: Self.now)
+    let folderItem = ArchivedItem(reason: .auto, archivedAt: Self.now, source: .space(world.work), snapshot: folder)
+    let restoredFolder = try Archiver.restore(folderItem, into: &world.sidebar, fallbackSpace: SpaceID())
+    #expect(restoredFolder.location == .pinned(world.work))
+    #expect(world.sidebar.children(of: .pinned(world.work)).last == folder.id)
+    let tab = ArchivedItem(reason: .auto, archivedAt: Self.now, source: .space(world.work), snapshot: Self.tab("i"))
+    let restoredTab = try Archiver.restore(tab, into: &world.sidebar, fallbackSpace: SpaceID())
+    #expect(restoredTab.location == .today(world.work))
+    #expect(world.sidebar.children(of: .today(world.work)).first == tab.id)
+  }
+
+  /// BH-138 [I]: Little Arc items, unknown sources and items whose Space is gone restore into `fallbackSpace` with
+  /// the default rules, even when a Pinned section was recorded.
+  @Test func littleArcAndMissingSpaceUseTheFallback() throws {
+    var world = try Self.makeWorld()
+    let little = ArchivedItem(reason: .manual, archivedAt: Self.now, source: .littleArc, snapshot: Self.tab("l"))
+    #expect(try Archiver.restore(little, into: &world.sidebar, fallbackSpace: world.work).space == world.work)
+    let gone = ArchivedItem(
+      reason: .auto, archivedAt: Self.now, source: .space(SpaceID()), section: .pinned, snapshot: Self.tab("g"))
+    let restoredGone = try Archiver.restore(gone, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(restoredGone.location == .today(world.work))
+    let badFallback = SpaceID()
+    let other = ArchivedItem(reason: .auto, archivedAt: Self.now, source: .unknown, snapshot: Self.tab("o"))
+    let before = world.sidebar
+    #expect(throws: SidebarError.invalidDestination(.today(badFallback))) {
+      try Archiver.restore(other, into: &world.sidebar, fallbackSpace: badFallback)
+    }
+    #expect(world.sidebar == before)
+  }
+
+  /// An invalid subtree (a folder inside a split) fails partway through; nothing of it may remain.
+  @Test func failedRestoreLeavesTheSidebarUnchanged() throws {
+    var world = try Self.makeWorld()
+    let inner = NodeSnapshot(kind: .folder(FolderItem(title: "Bad")), createdAt: Self.now)
+    let split = NodeSnapshot(
+      kind: .split(SplitItem(orientation: .vertical, widthFactors: [1])), createdAt: Self.now, children: [inner])
+    let folder = NodeSnapshot(kind: .folder(FolderItem(title: "Outer")), createdAt: Self.now, children: [split])
+    let item = ArchivedItem(reason: .manual, archivedAt: Self.now, source: .space(world.work), snapshot: folder)
+    let before = world.sidebar
+    #expect(throws: SidebarError.invalidDestination(.split(split.id))) {
+      try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    }
+    #expect(world.sidebar == before)
+  }
+
+  /// A subtree deeper than `Sidebar.maximumNestingDepth` is rejected as a whole.
+  @Test func tooDeepRestoreThrowsAndLeavesTheSidebarUnchanged() throws {
+    var world = try Self.makeWorld()
+    var chain = NodeSnapshot(kind: .folder(FolderItem(title: "leaf")), createdAt: Self.now)
+    let tooDeep = chain.id
+    for level in 1..<(Sidebar.maximumNestingDepth + 1) {
+      chain = NodeSnapshot(kind: .folder(FolderItem(title: "\(level)")), createdAt: Self.now, children: [chain])
+    }
+    let item = ArchivedItem(reason: .manual, archivedAt: Self.now, source: .space(world.work), snapshot: chain)
+    let before = world.sidebar
+    #expect(throws: SidebarError.nestingTooDeep(tooDeep)) {
+      try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    }
+    #expect(world.sidebar == before)
+  }
+
+  @Test func restoreOverATakenIDUsesFreshIDs() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.today[0], from: &world.sidebar, reason: .manual, at: Self.now)
+    _ = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    let again = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(again.nodeID != world.today[0])
+    #expect(world.sidebar.children(of: .today(world.work)).count == 3)
+  }
+
+  /// Only a nested descendant's id is taken: the whole subtree, root included, gets fresh ids.
+  @Test func takenDescendantIDGivesTheWholeSubtreeFreshIDs() throws {
+    var world = try Self.makeWorld()
+    let item = try Archiver.archive(world.folder, from: &world.sidebar, reason: .manual, at: Self.now)
+    let squatter = NodeSnapshot(
+      id: world.nested, kind: .tab(TabItem(url: Self.url("x"), title: "X")), createdAt: Self.now)
+    try world.sidebar.insert(squatter, in: .today(world.work))
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+    #expect(restored.nodeID != world.folder)
+    #expect(world.sidebar.nodes[world.folder] == nil)
+    let children = world.sidebar.children(of: .folder(restored.nodeID))
+    #expect(children.count == 1)
+    #expect(children.first != world.nested)
+    #expect(world.sidebar.section(of: world.nested) == .today(world.work))
+  }
+
+  @Test func titleAndURLComeFromTheSnapshot() throws {
+    var world = try Self.makeWorld()
+    let tab = try Archiver.archive(world.today[0], from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(tab.title == "Uno")
+    #expect(tab.url == Self.url("1"))
+    let folder = try Archiver.archive(world.folder, from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(folder.title == "Docs")
+    #expect(folder.url == nil)
+  }
+}

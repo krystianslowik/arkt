@@ -1,0 +1,4 @@
+# Arkt engine overlay. Everything Arkt-specific inside Chromium lives here.
+group("arkt") {
+  deps = [ "//arkt/browser" ]
+}

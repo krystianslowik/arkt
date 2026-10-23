@@ -1,0 +1,260 @@
+import Foundation
+import Testing
+import SidebarModel
+
+struct SidebarTests {
+  let url = URL(string: "https://example.com/a")!
+
+  func makeSidebar() throws -> Sidebar {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let folder = try sidebar.addFolder(title: "Docs", in: .pinned(space))
+    try sidebar.addTab(url: URL(string: "https://example.com/a")!, title: "A", in: .folder(folder))
+    try sidebar.addTab(url: URL(string: "https://example.com/b")!, title: "B", in: .today(space))
+    return sidebar
+  }
+
+  /// A space whose pinned section holds three tabs x, y, z.
+  func makeThreeTabs() throws -> (Sidebar, SpaceID, [NodeID]) {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let ids = try ["x", "y", "z"].map {
+      try sidebar.addTab(url: URL(string: "https://example.com/\($0)")!, title: $0, in: .pinned(space))
+    }
+    return (sidebar, space, ids)
+  }
+
+  // MARK: - Structure
+
+  @Test func spacesKeepInsertionOrder() {
+    var sidebar = Sidebar()
+    let a = sidebar.addSpace(title: "A")
+    let b = sidebar.addSpace(title: "B")
+    #expect(sidebar.spaceOrder == [a, b])
+  }
+
+  @Test func childrenAreOrdered() throws {
+    let sidebar = try makeSidebar()
+    let space = sidebar.spaceOrder[0]
+    let pinned = sidebar.children(of: .pinned(space))
+    #expect(pinned.count == 1)
+    guard case .folder(let folder) = sidebar.nodes[pinned[0]]?.kind else {
+      Issue.record("expected folder"); return
+    }
+    #expect(folder.title == "Docs")
+    #expect(sidebar.children(of: .folder(pinned[0])).count == 1)
+    #expect(sidebar.children(of: .today(space)).count == 1)
+  }
+
+  @Test func addSplitHoldsTabs() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let split = try sidebar.addSplit(orientation: .vertical, widthFactors: [0.5, 0.5], in: .pinned(space))
+    try sidebar.addTab(url: url, title: "L", in: .split(split))
+    try sidebar.addTab(url: url, title: "R", in: .split(split))
+    #expect(sidebar.children(of: .split(split)).count == 2)
+    guard case .split(let value) = sidebar.nodes[split]?.kind else {
+      Issue.record("expected split"); return
+    }
+    #expect(value.orientation == .vertical)
+    #expect(value.widthFactors == [0.5, 0.5])
+  }
+
+  @Test func favoritesAreSeparatedPerProfile() throws {
+    var sidebar = Sidebar()
+    let a = try sidebar.addTab(url: url, title: "A", in: .favorites(profile: "default"))
+    let b = try sidebar.addTab(url: url, title: "B", in: .favorites(profile: "work"))
+    #expect(sidebar.children(of: .favorites(profile: "default")) == [a])
+    #expect(sidebar.children(of: .favorites(profile: "work")) == [b])
+  }
+
+  // MARK: - Add validation
+
+  @Test func addRejectsUnknownSpace() throws {
+    var sidebar = Sidebar()
+    let missing = SpaceID()
+    #expect(throws: SidebarError.invalidDestination(.pinned(missing))) {
+      try sidebar.addFolder(title: "F", in: .pinned(missing))
+    }
+    #expect(throws: SidebarError.invalidDestination(.today(missing))) {
+      try sidebar.addTab(url: url, title: "T", in: .today(missing))
+    }
+    #expect(sidebar == Sidebar())
+  }
+
+  @Test func addRejectsNonFolderAsFolder() throws {
+    var (sidebar, _, ids) = try makeThreeTabs()
+    let before = sidebar
+    let missing = NodeID()
+    #expect(throws: SidebarError.invalidDestination(.folder(ids[0]))) {
+      try sidebar.addTab(url: url, title: "T", in: .folder(ids[0]))
+    }
+    #expect(throws: SidebarError.invalidDestination(.folder(missing))) {
+      try sidebar.addTab(url: url, title: "T", in: .folder(missing))
+    }
+    #expect(sidebar == before)
+  }
+
+  @Test func addRejectsNonTabInSplit() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5], in: .pinned(space))
+    let folder = try sidebar.addFolder(title: "F", in: .pinned(space))
+    let before = sidebar
+    #expect(throws: SidebarError.invalidDestination(.split(split))) {
+      try sidebar.addFolder(title: "Inner", in: .split(split))
+    }
+    #expect(throws: SidebarError.invalidDestination(.split(split))) {
+      try sidebar.addSplit(orientation: .vertical, widthFactors: [1], in: .split(split))
+    }
+    #expect(throws: SidebarError.invalidDestination(.split(folder))) {
+      try sidebar.addTab(url: url, title: "T", in: .split(folder))
+    }
+    #expect(sidebar == before)
+  }
+
+  // MARK: - Move
+
+  @Test func moveReordersAndReparents() throws {
+    var sidebar = try makeSidebar()
+    let space = sidebar.spaceOrder[0]
+    let todayTab = sidebar.children(of: .today(space))[0]
+    try sidebar.move(todayTab, to: .pinned(space), at: 0)
+    #expect(sidebar.children(of: .today(space)).isEmpty)
+    #expect(sidebar.children(of: .pinned(space)).first == todayTab)
+    #expect(sidebar.nodes[todayTab]?.parent == .pinned(space))
+  }
+
+  @Test func moveClampsIndex() throws {
+    var sidebar = try makeSidebar()
+    let space = sidebar.spaceOrder[0]
+    let todayTab = sidebar.children(of: .today(space))[0]
+    try sidebar.move(todayTab, to: .pinned(space), at: 99)
+    #expect(sidebar.children(of: .pinned(space)).last == todayTab)
+    try sidebar.move(todayTab, to: .pinned(space), at: -5)
+    #expect(sidebar.children(of: .pinned(space)).first == todayTab)
+    #expect(sidebar.children(of: .pinned(space)).count == 2)
+  }
+
+  @Test func moveWithinParentUsesIndexBeforeRemoval() throws {
+    let (base, space, ids) = try makeThreeTabs()
+    let (x, y, z) = (ids[0], ids[1], ids[2])
+
+    var sidebar = base
+    try sidebar.move(x, to: .pinned(space), at: 2)
+    #expect(sidebar.children(of: .pinned(space)) == [y, x, z])
+
+    sidebar = base
+    try sidebar.move(x, to: .pinned(space), at: 3)
+    #expect(sidebar.children(of: .pinned(space)) == [y, z, x])
+
+    sidebar = base
+    try sidebar.move(z, to: .pinned(space), at: 0)
+    #expect(sidebar.children(of: .pinned(space)) == [z, x, y])
+  }
+
+  @Test func moveIntoOwnSubtreeThrows() throws {
+    var sidebar = try makeSidebar()
+    let space = sidebar.spaceOrder[0]
+    let outer = sidebar.children(of: .pinned(space))[0]
+    let inner = try sidebar.addFolder(title: "Inner", in: .folder(outer))
+    let before = sidebar
+    #expect(throws: SidebarError.cycle) {
+      try sidebar.move(outer, to: .folder(inner), at: 0)
+    }
+    #expect(throws: SidebarError.cycle) {
+      try sidebar.move(outer, to: .folder(outer), at: 0)
+    }
+    #expect(sidebar == before)
+  }
+
+  @Test func moveOfUnknownNodeThrows() throws {
+    var sidebar = try makeSidebar()
+    let before = sidebar
+    let missing = NodeID()
+    #expect(throws: SidebarError.unknownNode(missing)) {
+      try sidebar.move(missing, to: .favorites(profile: "default"), at: 0)
+    }
+    #expect(sidebar == before)
+  }
+
+  @Test func moveRejectsInvalidDestinations() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let split = try sidebar.addSplit(orientation: .vertical, widthFactors: [0.5, 0.5], in: .pinned(space))
+    let folder = try sidebar.addFolder(title: "F", in: .pinned(space))
+    let tab = try sidebar.addTab(url: url, title: "T", in: .today(space))
+    let missingSpace = SpaceID()
+    let before = sidebar
+
+    #expect(throws: SidebarError.invalidDestination(.pinned(missingSpace))) {
+      try sidebar.move(tab, to: .pinned(missingSpace), at: 0)
+    }
+    #expect(throws: SidebarError.invalidDestination(.today(missingSpace))) {
+      try sidebar.move(tab, to: .today(missingSpace), at: 0)
+    }
+    #expect(throws: SidebarError.invalidDestination(.folder(tab))) {
+      try sidebar.move(folder, to: .folder(tab), at: 0)
+    }
+    #expect(throws: SidebarError.invalidDestination(.folder(split))) {
+      try sidebar.move(tab, to: .folder(split), at: 0)
+    }
+    #expect(throws: SidebarError.invalidDestination(.split(folder))) {
+      try sidebar.move(tab, to: .split(folder), at: 0)
+    }
+    #expect(throws: SidebarError.invalidDestination(.split(split))) {
+      try sidebar.move(folder, to: .split(split), at: 0)
+    }
+    #expect(sidebar == before)
+
+    try sidebar.move(tab, to: .split(split), at: 0)
+    #expect(sidebar.children(of: .split(split)) == [tab])
+  }
+
+  // MARK: - Remove
+
+  @Test func removeDropsDescendants() throws {
+    var sidebar = try makeSidebar()
+    let space = sidebar.spaceOrder[0]
+    let folder = sidebar.children(of: .pinned(space))[0]
+    let todayTab = sidebar.children(of: .today(space))[0]
+    sidebar.remove(folder)
+    #expect(sidebar.children(of: .pinned(space)).isEmpty)
+    #expect(sidebar.children(of: .folder(folder)).isEmpty)
+    #expect(Set(sidebar.nodes.keys) == [todayTab])
+    #expect(sidebar.children(of: .today(space)) == [todayTab])
+  }
+
+  @Test func removeSplitRemovesItsTabs() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let split = try sidebar.addSplit(orientation: .vertical, widthFactors: [0.5, 0.5], in: .pinned(space))
+    try sidebar.addTab(url: url, title: "L", in: .split(split))
+    try sidebar.addTab(url: url, title: "R", in: .split(split))
+    sidebar.remove(split)
+    #expect(sidebar.nodes.isEmpty)
+    #expect(sidebar.children(of: .split(split)).isEmpty)
+    #expect(sidebar.children(of: .pinned(space)).isEmpty)
+  }
+
+  @Test func removeMiddleSiblingKeepsOrder() throws {
+    var (sidebar, space, ids) = try makeThreeTabs()
+    sidebar.remove(ids[1])
+    #expect(sidebar.children(of: .pinned(space)) == [ids[0], ids[2]])
+  }
+
+  @Test func removeUnknownIsNoOp() throws {
+    var sidebar = try makeSidebar()
+    let before = sidebar
+    sidebar.remove(NodeID())
+    #expect(sidebar == before)
+  }
+
+  @Test func payloadTypesUseItemNames() {
+    let tab = TabItem(url: url, title: "T")
+    let folder = FolderItem(title: "F")
+    let split = SplitItem(orientation: .horizontal, widthFactors: [1])
+    #expect(NodeKind.tab(tab) != .folder(folder))
+    #expect(NodeKind.split(split) != .folder(folder))
+  }
+}

@@ -1,0 +1,31 @@
+# In-process browser hook, registered from
+# chrome/browser/chrome_browser_main.cc (patch 0001).
+source_set("browser") {
+  sources = [
+    "arkt_browser_main_extra_parts.h",
+    "arkt_browser_main_extra_parts.mm",
+    "arkt_extensions_bridge.h",
+    "arkt_extensions_bridge.mm",
+    "arkt_window_controller.h",
+    "arkt_window_controller.mm",
+  ]
+  deps = [
+    "//base",
+    "//chrome/browser/extensions",
+    "//chrome/browser/profiles:profile",
+    "//chrome/browser/ui/browser_window",
+    "//chrome/browser/ui/tabs:tab_strip",
+    "//chrome/browser/ui/toolbar",
+    "//components/sessions",
+    "//content/public/browser",
+    "//extensions/browser",
+    "//extensions/common",
+    "//ui/base",
+    "//ui/gfx",
+  ]
+  public_deps = [ "//chrome/browser:main_extra_parts" ]
+  frameworks = [
+    "AppKit.framework",
+    "QuartzCore.framework",
+  ]
+}

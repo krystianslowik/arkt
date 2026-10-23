@@ -1,0 +1,90 @@
+import AppKit
+import EngineAPI
+
+/// Pure in-memory engine for tests and previews. Loads complete only when `finishLoad` is called,
+/// which makes event order fully deterministic.
+@MainActor
+public final class InMemoryEngine: EngineClient {
+  private var snapshots: [TabID: TabSnapshot] = [:]
+  private var views: [TabID: NSView] = [:]
+  private let hub = EngineEventHub()
+  public private(set) var tabIDs: [TabID] = []
+
+  public init() {}
+
+  @discardableResult
+  public func createTab(url: URL?) -> TabID {
+    let id = TabID()
+    snapshots[id] = TabSnapshot(id: id)
+    tabIDs.append(id)
+    hub.emit(.tabCreated(id))
+    if let url { navigate(id, to: url) }
+    return id
+  }
+
+  public func closeTab(_ id: TabID) {
+    guard snapshots.removeValue(forKey: id) != nil else { return }
+    tabIDs.removeAll { $0 == id }
+    views[id]?.removeFromSuperview()
+    views[id] = nil
+    hub.emit(.tabClosed(id))
+  }
+
+  /// Starts a load and commits it at once: url, loading, then (on a host change) the favicon reset.
+  public func navigate(_ id: TabID, to url: URL) {
+    guard let previous = snapshots[id] else { return }
+    snapshots[id]?.url = url
+    snapshots[id]?.isLoading = true
+    hub.emit(.urlChanged(id, url))
+    if !previous.isLoading { hub.emit(.loadingChanged(id, isLoading: true)) }
+    if previous.url?.host() != url.host(), previous.faviconData != nil {
+      snapshots[id]?.faviconData = nil
+      hub.emit(.faviconChanged(id, nil))
+    }
+  }
+
+  public func reload(_ id: TabID) {
+    guard let current = snapshots[id], current.url != nil, !current.isLoading else { return }
+    snapshots[id]?.isLoading = true
+    hub.emit(.loadingChanged(id, isLoading: true))
+  }
+
+  /// Test hook: the page changed `document.title` after loading.
+  public func setDocumentTitle(_ id: TabID, _ title: String) {
+    guard let current = snapshots[id], current.title != title else { return }
+    snapshots[id]?.title = title
+    hub.emit(.titleChanged(id, title))
+  }
+
+  /// Test hook: completes the pending load the way a real engine would.
+  public func finishLoad(_ id: TabID, title: String, favicon: Data? = nil) {
+    guard let current = snapshots[id] else { return }
+    if current.title != title {
+      snapshots[id]?.title = title
+      hub.emit(.titleChanged(id, title))
+    }
+    if let favicon {
+      snapshots[id]?.faviconData = favicon
+      hub.emit(.faviconChanged(id, favicon))
+    }
+    if current.isLoading {
+      snapshots[id]?.isLoading = false
+      hub.emit(.loadingChanged(id, isLoading: false))
+    }
+  }
+
+  public func snapshot(of id: TabID) -> TabSnapshot? { snapshots[id] }
+
+  public func contentView(for id: TabID) -> NSView? {
+    guard snapshots[id] != nil else { return nil }
+    if let view = views[id] { return view }
+    let view = NSView()
+    view.identifier = NSUserInterfaceItemIdentifier("in-memory-tab-\(id)")
+    views[id] = view
+    return view
+  }
+
+  public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
+    hub.add(handler)
+  }
+}

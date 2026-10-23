@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Fri, 23 Oct 2026 10:36:13 +0200
+Subject: [PATCH] Arkt: let a WebContents view draw again after leaving Views
+
+RenderWidgetHostViewMac::SetParentUiLayer() disables Cocoa display permanently the first time a view is hosted by Views. Arkt moves the active tab's view into its own AppKit hierarchy, so add EnableDisplay() and call it when the parent ui::Layer is cleared. The recreated DisplayCALayerTree child layer is sized to the current bounds because it only autoresizes correctly when created at zero size.
+---
+ .../render_widget_host_ns_view_bridge.h              |  1 +
+ .../render_widget_host_ns_view_bridge.mm             | 12 ++++++++++++
+ .../renderer_host/render_widget_host_view_mac.mm     |  4 ++++
+ content/common/render_widget_host_ns_view.mojom      |  4 ++++
+ 4 files changed, 21 insertions(+)
+
+diff --git a/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.h b/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.h
+index 1f515437b6..2ee2e51451 100644
+--- a/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.h
++++ b/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.h
+@@ -63,6 +63,7 @@ class RenderWidgetHostNSViewBridge : public mojom::RenderWidgetHostNSView,
+                    uint64_t popup_parent_ns_view_id) override;
+   void SetParentWebContentsNSView(uint64_t parent_ns_view_id) override;
+   void DisableDisplay() override;
++  void EnableDisplay() override;
+   void MakeFirstResponder() override;
+   void SetBounds(const gfx::Rect& rect) override;
+   void SetCALayerParams(gfx::CALayerParams ca_layer_params) override;
+diff --git a/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.mm b/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.mm
+index 2eda2e79d7..b0ebef03d4 100644
+--- a/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.mm
++++ b/content/app_shim_remote_cocoa/render_widget_host_ns_view_bridge.mm
+@@ -120,6 +120,18 @@ void RenderWidgetHostNSViewBridge::DisableDisplay() {
+   display_disabled_ = true;
+ }
+ 
++void RenderWidgetHostNSViewBridge::EnableDisplay() {
++  if (!display_disabled_)
++    return;
++  ScopedCAActionDisabler disabler;
++  display_ca_layer_tree_ =
++      std::make_unique<ui::DisplayCALayerTree>(background_layer_);
++  // DisplayCALayerTree adds a zero-sized, autoresizing child layer. It only
++  // tracks the parent when created at zero size, so match the current bounds.
++  background_layer_.sublayers.lastObject.frame = background_layer_.bounds;
++  display_disabled_ = false;
++}
++
+ void RenderWidgetHostNSViewBridge::SetBounds(const gfx::Rect& rect) {
+   // |rect.size()| is view coordinates, |rect.origin| is screen coordinates,
+   // TODO(thakis): fix, http://crbug.com/73362
+diff --git a/content/browser/renderer_host/render_widget_host_view_mac.mm b/content/browser/renderer_host/render_widget_host_view_mac.mm
+index f99512647a..6340fefd82 100644
+--- a/content/browser/renderer_host/render_widget_host_view_mac.mm
++++ b/content/browser/renderer_host/render_widget_host_view_mac.mm
+@@ -414,6 +414,10 @@ void RenderWidgetHostViewMac::SetParentUiLayer(ui::Layer* parent_ui_layer) {
+     // changes (e.g, due to MigrateNSViewBridge), see
+     // https://crbug.com/1222976#c49.
+     ns_view_->DisableDisplay();
++  } else {
++    // Arkt: without a parent ui::Layer the view draws through its own
++    // compositor into the NSView, so Cocoa display must be on again.
++    ns_view_->EnableDisplay();
+   }
+   if (browser_compositor_)
+     browser_compositor_->SetParentUiLayer(parent_ui_layer);
+diff --git a/content/common/render_widget_host_ns_view.mojom b/content/common/render_widget_host_ns_view.mojom
+index 566af79647..6b1b170e2e 100644
+--- a/content/common/render_widget_host_ns_view.mojom
++++ b/content/common/render_widget_host_ns_view.mojom
+@@ -55,6 +55,10 @@ interface RenderWidgetHostNSView {
+   // to be called on views that are to be displayed via a parent ui::Compositor.
+   DisableDisplay();
+ 
++  // Arkt: undo DisableDisplay() when the view leaves its parent ui::Compositor
++  // and is shown directly in an AppKit hierarchy again.
++  EnableDisplay();
++
+   // Make the NSView be the first responder of its NSWindow.
+   MakeFirstResponder();
+ 

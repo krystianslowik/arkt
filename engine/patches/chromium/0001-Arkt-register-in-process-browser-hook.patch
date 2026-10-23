@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Fri, 23 Oct 2026 10:08:03 +0200
+Subject: [PATCH] Arkt: register in-process browser hook
+
+Adds arkt::ArktBrowserMainExtraParts (//arkt/browser) to the Mac browser main parts so Arkt code runs inside the browser process.
+---
+ chrome/browser/BUILD.gn               | 1 +
+ chrome/browser/chrome_browser_main.cc | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 33a6696fd8..e25f4798ba 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1541,6 +1541,7 @@ source_set("core") {
+       ":fullscreen",
+       ":global_keyboard_shortcuts_mac",
+       ":shutdown_watchdog_mac",
++      "//arkt/browser",
+       "//chrome/app_shim",
+       "//chrome/browser/apps/app_shim",
+       "//chrome/browser/enterprise/connectors/device_trust/key_management/core/mac",
+diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
+index b2619baa8f..d80838b786 100644
+--- a/chrome/browser/chrome_browser_main.cc
++++ b/chrome/browser/chrome_browser_main.cc
+@@ -221,6 +221,7 @@
+ #if BUILDFLAG(IS_MAC)
+ #include <Security/Security.h>
+ 
++#include "arkt/browser/arkt_browser_main_extra_parts.h"
+ #include "chrome/browser/infobars/browser_infobar_manager.h"
+ #include "chrome/browser/infobars/infobar_features.h"
+ #include "chrome/browser/mac/chrome_browser_main_extra_parts_mac.h"
+@@ -821,6 +822,7 @@ std::unique_ptr<content::BrowserMainParts> ChromeBrowserMainParts::Create(
+ 
+ #if BUILDFLAG(IS_MAC)
+   main_parts->AddParts(std::make_unique<ChromeBrowserMainExtraPartsMac>());
++  main_parts->AddParts(std::make_unique<arkt::ArktBrowserMainExtraParts>());
+ #endif
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
