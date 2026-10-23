@@ -363,6 +363,7 @@ void ArktExtensionsMenu::Shutdown() {
   view_models_.clear();
   observation_.Reset();
   model_ = nullptr;
+  browser_ = nullptr;
   browser_did_close_ = {};
 }
 
