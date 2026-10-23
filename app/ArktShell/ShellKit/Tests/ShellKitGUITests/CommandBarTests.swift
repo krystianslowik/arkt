@@ -151,24 +151,47 @@ final class CommandBarTests: XCTestCase {
   }
 
   func testCmdLEditedEnterNavigatesCurrentTab() async throws {
-    var result: (URL, Bool)?
+    var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     bar.setQueryForTesting("example.org")
     bar.commit()
     XCTAssertEqual(result?.0.absoluteString, "https://example.org")            // BH-101
-    XCTAssertEqual(result?.1, false)
+    XCTAssertEqual(result?.1, .currentTab)
   }
 
   func testCmdTEnterOnURLOpensInNewTab() async throws {
-    var result: (URL, Bool)?
+    var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.newTab)
     bar.setQueryForTesting("example.com")
     bar.commit()
     XCTAssertEqual(result?.0.absoluteString, "https://example.com")            // KB-001, BH-100
-    XCTAssertEqual(result?.1, true)
+    XCTAssertEqual(result?.1, .newTab)
     XCTAssertFalse(bar.isVisible)
+  }
+
+  // Split View S5 (KB-070): Ctrl-Shift-= opens an empty bar whose Enter opens the result as a new split pane.
+  func testNewSplitPaneEnterOpensInANewSplitPane() async throws {
+    var result: (URL, CommandBarController.OpenTarget)?
+    bar.onOpen = { result = ($0, $1) }
+    bar.toggle(.newSplitPane)
+    XCTAssertEqual(bar.barView.field.stringValue, "", "no prefill")
+    bar.setQueryForTesting("example.com")
+    bar.commit()
+    XCTAssertEqual(result?.0.absoluteString, "https://example.com")
+    XCTAssertEqual(result?.1, .newSplitPane)
+    XCTAssertFalse(bar.isVisible)
+  }
+
+  // [I] Cmd-Enter in the split pane bar opens a plain new tab, as from Cmd-T and Cmd-L (KB-085).
+  func testCommandReturnFromNewSplitPaneOpensInANewTab() async throws {
+    var result: (URL, CommandBarController.OpenTarget)?
+    bar.onOpen = { result = ($0, $1) }
+    bar.toggle(.newSplitPane)
+    bar.setQueryForTesting("example.com")
+    try sendReturn(.command)
+    XCTAssertEqual(result?.1, .newTab)
   }
 
   func testArrowKeysMoveSelectionAndEnterSearches() async throws {
@@ -486,51 +509,51 @@ final class CommandBarTests: XCTestCase {
   }
 
   func testReturnKeyEventOpensTheSelectedResult() async throws {
-    var result: (URL, Bool)?
+    var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.newTab)
     bar.setQueryForTesting("example.com")
     try sendReturn()
     XCTAssertEqual(result?.0.absoluteString, "https://example.com")
-    XCTAssertEqual(result?.1, true)
+    XCTAssertEqual(result?.1, .newTab)
     XCTAssertFalse(bar.isVisible)
   }
 
   // [I] KB-085: Opt-Enter opens the selected result in a new tab, also from Cmd-L (Chromium omnibox convention).
   func testOptionReturnFromCmdLOpensInANewTab() async throws {
-    var result: (URL, Bool)?
+    var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     bar.setQueryForTesting("example.org")
     try sendReturn(.option)
     XCTAssertEqual(result?.0.absoluteString, "https://example.org")
-    XCTAssertEqual(result?.1, true, "new tab, not the current one")
+    XCTAssertEqual(result?.1, .newTab, "new tab, not the current one")
     XCTAssertFalse(bar.isVisible)
   }
 
   // [I] KB-085: Cmd-Enter opens the selected result in a new tab, also from Cmd-L.
   func testCommandReturnFromCmdLOpensInANewTab() async throws {
-    var result: (URL, Bool)?
+    var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     bar.setQueryForTesting("example.org")
     try sendReturn(.command)
     XCTAssertEqual(result?.0.absoluteString, "https://example.org")
-    XCTAssertEqual(result?.1, true)
+    XCTAssertEqual(result?.1, .newTab)
     XCTAssertFalse(bar.isVisible)
   }
 
   // [I] A modified Enter on an unedited Cmd-L opens the URL in a new tab instead of reloading (KB-004 is plain Enter).
   func testModifiedReturnOnUneditedCmdLOpensANewTabInsteadOfReloading() async throws {
     var reloaded = false
-    var result: (URL, Bool)?
+    var result: (URL, CommandBarController.OpenTarget)?
     bar.onReload = { reloaded = true }
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     try sendReturn(.command)
     XCTAssertFalse(reloaded)
     XCTAssertEqual(result?.0.absoluteString, "https://example.com")
-    XCTAssertEqual(result?.1, true)
+    XCTAssertEqual(result?.1, .newTab)
   }
 
   // [I] A modified Enter on a "Switch to Tab" result still switches: the tab is already open.
@@ -549,13 +572,13 @@ final class CommandBarTests: XCTestCase {
 
   // Only Cmd and Opt are taken over: Shift-Return (KB-086, Arc Max, out of scope) reaches the field editor as before.
   func testShiftReturnIsNotTreatedAsANewTabKey() async throws {
-    var result: (URL, Bool)?
+    var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     bar.setQueryForTesting("example.org")
     try sendReturn(.shift)
     XCTAssertEqual(result?.0.absoluteString, "https://example.org")
-    XCTAssertEqual(result?.1, false, "plain commit: Cmd-L navigates the current tab")
+    XCTAssertEqual(result?.1, .currentTab, "plain commit: Cmd-L navigates the current tab")
   }
 
   // [I] RT-08: Enter on an empty query with no results closes the bar and opens nothing.
@@ -699,7 +722,7 @@ final class CommandBarTests: XCTestCase {
   // #157 review: only an actual Opt-Return makes the insertNewlineIgnoringFieldEditor: fallback open a new tab.
   // Another key bound to that selector commits like Return (Cmd-L: the current tab).
   func testNewlineIgnoringFieldEditorWithoutOptionReturnCommitsInPlace() async throws {
-    var result: (URL, Bool)?
+    var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     bar.setQueryForTesting("example.org")
@@ -708,7 +731,7 @@ final class CommandBarTests: XCTestCase {
                               doCommandBy: #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
     XCTAssertTrue(handled)
     XCTAssertEqual(result?.0.absoluteString, "https://example.org")
-    XCTAssertEqual(result?.1, false, "not an Opt-Return: Cmd-L navigates the current tab")
+    XCTAssertEqual(result?.1, .currentTab, "not an Opt-Return: Cmd-L navigates the current tab")
   }
 
   // The one rule both Cmd/Opt-Return paths use: Return or keypad Enter with exactly one of the allowed modifiers.

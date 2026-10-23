@@ -245,7 +245,7 @@ final class SplitWindowTests: XCTestCase {
     harness.controller.activate(node: world.panes[1])
     let target = Self.url("typed")
 
-    harness.controller.commandBar.onOpen?(target, false)
+    harness.controller.commandBar.onOpen?(target, .currentTab)
 
     XCTAssertEqual(harness.tab(world.panes[1]).flatMap { harness.engine.snapshot(of: $0)?.url }, target)
     XCTAssertEqual(harness.tab(world.panes[0]).flatMap { harness.engine.snapshot(of: $0)?.url }, Self.url("s0"))

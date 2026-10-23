@@ -20,6 +20,19 @@ struct SplitWindowState {
   var resyncPending = false
   /// The local mouse-down monitor that focuses the clicked pane.
   var mouseMonitor: Any?
+  /// Where the pane the split pane command bar is open for goes; read when its Enter commits.
+  var pendingSide: SplitPaneSide = .afterFocus
+}
+
+/// Where a new pane goes relative to the focused tab, and the orientation of a split made from a plain tab (BH-117).
+/// In an existing split the orientation stays as it is [I].
+enum SplitPaneSide {
+  /// Ctrl-Shift-= (KB-070): right after the focused pane, side by side for a new split.
+  case afterFocus
+  case right, left, top, bottom
+
+  var isBeforeFocus: Bool { self == .left || self == .top }
+  var orientation: SplitOrientation { self == .top || self == .bottom ? .vertical : .horizontal }
 }
 
 /// The window side of Split View: one engine tab per pane, the focused pane as `currentTab`, the pane cards' Toolbars,
@@ -254,5 +267,142 @@ extension ShellWindowController {
     guard let node, let index = panes.firstIndex(of: node) else { return panes.first(where: isCandidate) }
     let order = panes[(index + 1)...] + panes[..<index].reversed()
     return order.first(where: isCandidate)
+  }
+}
+
+// MARK: - Shortcuts and menu items (S5)
+
+/// The View menu's Split View actions (`SplitMenu`). Each acts on the current tab as the source has it now, so a
+/// shortcut pressed right after a source change still finds the right split.
+extension ShellWindowController {
+  /// Ctrl-Shift-= (KB-070): the command bar opens for the new pane; Enter adds it right after the focused pane.
+  /// A full split shows "Cannot Add New Pane" instead and the bar stays closed (BH-116).
+  /// PARITY(NEEDS-RUNTIME-CHECK RT-34): what Arc's new pane shows.
+  @objc public func addSplitPane(_ sender: Any?) { beginNewSplitPane(.afterFocus) }
+  /// Add Right Split (BH-117), unbound.
+  @objc public func addSplitRight(_ sender: Any?) { beginNewSplitPane(.right) }
+  /// Add Left Split (BH-117), unbound.
+  @objc public func addSplitLeft(_ sender: Any?) { beginNewSplitPane(.left) }
+  /// Add Top Split (BH-117), unbound.
+  @objc public func addSplitTop(_ sender: Any?) { beginNewSplitPane(.top) }
+  /// Add Bottom Split (BH-117), unbound.
+  @objc public func addSplitBottom(_ sender: Any?) { beginNewSplitPane(.bottom) }
+
+  /// Ctrl-Shift-- (KB-071, BH-122): the focused pane leaves the split with its page and lands right after it; it is
+  /// never archived (CF-18). Focus goes to the pane next to it in the split, after it, else before it (decision 9).
+  @objc public func closeSplitPane(_ sender: Any?) {
+    guard let pane = currentNode, let split = split(holding: pane) else { return }
+    let survivor = nearest(to: pane, in: sidebar.children(of: .split(split))) { $0 != pane }
+    do { try sidebar.separatePane(pane) } catch { onError?(.editSplit, error); return }
+    if let survivor { activate(node: survivor) }
+  }
+
+  /// Separate Page from Split View (KB-075), unbound: like Ctrl-Shift--, but the separated page keeps focus and shows
+  /// alone [I].
+  @objc public func separatePageFromSplit(_ sender: Any?) {
+    guard let pane = currentNode, split(holding: pane) != nil else { return }
+    do { try sidebar.separatePane(pane) } catch { onError?(.editSplit, error) }
+  }
+
+  /// Expand Current Split (KB-075, BH-124), unbound: the focused pane takes the split's place and stays shown; the
+  /// other panes follow it as plain tabs.
+  @objc public func expandCurrentSplit(_ sender: Any?) {
+    guard let pane = currentNode, split(holding: pane) != nil else { return }
+    do { try sidebar.expandPane(pane) } catch { onError?(.editSplit, error) }
+  }
+
+  /// Convert to Horizontal / Vertical Split View (BH-120): flips the shown split's orientation.
+  @objc public func convertSplitOrientation(_ sender: Any?) {
+    guard let pane = currentNode, let split = split(holding: pane),
+          case .split(_, let layout)? = sidebar.node(split) else { return }
+    let flipped: SplitOrientation = layout.orientation == .horizontal ? .vertical : .horizontal
+    do { try sidebar.setSplitOrientation(split, flipped) } catch { onError?(.editSplit, error) }
+  }
+
+  /// Ctrl-Shift-1 ... Ctrl-Shift-4 (KB-072, BH-128): the menu item's tag is the zero-based pane index. A number past
+  /// the pane count does nothing.
+  @objc public func focusSplitPane(_ sender: Any?) {
+    guard let tag = (sender as? NSMenuItem)?.tag, let panes = currentSplitPanes,
+          let index = SplitFocus.pane(number: tag + 1, count: panes.count) else { return }
+    activate(node: panes[index])
+  }
+
+  /// Ctrl-Shift-] (KB-073, BH-128): the next pane, wrapping around. PARITY(NEEDS-RUNTIME-CHECK RT-06)
+  @objc public func nextSplitPane(_ sender: Any?) { stepSplitFocus(SplitFocus.next(from:count:)) }
+
+  /// Ctrl-Shift-[ (KB-073, BH-128): the previous pane, wrapping around. PARITY(NEEDS-RUNTIME-CHECK RT-06)
+  @objc public func previousSplitPane(_ sender: Any?) { stepSplitFocus(SplitFocus.previous(from:count:)) }
+
+  /// Enables (and titles) the Split View items; nil for any other item. Adding a pane needs a current tab; every other
+  /// item needs the current tab to be a split pane, and a focus item a pane with its number.
+  func validateSplitMenuItem(_ item: NSMenuItem) -> Bool? {
+    switch item.action {
+    case #selector(addSplitPane(_:)), #selector(addSplitRight(_:)), #selector(addSplitLeft(_:)),
+         #selector(addSplitTop(_:)), #selector(addSplitBottom(_:)):
+      return currentNode != nil
+    case #selector(convertSplitOrientation(_:)):
+      let orientation = currentNode.flatMap(split(holding:)).flatMap { split -> SplitOrientation? in
+        if case .split(_, let layout)? = sidebar.node(split) { layout.orientation } else { nil }
+      }
+      item.title = SplitMenu.convertTitle(for: orientation ?? .horizontal)
+      return orientation != nil
+    case #selector(focusSplitPane(_:)):
+      guard let panes = currentSplitPanes else { return false }
+      return SplitFocus.pane(number: item.tag + 1, count: panes.count) != nil
+    case #selector(closeSplitPane(_:)), #selector(separatePageFromSplit(_:)), #selector(expandCurrentSplit(_:)),
+         #selector(nextSplitPane(_:)), #selector(previousSplitPane(_:)):
+      return currentSplitPanes != nil
+    default:
+      return nil
+    }
+  }
+
+  /// Commits the split pane command bar (`.newSplitPane`): a new tab for `url` becomes a pane next to the focused tab
+  /// on the side the bar was opened for, and gets focus. With no current tab left it opens as a plain new tab [I].
+  func openInNewSplitPane(_ url: URL) {
+    let side = splitState.pendingSide
+    splitState.pendingSide = .afterFocus
+    guard let target = currentNode else {
+      open(url, inNewTab: true)
+      return
+    }
+    let focusIndex = split(holding: target).flatMap { sidebar.children(of: .split($0)).firstIndex(of: target) } ?? 0
+    let index = side.isBeforeFocus ? focusIndex : focusIndex + 1
+    do {
+      let added = try sidebar.addToSplit(.new(url: url, title: url.host() ?? url.absoluteString), target: target,
+                                         at: index, orientation: side.orientation)
+      activate(node: added.pane)
+    } catch {
+      onError?(.addPane, error)
+    }
+  }
+
+  private func beginNewSplitPane(_ side: SplitPaneSide) {
+    if commandBar.isVisible {                       // like Cmd-T and Cmd-L, the shortcut closes an open bar
+      commandBar.hide()
+      return
+    }
+    guard currentNode != nil else { return }
+    if let panes = currentSplitPanes, panes.count >= SplitLayoutInfo.maximumPanes {
+      onError?(.addPane, SplitEditError.splitFull)  // "Cannot Add New Pane", BH-116
+      return
+    }
+    splitState.pendingSide = side
+    commandBar.show(.newSplitPane)
+  }
+
+  private func stepSplitFocus(_ step: (Int, Int) -> Int) {
+    guard let pane = currentNode, let panes = currentSplitPanes, let index = panes.firstIndex(of: pane) else { return }
+    activate(node: panes[step(index, panes.count)])
+  }
+
+  /// The panes of the split holding the current tab, as the source has them; nil when it is not a split pane.
+  private var currentSplitPanes: [NodeID]? {
+    currentNode.flatMap(split(holding:)).map { sidebar.children(of: .split($0)) }
+  }
+
+  /// The split `node` is a pane of, if any.
+  private func split(holding node: NodeID) -> NodeID? {
+    if case .split(let split)? = sidebar.parent(of: node) { split } else { nil }
   }
 }
