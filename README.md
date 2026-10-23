@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="design/brand/social/readme-header-dark.png">
+  <img src="design/brand/social/readme-header-light.png" alt="Arkt: A native macOS browser" width="800">
+</picture>
+
 # Arkt
 
 Arkt is a native macOS browser that rebuilds the Arc experience: the sidebar with Spaces, pinned and Today tabs,
