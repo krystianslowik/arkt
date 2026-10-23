@@ -83,30 +83,55 @@ struct FaviconWriterTests {
     }
   }
 
-  @Test func remembersWhichIDsItWasToldAbout() async throws {
+  /// A stored-favicon read leaves out ids reported (engine record or import save) from the call until it returns:
+  /// the sidebar already has their newer favicon (#91: the launch load and the restore load). A later read has them.
+  @Test func loadStoredSkipsIDsReportedWhileItRuns() async throws {
     try await Self.withStore { store, _ in
+      let (recorded, saved, kept) = (UUID(), UUID(), UUID())
+      try await store.save([recorded: Self.a, saved: Self.a, kept: Self.a])
       let writer = FaviconWriter(store: store, delay: .seconds(60))
-      let (recorded, saved, other) = (UUID(), UUID(), UUID())
-      writer.record(Self.a, for: recorded)
-      writer.save([saved: Self.a])
-      #expect(writer.touched == [recorded, saved])
-      #expect(!writer.touched.contains(other))
+
+      let load = writer.loadStored([recorded, saved, kept])
+      writer.record(Self.b, for: recorded)
+      writer.save([saved: Self.b])
+      #expect(await load.value == [kept: Self.a])
+
       await writer.flush()
+      #expect(await writer.loadStored([recorded, saved, kept]).value == [recorded: Self.b, saved: Self.b, kept: Self.a])
     }
   }
 
-  @Test func touchedIsClearedAndNoLongerGrowsOnceTheLaunchLoadCompleted() async throws {
+  /// The read does not wait for the `after` task (the launch prune): it keeps every sidebar id, and the store runs one
+  /// call at a time (#91). Writes still wait for it.
+  @Test func loadStoredDoesNotWaitForTheLaunchTask() async throws {
     try await Self.withStore { store, _ in
-      let writer = FaviconWriter(store: store, delay: .seconds(60))
-      writer.record(Self.a, for: UUID())
-      writer.launchLoadDidComplete()
-      #expect(writer.touched.isEmpty)
-      let later = UUID()
-      writer.record(Self.b, for: later)
-      writer.save([UUID(): Self.a])
-      #expect(writer.touched.isEmpty)
+      let id = UUID()
+      try await store.save([id: Self.a])
+      let gate = Gate()
+      let launch = Task { await gate.wait() }
+      let writer = FaviconWriter(store: store, delay: .seconds(60), after: launch)
+
+      #expect(await writer.loadStored([id]).value == [id: Self.a])
+
+      await gate.open()
       await writer.flush()
-      #expect(await store.loadAll(for: [later]) == [later: Self.b])   // writes are unaffected
     }
+  }
+}
+
+/// Holds `wait()` until `open()`.
+private actor Gate {
+  private var isOpen = false
+  private var waiting: [CheckedContinuation<Void, Never>] = []
+
+  func wait() async {
+    guard !isOpen else { return }
+    await withCheckedContinuation { waiting.append($0) }
+  }
+
+  func open() {
+    isOpen = true
+    waiting.forEach { $0.resume() }
+    waiting = []
   }
 }

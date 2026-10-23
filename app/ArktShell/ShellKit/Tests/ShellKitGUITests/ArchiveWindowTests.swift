@@ -83,6 +83,24 @@ final class ArchiveWindowTests: XCTestCase {
     XCTAssertFalse(controller.loadMoreButton.isHidden)
   }
 
+  /// #91: VoiceOver reads a row in one announcement (title, place, date, reason); the two text fields are not read
+  /// on their own.
+  func testRowHasOneAccessibilityLabel() async throws {
+    let source = StubArchiveSource()
+    source.pages = [ArchiveListPage(rows: Self.rows(1), unreadable: 0, mayHaveMore: false)]
+    let controller = makeWindow(source)
+    await controller.reload()
+
+    let row = try cell(controller, row: 0)
+
+    XCTAssertTrue(row.isAccessibilityElement())
+    XCTAssertEqual(row.accessibilityLabel(), "Item 0, a.example - Work - 1 hour ago, Closed")
+    let children = NSAccessibility.unignoredChildren(from: row.accessibilityChildren() ?? [])
+    for field in [row.titleField, row.detailField] {
+      XCTAssertFalse(children.contains { ($0 as AnyObject) === field || ($0 as AnyObject) === field.cell })
+    }
+  }
+
   func testFooterAndLoadMoreHiddenWhenNothingIsMissing() async throws {
     let source = StubArchiveSource()
     source.pages = [ArchiveListPage(rows: Self.rows(2), unreadable: 0, mayHaveMore: false)]

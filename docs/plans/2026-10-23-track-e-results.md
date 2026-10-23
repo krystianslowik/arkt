@@ -180,3 +180,34 @@ Baselines are the final counts minus the new tests; all pass.
 | ShellKit `swift test --filter ShellKitGUITests` (XCTest) | 310 | 311 | +1 `ArchiveWindowTests` |
 
 Debug app build: `** BUILD SUCCEEDED **`. No change to `AppSession.swift`.
+
+## Archive window and restore: robustness follow-ups (#91)
+
+Suggestions 1, 2, 4, 5 and 6 of the #49 review. `nice -n 10`, `-j 4`.
+
+- Overlapping loads: already handled since E6 (#143), where the `generation` guard moved into `ArchiveListModel`
+  and only the newest load sets `limit`. A regression test now covers the review's case: a "Load More" that returns
+  after a later reload leaves the limit at 200, so the next "Load More" asks for 400.
+- Favicon reads: `FaviconWriter.loadStored(_:)` replaces the launch-only `touched` set. Each read leaves out the ids
+  reported (engine record or import save) from the call until it returns, so both the launch load and the restore
+  load (`AppSession.didRestore`) skip ids whose newer favicon the sidebar already has. Tracking no longer stops after
+  launch.
+- The launch load no longer waits for the prune: the prune keeps every sidebar id and `FaviconStore` runs one call at
+  a time, so the archive-wide decode is off the launch favicon path. Writes still wait for the prune.
+- A restore the sidebar model refuses (`SidebarError`) calls `ArchiveListModel.onRestoreFailed`; the app shows the
+  toast "Couldn't restore from the Archive." and the row stays.
+- `ArchiveRowCellView` is one accessibility element (role cell) labelled "title, place - date, reason"; the two text
+  fields and their cells are hidden from accessibility.
+- Not done: the id-only `ArchiveStoring` query. The review ties it to archives well past about 10k entries; Arc
+  archives are about 1200, and the prune no longer delays the launch load.
+
+Baselines are the counts on `main` before the change; final counts are after rebasing on #208, #209 and the other merges
+of the day (they added tests of their own).
+
+| Suite | Baseline (`40ddc42`) | Final | Delta from this change |
+|---|---|---|---|
+| ArktCore `swift test` | 336 | 342 | not touched |
+| ShellKit `swift test --skip ShellKitGUITests` | 433 | 452 | +2 `ArchiveListModelTests`; `FaviconWriterTests` 2 replaced |
+| ShellKit `swift test --filter ShellKitGUITests` (XCTest) | 317 | 341 | +1 `ArchiveWindowTests` |
+
+Debug app build: `** BUILD SUCCEEDED **`.
