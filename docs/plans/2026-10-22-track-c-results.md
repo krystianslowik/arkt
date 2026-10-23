@@ -1005,3 +1005,19 @@ Checks: ArktCore 345 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swif
 
 Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 459 tests (+1
 `SidebarModelStubTests`), 0 failures. `SidebarViewTests`: 18/18 GUI tests pass (+1).
+
+## Space switching: mouse buttons 3 / 4, wrap at the ends, swipes from the Favorites grid and bottom bar (#98)
+
+- GS-002, BH-035: `ShellWindow.sendEvent(_:)` routes `.otherMouseDown` with `buttonNumber == 3` or `4` to
+  `otherMouseDown(with:)`, and `ShellWindowController.otherMouseDown(with:)` switches to `previousSpace(nil)` on button 3
+  and `nextSpace(nil)` on button 4 anywhere in the window (leaving button 2 middle-clicks untouched).
+- Stop-at-the-ends (`nextSpace` / `previousSpace`): kept as `[I]` (`PARITY(NEEDS-RUNTIME-CHECK #78)`) and pinned at both
+  ends for keyboard (`Cmd-Opt-Right` / `Cmd-Opt-Left`) and mouse buttons 3 / 4 while `#78` is open.
+- M1, GS-001: `SidebarContainerView.scrollWheel(with:)` forwards trackpad gestures (`event.phase != [] ||
+  event.momentumPhase != []`) to `pager.scrollWheel(with:)`, so horizontal swipes starting over the Favorites grid, the
+  bottom bar, or other sidebar chrome outside the outline page the Spaces.
+- Tests (`SpacePagerTests`): `testMouseButtons3And4SwitchToPreviousAndNextSpaceAndStopAtEnds` and
+  `testHorizontalGestureOverFavoritesGridAndBottomBarReachesThePager`.
+
+Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 459 tests, 0 failures.
+`SpacePagerTests`: 22/22 GUI tests pass (+2).
