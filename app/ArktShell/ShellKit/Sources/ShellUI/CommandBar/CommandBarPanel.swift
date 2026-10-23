@@ -51,7 +51,8 @@ final class CommandBarPanel: NSPanel {
 
   /// Sees each key-down before the field editor; returning true consumes it. Used for Cmd-Return and
   /// Opt-Return (KB-085), which have no field editor binding to reach the text field delegate through.
-  /// Menu key equivalents run before this (NSApplication tries them before the key window's sendEvent).
+  /// No menu item binds Cmd-Return or Opt-Return, so this hides no menu action
+  /// (`MainMenuKeyEquivalentTests` builds the app's main menu and checks).
   var keyDownHandler: ((NSEvent) -> Bool)?
 
   override func sendEvent(_ event: NSEvent) {

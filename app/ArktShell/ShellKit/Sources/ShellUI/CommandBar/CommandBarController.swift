@@ -221,8 +221,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     switch selector {
     case #selector(NSResponder.cancelOperation(_:)): hide(); return true          // Esc, KB-084
     case #selector(NSResponder.insertNewline(_:)): commit(); return true
-    // Opt-Return's standard binding; normally handled earlier in handleKeyDown, kept for other bindings.
-    case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)): commit(inNewTab: true); return true
+    // Opt-Return's standard binding; handleKeyDown normally takes Opt-Return first. Only an actual Opt-Return opens
+    // a new tab here; another key bound to this selector commits like Return.
+    case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+      commit(inNewTab: Self.isReturn(NSApp.currentEvent, withExactly: [.option]) ? true : nil); return true
     case #selector(NSResponder.moveDown(_:)): moveSelection(+1); return true
     case #selector(NSResponder.moveUp(_:)): moveSelection(-1); return true
     case #selector(NSResponder.scrollPageDown(_:)), #selector(NSResponder.pageDown(_:)): movePage(+1); return true
@@ -235,12 +237,17 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// alike (Chromium's omnibox opens Opt-Return in a new tab; Arc unverified, RT-08). Any other modifier, or
   /// Return during IME composition, goes on to the field editor.
   private func handleKeyDown(_ event: NSEvent) -> Bool {
-    guard isVisible, event.keyCode == 36 || event.keyCode == 76 else { return false }   // Return, keypad Enter
-    let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
-    guard mods == .command || mods == .option else { return false }
+    guard isVisible, Self.isReturn(event, withExactly: [.command, .option]) else { return false }
     if let editor = barView.field.currentEditor() as? NSTextView, editor.hasMarkedText() { return false }
     commit(inNewTab: true)
     return true
+  }
+
+  /// True for a key-down of Return or keypad Enter whose Cmd / Opt / Ctrl / Shift modifiers are exactly one of
+  /// `modifiers` (other flags, such as the keypad's, are ignored).
+  static func isReturn(_ event: NSEvent?, withExactly modifiers: [NSEvent.ModifierFlags]) -> Bool {
+    guard let event, event.type == .keyDown, event.keyCode == 36 || event.keyCode == 76 else { return false }
+    return modifiers.contains(event.modifierFlags.intersection([.command, .option, .control, .shift]))
   }
 
   /// Enter. Cmd-L + Enter without editing reloads (KB-004, BH-102). On an empty query Enter takes the first
