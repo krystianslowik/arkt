@@ -137,13 +137,15 @@ final class SpaceDotElement: NSAccessibilityElement {
   }
 }
 
-/// The sidebar column (flipped): traffic-light strip, favorites grid, one Space page, bottom bar.
+/// The sidebar column (flipped): traffic-light strip, URL bar, favorites grid, one Space page, bottom bar.
 /// All frames are set in `layout()`. Empty areas drag the window: a `WindowDragView` fills the back.
 @MainActor
 public final class SidebarContainerView: NSView {
   private let dragSurface = WindowDragView(frame: .zero)
   /// Reserved for the traffic lights (and later back / forward / reload).
   public let topBar: NSView = WindowDragView(frame: .zero)
+  /// The active tab's host under the traffic lights (BH-031, GS-042); the window controller binds it.
+  public let urlBar = URLBarView(style: .host)
   public let favorites: FavoritesGridView
   /// Every Space page of this profile side by side; swipes and Space switches move it.
   public let pager = SpacePagerView(frame: .zero)
@@ -176,7 +178,7 @@ public final class SidebarContainerView: NSView {
     }
     spaceDots.autoresizingMask = []
     bottomBar.addSubview(spaceDots)
-    for view in [dragSurface, topBar, favorites, pager, bottomBar] {
+    for view in [dragSurface, topBar, urlBar, favorites, pager, bottomBar] {
       view.autoresizingMask = []
       addSubview(view)
     }
@@ -210,6 +212,7 @@ public final class SidebarContainerView: NSView {
     appearance = NSAppearance(named: flavor == .dark ? .darkAqua : .aqua)
     favorites.flavor = flavor
     spaceDots.flavor = flavor
+    urlBar.flavor = flavor
     applyButtonImages()
   }
 
@@ -238,8 +241,10 @@ public final class SidebarContainerView: NSView {
     let bottomHeight = SidebarMetrics.bottomBarHeight
     dragSurface.frame = bounds
     topBar.frame = NSRect(x: 0, y: 0, width: width, height: topBarHeight)
+    urlBar.frame = NSRect(x: padding, y: topBarHeight + SidebarMetrics.urlBarTopGap,
+                          width: max(0, width - 2 * padding), height: SidebarMetrics.urlBarHeight)
     let favoritesHeight = favorites.preferredHeight
-    let favoritesY = topBarHeight + SidebarMetrics.favoritesTopGap
+    let favoritesY = urlBar.frame.maxY + SidebarMetrics.favoritesTopGap
     favorites.frame = NSRect(x: padding, y: favoritesY,
                              width: FavoritesLayout.contentWidth(sidebarWidth: width), height: favoritesHeight)
     let pagesY = favoritesY + favoritesHeight + (favoritesHeight > 0 ? SidebarMetrics.favoritesBottomGap : 0)

@@ -45,7 +45,10 @@ final class AppSession {
     self.database = state.database
     let source = ModelSidebarSource(sidebar: state.sidebar ?? SidebarModel.Sidebar())
     self.source = source
-    self.window = ShellWindowController(engine: engine, sidebar: source)
+    // Toolbar on / off is an app-level setting in the standard user defaults (`topBarURLEnabled`), not in the
+    // database: see ToolbarSetting.
+    self.window = ShellWindowController(engine: engine, sidebar: source,
+                                        toolbarSetting: ToolbarSetting(defaults: .standard))
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
     self.archiveStore = archiveStore

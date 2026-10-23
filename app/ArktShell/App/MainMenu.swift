@@ -29,6 +29,10 @@ enum MainMenu {
       spaces.append(space)
     }
     main.addItem(submenu(title: "Spaces", items: spaces))
+    // KB-018, BH-032: Cmd-Shift-D. ShellWindowController.validateMenuItem titles it Show / Hide Toolbar.
+    main.addItem(submenu(title: "View", items: [
+      item("Show Toolbar", #selector(ShellWindowController.toggleToolbar(_:)), "D"),
+    ]))
     main.addItem(submenu(title: "Edit", items: [
       item("Undo", Selector(("undo:")), "z"),
       item("Redo", Selector(("redo:")), "Z"),

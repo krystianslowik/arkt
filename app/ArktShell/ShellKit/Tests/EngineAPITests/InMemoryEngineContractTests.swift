@@ -17,6 +17,7 @@ struct InMemoryEngineContractTests {
   @Test func droppedObservationStopsDelivery() async throws { try await EngineContract.droppedObservationStopsDelivery(harness) }
   @Test func tabIDsKeepCreationOrder() async throws { try await EngineContract.tabIDsKeepCreationOrder(harness) }
   @Test func hostChangeClearsFavicon() async throws { try await EngineContract.hostChangeClearsFavicon(harness) }
+  @Test func historyMovesBackAndForward() async throws { try await EngineContract.historyMovesBackAndForward(harness) }
 }
 
 @MainActor
@@ -31,6 +32,22 @@ struct InMemoryEngineTests {
     let mark = recorder.events.count
     engine.reload(id)
     #expect(Array(recorder.events.dropFirst(mark)) == [.loadingChanged(id, isLoading: true)])
+  }
+
+  @Test func newNavigationDropsForwardHistory() {
+    let engine = InMemoryEngine()
+    let (a, b, c) = (URL(string: "arkt-test://page/A")!, URL(string: "arkt-test://page/B")!,
+                     URL(string: "arkt-test://page/C")!)
+    let id = engine.createTab(url: a)
+    engine.navigate(id, to: b)
+    engine.goBack(id)
+    #expect(engine.snapshot(of: id)?.url == a)
+    engine.navigate(id, to: c)
+    let recorder = EventRecorder(engine)
+    engine.goForward(id)
+    #expect(recorder.events.isEmpty, "forward after a new navigation must be a no-op")
+    engine.goBack(id)
+    #expect(engine.snapshot(of: id)?.url == a)
   }
 
   @Test func sameHostNavigationKeepsFavicon() {

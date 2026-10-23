@@ -18,13 +18,20 @@ public enum SidebarMetrics {
   public static let spaceTitleHeight: CGFloat = 28       // TODO(measure)
   public static let dividerHeight: CGFloat = 13          // TODO(measure)
   public static let indentationPerLevel: CGFloat = 14    // TODO(measure)
-  public static let favoritesTopGap: CGFloat = 4         // TODO(measure): traffic-light strip to favorites
+  public static let favoritesTopGap: CGFloat = 4         // TODO(measure): URL bar to favorites
   public static let favoritesBottomGap: CGFloat = 10     // TODO(measure): favorites to Space title
   public static let bottomBarHeight: CGFloat = 36        // TODO(measure)
   public static let favoriteFaviconSize: CGFloat = 20
   public static let bottomBarIconSize: CGFloat = 16       // archive and new-tab symbols
   public static let spaceDotSize: CGFloat = 6            // TODO(measure)
   public static let spaceDotSpacing: CGFloat = 8         // TODO(measure)
+  // URL bar under the traffic lights (BH-031). The gap keeps it clear of the titlebar container that hosts the
+  // traffic lights (ShellWindow.layoutTrafficLights), which would otherwise take its clicks.
+  public static let urlBarTopGap: CGFloat = 4            // TODO(measure): traffic-light strip to URL bar
+  public static let urlBarHeight: CGFloat = 30           // TODO(measure)
+  public static let urlBarCornerRadius: CGFloat = 9      // TODO(measure)
+  public static let urlBarTextInset: CGFloat = 10        // TODO(measure)
+  public static let urlBarFontSize: CGFloat = 13         // TODO(measure)
 }
 
 public enum TabRowState: Sendable, Equatable {

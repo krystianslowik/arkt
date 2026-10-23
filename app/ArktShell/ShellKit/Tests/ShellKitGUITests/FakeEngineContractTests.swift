@@ -33,6 +33,7 @@ final class FakeEngineContractTests: XCTestCase {
   func testDroppedObservationStopsDelivery() async throws { try await EngineContract.droppedObservationStopsDelivery(harness) }
   func testTabIDsKeepCreationOrder() async throws { try await EngineContract.tabIDsKeepCreationOrder(harness) }
   func testHostChangeClearsFavicon() async throws { try await EngineContract.hostChangeClearsFavicon(harness) }
+  func testHistoryMovesBackAndForward() async throws { try await EngineContract.historyMovesBackAndForward(harness) }
 
   /// FakeEngine only: a favicon that is not HTTP 200 + image/* is ignored.
   func testRejectsNonImageFavicon() async throws {
