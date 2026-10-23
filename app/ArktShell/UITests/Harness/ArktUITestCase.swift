@@ -90,9 +90,29 @@ class ArktUITestCase: XCTestCase {
     return XCUIApplication(url: url)
   }
 
+  /// Environment keys owned by `Sandbox` that `extraEnv` may never override (#199).
+  static let reservedEnvironmentKeys: Set<String> = [
+    "ARKT_UITEST",
+    "ARKT_DATA_DIR",
+    "ARKT_ARC_DIR",
+    "ARKT_DEFAULTS_SUITE",
+  ]
+
+  /// Merges `extraEnv` into `sandbox.environment`, refusing any key that `Sandbox` owns or already sets (#199).
+  static func mergedEnvironment(sandbox: Sandbox, extraEnv: [String: String]) throws -> [String: String] {
+    let base = sandbox.environment
+    let forbidden = reservedEnvironmentKeys.union(base.keys)
+    let collisions = extraEnv.keys.filter { forbidden.contains($0) }.sorted()
+    guard collisions.isEmpty else {
+      throw HarnessError("extraEnv cannot override sandbox keys: \(collisions.joined(separator: ", "))")
+    }
+    return base.merging(extraEnv) { current, _ in current }
+  }
+
   /// Launches the app into `sandbox` and waits for its window.
   @discardableResult
   func launch(_ sandbox: Sandbox, extraEnv: [String: String] = [:]) throws -> XCUIApplication {
+    let environment = try Self.mergedEnvironment(sandbox: sandbox, extraEnv: extraEnv)
     // One sandbox per test; a relaunch (quit, then launch again) reuses it.
     if let current = self.sandbox, current !== sandbox {
       throw HarnessError("a test launches into one sandbox only")
@@ -103,17 +123,16 @@ class ArktUITestCase: XCTestCase {
     self.sandbox = sandbox
     let app = try makeApp()
     self.app = app
-    app.launchEnvironment = sandbox.environment.merging(extraEnv) { _, extra in extra }
+    app.launchEnvironment = environment
     app.launchArguments = Self.launchArguments
     app.launch()
     waitFor(shellWindow(of: app))
     return app
   }
 
-  /// The browser window. `shell.window` arrives with the accessibility identifiers (U4a, #167); until then the
-  /// app's first window.
+  /// The browser window (`AXID.Shell.window`, U4a #167 / #199).
   func shellWindow(of app: XCUIApplication) -> XCUIElement {
-    app.windows.firstMatch
+    app.windows[AXID.Shell.window]
   }
 
   /// Quits the way a user does (Cmd-Q, so `applicationShouldTerminate` flushes) and waits until the app has exited.

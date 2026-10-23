@@ -519,3 +519,33 @@ Base: `origin/main` at `d318d0c`, branch `chore/169-ui-tests-u4c`.
 | `ArchiveWindowTests` | `swift test --filter ArchiveWindowTests` | 19/19 pass |
 | ShellKit pure + isolation | `swift test --skip ShellKitGUITests` | 456 tests in 61 suites pass |
 | `AXID.swift` standalone | `xcrun swiftc -typecheck app/ArktShell/ShellKit/Sources/ShellUI/Accessibility/AXID.swift` | exit 0 |
+
+## U2 follow-ups: harden the UI test harness (#199)
+
+Base: `origin/main` at `c5f9db8`, branch `chore/199-harden-u2-harness`.
+
+### What was done
+
+- `ArktUITestCase.shellWindow(of:)` now returns `app.windows[AXID.Shell.window]` (plan U2 step 3).
+- `ArktUITestCase.mergedEnvironment(sandbox:extraEnv:)` (called by `launch(_:extraEnv:)` before creating or launching
+  the app proxy) rejects any `extraEnv` key owned by `Sandbox` (`ARKT_UITEST`, `ARKT_DATA_DIR`, `ARKT_ARC_DIR`,
+  `ARKT_DEFAULTS_SUITE`, and `ARKT_AUTOSAVE_DELAY_MS` when set on the sandbox), so a test cannot point the app at a
+  path outside the sandbox.
+- `Sandbox.checkSafe(_:root:under:)` checks both that `root` sits under `temp` (with a trailing `/`) and that every
+  handed-out path sits under `root` (with a trailing `/`), in addition to rejecting `/Library/Application Support/`
+  and `Arc`.
+- `LoopbackPageTests` switched from the temporary pre-U4b outline static-text query to `AXID.CommandBar.field` and
+  `app.outlineRows[AXID.Sidebar.rowToday]`, and `SidebarOutlineView` / `CommandBarTableView` / `ArchiveTableView` and
+  their row views implement `accessibilityRows()`, `accessibilityVisibleRows()` and `accessibilityParent()` for
+  out-of-process `AXUIElement` traversal.
+- `LaunchTests.test_E_sandboxGuardAndExtraEnvRestrictions` covers the `Sandbox.checkSafe` prefix rules and
+  `mergedEnvironment` / `launch(_:extraEnv:)` rejections.
+
+### Verification
+
+| Check | Command | Result |
+|---|---|---|
+| `Check UI test sources` | workflow grep step on `app/ArktShell/UITests` | `UI test sources OK`, exit 0 |
+| `LaunchTests` guard test | `xctest -XCTest ArktShellUITests.LaunchTests/test_E_sandboxGuardAndExtraEnvRestrictions` | pass (0.006 s) |
+| `AccessibilityIdentifierTests` | `swift test --filter AccessibilityIdentifierTests` | 15/15 pass |
+| ShellKit pure + isolation | `swift test --skip ShellKitGUITests` | 457 tests in 61 suites pass |

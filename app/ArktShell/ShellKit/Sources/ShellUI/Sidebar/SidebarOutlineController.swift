@@ -75,6 +75,13 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   public override func accessibilityChildren() -> [Any]? {
     NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
   }
+
+  public override func accessibilityRows() -> [any NSAccessibilityRow]? {
+    (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) }
+      .filter { $0.isAccessibilityElement() }
+  }
+
+  public override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
 }
 
 /// Data source and delegate for one Space: pinned nodes, a divider, then Today nodes; folders and splits expand.
@@ -382,11 +389,19 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   /// Refreshes one row's cell (title or favicon) without touching any other row.
   public func reload(node id: NodeID) {
-    guard let existing = items[id], outlineView.row(forItem: existing) >= 0 else { return }
+    guard let existing = items[id] else { return }
+    let row = outlineView.row(forItem: existing)
+    guard row >= 0 else { return }
     outlineView.reloadItem(existing, reloadChildren: false)
+    outlineView.rowView(atRow: row, makeIfNecessary: false)?.setAccessibilityLabel(presentation(of: id).0)
     if let container = source.parent(of: id)?.containerNode, case .split? = source.node(container),
        let splitItem = items[container] {
       outlineView.reloadItem(splitItem, reloadChildren: false)   // split titles derive from their panes
+      let splitRow = outlineView.row(forItem: splitItem)
+      if splitRow >= 0 {
+        outlineView.rowView(atRow: splitRow, makeIfNecessary: false)?
+          .setAccessibilityLabel(presentation(of: container).0)
+      }
     }
   }
 

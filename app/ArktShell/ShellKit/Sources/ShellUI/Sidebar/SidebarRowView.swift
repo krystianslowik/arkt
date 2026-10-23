@@ -128,6 +128,14 @@ public final class SidebarRowView: NSTableRowView {
 
   public override func isAccessibilitySelected() -> Bool { state == .current }
 
+  public override func accessibilityParent() -> Any? {
+    superview.flatMap(NSAccessibility.unignoredAncestor(of:))
+  }
+
+  public override func accessibilityChildren() -> [Any]? {
+    NSAccessibility.unignoredChildren(from: subviews)
+  }
+
   public override func accessibilityLabel() -> String? {
     tabCell?.titleField.stringValue ?? super.accessibilityLabel()
   }

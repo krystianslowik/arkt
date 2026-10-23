@@ -138,6 +138,10 @@ public final class FavoriteTileView: NSView {
     setAccessibilityCustomActions([])
   }
 
+  public override func accessibilityParent() -> Any? {
+    superview.flatMap(NSAccessibility.unignoredAncestor(of:))
+  }
+
   public override func mouseEntered(with event: NSEvent) { isHovered = true }
   public override func mouseExited(with event: NSEvent) { isHovered = false }
 }

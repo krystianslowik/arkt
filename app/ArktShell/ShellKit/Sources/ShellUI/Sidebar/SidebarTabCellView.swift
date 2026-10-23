@@ -118,6 +118,10 @@ public final class SidebarDividerView: NSView {
     setAccessibilityIdentifier(AXID.Sidebar.divider)
   }
 
+  public override func accessibilityParent() -> Any? {
+    superview.flatMap(NSAccessibility.unignoredAncestor(of:))
+  }
+
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
