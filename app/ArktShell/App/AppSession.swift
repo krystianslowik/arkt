@@ -78,6 +78,8 @@ final class AppSession {
   func start(outcome: OpenOutcome) {
     startFavicons(prune: outcome == .opened)          // before the window can create engine tabs
     window.onImportFromArc = { [weak self] in self?.importFromArc() }
+    window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
+    window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
     window.window?.center()
     window.showWindow(nil)
     refreshArcImportAvailability()
@@ -236,9 +238,10 @@ final class AppSession {
     autosaver.needsFlush || archive.hasPendingWrites || (faviconWriter?.needsFlush ?? false)
   }
 
-  /// Runs before the termination flush. Stamping visible tabs (decision 10) comes with E5b, after the stop.
+  /// Runs before the termination flush: stops the auto-archive timer, then stamps visible tabs (decision 10).
   func prepareForTermination() {
     autoArchive.stop()  // stop first: no auto-archive pass may run between the sidebar write and the outbox write
+    source.markInactive(window.visibleNodes, at: .now)
   }
 
   /// Writes what is pending: the sidebar and the archive outbox together, each bounded by its own flush timeout

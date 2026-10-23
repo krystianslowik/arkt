@@ -76,18 +76,26 @@ struct ArchiverTests {
     }
   }
 
-  /// Precondition pinned as current behavior: archiving one pane (not the split root) leaves the split in place with
-  /// stale `widthFactors`. Callers archive the split root (BH-122/123 pane removal is a separate, unresolved action).
-  @Test func archivingASinglePaneLeavesTheSplitWithStaleWidths() throws {
+  /// User decision 4, PARITY(NEEDS-RUNTIME-CHECK BH-123): archiving one pane archives just that tab and the split
+  /// shrinks; a split left with one pane becomes that plain tab, in the split's place.
+  @Test func archivingAPaneShrinksTheSplitAndCollapsesTheLastPane() throws {
     var world = try Self.makeWorld()
     let split = try world.sidebar.addSplit(
-      orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(world.work))
-    let left = try world.sidebar.addTab(url: Self.url("l"), title: "Left", in: .split(split))
-    let right = try world.sidebar.addTab(url: Self.url("r"), title: "Right", in: .split(split))
-    let item = try Archiver.archive(left, from: &world.sidebar, reason: .manual, at: Self.now)
+      orientation: .horizontal, widthFactors: [0.5, 0.25, 0.25], in: .today(world.work))
+    let panes = try ["l", "m", "r"].map {
+      try world.sidebar.addTab(url: Self.url($0), title: $0, in: .split(split))
+    }
+    let item = try Archiver.archive(panes[0], from: &world.sidebar, reason: .manual, at: Self.now)
     #expect(item.section == .today)
-    #expect(world.sidebar.children(of: .split(split)) == [right])
+    #expect(item.source == .space(world.work))
+    #expect(item.snapshot.allIDs == [panes[0]])
+    #expect(world.sidebar.children(of: .split(split)) == [panes[1], panes[2]])
     #expect(world.sidebar.nodes[split]?.kind == .split(SplitItem(orientation: .horizontal, widthFactors: [0.5, 0.5])))
+
+    try Archiver.archive(panes[2], from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(world.sidebar.nodes[split] == nil)
+    #expect(world.sidebar.children(of: .today(world.work)) == world.today + [panes[1]])
+    #expect(world.sidebar.nodes[panes[1]]?.parent == .today(world.work))
   }
 
   // MARK: Restore

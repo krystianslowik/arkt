@@ -243,6 +243,50 @@ struct SidebarTests {
     #expect(sidebar.children(of: .pinned(space)) == [ids[0], ids[2]])
   }
 
+  // MARK: - Remove pane
+
+  /// A Today tab, a split with `widths.count` panes, then another Today tab.
+  func makeSplit(widths: [Double] = [0.5, 0.25, 0.25]) throws -> (Sidebar, SpaceID, NodeID, [NodeID], [NodeID]) {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let before = try sidebar.addTab(url: url, title: "Before", in: .today(space))
+    let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: widths, in: .today(space))
+    let panes = try (0..<widths.count).map { try sidebar.addTab(url: url, title: "P\($0)", in: .split(split)) }
+    let after = try sidebar.addTab(url: url, title: "After", in: .today(space))
+    return (sidebar, space, split, panes, [before, after])
+  }
+
+  @Test func removePaneDropsItsWidthAndRescalesTheRest() throws {
+    var (sidebar, _, split, panes, _) = try makeSplit()
+    sidebar.removePane(panes[0])
+    #expect(sidebar.nodes[panes[0]] == nil)
+    #expect(sidebar.children(of: .split(split)) == [panes[1], panes[2]])
+    #expect(sidebar.nodes[split]?.kind == .split(SplitItem(orientation: .horizontal, widthFactors: [0.5, 0.5])))
+  }
+
+  @Test func removePaneLeavingOnePaneReplacesTheSplitWithThatTab() throws {
+    var (sidebar, space, split, panes, today) = try makeSplit(widths: [0.5, 0.5])
+    sidebar.removePane(panes[1])
+    #expect(sidebar.nodes[split] == nil)
+    #expect(sidebar.children(of: .split(split)).isEmpty)
+    #expect(sidebar.children(of: .today(space)) == [today[0], panes[0], today[1]])
+    #expect(sidebar.nodes[panes[0]]?.parent == .today(space))
+    #expect(Set(sidebar.nodes.keys) == [today[0], panes[0], today[1]])
+  }
+
+  @Test func removeTheOnlyPaneRemovesTheSplit() throws {
+    var (sidebar, space, split, panes, today) = try makeSplit(widths: [1])
+    sidebar.removePane(panes[0])
+    #expect(sidebar.nodes[split] == nil)
+    #expect(sidebar.children(of: .today(space)) == today)
+  }
+
+  @Test func removePaneOfANonPaneIsPlainRemove() throws {
+    var (sidebar, space, ids) = try makeThreeTabs()
+    sidebar.removePane(ids[1])
+    #expect(sidebar.children(of: .pinned(space)) == [ids[0], ids[2]])
+  }
+
   @Test func removeUnknownIsNoOp() throws {
     var sidebar = try makeSidebar()
     let before = sidebar
