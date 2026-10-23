@@ -211,7 +211,7 @@ class ArktBrowserWindow : public BrowserWindow,
  private:
   // One tab in model order, as last reported to the host.
   struct TabEntry {
-    SessionID id;
+    SessionID id = SessionID::InvalidValue();
     std::u16string title;
     GURL url;
   };

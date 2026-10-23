@@ -17,6 +17,8 @@ NSString* const kTitleColumn = @"title";
 @end
 
 @implementation ArktTabListRow
+@synthesize tabId = _tabId;
+@synthesize title = _title;
 @end
 
 @interface ArktTabListView () <NSTableViewDataSource, NSTableViewDelegate>
