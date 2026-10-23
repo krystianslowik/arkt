@@ -963,3 +963,24 @@ bound=9.54 load1=11.23 cores=12 asserted=yes`).
 
 Checks: ArktCore 342 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 456 tests, 0 failures.
 `URLBarTests`: 22/22 GUI tests pass.
+
+## Space pager edge cases: overshoot catch, resize during swipe, flavor flip (#99)
+
+- M3 (overshoot catch): `PagingMath.unrubberBand(_:dimension:)` and `PagingMath.initialTranslation(offset:index:pageWidth:count:)`
+  invert the rubber-band resistance when `offset` is already overshot past the first or last page, so `beginTracking()`
+  followed by `track(delta: 0, at:)` keeps the exact overshot position instead of applying `rubberBand` a second time.
+- M4 (resize during swipe): `SpacePagerView.layout()` now recomputes `offset` via
+  `PagingMath.offset(index: dragBase, translation: translation, pageWidth: width, count: pages.count)` when
+  `isTracking` is true and `width != laidOutWidth`, so both page frames and the strip offset follow a sidebar resize
+  during an active swipe.
+- M9 (flavor flip at the halfway point): `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` now also runs a
+  20-frame scripted swipe from `Dev` (`.dark`) to `Work` (`.light`) (`space-swipe-flavor`, crossing the halfway
+  `.darkAqua` -> `.aqua` flip). Measured: `frames=67 over8.6=0 maxMs=8.33 p99Ms=8.33 hitchesMs=[]` (each
+  `SpacePageView` pins its own `appearance`, so the chrome flavor flip does not invalidate row views inside the pages).
+- Tests: `PagingMathTests.initialTranslationInvertsRubberBandOnOvershoot`,
+  `SpacePagerTests.testCatchingAnOvershootingSettleKeepsTheExactPosition`,
+  `SpacePagerTests.testPageWidthFollowsASidebarResizeDuringASwipe`, and `space-swipe-flavor` in
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`.
+
+Checks: ArktCore 345 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 458 tests (+1
+`PagingMathTests`), 0 failures. `SpacePagerTests`: 20/20 GUI tests pass (+2).

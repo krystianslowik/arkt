@@ -92,7 +92,12 @@ public final class SpacePagerView: NSView {
         index = target
         settled(target)
       }
-      if !isTracking { apply(offset: -CGFloat(index) * width) }
+      if isTracking {
+        apply(offset: PagingMath.offset(index: dragBase, translation: translation, pageWidth: width,
+                                        count: pages.count))
+      } else {
+        apply(offset: -CGFloat(index) * width)
+      }
     }
   }
 
@@ -210,7 +215,7 @@ public final class SpacePagerView: NSView {
     frozenTarget = nil
     let base = min(max(Int(position.rounded()), 0), pages.count - 1)
     dragBase = base
-    translation = offset + CGFloat(base) * pageWidth
+    translation = PagingMath.initialTranslation(offset: offset, index: base, pageWidth: pageWidth, count: pages.count)
     tracker.reset()
     isTracking = true
     pacerSession = pacer.begin("space-swipe", in: self)

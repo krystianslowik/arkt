@@ -43,4 +43,13 @@ struct PagingMathTests {
     #expect(PagingMath.targetIndex(current: 0, translation: -150, velocity: -900, pageWidth: w, count: 1) == 0)
     #expect(PagingMath.targetIndex(current: 0, translation: -150, velocity: -900, pageWidth: w, count: 0) == 0)
   }
+
+  @Test func initialTranslationInvertsRubberBandOnOvershoot() {
+    for (index, overshotOffset) in [(0, CGFloat(14.5)), (2, -2 * w - 18.25), (1, -w - 22)] {
+      let translation = PagingMath.initialTranslation(
+        offset: overshotOffset, index: index, pageWidth: w, count: 3)
+      let recomputed = PagingMath.offset(index: index, translation: translation, pageWidth: w, count: 3)
+      #expect(abs(recomputed - overshotOffset) < 0.0001)
+    }
+  }
 }
