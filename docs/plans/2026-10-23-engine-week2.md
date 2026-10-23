@@ -258,7 +258,7 @@ tweaks) would be at risk. `$RES` keeps this table current (patch files, upstream
 MAIN=/path/to/arkt                                    # the main checkout; stays on its own branch
 git -C $MAIN status --short --untracked-files=no       # must print nothing; otherwise ask who owns the changes
 git -C $MAIN worktree add ../arkt-wt/engine-week2 -b engine-week2 spike/week1
-REPO=$MAIN/../arkt-wt/engine-week2(:A)
+REPO=${MAIN:h}/arkt-wt/engine-week2
 ls -l $CR/arkt                                         # record the old target in $RES (Step 5)
 ln -sfn $REPO/engine/arkt $CR/arkt && readlink $CR/arkt
 git -C $CR branch --show-current; git -C $CR rev-list --count 156.0.8078.48..arkt; wc -l < $REPO/engine/patches/chromium/.patches
@@ -766,8 +766,9 @@ A function pointer in a dependency-free target breaks the cycle, and the registr
 ```cpp
 namespace arkt {
 // Deliberately narrower than BrowserWindow::CreateBrowserWindow(browser, user_gesture, in_tab_dragging): an
-// Arkt window is never created by a tab drag (there is no Views tab strip to drag from), and user_gesture only
-// decides Show vs ShowInactive inside Views, which Arkt decides itself. The patch passes only `browser`.
+// Arkt window is never created by a tab drag (there is no Views tab strip to drag from), and user_gesture is
+// only consumed on Aura (kCreatedByUserGesture, browser_window_factory.cc:76), never on Mac. The patch passes only
+// `browser`.
 using CreateBrowserWindowFn = std::unique_ptr<BrowserWindow, BrowserWindowDeleter> (*)(
     BrowserWindowInterface* browser);
 // Set once at startup by //arkt/browser; nullptr means "use Chromium's window".
@@ -910,8 +911,12 @@ not running, set `download.default_directory` to `$PROF/downloads` and `download
 | 16 | Docked DevTools | launch with `--auto-open-devtools-for-tabs` |
 | 17 | Autofill / `<datalist>` dropdown | `cdp.mjs --user-gesture example.com 'document.body.innerHTML="<input id=i list=d><datalist id=d><option value=arkt1><option value=arkt2></datalist>";i.focus();i.showPicker();1'` |
 
-Pass for each: process alive 10 s after the driver, no `FATAL`/`CHECK failed` in the log, no new crash dump
-(compare `find $PROF/week2-native/Crashpad -type f | wc -l` before and after; record the count). Scenario 8
+Pass for each: process alive 10 s after the driver, no `FATAL`/`CHECK failed` in the log, no new crash dump.
+Crash reports are always stored under the default user data directory, not `--user-data-dir`
+(`chrome/common/chrome_paths.cc:216-221`), which for these builds is still `Chromium`: compare
+`find "$HOME/Library/Application Support/Chromium/Crashpad" -type f 2>/dev/null | wc -l` before and after and record
+the counts. Count only: never open, move or delete anything in that directory (it may belong to another
+Chromium-based app). Scenario 8
 additionally prints `true` and the new tab lands in the Arkt window (census `views=0`); without `--user-gesture` the
 popup blocker would block it and the scenario would test nothing. Scenario 7 does not end in an exit: on macOS the
 browser keeps running with no windows, so after the `windows.remove` call assert the census
