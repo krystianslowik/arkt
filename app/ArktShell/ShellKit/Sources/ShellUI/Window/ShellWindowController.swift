@@ -40,6 +40,17 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private var tabsByNode: [NodeID: TabID] = [:]
   private var nodeByTab: [TabID: NodeID] = [:]
   private var observation: EngineObservation?
+  /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
+  private var sidebarObservation: SidebarObservation?
+  /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
+  /// does nothing.
+  public var onArchive: (@MainActor ([NodeID]) -> Void)?
+  /// A tab stopped being visible in this window: another tab became current, or the window closed (decision 10; the
+  /// app stamps `lastActiveAt`).
+  public var onTabHidden: (@MainActor (NodeID) -> Void)?
+  /// The tabs this window shows: the current one, or none.
+  public var visibleNodes: Set<NodeID> { currentNode.map { [$0] } ?? [] }
+  private var currentNode: NodeID? { currentTab.flatMap { nodeByTab[$0] } }
   /// Toolbar on or off (KB-018, BH-032). The app passes one backed by user defaults; the default is ephemeral.
   public let toolbarSetting: ToolbarSetting
 
@@ -83,6 +94,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
     wireAddressBars()
     observation = engine.observe { [weak self] event in self?.handle(event) }
+    // A removed Space's nodes emit no structure change, so `.spaces` checks too.
+    sidebarObservation = sidebar.observe { [weak self] change in
+      switch change {
+      case .structure, .spaces: self?.closeEngineTabsOfRemovedNodes()
+      case .node: break
+      }
+    }
     // Space theme: the pager's continuous position drives the crossfade (design section 2).
     sidebarController.onSpacePosition = { [weak self, weak root] position in
       root?.themeBackground.setPosition(position)
@@ -202,6 +220,51 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     rootView.card.toolbar.urlBar.url = url
   }
 
+  // MARK: Close tab
+
+  /// Cmd-W (KB-008). A Today tab is archived (BH-071) and the nearest sibling below, else above, becomes current; with
+  /// none left the card stays empty and the window open (BH-073). A pane archives alone and its split shrinks (user
+  /// decision 4, PARITY(NEEDS-RUNTIME-CHECK BH-123)). A pinned tab or Favorite closes its page and keeps its row
+  /// (BH-067, BH-048 [I]). Without a current tab nothing happens (BH-069, a second Cmd-W unpinning, is
+  /// NEEDS-RUNTIME-CHECK and not implemented).
+  @objc public func closeTab(_ sender: Any?) {
+    guard let node = currentNode else { return }
+    switch sidebar.section(containing: node) {
+    case .today?:
+      let next = successor(of: node)          // resolved while the node is still in place
+      onArchive?([node])
+      guard sidebar.node(node) == nil else { return }
+      if let next, sidebar.node(next) != nil { activate(node: next) }
+    case .pinned?, .favorites?:
+      if let tab = tabsByNode[node] { engine.closeTab(tab) }   // `.tabClosed` clears the card and the row state
+    default:
+      return
+    }
+  }
+
+  /// The tab to show after `node` leaves: the first tab of the nearest sibling below, else above. With no such sibling
+  /// inside a split or folder, the container's siblings are tried; never another section.
+  private func successor(of node: NodeID) -> NodeID? {
+    var current = node
+    for _ in 0..<64 {                       // depth guard against a malformed source
+      guard let location = sidebar.parent(of: current) else { return nil }
+      let siblings = sidebar.children(of: location)
+      if let index = siblings.firstIndex(of: current) {
+        let candidates = siblings[(index + 1)...] + siblings[..<index].reversed()
+        if let tab = candidates.lazy.compactMap({ self.sidebar.firstTab(at: $0) }).first { return tab }
+      }
+      guard let container = location.containerNode else { return nil }
+      current = container
+    }
+    return nil
+  }
+
+  /// Engine tabs of nodes the sidebar no longer holds are closed; `.tabClosed` then drops the mappings. Runs inside
+  /// change delivery, so it must not mutate the sidebar (closing a tab does not).
+  private func closeEngineTabsOfRemovedNodes() {
+    for (node, tab) in tabsByNode where sidebar.node(node) == nil { engine.closeTab(tab) }
+  }
+
   // MARK: Command bar
 
   /// Cmd-T (KB-001, BH-100); Cmd-T while open closes (KB-003, BH-103).
@@ -233,6 +296,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   private func show(node: NodeID) {
+    if let old = currentNode, old != node { onTabHidden?(old) }
     let tab: TabID
     if let existing = tabsByNode[node] {
       tab = existing
@@ -304,8 +368,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     if let scale = window?.backingScaleFactor { SymbolImageCache.shared.prewarm(scale: scale) }   // cache hits if warm
   }
   public func windowDidDeminiaturize(_ notification: Notification) { reapplyTrafficLights() }
-  /// The command bar's display link retains its controller; release it with the window.
+  /// The current tab stops being visible (decision 10). The command bar's display link retains its controller;
+  /// release it with the window.
   public func windowWillClose(_ notification: Notification) {
+    if let node = currentNode { onTabHidden?(node) }
     commandBar.invalidate()
     pager.stopInteraction()        // a closed window's views keep their display links
   }

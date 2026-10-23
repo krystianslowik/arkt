@@ -12,6 +12,7 @@ enum MainMenu {
     main.addItem(submenu(title: "File", items: [
       item("New Tab", #selector(ShellWindowController.newTab(_:)), "t"),                  // KB-001
       item("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l"),    // KB-002
+      item("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w"),             // KB-008
       .separator(),
       item("Import from Arc...", #selector(AppDelegate.importFromArc(_:)), "", []),       // E4c, no shortcut
     ]))

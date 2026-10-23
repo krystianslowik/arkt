@@ -49,7 +49,11 @@ let package = Package(
     ),
     .testTarget(
       name: "ShellKitGUITests",
-      dependencies: ["ShellUI", "FakeEngineKit", "EngineAPITestSupport", "Motion"]
+      dependencies: [
+        "ShellUI", "FakeEngineKit", "EngineAPITestSupport", "Motion", "CoreBridge",
+        .product(name: "SidebarModel", package: "ArktCore"),
+        .product(name: "Archive", package: "ArktCore"),
+      ]
     ),
   ]
 )
