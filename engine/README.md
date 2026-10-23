@@ -167,5 +167,43 @@ when swap is already above about 6 GB. To pause or stop the build, signal the `s
 `third_party/siso/cipd/`) shows progress when the log is quiet. The result is ad-hoc (linker) signed and launches
 as is; it must be re-signed after every rebuild before it goes into `/Applications` (W2).
 
+## Sign and install (out/Arkt)
+
 `out/Arkt` must be re-signed after every rebuild, incremental ones included (plan W2): a rebuild replaces the signed
-binaries.
+binaries. Sign a copy, never `$REL` itself, so the build output stays as the linker left it. The identity is any
+Apple Development (or Developer ID) certificate in the login keychain; pass its hash from
+`security find-identity -v -p codesigning`. Never write the identity, team id or certificate hash into this repo.
+Sign inside-out, with the entitlements files Chromium ships in `chrome/app/` and the hardened runtime on every
+executable (as in `chrome/installer/mac/signing/parts.py`: JIT only for the Renderer and GPU helpers, the device and
+personal-information entitlements only on the app):
+
+    ID=<certificate hash>; ENT=$CR/chrome/app; STAGE=$CHROMIUM_ROOT/stage-w2
+    mkdir -p $STAGE && ditto $REL/Arkt.app $STAGE/Arkt.app && cd $STAGE
+    S=(codesign --force --timestamp=none --sign $ID)
+    F="Arkt.app/Contents/Frameworks/Arkt Framework.framework/Versions/Current"
+    for l in "$F"/Libraries/*.dylib; do $S "$l"; done
+    for b in "$F"/Helpers/chrome_crashpad_handler "$F"/Helpers/app_mode_loader "$F"/Helpers/web_app_shortcut_copier; do
+      [[ -e "$b" ]] && $S --options runtime "$b"; done
+    for h in "$F"/Helpers/*.app; do case "$h" in
+      *Renderer*) e="--entitlements $ENT/helper-renderer-entitlements.plist";;
+      *GPU*) e="--entitlements $ENT/helper-gpu-entitlements.plist";; *) e="";; esac
+      $S --options runtime ${=e} "$h"; done
+    $S "Arkt.app/Contents/Frameworks/Arkt Framework.framework"
+    $S --options runtime --entitlements $ENT/app-entitlements.plist Arkt.app
+    codesign --verify --deep --strict --verbose=2 Arkt.app      # valid on disk, satisfies its Designated Requirement
+    codesign -dv Arkt.app 2>&1 | grep -E '^(Identifier|CodeDirectory)'   # com.arkt.Arkt, flags=0x10000(runtime)
+
+List `"$F"/Helpers` first: every executable there must be covered (11 entries on 156: eight `Arkt Helper*.app`,
+including the four `Aperitif` ones, plus the three tools above). `--timestamp=none` keeps signing offline; a
+notarized build (#125) needs a secure timestamp and a Developer ID certificate instead.
+
+Install (the internal disk holds swap; keep at least 4 GB free after the copy):
+
+    df -h / | tail -1; sysctl vm.swapusage
+    ls -d /Applications/Arkt.app 2>/dev/null && echo EXISTS   # replace only a bundle this project installed
+    ditto $STAGE/Arkt.app /Applications/Arkt.app
+    codesign --verify --deep --strict --verbose=2 /Applications/Arkt.app
+    spctl --assess --type execute -vv /Applications/Arkt.app   # "rejected" until the build is notarized (#125)
+
+To replace an older install, move it aside first (keep it for rollback until the new one passes the smoke), then
+`ditto` the new one in. Smoke from `/Applications` with a fresh profile and the launch flags above: plan W2 Step 3.
