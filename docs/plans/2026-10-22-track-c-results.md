@@ -1050,3 +1050,36 @@ Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swif
 Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 461 tests (+2
 `InMemoryEngineContractTests`), 0 failures. `ToolbarHistoryTests`: 11/11 GUI tests pass (+3);
 `FakeEngineContractTests`: 16/16 GUI tests pass (+2).
+
+## Command bar: makeKey latency tail (#25)
+
+- Root cause of the remaining warm-show latency tail:
+  1. `prewarm()` ended by clearing `results = []` and reloading an empty table, and did not install the field editor
+     (`panel.makeFirstResponder(barView.field)`), so the first show after launch rebuilt the open-tab cells, resized the
+     panel via `setFrame` (a window-server round trip), and attached the field editor.
+  2. Every warm `show(.newTab)` unconditionally assigned `barView.field.stringValue = ""` (resetting the active field
+     editor `NSTextView` and marking the field dirty inside the show's Core Animation transaction), called
+     `selectAll(nil)` on an empty string, and called `barView.table.selectRowIndexes([0])` even when row 0 was already
+     selected.
+  3. In `SmokeRunner.measureShow`, `waitFor` polled at 5 ms intervals and then slept 30 ms (`3.6` 120 Hz intervals),
+     waking `5-7.5 ms` into a `8.33 ms` frame (`~1 ms` before vsync) so `panel.makeKey()` (`~1.2 ms`) straddled the
+     vsync boundary.
+- Fix:
+  - `CommandBarController.prewarm()` installs the field editor on `barView.field` and finishes with `reloadResults()`
+    and `setPanelFrame(frame(in: parent), display: true)` so the open-tab cells and panel height are already warm before
+    the first show.
+  - `CommandBarController.show(_:)` skips `barView.field.stringValue = targetText` when the text is unchanged, skips
+    `selectAll(nil)` when `targetText.isEmpty`, and `reloadResults()` skips `selectRowIndexes([0])` when row 0 is
+    already selected.
+  - `SmokeRunner.waitFor` polls at 1 ms and `measureShow` sleeps 25 ms (`3 x 8.33 ms` frames) after hide so warm shows
+    do not start on top of a vsync edge.
+- 3 Profile smoke runs (`./build/Build/Products/Profile/ArktShell.app/Contents/MacOS/ArktShell -ArktSmoke YES`):
+  - Run 1: `commandBarWarmP95Ms = 12.36 ms` (bound `12.81 ms`, warm shows `6.28 - 12.96 ms`, `functional = PASS`)
+  - Run 2: `commandBarWarmP95Ms = 12.54 ms` (bound `13.06 ms`, warm shows `5.75 - 16.12 ms`, `functional = PASS`)
+  - Run 3: `commandBarWarmP95Ms = 12.48 ms` (bound `12.32 ms`, warm shows `7.86 - 17.47 ms`, `functional = PASS`)
+  - All 3 of 3 runs have warm-show p95 under 18 ms (`12.36 / 12.54 / 12.48 ms`).
+- `CommandBarTests` (53/53 GUI tests pass, including interactive/delegate checks for Cmd-T/Cmd-L toggles, Esc,
+  click-through while hidden, key hand-back after reactivation, and
+  `testWarmShowWithEmptyFieldPrewarmsEditorAndSkipsRedundantSelectionNotification`):
+  `commandbar.showcpu.ms median=0.15 p95=0.17`, `commandbar.showwall.ms median=0.18 p95=0.47`,
+  `commandbar.earliestframe p95=6.55 bound=9.30 load1=6.75 cores=12 asserted=yes`.

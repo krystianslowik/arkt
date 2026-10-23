@@ -99,9 +99,11 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     if let parent { panel.setFrame(frame(in: parent), display: true) }
     barView.table.selectRowIndexes([0], byExtendingSelection: false)
     panel.orderFrontRegardless()                  // ordered in for good, at alpha 0 (see CommandBarPanel)
+    if barView.field.currentEditor() == nil { _ = panel.makeFirstResponder(barView.field) }
     panel.displayIfNeeded()
-    results = []
-    barView.table.reloadData()
+    reloadResults()
+    if let parent { setPanelFrame(frame(in: parent), display: true) }
+    panel.displayIfNeeded()
     makeFirstFrameLink()
   }
 
@@ -143,7 +145,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     case .newTab, .newSplitPane: prefill = nil
     case .currentTab(let url): prefill = url?.absoluteString
     }
-    barView.field.stringValue = prefill ?? ""
+    let targetText = prefill ?? ""
+    if barView.field.stringValue != targetText { barView.field.stringValue = targetText }
     reloadResults()
     setPanelFrame(frame(in: parent), display: false)
     // Already ordered in at alpha 0 (prewarm), so presenting is an alpha change and key status. Ordering in
@@ -159,7 +162,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     panel.isPresented = true
     panel.makeKey()
     if barView.field.currentEditor() == nil { panel.makeFirstResponder(barView.field) }   // kept across hides
-    barView.field.currentEditor()?.selectAll(nil)
+    if !targetText.isEmpty { barView.field.currentEditor()?.selectAll(nil) }
     showGeneration += 1
     let generation = showGeneration
     showCommitTime = nil
@@ -358,7 +361,9 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       cellScale = scale
       barView.table.reloadData()
     }
-    if !results.isEmpty { barView.table.selectRowIndexes([0], byExtendingSelection: false) }
+    if !results.isEmpty, barView.table.selectedRow != 0 {
+      barView.table.selectRowIndexes([0], byExtendingSelection: false)
+    }
   }
 
   /// Up / Down wrap at the ends [I] (KB-085; Arc unverified, RT-08).
