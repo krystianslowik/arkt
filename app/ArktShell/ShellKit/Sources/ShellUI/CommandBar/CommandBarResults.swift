@@ -34,6 +34,15 @@ public enum CommandBarResults {
     public let title: String
     public let subtitle: String
     public let trailingHint: String?
+
+    /// Accessibility value for `commandBar.row` ("Switch to Tab", "Switch to Split View", "Open", "Search").
+    public var accessibilityCaption: String {
+      switch kind {
+      case .open: "Open"
+      case .switchTo: trailingHint ?? CommandBarResults.switchHint
+      case .search: "Search"
+      }
+    }
   }
 
   public static let maxSwitchResults = 6

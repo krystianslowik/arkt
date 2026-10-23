@@ -395,8 +395,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
     let rowView = tableView.makeView(withIdentifier: CommandBarRowView.identifier, owner: nil) as? CommandBarRowView
-      ?? CommandBarRowView()
+      ?? CommandBarRowView(frame: .zero)
     rowView.identifier = CommandBarRowView.identifier
+    if results.indices.contains(row) {
+      rowView.setAccessibilityLabel(results[row].title)
+      rowView.setAccessibilityValue(results[row].accessibilityCaption)
+    }
     return rowView
   }
 }

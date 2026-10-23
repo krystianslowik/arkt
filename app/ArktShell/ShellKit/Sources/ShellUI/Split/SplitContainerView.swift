@@ -56,6 +56,7 @@ public final class SplitContainerView: NSView {
     wantsLayer = true
     setAccessibilityElement(true)
     setAccessibilityRole(.splitGroup)
+    setAccessibilityIdentifier(AXID.Split.container)
   }
 
   @available(*, unavailable)
@@ -64,6 +65,10 @@ public final class SplitContainerView: NSView {
   public override var mouseDownCanMoveWindow: Bool { false }
 
   public override func accessibilitySplitters() -> [Any]? { dividers }
+
+  public override func accessibilityChildren() -> [Any]? {
+    NSAccessibility.unignoredChildren(from: paneCards + dividers + (toastView.map { [$0] } ?? []))
+  }
 
   // MARK: Showing panes
 
@@ -139,7 +144,11 @@ public final class SplitContainerView: NSView {
   }
 
   private func updateBorderEmphasis() {
-    for (index, card) in cards.enumerated() { card.borderEmphasis = index == focusedIndex ? 1 : 0.5 }
+    for (index, card) in cards.enumerated() {
+      let focused = index == focusedIndex
+      card.borderEmphasis = focused ? 1 : 0.5
+      card.setAccessibilitySelected(focused)
+    }
   }
 
   // MARK: Divider drag (driven by SplitDividerView)
@@ -220,6 +229,7 @@ public final class SplitContainerView: NSView {
 
   private func makeCard() -> ContentCardView {
     let card = ContentCardView(metrics: metrics)
+    card.setAccessibilityIdentifier(AXID.Split.pane)
     card.autoresizingMask = []
     addSubview(card, positioned: .below, relativeTo: dividerViews.first)
     return card
@@ -252,6 +262,7 @@ final class SplitPanePlaceholderView: NSView {
     setAccessibilityElement(true)
     setAccessibilityRole(.button)
     setAccessibilityLabel("Reopen page")
+    setAccessibilityIdentifier(AXID.Split.reopen)
   }
 
   @available(*, unavailable)

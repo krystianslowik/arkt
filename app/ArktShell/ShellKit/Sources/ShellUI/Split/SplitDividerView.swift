@@ -29,6 +29,7 @@ public final class SplitDividerView: NSView {
     setAccessibilityElement(true)
     setAccessibilityRole(.splitter)
     setAccessibilityLabel("Split View divider")
+    setAccessibilityIdentifier(AXID.Split.divider)
     setAccessibilityOrientation(Self.accessibilityOrientation(for: axis))
   }
 
