@@ -7,48 +7,19 @@
 #include <string>
 #include <vector>
 
+#import "arkt/browser/arkt_window_host.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "components/sessions/core/session_id.h"
 #include "ui/color/color_provider_source.h"
 #include "ui/gfx/geometry/rect.h"
+#include "url/gurl.h"
 
 namespace new_tab_footer {
 class NewTabFooterController;
 }  // namespace new_tab_footer
-
-// The embedder seam of the engine window. ArktBrowserWindow never creates or
-// lays out a window: it asks its host for the NSWindow and for the view tab
-// content is mounted in, and reports tab changes back. This week's host is
-// ArktPlaceholderWindowHost; in week 3 ShellUI hands over its own borderless
-// window and card through the same protocol.
-@protocol ArktWindowHost <NSObject>
-@property(nonatomic, readonly) NSWindow* window;
-// The view that holds the mounted tab content.
-@property(nonatomic, readonly) NSView* cardView;
-// Called by the host when the user asks to close the window (close button,
-// Close Window menu item). The host must not close the window itself; the
-// engine closes the Browser and then releases the host.
-@property(nonatomic, copy) void (^closeRequested)(void);
-// Chrome's main menu sends browser commands (commandDispatch:, tag = command
-// id) down the key window's responder chain. The host answers them for its
-// window through these blocks, which the engine sets.
-@property(nonatomic, copy) BOOL (^validateCommand)(NSInteger command);
-@property(nonatomic, copy) void (^executeCommand)(NSInteger command);
-// Plain tab events, one dictionary per change, in order. Keys: "kind"
-// ("inserted", "removed", "moved", "activated"), "tabId", "index", and for
-// "moved" also "fromIndex".
-- (void)tabListChanged:(NSArray<NSDictionary<NSString*, id>*>*)events;
-@end
-
-// This week's host: an ArktWindow with the 190 pt sidebar placeholder (with
-// the Extensions button) and an inset, rounded card.
-@interface ArktPlaceholderWindowHost : NSObject <ArktWindowHost>
-@property(nonatomic, readonly) NSButton* extensionsButton;
-// Run when the Extensions button is clicked.
-@property(nonatomic, copy) void (^extensionsButtonAction)(void);
-@end
 
 namespace arkt {
 
@@ -217,9 +188,17 @@ class ArktBrowserWindow : public BrowserWindow,
       ui::ColorProviderKey::ForcedColors forced_colors) const override;
 
   // TabStripModelObserver:
-  void OnTabStripModelChanged(TabStripModel* tab_strip_model,
-                              const TabStripModelChange& change,
-                              const TabStripSelectionChange& selection) override;
+  void OnTabStripModelChanged(
+      TabStripModel* tab_strip_model,
+      const TabStripModelChange& change,
+      const TabStripSelectionChange& selection) override;
+  void OnTabChangedAt(tabs::TabInterface* tab,
+                      TabChangeType change_type) override;
+
+  // Makes the tab with session id `tab_id` the active tab of the model (a tab
+  // picked in the host's tab list). Returns false if the window has no such
+  // tab.
+  bool ActivateTab(int32_t tab_id);
 
   // Called by the exclusive access context when the host window entered or
   // left native fullscreen.
@@ -230,9 +209,24 @@ class ArktBrowserWindow : public BrowserWindow,
   void DeleteBrowserWindow() override;
 
  private:
+  // One tab in model order, as last reported to the host.
+  struct TabEntry {
+    SessionID id = SessionID::InvalidValue();
+    std::u16string title;
+    GURL url;
+  };
+
   void Mount(content::WebContents* contents);
   void Unmount(content::WebContents* contents);
   void OnCardResized();
+  // Builds an event for the tab at `index` that carries its title and URL, and
+  // stores them in `entries_[index]`.
+  ArktTabEvent* EntryEvent(ArktTabEventKind kind,
+                           content::WebContents* contents,
+                           int index,
+                           int32_t previous_tab_id);
+  // --arkt-trace-visibility: logs every tab's WebContents visibility.
+  void TraceVisibility();
 
   const raw_ptr<BrowserWindowInterface> browser_;
   id<ArktWindowHost> __strong host_;
@@ -240,6 +234,10 @@ class ArktBrowserWindow : public BrowserWindow,
   NSMutableArray* __strong notification_tokens_;
   // The WebContents whose view is mounted in the card, if any.
   raw_ptr<content::WebContents> mounted_ = nullptr;
+  // The tab list as the host knows it. Kept apart from any host view: the
+  // host gets events, never this list.
+  std::vector<TabEntry> entries_;
+  const bool trace_visibility_;
 
   std::unique_ptr<ArktExclusiveAccessContext> exclusive_access_context_;
   std::unique_ptr<ArktModalDialogHost> modal_dialog_host_;

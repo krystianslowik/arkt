@@ -9,6 +9,7 @@
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_browser_window_factory_hook.h"
 #include "arkt/browser/arkt_extensions_menu.h"
+#import "arkt/browser/arkt_placeholder_window_host.h"
 #include "arkt/browser/arkt_window_controller.h"
 #include "base/command_line.h"
 #include "base/functional/bind.h"
