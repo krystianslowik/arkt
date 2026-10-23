@@ -57,6 +57,7 @@ public final class SpaceDotsView: NSView {
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityLabel("Spaces")
+    setAccessibilityIdentifier(AXID.Sidebar.spaceDots)
     clipLayer.masksToBounds = true
     clipLayer.addSublayer(stripLayer)
     fadeMask.startPoint = CGPoint(x: 0, y: 0.5)
@@ -85,6 +86,7 @@ public final class SpaceDotsView: NSView {
       let element = SpaceDotElement { [weak self] in self?.onSelect?(index) }
       element.setAccessibilityParent(self)
       element.setAccessibilityRole(.button)
+      element.setAccessibilityIdentifier(AXID.Sidebar.spaceDot)
       element.setAccessibilitySelected(index == selectedIndex)
       return element
     }
@@ -291,6 +293,8 @@ public final class SidebarContainerView: NSView {
     }
     spaceDots.autoresizingMask = []
     bottomBar.addSubview(spaceDots)
+    urlBar.setAccessibilityIdentifier(AXID.Sidebar.urlBar)
+    newTabButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.newTab)
     for view in [dragSurface, topBar, urlBar, favorites, pager, bottomBar] {
       view.autoresizingMask = []
       addSubview(view)
@@ -305,12 +309,19 @@ public final class SidebarContainerView: NSView {
 
   /// Puts `pages` into the pager (showing `index` without animating) and routes their horizontal swipes to it.
   public func setPages(_ pages: [SpacePageView], index: Int) {
-    for page in pages { page.scrollView.horizontalGestureTarget = pager }
+    for (pageIndex, page) in pages.enumerated() {
+      page.scrollView.horizontalGestureTarget = pager
+      page.setAccessibilitySelected(pageIndex == index)
+    }
     pager.setPages(pages, index: index)
   }
 
   /// Marks the committed Space's page (what `currentOutline` reads).
-  public func setCurrent(page: SpacePageView?) { currentPage = page }
+  public func setCurrent(page: SpacePageView?) {
+    currentPage?.setAccessibilitySelected(false)
+    currentPage = page
+    page?.setAccessibilitySelected(true)
+  }
 
   /// Flavor of the chrome around the pages (favorites, dots, buttons). Each page keeps its own Space's flavor.
   public private(set) var flavor: ThemeFlavor = .light

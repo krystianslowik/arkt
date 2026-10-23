@@ -17,10 +17,15 @@ public final class SpacePageView: NSView {
     titleLabel.font = .systemFont(ofSize: SidebarMetrics.spaceTitleFontSize, weight: .medium)
     titleLabel.lineBreakMode = .byTruncatingTail
     titleLabel.autoresizingMask = []
+    titleLabel.setAccessibilityIdentifierWithCell(AXID.Sidebar.spaceTitle)
     scrollView.autoresizingMask = []
     scrollView.documentView = outlineController.outlineView
     addSubview(titleLabel)
     addSubview(scrollView)
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
+    setAccessibilityIdentifier(AXID.Sidebar.page)
+    setAccessibilityLabel(titleLabel.stringValue)
     setFlavor(info?.theme.flavor ?? .light)
   }
 
@@ -29,6 +34,7 @@ public final class SpacePageView: NSView {
     let title = info?.title ?? ""
     if titleLabel.stringValue != title {
       titleLabel.stringValue = title
+      setAccessibilityLabel(title)
       needsLayout = true
     }
     let flavor = info?.theme.flavor ?? .light

@@ -47,8 +47,10 @@ public final class FavoriteTileView: NSView {
     faviconView.setAccessibilityElement(false)
     addSubview(faviconView)
     addSubview(closeButton)
+    closeButton.setAccessibilityIdentifierWithCell(AXID.Favorites.tileClose)
     setAccessibilityElement(true)
     setAccessibilityRole(.button)
+    setAccessibilityIdentifier(AXID.Favorites.tile)
   }
 
   @available(*, unavailable)
@@ -132,6 +134,7 @@ public final class FavoriteTileView: NSView {
     nodeID = nil
     setCloseAction(nil)
     setCloseButtonShown(false, animated: false)        // no fade on a reused tile
+    setAccessibilityValue(nil)
     setAccessibilityCustomActions([])
   }
 
@@ -167,6 +170,11 @@ final class FavoritesCollectionView: NSCollectionView {
     super.mouseDown(with: event)
     let endEvent = NSApp.currentEvent ?? event
     onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
+  }
+
+  override func accessibilityChildren() -> [Any]? {
+    let items = (0..<numberOfItems(inSection: 0)).compactMap { item(at: IndexPath(item: $0, section: 0))?.view }
+    return NSAccessibility.unignoredChildren(from: items)
   }
 }
 
@@ -237,6 +245,9 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     collectionView.delegate = self
     collectionView.autoresizingMask = []
     addSubview(collectionView)
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
+    setAccessibilityIdentifier(AXID.Favorites.grid)
   }
 
   @available(*, unavailable)
@@ -296,7 +307,9 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.toolTip = title
     tile.setAccessibilityLabel(title)
     tile.nodeID = id
-    let action = pageLoadedProvider?(id) == true ? RowCloseAction.resolve(id, in: source) : nil
+    let isLoaded = pageLoadedProvider?(id) == true
+    tile.setAccessibilityValue(isLoaded ? AXID.Favorites.loaded : AXID.Favorites.unloaded)
+    let action = isLoaded ? RowCloseAction.resolve(id, in: source) : nil
     tile.closeButton.target = self
     tile.closeButton.action = #selector(closeClicked(_:))
     tile.setCloseAction(action)

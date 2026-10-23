@@ -31,6 +31,7 @@ public final class SidebarTabCellView: NSTableCellView {
     addSubview(faviconView)
     addSubview(titleField)
     addSubview(closeButton)
+    closeButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.rowClose)
     imageView = faviconView
     textField = titleField
   }
@@ -112,7 +113,9 @@ public final class SidebarDividerView: NSView {
     identifier = Self.reuseIdentifier
     wantsLayer = true
     layer?.addSublayer(line)
-    setAccessibilityElement(false)
+    setAccessibilityElement(true)
+    setAccessibilityRole(.splitter)
+    setAccessibilityIdentifier(AXID.Sidebar.divider)
   }
 
   @available(*, unavailable)

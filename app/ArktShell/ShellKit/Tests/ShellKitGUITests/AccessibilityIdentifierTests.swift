@@ -176,4 +176,178 @@ final class AccessibilityIdentifierTests: XCTestCase {
     XCTAssertEqual(try elements(AXID.Toast.action, in: controller).count, 0)
     controller.close()
   }
+
+  // MARK: Sidebar chrome, Space dots and Space pages (U4b)
+
+  func testSidebarURLBarNewTabAndSpaceDotsHaveIdentifiersLabelsAndSelection() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeController(sidebar)
+    let urlBar = try element(AXID.Sidebar.urlBar, in: controller)
+    XCTAssertEqual(urlBar.accessibilityRole(), .button)
+    XCTAssertEqual(urlBar.accessibilityValue() as? String,
+                   controller.rootView.sidebarContainer.urlBar.displayedText)
+
+    let newTab = try element(AXID.Sidebar.newTab, in: controller)
+    XCTAssertEqual(newTab.accessibilityRole(), .button)
+    XCTAssertEqual(label(of: newTab), "New Tab")
+
+    let dotsGroup = try element(AXID.Sidebar.spaceDots, in: controller)
+    XCTAssertEqual(dotsGroup.accessibilityRole(), .group)
+    XCTAssertEqual(dotsGroup.accessibilityLabel(), "Spaces")
+
+    let dots = try elements(AXID.Sidebar.spaceDot, in: controller)
+    XCTAssertEqual(dots.count, 3)
+    XCTAssertEqual(dots.map { $0.accessibilityLabel() }, ["Personal", "Work", "Dev"])
+    XCTAssertEqual(dots.map { $0.isAccessibilitySelected() }, [true, false, false])
+
+    controller.sidebarController.showSpace(sidebar.spaceOrder[1])
+    controller.rootView.layoutSubtreeIfNeeded()
+    let updatedDots = try elements(AXID.Sidebar.spaceDot, in: controller)
+    XCTAssertEqual(updatedDots.map { $0.isAccessibilitySelected() }, [false, true, false])
+    controller.close()
+  }
+
+  func testSpacePagesAndTitlesHaveIdentifiersLabelsAndSelection() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeController(sidebar)
+    // At rest, SpacePagerView hides offscreen pages so only the current Space's page is in the accessibility tree.
+    let page = try element(AXID.Sidebar.page, in: controller)
+    XCTAssertEqual(page.accessibilityRole(), .group)
+    XCTAssertEqual(page.accessibilityLabel(), "Personal")
+    XCTAssertTrue(page.isAccessibilitySelected())
+
+    let title = try element(AXID.Sidebar.spaceTitle, in: controller)
+    XCTAssertEqual(title.accessibilityValue() as? String, "Personal")
+
+    let pager = controller.rootView.sidebarContainer.pager
+    XCTAssertEqual(pager.pages.map { $0.accessibilityIdentifier() }, Array(repeating: AXID.Sidebar.page, count: 3))
+    XCTAssertEqual(pager.pages.map { $0.accessibilityLabel() }, ["Personal", "Work", "Dev"])
+    XCTAssertEqual(pager.pages.map { $0.isAccessibilitySelected() }, [true, false, false])
+
+    controller.sidebarController.showSpace(sidebar.spaceOrder[2])
+    controller.rootView.layoutSubtreeIfNeeded()
+    let updatedPage = try element(AXID.Sidebar.page, in: controller)
+    XCTAssertEqual(updatedPage.accessibilityLabel(), "Dev")
+    XCTAssertTrue(updatedPage.isAccessibilitySelected())
+    XCTAssertEqual(pager.pages.map { $0.isAccessibilitySelected() }, [false, false, true])
+    let updatedTitle = try element(AXID.Sidebar.spaceTitle, in: controller)
+    XCTAssertEqual(updatedTitle.accessibilityValue() as? String, "Dev")
+    controller.close()
+  }
+
+  // MARK: Sidebar outline rows, divider and close button (U4b)
+
+  func testSidebarOutlineRowsDividerAndHoverCloseButton() throws {
+    let sidebar = StubSidebar.sample()
+    let space = sidebar.spaceOrder[0]
+    let split = sidebar.addSplit(in: .today(space))
+    let pane0 = sidebar.addTab(url: URL(string: "https://example.com/p0")!, title: "Left Pane", in: .split(split))
+    _ = sidebar.addTab(url: URL(string: "https://example.com/p1")!, title: "Right Pane", in: .split(split))
+    let controller = makeController(sidebar)
+    let page = try XCTUnwrap(controller.sidebarController.currentPage)
+    page.outlineView.layoutSubtreeIfNeeded()
+
+    func inCurrentPage(_ id: String) -> [NSAccessibilityProtocol] {
+      descendants(of: page).filter { identifier(of: $0) == id }.compactMap { $0 as? NSAccessibilityProtocol }
+    }
+
+    let dividers = inCurrentPage(AXID.Sidebar.divider)
+    XCTAssertEqual(dividers.count, 1)
+    XCTAssertEqual(dividers.first?.accessibilityRole(), .splitter)
+
+    let folders = inCurrentPage(AXID.Sidebar.rowFolder)
+    XCTAssertEqual(folders.count, 1)
+    XCTAssertEqual(folders.first?.accessibilityRole(), .row)
+    XCTAssertEqual(folders.first?.accessibilityLabel(), "Trips")
+    XCTAssertEqual(folders.first?.isAccessibilitySelected(), false)
+
+    let pinnedRows = inCurrentPage(AXID.Sidebar.rowPinned)
+    XCTAssertEqual(pinnedRows.count, 4)
+    XCTAssertEqual(pinnedRows.map { $0.accessibilityLabel() },
+                   ["Family Calendar", "Inbox", "Lisbon Itinerary", "Flight Options"])
+    // The initial current tab is the first Pinned tab ("Family Calendar").
+    XCTAssertEqual(pinnedRows.map { $0.isAccessibilitySelected() }, [true, false, false, false],
+                   "the initial current tab's row is selected without enabling outline selection")
+    XCTAssertTrue(page.outlineView.selectedRowIndexes.isEmpty)
+
+    let todayRows = inCurrentPage(AXID.Sidebar.rowToday)
+    XCTAssertEqual(todayRows.count, 5)
+    XCTAssertEqual(todayRows.map { $0.accessibilityLabel() },
+                   ["Weekend Recipes", "Reading List", "Swift Blog", "Left Pane", "Right Pane"])
+    XCTAssertEqual(todayRows.map { $0.isAccessibilitySelected() }, [false, false, false, false, false])
+
+    let splitRows = inCurrentPage(AXID.Sidebar.rowSplit)
+    XCTAssertEqual(splitRows.count, 1)
+    XCTAssertEqual(splitRows.first?.accessibilityLabel(), "Left Pane | Right Pane")
+    XCTAssertEqual(splitRows.first?.isAccessibilitySelected(), false)
+
+    controller.activate(node: pane0)
+    page.outlineView.layoutSubtreeIfNeeded()
+    XCTAssertEqual(inCurrentPage(AXID.Sidebar.rowSplit).first?.isAccessibilitySelected(), true,
+                   "a split row is selected while one of its panes is current")
+    XCTAssertEqual(inCurrentPage(AXID.Sidebar.rowPinned).map { $0.isAccessibilitySelected() },
+                   [false, false, false, false])
+    XCTAssertEqual(inCurrentPage(AXID.Sidebar.rowToday).map { $0.isAccessibilitySelected() },
+                   [false, false, false, true, false])
+
+    XCTAssertEqual(inCurrentPage(AXID.Sidebar.rowClose).count, 0, "close button absent while no row is hovered")
+    let todayNode = sidebar.children(of: .today(space))[0]
+    let todayRowIndex = page.outlineController.row(for: todayNode)
+    let todayRowView = try XCTUnwrap(page.outlineView.rowView(atRow: todayRowIndex, makeIfNecessary: false)
+                                       as? SidebarRowView)
+    todayRowView.isHovered = true
+    let closeButtons = inCurrentPage(AXID.Sidebar.rowClose)
+    XCTAssertEqual(closeButtons.count, 1)
+    XCTAssertEqual(closeButtons.first?.accessibilityRole(), .button)
+    if let firstClose = closeButtons.first {
+      XCTAssertEqual(label(of: firstClose), "Archive this tab")
+    }
+    let todayCell = try XCTUnwrap(page.outlineView.view(atColumn: 0, row: todayRowIndex, makeIfNecessary: false)
+                                    as? SidebarTabCellView)
+    todayRowView.isHovered = false
+    todayCell.setCloseButtonShown(false, animated: false)
+    XCTAssertEqual(inCurrentPage(AXID.Sidebar.rowClose).count, 0)
+    controller.close()
+  }
+
+  // MARK: Favorites grid and tiles (U4b)
+
+  func testFavoritesGridTilesAndCloseButton() throws {
+    let sidebar = StubSidebar.sample()
+    let favorites = sidebar.children(of: .favorites(profile: "default"))
+    let controller = makeController(sidebar)
+    controller.rootView.sidebarContainer.favorites.collectionView.layoutSubtreeIfNeeded()
+
+    let grid = try element(AXID.Favorites.grid, in: controller)
+    XCTAssertEqual(grid.accessibilityRole(), .group)
+
+    let tiles = try elements(AXID.Favorites.tile, in: controller)
+    XCTAssertEqual(tiles.count, 6)
+    for tile in tiles { XCTAssertEqual(tile.accessibilityRole(), .button) }
+    XCTAssertEqual(tiles.map { $0.accessibilityLabel() },
+                   ["Example", "Wikipedia", "Hacker News", "GitHub", "Apple Developer", "Swift"])
+    // The initial current tab is in Pinned, so all six Favorites start unloaded.
+    XCTAssertEqual(tiles.compactMap { $0.accessibilityValue() as? String },
+                   Array(repeating: AXID.Favorites.unloaded, count: 6))
+    XCTAssertEqual(try elements(AXID.Favorites.tileClose, in: controller).count, 0)
+
+    controller.activate(node: favorites[1])
+    controller.rootView.sidebarContainer.favorites.collectionView.layoutSubtreeIfNeeded()
+    let loadedTiles = try elements(AXID.Favorites.tile, in: controller)
+    XCTAssertEqual(loadedTiles.compactMap { $0.accessibilityValue() as? String },
+                   [AXID.Favorites.unloaded, AXID.Favorites.loaded, AXID.Favorites.unloaded,
+                    AXID.Favorites.unloaded, AXID.Favorites.unloaded, AXID.Favorites.unloaded])
+    XCTAssertEqual(try elements(AXID.Favorites.tileClose, in: controller).count, 0,
+                   "close button absent until the loaded tile is hovered")
+
+    let tileView = try XCTUnwrap(controller.rootView.sidebarContainer.favorites.tile(for: favorites[1]))
+    tileView.isHovered = true
+    let close = try element(AXID.Favorites.tileClose, in: controller)
+    XCTAssertEqual(close.accessibilityRole(), .button)
+    XCTAssertEqual(label(of: close), "Close this tab")
+    tileView.isHovered = false
+    tileView.setCloseButtonShown(false, animated: false)
+    XCTAssertEqual(try elements(AXID.Favorites.tileClose, in: controller).count, 0)
+    controller.close()
+  }
 }

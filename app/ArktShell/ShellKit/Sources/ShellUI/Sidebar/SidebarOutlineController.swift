@@ -71,6 +71,10 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// Clicks activate rows; the window drags from empty sidebar space only.
   public override var mouseDownCanMoveWindow: Bool { false }
   public override var needsPanelToBecomeKey: Bool { false }
+
+  public override func accessibilityChildren() -> [Any]? {
+    NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
+  }
 }
 
 /// Data source and delegate for one Space: pinned nodes, a divider, then Today nodes; folders and splits expand.
@@ -310,9 +314,25 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     if let id = item?.nodeID {
       row.isInteractive = true
       row.state = state(for: id)
+      row.setAccessibilityElement(true)
+      row.setAccessibilityIdentifier(rowIdentifier(for: id))
+      row.setAccessibilityLabel(presentation(of: id).0)
     } else {
       row.isInteractive = false
       row.state = .normal
+      row.setAccessibilityElement(false)
+      row.setAccessibilityIdentifier(nil)
+      row.setAccessibilityLabel(nil)
+    }
+  }
+
+  private func rowIdentifier(for id: NodeID) -> String {
+    switch source.node(id) {
+    case .folder?: return AXID.Sidebar.rowFolder
+    case .split?: return AXID.Sidebar.rowSplit
+    case .tab?, nil:
+      if case .pinned? = source.section(containing: id) { return AXID.Sidebar.rowPinned }
+      return AXID.Sidebar.rowToday
     }
   }
 

@@ -46,4 +46,39 @@ public enum AXID {
     /// Value of `root` for a toast that hides after its duration.
     public static let timed = "timed"
   }
+
+  /// Sidebar chrome, Space dock, Space pages and outline rows (group U4b).
+  public enum Sidebar {
+    /// Value: the displayed host of the shown tab.
+    public static let urlBar = "sidebar.urlBar"
+    public static let newTab = "sidebar.newTab"
+    public static let spaceDots = "sidebar.spaceDots"
+    /// Label: Space title. Selected: current Space.
+    public static let spaceDot = "sidebar.spaceDot"
+    /// Label: Space title. Selected: current Space's page.
+    public static let page = "sidebar.page"
+    public static let spaceTitle = "sidebar.spaceTitle"
+    /// Label: row title. Selected: row state is `current`.
+    public static let rowPinned = "sidebar.row.pinned"
+    /// Label: row title. Selected: row state is `current`.
+    public static let rowToday = "sidebar.row.today"
+    /// Label: folder title.
+    public static let rowFolder = "sidebar.row.folder"
+    /// Label: joined pane titles. Selected: any pane of the split is `current`.
+    public static let rowSplit = "sidebar.row.split"
+    public static let divider = "sidebar.divider"
+    /// Present only while the row's close button is shown. Label: tooltip.
+    public static let rowClose = "sidebar.row.close"
+  }
+
+  /// Favorites grid and tiles at the top of the sidebar (group U4b).
+  public enum Favorites {
+    public static let grid = "favorites.grid"
+    /// Label: title. Value: `loaded` or `unloaded`.
+    public static let tile = "favorites.tile"
+    /// Present only while a loaded tile is hovered.
+    public static let tileClose = "favorites.tile.close"
+    public static let loaded = "loaded"
+    public static let unloaded = "unloaded"
+  }
 }
