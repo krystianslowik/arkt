@@ -183,7 +183,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     lastFrameInterval = link.targetTimestamp - link.timestamp
     lastShowLatency = latency
     endSignpost()
-    ShellSignposts.logger.info("commandbar.show ms=\(latency * 1000, format: .fixed(precision: 2))")
+    ShellSignposts.logger.notice("commandbar.show ms=\(latency * 1000, format: .fixed(precision: 2))")
     onFirstFrame?(latency)
   }
 
