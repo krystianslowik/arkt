@@ -924,7 +924,8 @@ asserted=no`. Debug app build: `** BUILD SUCCEEDED **`.
 - [I] PARITY(NEEDS-RUNTIME-CHECK): the menu title and place and the confirmation wording; the parity spec has no
   Delete Space flow. No Space context menu exists yet.
 
-Checks (`nice -n 10`, `-j 4`): ArktCore 342 tests (342 + 0), 0 failures. ShellKit `--skip ShellKitGUITests`: Swift
-Testing 453 tests (450 + 3 in `SpaceRemovalPromptTests`), 0 failures. ShellKit `--filter ShellKitGUITests`: XCTest
-349 tests (340 + 9: 8 in `DeleteSpaceTests`, 1 in `MainMenuKeyEquivalentTests`), 0 failures; pacing asserted,
-`space-swipe` and `space-key` 0 frames over 8.6 ms (load 3.09). Debug app build: `** BUILD SUCCEEDED **`.
+Checks (`nice -n 10`, `-j 4`, rebased on #216): ArktCore 342 tests (342 + 0), 0 failures. ShellKit
+`--skip ShellKitGUITests`: Swift Testing 455 tests (452 + 3 in `SpaceRemovalPromptTests`), 0 failures. ShellKit
+`--filter ShellKitGUITests`: XCTest 350 tests (341 + 9: 8 in `DeleteSpaceTests`, 1 in `MainMenuKeyEquivalentTests`),
+0 failures; pacing not asserted at load 11.65 (`space-key` 2 frames over 8.6 ms; before the rebase, at load 3.09,
+`space-swipe` and `space-key` 0 frames, asserted). Debug app build: `** BUILD SUCCEEDED **`.
