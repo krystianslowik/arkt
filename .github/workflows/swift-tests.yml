@@ -176,6 +176,56 @@ jobs:
             -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \
             CODE_SIGNING_ALLOWED=NO build
 
+  # XCUITest suite against the Debug app with the FakeEngine. Informative until promoted (UI test plan, decision 8):
+  # not in the gate's needs. The runner needs the ad-hoc signature, so no CODE_SIGNING_ALLOWED=NO here.
+  ui-tests:
+    name: UI tests (informative)
+    runs-on: macos-26
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - name: Install XcodeGen ${{ env.XCODEGEN_VERSION }}
+        run: |
+          dir=$RUNNER_TEMP/xcodegen
+          mkdir -p $dir
+          curl -fsSL -o $dir/xcodegen.zip \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          print "$XCODEGEN_SHA256  $dir/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q $dir/xcodegen.zip -d $dir
+          print "$dir/xcodegen/bin" >> $GITHUB_PATH
+      # Restore only: the app job saves this key, a second save from here would only fail with "already exists".
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/ArktShell/build/SourcePackages
+          key: app-spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/ArktCore/Package.resolved', 'app/ArktShell/ShellKit/Package.resolved') }}
+          restore-keys: app-spm-${{ runner.os }}-${{ runner.arch }}-
+      - name: xcodegen generate
+        working-directory: app/ArktShell
+        run: xcodegen --version && xcodegen generate
+      - name: xcodebuild test
+        working-directory: app/ArktShell
+        # TEST_RUNNER_* values reach the test runner only through the process environment, not as build settings.
+        env:
+          TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE: "3"
+        run: |
+          xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages -resultBundlePath $RUNNER_TEMP/ui.xcresult \
+            -parallel-testing-enabled NO test
+      - name: Upload the result bundle
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-tests-xcresult
+          path: ${{ runner.temp }}/ui.xcresult
+          retention-days: 7
+          if-no-files-found: ignore
+
   # The one check to require on main: passes only when every required job above passed.
   gate:
     name: Swift tests
