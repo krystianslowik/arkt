@@ -154,3 +154,8 @@ Baselines run on `main` at `772f94c` before this change; all pass, before and af
 | ArktCore | not touched | | |
 
 Debug app build: `** BUILD SUCCEEDED **`. No change to `AppSession.swift`: the model wires itself to the coordinator.
+
+## Manual checks pending (#26)
+
+Quit within the save window and the recovery toast: pending. It needs a Debug build, because the Release build ignores
+`ARKT_DATA_DIR`. See "Manual checks (#26)" in `2026-10-22-track-c-results.md`.

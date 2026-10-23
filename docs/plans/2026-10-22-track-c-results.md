@@ -800,3 +800,18 @@ Checks (rebased on #187 and #189): `nice -n 10 swift test -j 4` in ShellKit: Swi
 285 tests (280 + 5 in `URLBarTests`, GUI included), 0 failures. Pacing asserted: `space-swipe` and `space-key` 0 frames
 over 8.6 ms (load 9.79 on 10 cores); command bar earliest frame not asserted (load 11.7, `p95=16.81 bound=18.05`).
 Debug app build: `** BUILD SUCCEEDED **`.
+
+## Manual checks (#26) (2026-10-23)
+
+Maintainer pass on the Release build of `main` at `ba0c281` (ad-hoc signed), 120 Hz display. Issue #26 stays open: three
+checks remain.
+
+- Trackpad Space swipes: PASS. 20 real two-finger swipes (both directions) logged 20 `pacing label=space-swipe` lines
+  from the app process; every one had `over8.6=0`, `maxMs=8.33`, `p99Ms=8.33`, frames 22 to 77. No hitches. The xctest
+  lines in the same window came from concurrent automated test runs and are excluded.
+- Cmd-T with the window in fullscreen: PASS. The command bar opens correctly.
+- Cmd-T on a second desktop: not run yet.
+- Move between a 1x and a 2x display: not run yet.
+- Quit within the save window and the recovery toast: not run yet. The Release build ignores `ARKT_DATA_DIR` by design
+  (environment overrides are honoured only in Debug and Profile builds), so this check, like the save one in the Track E
+  results, must use a Debug build.
