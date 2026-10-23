@@ -1748,6 +1748,14 @@ the archive's root ids (and their snapshot descendants) to the keep set, which n
 launch so the prune stays cheap, or accept the placeholder and document it. Whichever is chosen, the prune must
 still run before any favicon write (`FaviconWriter(after:)`).
 
+**Decided (E5c): archived node ids count as kept.** The launch prune keeps the sidebar's node ids plus the root and
+snapshot-descendant ids of every readable archive entry (`CoreBridge.FaviconRetention.keptIDs`, one off-main
+`items(matching:limit: nil)` read inside the prune task, so favicon writes still wait for it). An archive that cannot
+be read skips the prune for that launch; unreadable rows contribute no ids (they can be neither shown nor restored).
+No new store API: the read reuses `ArchiveStoring`. After a restore the app loads the restored subtree's favicons from
+the folder, because the sidebar drops a node's cached favicon when the node leaves (also within one session). A
+restore under fresh ids (the original id was taken) still shows the letter placeholder until the engine reports one.
+
 **Step 1: Failing tests**
 
 `ArchiveListModelTests` (fake store with 450 readable items and 3 unreadable rows):

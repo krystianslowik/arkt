@@ -142,8 +142,8 @@ final class AppSession {
 
   // MARK: - Favicons
 
-  /// Decision 8 plus the launch rules: the prune runs once, at launch, with the node ids loaded from the database,
-  /// and every favicon write (engine or import) is queued behind it, so the prune can never remove a favicon written
+  /// Decision 8 plus the launch rules: the prune runs once, at launch, with the node ids loaded from the database
+  /// and the ids of every archived node (E5c, `FaviconRetention`), and every favicon write (engine or import) is queued behind it, so the prune can never remove a favicon written
   /// after launch. It runs only when the database opened normally (`prune`): after a restore from backup or an empty
   /// re-creation the loaded sidebar is not the one the favicons were written for, and pruning against it would
   /// delete favicons of nodes the user may get back. The stored favicons are then loaded once; ids the engine
@@ -151,7 +151,12 @@ final class AppSession {
   private func startFavicons(prune: Bool) {
     guard let store = faviconStore else { return }
     let ids = Set(source.sidebar.nodes.keys)
-    let pruning: Task<Void, Never>? = prune ? Task { await store.prune(keeping: ids) } : nil
+    // Archived nodes count as kept (E5c), so a restore under the same id gets its favicon back; an unreadable
+    // archive skips the prune.
+    let pruning: Task<Void, Never>? = prune ? Task { [archiveStore] in
+      guard let kept = await FaviconRetention.keptIDs(sidebar: ids, archive: archiveStore) else { return }
+      await store.prune(keeping: kept)
+    } : nil
     let writer = FaviconWriter(store: store, after: pruning)
     faviconWriter = writer
     window.onFaviconChanged = { [weak writer] id, data in writer?.record(data, for: id) }
@@ -161,6 +166,41 @@ final class AppSession {
       guard let self, let writer = self.faviconWriter else { return }
       self.window.sidebarController.setFavicons(loaded.filter { !writer.touched.contains($0.key) })
       writer.launchLoadDidComplete()
+    }
+  }
+
+  // MARK: - Archive window (E5c)
+
+  private var archiveWindow: ArchiveWindowController?
+
+  /// Window > Show Archive: creates the window on first use, then fronts it and reloads its first page.
+  func showArchive() {
+    if let archiveWindow {
+      archiveWindow.show()
+      return
+    }
+    let model = ArchiveListModel(source: source, store: archiveStore, coordinator: archive)
+    // The source Space wins; when it is gone the item lands in the Space on screen (BH-157 routing comes later).
+    model.currentSpaceProvider = { [weak self] in self?.window.currentSpace }
+    model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
+    let controller = ArchiveWindowController(dataSource: model)
+    archiveWindow = controller
+    controller.show()
+  }
+
+  /// BH-086: the restore toast in the browser window; "View" focuses the restored item. The item's favicons come
+  /// back from the favicon folder (the sidebar dropped them when the item left).
+  private func didRestore(_ restored: RestoredItem, toast text: String) {
+    window.toasts.show(Toast(text: text, actionTitle: "View")) { [weak self] in
+      guard let self else { return }
+      self.window.showWindow(nil)
+      self.window.activate(node: restored.nodeID)
+    }
+    guard let store = faviconStore, let snapshot = source.sidebar.snapshot(of: restored.nodeID) else { return }
+    let ids = Set(FaviconRetention.ids(in: snapshot))
+    Task { [weak self] in
+      let loaded = await store.loadAll(for: ids)
+      self?.window.sidebarController.setFavicons(loaded)
     }
   }
 
