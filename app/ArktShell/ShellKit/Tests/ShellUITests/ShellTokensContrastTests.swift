@@ -125,6 +125,14 @@ enum ShellTokenSites {
     [nil, ShellTokens.sidebarItemBackground.resolve(flavor), ShellTokens.sidebarItemHovered.resolve(flavor)]
   }
 
+  /// `primaryText` is text: row titles and row symbols (`SidebarTabCellView`, on whichever fill the row has, or
+  /// none) and the active page dot (`SidebarContainerView`, on the theme).
+  static func primaryTextLayers(_ flavor: ThemeFlavor) -> [ShellContrastProbe.Layer?] {
+    let rowFills = [ShellTokens.tabCurrent, ShellTokens.tabContentVisible, ShellTokens.sidebarItemHovered,
+                    ShellTokens.tabPrevious, ShellTokens.tabPreviousHovered, ShellTokens.tabPressed]
+    return [nil] + rowFills.map { $0.resolve(flavor) }
+  }
+
   /// `sidebarForeground` is icon-only: idle page dots and bottom-bar symbols (`SidebarContainerView`, on the
   /// theme) and the hover close X (`SidebarTabCellView`, on whichever row fill the hovered row has).
   static func sidebarForegroundLayers(_ flavor: ThemeFlavor) -> [ShellContrastProbe.Layer?] {
@@ -174,6 +182,13 @@ struct ShellTokensContrastTests {
   }
 
   // MARK: Text, WCAG 2.x AA 4.5:1
+
+  @Test(arguments: flavors)
+  func primaryTextReadsOnEveryShippedSurface(flavor: ThemeFlavor) {
+    let text = ShellTokens.primaryText.resolve(flavor)
+    let worst = ShellContrastProbe.worstCase(text, flavor: flavor, layers: ShellTokenSites.primaryTextLayers(flavor))
+    #expect(worst >= Contrast.minimumText, "primaryText \(flavor): \(worst)")
+  }
 
   @Test(arguments: flavors)
   func secondaryTextReadsOnEveryShippedSurface(flavor: ThemeFlavor) {
