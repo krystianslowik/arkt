@@ -50,6 +50,24 @@ struct InMemoryEngineTests {
     #expect(engine.snapshot(of: id)?.url == a)
   }
 
+  /// Like a reload: the history is left as it was, so Back finds no duplicate and Forward still works.
+  @Test func navigatingToTheCurrentURLLeavesTheHistoryAlone() {
+    let engine = InMemoryEngine()
+    let (a, b) = (URL(string: "arkt-test://page/A")!, URL(string: "arkt-test://page/B")!)
+    let id = engine.createTab(url: a)
+    engine.navigate(id, to: b)
+    engine.goBack(id)
+    engine.navigate(id, to: a)
+    #expect(engine.snapshot(of: id)?.url == a)
+    let recorder = EventRecorder(engine)
+    engine.goBack(id)
+    #expect(recorder.events.isEmpty, "no back entry for the URL the tab already shows")
+    engine.goForward(id)
+    #expect(engine.snapshot(of: id)?.url == b, "the forward entry survives")
+    engine.goBack(id)
+    #expect(engine.snapshot(of: id)?.url == a)
+  }
+
   @Test func sameHostNavigationKeepsFavicon() {
     let engine = InMemoryEngine()
     let id = engine.createTab(url: URL(string: "arkt-test://alpha.test/A")!)
