@@ -187,9 +187,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # First, before anything is built: no sleeps and no URL other than the loopback fixture server in the suite.
+      # First, before anything is built (plan, Rules "No sleeps" and "No network"): no file under
+      # app/ArktShell/UITests waits on time or names an http(s) URL other than the loopback fixture server
+      # (http://127.0.0.1) and the Arc fixture placeholder (https://example.com, only in Harness/ArcFixture.swift,
+      # which rewrites it to the loopback server). Each grep succeeds only when it prints an offending line.
       - name: Check UI test sources
-        run: scripts/ui-tests/check-sources.sh
+        working-directory: app/ArktShell/UITests
+        run: |
+          failed=0
+          if grep -rnE 'sleep\(|usleep\(|Thread\.sleep|Task\.sleep' .; then
+            print -r -- "Sleeps in UI tests above (wait on accessibility state instead)"
+            failed=1
+          fi
+          if grep -rnoE 'https?://[^[:space:]"'\''<>()\\`]*' . \
+            | grep -vE '^[^:]+:[0-9]+:http://127\.0\.0\.1([:/]|$)' \
+            | grep -vE '^\./Harness/ArcFixture\.swift:[0-9]+:https://example\.com([:/]|$)'; then
+            print -r -- "URLs other than http://127.0.0.1 in UI tests above (the network is never touched)"
+            failed=1
+          fi
+          (( failed )) && exit 1
+          print "UI test sources OK"
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}

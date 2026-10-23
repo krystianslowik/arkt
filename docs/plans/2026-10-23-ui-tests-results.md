@@ -392,7 +392,8 @@ build running; `nice -n 10`, `-jobs 4`.
 - `UITests/LoopbackPageTests.swift`: `test_E_loopbackPageLoadsInTheEngine`. Cmd-T on an empty profile (the shell
   creates the first Space), type `<base>/p/alpha` into `commandBar.field`, Return, then wait for the sidebar row's
   title `Fixture alpha` and check the server log has `/p/alpha`.
-- `scripts/ui-tests/check-sources.sh` (zsh): fails on `sleep(`, `usleep(`, `Thread.sleep`, `Task.sleep`, and on any
+- `Check UI test sources`, an inline zsh step of the `ui-tests` job in `.github/workflows/swift-tests.yml` (no
+  script): fails on `sleep(`, `usleep(`, `Thread.sleep`, `Task.sleep`, and on any
   `http(s)://` under `app/ArktShell/UITests` other than `http://127.0.0.1` (followed by `:`, `/` or the end) and
   `https://example.com` in `Harness/ArcFixture.swift` only.
 - `project.yml` (own commit): the `ArktShellUITests` target gets an entitlements file,
@@ -405,7 +406,7 @@ build running; `nice -n 10`, `-jobs 4`.
 
 | Check | Result |
 |---|---|
-| `check-sources.sh` on the branch | `UI test sources OK`, exit 0 |
+| `Check UI test sources` step on the branch | `UI test sources OK`, exit 0 |
 | Temporary `sleep(1)` in `LoopbackPageTests.swift` (reverted) | lists `./LoopbackPageTests.swift:25:    sleep(1)`, exit 1 |
 | Temporary `Task.sleep`, `Thread.sleep`, `usleep` line (reverted) | listed, exit 1 |
 | Temporary `https://www.example.org/x`, `http://127.0.0.1.evil.test/`, `https://example.com/a` outside `ArcFixture.swift` (reverted) | all three listed, exit 1 |
