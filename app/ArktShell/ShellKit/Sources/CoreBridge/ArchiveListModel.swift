@@ -12,7 +12,8 @@ import SidebarModel
 /// Entries still in the coordinator's outbox (a slow or failing archive write) are listed with every page (#88):
 /// merged with the store's items newest first, one row per id (the newer entry wins), restorable like any row.
 /// The model sets the coordinator's `onPendingItemsChange` and passes it on as `onChange`, so the window refreshes
-/// when an entry is archived or its write lands.
+/// when an entry is archived or its write lands. Space changes (`.spaces`) are passed on too (#89): they decide
+/// `canRestore` and the Space titles in the rows.
 @MainActor
 public final class ArchiveListModel: ArchiveListDataSource {
   nonisolated public static let pageSize = 200
@@ -43,6 +44,7 @@ public final class ArchiveListModel: ArchiveListDataSource {
   private var restored: [UUID: Date] = [:]
   /// Bumped by every load, so a slower, older load never overwrites the state a newer one set.
   private var generation = 0
+  private var spaceObservation: SidebarObservation?
 
   public init(
     source: ModelSidebarSource, store: any ArchiveStoring, coordinator: ArchiveCoordinator,
@@ -57,6 +59,9 @@ public final class ArchiveListModel: ArchiveListDataSource {
     formatter.unitsStyle = .full
     formatter.dateTimeStyle = .numeric
     coordinator.onPendingItemsChange = { [weak self] in self?.onChange?() }
+    spaceObservation = source.observe { [weak self] change in
+      if case .spaces = change { self?.onChange?() }
+    }
   }
 
   // MARK: - ArchiveListDataSource

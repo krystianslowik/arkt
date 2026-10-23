@@ -159,3 +159,24 @@ Debug app build: `** BUILD SUCCEEDED **`. No change to `AppSession.swift`: the m
 
 Quit within the save window and the recovery toast: pending. It needs a Debug build, because the Release build ignores
 `ARKT_DATA_DIR`. See "Manual checks (#26)" in `2026-10-22-track-c-results.md`.
+
+## Archive window: Restore after a Space is created (#89)
+
+Follow-up to E5c (#49, "Not done"). Base `main` at `a79d75f`; `nice -n 10`, `-j 4`.
+
+- `ArchiveListModel` observes its `ModelSidebarSource` and passes `.spaces` changes on as `onChange`, like the
+  outbox changes from #88. The window refreshes while on screen, and `apply` re-evaluates Restore, so a Space created
+  with the window open enables Restore without a selection change. The refresh also re-words the rows' Space titles.
+  Tab changes (`.structure`, `.node`) are not passed on, so tab edits cause no store read.
+- Built on the existing `.spaces` change; no Space-level event API from #86 is needed or added. When #86 splits
+  `.spaces` into finer events, this observer matches the ones that change `spaceOrder` or a Space's title.
+
+Baselines are the final counts minus the new tests; all pass.
+
+| Suite | Baseline | Final | Delta |
+|---|---|---|---|
+| ArktCore `swift test` | 336 | 336 | not touched |
+| ShellKit `swift test --skip ShellKitGUITests` | 424 | 425 | +1 `ArchiveListModelTests` |
+| ShellKit `swift test --filter ShellKitGUITests` (XCTest) | 310 | 311 | +1 `ArchiveWindowTests` |
+
+Debug app build: `** BUILD SUCCEEDED **`. No change to `AppSession.swift`.
