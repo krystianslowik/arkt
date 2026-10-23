@@ -28,7 +28,9 @@ public enum ShellTokens {
   public static let sidebarForeground = TokenPair(light: .black(0.48), dark: .white(0.57))
   public static let sidebarItemBackground = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.05), dark: .p3(hex: 0xFAFBFF, alpha: 0.10))
   public static let sidebarItemHovered = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.10), dark: .p3(hex: 0xFAFBFF, alpha: 0.15))
-  public static let primaryText = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.90), dark: .white(0.80))
+  /// Text (row titles, row symbols, the active page dot): WCAG AA 4.5:1 over every shipped Space theme and row
+  /// fill. Dark raised from Arc's 0.80 (#146); the worst case is `tabCurrent` over the Dev theme's light stop.
+  public static let primaryText = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.90), dark: .white(0.84))
   /// Text (Space title, URL bar label, toolbar buttons): WCAG AA 4.5:1 over every shipped Space theme, the URL bar
   /// fills and the toolbar strip. Raised from Arc's 0.50 / 0.50 (#72); the worst case is the hovered URL bar
   /// (`sidebarItemHovered`) over the sample pink stop (light) and the Dev theme's light stop (dark).

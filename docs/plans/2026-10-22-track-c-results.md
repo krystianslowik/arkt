@@ -539,10 +539,35 @@ One step lower (0.63, 0.75, 0.47, 0.56) fails each case, so these are the smalle
 order primary > secondary > sidebar foreground holds in both modes and is asserted. Arc parity: both tokens are
 now darker (light) and brighter (dark) than Arc's levels.
 
-Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over `#2D4468`, below 4.5.
+Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over `#2D4468`, below 4.5 (fixed in
+#146, below).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 334 tests (327 plus 7 new), XCTest 181 tests
 (GUI included), 0 failures. Debug app build: `** BUILD SUCCEEDED **`.
+
+## Text contrast of primaryText (#146)
+
+`primaryText` colors row titles, row symbols and the active page dot. `ShellTokensContrastTests` now measures it
+with the same probe as #72: 4.5:1 over every shipped Space theme surface, bare and under each row fill
+(`tabCurrent`, `tabContentVisible`, `sidebarItemHovered`, `tabPrevious`, `tabPreviousHovered`, `tabPressed`).
+
+| Token | Mode | Before | After | Worst surface |
+|---|---|---|---|---|
+| `primaryText` | light | 0.90: 6.83:1 | unchanged | |
+| `primaryText` | dark | 0.80: 4.27:1 | 0.84: 4.52:1 | `tabCurrent` over the Dev stop `#2D4468` |
+
+0.83 gives 4.46:1, so 0.84 is the smallest passing level at 0.01. The fix raises the text level instead of lowering
+`tabCurrent` dark (0.17 would also pass) because it changes one token, keeps the current row clearly brighter than
+`tabContentVisible` (0.15), and leaves the `secondaryText` and `sidebarForeground` cases untouched. The order
+primary > secondary (0.76) > sidebar foreground (0.57) still holds. Arc parity: dark row titles are brighter than
+Arc's 0.80.
+
+Not covered: the letter tile shown for rows without a favicon draws `primaryText` on `sidebarItemHovered` on top of
+the row fill. In dark mode on `tabCurrent` over `#2D4468` that nested fill stays below 4.5:1 even at white 1.0
+(about 4.1:1), so it needs a change to the tile itself rather than the text level.
+
+Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 338 tests, XCTest 182 tests (GUI included), 0
+failures. Debug app build: `** BUILD SUCCEEDED **`.
 
 ## Toolbar Back and Forward enabled state (#79)
 
