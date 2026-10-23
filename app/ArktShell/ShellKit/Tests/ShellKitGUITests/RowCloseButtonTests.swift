@@ -209,6 +209,149 @@ final class RowCloseButtonTests: XCTestCase {
     harness.controller.close()
   }
 
+  // MARK: Hover resync
+
+  /// The resync reads the pointer in any visible window, key or not (tracking areas are active always, so a
+  /// background window shows hover too): the row under the pointer is hovered, the others are not.
+  func testResyncHoversTheRowUnderThePointerInANonKeyWindow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let outline = try XCTUnwrap(harness.controller.sidebarController.view.currentOutline)
+    let window = try XCTUnwrap(outline.window)
+    let row = try harness.rowView(world.today[0])
+    let other = try harness.rowView(world.today[1])
+    other.isHovered = true
+    let pointer = HoverPointerStub(window: window)
+    pointer.move(toCenterOf: row)
+    outline.hoverPointerLookup = pointer.lookup
+    XCTAssertFalse(window.isKeyWindow)
+
+    outline.resyncHoverWithPointer()
+
+    XCTAssertTrue(row.isHovered)
+    XCTAssertTrue(try harness.cell(world.today[0]).isCloseButtonShown)
+    XCTAssertFalse(other.isHovered, "a row the pointer left while it did not move drops its hover")
+    XCTAssertFalse(try harness.cell(world.today[1]).isCloseButtonShown)
+    harness.controller.close()
+  }
+
+  /// A child panel (the command bar) or any other window over the pointer: no row stays hovered under it.
+  func testResyncClearsHoverWhenAnotherWindowCoversThePointer() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let outline = try XCTUnwrap(harness.controller.sidebarController.view.currentOutline)
+    let window = try XCTUnwrap(outline.window)
+    let row = try harness.rowView(world.today[0])
+    row.isHovered = true
+    let pointer = HoverPointerStub(window: window)
+    pointer.move(toCenterOf: row)
+    pointer.coveringWindowNumber = window.windowNumber + 1
+    outline.hoverPointerLookup = pointer.lookup
+
+    outline.resyncHoverWithPointer()
+
+    XCTAssertFalse(row.isHovered)
+    XCTAssertFalse(try harness.cell(world.today[0]).isCloseButtonShown)
+    harness.controller.close()
+  }
+
+  /// A window that is not on screen keeps its hover state; nothing is read from the window server.
+  func testResyncSkipsAWindowThatIsNotVisible() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let outline = try XCTUnwrap(harness.controller.sidebarController.view.currentOutline)
+    let row = try harness.rowView(world.today[0])
+    row.isHovered = true
+    let pointer = HoverPointerStub(window: try XCTUnwrap(outline.window))
+    pointer.isVisible = false
+    outline.hoverPointerLookup = pointer.lookup
+
+    outline.resyncHoverWithPointer()
+
+    XCTAssertTrue(row.isHovered)
+    XCTAssertEqual(pointer.windowServerQueries, 0)
+    harness.controller.close()
+  }
+
+  /// Every row updates its tracking areas on a scroll; the outline coalesces them into one window-server query on
+  /// the next main-queue turn.
+  func testTrackingAreaUpdatesOfAllRowsQueryTheWindowServerOnce() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let outline = try XCTUnwrap(harness.controller.sidebarController.view.currentOutline)
+    let row = try harness.rowView(world.today[2])
+    let pointer = HoverPointerStub(window: try XCTUnwrap(outline.window))
+    pointer.move(toCenterOf: row)
+    outline.hoverPointerLookup = pointer.lookup
+    var rows: [SidebarRowView] = []
+    outline.enumerateAvailableRowViews { rowView, _ in
+      if let rowView = rowView as? SidebarRowView { rows.append(rowView) }
+    }
+    XCTAssertGreaterThan(rows.count, 3)
+
+    for rowView in rows { rowView.updateTrackingAreas() }
+    XCTAssertEqual(pointer.windowServerQueries, 0, "coalesced to the next turn")
+    drainMainQueue()
+
+    XCTAssertEqual(pointer.windowServerQueries, 1)
+    XCTAssertTrue(row.isHovered)
+    XCTAssertEqual(rows.filter(\.isHovered).count, 1)
+    harness.controller.close()
+  }
+
+  // MARK: Fade
+
+  /// Hover out during the fade-in: the fade-out starts from the opacity on screen (no jump to full opacity first),
+  /// and the replaced fade-in's completion does not hide the X early (no pop).
+  func testFadeOutInterruptingAFadeInStartsFromTheCurrentOpacity() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let row = try harness.rowView(world.today[0])
+    let button = try harness.cell(world.today[0]).closeButton
+    button.reducesMotion = { false }
+    button.fadeDuration = 1
+    row.isHovered = true
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.3))
+    let midway = button.displayedOpacity
+    XCTAssertGreaterThan(midway, 0.05)
+    XCTAssertLessThan(midway, 0.95)
+
+    row.isHovered = false
+    let fade = try XCTUnwrap(button.layer?.animation(forKey: "opacity") as? CABasicAnimation)
+    XCTAssertEqual((fade.fromValue as? NSNumber)?.doubleValue ?? -1, Double(midway), accuracy: 0.1)
+    XCTAssertEqual(fade.duration, Double(midway), accuracy: 0.1, "the remaining distance at the same speed")
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+    XCTAssertFalse(button.isHidden, "still fading out")
+
+    let hidden = expectation(description: "hidden after the fade-out")
+    Task { @MainActor in
+      while !button.isHidden { try? await Task.sleep(for: .milliseconds(20)) }
+      hidden.fulfill()
+    }
+    wait(for: [hidden], timeout: 3)
+    harness.controller.close()
+  }
+
+  /// Reduce Motion: the X appears and hides at once, without a fade.
+  func testReduceMotionShowsAndHidesTheCloseButtonWithoutAFade() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let row = try harness.rowView(world.today[0])
+    let button = try harness.cell(world.today[0]).closeButton
+    button.reducesMotion = { true }
+
+    row.isHovered = true
+    XCTAssertEqual(button.alphaValue, 1)
+    XCTAssertFalse(button.isHidden)
+    XCTAssertNil(button.layer?.animation(forKey: "opacity"))
+
+    row.isHovered = false
+    XCTAssertEqual(button.alphaValue, 0)
+    XCTAssertTrue(button.isHidden)
+    XCTAssertNil(button.layer?.animation(forKey: "opacity"))
+    harness.controller.close()
+  }
+
   // MARK: Tooltips
 
   /// GS-043 [S]: "Archive this tab" on Today, "Close and Keep Pinned" on pinned; panes read like tabs (decision 4).

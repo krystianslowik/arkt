@@ -10,7 +10,7 @@ public final class SidebarTabCellView: NSTableCellView {
   public let titleField = NSTextField(labelWithString: "")
   /// Shown while the row is hovered and the row has a close action. Its target and action are set by the
   /// outline controller; it is hidden (so neither hit-tested nor in the accessibility tree) otherwise.
-  public let closeButton = NSButton()
+  public let closeButton = HoverCloseButton()
 
   /// What the X does for this row; nil (folders) never shows it.
   public private(set) var closeAction: RowCloseAction?
@@ -28,14 +28,6 @@ public final class SidebarTabCellView: NSTableCellView {
     titleField.maximumNumberOfLines = 1
     titleField.cell?.truncatesLastVisibleLine = true
     titleField.autoresizingMask = []
-    closeButton.isBordered = false
-    closeButton.bezelStyle = .regularSquare
-    closeButton.imagePosition = .imageOnly
-    closeButton.imageScaling = .scaleNone
-    closeButton.autoresizingMask = []
-    closeButton.wantsLayer = true
-    closeButton.isHidden = true
-    closeButton.alphaValue = 0
     addSubview(faviconView)
     addSubview(titleField)
     addSubview(closeButton)
@@ -68,22 +60,7 @@ public final class SidebarTabCellView: NSTableCellView {
     guard shown != isCloseButtonShown || !animated else { return }   // unanimated calls always settle the state
     isCloseButtonShown = shown
     layoutTitle()
-    if shown { closeButton.isHidden = false }
-    guard animated, window != nil else {
-      closeButton.alphaValue = shown ? 1 : 0
-      closeButton.isHidden = !shown
-      return
-    }
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = SidebarMetrics.closeButtonFadeDuration
-      context.allowsImplicitAnimation = true
-      closeButton.animator().alphaValue = shown ? 1 : 0
-    } completionHandler: { [weak self] in
-      MainActor.assumeIsolated {
-        guard let self, !self.isCloseButtonShown else { return }
-        self.closeButton.isHidden = true      // a faded-out X takes no clicks
-      }
-    }
+    closeButton.setShown(shown, animated: animated)
   }
 
   public override func prepareForReuse() {

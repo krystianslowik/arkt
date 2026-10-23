@@ -7,7 +7,7 @@ public final class FavoriteTileView: NSView {
   public let faviconView = NSImageView()
   /// Shown while the tile is hovered and has a close action (its page is loaded). Target and action are set by the
   /// grid; hidden (so neither hit-tested nor in the accessibility tree) otherwise.
-  public let closeButton = NSButton()
+  public let closeButton = HoverCloseButton()
   public var flavor: ThemeFlavor = .light {
     didSet {
       guard flavor != oldValue else { return }
@@ -45,14 +45,6 @@ public final class FavoriteTileView: NSView {
     faviconView.imageScaling = .scaleProportionallyUpOrDown
     faviconView.autoresizingMask = []
     faviconView.setAccessibilityElement(false)
-    closeButton.isBordered = false
-    closeButton.bezelStyle = .regularSquare
-    closeButton.imagePosition = .imageOnly
-    closeButton.imageScaling = .scaleNone
-    closeButton.autoresizingMask = []
-    closeButton.wantsLayer = true
-    closeButton.isHidden = true
-    closeButton.alphaValue = 0
     addSubview(faviconView)
     addSubview(closeButton)
     setAccessibilityElement(true)
@@ -113,22 +105,7 @@ public final class FavoriteTileView: NSView {
     let shown = shown && closeAction != nil
     guard shown != isCloseButtonShown || !animated else { return }   // unanimated calls always settle the state
     isCloseButtonShown = shown
-    if shown { closeButton.isHidden = false }
-    guard animated, window != nil else {
-      closeButton.alphaValue = shown ? 1 : 0
-      closeButton.isHidden = !shown
-      return
-    }
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = SidebarMetrics.closeButtonFadeDuration
-      context.allowsImplicitAnimation = true
-      closeButton.animator().alphaValue = shown ? 1 : 0
-    } completionHandler: { [weak self] in
-      MainActor.assumeIsolated {
-        guard let self, !self.isCloseButtonShown else { return }
-        self.closeButton.isHidden = true      // a faded-out X takes no clicks
-      }
-    }
+    closeButton.setShown(shown, animated: animated)
   }
 
   public override func updateTrackingAreas() {
@@ -138,7 +115,7 @@ public final class FavoriteTileView: NSView {
                               owner: self, userInfo: nil)
     addTrackingArea(area)
     hoverArea = area
-    resyncHoverWithPointer { syncHover(pointerInWindow: $0) }   // a tile shifted or reused under a still pointer
+    setNeedsHoverResyncInHost()                     // a tile shifted or reused under a still pointer
   }
 
   /// Sets the hover state from a pointer location in window coordinates (nil: the pointer is not over this window).
@@ -180,7 +157,7 @@ public final class FavoriteTileItem: NSCollectionViewItem {
 /// Favorites grid: an NSCollectionView with a flow layout (3 columns, 9 pt gaps). Not inside a scrolling clip;
 /// its height is `FavoritesLayout.height(itemCount:)`. Shared by every Space of the same profile (BH-045).
 @MainActor
-public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSCollectionViewDelegate {
+public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSCollectionViewDelegate, HoverResyncHost {
   public let source: any SidebarSource
   public let profile: String
   public let collectionView = NSCollectionView(frame: .zero)
@@ -196,6 +173,16 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   public var pageLoadedProvider: (@MainActor (NodeID) -> Bool)?
 
   private let flowLayout = NSCollectionViewFlowLayout()
+  private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
+    for case let item as FavoriteTileItem in collectionView.visibleItems() {
+      item.tileView.syncHover(pointerInWindow: pointer)
+    }
+  }
+  /// Where hover resyncs read the pointer; tests replace it.
+  var hoverPointerLookup: HoverPointerLookup {
+    get { hoverResync.lookup }
+    set { hoverResync.lookup = newValue }
+  }
 
   public init(source: any SidebarSource, profile: String) {
     self.source = source
@@ -242,6 +229,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     }
     collectionView.frame = bounds
   }
+
+  // MARK: Hover
+
+  func setNeedsHoverResync() { hoverResync.setNeeded() }
+
+  /// Reads the pointer once and sets the hover state of every visible tile from it.
+  func resyncHoverWithPointer() { hoverResync.resyncNow() }
 
   // MARK: Data source
 

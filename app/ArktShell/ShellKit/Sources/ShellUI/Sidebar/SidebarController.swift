@@ -34,7 +34,8 @@ public final class SidebarController {
   /// dropped when the node leaves it (`.structure` and `.spaces` changes, `deactivate(node:)`).
   private(set) var favicons: [NodeID: NSImage] = [:]
   /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page, and the
-  /// window calls `deactivate(node:)` when the page closes. Decides whether a Favorite tile shows its X (#82).
+  /// window calls `deactivate(node:)` when the page closes; nodes that leave the source are dropped like favicons.
+  /// Decides whether a Favorite tile shows its X (#82).
   private(set) var loadedNodes: Set<NodeID> = []
   private var observation: SidebarObservation?
   private let buttonTarget = ButtonTarget()
@@ -193,13 +194,16 @@ public final class SidebarController {
   /// its favicon only when the node itself is gone from the source.
   public func deactivate(node: NodeID) {
     if source.node(node) == nil { favicons[node] = nil }
-    if loadedNodes.remove(node) != nil { view.favorites.reload(node: node) }   // a background Favorite drops its X
-    guard node == current || node == previous else { return }
+    let wasLoaded = loadedNodes.remove(node) != nil
+    guard node == current || node == previous else {
+      if wasLoaded { view.favorites.reload(node: node) }   // a background Favorite drops its X
+      return
+    }
     if node == current { current = nil }
     if node == previous { previous = nil }
     let states = resolver
     for page in pages.values { page.outlineController.setRowStates(states) }
-    view.favorites.setRowStates(states)
+    view.favorites.setRowStates(states)       // refreshes the visible tiles, this one's X included
   }
 
   // MARK: Updates
@@ -225,15 +229,17 @@ public final class SidebarController {
     }
   }
 
-  /// Drops cached favicons of nodes that left the source. O(cached favicons), on structure and Space changes only.
-  private func pruneFavicons() {
+  /// Drops cached favicons and loaded state of nodes that left the source. O(cached favicons + loaded nodes), on
+  /// structure and Space changes only.
+  private func pruneRemovedNodes() {
     for node in favicons.keys where source.node(node) == nil { favicons[node] = nil }
+    loadedNodes = loadedNodes.filter { source.node($0) != nil }
   }
 
   private func apply(_ change: SidebarChange) {
     switch change {
     case .structure(let location):
-      pruneFavicons()
+      pruneRemovedNodes()
       if case .favorites = location {
         if view.favorites.apply(structure: location) { view.needsLayout = true }
       } else {
@@ -243,7 +249,7 @@ public final class SidebarController {
       for page in pages.values { page.outlineController.reload(node: id) }
       view.favorites.reload(node: id)
     case .spaces:
-      pruneFavicons()                               // a removed Space's nodes emit no structure change
+      pruneRemovedNodes()                           // a removed Space's nodes emit no structure change
       // Settle pages and the current Space first, then tell the window once, so `onSpacesChanged` never sees a
       // nil current Space after an add or a removed one after a removal.
       if spaces == pagedSpaces {
