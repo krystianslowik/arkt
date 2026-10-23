@@ -101,6 +101,9 @@ final class AppSession {
         self.backUp()
       }
     }
+    #if DEBUG
+    if let phase = AppEnvironment.smokePhase { runSmoke(phase, outcome: outcome) }
+    #endif
   }
 
   /// E5d: the visible tab is exempt (BH-076 media-playing tabs join once the engine reports audio state), each
@@ -231,6 +234,13 @@ final class AppSession {
   }
 
   private func runImport() async {
+    guard let summary = await performImport() else { return }
+    showSummary(summary)
+  }
+
+  /// Runs the import and applies its favicons; nil when it was already running or failed (the failure toast is
+  /// shown here).
+  private func performImport() async -> ArcImportSummary? {
     do {
       let outcome = try await importer.run(arcFiles)
       faviconWriter?.save(outcome.favicons)
@@ -247,13 +257,14 @@ final class AppSession {
         "arc import favorites \(favorites, privacy: .public) archive \(archived, privacy: .public)")
       if archiveFailed { Self.log.error("arc import archive failed") }
       if summary.recordFailed { Self.log.error("arc import record not saved") }
-      showSummary(summary)
+      return summary
     } catch ArcImportCoordinatorError.alreadyRunning {
-      return
+      return nil
     } catch {
       let (errorType, code) = (String(describing: type(of: error)), (error as NSError).code)
       Self.log.error("arc import failed \(errorType, privacy: .public) \(code, privacy: .public)")
       window.toasts.show(Toast(text: "Couldn't import from Arc."))
+      return nil
     }
   }
 
@@ -308,3 +319,77 @@ final class AppSession {
     }
   }
 }
+
+#if DEBUG
+// MARK: - End-to-end data smoke (E6, Debug builds only)
+
+extension AppSession {
+  /// `ARKT_SMOKE=import|verify`: waits for the launch backup (so a quick quit cannot race it), imports on the
+  /// `import` phase (no summary sheet), prints one line of counts and case names, then quits through
+  /// `NSApp.terminate` like the Quit menu item, so the quit takes the real `applicationShouldTerminate` and flush
+  /// path.
+  fileprivate func runSmoke(_ phase: AppEnvironment.SmokePhase, outcome: OpenOutcome) {
+    Task { [weak self] in
+      guard let self else { return }
+      await self.lastBackup?.value
+      var summary: ArcImportSummary?
+      if phase == .import {
+        summary = await self.performImport()
+      }
+      let archive: String
+      do {
+        archive = String(try await self.archiveStore.items(limit: nil).items.count)
+      } catch {
+        archive = "failed"
+      }
+      // The recovery notice is the only toast a launch shows; persistent means the toast is up (decision 4).
+      let toast = self.window.toasts.current.map { $0.isPersistent ? "persistent" : "timed" } ?? "none"
+      let counts = Self.smokeCounts(self.source.sidebar)
+      let imported: (added: String, existing: String, archiveAdded: String) = switch (phase, summary) {
+      case (.verify, _): ("-", "-", "-")
+      case (.import, nil): ("failed", "failed", "failed")
+      case (.import, let summary?):
+        (String(summary.spaces), String(summary.existingSpaces),
+         summary.archiveFailed ? "failed" : summary.archiveImported.map(String.init) ?? "none")
+      }
+      print([
+        "ARKT_SMOKE phase=\(phase.rawValue) outcome=\(Self.caseName(outcome))",
+        "spaces=\(counts.spaces) tabs=\(counts.tabs) folders=\(counts.folders) splits=\(counts.splits)",
+        "favorites=\(counts.favorites) archive=\(archive)",
+        "added=\(imported.added) existing=\(imported.existing) archiveAdded=\(imported.archiveAdded)",
+        "toast=\(toast)",
+      ].joined(separator: " "))
+      fflush(stdout)
+      // From the run loop, not from this main-actor job: with `.terminateLater`, `terminate` waits in a nested run
+      // loop for the flush Task, which cannot start on the main actor while this job is still running.
+      NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
+    }
+  }
+
+  /// The case name only: the associated values name files.
+  private static func caseName(_ outcome: OpenOutcome) -> String {
+    switch outcome {
+    case .created: "created"
+    case .opened: "opened"
+    case .restoredFromBackup: "restoredFromBackup"
+    case .recreatedEmpty: "recreatedEmpty"
+    }
+  }
+
+  /// Every node by kind (Favorites included, like the import check's totals); `favorites` counts the top-level
+  /// Favorites.
+  private static func smokeCounts(_ sidebar: SidebarModel.Sidebar)
+    -> (spaces: Int, tabs: Int, folders: Int, splits: Int, favorites: Int) {
+    var counts = (spaces: sidebar.spaceOrder.count, tabs: 0, folders: 0, splits: 0, favorites: 0)
+    for node in sidebar.nodes.values {
+      switch node.kind {
+      case .tab: counts.tabs += 1
+      case .folder: counts.folders += 1
+      case .split: counts.splits += 1
+      }
+      if case .favorites = node.parent { counts.favorites += 1 }
+    }
+    return counts
+  }
+}
+#endif

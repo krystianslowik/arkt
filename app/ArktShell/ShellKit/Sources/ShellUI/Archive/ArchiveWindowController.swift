@@ -21,8 +21,6 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   public private(set) var pendingLoad: Task<Void, Never>?
 
   private let dataSource: any ArchiveListDataSource
-  /// Bumped by every load, so a slower, older load never overwrites a newer one.
-  private var generation = 0
 
   public init(dataSource: any ArchiveListDataSource) {
     self.dataSource = dataSource
@@ -48,20 +46,20 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     pendingLoad = Task { [weak self] in await self?.reload() }
   }
 
-  /// Loads the first page, starting over.
+  /// Loads the first page, starting over. Overlapping loads are ordered by the data source (see
+  /// `ArchiveListDataSource`), so every page that comes back is applied.
   public func reload() async {
-    generation += 1
-    let current = generation
-    let page = await dataSource.loadPage()
-    if current == generation { apply(page) }
+    apply(await dataSource.loadPage())
   }
 
   /// Loads the next page.
   public func loadMore() async {
-    generation += 1
-    let current = generation
-    let page = await dataSource.loadMore()
-    if current == generation { apply(page) }
+    apply(await dataSource.loadMore())
+  }
+
+  /// Escape closes the window, like its close button.
+  public override func cancelOperation(_ sender: Any?) {
+    window?.performClose(sender)
   }
 
   @objc func loadMoreClicked(_ sender: Any?) {

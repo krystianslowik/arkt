@@ -44,9 +44,12 @@ enum MainMenu {
     }
     main.addItem(submenu(title: "Spaces", items: spaces))
     // KB-043: Show Archive is unbound by default; Cmd-Shift-L stays reserved for the Library (KB-065).
-    main.addItem(submenu(title: "Window", items: [
+    let window = submenu(title: "Window", items: [
       item("Show Archive", #selector(AppDelegate.showArchive(_:)), "", []),
-    ]))
+    ])
+    main.addItem(window)
+    // AppKit lists the open windows (the Archive window among them) in the Window menu.
+    NSApp.windowsMenu = window.submenu
     return main
   }
 
