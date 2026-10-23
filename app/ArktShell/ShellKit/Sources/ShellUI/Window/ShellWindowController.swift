@@ -296,7 +296,6 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   private func show(node: NodeID) {
-    if let old = currentNode, old != node { onTabHidden?(old) }
     let tab: TabID
     if let existing = tabsByNode[node] {
       tab = existing
@@ -308,6 +307,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       // Events emitted inside createTab arrived before the mapping existed; catch up from the snapshot.
       if let snapshot = engine.snapshot(of: tab) { replay(snapshot, into: node) }
     }
+    if let old = currentNode, old != node { onTabHidden?(old) }   // only once the card really switches
     currentTab = tab
     rootView.card.setContent(engine.contentView(for: tab))
     refreshAddress()
