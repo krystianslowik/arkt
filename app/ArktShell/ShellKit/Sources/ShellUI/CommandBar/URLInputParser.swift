@@ -6,12 +6,18 @@ import Foundation
 /// - Input with whitespace is a query.
 /// - A leading scheme (`^[A-Za-z][A-Za-z0-9+.-]*://`) must be http or https and have a host; other schemes are
 ///   queries. A "://" later in the input (`example.com/login?next=https://x`) is not a scheme.
-/// - Otherwise the authority (up to the first `/ ? #`) must be `host[:port]` where host is `localhost`, an IPv4
-///   dotted quad (each part 0-255), a bracketed IPv6 literal, or a domain name. IP literals and localhost open
-///   over http (no certificate would match them); domain names open over https.
-/// - Domain names: 2+ labels of letters (any script, for IDN), ASCII digits and inner hyphens; the last label is
-///   2+ letters or a punycode `xn--` label. Foundation IDNA-encodes non-ASCII hosts (`münchen.de` ->
-///   `xn--mnchen-3ya.de`). So `1.5` and `file.x` stay queries.
+/// - Otherwise the authority (up to the first `/ ? #`) must be `[userinfo@]host[:port]` where host is
+///   `localhost`, an IPv4 dotted quad (each part 0-255, no leading zeros), a bracketed IPv6 literal, or a domain
+///   name. IP literals and localhost open over http (no certificate would match them); domain names open over
+///   https.
+/// - Domain names: 2+ labels of letters (any script, for IDN), ASCII digits, inner hyphens and underscores; the
+///   last label is 2+ letters or a punycode `xn--` label, and one trailing dot (a fully qualified name) is kept.
+///   Foundation IDNA-encodes non-ASCII hosts (`münchen.de` -> `xn--mnchen-3ya.de`). So `1.5` and `file.x` stay
+///   queries.
+/// - User-info (Chromium's omnibox `AutocompleteInput::Parse`): `user@host` alone reads as an email address and
+///   is a query; with a password, a port, or anything after the host it is a URL.
+/// - IPv4 parts with a leading zero (`010.0.0.1`) are rejected, so the input is a query: Chromium reads them as
+///   octal, which a user typing a dotted quad rarely means. With an explicit scheme the engine decides.
 public enum URLInputParser {
   /// TODO: the default search engine is a product decision; Arc defaulted to Google.
   public static let searchBase = "https://www.google.com/search?q="
@@ -34,7 +40,18 @@ public enum URLInputParser {
     }
 
     let authority = String(input.prefix { $0 != "/" && $0 != "?" && $0 != "#" })
-    guard let host = host(ofAuthority: authority) else { return nil }
+    let hostAndPort: String
+    if let at = authority.lastIndex(of: "@") {
+      let userInfo = authority[..<at]
+      hostAndPort = String(authority[authority.index(after: at)...])
+      let password = userInfo.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).dropFirst().first
+      let user = userInfo.prefix { $0 != ":" }
+      let hasMore = input.count > authority.count || hostAndPort.contains(":")   // path, query, fragment or port
+      guard !user.isEmpty, password?.isEmpty == false || hasMore else { return nil }
+    } else {
+      hostAndPort = authority
+    }
+    guard let host = host(ofAuthority: hostAndPort) else { return nil }
     if host.lowercased() == "localhost" || isIPv4(host) || host.hasPrefix("[") {
       return URL(string: "http://" + input)
     }
@@ -46,6 +63,11 @@ public enum URLInputParser {
   public static func searchURL(for query: String) -> URL {
     let encoded = query.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? ""
     return URL(string: searchBase + encoded) ?? URL(string: searchBase)!
+  }
+
+  /// True when the input starts with `scheme://` (any scheme; `url(from:)` decides whether it opens).
+  public static func hasExplicitScheme(_ raw: String) -> Bool {
+    leadingScheme(raw.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
   }
 
   /// The lowercased scheme when the input starts with `scheme://`, else nil.
@@ -82,6 +104,7 @@ public enum URLInputParser {
     let parts = host.split(separator: ".", omittingEmptySubsequences: false)
     return parts.count == 4 && parts.allSatisfy { part in
       (1...3).contains(part.count) && part.allSatisfy { $0.isASCII && $0.isNumber } && (Int(part) ?? 256) <= 255
+        && (part.count == 1 || part.first != "0")
     }
   }
 
@@ -90,15 +113,19 @@ public enum URLInputParser {
     return literal.withCString { inet_pton(AF_INET6, $0, &address) } == 1
   }
 
+  /// One trailing dot (`example.com.`) is the fully qualified form of the same name.
   private static func isDomainName(_ host: String) -> Bool {
-    let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+    let name = host.hasSuffix(".") ? host.dropLast() : Substring(host)
+    let labels = name.split(separator: ".", omittingEmptySubsequences: false)
     guard labels.count >= 2, labels.allSatisfy(isLabel), let tld = labels.last else { return false }
     let punycode = tld.lowercased().hasPrefix("xn--") && tld.count > 4
     return punycode || (tld.count >= 2 && tld.allSatisfy(\.isLetter))
   }
 
+  /// Letters, ASCII digits, hyphens (not at either end) and underscores (anywhere; the TLD rule excludes them
+  /// there), as net::IsCanonicalizedHostCompliant allows.
   private static func isLabel(_ label: Substring) -> Bool {
     guard let first = label.first, let last = label.last, first != "-", last != "-" else { return false }
-    return label.allSatisfy { $0.isLetter || ($0.isASCII && $0.isNumber) || $0 == "-" }
+    return label.allSatisfy { $0.isLetter || ($0.isASCII && $0.isNumber) || $0 == "-" || $0 == "_" }
   }
 }

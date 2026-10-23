@@ -40,4 +40,30 @@ struct CommandBarResultsTests {
     guard case .search(let url) = results.last?.kind else { Issue.record("no search result"); return }
     #expect(url == URLInputParser.searchURL(for: "hello world"))
   }
+
+  // #96: Cmd-L prefills the current URL. With an explicit scheme the input is a URL for certain, so there is no
+  // "Search Google" row repeating the same text.
+  @Test func explicitSchemeURLHasNoSearchRow() {
+    let results = CommandBarResults.make(query: "https://example.com/a?b=1", openTabs: [])
+    #expect(results.map(\.kind.name) == ["open"])
+  }
+
+  // #96: the open row does not repeat its title as the subtitle when the typed text is already the full URL.
+  @Test func openRowDropsASubtitleEqualToItsTitle() {
+    let results = CommandBarResults.make(query: "https://example.com/a", openTabs: [])
+    #expect(results.first?.title == "https://example.com/a")
+    #expect(results.first?.subtitle == "")
+  }
+
+  // A schemeless URL is ambiguous (Chromium: UNKNOWN), so it keeps both rows; their subtitles differ.
+  @Test func schemelessURLKeepsOpenAndSearchRows() {
+    let results = CommandBarResults.make(query: "example.com", openTabs: [])
+    #expect(results.map(\.kind.name) == ["open", "search"])
+    #expect(results.map(\.subtitle) == ["https://example.com", "Search Google"])
+  }
+
+  // A scheme that is not http or https is a query, so it keeps the search row.
+  @Test func otherSchemesStaySearches() {
+    #expect(CommandBarResults.make(query: "ftp://example.com", openTabs: []).map(\.kind.name) == ["search"])
+  }
 }

@@ -670,3 +670,34 @@ previous Favorite no longer reloads its tile before the row-state refresh, which
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 388 tests (384 + 4, new in `HoverCloseFadeTests`),
 XCTest 235 tests (224 + 11, GUI included; 6 new in `RowCloseButtonTests`, 5 new in `FavoriteTileCloseTests`),
 0 failures. Debug app build: `** BUILD SUCCEEDED **`.
+
+## Command bar URL parsing edge cases and duplicate rows (#96)
+
+`URLInputParser` rules added, checked against Chromium 156 (`net::IsCanonicalizedHostCompliant`,
+`AutocompleteInput::Parse`); Arc unverified:
+
+| Input | Before | Now | Source |
+|---|---|---|---|
+| `example.com.` (trailing dot) | query | `https://example.com.` (dot kept) | Chromium canonical host keeps it |
+| `my_host.example.com`, `_dmarc.example.com` | query | URL | underscores allowed in labels; TLD stays letters only |
+| `user@example.com` | query | query | omnibox: `user@host` alone is an email address, search by default |
+| `user:pass@example.com`, `user@example.com/inbox`, `user@example.com:8443` | query | URL | omnibox: password, or more than one non-host component |
+| `010.0.0.1`, `192.168.01.1` | URL (decimal) | query | Chromium reads leading-zero parts as octal; rejected instead of canonicalised |
+
+With an explicit scheme (`http://010.0.0.1`) the input still opens and the engine canonicalises the host.
+
+Duplicate rows: an input with an explicit http(s) scheme (Cmd-L prefills one) no longer gets a "Search Google" row
+repeating it, and the open row drops a subtitle equal to its title. Chromium keeps a demoted search-what-you-typed
+row there; Arc unverified [I] (RT-08). Schemeless input such as `example.com` keeps both rows.
+
+Also from the #157 review: hover selects only rows inside the table's visible rect; the
+`insertNewlineIgnoringFieldEditor:` fallback opens a new tab only for an actual Opt-Return (other bindings commit
+like Return); `MainMenuKeyEquivalentTests` builds the app's main menu (`App/MainMenu.swift`, linked into the GUI
+test target with a stub `AppDelegate`) and checks that no item binds Cmd-Return or Opt-Return, which the panel's
+`sendEvent` takes first. `show()` and `reloadResults()` are unchanged.
+
+Checks (rebased on #158): `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 392 tests (388 + 4), XCTest 240
+tests (235 + 5, GUI included), 0 failures. `commandbar.showcpu.ms median=0.29 p95=0.44`; earliest-frame not
+asserted (load 13.1 on 10 cores; `p95=17.53 bound=19.89`). Before the rebases the same suite gave
+`commandbar.earliestframe p95=17.25 bound=17.88 load1=9.72 cores=10 asserted=yes`. ArktCore `swift test`: 336
+tests, 0 failures. Debug app build: `** BUILD SUCCEEDED **`.

@@ -24,6 +24,22 @@ struct URLInputParserTests {
     ("münchen.de", "https://xn--mnchen-3ya.de"),
     ("пример.рф", "https://xn--e1afmkfd.xn--p1ai"),
     ("example.xn--p1ai", "https://example.xn--p1ai"),
+    // #96: a trailing dot (fully qualified name) is kept, like Chromium's canonical host.
+    ("example.com.", "https://example.com."),
+    ("example.com./a", "https://example.com./a"),
+    ("example.com.:8080", "https://example.com.:8080"),
+    // #96: underscores are allowed in labels other than the TLD (net::IsCanonicalizedHostCompliant).
+    ("my_host.example.com", "https://my_host.example.com"),
+    ("_dmarc.example.com", "https://_dmarc.example.com"),
+    // #96: user-info navigates when it has a password or the input has more than the host (omnibox Parse).
+    ("user:pass@example.com", "https://user:pass@example.com"),
+    ("user@example.com/inbox", "https://user@example.com/inbox"),
+    ("user@example.com:8443", "https://user@example.com:8443"),
+    ("admin:pw@192.168.1.1", "http://admin:pw@192.168.1.1"),
+    ("https://user@example.com", "https://user@example.com"),
+    // #96: a single 0 octet has no leading zero.
+    ("0.0.0.0", "http://0.0.0.0"),
+    ("10.0.0.1", "http://10.0.0.1"),
   ])
   func parsesURLs(input: String, expected: String) {
     #expect(URLInputParser.url(from: input)?.absoluteString == expected)
@@ -33,6 +49,14 @@ struct URLInputParserTests {
     "hello world", "swift", "", "what is example.com", "1.5", "https://", "file.x",
     "ftp://example.com", "javascript:alert(1)", "1.2.3", "256.1.1.1", "1.2.3.4.5", "[zz::g]", "[::1",
     "example.com:abc", "-x.com.-", "a..b.com",
+    // #96: only one trailing dot; a dot alone is not a host.
+    "example.com..", ".", ".com",
+    // #96: underscores never in the TLD.
+    "example.c_m", "example._com",
+    // #96: "user@host" alone reads as an email address (omnibox Parse: search by default); empty user-info.
+    "user@example.com", "@example.com", "user:@example.com",
+    // #96: IPv4 parts with a leading zero (Chromium reads them as octal); rejected, so they stay queries.
+    "010.0.0.1", "192.168.01.1", "08.0.0.1", "1.2.3.00",
   ])
   func rejectsQueries(input: String) {
     #expect(URLInputParser.url(from: input) == nil)

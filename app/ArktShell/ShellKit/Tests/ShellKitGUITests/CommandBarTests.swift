@@ -142,6 +142,14 @@ final class CommandBarTests: XCTestCase {
     XCTAssertFalse(bar.isVisible)
   }
 
+  // #96: Cmd-L on a URL lists it once: no "Search Google" row with the same text, no subtitle repeating it.
+  func testCmdLOnAURLShowsOneOpenRow() async throws {
+    bar.toggle(.currentTab(URL(string: "https://example.com/a")))
+    XCTAssertEqual(bar.results.map(\.kind.name), ["open"])
+    XCTAssertEqual(bar.results.first?.subtitle, "")
+    XCTAssertEqual(bar.panel.frame.height, CommandBarGeometry.contentHeight(rowCount: 1))
+  }
+
   func testCmdLEditedEnterNavigatesCurrentTab() async throws {
     var result: (URL, Bool)?
     bar.onOpen = { result = ($0, $1) }
@@ -665,6 +673,61 @@ final class CommandBarTests: XCTestCase {
                                                  eventNumber: 0, clickCount: 0, pressure: 0))
     bar.barView.mouseMoved(with: event)
     XCTAssertEqual(bar.barView.table.selectedRow, 0)
+  }
+
+  // #157 review: a pointer move over a row that scrolled out of view (forwarded from above the clip view) leaves
+  // the selection alone; only visible rows select.
+  func testHoverOverARowScrolledOutOfViewKeepsTheSelection() async throws {
+    bar.openTabsProvider = { self.tabs(6) }
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("example")                  // open-tab matches plus the search row
+    let table = bar.barView.table
+    let last = bar.results.count - 1
+    // Results never exceed maxVisibleRows today, so shorten the panel to make the list scroll.
+    var frame = bar.panel.frame
+    frame.size.height = CommandBarGeometry.contentHeight(rowCount: 3)
+    bar.panel.setFrame(frame, display: true)
+    bar.panel.layoutIfNeeded()
+    table.selectRowIndexes([last], byExtendingSelection: false)
+    table.scrollRowToVisible(last)
+    bar.panel.displayIfNeeded()
+    XCTAssertFalse(table.visibleRect.intersects(table.rect(ofRow: 0)), "row 0 scrolled out of view")
+    try hover(row: 0)
+    XCTAssertEqual(table.selectedRow, last)
+  }
+
+  // #157 review: only an actual Opt-Return makes the insertNewlineIgnoringFieldEditor: fallback open a new tab.
+  // Another key bound to that selector commits like Return (Cmd-L: the current tab).
+  func testNewlineIgnoringFieldEditorWithoutOptionReturnCommitsInPlace() async throws {
+    var result: (URL, Bool)?
+    bar.onOpen = { result = ($0, $1) }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    bar.setQueryForTesting("example.org")
+    let editor = try XCTUnwrap(bar.barView.field.currentEditor() as? NSTextView)
+    let handled = bar.control(bar.barView.field, textView: editor,
+                              doCommandBy: #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
+    XCTAssertTrue(handled)
+    XCTAssertEqual(result?.0.absoluteString, "https://example.org")
+    XCTAssertEqual(result?.1, false, "not an Opt-Return: Cmd-L navigates the current tab")
+  }
+
+  // The one rule both Cmd/Opt-Return paths use: Return or keypad Enter with exactly one of the allowed modifiers.
+  func testNewTabReturnRule() throws {
+    func key(_ code: UInt16, _ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                     windowNumber: 0, context: nil, characters: "\r",
+                                     charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: code))
+    }
+    let rule = CommandBarController.isReturn(_:withExactly:)
+    XCTAssertTrue(rule(try key(36, .option), [.option]))
+    XCTAssertTrue(rule(try key(76, .option), [.option]))                    // keypad Enter
+    XCTAssertTrue(rule(try key(36, .command), [.command, .option]))
+    XCTAssertTrue(rule(try key(36, [.option, .numericPad]), [.option]))     // other flags are ignored
+    XCTAssertFalse(rule(try key(36, .command), [.option]))
+    XCTAssertFalse(rule(try key(36, [.option, .shift]), [.option]))
+    XCTAssertFalse(rule(try key(36, []), [.option]))
+    XCTAssertFalse(rule(try key(0, .option), [.option]))                    // not Return
+    XCTAssertFalse(rule(nil, [.option]))
   }
 
   /// The responder in `window` that a nil-targeted action reaches, as AppKit searches one window: the first

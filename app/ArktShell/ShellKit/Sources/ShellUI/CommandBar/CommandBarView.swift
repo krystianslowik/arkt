@@ -73,7 +73,9 @@ final class CommandBarView: NSView {
   var onHoverRow: ((Int) -> Void)?
 
   override func mouseMoved(with event: NSEvent) {
-    let row = table.row(at: table.convert(event.locationInWindow, from: nil))
+    let point = table.convert(event.locationInWindow, from: nil)
+    guard table.visibleRect.contains(point) else { return }   // a row scrolled out of view is not under the pointer
+    let row = table.row(at: point)
     if row >= 0 { onHoverRow?(row) }
   }
 
