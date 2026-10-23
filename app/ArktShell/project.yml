@@ -89,7 +89,13 @@ targets:
   ArktShellUITests:
     type: bundle.ui-testing
     platform: macOS
-    sources: [UITests, {path: ShellKit/Sources/ShellUI/Accessibility/AXID.swift}]
+    sources:
+      - UITests
+      - path: ShellKit/Sources/ShellUI/Accessibility/AXID.swift
+      - path: ../ArktCore/Tests/ArcImportTests/Fixtures/StorableSidebar-synthetic.json
+        buildPhase: resources
+      - path: ../ArktCore/Tests/ArcImportTests/Fixtures/StorableArchiveItems-synthetic.json
+        buildPhase: resources
     dependencies:
       - target: ArktShell
     # Xcode signs the sandboxed runner with these on top of its own (network.client only): the loopback fixture
