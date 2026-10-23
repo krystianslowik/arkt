@@ -13,9 +13,9 @@ struct SplitWindowState {
   /// Last focused pane per split (decision 7) [I]. Activating a split row focuses it.
   var activePane: [NodeID: NodeID] = [:]
   /// Panes whose page was closed while their node stayed (Cmd-W on a Pinned or Favorite pane, the X on a Pinned split
-  /// row, or the page closing itself): they show a
-  /// placeholder until clicked or activated, and showing the split again does not reopen them (decision 6) [I]
-  /// PARITY(NEEDS-RUNTIME-CHECK RT-36). Forgotten when every pane of the split is closed.
+  /// row, or the page closing itself): they show a placeholder until clicked or activated, and showing the split
+  /// again does not reopen them (decision 6) [I] PARITY(NEEDS-RUNTIME-CHECK RT-36). Forgotten when every pane of the
+  /// split is closed.
   var closedPanes: Set<NodeID> = []
   /// A re-show after a source change is queued.
   var resyncPending = false

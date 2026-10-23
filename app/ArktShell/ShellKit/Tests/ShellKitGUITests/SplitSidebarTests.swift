@@ -242,6 +242,41 @@ final class SplitSidebarTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// Sends a real Opt-click `NSEvent` through `SidebarOutlineView.mouseDown`, covering `clickModifiers` -> `rowClicked`.
+  func testOptClickMouseDownOnASplitRowSeparatesIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: world.panes[0])
+    let view = try harness.outline().outlineView
+    view.layoutSubtreeIfNeeded()
+    XCTAssertTrue(window.makeFirstResponder(view))
+    let rect = view.rect(ofRow: try harness.row(world.split))
+    let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    let down = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseDown, location: point, modifierFlags: [.option], timestamp: ProcessInfo.processInfo.systemUptime,
+      windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+    let up = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseUp, location: point, modifierFlags: [.option], timestamp: ProcessInfo.processInfo.systemUptime,
+      windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
+    window.postEvent(up, atStart: true)
+    window.postEvent(down, atStart: true)
+    let currentDown = try XCTUnwrap(window.nextEvent(matching: .leftMouseDown, until: .distantPast,
+                                                     inMode: .default, dequeue: true))
+
+    view.mouseDown(with: currentDown)
+
+    XCTAssertEqual(view.clickModifiers, [], "clickModifiers is cleared when mouseDown returns")
+    XCTAssertNil(harness.source.node(world.split))
+    XCTAssertEqual(harness.children(.today(world.space)),
+                   [world.today[0], world.panes[0], world.panes[1], world.today[1]])
+    waitUntil("the card to show pane 0's page alone") {
+      harness.split.isHidden && harness.controller.rootView.card.contentView === harness.page(world.panes[0])
+    }
+    XCTAssertEqual(harness.current, world.panes[0])
+    harness.controller.close()
+  }
+
   func testPlainClickOnASplitRowActivatesIt() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)

@@ -82,14 +82,6 @@ final class SplitShortcutTests: XCTestCase {
       menu.performKeyEquivalent(with: try SplitShortcutTests.controlShiftKey(keyCode))
     }
 
-    /// Lets deferred work (the re-show after a source change) run: turns the run loop until no re-show is queued,
-    /// not for a fixed time, so a stalled runner cannot pass the deadline before the re-show runs.
-    func settle() {
-      let deadline = Date().addingTimeInterval(5)
-      repeat { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
-      while controller.splitState.resyncPending && Date() < deadline
-    }
-
     func close() {
       controller.commandBar.hide(restoreFocus: false)
       controller.close()
@@ -260,15 +252,15 @@ final class SplitShortcutTests: XCTestCase {
     let page = try XCTUnwrap(harness.tab(world.panes[0]))
 
     XCTAssertTrue(try harness.press(kVK_ANSI_Minus))
-    harness.settle()
 
     XCTAssertEqual(harness.archived, [])
     XCTAssertEqual(harness.children(.today(world.space)),
                    [world.today[0], world.panes[1], world.panes[0], world.today[1]])
     XCTAssertEqual(harness.tab(world.panes[0]), page, "the separated tab keeps its page")
-    XCTAssertEqual(harness.current, world.panes[1])
+    waitUntil("the split hidden and survivor focused") {
+      harness.controller.rootView.split.isHidden && harness.current == world.panes[1]
+    }
     XCTAssertEqual(harness.controller.currentTab, harness.tab(world.panes[1]))
-    XCTAssertTrue(harness.controller.rootView.split.isHidden)
     harness.close()
   }
 
@@ -279,14 +271,14 @@ final class SplitShortcutTests: XCTestCase {
     harness.controller.activate(node: world.panes[1])
 
     try harness.press(kVK_ANSI_Minus)
-    harness.settle()
 
     XCTAssertEqual(harness.archived, [])
     XCTAssertEqual(harness.children(.today(world.space)),
                    [world.today[0], world.split, world.panes[1], world.today[1]])
     XCTAssertEqual(harness.children(.split(world.split)), [world.panes[0], world.panes[2]])
-    XCTAssertEqual(harness.current, world.panes[2])
-    XCTAssertEqual(harness.controller.rootView.split.paneCount, 2)
+    waitUntil("the split shown with 2 panes and pane 2 focused") {
+      harness.controller.rootView.split.paneCount == 2 && harness.current == world.panes[2]
+    }
     XCTAssertEqual(harness.controller.rootView.split.focusedIndex, 1)
     harness.close()
   }
@@ -373,13 +365,13 @@ final class SplitShortcutTests: XCTestCase {
     let page = try XCTUnwrap(harness.tab(world.panes[1]))
 
     harness.controller.expandCurrentSplit(nil)
-    harness.settle()
 
     XCTAssertEqual(harness.children(.today(world.space)),
                    [world.today[0], world.panes[1], world.panes[0], world.panes[2], world.today[1]])
-    XCTAssertEqual(harness.current, world.panes[1])
+    waitUntil("the split hidden with the focused pane shown alone") {
+      harness.controller.rootView.split.isHidden && harness.current == world.panes[1]
+    }
     XCTAssertEqual(harness.controller.currentTab, page)
-    XCTAssertTrue(harness.controller.rootView.split.isHidden)
     XCTAssertEqual(harness.controller.visibleNodes, [world.panes[1]])
     XCTAssertEqual(harness.archived, [])
     harness.close()
@@ -392,13 +384,13 @@ final class SplitShortcutTests: XCTestCase {
     harness.controller.activate(node: world.panes[0])
 
     harness.controller.separatePageFromSplit(nil)
-    harness.settle()
 
     XCTAssertEqual(harness.children(.today(world.space)),
                    [world.today[0], world.split, world.panes[0], world.today[1]])
     XCTAssertEqual(harness.children(.split(world.split)), [world.panes[1], world.panes[2]])
-    XCTAssertEqual(harness.current, world.panes[0])
-    XCTAssertTrue(harness.controller.rootView.split.isHidden)
+    waitUntil("the split hidden with the separated page focused") {
+      harness.controller.rootView.split.isHidden && harness.current == world.panes[0]
+    }
     XCTAssertEqual(harness.archived, [])
     harness.close()
   }
@@ -414,11 +406,12 @@ final class SplitShortcutTests: XCTestCase {
     XCTAssertEqual(convert.title, "Convert to Vertical Split View")
 
     harness.controller.convertSplitOrientation(convert)
-    harness.settle()
 
     guard case .split(_, let layout)? = harness.source.node(world.split) else { return XCTFail("split gone") }
     XCTAssertEqual(layout.orientation, .vertical)
-    XCTAssertEqual(harness.controller.rootView.split.axis, .stacked)
+    waitUntil("the shown split's axis to become .stacked") {
+      harness.controller.rootView.split.axis == .stacked
+    }
     XCTAssertTrue(harness.controller.validateMenuItem(convert))
     XCTAssertEqual(convert.title, "Convert to Horizontal Split View")
 

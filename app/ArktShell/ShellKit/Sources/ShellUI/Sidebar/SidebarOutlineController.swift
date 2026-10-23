@@ -50,7 +50,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// GS-033) instead of `NSApp.currentEvent`, which is not always the click.
   private(set) var clickModifiers: NSEvent.ModifierFlags = []
 
-  /// `reloadData()` calls so far (tests check that split edits never reload the whole outline).
+  /// Number of `reloadData()` calls so far; exists for tests (checks that split edits never reload the whole outline).
   private(set) var reloadDataCount = 0
 
   public override func reloadData() {
@@ -70,6 +70,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 
   /// Clicks activate rows; the window drags from empty sidebar space only.
   public override var mouseDownCanMoveWindow: Bool { false }
+  public override var needsPanelToBecomeKey: Bool { false }
 }
 
 /// Data source and delegate for one Space: pinned nodes, a divider, then Today nodes; folders and splits expand.
@@ -550,9 +551,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     return actions
   }
 
-  private func customAction(_ name: String, _ id: NodeID,
-                            _ handler: @escaping @MainActor (SidebarOutlineController) -> (@MainActor (NodeID) -> Void)?)
-    -> NSAccessibilityCustomAction {
+  private func customAction(
+    _ name: String, _ id: NodeID,
+    _ handler: @escaping @MainActor (SidebarOutlineController) -> (@MainActor (NodeID) -> Void)?
+  ) -> NSAccessibilityCustomAction {
     NSAccessibilityCustomAction(name: name) { [weak self] in
       guard let self, self.source.node(id) != nil else { return false }
       handler(self)?(id)

@@ -277,8 +277,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   /// Closes a tab, pane or split the way Cmd-W closes the current tab; the hover X (GS-043) and the rows' VoiceOver
-  /// action call it for every row except a pane row, whose X removes the pane from its split (BH-121). Today: archived (a split as one unit), and when it held the current tab the
-  /// nearest sibling becomes current. Pinned and Favorites: the pages close and the rows stay. Folders are ignored.
+  /// action call it for every row except a pane row, whose X removes the pane from its split (BH-121). Today: archived
+  /// (a split as one unit), and when it held the current tab the nearest sibling becomes current. Pinned and
+  /// Favorites: the pages close and the rows stay. Folders are ignored.
   public func close(node: NodeID) {
     let tabs: [NodeID]
     switch sidebar.node(node) {
