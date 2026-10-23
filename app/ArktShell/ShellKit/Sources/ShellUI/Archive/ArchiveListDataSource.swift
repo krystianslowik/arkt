@@ -42,12 +42,17 @@ public struct ArchiveListPage: Equatable, Sendable {
 /// must report the newer state, never its own older rows.
 @MainActor
 public protocol ArchiveListDataSource: AnyObject {
+  /// Called when the list may have changed outside the window (an entry archived, or its archive write landed); the
+  /// window sets it and refreshes while on screen.
+  var onChange: (@MainActor () -> Void)? { get set }
   /// False while there is no Space to restore into.
   var canRestore: Bool { get }
   /// The first page, starting over.
   func loadPage() async -> ArchiveListPage
   /// The loaded rows plus the next page.
   func loadMore() async -> ArchiveListPage
+  /// The rows again, as many as are loaded (at least the first page).
+  func refresh() async -> ArchiveListPage
   /// Restores the row's item. True when it was restored and the row is gone from the list.
   func restore(_ id: UUID) -> Bool
 }
