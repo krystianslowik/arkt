@@ -655,6 +655,14 @@ status to CONFIRMED (or rewrite the rule) and move any losing claim to section 7
 | RT-28 | BH-192 | Copy URL toast text and duration | Cmd-Shift-C on a URL with no tracking params and on one with `utm_source`; record toast text and duration |
 | RT-29 | BH-201 | Default shortcut priority per action | Settings > Shortcuts: for each action, open the conflict-mode menu and record the default |
 | RT-30 | section 4 rows with `unknown` default | Default value of each setting | Fresh install: open every Settings pane and record each toggle/picker; run `defaults read company.thebrowser.Browser` before and after first launch |
+| RT-31 | BH-120, Split View plan decision 1 | Which `layoutOrientation` value does Arc store for each split orientation? | Create a side-by-side split, quit Arc, read that test account's `StorableSidebar.json` `layoutOrientation`; repeat for top-bottom |
+| RT-32 | GS-011, BH-117 | Drop zones when a sidebar tab is dragged over the content | Drag a sidebar tab over the content: map the drop zones (edges, center, top or bottom center), the preview shape and the side the new pane lands on |
+| RT-33 | Split View plan decision 4 | Minimum pane size and divider behavior | In a 3-pane split: drag a divider to its limit and note the minimum pane width (and height in a top-bottom split); note whether a divider drag resizes only the two adjacent panes; double-click a divider and note what it does |
+| RT-34 | KB-070 | What does Ctrl-Shift-= show in the new pane? | On a single tab press Ctrl-Shift-=; note what the new pane shows (blank, command bar, duplicate); press Esc and note what it does |
+| RT-35 | Split View plan decision 2 | Pane shares after adding a pane: equal or proportional? | Make a 2-pane split with unequal shares; add a 3rd pane, then a 4th; note the shares after each (equal or proportional) |
+| RT-36 | BH-123, BH-067 | Cmd-W on a pane of a Pinned split | Make a split of Pinned tabs; focus one pane and press Cmd-W; note what the pane area shows afterwards |
+| RT-37 | Split View plan S3, S4 | Pane chrome | In a 2-pane and a 3-pane split: screenshot and note the gap between panes, the focused-pane indicator (border, dimming) and the pane header controls above each pane |
+| RT-38 | KB-070 to KB-075 | Where are the Split View menu items and what are they called? | Open each menu bar menu; note the menu (and submenu) that holds the Split View items and each item's title |
 
 ---
 
