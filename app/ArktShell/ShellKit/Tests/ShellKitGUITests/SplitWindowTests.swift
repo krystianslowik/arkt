@@ -50,14 +50,6 @@ final class SplitWindowTests: XCTestCase {
     func page(_ node: UUID) -> NSView? { tab(node).flatMap { engine.contentView(for: $0) } }
 
     func layout() { controller.window?.contentView?.layoutSubtreeIfNeeded() }
-
-    /// Lets deferred work (the re-show after a source change) run: turns the run loop until no re-show is queued,
-    /// not for a fixed time, so a stalled runner cannot pass the deadline before the re-show runs.
-    func settle() {
-      let deadline = Date().addingTimeInterval(5)
-      repeat { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
-      while controller.splitState.resyncPending && Date() < deadline
-    }
   }
 
   override func setUp() async throws {
@@ -320,7 +312,11 @@ final class SplitWindowTests: XCTestCase {
     XCTAssertEqual(layout.widthFactors.count, 2)
     XCTAssertEqual(layout.widthFactors[0], harness.split.liveFactors[0], accuracy: 1e-9)
     XCTAssertGreaterThan(layout.widthFactors[0], 0.5)
-    harness.settle()
+    // The commit's source change queued a re-show synchronously; what this checks is that it ran and wrote nothing.
+    XCTAssertTrue(harness.controller.splitState.resyncPending)
+    waitUntil("the re-show queued by the commit to run (splitState.resyncPending false)") {
+      !harness.controller.splitState.resyncPending
+    }
     XCTAssertEqual(harness.changes, 1, "the re-show after the commit writes nothing")
     harness.controller.close()
   }
@@ -333,7 +329,7 @@ final class SplitWindowTests: XCTestCase {
     XCTAssertEqual(harness.split.axis, .sideBySide)
 
     try harness.source.setSplitOrientation(world.split, .vertical)
-    harness.settle()
+    waitUntil("the shown split's axis to become .stacked") { harness.split.axis == .stacked }
 
     XCTAssertEqual(harness.split.axis, .stacked)
     XCTAssertEqual(harness.split.focusedIndex, 1)
@@ -350,7 +346,9 @@ final class SplitWindowTests: XCTestCase {
     harness.hidden = []
 
     try harness.source.separatePane(world.panes[1])
-    harness.settle()
+    waitUntil("the split container to hide and the card to show pane 0's page") {
+      harness.split.isHidden && harness.controller.rootView.card.contentView === harness.page(world.panes[0])
+    }
 
     XCTAssertEqual(harness.engine.tabIDs, tabs)
     XCTAssertTrue(harness.split.isHidden)
@@ -367,7 +365,7 @@ final class SplitWindowTests: XCTestCase {
     harness.controller.activate(node: world.panes[1])
 
     harness.controller.closeTab(nil)
-    harness.settle()
+    waitUntil("the shown split to shrink to 2 panes") { harness.split.paneCount == 2 }
 
     XCTAssertNil(harness.source.node(world.panes[1]))
     XCTAssertEqual(harness.controller.sidebarController.current, world.panes[2])
