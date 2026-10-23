@@ -51,8 +51,13 @@ final class SplitWindowTests: XCTestCase {
 
     func layout() { controller.window?.contentView?.layoutSubtreeIfNeeded() }
 
-    /// Lets deferred work (the re-show after a source change) run.
-    func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    /// Lets deferred work (the re-show after a source change) run: turns the run loop until no re-show is queued,
+    /// not for a fixed time, so a stalled runner cannot pass the deadline before the re-show runs.
+    func settle() {
+      let deadline = Date().addingTimeInterval(5)
+      repeat { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+      while controller.splitState.resyncPending && Date() < deadline
+    }
   }
 
   override func setUp() async throws {
@@ -245,7 +250,7 @@ final class SplitWindowTests: XCTestCase {
     harness.controller.activate(node: world.panes[1])
     let target = Self.url("typed")
 
-    harness.controller.commandBar.onOpen?(target, false)
+    harness.controller.commandBar.onOpen?(target, .currentTab)
 
     XCTAssertEqual(harness.tab(world.panes[1]).flatMap { harness.engine.snapshot(of: $0)?.url }, target)
     XCTAssertEqual(harness.tab(world.panes[0]).flatMap { harness.engine.snapshot(of: $0)?.url }, Self.url("s0"))

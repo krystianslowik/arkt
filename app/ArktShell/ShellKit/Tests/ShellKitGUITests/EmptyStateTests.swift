@@ -85,7 +85,7 @@ final class EmptyStateTests: XCTestCase {
     let stub = StubSidebar()
     let controller = makeController(stub)
     let url = try XCTUnwrap(URL(string: "https://example.com/page"))
-    controller.commandBar.onOpen?(url, true)
+    controller.commandBar.onOpen?(url, .newTab)
     XCTAssertEqual(stub.spaceOrder.count, 1)
     let space = try XCTUnwrap(stub.spaceOrder.first)
     let tabs = stub.children(of: .today(space))

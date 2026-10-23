@@ -9,10 +9,21 @@ import os
 @MainActor
 public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate,
   NSWindowDelegate {
-  public enum Mode: Equatable { case newTab, currentTab(URL?) }
+  /// Cmd-T, Cmd-L (with the current URL) and Ctrl-Shift-= (a new Split View pane, KB-070).
+  public enum Mode: Equatable { case newTab, currentTab(URL?), newSplitPane }
 
-  /// Enter on a URL or search result. `inNewTab` is true for Cmd-T (new Today tab), false for Cmd-L.
-  public var onOpen: ((URL, _ inNewTab: Bool) -> Void)?
+  /// Where Enter opens a URL or search result.
+  public enum OpenTarget: Equatable, Sendable {
+    /// Cmd-L: navigate the current tab.
+    case currentTab
+    /// Cmd-T, or Cmd-Enter / Opt-Enter from any mode: a new Today tab.
+    case newTab
+    /// Ctrl-Shift-= and the Add Right / Left / Top / Bottom Split items: a new pane next to the focused tab.
+    case newSplitPane
+  }
+
+  /// Enter on a URL or search result.
+  public var onOpen: ((URL, OpenTarget) -> Void)?
   /// Enter on a "Switch to Tab" result.
   public var onSwitch: ((NodeID) -> Void)?
   /// Cmd-L then Enter without editing (KB-004).
@@ -123,7 +134,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     signpostState = ShellSignposts.signposter.beginInterval("CommandBarShow")
     mode = newMode
     switch newMode {
-    case .newTab: prefill = nil
+    case .newTab, .newSplitPane: prefill = nil
     case .currentTab(let url): prefill = url?.absoluteString
     }
     barView.field.stringValue = prefill ?? ""
@@ -254,8 +265,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// result, which is the first open tab, and closes the bar when there is none [I] (RT-08).
   public func commit() { commit(inNewTab: nil) }
 
-  /// `inNewTab` nil: the mode decides (Cmd-T new tab, Cmd-L current tab). true: Cmd-Enter / Opt-Enter, which
-  /// open in a new tab and never reload.
+  /// `inNewTab` nil: the mode decides (Cmd-T new tab, Cmd-L current tab, Ctrl-Shift-= new split pane). true:
+  /// Cmd-Enter / Opt-Enter, which open in a new tab and never reload.
   private func commit(inNewTab: Bool?) {
     let text = barView.field.stringValue
     if inNewTab == nil, case .currentTab = mode, let prefill, text == prefill { hide(); onReload?(); return }
@@ -265,11 +276,21 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   private func commit(row: Int, inNewTab forced: Bool? = nil) {
     guard row < results.count else { hide(); return }
     let kind = results[row].kind
-    let inNewTab = forced ?? (mode == .newTab)
+    let target = forced.map { $0 ? OpenTarget.newTab : .currentTab } ?? openTarget
     hide()
     switch kind {
-    case .open(let url), .search(let url): onOpen?(url, inNewTab)
+    case .open(let url), .search(let url): onOpen?(url, target)
+    // [I] A "Switch to Tab" result switches in every mode, the split pane bar included: the tab is already open.
     case .switchTo(let node): onSwitch?(node)
+    }
+  }
+
+  /// Where a plain Enter opens a result in the current mode.
+  private var openTarget: OpenTarget {
+    switch mode {
+    case .newTab: .newTab
+    case .currentTab: .currentTab
+    case .newSplitPane: .newSplitPane
     }
   }
 
