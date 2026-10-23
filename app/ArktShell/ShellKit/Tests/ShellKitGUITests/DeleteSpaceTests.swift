@@ -180,7 +180,8 @@ final class DeleteSpaceTests: XCTestCase {
   }
 
   /// The default confirmation is a sheet on the window; its second button (Cancel) keeps the Space and its first
-  /// (Delete Space) removes it.
+  /// (Delete Space) removes it. Delete Space has no key, Escape answers Cancel, and while the sheet is open the item is
+  /// disabled and a second request opens no second sheet.
   func testDefaultConfirmationIsASheetOnTheWindow() throws {
     var sidebar = SidebarModel.Sidebar()
     let work = sidebar.addSpace(title: "Work")
@@ -194,7 +195,15 @@ final class DeleteSpaceTests: XCTestCase {
     controller.deleteSpace(nil)
     waitUntil("the confirmation sheet") { window.attachedSheet != nil }
     let alert = try XCTUnwrap(window.attachedSheet)
-    XCTAssertTrue(alert.contentView?.firstDescendant(of: NSButton.self) { $0.title == "Delete Space" } != nil)
+    let delete = try XCTUnwrap(alert.contentView?.firstDescendant(of: NSButton.self) { $0.title == "Delete Space" })
+    let cancel = try XCTUnwrap(alert.contentView?.firstDescendant(of: NSButton.self) { $0.title == "Cancel" })
+    XCTAssertTrue(delete.hasDestructiveAction)
+    XCTAssertEqual(delete.keyEquivalent, "")
+    XCTAssertEqual(cancel.keyEquivalent, "\u{1b}")
+    XCTAssertFalse(controller.validateMenuItem(Self.deleteItem()))
+    controller.deleteSpace(nil)
+    XCTAssertTrue(window.attachedSheet === alert)
+    XCTAssertEqual(window.sheets.count, 1, "no second sheet queued")
     window.endSheet(alert, returnCode: .alertSecondButtonReturn)
     waitUntil("the sheet closed") { window.attachedSheet == nil }
     XCTAssertTrue(removed.isEmpty)

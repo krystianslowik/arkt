@@ -8,7 +8,7 @@ struct SpaceRemovalPromptTests {
     let space = UUID()
     let prompt = SpaceRemovalPrompt(space: space, title: "Work", hasItems: true)
     #expect(prompt.space == space)
-    #expect(prompt.message == "Delete the Space \"Work\"?")
+    #expect(prompt.message == "Delete the Space \u{201C}Work\u{201D}?")
     #expect(prompt.information
       == "Its pinned tabs, folders and Today tabs move to the Archive, where you can restore them.")
     #expect(SpaceRemovalPrompt.confirmTitle == "Delete Space")
