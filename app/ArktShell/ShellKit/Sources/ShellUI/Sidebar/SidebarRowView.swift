@@ -9,7 +9,10 @@ public final class SidebarRowView: NSTableRowView {
   public let backgroundLayer = CALayer()
 
   public var state: TabRowState = .normal {
-    didSet { if state != oldValue { needsDisplay = true } }
+    didSet {
+      if state != oldValue { needsDisplay = true }
+      setAccessibilitySelected(state == .current)
+    }
   }
   public var flavor: ThemeFlavor = .light {
     didSet { if flavor != oldValue { needsDisplay = true } }
@@ -49,6 +52,7 @@ public final class SidebarRowView: NSTableRowView {
     backgroundLayer.cornerCurve = .continuous
     backgroundLayer.shadowRadius = 2
     backgroundLayer.shadowOffset = CGSize(width: 0, height: -1)
+    setAccessibilityRole(.row)
   }
 
   @available(*, unavailable)
@@ -122,11 +126,20 @@ public final class SidebarRowView: NSTableRowView {
   public override func mouseEntered(with event: NSEvent) { isHovered = true }
   public override func mouseExited(with event: NSEvent) { isHovered = false; isPressed = false }
 
+  public override func isAccessibilitySelected() -> Bool { state == .current }
+
+  public override func accessibilityLabel() -> String? {
+    tabCell?.titleField.stringValue ?? super.accessibilityLabel()
+  }
+
   public override func prepareForReuse() {
     super.prepareForReuse()
     isHovered = false
     isPressed = false
     state = .normal
     isInteractive = true
+    setAccessibilitySelected(false)
+    setAccessibilityIdentifier(nil)
+    setAccessibilityLabel(nil)
   }
 }

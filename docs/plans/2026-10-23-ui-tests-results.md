@@ -444,3 +444,40 @@ plan expected.
   of the whole screen, which decision 7 rules out; the scheme should turn it off. Left for the harness follow-up
   (#199). The same run also spent about 150 s between the recorded failure and tear-down, likely that recording.
 - #93 removes the duplication between `FixtureServer` and `ShellKitGUITests/LoopbackServer.swift`.
+
+## U4b: Accessibility identifiers: sidebar rows, Space dots and Favorites (#168)
+
+Base: `origin/main` at `8b1a570`, branch `chore/168-ui-tests-u4b`.
+
+### What was done
+
+- `ShellKit/Sources/ShellUI/Accessibility/AXID.swift`: added `AXID.Sidebar` (`urlBar`, `newTab`, `spaceDots`,
+  `spaceDot`, `page`, `spaceTitle`, `rowPinned`, `rowToday`, `rowFolder`, `rowSplit`, `divider`, `rowClose`) and
+  `AXID.Favorites` (`grid`, `tile`, `tileClose`, `loaded`, `unloaded`).
+- Identifiers, labels, values and selected state set:
+  - `SidebarContainerView`: `urlBar` (`sidebar.urlBar`), `newTabButton` (`sidebar.newTab`), `SpaceDotsView`
+    (`sidebar.spaceDots`) and each `SpaceDotElement` (`sidebar.spaceDot`), plus `setAccessibilitySelected` on
+    `SpacePageView` from `setPages(_:index:)` and `setCurrent(page:)`.
+  - `SpacePageView`: `sidebar.page` (role `.group`, label = Space title, selected = current Space) and `titleLabel`
+    (`sidebar.spaceTitle`).
+  - `SidebarOutlineView`, `SidebarOutlineController`, `SidebarRowView`, `SidebarTabCellView`, `SidebarDividerView`:
+    `SidebarOutlineView.accessibilityChildren()` exposes the unignored row views; node rows carry `sidebar.row.pinned`,
+    `sidebar.row.today`, `sidebar.row.folder` or `sidebar.row.split` with role `.row`, label = row title and
+    `isAccessibilitySelected() == (state == .current)` without enabling outline selection; the divider row is ignored
+    so its child `SidebarDividerView` (`sidebar.divider`, role `.splitter`) sits directly in the outline's unignored
+    children; `SidebarTabCellView.closeButton` carries `sidebar.row.close` while shown.
+  - `FavoritesGridView` and `FavoriteTileView`: `FavoritesGridView` carries `favorites.grid` (role `.group`),
+    `FavoritesCollectionView.accessibilityChildren()` exposes the realized `FavoriteTileView`s (`favorites.tile`,
+    role `.button`, label = title, value `loaded` or `unloaded`), and `FavoriteTileView.closeButton` carries
+    `favorites.tile.close` while shown.
+- Tests: `AccessibilityIdentifierTests` gains 4 tests (`testSidebarURLBarNewTabAndSpaceDotsHaveIdentifiersLabelsAndSelection`,
+  `testSpacePagesAndTitlesHaveIdentifiersLabelsAndSelection`, `testSidebarOutlineRowsDividerAndHoverCloseButton`,
+  `testFavoritesGridTilesAndCloseButton`), written first (failed before the view changes, then 12/12 pass).
+
+### Verification
+
+| Check | Command | Result |
+|---|---|---|
+| `AccessibilityIdentifierTests` | `swift test --filter AccessibilityIdentifierTests` | 12/12 pass (8 U4a + 4 U4b) |
+| ShellKit pure + isolation | `swift test --skip ShellKitGUITests` | 456 tests in 61 suites pass |
+| `AXID.swift` standalone | `xcrun swiftc -typecheck app/ArktShell/ShellKit/Sources/ShellUI/Accessibility/AXID.swift` | exit 0 |
