@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Fri, 23 Oct 2026 15:20:13 +0200
+Subject: [PATCH] Arkt: let Arkt create normal browser windows
+
+BrowserWindow::CreateBrowserWindow asks arkt::GetCreateBrowserWindowOverride() (//arkt/browser:window_factory_hook, a dependency-free target) first. //arkt/browser registers it in PreProfileInit when --arkt-native-window is set and returns nullptr for every browser it does not take, so Chromium's path is unchanged otherwise. user_gesture and in_tab_dragging are not passed: both are only consumed on Aura.
+---
+ chrome/browser/ui/views/frame/BUILD.gn                  | 1 +
+ chrome/browser/ui/views/frame/browser_window_factory.cc | 9 +++++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/BUILD.gn b/chrome/browser/ui/views/frame/BUILD.gn
+index d1973034ee..2dc3ff97d3 100644
+--- a/chrome/browser/ui/views/frame/BUILD.gn
++++ b/chrome/browser/ui/views/frame/BUILD.gn
+@@ -973,6 +973,7 @@ source_set("browser_window_factory") {
+   deps = [
+     ":browser_native_widget_factory",
+     ":browser_widget",
++    "//arkt/browser:window_factory_hook",
+     "//build:buildflag_header_h",
+     "//chrome/browser/ui:browser_window_deleter",
+     "//chrome/browser/ui/fullscreen",
+diff --git a/chrome/browser/ui/views/frame/browser_window_factory.cc b/chrome/browser/ui/views/frame/browser_window_factory.cc
+index ad579aa818..584143c330 100644
+--- a/chrome/browser/ui/views/frame/browser_window_factory.cc
++++ b/chrome/browser/ui/views/frame/browser_window_factory.cc
+@@ -4,6 +4,7 @@
+ 
+ #include <memory>
+ 
++#include "arkt/browser/arkt_browser_window_factory_hook.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/ui/browser_window_deleter.h"
+ #include "chrome/browser/ui/fullscreen/browser_window_fullscreen_controller.h"
+@@ -32,6 +33,14 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter>
+ BrowserWindow::CreateBrowserWindow(BrowserWindowInterface* browser,
+                                    bool user_gesture,
+                                    bool in_tab_dragging) {
++  // Arkt creates its own window for the browsers it takes (normal windows);
++  // the override returns nullptr for everything else.
++  if (auto fn = arkt::GetCreateBrowserWindowOverride()) {
++    if (auto window = fn(browser)) {
++      return window;
++    }
++  }
++
+   if (webui_browser::IsWebUIBrowserEnabled() &&
+       browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
+     return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(

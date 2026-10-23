@@ -6,15 +6,20 @@
 #include <string>
 #include <vector>
 
+#include "arkt/browser/arkt_browser_window.h"
+#include "arkt/browser/arkt_browser_window_factory_hook.h"
 #include "arkt/browser/arkt_extensions_menu.h"
 #include "arkt/browser/arkt_window_controller.h"
 #include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
+#include "base/scoped_observation.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -25,6 +30,16 @@
 namespace arkt {
 
 namespace {
+
+// Normal browser windows are ArktBrowserWindows (week-2 W5a). Without the
+// switch the week-1 path runs: Chromium's window, with its active tab mounted
+// in an ArktWindowController.
+constexpr char kNativeWindowSwitch[] = "arkt-native-window";
+
+bool NativeWindowEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kNativeWindowSwitch);
+}
 
 constexpr int kMaxAttempts = 40;
 constexpr base::TimeDelta kRetryDelay = base::Milliseconds(250);
@@ -106,13 +121,90 @@ void MountActiveTab(int attempt) {
                << " attempt(s)";
 }
 
+std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
+    BrowserWindowInterface* browser) {
+  // Popups, app, DevTools and picture-in-picture windows stay Views windows.
+  if (browser->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
+    return nullptr;
+  }
+  return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(
+      new ArktBrowserWindow(browser, [[ArktPlaceholderWindowHost alloc] init]));
+}
+
+// Logs `ARKT: browsers normal=<n> arkt=<n> views=<n>` on every browser add and
+// remove, so scripts can tell which window type each Browser got.
+class BrowserCensus : public BrowserCollectionObserver {
+ public:
+  void Start() {
+    observation_.Observe(GlobalBrowserCollection::GetInstance());
+  }
+
+  // BrowserCollectionObserver:
+  void OnBrowserCreated(BrowserWindowInterface* browser) override {
+    Log(nullptr);
+  }
+  void OnBrowserClosed(BrowserWindowInterface* browser) override {
+    Log(browser);
+  }
+
+ private:
+  // `closing` may still be listed while it is being removed; skip it.
+  void Log(BrowserWindowInterface* closing) {
+    int normal = 0;
+    int arkt = 0;
+    int views = 0;
+    GlobalBrowserCollection::GetInstance()->ForEach(
+        [&](BrowserWindowInterface* browser) {
+          if (browser == closing) {
+            return true;
+          }
+          if (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
+            normal++;
+          }
+          if (ArktBrowserWindow::FromBrowser(browser)) {
+            arkt++;
+          } else if (BrowserWindow* window = BrowserWindow::FromBrowser(browser);
+                     window && window->AsBrowserView()) {
+            views++;
+          }
+          return true;
+        });
+    LOG(WARNING) << "ARKT: browsers normal=" << normal << " arkt=" << arkt
+                 << " views=" << views;
+  }
+
+  base::ScopedObservation<GlobalBrowserCollection, BrowserCollectionObserver>
+      observation_{this};
+};
+
+BrowserCensus& Census() {
+  static base::NoDestructor<BrowserCensus> census;
+  return *census;
+}
+
 }  // namespace
 
 ArktBrowserMainExtraParts::ArktBrowserMainExtraParts() = default;
 ArktBrowserMainExtraParts::~ArktBrowserMainExtraParts() = default;
 
+void ArktBrowserMainExtraParts::PreProfileInit() {
+  // Profile init precedes the startup browser, so every normal Browser is
+  // created through the override.
+  if (NativeWindowEnabled()) {
+    SetCreateBrowserWindowOverride(&CreateArktBrowserWindow);
+    LOG(WARNING) << "ARKT: native window factory registered";
+  }
+}
+
+void ArktBrowserMainExtraParts::PreBrowserStart() {
+  Census().Start();
+}
+
 void ArktBrowserMainExtraParts::PostBrowserStart() {
   LOG(WARNING) << "ARKT: in-process hook alive";
+  if (NativeWindowEnabled()) {
+    return;
+  }
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(&MountActiveTab, 0));
 }

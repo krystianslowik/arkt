@@ -12,7 +12,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W2 | Sign `Arkt.app`, install in /Applications, smoke | TODO | |
 | W3 | Inventory of non-`BrowserView` window seams, variant decision | DONE | variant P (plain `NSWindow`); this week 3 seam patch files, 4-8 upstream files, 0 hot-file hunks (W: 3 / 4 / 0); see "W3" below |
 | W4 | Extensions menu lists every action (finding 1) | DONE | no upstream patch; see below |
-| W5a | `ArktBrowserWindow` skeleton behind `--arkt-native-window` | TODO | |
+| W5a | `ArktBrowserWindow` skeleton behind `--arkt-native-window` | DONE | patch 0004; startup, tabs and `chrome.windows` work; 3 crash seams hit (sad tab, NTP footer, closing the active tab, which also blocks window close and quit), see "W5a" below |
 | W5b | Seam fixes found by the smoke matrix (GATE) | TODO | |
 | W5c | Arkt-owned tab list and visibility (finding 2) | TODO | |
 | W6 | Extension window identity, extension-created tabs and windows (finding 3) | TODO | |
@@ -29,10 +29,10 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | 0001 | Register in-process browser hook | exists | 2 | 0 |
 | 0002 | Let a WebContents view draw again after leaving Views | exists; W9 tries to drop it | 4 | 0 |
 | 0003 | Arkt keychain item name (W8) | exists | 1 (`keychain_password_mac.mm`) | 0 |
-| 0004 | `BrowserWindow` factory hook for Arkt (W5a) | new | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
-| 0005+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new; W3 projects 3 patch files (P) | 4-8 (W3 estimate, P; 8-13 with week-3 rows) | 0 (W3 estimate) |
+| 0004 | `BrowserWindow` factory hook for Arkt (W5a) | exists | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
+| 0005+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new; W3 projects 3 patch files (P); W5a adds `read_anything_side_panel_controller.cc` | 5-9 (W3 estimate plus 1, P; 9-14 with week-3 rows) | 0 (W3 estimate) |
 
-Current totals: 3 patch files, 7 upstream files, 0 hot-file hunks.
+Current totals: 4 patch files, 9 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 9 files changed, 36 insertions, 2 deletions).
 
 ## W0
 
@@ -644,6 +644,124 @@ Beyond W5a Step 3's list, this inventory adds or confirms:
 Known gaps recorded for W5b (both variants, no fix this week): sad tab UI, download bubble, docked DevTools, zoom
 bubble, fullscreen exit control, extension keyboard commands, Share menu. If item 9 is not done, payments and Autofill AI bubbles join this list for
 week 3.
+
+## W5a: `ArktBrowserWindow` skeleton behind `--arkt-native-window`
+
+Date 2026-10-23. Branch `engine/w5a-native-window`. Variant P (plain `NSWindow`), as decided in W3 and on issue #15.
+
+### Prep
+
+- Plan: the factory hook is patch 0004 (0003 is the W8 keychain patch); seam patches start at 0005.
+- Chromium branch `arkt`: commits 0001 and 0002 were re-authored to `Arkt contributors <noreply@arkt.invalid>`
+  (`git rebase --exec 'git commit --amend --no-edit --author=...'` onto `156.0.8078.48`, author dates kept,
+  `GIT_LFS_SKIP_SMUDGE=1`). Tree unchanged (`git diff <old arkt> arkt` empty, same tree hash `0528431029`). Export
+  produced `From: Arkt contributors <noreply@arkt.invalid>` for all patches, and 0001-0003 were byte-identical to
+  the committed files (the repo copies already carried the noreply author).
+
+### Implementation
+
+- `arkt_browser_window_factory_hook.{h,cc}`, target `//arkt/browser:window_factory_hook` (public dep
+  `//chrome/browser/ui:browser_window_deleter` only): a function pointer, set in `PreProfileInit` when
+  `--arkt-native-window` is present. Patch 0004 (`Arkt: let Arkt create normal browser windows`) calls it first in
+  `BrowserWindow::CreateBrowserWindow` and passes only `browser` (`user_gesture`, `in_tab_dragging` are Aura-only).
+  The override returns nullptr for every type except `TYPE_NORMAL`.
+- `arkt_browser_window.{h,mm}`: `arkt::ArktBrowserWindow` (`BrowserWindow`, `ui::ColorProviderSource`,
+  `TabStripModelObserver`), the `ArktWindowHost` protocol (`window`, `cardView`, `closeRequested`,
+  `tabListChanged:`) and `ArktPlaceholderWindowHost` (an `ArktWindow`, 190 pt sidebar with the Extensions button,
+  inset rounded card; frames, not constraints, so the card has its size before the first mount). No RTTI:
+  `ArktBrowserWindow::FromBrowser` looks the browser up in the set of live windows.
+- The 9-item list from #15: `CreateFindBar` returns `ArktFindBar` (no UI); `IsTabStripEditable` true;
+  `GetContentsSize` is the card size; `GetLocationBar` is a non-null stub with `IsDrawn()` false;
+  `GetExclusiveAccessContext` is created in the constructor (native fullscreen through `toggleFullScreen:`,
+  `WindowFullscreenStateChanged` on the enter/exit notifications, bubble is a logged no-op that runs the hide
+  callback with `kNotShown`); `GetWebContentsModalDialogHost(For)` is a host over the card (top centre, card size,
+  observers notified on resize); `IsToolbarVisible` true; window state and bounds, `GetNativeWindow`, theme and
+  colour providers, keyboard (`HandleKeyboardEvent` offers unhandled Cmd key downs to `NSApp.mainMenu`,
+  `PreHandleKeyboardEvent` not handled) and `DeleteBrowserWindow` are real. Item 9 (`GetAutofillBubbleHandler`)
+  stays nullptr for week 3.
+- Lifecycle: `Show` calls `BrowserActiveStateManager::DidBecomeActive` and makes the window key; key/resign-key
+  notifications drive `DidBecomeActive`/`DidBecomeInactive`. `Close` runs from a posted task (as a Widget close
+  does): `HandleBeforeClose`, order out while tabs remain, `UnloadController::OnWindowClosing`. The close button
+  asks the engine through `closeRequested` instead of closing. The destructor calls
+  `TearDownPreBrowserWindowDestruction()` first, then drops the observers, unmounts and orders the window out.
+- Mounting: `OnActiveTabChanged` puts the new tab's `WebContents` view in the card (old one removed from the
+  hierarchy) and sets the window as the tab's colour provider source. Tab strip changes go to the host as plain
+  events (`inserted`, `removed`, `moved`, `activated`).
+- Census on every browser add and remove: `ARKT: browsers normal=<n> arkt=<n> views=<n>`.
+- `gn check out/Spike '//arkt/browser:*'`: `Header dependency check OK`.
+
+**Deviation from Step 3: `GetStatusBubbles` returns an empty vector, not an `ArktStatusBubble`.** The first smoke
+run crashed on the first mouse-entered event: `BrowserWebContentsDelegate::UpdateTargetURL` and `ContentsMouseEvent`
+(`browser_web_contents_delegate.cc:800-803`, `:827-833`) `static_cast` every status bubble to `StatusBubbleViews`
+and dereference its `base_view()` (SEGV at 0x348, from the macOS crash report). Webium returns an empty vector for
+the same reason. Link-target display for the shell needs another route (a `WebContentsDelegate`-level hook or a
+seam patch), week 3.
+
+### Build
+
+`nice -n 15 autoninja -C out/Spike chrome`: `The build has finished successfully.`, 0 `FAILED:` lines (twice).
+Before: `df -h /` 11-12 GiB available; swap free 1349-1429 MB.
+
+### Smoke (Step 5)
+
+With `--arkt-native-window`, profile `$PROF/week2-native`, `https://example.com`:
+
+```
+ARKT: native window factory registered
+ARKT: native window created
+ARKT: browsers normal=1 arkt=1 views=0
+ARKT: native window mounted tab 1888263317
+ARKT: tab event inserted tab 1888263317 index 0
+ARKT: tab event activated tab 1888263317 index 0
+ARKT: window number 46757
+ARKT: in-process hook alive
+ARKT: key window 46757
+cdp.mjs example.com 'document.visibilityState + " " + document.title'   -> "visible Example Domain"
+cdp.mjs example.com 'innerWidth + "x" + innerHeight'                     -> "1200x880" (the card)
+```
+
+Alive after 30 s idle (`ps -p` elapsed 00:36), no `FATAL`/`Check failed`. Window-only screenshot
+(`$PROF/shots/w5a-1.png`) shows example.com in the card, the sidebar placeholder and the Extensions button.
+
+Without the flag the week-1 path is unchanged: `ARKT: browsers normal=1 arkt=0 views=1`,
+`ARKT: mounted active tab after 1 attempt(s)`, CDP `"visible Example Domain"`.
+
+### Extension APIs (tabs-probe service worker, no input)
+
+| Call | Result |
+|---|---|
+| `chrome.windows.getAll({populate:true})` | one window, `type normal`, `focused true`, `state normal`, 1400x900, its one tab active |
+| `chrome.windows.getLastFocused()` | the same window id |
+| `chrome.tabs.create({active:false})` | tab at index 1 in that window; `tab event inserted`, no mount |
+| `chrome.tabs.update(id, {active:true})` | `true`; `native window mounted tab <id>` |
+| `chrome.tabs.remove` of a background tab | removed, `tab event removed`, process alive |
+| page `window.open("about:blank#page-open")` with a user gesture | `true`; the new tab lands in the Arkt window (`windows.getAll`: `normal:2`, census unchanged) |
+
+### Seams reached (recorded for W5b, not fixed)
+
+| Seam | How reached | Result |
+|---|---|---|
+| Sad tab | `cdp.mjs --navigate example.com chrome://crash` | **crash**: `SadTabController::ReinstallInWebView` -> `FindContentsWebView` -> `BrowserView::GetAllVisibleContentsWebViews` on a null `BrowserView` (SEGV) |
+| NTP footer | `cdp.mjs --navigate example.com chrome://newtab/` | **crash**: `Check failed: footer_controller.` (`new_tab_page_handler.cc`) |
+| Permission prompt | `Notification.requestPermission()` with a user gesture | no crash; no bubble shown (`Notification.permission` stays `"default"`, only the Arkt window exists) |
+| Post-install IPH | needs an extension install from the Web Store | not reached this task (W7) |
+| **New: closing the active tab** | `chrome.tabs.remove` of the active tab | **crash**: `Check failed: base::internal::get_is_test_impl()` in `ReadAnythingSidePanelController::TabWillDetach` (`read_anything_side_panel_controller.cc:243-248`): no `SidePanelUI` and Webium off, so `CHECK_IS_TEST()`. Every close of the active tab hits it, so closing a window (scenario 7) and quitting are blocked too: CDP `Browser.close` ends in the same `Check failed`. One-line Arkt predicate next to the Webium one, or an Arkt `SidePanelUI`; W3 had not classified this site as (a) |
+
+Teardown is therefore not verified yet: no run reached `~ArktBrowserWindow` (`ARKT: native window destroyed`).
+`kill -TERM` ends the process without running browser teardown (no destroyed line, no crash), and every graceful
+path (window close, `Browser.close`) first closes the active tab. W5b checks the destructor once the
+`ReadAnythingSidePanelController` seam is fixed.
+
+Crash reports under `~/Library/Application Support/Chromium/Crashpad`: 71 files before W5a, 78 after (counted
+only); all new ones come from the crash runs above (more than one dump per run where a renderer died too).
+
+Also known, not reached: `ExclusiveAccessPermissionPrompt` dereferences `GetLocationBar()->GetChipController()`
+unchecked (`exclusive_access_permission_prompt.cc:25`), and the stub returns nullptr (pointer/keyboard lock
+prompts).
+
+Not done in W5a: the extensions menu is not wired to the native window (the placeholder button does nothing;
+W5b scenario 4 needs it, W6 registers the `ExtensionsContainer`); tab-modal dialogs are not attached with
+`addChildWindow:` yet (W5b scenario 10).
 
 ## W8
 

@@ -7,6 +7,15 @@ namespace content {
 class WebContents;
 }
 
+// Chrome sends web content's unhandled key events back through the browser
+// window's CommandDispatcher, which retargets them at Chrome's (hidden) window
+// and calls -[NSApp sendEvent:]. AppKit delivers that to the key window, which
+// is ours, and the page would see the key twice. Treat such events the way
+// CommandDispatcher treats a redispatch: never hand them to the responder
+// chain again, only offer key equivalents to the main menu (Copy, Paste, ...).
+@interface ArktWindow : NSWindow
+@end
+
 // Hosts one WebContents NSView inside an Arkt-owned layout: a 190 pt sidebar
 // placeholder and an inset, rounded content card.
 @interface ArktWindowController : NSWindowController

@@ -1,9 +1,22 @@
+# Lets //arkt/browser create normal browser windows. Dependency-free on
+# purpose: //chrome/browser/ui/views/frame:browser_window_factory depends on it
+# (patch 0004), and depending on //arkt/browser there would be a GN cycle.
+source_set("window_factory_hook") {
+  sources = [
+    "arkt_browser_window_factory_hook.cc",
+    "arkt_browser_window_factory_hook.h",
+  ]
+  public_deps = [ "//chrome/browser/ui:browser_window_deleter" ]
+}
+
 # In-process browser hook, registered from
 # chrome/browser/chrome_browser_main.cc (patch 0001).
 source_set("browser") {
   sources = [
     "arkt_browser_main_extra_parts.h",
     "arkt_browser_main_extra_parts.mm",
+    "arkt_browser_window.h",
+    "arkt_browser_window.mm",
     "arkt_extensions_bridge.h",
     "arkt_extensions_bridge.mm",
     "arkt_extensions_menu.h",
@@ -12,20 +25,34 @@ source_set("browser") {
     "arkt_window_controller.mm",
   ]
   deps = [
+    ":window_factory_hook",
     "//base",
     "//chrome/browser/extensions",
     "//chrome/browser/profiles:profile",
+    "//chrome/browser/themes",
+    "//chrome/browser/ui:browser_command_controller",
+    "//chrome/browser/ui:browser_window_header",
+    "//chrome/browser/ui/browser_active_state_manager",
     "//chrome/browser/ui/browser_window",
+    "//chrome/browser/ui/exclusive_access",
     "//chrome/browser/ui/extensions",
     "//chrome/browser/ui/extensions:extension_popup_types",
+    "//chrome/browser/ui/find_bar",
+    "//chrome/browser/ui/fullscreen",
+    "//chrome/browser/ui/location_bar",
     "//chrome/browser/ui/tabs:tab_strip",
     "//chrome/browser/ui/toolbar",
+    "//chrome/browser/ui/views:bubble_anchor_util_views",
+    "//components/input",
     "//components/sessions",
+    "//components/web_modal",
     "//content/public/browser",
     "//extensions/browser",
     "//extensions/common",
     "//ui/base",
+    "//ui/color",
     "//ui/gfx",
+    "//ui/native_theme",
   ]
   public_deps = [ "//chrome/browser:main_extra_parts" ]
   frameworks = [
