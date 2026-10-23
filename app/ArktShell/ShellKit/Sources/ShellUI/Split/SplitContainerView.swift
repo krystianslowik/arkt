@@ -21,7 +21,8 @@ public final class SplitContainerView: NSView {
   /// Pacing of the last finished divider drag.
   public private(set) var lastPacing: FrameStats?
 
-  /// The new factors after a drag, a double-click or an accessibility adjustment; called once per change.
+  /// The new factors after a drag, a double-click or an accessibility adjustment; called once per change, and not
+  /// for a drag that ends where it began.
   public var onCommitFactors: (@MainActor ([Double]) -> Void)?
   /// A click asked to focus (or, on a closed pane's placeholder, to reopen) pane N.
   public var onFocusRequest: (@MainActor (Int) -> Void)?
@@ -33,6 +34,8 @@ public final class SplitContainerView: NSView {
   private var dividerViews: [SplitDividerView] = []
   private var placeholders: [Int: SplitPanePlaceholderView] = [:]
   private var draggingIndex: Int?
+  /// `liveFactors` when the running drag began; a drag that ends there commits nothing.
+  private var factorsAtDragStart: [Double] = []
 
   /// The gap between pane cards; it is the divider's hit area. TODO(measure) PARITY(NEEDS-RUNTIME-CHECK RT-37)
   public var gap: CGFloat { metrics.cardInsetRight }
@@ -133,6 +136,7 @@ public final class SplitContainerView: NSView {
   func beginDividerDrag(_ index: Int) {
     guard draggingIndex == nil, dividers.indices.contains(index) else { return }
     draggingIndex = index
+    factorsAtDragStart = liveFactors
     pacerSession = pacer.begin("split-divider", in: self)
   }
 
@@ -147,7 +151,8 @@ public final class SplitContainerView: NSView {
     guard draggingIndex == index else { return }
     draggingIndex = nil
     if let stats = pacer.end(session: pacerSession) { lastPacing = stats }
-    onCommitFactors?(liveFactors)
+    // A plain click on the gap (or the first click of a double-click) moved nothing: no source write.
+    if liveFactors != factorsAtDragStart { onCommitFactors?(liveFactors) }
   }
 
   /// Double-click on a divider: every pane gets an equal share, committed once. [I] PARITY(NEEDS-RUNTIME-CHECK RT-33)

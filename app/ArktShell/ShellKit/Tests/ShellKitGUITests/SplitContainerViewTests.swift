@@ -172,6 +172,10 @@ final class SplitContainerViewTests: XCTestCase {
     var commits: [[Double]] = []
     container.onCommitFactors = { commits.append($0) }
     let divider = container.dividers[0]
+    // A plain click on the gap moves nothing and writes nothing.
+    divider.mouseDown(with: try mouseEvent(.leftMouseDown, at: NSPoint(x: 504, y: 300), in: container))
+    divider.mouseUp(with: try mouseEvent(.leftMouseUp, at: NSPoint(x: 504, y: 300), in: container))
+    XCTAssertTrue(commits.isEmpty)
     // Grab the divider 4 pt into the gap; the gap keeps that offset under the pointer.
     divider.mouseDown(with: try mouseEvent(.leftMouseDown, at: NSPoint(x: 504, y: 300), in: container))
     divider.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: NSPoint(x: 704, y: 300), in: container))
@@ -189,6 +193,9 @@ final class SplitContainerViewTests: XCTestCase {
     container.onCommitFactors = { commits.append($0) }
     let divider = container.dividers[1]
     let point = NSPoint(x: divider.frame.midX, y: 300)
+    // AppKit delivers a double-click as down(1), up(1), down(2), up(2).
+    divider.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+    divider.mouseUp(with: try mouseEvent(.leftMouseUp, at: point, in: container))
     divider.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container, clickCount: 2))
     divider.mouseUp(with: try mouseEvent(.leftMouseUp, at: point, in: container, clickCount: 2))
     let third: Double = 1.0 / 3
