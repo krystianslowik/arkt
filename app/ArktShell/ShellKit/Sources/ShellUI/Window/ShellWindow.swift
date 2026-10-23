@@ -34,8 +34,9 @@ public final class ShellWindow: NSWindow {
           let titlebar = close.superview,                    // NSTitlebarView
           let container = titlebar.superview else { return } // NSTitlebarContainerView
     let origin = metrics.trafficLightOrigin
-    // Grow the titlebar container (32 pt by default on this OS) so buttons placed lower stay hit-testable.
-    let height = origin.y * 2 + close.frame.height
+    // As tall as the sidebar's traffic-light strip, so the sidebar URL bar below it keeps its clicks, and never
+    // shorter than the buttons' bottom edge, so they stay hit-testable.
+    let height = max(metrics.sidebarTopBarHeight, origin.y + close.frame.height)
     let buttonsExtent = origin.x * 2 + CGFloat(kinds.count - 1) * metrics.trafficLightSpacing + close.frame.width
     let width = min(frame.width, max(sidebarWidth, buttonsExtent))
     let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)

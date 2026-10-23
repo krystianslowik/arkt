@@ -146,6 +146,15 @@ public final class SidebarContainerView: NSView {
   public let topBar: NSView = WindowDragView(frame: .zero)
   /// The active tab's host under the traffic lights (BH-031, GS-042); the window controller binds it.
   public let urlBar = URLBarView(style: .host)
+  /// False hides the URL bar and moves the favorites up under the traffic-light strip. Arc hides it while the
+  /// Toolbar is on (Arc 1.168, see `docs/plans/2026-10-23-arc-measurements.md`); the window controller sets it.
+  public var showsURLBar = true {
+    didSet {
+      guard showsURLBar != oldValue else { return }
+      urlBar.isHidden = !showsURLBar
+      needsLayout = true
+    }
+  }
   public let favorites: FavoritesGridView
   /// Every Space page of this profile side by side; swipes and Space switches move it.
   public let pager = SpacePagerView(frame: .zero)
@@ -244,14 +253,14 @@ public final class SidebarContainerView: NSView {
     urlBar.frame = NSRect(x: padding, y: topBarHeight + SidebarMetrics.urlBarTopGap,
                           width: max(0, width - 2 * padding), height: SidebarMetrics.urlBarHeight)
     let favoritesHeight = favorites.preferredHeight
-    let favoritesY = urlBar.frame.maxY + SidebarMetrics.favoritesTopGap
+    let favoritesY = (showsURLBar ? urlBar.frame.maxY : topBarHeight) + SidebarMetrics.favoritesTopGap
     favorites.frame = NSRect(x: padding, y: favoritesY,
                              width: FavoritesLayout.contentWidth(sidebarWidth: width), height: favoritesHeight)
     let pagesY = favoritesY + favoritesHeight + (favoritesHeight > 0 ? SidebarMetrics.favoritesBottomGap : 0)
     let pagerFrame = NSRect(x: 0, y: pagesY, width: width, height: max(0, bounds.height - pagesY - bottomHeight))
     if pager.frame != pagerFrame { pager.frame = pagerFrame }
     bottomBar.frame = NSRect(x: 0, y: max(pagesY, bounds.height - bottomHeight), width: width, height: bottomHeight)
-    let buttonSize: CGFloat = 28                                   // TODO(measure)
+    let buttonSize = SidebarMetrics.bottomBarButtonSize
     let buttonY = ((bottomHeight - buttonSize) / 2).rounded()
     archiveButton.frame = NSRect(x: padding, y: buttonY, width: buttonSize, height: buttonSize)
     newTabButton.frame = NSRect(x: width - padding - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)

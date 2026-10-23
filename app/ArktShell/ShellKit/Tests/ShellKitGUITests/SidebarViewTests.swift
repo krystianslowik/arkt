@@ -129,12 +129,16 @@ final class SidebarViewTests: XCTestCase {
   func testContainerLayout() throws {
     let controller = makeSidebar()
     let view = controller.view
-    XCTAssertEqual(view.topBar.frame, CGRect(x: 0, y: 0, width: 190, height: 44))
+    XCTAssertEqual(view.topBar.frame, CGRect(x: 0, y: 0, width: 190, height: 36))
     XCTAssertEqual(view.favorites.frame.minX, 8)
     XCTAssertEqual(view.favorites.frame.width, 174)
-    XCTAssertGreaterThanOrEqual(view.favorites.frame.minY, 44, "favorites sit below the traffic lights")
+    XCTAssertGreaterThanOrEqual(view.favorites.frame.minY, 36, "favorites sit below the traffic lights")
+    XCTAssertEqual(view.favorites.frame.minY, view.urlBar.frame.maxY + 8, "URL bar shown: 8 pt to the tiles")
     XCTAssertEqual(view.bottomBar.frame.maxY, 800)
-    XCTAssertEqual(view.bottomBar.frame.height, 36)
+    XCTAssertEqual(view.bottomBar.frame.height, 50)
+    // Arc's Space dock: 32 pt buttons, 8 pt from the sidebar edges, 9 pt above and below.
+    XCTAssertEqual(view.archiveButton.frame, CGRect(x: 8, y: 9, width: 32, height: 32))
+    XCTAssertEqual(view.newTabButton.frame, CGRect(x: 150, y: 9, width: 32, height: 32))
     let page = try XCTUnwrap(controller.currentPage)
     XCTAssertEqual(page.titleLabel.stringValue, "Personal")
     XCTAssertEqual(page.titleLabel.frame.minX, 16)
@@ -159,11 +163,11 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertEqual(outline.numberOfRows, pinned.count + folderChildren.count + 1 + today.count)
     let dividerRow = outlineController.dividerRow
     XCTAssertEqual(dividerRow, pinned.count + folderChildren.count)
-    XCTAssertEqual(outline.rect(ofRow: dividerRow).height, 13)
+    XCTAssertEqual(outline.rect(ofRow: dividerRow).height, 25)
     XCTAssertEqual(outlineController.row(for: today[0]), dividerRow + 1)
     // Children are indented one step; top-level rows are not.
     let childRow = outlineController.row(for: folderChildren[0])
-    XCTAssertEqual(outline.frameOfCell(atColumn: 0, row: childRow).minX, 14)
+    XCTAssertEqual(outline.frameOfCell(atColumn: 0, row: childRow).minX, 16)
     XCTAssertEqual(outline.frameOfCell(atColumn: 0, row: 0).minX, 0)
     XCTAssertEqual(outline.frameOfOutlineCell(atRow: outlineController.row(for: folder)), .zero)
     let titleCell = try cell(controller, today[0])

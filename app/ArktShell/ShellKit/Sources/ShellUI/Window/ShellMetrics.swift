@@ -15,20 +15,23 @@ public struct ShellMetrics: Sendable, Equatable {
   /// Close button origin measured from the window's top-left corner.
   public var trafficLightOrigin: CGPoint
   public var trafficLightSpacing: CGFloat
-  /// Height of the sidebar strip that hosts the traffic lights (and later back/forward/reload).
+  /// Height of the sidebar strip that hosts the traffic lights (and later back/forward/reload); also the height of
+  /// the titlebar container, so it never covers the sidebar URL bar below the strip.
   public var sidebarTopBarHeight: CGFloat
 
+  /// "Arc 1.168" marks a value from `docs/plans/2026-10-23-arc-measurements.md` (one 2x window, dark, not key,
+  /// Toolbar on).
   public static let standard = ShellMetrics(
     sidebarDefaultWidth: 190,
     sidebarMinWidth: 150,          // TODO(measure): Arc's minimum
     sidebarMaxWidth: 400,          // TODO(measure): Arc's maximum
-    cardInsetTop: 9,
+    cardInsetTop: 10,                            // Arc 1.168
     cardInsetRight: 10,
     cardInsetBottom: 10,
     cardCornerRadius: 10,
     resizeHandleWidth: 8,
-    trafficLightOrigin: CGPoint(x: 16, y: 16),   // TODO(measure)
-    trafficLightSpacing: 20,                     // AppKit default pitch
-    sidebarTopBarHeight: 44                      // TODO(measure)
+    trafficLightOrigin: CGPoint(x: 12, y: 16),   // Arc 1.168: close button frame (16 x 16)
+    trafficLightSpacing: 23,                     // Arc 1.168: close x 12, minimize x 35, zoom x 58
+    sidebarTopBarHeight: 36                      // Arc 1.168, Toolbar-on layout only (window top to Favorites)
   )
 }

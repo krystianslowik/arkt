@@ -132,9 +132,9 @@ enum ShellContrastProbe {
 
 /// Where each token is drawn. Kept next to the assertions so a new call site shows up as a missing case here.
 enum ShellTokenSites {
-  /// `secondaryText` is text: the Space title (`SpacePageView`, on the theme), the URL bar label (`URLBarView`, on
-  /// `sidebarItemBackground`, `sidebarItemHovered` while hovered), and the toolbar buttons (`ContentToolbarView`,
-  /// on the opaque `toolbarSurface`).
+  /// `secondaryText` is text: the Space title (`SpacePageView`, on the theme), the sidebar URL bar label
+  /// (`URLBarView` `.host`, on `sidebarItemBackground`, `sidebarItemHovered` while hovered), and the Toolbar buttons
+  /// and plain URL text (`ContentToolbarView`, `URLBarView` `.full` without a pill, on the opaque `toolbarSurface`).
   static func secondaryTextLayers(_ flavor: ThemeFlavor) -> [ShellContrastProbe.Layer?] {
     [nil, ShellTokens.sidebarItemBackground.resolve(flavor), ShellTokens.sidebarItemHovered.resolve(flavor)]
   }
@@ -229,6 +229,15 @@ struct ShellTokensContrastTests {
     let onToolbar = ShellContrastProbe.ratio(text, onOpaque: ShellTokens.toolbarSurface.resolve(flavor))
     #expect(onTheme >= Contrast.minimumText, "secondaryText \(flavor) over theme: \(onTheme)")
     #expect(onToolbar >= Contrast.minimumText, "secondaryText \(flavor) over toolbar: \(onToolbar)")
+  }
+
+  /// Why `toolbarSurface` is not Arc's measured strip (#186): Arc 1.168 draws the Toolbar on the card's own surface,
+  /// sRGB #878787 in the dark theme measured, where `secondaryText` would fall below 4.5:1. If this ever passes, the
+  /// measured surface can be reconsidered.
+  @Test func arcsMeasuredToolbarSurfaceWouldFailSecondaryText() {
+    let arcStrip = RGBA.srgb(hex: 0x878787)
+    let ratio = ShellContrastProbe.ratio(ShellTokens.secondaryText.dark, onOpaque: arcStrip)
+    #expect(ratio < Contrast.minimumText, "secondaryText dark over Arc's strip: \(ratio)")
   }
 
   // MARK: Icons, WCAG 2.x non-text 3:1

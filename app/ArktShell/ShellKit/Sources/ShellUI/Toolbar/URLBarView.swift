@@ -1,7 +1,7 @@
 import AppKit
 
-/// The URL bar: the active tab's address in a rounded pill. One class serves the sidebar (host only, under the
-/// traffic lights) and the Toolbar (full URL). A press opens the command bar prefilled with the URL (the owner
+/// The URL bar: the active tab's address. One class serves the sidebar (host only, under the traffic lights, in a
+/// rounded pill) and the Toolbar (full URL as plain centered text, no fill, border or radius, as Arc 1.168 draws it). A press opens the command bar prefilled with the URL (the owner
 /// wires `onPress` to Cmd-L, KB-002; a click presses on mouse up inside); right-click or Ctrl-click offers
 /// Show / Hide Toolbar (BH-031, GS-042). Frames are set by the owner; the label is laid out here. Text changes only
 /// when the URL does.
@@ -56,6 +56,7 @@ public final class URLBarView: NSView {
     layer?.cornerCurve = .continuous
     label.font = Self.font
     label.lineBreakMode = style == .host ? .byTruncatingTail : .byTruncatingMiddle
+    label.alignment = style == .host ? .natural : .center
     label.maximumNumberOfLines = 1
     label.cell?.usesSingleLineMode = true
     label.autoresizingMask = []
@@ -92,7 +93,7 @@ public final class URLBarView: NSView {
   }
 
   public override func updateLayer() {
-    guard let layer else { return }
+    guard let layer, style == .host else { return }   // the Toolbar's URL is plain text
     layer.cornerRadius = SidebarMetrics.urlBarCornerRadius
     let token = isHovered ? ShellTokens.sidebarItemHovered : ShellTokens.sidebarItemBackground
     layer.backgroundColor = token.resolve(flavor).cgColor
@@ -100,7 +101,7 @@ public final class URLBarView: NSView {
 
   public override func layout() {
     super.layout()
-    let inset = SidebarMetrics.urlBarTextInset
+    let inset = style == .host ? SidebarMetrics.urlBarTextInset : 0
     let height = Self.labelHeight
     label.frame = NSRect(x: inset, y: ((bounds.height - height) / 2).rounded(),
                          width: max(0, bounds.width - 2 * inset), height: height)
