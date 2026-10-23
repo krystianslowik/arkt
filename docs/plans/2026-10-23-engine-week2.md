@@ -229,9 +229,9 @@ patch workflow (`engine/README.md`), Node 26 (built-in `WebSocket`) for the CDP 
 |---|---|---|---|---|
 | 0001 | Register in-process browser hook | exists | 2 | W0 records |
 | 0002 | Let a WebContents view draw again after leaving Views | exists; W9 tries to drop it | 1-4 | W0 records |
-| 0003 | `BrowserWindow` factory hook for Arkt (W5a) | new | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
-| 0004+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new, measured in W3/W5b | W3 estimate | W3 estimate |
-| next | Arkt keychain item name (W8) | new | 1 | 0 |
+| 0003 | Arkt keychain item name (W8) | new | 1 | 0 |
+| 0004 | `BrowserWindow` factory hook for Arkt (W5a) | new | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
+| 0005+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new, measured in W3/W5b | W3 estimate | W3 estimate |
 
 "Hot files" are the two files every upstream feature touches and that conflict on almost every rebase:
 `chrome/browser/ui/browser_window/internal/browser_window_features.cc` and `chrome/browser/ui/tabs/tab_features.cc`.
@@ -742,7 +742,7 @@ Time-box: 4 h.
 
 ---
 
-### Task W5a: `ArktBrowserWindow` skeleton behind `--arkt-native-window` (factory hook, patch 0003)
+### Task W5a: `ArktBrowserWindow` skeleton behind `--arkt-native-window` (factory hook, patch 0004)
 
 **Files:**
 - Create: `engine/arkt/browser/arkt_browser_window_factory_hook.{h,cc}` (tiny target, no Chrome UI deps)
@@ -753,7 +753,7 @@ Time-box: 4 h.
 - Modify: `engine/arkt/browser/BUILD.gn` (new `source_set("window_factory_hook")`; `arkt_browser_window.mm` in
   `//arkt/browser`)
 - Modify: `engine/arkt/browser/arkt_browser_main_extra_parts.{h,mm}` (register the factory in `PreProfileInit`)
-- Upstream (patch 0003): `chrome/browser/ui/views/frame/browser_window_factory.cc`,
+- Upstream (patch 0004): `chrome/browser/ui/views/frame/browser_window_factory.cc`,
   `chrome/browser/ui/views/frame/BUILD.gn`
 
 **Why a registration hook and not a direct dependency:** `//arkt/browser` depends on large Chrome UI targets and is a
@@ -779,7 +779,7 @@ CreateBrowserWindowFn GetCreateBrowserWindowOverride();
 Deps: `//chrome/browser/ui:browser_window_deleter` only (check the exact target with
 `git -C $CR grep -n browser_window_deleter -- chrome/browser/ui/BUILD.gn`).
 
-**Step 2: Upstream patch 0003.** In `BrowserWindow::CreateBrowserWindow`, before the Webium branch:
+**Step 2: Upstream patch 0004.** In `BrowserWindow::CreateBrowserWindow`, before the Webium branch:
 
 ```cpp
   if (auto fn = arkt::GetCreateBrowserWindowOverride()) {
@@ -868,7 +868,8 @@ in the card. A crash or `CHECK` here goes to W5b, not into this task's time-box 
 git add engine/arkt/browser/{arkt_browser_window_factory_hook.h,arkt_browser_window_factory_hook.cc} \
   engine/arkt/browser/{arkt_browser_window.h,arkt_browser_window.mm,BUILD.gn} \
   engine/arkt/browser/{arkt_browser_main_extra_parts.h,arkt_browser_main_extra_parts.mm} \
-  engine/patches/chromium/.patches engine/patches/chromium/0003-*.patch docs/plans/2026-10-23-engine-week2-results.md
+  engine/patches/chromium/.patches engine/patches/chromium/0004-Arkt-let-Arkt-create-normal-browser-windows.patch \
+  docs/plans/2026-10-23-engine-week2-results.md
 git commit -m "Add the ArktBrowserWindow skeleton behind --arkt-native-window"
 ```
 
@@ -945,8 +946,8 @@ an Arkt arm in `browser_window_features.cc` counts against the hot-file hunk lim
 
 **Step 3: GATE.** Measure after every theme commit, then decide. The gate trips if any of these holds for the seam
 patches (W5b, plus any W7 adds): more than 8 seam patch files; more than 25 upstream files touched
-(`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`, minus the files of patches 0001-0003 and the keychain
-patch); more than 6 hunks in the hot files (patch budget command; one hunk in either file is one rebase conflict
+(`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`, minus the files of patches 0001-0004: hook, draw,
+keychain and factory hook); more than 6 hunks in the hot files (patch budget command; one hunk in either file is one rebase conflict
 waiting to happen); or a seam needs a change to a widely included header. Patch-file count alone is not the gate:
 one theme patch that edits 15 files or adds 6 arms to `browser_window_features.cc` is worse than three small ones.
 When it trips:
@@ -1160,8 +1161,8 @@ and cookies (throwaway test data).
 **Step 4: Commit**
 
 ```zsh
-git add engine/patches/chromium/.patches engine/patches/chromium/00NN-Arkt-use-the-Arkt-Safe-Storage-keychain-item.patch \
-  engine/README.md docs/plans/2026-10-23-engine-week2-results.md   # NN: the number Export assigned
+git add engine/patches/chromium/.patches engine/patches/chromium/0003-Arkt-use-the-Arkt-Safe-Storage-keychain-item.patch \
+  engine/README.md docs/plans/2026-10-23-engine-week2-results.md
 git commit -m "Use the Arkt Safe Storage keychain item"
 ```
 

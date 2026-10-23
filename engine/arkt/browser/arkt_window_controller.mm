@@ -47,15 +47,6 @@ CASpringAnimation* SlideSpring(CGFloat from, CGFloat to) {
 }
 }  // namespace
 
-// Chrome sends web content's unhandled key events back through the browser
-// window's CommandDispatcher, which retargets them at Chrome's (hidden) window
-// and calls -[NSApp sendEvent:]. AppKit delivers that to the key window, which
-// is ours, and the page would see the key twice. Treat such events the way
-// CommandDispatcher treats a redispatch: never hand them to the responder
-// chain again, only offer key equivalents to the main menu (Copy, Paste, ...).
-@interface ArktWindow : NSWindow
-@end
-
 @implementation ArktWindow
 - (void)sendEvent:(NSEvent*)event {
   NSEventType type = event.type;

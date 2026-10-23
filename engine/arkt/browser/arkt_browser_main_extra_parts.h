@@ -14,6 +14,8 @@ class ArktBrowserMainExtraParts : public ChromeBrowserMainExtraParts {
   ~ArktBrowserMainExtraParts() override;
 
   // ChromeBrowserMainExtraParts:
+  void PreProfileInit() override;
+  void PreBrowserStart() override;
   void PostBrowserStart() override;
 };
 

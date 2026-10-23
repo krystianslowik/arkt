@@ -1,3 +1,4 @@
 0001-Arkt-register-in-process-browser-hook.patch
 0002-Arkt-let-a-WebContents-view-draw-again-after-leaving.patch
 0003-Arkt-use-the-Arkt-Safe-Storage-keychain-item.patch
+0004-Arkt-let-Arkt-create-normal-browser-windows.patch
