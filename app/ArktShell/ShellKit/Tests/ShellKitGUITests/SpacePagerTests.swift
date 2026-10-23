@@ -329,6 +329,74 @@ final class SpacePagerTests: XCTestCase {
     XCTAssertEqual(controller.pager.offset, 0)
   }
 
+  /// #98 (GS-002, BH-035): mouse buttons 3 and 4 switch to the previous and next Space anywhere in the window and
+  /// stop at the first and last Space ([I], PARITY(NEEDS-RUNTIME-CHECK #78)).
+  func testMouseButtons3And4SwitchToPreviousAndNextSpaceAndStopAtEnds() async throws {
+    let window = try XCTUnwrap(controller.window)
+    func mouseEvent(button: Int) throws -> NSEvent {
+      let mouseButton = try XCTUnwrap(CGMouseButton(rawValue: UInt32(button)))
+      let cg = try XCTUnwrap(CGEvent(mouseEventSource: nil, mouseType: .otherMouseDown,
+                                     mouseCursorPosition: CGPoint(x: 400, y: 400), mouseButton: mouseButton))
+      return try XCTUnwrap(NSEvent(cgEvent: cg))
+    }
+
+    let button2 = try mouseEvent(button: 2)
+    let button3 = try mouseEvent(button: 3)
+    let button4 = try mouseEvent(button: 4)
+
+    // Button 2 (middle click) does not switch Spaces.
+    window.sendEvent(button2)
+    XCTAssertEqual(controller.pager.targetIndex, 0)
+
+    // Button 3 at the first Space stops at index 0.
+    window.sendEvent(button3)
+    XCTAssertEqual(controller.pager.targetIndex, 0)
+
+    // Button 4 advances to the next Space, and at the last Space stops at index 2.
+    await awaitSettle { window.sendEvent(button4) }
+    XCTAssertEqual(controller.currentSpace, sidebar.spaceOrder[1])
+    await awaitSettle { window.sendEvent(button4) }
+    XCTAssertEqual(controller.currentSpace, sidebar.spaceOrder[2])
+    window.sendEvent(button4)
+    XCTAssertEqual(controller.pager.targetIndex, 2)
+    controller.nextSpace(nil)
+    XCTAssertEqual(controller.pager.targetIndex, 2)
+
+    // Button 3 moves back to the previous Space.
+    await awaitSettle { window.sendEvent(button3) }
+    XCTAssertEqual(controller.currentSpace, sidebar.spaceOrder[1])
+  }
+
+  /// #98 (M1, GS-001): horizontal trackpad swipes starting over the Favorites grid or the bottom bar page the Spaces.
+  func testHorizontalGestureOverFavoritesGridAndBottomBarReachesThePager() throws {
+    func event(_ phase: Int, dx: Int32, dy: Int32) throws -> NSEvent {
+      let cg = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                                     wheel1: dy, wheel2: dx, wheel3: 0))
+      cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+      cg.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(dy))
+      cg.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(dx))
+      cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase))
+      return try XCTUnwrap(NSEvent(cgEvent: cg))
+    }
+
+    let favoritesGrid = controller.sidebarController.view.favorites.collectionView
+    favoritesGrid.scrollWheel(with: try event(1, dx: 0, dy: 0))
+    favoritesGrid.scrollWheel(with: try event(2, dx: -20, dy: 0))
+    XCTAssertTrue(controller.pager.isTracking, "swipe starting over the Favorites grid reaches the pager")
+    XCTAssertNotEqual(controller.pager.offset, 0)
+    favoritesGrid.scrollWheel(with: try event(4, dx: 0, dy: 0))
+    XCTAssertFalse(controller.pager.isTracking)
+    controller.pager.jump(to: 0)
+
+    let bottomBar = controller.sidebarController.view.spaceDots
+    bottomBar.scrollWheel(with: try event(1, dx: 0, dy: 0))
+    bottomBar.scrollWheel(with: try event(2, dx: -20, dy: 0))
+    XCTAssertTrue(controller.pager.isTracking, "swipe starting over the bottom bar reaches the pager")
+    XCTAssertNotEqual(controller.pager.offset, 0)
+    bottomBar.scrollWheel(with: try event(4, dx: 0, dy: 0))
+    XCTAssertFalse(controller.pager.isTracking)
+  }
+
   // Frame pacing: a display-paced scripted swipe and a keyboard switch, measured on the pager's display link.
   func testFramePacingDuringSwipeAndKeyboardSwitch() async throws {
     let pager = controller.pager

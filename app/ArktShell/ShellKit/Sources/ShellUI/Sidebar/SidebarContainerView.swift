@@ -382,4 +382,14 @@ public final class SidebarContainerView: NSView {
     let dotsX = archiveButton.frame.maxX
     spaceDots.frame = NSRect(x: dotsX, y: 0, width: max(0, newTabButton.frame.minX - dotsX), height: bottomHeight)
   }
+
+  /// Trackpad swipes starting over the Favorites grid, bottom bar, or other sidebar chrome outside the outline page
+  /// the Spaces (#98, M1, GS-001).
+  public override func scrollWheel(with event: NSEvent) {
+    guard event.phase != [] || event.momentumPhase != [] else {
+      super.scrollWheel(with: event)
+      return
+    }
+    pager.scrollWheel(with: event)
+  }
 }

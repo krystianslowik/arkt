@@ -195,6 +195,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   @objc public func nextSpace(_ sender: Any?) { sidebarController.nextSpace() }
   /// Cmd-Opt-Left (KB-034).
   @objc public func previousSpace(_ sender: Any?) { sidebarController.previousSpace() }
+  /// GS-002, BH-035: mouse buttons 3 / 4 switch to the previous / next Space anywhere in the window (#98).
+  public override func otherMouseDown(with event: NSEvent) {
+    switch event.buttonNumber {
+    case 3: previousSpace(nil)
+    case 4: nextSpace(nil)
+    default: super.otherMouseDown(with: event)
+    }
+  }
   /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041): the menu item's tag is the zero-based Space index.
   @objc public func goToSpace(_ sender: Any?) {
     guard let tag = (sender as? NSMenuItem)?.tag else { return }

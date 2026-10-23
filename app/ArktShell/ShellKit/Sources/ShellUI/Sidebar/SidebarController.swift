@@ -108,9 +108,10 @@ public final class SidebarController {
     view.pager.go(to: index)
   }
 
-  /// KB-033: Cmd-Opt-Right. Counts from the Space a running switch heads to; stops at the last Space.
+  /// KB-033, GS-002: Cmd-Opt-Right and mouse button 4. Counts from the Space a running switch heads to; stops at the
+  /// last Space [I], PARITY(NEEDS-RUNTIME-CHECK #78: whether Arc wraps at the ends).
   public func nextSpace() { goToSpace(at: min(view.pager.targetIndex + 1, pagedSpaces.count - 1)) }
-  /// KB-034: Cmd-Opt-Left. Stops at the first Space.
+  /// KB-034, GS-002: Cmd-Opt-Left and mouse button 3. Stops at the first Space [I], PARITY(NEEDS-RUNTIME-CHECK #78).
   public func previousSpace() { goToSpace(at: max(view.pager.targetIndex - 1, 0)) }
 
   /// The tab to show when `space` becomes current: its last active tab (BH-036), else its first tab,

@@ -50,4 +50,13 @@ public final class ShellWindow: NSWindow {
       if button.frame.origin != target { button.setFrameOrigin(target) }
     }
   }
+
+  /// Mouse buttons 3 and 4 switch to the previous / next Space anywhere in the window (GS-002, BH-035, #98).
+  public override func sendEvent(_ event: NSEvent) {
+    if event.type == .otherMouseDown, event.buttonNumber == 3 || event.buttonNumber == 4 {
+      otherMouseDown(with: event)
+      return
+    }
+    super.sendEvent(event)
+  }
 }

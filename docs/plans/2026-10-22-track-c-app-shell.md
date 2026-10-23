@@ -3230,10 +3230,10 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
 ## C6 review follow-ups (deferred)
 
 - Next / Previous Space at the ends: the shell stops at the first and last Space; Arc may wrap. Verify at runtime
-  (RT item) before changing `SidebarController.nextSpace` / `previousSpace`.
-- GS-002: mouse buttons 3 / 4 switch to the previous / next Space (BH-035). Not implemented.
+  (RT item) before changing `SidebarController.nextSpace` / `previousSpace`. #98 keeps this [I] stop-at-the-ends behavior (`PARITY(NEEDS-RUNTIME-CHECK #78)`) and pins both ends with tests.
+- GS-002: mouse buttons 3 / 4 switch to the previous / next Space (BH-035). Done in #98 (`ShellWindow.sendEvent` and `ShellWindowController.otherMouseDown`).
 - M1: horizontal swipes that start over the favorites grid or the bottom bar do not reach the pager yet (only the
-  outline and the Space title do).
+  outline and the Space title do). Done in #98 (`SidebarContainerView.scrollWheel` forwards trackpad gestures to `pager`).
 - I3: responsive scrolling (`NSScrollView` non-contiguous / responsive-scroll paths) for the outline, and I4: move
   the strip with a layer transform instead of `setFrameOrigin`. Decide both from idle-machine pacing in C7; the
   loaded runs so far record one 9-12 ms frame per scripted swipe (0 for keyboard switches).
