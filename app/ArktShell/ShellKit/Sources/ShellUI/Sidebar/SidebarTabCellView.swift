@@ -140,12 +140,16 @@ public final class SidebarDividerView: NSView {
 /// from `SymbolImageCache`, so displaying them during a Space swipe never re-rasterizes a glyph.
 @MainActor
 enum SidebarGlyphs {
+  /// Fill and ink of the letter tile. Both depend on the flavor only, so the bitmap cache key needs no colors.
+  static let letterFill = ShellTokens.letterTileFill
+  static let letterInk = ShellTokens.primaryText
+
   static func letter(for title: String, url: URL?, flavor: ThemeFlavor, size: CGFloat, scale: CGFloat,
                      cache: SymbolImageCache = .shared) -> NSImage {
     let source = url?.host().map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 } ?? title
     let letter = source.first.map { String($0).uppercased() } ?? "?"
-    let fill = ShellTokens.sidebarItemHovered.resolve(flavor)
-    let ink = ShellTokens.primaryText.resolve(flavor)
+    let fill = letterFill.resolve(flavor)
+    let ink = letterInk.resolve(flavor)
     return cache.bitmap(key: "letter-\(letter)-\(flavor)", size: size, scale: scale) { rect in
       let path = NSBezierPath(roundedRect: rect, xRadius: rect.width * 0.25, yRadius: rect.height * 0.25)
       fill.nsColor().setFill()

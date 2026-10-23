@@ -63,6 +63,20 @@ enum ShellContrastProbe {
     return worst
   }
 
+  /// Lowest contrast of `foreground` drawn on a translucent `tile` fill that itself sits on each of `layers` (or
+  /// on the bare theme, for `nil`) over every theme surface of `flavor`: theme, then row fill, then tile, then ink.
+  @MainActor
+  static func worstCase(_ foreground: RGBA, onTile tile: Layer, flavor: ThemeFlavor, layers: [Layer?]) -> Double {
+    var worst = Double.infinity
+    for theme in themeSurfaces(flavor) {
+      for layer in layers {
+        let surface = over(tile, layer.map { over($0, theme) } ?? theme)
+        worst = min(worst, ratio(over(foreground, surface), surface))
+      }
+    }
+    return worst
+  }
+
   /// Contrast of `foreground` over a fixed opaque surface (the toolbar strip).
   static func ratio(_ foreground: RGBA, onOpaque surface: RGBA) -> Double {
     let base = toP3(surface)
@@ -133,6 +147,13 @@ enum ShellTokenSites {
     return [nil] + rowFills.map { $0.resolve(flavor) }
   }
 
+  /// The letter tile of a row or favorite without a favicon (`SidebarGlyphs.letter`): a rounded fill with the first
+  /// letter drawn on it. Rows put it on every row fill `primaryText` sits on; favorite tiles also on their idle
+  /// `sidebarItemBackground` (`FavoriteTileView`).
+  static func letterTileLayers(_ flavor: ThemeFlavor) -> [ShellContrastProbe.Layer?] {
+    primaryTextLayers(flavor) + [ShellTokens.sidebarItemBackground.resolve(flavor)]
+  }
+
   /// `sidebarForeground` is icon-only: idle page dots and bottom-bar symbols (`SidebarContainerView`, on the
   /// theme) and the hover close X (`SidebarTabCellView`, on whichever row fill the hovered row has).
   static func sidebarForegroundLayers(_ flavor: ThemeFlavor) -> [ShellContrastProbe.Layer?] {
@@ -188,6 +209,16 @@ struct ShellTokensContrastTests {
     let text = ShellTokens.primaryText.resolve(flavor)
     let worst = ShellContrastProbe.worstCase(text, flavor: flavor, layers: ShellTokenSites.primaryTextLayers(flavor))
     #expect(worst >= Contrast.minimumText, "primaryText \(flavor): \(worst)")
+  }
+
+  /// The tile letter is text (a site's initial stands in for its favicon), so it gets the text level, measured on
+  /// the tile fill over every row fill and theme surface.
+  @Test(arguments: flavors)
+  func letterTileReadsOnEveryShippedSurface(flavor: ThemeFlavor) {
+    let worst = ShellContrastProbe.worstCase(SidebarGlyphs.letterInk.resolve(flavor),
+                                             onTile: SidebarGlyphs.letterFill.resolve(flavor), flavor: flavor,
+                                             layers: ShellTokenSites.letterTileLayers(flavor))
+    #expect(worst >= Contrast.minimumText, "letter tile \(flavor): \(worst)")
   }
 
   @Test(arguments: flavors)

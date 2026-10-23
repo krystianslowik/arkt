@@ -28,6 +28,10 @@ public enum ShellTokens {
   public static let sidebarForeground = TokenPair(light: .black(0.48), dark: .white(0.57))
   public static let sidebarItemBackground = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.05), dark: .p3(hex: 0xFAFBFF, alpha: 0.10))
   public static let sidebarItemHovered = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.10), dark: .p3(hex: 0xFAFBFF, alpha: 0.15))
+  /// Fill of the letter tile for rows and favorites without a favicon; `primaryText` is drawn on it. Light keeps
+  /// `sidebarItemHovered`; dark darkens instead of lightening (#153): the lighter chip held the letter below 4.5:1
+  /// on `tabCurrent` over the Dev theme's light stop even at white 1.0.
+  public static let letterTileFill = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.10), dark: .p3(hex: 0x0E0F10, alpha: 0.15))
   /// Text (row titles, row symbols, the active page dot): WCAG AA 4.5:1 over every shipped Space theme and row
   /// fill. Dark raised from Arc's 0.80 (#146); the worst case is `tabCurrent` over the Dev theme's light stop.
   public static let primaryText = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.90), dark: .white(0.84))

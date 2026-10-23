@@ -564,10 +564,39 @@ Arc's 0.80.
 
 Not covered: the letter tile shown for rows without a favicon draws `primaryText` on `sidebarItemHovered` on top of
 the row fill. In dark mode on `tabCurrent` over `#2D4468` that nested fill stays below 4.5:1 even at white 1.0
-(about 4.1:1), so it needs a change to the tile itself rather than the text level.
+(about 4.1:1), so it needs a change to the tile itself rather than the text level (fixed in #153, below).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 338 tests, XCTest 182 tests (GUI included), 0
 failures. Debug app build: `** BUILD SUCCEEDED **`.
+
+## Letter tile contrast (#153)
+
+The letter tile of a row or favorite without a favicon (`SidebarGlyphs.letter`) draws `primaryText` on a rounded
+fill that sits on the row fill. `ShellTokensContrastTests.letterTileReadsOnEveryShippedSurface` measures it with the
+same probe as #146, in both flavors: theme, then each row fill `primaryText` sits on (plus none, plus the idle
+favorite tile's `sidebarItemBackground`), then the tile fill, then the letter. The letter is treated as text (it
+stands in for the site's favicon and is read as an initial), so the test asserts 4.5:1, not the non-text 3:1.
+
+| Mode | Tile fill | Before | After | Worst surface |
+|---|---|---|---|---|
+| light | P3 `#0E0F10` at 0.10 | 5.78:1 | unchanged | |
+| dark | P3 `#FAFBFF` at 0.15, now P3 `#0E0F10` at 0.15 | 3.40:1 | 5.43:1 | `tabCurrent` over the Dev stop `#2D4468` |
+
+The fix is a new token, `ShellTokens.letterTileFill`: light keeps the shipped value (the same as
+`sidebarItemHovered` light), dark now darkens the surface instead of lightening it, so both flavors draw the tile
+as the palette's dark ink at a low level. `primaryText` is unchanged. Alternatives measured and dropped: white 1.0
+ink on the old tile reaches 4.09:1; a fainter light tile makes it worse (`#FAFBFF` at 0.05: 4.10:1); no fill
+passes with no headroom (4.52:1) and loses the tile shape. Black at 0.12 (5.36:1) is equivalent; `#0E0F10` matches
+the light tile. On the darkest shipped dark stop (`#120F2E`, bare row) the dark tile is barely visible; the letter
+still reads there, which is what the tile is for.
+
+Fill and ink depend on the flavor only, so the bitmap cache key (`letter-<letter>-<flavor>@<size>x<scale>`) is
+unchanged. `SymbolImageCacheTests.letterTileIsFilledWithItsFlavorsTileToken` checks the drawn fill against the
+token per flavor and that the two flavors are separate cache entries.
+
+Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 406 tests (2 new, each run for both flavors),
+XCTest 261 tests (GUI included), 0 failures. The new contrast test failed first at 3.40:1 (dark). Debug app build:
+`** BUILD SUCCEEDED **`.
 
 ## Toolbar Back and Forward enabled state (#79)
 
