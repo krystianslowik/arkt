@@ -25,6 +25,22 @@ public struct RGBA: Sendable, Equatable {
          alpha: alpha, space: .displayP3)
   }
 
+  /// sRGB color from a 0xRRGGBB hex, the form brand colors are specified in.
+  public static func srgb(hex: UInt32, alpha: Double = 1) -> RGBA {
+    RGBA(red: Double((hex >> 16) & 0xFF) / 255,
+         green: Double((hex >> 8) & 0xFF) / 255,
+         blue: Double(hex & 0xFF) / 255,
+         alpha: alpha)
+  }
+
+  /// sRGB color from a "#RRGGBB" string; nil when the string is not exactly that form.
+  public static func srgb(hexString: String) -> RGBA? {
+    let digits = hexString.dropFirst()
+    guard hexString.first == "#", digits.count == 6, digits.allSatisfy(\.isHexDigit),
+          let hex = UInt32(digits, radix: 16) else { return nil }
+    return srgb(hex: hex)
+  }
+
   /// Linear blend from `a` (t = 0) to `b` (t = 1), per component; the result takes the nearer end's space.
   public static func mix(_ a: RGBA, _ b: RGBA, _ t: Double) -> RGBA {
     let t = min(max(t, 0), 1)
