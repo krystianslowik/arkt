@@ -67,6 +67,7 @@ final class AppSession {
       persistSidebar: { await autosaver.flush() })     // the import record waits for the merged sidebar on disk
     let archive = ArchiveCoordinator(source: source, store: archiveStore)
     self.archive = archive
+    autosaver.beforeSave = { [weak archive] in await archive?.flushPendingAdds() ?? true }
     self.autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
     self.faviconStore = faviconStore
     source.onDidChange = { [weak self] sidebar in
@@ -297,15 +298,15 @@ final class AppSession {
     source.markInactive(window.visibleNodes, at: .now)
   }
 
-  /// Writes what is pending: the sidebar and the archive outbox together, each bounded by its own flush timeout
-  /// (1 s, decision 11); favicons get at most `faviconFlushTimeout` more (they are re-fetched by the engine anyway).
+  /// Writes what is pending: the archive outbox first (#213: the on-disk sidebar never gets ahead of the archive
+  /// store), then the sidebar, each bounded by its own flush timeout (1 s, decision 11); favicons get at most
+  /// `faviconFlushTimeout` more (they are re-fetched by the engine anyway).
   func flush() async -> Bool {
     let favicons = Task { [faviconWriter] in
       if let faviconWriter { await faviconWriter.flush() }
     }
-    async let sidebarSaved = autosaver.flush()
-    async let archiveSaved = archive.flush()
-    let (sidebar, archived) = await (sidebarSaved, archiveSaved)
+    let archived = await archive.flush()
+    let sidebar = archived ? await autosaver.flush() : false
     await Self.wait(for: favicons, atMost: Self.faviconFlushTimeout)
     return sidebar && archived
   }

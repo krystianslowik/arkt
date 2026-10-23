@@ -26,10 +26,11 @@ import Synchronization
 /// until it is empty or an add fails, bounded by `flushTimeout`. A remove that fails during the flush is dropped (a
 /// harmless duplicate in the archive), so it cannot hold back an add queued behind it at quit.
 ///
-/// Crash and quit window (decision 11, accepted): the outbox lives in memory only. An entry is lost when the sidebar
-/// save (which no longer holds the node) lands while its archive write has not: a crash while the write fails or
-/// stalls, or a quit where the outbox flush fails or times out while the sidebar flush succeeds (termination does not
-/// wait any longer). A slow store widens the window as much as a failing one.
+/// Crash and quit durability (#213): `archive` and `removeSpace` enqueue their entries into the outbox before
+/// `source.onDidChange` fires, and `flushPendingAdds()` gates `SidebarAutosaver.beforeSave` so the on-disk sidebar
+/// never gets ahead of the archive store. If the process dies before the archive write lands, the items remain in
+/// `SidebarStore`; if it dies after the archive write and before `SidebarStore.save`, `ArchiveStore` holds the entries
+/// and `SidebarStore.load()` replays the pending removals idempotently on launch.
 @MainActor
 public final class ArchiveCoordinator {
   public enum RestoreError: Error, Equatable, Sendable {
@@ -104,12 +105,11 @@ public final class ArchiveCoordinator {
   // MARK: - Archive and restore
 
   /// Removes `ids` (unknown ones are skipped) from the sidebar in one mutation and queues their entries for the
-  /// store. Returns the entries. Whether a node may be archived at all (pinned, Favorites) is the caller's decision.
+  /// store before `source.onDidChange` runs (#213). Returns the entries. Whether a node may be archived at all
+  /// (pinned, Favorites) is the caller's decision.
   @discardableResult
   public func archive(_ ids: [UUID], reason: ArchiveReason) -> [ArchivedItem] {
-    let items = source.archive(ids, reason: reason, at: now())
-    enqueue(items)
-    return items
+    source.archive(ids, reason: reason, at: now(), beforeDidChange: enqueue)
   }
 
   /// Queues an add of freshly archived `items`; nothing for an empty list.
@@ -122,12 +122,11 @@ public final class ArchiveCoordinator {
   }
 
   /// Removes Space `id` from the sidebar (decision on #86: its pinned and Today items are archived, reason `.manual`)
-  /// and queues the entries for the store like `archive`. Returns the entries; an unknown id changes nothing.
+  /// and queues the entries for the store before `source.onDidChange` runs (#213). Returns the entries; an unknown id
+  /// changes nothing.
   @discardableResult
   public func removeSpace(_ id: UUID) -> [ArchivedItem] {
-    let items = source.removeSpace(id, at: now())
-    enqueue(items)
-    return items
+    source.removeSpace(id, at: now(), beforeDidChange: enqueue)
   }
 
   /// One auto-archive pass (BH-080, BH-084, BH-054, BH-048, BH-083): archives, with reason `.auto`, the Today tabs
@@ -169,6 +168,15 @@ public final class ArchiveCoordinator {
   }
 
   // MARK: - Flush
+
+  /// Ensures every queued archive add has been written to the store before a sidebar snapshot that dropped those
+  /// items is saved (#213). Returns true immediately when no add is pending, and false when an add could not be
+  /// written within `flushTimeout` (the sidebar save then backs off and retries so the on-disk sidebar never gets
+  /// ahead of the archive store).
+  public func flushPendingAdds() async -> Bool {
+    guard !pendingItems.isEmpty else { return true }
+    return await flush() && pendingItems.isEmpty
+  }
 
   /// Sends everything pending now: stops a retry wait, waits for a write in flight, then sends the outbox in order
   /// until it is empty or an add fails (a failing remove is dropped). Returns true when nothing is left unsent; false

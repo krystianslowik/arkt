@@ -211,3 +211,24 @@ of the day (they added tests of their own).
 | ShellKit `swift test --filter ShellKitGUITests` (XCTest) | 317 | 341 | +1 `ArchiveWindowTests` |
 
 Debug app build: `** BUILD SUCCEEDED **`.
+
+## Archive durability between the sidebar save and the archive write (#213)
+
+- `ModelSidebarSource.archive` and `ModelSidebarSource.removeSpace` (now `internal`, so production callers go through
+  `ArchiveCoordinator.removeSpace(_:)`) pass a `beforeDidChange` hook to `mutate`, so `ArchiveCoordinator` enqueues the
+  archived entries into its outbox before `source.onDidChange` schedules a sidebar save.
+- `SidebarAutosaver` gains `beforeSave: @MainActor () async -> Bool` (`AppSession` wires it to
+  `archive.flushPendingAdds()`, and `AppSession.flush()` flushes `archive` before `autosaver`), so the on-disk sidebar
+  never gets ahead of the archive outbox when an archive write is in flight or failing.
+- `ArchiveStore.add(_:onConflict:)` (for `.replace`) records the archived node ids in `setting` under
+  `archive.pendingRemovals` in the same transaction; `SidebarStore.save` trims ids that have left `sidebar.nodes` (and
+  `ArchiveStore.remove` / `removeAll` clear restored or cleared ids); `SidebarStore.load()` replays any remaining ids
+  idempotently with `sidebar.removePane(_:)`, so a crash after the archive write and before `SidebarStore.save` leaves
+  both stores in sync on launch.
+- Tests: `SidebarAutosaverTests.crashBetweenArchiveWriteAndSidebarSaveLosesNoItems` and
+  `ArchiveCoordinatorTests.crashBetweenArchiveWriteAndSidebarSaveLosesNoItems`.
+
+| Suite | Baseline (`e2e967f`) | Final | Delta |
+|---|---|---|---|
+| ArktCore `swift test` | 342 | 343 | +1 `SidebarAutosaverTests` |
+| ShellKit `swift test --skip ShellKitGUITests` | 456 | 457 | +1 `ArchiveCoordinatorTests` |

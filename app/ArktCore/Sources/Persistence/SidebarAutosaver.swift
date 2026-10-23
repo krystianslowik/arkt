@@ -38,6 +38,9 @@ public final class SidebarAutosaver {
   private let flushTimeout: Duration
   private let now: @Sendable () -> Date
   private let sleep: AutosaveSleep
+  /// Runs on the main actor before each save attempt (#213: the app flushes pending archive adds first so the on-disk
+  /// sidebar never gets ahead of the archive store). Returning false aborts the save attempt and backs off to retry.
+  public var beforeSave: @MainActor () async -> Bool
 
   private var pending: Sidebar?
   private var timer: Task<Void, Never>?
@@ -61,7 +64,8 @@ public final class SidebarAutosaver {
     retryDelays: [Duration] = SidebarAutosaver.defaultRetryDelays,
     flushTimeout: Duration = SidebarAutosaver.defaultFlushTimeout,
     now: @escaping @Sendable () -> Date = { Date() },
-    sleep: @escaping AutosaveSleep = { try await Task.sleep(for: $0) }
+    sleep: @escaping AutosaveSleep = { try await Task.sleep(for: $0) },
+    beforeSave: @escaping @MainActor () async -> Bool = { true }
   ) {
     precondition(!retryDelays.isEmpty, "retryDelays must not be empty")
     self.store = store
@@ -70,6 +74,7 @@ public final class SidebarAutosaver {
     self.flushTimeout = flushTimeout
     self.now = now
     self.sleep = sleep
+    self.beforeSave = beforeSave
   }
 
   /// Records `sidebar` as the newest state. Never blocks and never awaits.
@@ -150,9 +155,14 @@ public final class SidebarAutosaver {
     writer = Task { [weak self] in await self?.writeLoop() }
   }
 
-  /// Takes the newest value and saves it. Returns false and puts the value back when the save fails, unless a newer
-  /// value arrived meanwhile.
+  /// Takes the newest value and saves it after `beforeSave()` succeeds. Returns false and keeps the value pending when
+  /// `beforeSave()` or the store save fails, unless a newer value arrived meanwhile.
   private func attemptSave() async -> Bool {
+    guard pending != nil else { return true }
+    guard await beforeSave() else {
+      consecutiveFailures += 1
+      return false
+    }
     guard let sidebar = pending else { return true }
     pending = nil
     do {
