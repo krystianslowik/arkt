@@ -112,11 +112,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     wireAddressBars()
     wireSplit()
     observation = engine.observe { [weak self] event in self?.handle(event) }
-    // A removed Space's nodes emit no structure change, so `.spaces` checks too.
+    // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
       switch change {
-      case .structure, .spaces: self?.closeEngineTabsOfRemovedNodes()
-      case .node: break
+      case .structure, .spaceRemoved: self?.closeEngineTabsOfRemovedNodes()
+      case .node, .spaceAdded, .spaceMoved, .spaceChanged: break
       }
       self?.splitSourceDidChange(change)
     }
@@ -175,7 +175,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   // MARK: Spaces
 
-  /// Creates a Space named `newSpaceTitle`; it becomes current through `.spaces`. Reports a failure via `onError`.
+  /// Creates a Space named `newSpaceTitle`; it becomes current through `.spaceAdded`. Reports a failure via `onError`.
   @discardableResult
   func createSpace() -> SpaceID? {
     do { return try sidebar.addSpace(title: Self.newSpaceTitle) } catch { onError?(.addSpace, error); return nil }
