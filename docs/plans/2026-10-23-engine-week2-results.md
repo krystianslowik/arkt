@@ -11,7 +11,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W1 | Arkt-branded non-component build | STOPPED | build stopped on low swap; config done, see below |
 | W2 | Sign `Arkt.app`, install in /Applications, smoke | TODO | |
 | W3 | Inventory of non-`BrowserView` window seams, variant decision | TODO | |
-| W4 | Extensions menu lists every action (finding 1) | TODO | |
+| W4 | Extensions menu lists every action (finding 1) | DONE | no upstream patch; see below |
 | W5a | `ArktBrowserWindow` skeleton behind `--arkt-native-window` | TODO | |
 | W5b | Seam fixes found by the smoke matrix (GATE) | TODO | |
 | W5c | Arkt-owned tab list and visibility (finding 2) | TODO | |
@@ -299,3 +299,107 @@ which needs the user (freeing space on `/` is not ours to do).
 
 Resume command (incremental): `cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1`.
 Step 7 (verification) has not run.
+
+## W4
+
+Date 2026-10-23. No upstream patch; patch totals unchanged.
+
+### Step 2: failing check (build before W4)
+
+Profile `$PROF/week2`, `--load-extension=action-probe,tabs-probe`, `--arkt-extensions-demo=list`
+(`$PROF/w2-w4-before.log`):
+
+```
+ARKT: toolbar actions 2
+ARKT action ceojeochoeiibbkbcnnidcahamphllac Arkt action probe
+ARKT action hleckajngfboclajgdleaccpegbhpdmm Arkt tabs probe
+```
+
+tabs-probe has no `action` key and still gets a toolbar action (count 2). AXPress on the Extensions button (process
+frontmost, our window key) logged `ARKT: extension not installed ddkjiahejlhfcafbddmgiahcphecmpfh`: the failure.
+
+### Implementation
+
+- `engine/test-extensions/action-probe/` (MV3: popup with `create`/`open`/`window` buttons, `sw.js` with
+  `self.probe` and the keep-alive interval); `tabs-probe/sw.js` gets the keep-alive line.
+- `arkt_extensions_menu.{h,mm}`: `ArktExtensionsMenu` observes `ToolbarActionsModel`, keeps one
+  `ExtensionActionViewModel` per action (`ExtensionActionViewModel::Create` with `ArktExtensionActionDelegate`),
+  builds the `NSMenu` on click (title `GetActionName()`, 16 pt icon from `GetIcon` rasterized with the tab's color
+  provider, disabled when `IsEnabled` is false, "No extensions" when empty) and runs the chosen item with
+  `ExecuteUserAction(kMenuEntry)`. The delegate's `GetActiveWebContents()` returns the tab Arkt shows;
+  `TriggerPopup` hands the host to the popover; `RegisterCommand` and the context-menu fallback only log.
+- `arkt_extensions_bridge.{h,mm}`: only hosts the popup now (`ShowPopover`, `IsShowingPopover`, `HidePopover`,
+  `GetPopoverNativeView`); the hand-made `RunAction` + `CreatePopupHost` path is gone.
+- `arkt_browser_main_extra_parts.mm`: `kUBlockLiteId` removed; the button shows the menu;
+  `--arkt-extensions-demo=<id>` runs that action through its view model (`kToolbarButton`) once the model lists it;
+  `--arkt-extensions-menu-dump` logs the items (only when they change; 1Password updates its action about 30 times
+  in the first seconds) and closes a shown menu after 3 s.
+- `BUILD.gn`: new sources, deps `//chrome/browser/ui/extensions` and `:extension_popup_types`.
+  `gn check out/Spike //arkt/browser:browser`: `Header dependency check OK`.
+
+Build: `nice -n 15 autoninja -C out/Spike chrome`: `The build has finished successfully.`, 0 `FAILED:` lines.
+
+### Step 6: popup through TriggerPopup (no input)
+
+`--arkt-extensions-demo=ceojeochoeiibbkbcnnidcahamphllac`, `--remote-debugging-port=9333` (`$PROF/w2-w4.log`):
+
+```
+ARKT: toolbar actions 2
+ARKT action ceojeochoeiibbkbcnnidcahamphllac Arkt action probe
+ARKT action hleckajngfboclajgdleaccpegbhpdmm Arkt tabs probe
+ARKT: run action ceojeochoeiibbkbcnnidcahamphllac source 1
+ARKT: TriggerPopup ceojeochoeiibbkbcnnidcahamphllac by_user=1 url=chrome-extension://ceojeochoeiibbkbcnnidcahamphllac/popup.html
+ARKT: popup loaded chrome-extension://ceojeochoeiibbkbcnnidcahamphllac/popup.html
+```
+
+| Command | Output |
+|---|---|
+| `cdp.mjs popup.html 'document.body.innerText.includes("ARKT action-probe popup")'` | `true` |
+| `cdp.mjs ceojeochoeiibbkbcnnidcahamphllac/sw.js 'typeof self.probe.create'` | `"function"` |
+
+Window-only screenshot `$PROF/shots/w2-w4-popup.png`: the popover with the probe's text and three buttons, its
+arrow at the sidebar Extensions button.
+
+### Step 7: menu contents and button wiring
+
+`--arkt-extensions-menu-dump`, no demo (`$PROF/w2-w4-menu.log`):
+
+```
+ARKT: menu item 0 Arkt action probe enabled=1
+ARKT: menu item 1 Arkt tabs probe enabled=0
+```
+
+Titles equal the `ARKT action` names in model order. tabs-probe is disabled: it has no popup and no
+`action.onClicked` listener, so `IsEnabled` is false on the page.
+
+AXPress on `button "Extensions" of window 1` (process frontmost, `ARKT: key window` named our window), run in the
+background: `ARKT: extensions menu shown 2 items` at 14:34:58.58, `ARKT: extensions menu closed` at 14:35:01.82
+(3.2 s, the dump-mode `cancelTracking`); `osascript` had exited. Item count equals the dump's.
+
+### Step 8: real extension (1Password)
+
+Run on a copy-on-write copy of the 1Password test profile (`cp -c -R` to `$PROF/1password-w4`; the original was in
+use for a manual test), `--load-extension=action-probe`, `--arkt-extensions-menu-dump`,
+`--arkt-extensions-demo=aeblfdkhhhdcdjpifhhbdiojplfjncoa` (`$PROF/w2-w4-1password.log`). Read-only, not signed in:
+
+```
+ARKT: toolbar actions 2
+ARKT action aeblfdkhhhdcdjpifhhbdiojplfjncoa 1Password – Password Manager
+ARKT action ceojeochoeiibbkbcnnidcahamphllac Arkt action probe
+ARKT: menu item 0 1Password – Password Manager enabled=1
+ARKT: menu item 1 Arkt action probe enabled=1
+ARKT: run action aeblfdkhhhdcdjpifhhbdiojplfjncoa source 1
+ARKT: TriggerPopup aeblfdkhhhdcdjpifhhbdiojplfjncoa by_user=1 url=chrome-extension://aeblfdkhhhdcdjpifhhbdiojplfjncoa/popup/index.html
+ARKT: popup loaded chrome-extension://aeblfdkhhhdcdjpifhhbdiojplfjncoa/popup/index.html
+```
+
+The popover auto-resized to 600x450. No screenshot (the popup shows account UI).
+
+No `FATAL` or `Check failed` lines in any W4 log. Every browser was stopped by its PID; no `$OUT/Chromium.app`
+processes were left.
+
+### Follow-ups
+
+- `out/Arkt` was configured before W4; the next `out/Arkt` build regenerates and compiles the W4 overlay
+  (incremental).
+- Keyboard commands for actions, the context menu, pinning and ordering are later work.

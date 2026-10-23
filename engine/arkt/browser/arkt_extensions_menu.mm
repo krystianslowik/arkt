@@ -2,11 +2,14 @@
 
 #import <AppKit/AppKit.h>
 
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "arkt/browser/arkt_extensions_bridge.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_view_host.h"
@@ -314,12 +317,21 @@ void ArktExtensionsMenu::DumpMenu() {
     return;
   }
   NSMenu* menu = BuildMenu();
+  std::vector<std::string> lines;
   for (NSInteger i = 0; i < menu.numberOfItems; ++i) {
     NSMenuItem* item = [menu itemAtIndex:i];
-    LOG(WARNING) << "ARKT: menu item " << i << " "
-                 << base::SysNSStringToUTF8(item.title)
-                 << " enabled=" << (item.enabled ? 1 : 0);
+    lines.push_back("ARKT: menu item " + base::NumberToString(i) + " " +
+                    base::SysNSStringToUTF8(item.title) +
+                    " enabled=" + (item.enabled ? "1" : "0"));
   }
+  // Actions update often (badges, icons); log only when the menu changes.
+  if (lines == last_dump_) {
+    return;
+  }
+  for (const auto& line : lines) {
+    LOG(WARNING) << line;
+  }
+  last_dump_ = std::move(lines);
 }
 
 void ArktExtensionsMenu::MaybeRunPendingAction() {

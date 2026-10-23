@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
@@ -81,6 +82,7 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   std::map<extensions::ExtensionId, std::unique_ptr<ExtensionActionViewModel>>
       view_models_;
   bool dump_ = false;
+  std::vector<std::string> last_dump_;
   extensions::ExtensionId pending_action_id_;
   base::ScopedObservation<ToolbarActionsModel, ToolbarActionsModel::Observer>
       observation_{this};
