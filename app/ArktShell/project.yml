@@ -9,6 +9,8 @@ configs:
   Release: release
   # Release settings plus the scripted smoke (`-ArktSmoke YES`): optimized pacing runs. Never shipped.
   Profile: release
+  # Embedding spike (engine week 2, Task WE): main.swift hands the process to Chromium's ChromeMain. Never shipped.
+  Spike: debug
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -19,9 +21,18 @@ settings:
     ENABLE_HARDENED_RUNTIME: NO
     ENABLE_APP_SANDBOX: NO
     DEAD_CODE_STRIPPING: YES
+    ARKT_PRINCIPAL_CLASS: NSApplication
   configs:
     Profile:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_SMOKE_BUILD"
+    Spike:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_CHROMIUM_SPIKE"
+      # Chromium CHECKs that NSApp is a BrowserCrApplication (chrome_browser_application_mac.mm).
+      ARKT_PRINCIPAL_CLASS: BrowserCrApplication
+      ENABLE_HARDENED_RUNTIME: NO
+      # Keep the Swift entry point in the main executable, like Chromium's stub, instead of
+      # Xcode's debug stub plus ArktShell.debug.dylib.
+      ENABLE_DEBUG_DYLIB: NO
 packages:
   ShellKit:
     path: ShellKit
@@ -42,7 +53,7 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "15.0"
-        NSPrincipalClass: NSApplication
+        NSPrincipalClass: $(ARKT_PRINCIPAL_CLASS)
         NSHighResolutionCapable: true
         LSApplicationCategoryType: public.app-category.productivity
     settings:
