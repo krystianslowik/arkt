@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Arkt action probe",
+  "version": "1.0",
+  "permissions": ["tabs"],
+  "action": { "default_title": "Arkt action probe", "default_popup": "popup.html" },
+  "background": { "service_worker": "sw.js" }
+}
