@@ -1,0 +1,188 @@
+# Swift tests for the two packages and a Debug build of the app against the FakeEngine.
+# Chromium is never built here (hours and over 100 GB); engine changes are verified locally (CONTRIBUTING, section 12).
+# The check to require on main is "Swift tests" (the gate job at the end).
+name: Swift tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to the same pull request cancels the run it supersedes; runs on main always finish.
+concurrency:
+  group: swift-tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Swift 6.2+ is required (`@concurrent`); 26.6 is the default Xcode on the macos-26 image.
+  XCODE_VERSION: "26.6"
+  XCODEGEN_VERSION: "2.46.0"
+  XCODEGEN_SHA256: "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+
+defaults:
+  run:
+    shell: zsh -eo pipefail {0}
+
+jobs:
+  isolation:
+    name: Isolation greps
+    runs-on: macos-26
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Fast source-only mirror of IsolationTests (CoreIsolationTests, WebKitIsolationTests), so a layering break
+      # fails in seconds with the offending lines. The Swift tests stay the authoritative gate.
+      - name: Check import layering
+        run: |
+          pre='^[[:space:]]*(@[A-Za-z_]+(\([^)]*\))?[[:space:]]+)*((public|package|internal|fileprivate|private)[[:space:]]+)?import[[:space:]]+([a-z]+[[:space:]]+)?'
+          end='([^A-Za-z0-9_]|$)'
+          imports() { grep -rEn --include='*.swift' --exclude-dir=.build --exclude-dir=build "${pre}($1)${end}" "${@:2}" || true; }
+          failed=0
+          webkit=$(imports 'WebKit' app | grep -v '^app/ArktShell/ShellKit/Sources/FakeEngineKit/FakeEngine.swift:' || true)
+          if [[ -n $webkit ]]; then
+            print "::error::Only FakeEngineKit/FakeEngine.swift may import WebKit:"; print -r -- $webkit; failed=1
+          fi
+          grdb=$(imports 'Persistence|GRDB' app/ArktShell/ShellKit/Sources)
+          if [[ -n $grdb ]]; then
+            print "::error::ShellKit sources must not import Persistence or GRDB:"; print -r -- $grdb; failed=1
+          fi
+          ui=$(imports 'SidebarModel|Archive|ArcImport|Persistence|GRDB' app/ArktShell/ShellKit/Sources/ShellUI)
+          if [[ -n $ui ]]; then
+            print "::error::ShellUI must not import ArktCore modules or GRDB:"; print -r -- $ui; failed=1
+          fi
+          (( failed == 0 )) && print "Import layering OK"
+          exit $failed
+
+  arktcore:
+    name: ArktCore tests
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - run: swift --version
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/ArktCore/.build
+          key: arktcore-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktCore/Package.resolved') }}
+          restore-keys: arktcore-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-
+      - name: swift test
+        working-directory: app/ArktCore
+        run: swift test
+
+  shellkit:
+    name: ShellKit tests
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/ArktShell/ShellKit/.build
+          key: shellkit-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktShell/ShellKit/Package.resolved') }}
+          restore-keys: shellkit-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-
+      - name: swift test (pure, no windows)
+        working-directory: app/ArktShell/ShellKit
+        run: swift test --skip ShellKitGUITests
+
+  # Hosted macOS runners have a window server, so the GUI tests can open windows, but the display is a 60 Hz virtual
+  # one and the machine is shared (1-minute load far above its 3 cores). Results are informative, not required.
+  # Tests that depend on frame timing run in their own step and are reported, not asserted: the frame-timing gates
+  # (command bar latency, Space swipe pacing) and the two tests that catch a Space settle mid-flight, which a loaded
+  # 60 Hz runner can miss. They are asserted on a developer machine (CONTRIBUTING, section 7).
+  shellkit-gui:
+    name: ShellKit GUI tests (informative)
+    runs-on: macos-26
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      TIMING_TESTS: "CommandBarTests/testAppearsUnder16ms|SpacePagerTests/testFramePacingDuringSwipeAndKeyboardSwitch|SpacePagerTests/testInterruptingASettleContinuesFromTheSpring|SpacePagerTests/testTouchDownFreezesASettleAndVerticalResumesIt"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/ArktShell/ShellKit/.build
+          key: shellkit-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktShell/ShellKit/Package.resolved') }}
+          restore-keys: shellkit-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-
+      - name: GUI tests (functional)
+        working-directory: app/ArktShell/ShellKit
+        run: swift test --filter ShellKitGUITests --skip "$TIMING_TESTS"
+      - name: Timing-dependent GUI tests (reported, not asserted)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        working-directory: app/ArktShell/ShellKit
+        run: |
+          swift test --filter "$TIMING_TESTS" 2>&1 \
+            | grep -E 'commandbar\.|spacepager\.|Test Case|error:|Executed'
+
+  app:
+    name: App build (Debug)
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+      - name: Install XcodeGen ${{ env.XCODEGEN_VERSION }}
+        run: |
+          dir=$RUNNER_TEMP/xcodegen
+          mkdir -p $dir
+          curl -fsSL -o $dir/xcodegen.zip \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          print "$XCODEGEN_SHA256  $dir/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q $dir/xcodegen.zip -d $dir
+          print "$dir/xcodegen/bin" >> $GITHUB_PATH
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: app/ArktShell/build/SourcePackages
+          key: app-spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/ArktCore/Package.resolved', 'app/ArktShell/ShellKit/Package.resolved') }}
+          restore-keys: app-spm-${{ runner.os }}-${{ runner.arch }}-
+      - name: xcodegen generate
+        working-directory: app/ArktShell
+        run: xcodegen --version && xcodegen generate
+      - name: xcodebuild Debug
+        working-directory: app/ArktShell
+        run: |
+          xcodebuild -project ArktShell.xcodeproj -scheme ArktShell -configuration Debug \
+            -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGNING_ALLOWED=NO build
+
+  # The one check to require on main: passes only when every required job above passed.
+  gate:
+    name: Swift tests
+    if: ${{ always() }}
+    needs: [isolation, arktcore, shellkit, app]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check required jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
