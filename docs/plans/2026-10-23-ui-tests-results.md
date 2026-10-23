@@ -159,3 +159,70 @@ checksums were unchanged. Temp folders and suites were removed afterwards.
 
 - Nothing for U1. The XCUITest run itself starts in U2 and still needs the one-time permission steps 1 and 2 from U0
   (developer mode, automation mode).
+
+## U4a: Accessibility identifiers: window, empty state, Toolbar and toasts (#167)
+
+Base: `origin/main` at `5db2b4e`, branch `chore/167-ui-tests-u4a`. Same machine as U0 (`nice -n 10`, `-j 4` /
+`-jobs 4`, no Chromium build running).
+
+### What was done
+
+- `ShellKit/Sources/ShellUI/Accessibility/AXID.swift` (new, no imports): `public enum AXID` with one nested enum per
+  area: `Shell`, `Content`, `EmptyState`, `Toolbar`, `Toast`. The toast values `persistent` and `timed` live next to
+  their identifier. U4b and U4c add their own nested enums. `xcrun swiftc -typecheck` on the file alone succeeds, so
+  the UI test target can compile it by path.
+- Identifiers set (setter calls only):
+
+  | Identifier | Where | Role, label, value, state |
+  |---|---|---|
+  | `shell.window` | `ShellWindow.init` | window |
+  | `content.card` | `ContentCardView.init` | group (the card becomes an accessibility element) |
+  | `emptyState` | `EmptyStateView.init` | group (the panel becomes an accessibility element) |
+  | `emptyState.import`, `emptyState.newSpace` | `EmptyStateView.init` | buttons keep their titles; `emptyState.import` absent while hidden |
+  | `toolbar` | `ContentToolbarView.init` | toolbar, label "Toolbar"; absent while the Toolbar is hidden |
+  | `toolbar.back`, `toolbar.forward`, `toolbar.reload` | `ContentToolbarView.init` | buttons, labels Back / Forward / Reload, enabled from `setHistory` |
+  | `toolbar.urlBar` | `ContentToolbarView.init` on its `urlBar` | button, value = full address |
+  | `toast` | `ToastView.init` | group, label = toast text, value `persistent` or `timed` (set in `display`) |
+  | `toast.action` | `ToastView.init` on `actionButton` | button; absent without an action title |
+
+- AppKit lists a control's cell, not the control, as the accessibility child, and the cell does not report an
+  identifier set only on the control (checked in process: `NSButtonCell.accessibilityIdentifier()` stays empty).
+  `NSControl.setAccessibilityIdentifierWithCell(_:)` (internal, `Accessibility/NSControl+AXID.swift`) sets the
+  identifier on both; every button above uses it.
+- `ShellWindowController.swift` is not touched: every identifier is set in the view that owns it.
+- Tests: `ShellKitGUITests/AccessibilityIdentifierTests.swift`, 8 XCTest tests over a real `ShellWindowController`
+  (`StubSidebar.sample()` or an empty `StubSidebar()`, `InMemoryEngine`). They walk the window's tree through
+  `NSAccessibility.unignoredChildren` (what a client sees), find each identifier exactly once, check role, label,
+  value or enabled state, and check that hidden views (import button, hidden Toolbar, idle toast, action button
+  without a title) are absent. Written first: the first build failed with "cannot find 'AXID' in scope"; with
+  `AXID.swift` only, 8 tests ran with 11 failures; with the identifiers set on the controls only, the 3 toolbar
+  button checks still failed on the cell; then all passed.
+
+### Verification
+
+| Check | Command | Result |
+|---|---|---|
+| ShellKit GUI | `cd $KIT && nice -n 10 swift test -j 4 --filter ShellKitGUITests` | pass, 288 XCTest tests (baseline 280 at `5db2b4e` + 8), 0 failures, 46.8 s |
+| ShellKit pure | `cd $KIT && nice -n 10 swift test -j 4 --skip ShellKitGUITests` | pass, 416 tests (baseline 416 at `5db2b4e` + 0) |
+| ArktCore | `cd $CORE && nice -n 10 swift test -j 4` | pass, 336 tests (+ 0) |
+| App build (Debug) | App command, `-jobs 4` | `** BUILD SUCCEEDED **`, 0 compiler warnings, 32.8 s |
+| Import layering | the workflow's `Check import layering` step, run locally | `Import layering OK` |
+| `AXID.swift` stands alone | `xcrun swiftc -typecheck $KIT/Sources/ShellUI/Accessibility/AXID.swift` | no output, exit 0 |
+
+The GUI baseline is 280, not U0's 240: #183, #185 and #187 added GUI tests after U0's base. Both baselines were run
+on the untouched worktree at `5db2b4e` before any change.
+
+### Deviations from the plan
+
+- `project.yml` does not add `AXID.swift` to `ArktShellUITests` yet: that target does not exist until U2 (#165). U2
+  adds the path (`ShellKit/Sources/ShellUI/Accessibility/AXID.swift`) to the target's sources. The plan's U2 step 1 and the
+  U4 "Files" list now say so.
+- Buttons get their identifier on the cell as well as on the control (`setAccessibilityIdentifierWithCell`), see
+  above. The labels Back / Forward / Reload stay on the control as before; the first XCUITest run (U2) shows whether
+  the real tree reports them, and U8 asserts on identifiers, not those labels.
+- Split View pane cards are `ContentCardView`s too, so they carry `content.card` until U4c gives them `split.pane`.
+
+### What remains
+
+- U2 (#165): add `AXID.swift` to the `ArktShellUITests` sources by path and confirm the identifiers in the real
+  accessibility tree. That run needs the one-time permission steps 1 and 2 from U0 (developer mode, automation mode).
