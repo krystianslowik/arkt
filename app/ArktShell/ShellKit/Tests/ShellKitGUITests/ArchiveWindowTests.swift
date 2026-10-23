@@ -167,6 +167,61 @@ final class ArchiveWindowTests: XCTestCase {
     XCTAssertEqual(controller.tableView.numberOfRows, 2)
   }
 
+  // MARK: - Data source changes (#88)
+
+  /// An outbox change while the window is on screen refreshes it at the loaded depth.
+  func testDataSourceChangeRefreshesTheVisibleWindow() async throws {
+    let source = StubArchiveSource()
+    source.pages = [
+      ArchiveListPage(rows: Self.rows(1), unreadable: 0, mayHaveMore: false),
+      ArchiveListPage(rows: Self.rows(2), unreadable: 0, mayHaveMore: false),
+    ]
+    let controller = makeWindow(source)
+    controller.show()
+    await controller.pendingLoad?.value
+
+    source.onChange?()
+    await controller.pendingLoad?.value
+
+    XCTAssertEqual(source.calls, [.loadPage, .refresh])
+    XCTAssertEqual(controller.tableView.numberOfRows, 2)
+  }
+
+  /// A hidden window does not read; showing it loads anyway.
+  func testDataSourceChangeIsIgnoredWhileHidden() async throws {
+    let source = StubArchiveSource()
+    let controller = makeWindow(source)
+    controller.show()
+    await controller.pendingLoad?.value
+    controller.close()
+
+    source.onChange?()
+    await controller.pendingLoad?.value
+
+    XCTAssertEqual(source.calls, [.loadPage])
+  }
+
+  /// The selected row stays selected across a refresh that moves it (a new entry above it).
+  func testRefreshKeepsTheSelectedRow() async throws {
+    let source = StubArchiveSource()
+    let rows = Self.rows(2)
+    let newer = Self.rows(1, from: 9)
+    source.pages = [
+      ArchiveListPage(rows: rows, unreadable: 0, mayHaveMore: false),
+      ArchiveListPage(rows: newer + rows, unreadable: 0, mayHaveMore: false),
+    ]
+    let controller = makeWindow(source)
+    controller.show()
+    await controller.pendingLoad?.value
+    controller.tableView.selectRowIndexes([1], byExtendingSelection: false)
+
+    source.onChange?()
+    await controller.pendingLoad?.value
+
+    XCTAssertEqual(controller.tableView.selectedRow, 2)
+    XCTAssertTrue(controller.restoreButton.isEnabled)
+  }
+
   // MARK: - Restore
 
   func testRestoreButtonFollowsSelectionAndCanRestore() async throws {
@@ -298,9 +353,11 @@ private final class StubArchiveSource: ArchiveListDataSource {
   enum Call: Equatable {
     case loadPage
     case loadMore
+    case refresh
     case restore(UUID)
   }
 
+  var onChange: (@MainActor () -> Void)?
   var canRestore = true
   var restoreSucceeds = true
   var pages: [ArchiveListPage] = []
@@ -314,6 +371,11 @@ private final class StubArchiveSource: ArchiveListDataSource {
 
   func loadMore() async -> ArchiveListPage {
     calls.append(.loadMore)
+    return next()
+  }
+
+  func refresh() async -> ArchiveListPage {
+    calls.append(.refresh)
     return next()
   }
 

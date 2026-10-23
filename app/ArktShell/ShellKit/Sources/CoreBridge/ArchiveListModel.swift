@@ -8,9 +8,16 @@ import SidebarModel
 ///
 /// `ArchiveStoring` exposes only a limit, so paging re-queries with a growing one (200, 400, 600 ...); fine at Arc's
 /// ~1200 entries, a cursor is a later optimization. The store reads off the main actor; this model only awaits.
+///
+/// Entries still in the coordinator's outbox (a slow or failing archive write) are listed with every page (#88):
+/// merged with the store's items newest first, one row per id (the newer entry wins), restorable like any row.
+/// The model sets the coordinator's `onPendingItemsChange` and passes it on as `onChange`, so the window refreshes
+/// when an entry is archived or its write lands.
 @MainActor
 public final class ArchiveListModel: ArchiveListDataSource {
   nonisolated public static let pageSize = 200
+
+  public var onChange: (@MainActor () -> Void)?
 
   /// The Space a restore falls back to when the item's own Space is gone (BH-157 routing is a later track).
   public var currentSpaceProvider: @MainActor () -> UUID? = { nil }
@@ -27,6 +34,8 @@ public final class ArchiveListModel: ArchiveListDataSource {
   private let formatter: RelativeDateTimeFormatter
   private var limit = 0
   private var items: [UUID: ArchivedItem] = [:]
+  /// The store's items from the last read that succeeded; a failed read lists them again with the outbox.
+  private var storedItems: [ArchivedItem] = []
   private var unreadable = 0
   private var mayHaveMore = false
   /// Entries restored here (id and archive date): hidden from later pages, where the store may still hold them until
@@ -47,6 +56,7 @@ public final class ArchiveListModel: ArchiveListDataSource {
     formatter.locale = locale
     formatter.unitsStyle = .full
     formatter.dateTimeStyle = .numeric
+    coordinator.onPendingItemsChange = { [weak self] in self?.onChange?() }
   }
 
   // MARK: - ArchiveListDataSource
@@ -60,6 +70,10 @@ public final class ArchiveListModel: ArchiveListDataSource {
 
   public func loadMore() async -> ArchiveListPage {
     await load(limit: limit + Self.pageSize)
+  }
+
+  public func refresh() async -> ArchiveListPage {
+    await load(limit: max(limit, Self.pageSize))
   }
 
   /// Restores the row's item (`ArchiveCoordinator.restore`: its source Space, else the current one, else the first),
@@ -88,10 +102,15 @@ public final class ArchiveListModel: ArchiveListDataSource {
   private func load(limit wanted: Int) async -> ArchiveListPage {
     generation += 1
     let current = generation
+    // Taken before the read: an entry whose write lands during it is then in the page, here, or both (never neither).
+    let pending = coordinator.pendingItems
     let page: ArchivePage
     do { page = try await store.items(matching: ArchiveFilter(), limit: wanted) } catch {
-      let failed = current == generation
-      return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore, failed: failed)
+      guard current == generation else {
+        return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore)
+      }
+      list(storedItems, pending)
+      return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore, failed: true)
     }
     guard current == generation else {
       return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore)
@@ -99,10 +118,37 @@ public final class ArchiveListModel: ArchiveListDataSource {
     limit = wanted
     mayHaveMore = page.items.count >= wanted       // fewer than asked: the store ran out
     unreadable = page.unreadable
-    let visible = page.items.filter { restored[$0.id] != $0.archivedAt }
+    storedItems = page.items
+    list(page.items, pending)
+    return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore)
+  }
+
+  /// Sets the rows and restorable items: `stored` and `pending` merged, minus entries restored here.
+  private func list(_ stored: [ArchivedItem], _ pending: [ArchivedItem]) {
+    let visible = Self.merged(stored, pending).filter { restored[$0.id] != $0.archivedAt }
     items = Dictionary(visible.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     rows = visible.map(row(for:))
-    return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore)
+  }
+
+  /// Store items and outbox entries, newest first, one per id: the newer entry wins (a re-archive the store still
+  /// holds an older entry of), an outbox entry on equal dates. Equal dates keep the newest outbox entry first, then
+  /// the store's order.
+  private static func merged(_ stored: [ArchivedItem], _ pending: [ArchivedItem]) -> [ArchivedItem] {
+    guard !pending.isEmpty else { return stored }
+    var winners: [UUID: ArchivedItem] = [:]
+    var order: [UUID] = []
+    for item in pending.reversed() + stored {
+      guard let kept = winners[item.id] else {
+        winners[item.id] = item
+        order.append(item.id)
+        continue
+      }
+      if item.archivedAt > kept.archivedAt { winners[item.id] = item }
+    }
+    return order.enumerated()
+      .compactMap { offset, id in winners[id].map { (offset, $0) } }
+      .sorted { $0.1.archivedAt != $1.1.archivedAt ? $0.1.archivedAt > $1.1.archivedAt : $0.0 < $1.0 }
+      .map(\.1)
   }
 
   // MARK: - Row text

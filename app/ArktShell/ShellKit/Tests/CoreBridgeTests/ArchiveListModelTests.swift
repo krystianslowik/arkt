@@ -125,6 +125,163 @@ struct ArchiveListModelTests {
     #expect(harness.model.restore(newerPage.rows[0].id))
   }
 
+  @Test func refreshReloadsAtTheLoadedDepth() async throws {
+    let harness = try Harness(items: Self.tabs(450))
+    _ = await harness.model.loadPage()
+    _ = await harness.model.loadMore()
+
+    let page = await harness.model.refresh()
+
+    #expect(await harness.store.limits == [200, 400, 400])
+    #expect(page.rows.count == 400)
+    #expect(page.mayHaveMore)
+  }
+
+  @Test func refreshBeforeAnyLoadAsksForTheFirstPage() async throws {
+    let harness = try Harness(items: Self.tabs(3))
+
+    _ = await harness.model.refresh()
+
+    #expect(await harness.store.limits == [200])
+  }
+
+  // MARK: - Outbox entries (#88)
+
+  /// Entries not yet written are listed with the store page, newest first.
+  @Test func pendingEntriesAreListedWithTheStorePageNewestFirst() async throws {
+    let harness = try Harness(items: [Self.tab("Stored", ago: 60)])
+    let space = try #require(harness.space)
+    let tab = try harness.source.addTab(url: URL(string: "https://p.example/x")!, title: "Pending", in: .today(space))
+    await harness.store.holdAdds()
+    harness.coordinator.archive([tab], reason: .manual)
+    await eventually { await harness.store.heldAddCount == 1 }
+
+    let page = await harness.model.loadPage()
+
+    #expect(page.rows.map(\.title) == ["Pending", "Stored"])
+    #expect(page.rows.first?.detail.hasPrefix("p.example - Work - ") == true)
+    #expect(!page.mayHaveMore)
+    await harness.store.releaseAdds()
+  }
+
+  /// When the write lands, the entry comes from the store and is listed once.
+  @Test func aPendingEntryIsListedOnceWhenItsWriteLands() async throws {
+    let harness = try Harness()
+    let space = try #require(harness.space)
+    let tab = try harness.source.addTab(url: URL(string: "https://p.example/x")!, title: "Pending", in: .today(space))
+    await harness.store.holdAdds()
+    harness.coordinator.archive([tab], reason: .manual)
+    await eventually { await harness.store.heldAddCount == 1 }
+    #expect(await harness.model.loadPage().rows.map(\.id) == [tab])
+
+    await harness.store.releaseAdds()
+    await eventually { !harness.coordinator.hasPendingWrites }
+
+    #expect(await harness.model.refresh().rows.map(\.id) == [tab])
+  }
+
+  /// A pending re-archive of an id the store still holds shows once, with the newer entry.
+  @Test func aPendingEntryReplacesAnOlderStoredEntryOfTheSameId() async throws {
+    let harness = try Harness()
+    let space = try #require(harness.space)
+    let tab = try harness.source.addTab(url: URL(string: "https://p.example/x")!, title: "Again", in: .today(space))
+    let snapshot = try #require(harness.source.sidebar.snapshot(of: tab))
+    let old = ArchivedItem(
+      reason: .auto, archivedAt: Self.now.addingTimeInterval(-86_400), source: .space(space), section: .today,
+      snapshot: snapshot)
+    await harness.store.seed([old, Self.tab("Other", ago: 3600)])
+    await harness.store.holdAdds()
+    harness.coordinator.archive([tab], reason: .manual)
+    await eventually { await harness.store.heldAddCount == 1 }
+
+    let rows = await harness.model.loadPage().rows
+
+    #expect(rows.map(\.title) == ["Again", "Other"])
+    #expect(rows.first?.reason == "Closed")
+    await harness.store.releaseAdds()
+  }
+
+  /// Restoring a pending row goes through the coordinator: back in the sidebar, out of the outbox, no store remove
+  /// when its add was never sent.
+  @Test func restoringAPendingRowDropsItFromTheOutbox() async throws {
+    let harness = try Harness()
+    let space = try #require(harness.space)
+    let sent = try harness.source.addTab(url: URL(string: "https://p.example/1")!, title: "Sent", in: .today(space))
+    let queued = try harness.source.addTab(url: URL(string: "https://p.example/2")!, title: "Queued", in: .today(space))
+    await harness.store.holdAdds()
+    harness.coordinator.archive([sent], reason: .manual)
+    await eventually { await harness.store.heldAddCount == 1 }
+    harness.coordinator.archive([queued], reason: .manual)
+    _ = await harness.model.loadPage()
+
+    #expect(harness.model.restore(queued))
+
+    #expect(harness.source.children(of: .today(space)) == [queued])
+    #expect(harness.coordinator.pendingItems.map(\.id) == [sent])
+    #expect(harness.model.rows.map(\.id) == [sent])
+    #expect(harness.restored.first?.1 == "Tab restored to Work. Click to view.")
+    await harness.store.releaseAdds()
+    await eventually { !harness.coordinator.hasPendingWrites }
+    #expect(await harness.store.removed.isEmpty)
+    #expect(await harness.model.refresh().rows.map(\.id) == [sent])
+  }
+
+  /// A pending entry restored while a load reads the store is not listed by that load.
+  @Test func aPendingEntryRestoredDuringALoadIsNotListed() async throws {
+    let harness = try Harness()
+    let space = try #require(harness.space)
+    let tab = try harness.source.addTab(url: URL(string: "https://p.example/x")!, title: "Pending", in: .today(space))
+    await harness.store.holdAdds()
+    harness.coordinator.archive([tab], reason: .manual)
+    await eventually { await harness.store.heldAddCount == 1 }
+    _ = await harness.model.loadPage()
+    await harness.store.holdReads()
+    let load = Task { await harness.model.refresh() }
+    await eventually { await harness.store.heldReadCount == 1 }
+
+    #expect(harness.model.restore(tab))
+    await harness.store.releaseReads()
+
+    #expect(await load.value.rows.isEmpty)
+    await harness.store.releaseAdds()
+  }
+
+  /// A failing store (the usual reason entries sit in the outbox) still lists them, with the last rows read.
+  @Test func pendingEntriesAreListedWhenTheStoreCannotBeRead() async throws {
+    let harness = try Harness(items: [Self.tab("Stored", ago: 60)])
+    let space = try #require(harness.space)
+    let tab = try harness.source.addTab(url: URL(string: "https://p.example/x")!, title: "Pending", in: .today(space))
+    _ = await harness.model.loadPage()
+    await harness.store.setFails(true)
+    await harness.store.holdAdds()
+    harness.coordinator.archive([tab], reason: .manual)
+    await eventually { await harness.store.heldAddCount == 1 }
+
+    let page = await harness.model.refresh()
+
+    #expect(page.failed)
+    #expect(page.rows.map(\.title) == ["Pending", "Stored"])
+    #expect(harness.model.restore(tab))
+    #expect(harness.model.rows.map(\.title) == ["Stored"])
+    await harness.store.releaseAdds()
+  }
+
+  /// Every change of the outbox's entries is passed on, so the window can refresh.
+  @Test func outboxChangesAreReported() async throws {
+    let harness = try Harness()
+    let space = try #require(harness.space)
+    let tab = try harness.source.addTab(url: URL(string: "https://p.example/x")!, title: "Pending", in: .today(space))
+    var changes = 0
+    harness.model.onChange = { changes += 1 }
+    await harness.store.holdAdds()
+
+    harness.coordinator.archive([tab], reason: .manual)
+    #expect(changes == 1)
+    await harness.store.releaseAdds()
+    await eventually { !harness.coordinator.hasPendingWrites }
+    #expect(changes == 2)
+  }
+
   // MARK: - Row text
 
   @Test func rowTextForTabsFoldersSplitsAndSources() async throws {
@@ -269,6 +426,18 @@ actor PagedArchiveStore: ArchiveStoring {
   }
 
   func seed(_ items: [ArchivedItem]) { self.items += items }
+
+  private var holdsAdds = false
+  private var heldAdds: [CheckedContinuation<Void, Never>] = []
+  /// While true, `add` parks before writing until `releaseAdds()`.
+  func holdAdds() { holdsAdds = true }
+  var heldAddCount: Int { heldAdds.count }
+
+  func releaseAdds() {
+    holdsAdds = false
+    for held in heldAdds { held.resume() }
+    heldAdds = []
+  }
   func setFails(_ fails: Bool) { self.fails = fails }
   func holdRemoves() { holdsRemoves = true }
 
@@ -279,6 +448,7 @@ actor PagedArchiveStore: ArchiveStoring {
   }
 
   func add(_ items: [ArchivedItem], onConflict policy: ArchiveConflictPolicy) async throws -> Int {
+    if holdsAdds { await withCheckedContinuation { heldAdds.append($0) } }
     let ids = Set(items.map(\.id))
     self.items = self.items.filter { !ids.contains($0.id) } + items
     return items.count

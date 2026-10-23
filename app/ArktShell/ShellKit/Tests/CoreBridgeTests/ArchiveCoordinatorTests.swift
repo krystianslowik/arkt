@@ -377,6 +377,81 @@ struct ArchiveCoordinatorTests {
     #expect(await harness.store.removeCalls == [[item.id]])
   }
 
+  /// #88: an entry whose add was never sent (queued behind a write in flight) cannot be in the store, so restoring it
+  /// only drops it from the outbox.
+  @Test func restoringAnUnsentPendingItemSendsNoRemove() async throws {
+    let harness = try Harness(todayTabs: 2)
+    await harness.store.holdAdds()
+    let first = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    await eventually { await harness.store.addCalls.count == 1 }
+    let second = try #require(harness.coordinator.archive([harness.today[1]], reason: .manual).first)
+    #expect(harness.coordinator.pendingItems == [first, second])
+
+    _ = try harness.coordinator.restore(second, fallbackSpace: nil)
+
+    #expect(harness.coordinator.pendingItems == [first])
+    #expect(harness.source.node(second.id) != nil)
+    await harness.store.releaseAdds()
+    await harness.drain()
+    #expect(await harness.store.calls == [.add([first.id])])
+    #expect(await harness.store.stored[second.id] == nil)
+  }
+
+  /// A remove dropped at a flush leaves the entry (here one from an earlier launch) in the store; a later unsent add
+  /// of the same id that is restored still sends a remove, so that entry does not linger.
+  @Test func restoreAfterADroppedRemoveStillRemoves() async throws {
+    let harness = try Harness(todayTabs: 1)
+    var other = SidebarModel.Sidebar()
+    let otherSpace = other.addSpace(title: "Earlier")
+    let tab = try other.addTab(url: Self.url, title: "Earlier", in: .today(otherSpace))
+    let item = ArchivedItem(
+      reason: .manual, archivedAt: Self.now.addingTimeInterval(-3600), source: .space(harness.space),
+      section: .today, snapshot: try #require(other.snapshot(of: tab)))
+    _ = try await harness.store.add([item], onConflict: .replace)
+    await harness.store.setFailsRemoves(true)
+    _ = try harness.coordinator.restore(item, fallbackSpace: nil)
+    await eventually { harness.sleeper.parkedDurations == [.seconds(1)] }
+    #expect(await harness.coordinator.flush())
+    #expect(await harness.store.stored[item.id] != nil)
+    await harness.store.setFailsRemoves(false)
+
+    await harness.store.holdAdds()
+    harness.coordinator.archive([harness.today[0]], reason: .manual)
+    await eventually { await harness.store.addCalls.count == 2 }
+    let again = try #require(harness.coordinator.archive([item.id], reason: .manual).first)
+    _ = try harness.coordinator.restore(again, fallbackSpace: nil)
+    await harness.store.releaseAdds()
+    await harness.drain()
+
+    #expect(await harness.store.calls.suffix(2) == [.add([harness.today[0]]), .remove([item.id])])
+    #expect(await harness.store.stored[item.id] == nil)
+  }
+
+  /// #88: the Archive window refreshes on this: an archive, a restore that drops a pending entry, a landed write.
+  @Test func pendingItemsChangeIsReported() async throws {
+    let harness = try Harness(todayTabs: 2)
+    var reports = 0
+    harness.coordinator.onPendingItemsChange = { reports += 1 }
+    await harness.store.holdAdds()
+
+    let first = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    #expect(reports == 1)
+    await eventually { await harness.store.addCalls.count == 1 }
+    let second = try #require(harness.coordinator.archive([harness.today[1]], reason: .manual).first)
+    #expect(reports == 2)
+    _ = try harness.coordinator.restore(second, fallbackSpace: nil)
+    #expect(reports == 3)
+
+    await harness.store.releaseAdds()
+    await harness.drain()
+    #expect(reports == 4)
+    #expect(harness.coordinator.pendingItems.isEmpty)
+
+    _ = try harness.coordinator.restore(first, fallbackSpace: nil)  // a stored entry: the pending list is unchanged
+    await harness.drain()
+    #expect(reports == 4)
+  }
+
   @Test func restoreWaitsForTheWriteInFlightBeforeRemoving() async throws {
     let harness = try Harness()
     await harness.store.holdAdds()

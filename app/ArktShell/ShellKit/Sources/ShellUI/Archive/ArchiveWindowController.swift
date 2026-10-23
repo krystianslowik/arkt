@@ -2,7 +2,8 @@ import AppKit
 
 /// The minimal Archive window (E5c; Window > Show Archive, unbound by default, KB-043): archived items newest first
 /// in a one-column AppKit table, a footer for unreadable items, "Load More" while more may exist, and Restore
-/// (button or double-click). Not a hot path, but still AppKit, never a SwiftUI list.
+/// (button or double-click). While on screen it refreshes when the data source reports a change (an entry archived or
+/// its archive write landed, #88). Not a hot path, but still AppKit, never a SwiftUI list.
 @MainActor
 public final class ArchiveWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
   static let contentSize = NSSize(width: 600, height: 480)
@@ -32,6 +33,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     window.minSize = NSSize(width: 360, height: 240)
     super.init(window: window)
     buildContent(in: window)
+    dataSource.onChange = { [weak self] in self?.dataSourceDidChange() }
   }
 
   @available(*, unavailable)
@@ -66,9 +68,23 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     pendingLoad = Task { [weak self] in await self?.loadMore() }
   }
 
+  /// The list changed elsewhere: on screen, read it again at the loaded depth; hidden, nothing (`show()` reloads).
+  private func dataSourceDidChange() {
+    guard window?.isVisible == true else { return }
+    pendingLoad = Task { [weak self] in
+      guard let self else { return }
+      self.apply(await self.dataSource.refresh())
+    }
+  }
+
+  /// Applies a page; the selected row stays selected when it is still listed.
   private func apply(_ page: ArchiveListPage) {
+    let selected = rows.indices.contains(tableView.selectedRow) ? rows[tableView.selectedRow].id : nil
     rows = page.rows
     tableView.reloadData()
+    if let selected, let index = rows.firstIndex(where: { $0.id == selected }) {
+      tableView.selectRowIndexes([index], byExtendingSelection: false)
+    }
     loadMoreButton.isHidden = !page.mayHaveMore
     if page.failed {
       footerLabel.stringValue = "The Archive could not be read."

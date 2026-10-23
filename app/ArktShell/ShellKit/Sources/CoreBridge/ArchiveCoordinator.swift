@@ -17,6 +17,11 @@ import Synchronization
 /// anyway, so those ids are dropped and the add goes next instead of waiting behind a retry. Outside a flush, a remove
 /// that keeps failing therefore holds back every add queued behind it (FIFO) until it succeeds.
 ///
+/// Restoring an entry whose add was never sent (queued behind a write in flight or a retrying remove) only drops it
+/// from the outbox: no store call can have written it. When an add holding the id was sent (in flight, failed or
+/// written) or a remove of the id failed, the entry may be in the store and the restore queues a remove as usual.
+/// `onPendingItemsChange` reports every change of `pendingItems`, so the Archive window can list them (#88).
+///
 /// `flush()` is for termination: it stops a retry wait, waits for a write in flight, then sends the outbox in order
 /// until it is empty or an add fails, bounded by `flushTimeout`. A remove that fails during the flush is dropped (a
 /// harmless duplicate in the archive), so it cannot hold back an add queued behind it at quit.
@@ -53,6 +58,10 @@ public final class ArchiveCoordinator {
     }
   }
 
+  /// Called on the main actor after `pendingItems` changed: an archive, a restore that dropped a pending entry, or a
+  /// write that landed. One observer: the Archive window's list model sets it.
+  public var onPendingItemsChange: (@MainActor () -> Void)?
+
   /// True while an add or remove is unsent or a write is still running. Termination must check this (or always
   /// flush).
   public var hasPendingWrites: Bool { !outbox.isEmpty || writer != nil }
@@ -67,6 +76,9 @@ public final class ArchiveCoordinator {
   private var outbox: [Operation] = []
   /// Ids restored and not archived again since; restoring one of them again is a no-op.
   private var restoredIDs: Set<NodeID> = []
+  /// Ids this coordinator may have left in the store: sent in an add, or named by a remove that failed. A
+  /// successful remove takes them out. Restoring a pending entry whose id is not here needs no store remove.
+  private var mayBeStored: Set<NodeID> = []
   /// The one write loop (or flush attempt) in progress.
   private var writer: Task<Void, Never>?
   private var consecutiveFailures = 0
@@ -100,6 +112,7 @@ public final class ArchiveCoordinator {
     restoredIDs.subtract(items.map(\.id))
     outbox.append(.add(items))
     startWriter(delayFirst: false)
+    onPendingItemsChange?()
     return items
   }
 
@@ -117,10 +130,11 @@ public final class ArchiveCoordinator {
   }
 
   /// Puts `item` back into the sidebar (`Archiver.restore` rules: top of Today in its source Space, folders at the
-  /// end of Pinned, fresh ids when an id is taken), then queues its removal from the store. `fallbackSpace` is used
-  /// when the source Space is gone; when it is nil or gone too, the first Space is used. Returns nil and changes
-  /// nothing when `item.id` was already restored and not archived again since (a repeated click). Throws
-  /// `.noSpaceForRestore` when the sidebar has no Space, and the model's `SidebarError`s; nothing changes on throw.
+  /// end of Pinned, fresh ids when an id is taken), then queues its removal from the store, unless it was pending and
+  /// never sent (see the type comment). `fallbackSpace` is used when the source Space is gone; when it is nil or gone
+  /// too, the first Space is used. Returns nil and changes nothing when `item.id` was already restored and not
+  /// archived again since (a repeated click). Throws `.noSpaceForRestore` when the sidebar has no Space, and the
+  /// model's `SidebarError`s; nothing changes on throw.
   @discardableResult
   public func restore(_ item: ArchivedItem, fallbackSpace: UUID?) throws -> RestoredItem? {
     guard !restoredIDs.contains(item.id) else { return nil }
@@ -129,10 +143,14 @@ public final class ArchiveCoordinator {
     guard let fallback else { throw RestoreError.noSpaceForRestore }
     let restored = try source.restore(item, fallbackSpace: fallback)
     restoredIDs.insert(item.id)
-    dropUnsentAdds(of: item.id)
-    // Queued even when the add was never sent: a failed add may still have landed, and an extra remove is harmless.
-    outbox.append(.remove([item.id]))
-    startWriter(delayFirst: false)
+    let wasPending = dropUnsentAdds(of: item.id)
+    // Queued whenever a store call may have written the entry: a failed add may still have landed, and an extra
+    // remove is harmless.
+    if !wasPending || mayBeStored.contains(item.id) {
+      outbox.append(.remove([item.id]))
+      startWriter(delayFirst: false)
+    }
+    if wasPending { onPendingItemsChange?() }
     return restored
   }
 
@@ -231,6 +249,7 @@ public final class ArchiveCoordinator {
   private func sendLeadingAdds() async -> Bool {
     let leading = outbox.prefix { if case .add = $0 { true } else { false } }.count
     let batch = pendingItems(inFirst: leading)
+    mayBeStored.formUnion(batch.map(\.id))
     let store = self.store
     let written = await Task { () -> Bool in
       do {
@@ -250,6 +269,7 @@ public final class ArchiveCoordinator {
     }
     dropEmptyAdds()
     consecutiveFailures = 0
+    if !batch.isEmpty { onPendingItemsChange?() }
     return true
   }
 
@@ -268,9 +288,11 @@ public final class ArchiveCoordinator {
     }.value
     if removed {
       outbox.removeFirst()
+      mayBeStored.subtract(ids)
       consecutiveFailures = 0
       return true
     }
+    mayBeStored.formUnion(ids)
     let superseded = Set(pendingItems.map(\.id))
     let remaining = ids.filter { !superseded.contains($0) }
     guard remaining.isEmpty || droppingOnFailure else {
@@ -292,12 +314,18 @@ public final class ArchiveCoordinator {
     }
   }
 
-  /// Removes `id` from every add not yet sent; an add in flight is a snapshot and is not affected.
-  private func dropUnsentAdds(of id: NodeID) {
+  /// Removes `id` from every add not yet sent; an add in flight is a snapshot and is not affected. True when an add
+  /// held it.
+  private func dropUnsentAdds(of id: NodeID) -> Bool {
+    var dropped = false
     for index in outbox.indices {
-      if case .add(let items) = outbox[index] { outbox[index] = .add(items.filter { $0.id != id }) }
+      guard case .add(let items) = outbox[index] else { continue }
+      let kept = items.filter { $0.id != id }
+      dropped = dropped || kept.count != items.count
+      outbox[index] = .add(kept)
     }
     dropEmptyAdds()
+    return dropped
   }
 
   private func dropEmptyAdds() {

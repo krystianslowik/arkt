@@ -128,3 +128,29 @@ What the automated run shows instead:
   menu, so open windows are listed there.
 - The overlapping-loads generation check moved from `ArchiveWindowController` into `ArchiveListModel`: a load that a
   newer one overtook leaves the model's rows and restorable items alone and reports the current state.
+
+## Archive window: entries still in the outbox (#88)
+
+Follow-up to E5c (#49, "Not done"). Base `main` at `772f94c`; `nice -n 10`, `-j 4`.
+
+- `ArchiveListModel` lists the coordinator's `pendingItems` with every page: merged with the store's items newest
+  first, one row per id (the newer entry wins). The pending list is read before the store read, so an entry whose
+  write lands during the read is never missing from both. When the store read fails (the usual reason entries sit
+  in the outbox), the pending entries are listed with the rows of the last read that succeeded, and the footer
+  reports the failure. A pending row restores through the coordinator like any other row.
+- `ArchiveCoordinator.onPendingItemsChange` fires on an archive, a restore that drops a pending entry, and a landed
+  write. The model sets it and passes it on as `ArchiveListDataSource.onChange`; the window refreshes while on screen
+  (`refresh()` re-reads at the loaded depth, so "Load More" pages stay) and keeps the selected row selected.
+- Restoring a pending entry whose add was never sent (queued behind a write in flight or a retrying remove) drops it
+  from the outbox without a store remove. When an add holding the id was sent (in flight, failed, written) or a
+  remove of the id failed, the entry may be in the store, so the restore still queues a remove, as before.
+
+Baselines run on `main` at `772f94c` before this change; all pass, before and after.
+
+| Suite | Baseline | Final | Delta |
+|---|---|---|---|
+| ShellKit `swift test --skip ShellKitGUITests` | 392 | 404 | +3 `ArchiveCoordinatorTests`, +9 `ArchiveListModelTests` |
+| ShellKit `swift test --filter ShellKitGUITests` (XCTest) | 240 | 243 | +3 `ArchiveWindowTests` |
+| ArktCore | not touched | | |
+
+Debug app build: `** BUILD SUCCEEDED **`. No change to `AppSession.swift`: the model wires itself to the coordinator.
