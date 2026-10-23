@@ -14,7 +14,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W4 | Extensions menu lists every action (finding 1) | DONE | no upstream patch; see below |
 | W5a | `ArktBrowserWindow` skeleton behind `--arkt-native-window` | DONE | patch 0004; startup, tabs and `chrome.windows` work; 3 crash seams hit (sad tab, NTP footer, closing the active tab, which also blocks window close and quit), see "W5a" below |
 | W5b | Seam fixes found by the smoke matrix (GATE) | DONE: gate passes | 17/17 scenarios pass; patches 0005-0006 (2 patch files, 3 upstream files, 0 hot-file hunks); close, quit, NTP, main-menu commands and the extension popup fixed on our side; see "W5b" below |
-| W5c | Arkt-owned tab list and visibility (finding 2) | TODO | |
+| W5c | Arkt-owned tab list and visibility (finding 2) | DONE | no upstream patch; week-1 blackout repro passes (CDP `visibilityState`, `ARKT: visibility` lines, AX row selection); `arkt_browser_window.mm` split; affected W5b rows pass; see "W5c" below |
 | W6 | Extension window identity, extension-created tabs and windows (finding 3) | TODO | |
 | W7 | Web Store install on the native window | TODO | |
 | W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | DONE (user steps open) | patch 0003; see below |
@@ -920,3 +920,126 @@ Both compiled in the W8 build above.
 2. After W10 installs the rebuilt `/Applications/Arkt.app`, launch it once without `--use-mock-keychain` (plan W8,
    "Needs the user" step 2). Expected: no prompt about "Chromium Safe Storage", and an "Arkt Safe Storage" item
    (account `Arkt`) afterwards.
+
+## W5c: Arkt-owned tab list and visibility
+
+Date 2026-10-23. Branch `engine/17-tab-list`, issue #17. Variant P. No upstream change: the patch set is still 0001-0006
+(6 patch files, 12 upstream files, 0 hot-file hunks; `git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 12 files
+changed, 56 insertions, 4 deletions). Build: `nice -n 15 autoninja -C out/Spike chrome`, `The build has finished
+successfully.`, 0 `FAILED:` (after two compile fixes). `gn check out/Spike '//arkt/browser:*'`: `Header dependency
+check OK`. The build waited about two hours for `/` to get back above 8 GiB free (it dropped as low as 3.1 GiB from
+other jobs on the machine); nothing was deleted.
+
+### Split of `arkt_browser_window.mm`
+
+| File | Holds |
+|---|---|
+| `arkt_window_host.{h,mm}` | the `ArktWindowHost` protocol and `ArktTabEvent` (the tab event value type) |
+| `arkt_placeholder_window_host.{h,mm}` | `ArktPlaceholderWindowHost` (window, card, Extensions button, tab list, menu command forwarding) |
+| `arkt_tab_list_view.{h,mm}` | `ArktTabListView`, the placeholder `NSTableView` |
+| `arkt_browser_window_parts.{h,mm}` | `ArktExclusiveAccessContext`, `ArktModalDialogHost`, `ArktStubLocationBar`, `ArktFindBar`, `ArktSidePanelUI`, `LogStubOnce`/`ARKT_STUB` |
+| `arkt_browser_window.{h,mm}` | `ArktBrowserWindow` only (1278 lines before, 946 after) |
+
+The window-side objects moved without behaviour changes (declarations in the header, bodies in the `.mm`).
+
+### Tab list and events
+
+- `ArktBrowserWindow` keeps an ordered `TabEntry` list (session id, title, URL) that follows each
+  `TabStripModelChange` in the order it lists its tabs, and turns every change into `ArktTabEvent`s: `inserted` (with
+  title and URL), `removed`, `moved` (with `fromIndex`), `activated`, and `updated` (title or URL changed, from
+  `OnTabChangedAt`; or contents replaced, `kReplaced`, with `previousTabId`). Tab ids are the session ids
+  `chrome.tabs` reports. The host gets events only; the list and the observer never reference the table.
+- The event type replaces W5a's dictionaries: typed properties, integers and strings only, so the ShellUI host can
+  consume it from Swift. This is the seed of the `ChromiumEngine` tab events.
+- `ArktPlaceholderWindowHost` logs each event (kind, tab id, index; no titles or URLs) and hands the batch to
+  `ArktTabListView`, which mirrors the rows from the events alone and selects the active row. A user selection
+  (click, keyboard, AX) calls the host's `activateTab` block with the row's tab id; the engine resolves the index at
+  call time and calls `TabStripModel::ActivateTabAt(index, kOther)`. The resulting `activated` event re-selects the
+  row; a guard keeps that mirrored selection from being reported back.
+- Accessibility: the table's scroll view is labelled `Tabs`. The web contents expose a scroll area of their own
+  (`scroll area 1` is the page), so scripts address the list as
+  `table 1 of (first scroll area of window 1 whose description is "Tabs")`.
+
+### Visibility
+
+Unchanged mechanism from W5a, now verified: on every active-tab change `Browser` calls `OnActiveTabChanged` (it
+observes the model before the window does), and `Mount` puts the new tab's view in the card and takes the previous one
+out with `removeFromSuperview`; no `WasShown`/`WasHidden` calls. `--arkt-trace-visibility` posts a task after every
+tab list or active-tab change that logs `ARKT: visibility <tab id> <visible|hidden|occluded>` from each tab's
+`WebContents::GetVisibility()`.
+
+### Menu commands (from the #17 parity list)
+
+- `commandDispatchUsingKeyModifiers:` now matches `browser_window_command_handler.mm`: ignored for a disabled sender;
+  Shift- or Ctrl-reload becomes `IDC_RELOAD_BYPASSING_CACHE` (and those flags are masked off); Cmd is dropped when the
+  sender's window is not main; the disposition comes from `ui::WindowOpenDispositionFromNSEventWithFlags`.
+  `executeCommand` takes `(command, disposition)` and runs `chrome::ExecuteCommandWithDisposition`;
+  `commandDispatch:` passes `CURRENT_TAB`.
+- `validateCommand` also requires `chrome::SupportsCommand`, as `BrowserNativeWidgetMac::ValidateUserInterfaceItem`
+  does.
+- Not exercised at runtime: Chrome's main menu items send `commandDispatch:`; `commandDispatchUsingKeyModifiers:` is
+  the selector of toolbar buttons, and the placeholder has none. The ShellUI back/forward/reload buttons will send it.
+- Still deferred (week 3): toggle state, hidden state, dynamic titles (`IDC_FULLSCREEN`) and
+  `disable_if_has_no_key_equivalent` (`IDC_CLOSE_TAB`), and the "key window is modal" disabling.
+
+### Verification (Step 3)
+
+Fresh profile, `--arkt-native-window --arkt-trace-visibility`, both probe extensions, `https://example.com`. CDP
+port 9343 and a profile of its own (see "Interference" below).
+
+| Step | CDP result | Log |
+|---|---|---|
+| `probe.create()` | index 1 | `inserted` tab 2 at index 1, `visibility <1> visible`, `<2> hidden`; table 2 rows, row 1 selected |
+| example.com `visibilityState` | `"visible"` (about:blank `"hidden"`) | |
+| `tabs.update(<about:blank>, {active:true})` | `true` | `mounted` tab 2, `activated` index 1, `<1> hidden`, `<2> visible`; row 2 selected |
+| example.com `visibilityState` | `"hidden"` (about:blank `"visible"`) | |
+| `tabs.update(<example.com>, {active:true})` | `true` | `mounted` tab 1, `activated` index 0, `<1> visible`, `<2> hidden`; row 1 selected |
+| example.com `visibilityState` | `"visible"` (about:blank `"hidden"`) | |
+| AX `select row 2` of the `Tabs` table (after the frontmost and key-window checks) | example.com `"hidden"`, about:blank `"visible"` | `mounted` tab 2, `activated` index 1, matching visibility lines |
+| AX `select row 1` | example.com `"visible"`, about:blank `"hidden"` | `mounted` tab 1, `activated` index 0 |
+
+The week-1 reproduction (opening a tab blacked out the card) passes: the extension-created background tab leaves
+example.com `visible`. Window-only screenshots after each switch: `$PROF/shots/w5c-1.png` to `w5c-5.png` (the card
+shows the active tab; the table shows 2 rows with the active one selected).
+
+### W5b rows re-run (fresh launch each, pass = alive 10 s after the driver, 0 `FATAL`/`Check failed`, no new dump)
+
+| # | Scenario | Result | Dumps |
+|---|---|---|---|
+| 1 | Startup, idle 30 s | pass; census `normal=1 arkt=1 views=0`, 1 row | 85 -> 85 |
+| 2 | Navigate the tab | pass (`visible Example Domain` on example.org); `updated` event, 1 row | 85 -> 85 |
+| 3 | Extension adds a background tab | pass; 2 rows, row 1 still selected, example.com `visible` | 85 -> 86 once (see flakes), rerun 87 -> 87 |
+| 5 | `chrome.windows.create` | pass (`normal`, census `normal=2 arkt=2 views=0`); each window has its own table | 86 -> 87 once (see flakes), rerun 87 -> 87 |
+| 6 | Close the last tab; second launch: close the active tab | pass; `removed`, 1 row; the next tab is mounted, `activated`, `visible` | 87 -> 87 |
+| 7 | Close every window, then quit | pass (census 0/0/0, `native window destroyed` with a live table, alive with no windows, gone after `kill -TERM`) | 87 -> 87 |
+| 8 | Page `window.open` with a gesture | pass (`true`, one `normal` window with 2 tabs, 2 rows) | 87 -> 87 |
+| 13 | Find (AX `Edit > Find > Find…`, after the frontmost and key-window checks) | pass; `Find…` enabled, `ARKT: stub FindBar::Show` (new `executeCommand` signature) | 87 -> 87 |
+
+Rows 4, 9-12 and 14-17 do not touch the tab list, mounting or menu dispatch and were not re-run.
+
+Flakes: as in W5b, the two new dumps appeared in runs that started a few seconds after the previous launch was
+stopped with `kill -TERM` (s2 -> s3, s3 -> s5); neither run logged `FATAL`/`Check failed`, and both browsers stayed
+alive. With 20 s between stop and the next launch, both reruns and every later row left the count unchanged. The dump
+count was also 84 -> 85 across the interference runs below. Dumps are counted only, never opened.
+
+### Interference (recorded, not an Arkt bug)
+
+The first runs used `$PROF/week2-native` and port 9333 and were driven by input this task did not send: tabs
+created by the action probe's popup buttons (`probe-create`, `probe-open`, `probe-window`), row activations, new
+windows, tab closes. Another app under test (an `ArktShell` window at 551,214, 1200x800) shared the screen with the
+Arkt window (132,126, 1400x900), and its synthetic clicks and keys landed on our window whenever it was on top or
+frontmost; a launch on the same profile also hands its URL and flags to the running instance. Every recorded run
+above therefore uses its own profile, port 9343, moves the window to 0,60 540x860 with `chrome.windows.update` right
+after launch (no overlap), and keeps it frontmost only for the AX steps. One AX attempt was itself disturbed this way:
+once the window was frontmost, three tabs were closed by keys this task did not send. Nothing from the discarded runs
+is counted above except the dump count.
+
+### Known gaps and follow-ups
+
+- The deferred list from #17 stays open except the split and the two parity items above: find bar UI, sad tab page,
+  download bubble, docked DevTools, tab-modal attachment, the remaining menu parity (toggle, hidden, titles,
+  `disable_if_has_no_key_equivalent`), `ExtensionsMenus()` keeping one menu per closed window, the patch 0006 RTL
+  anchor.
+- Pinned tabs, tab groups and split tabs are not in the events; `OnTabPinnedStateChanged`, `OnTabGroupChanged` and
+  `OnSplitTabChanged` are the hooks when ShellUI needs them.
+- The placeholder table is fixed at the sidebar width and does not show favicons or loading state.
