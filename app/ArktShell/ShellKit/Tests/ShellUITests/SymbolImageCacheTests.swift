@@ -90,6 +90,25 @@ struct SymbolImageCacheTests {
     #expect(rep.pixelsWide == 32)
   }
 
+  /// #153: the letter tile is filled with `ShellTokens.letterTileFill` of its flavor (dark darkens), and the two
+  /// flavors are separate cache entries, so a flavor switch never shows the other flavor's fill.
+  @Test(arguments: [ThemeFlavor.light, .dark])
+  func letterTileIsFilledWithItsFlavorsTileToken(flavor: ThemeFlavor) throws {
+    let cache = SymbolImageCache()
+    let image = SidebarGlyphs.letter(for: "Example", url: nil, flavor: flavor, size: 16, scale: 2, cache: cache)
+    let other = SidebarGlyphs.letter(for: "Example", url: nil, flavor: flavor == .dark ? .light : .dark, size: 16,
+                                     scale: 2, cache: cache)
+    #expect(image !== other)
+    let rep = try #require(image.representations.first as? NSBitmapImageRep)
+    // Middle of the left edge: inside the rounded rect, clear of the centered letter.
+    let pixel = try #require(color(rep, x: 2, y: 16))
+    let alpha = pixel.alphaComponent
+    let fill = ShellTokens.letterTileFill.resolve(flavor)
+    #expect(abs(alpha - fill.alpha) < 0.02, "\(flavor) alpha \(alpha)")
+    let p3 = try #require(pixel.usingColorSpace(.displayP3))
+    #expect(max(p3.redComponent, p3.greenComponent, p3.blueComponent) < 0.15, "\(flavor) \(p3)")
+  }
+
   @Test func prewarmRendersEveryShellSymbolForBothFlavors() {
     let cache = SymbolImageCache()
     cache.prewarm(scale: 2)
