@@ -28,9 +28,35 @@ struct SpaceDockLayoutTests {
     // Half a gap before the first dot and after the last one: 6 * 21.5 = 129.
     #expect(layout.stripWidth == 129)
     #expect(layout.maxOffset == 19)
-    #expect(layout.dotMinX(0, offset: 0) == 8.75)
-    #expect(layout.dotMinX(0, offset: 19) == -10.25)
+    #expect(layout.dotMinX(0, offset: 0) == 9)
+    #expect(layout.dotMinX(0, offset: 19) == -10)
     #expect(layout.hitMinX(5, offset: 19) + layout.pitch == 110, "scrolled to the end, the last hit box ends at the edge")
+  }
+
+  @Test(arguments: [CGFloat(1), CGFloat(2)])
+  func dotsSitOnWholeDevicePixelsAt1xAnd2x(scale: CGFloat) {
+    let twelveAt70 = SpaceDockLayout(count: 12, width: 70, scale: scale)
+    #expect(twelveAt70.dotMinX(11, offset: twelveAt70.maxOffset) == (scale == 2 ? 57.5 : 58))
+    let twelveAt110 = SpaceDockLayout(count: 12, width: 110, scale: scale)
+    #expect(twelveAt110.dotMinX(11, offset: twelveAt110.maxOffset) == (scale == 2 ? 97.5 : 98))
+
+    for width in [CGFloat(70), 110, 150] {
+      for count in [4, 5, 6, 7, 12] {
+        let layout = SpaceDockLayout(count: count, width: width, scale: scale)
+        let revealed = (0..<count).map { layout.offsetRevealing($0, from: 0) }
+          + (0..<count).map { layout.offsetRevealing($0, from: layout.maxOffset) }
+        let scrolled: [CGFloat] = [0, 0.3, 12.75, 37.1, 64.25, 97.25, layout.maxOffset]
+        for offset in revealed + scrolled {
+          let stripPixels = layout.stripMinX(offset: offset) * scale
+          #expect(stripPixels == stripPixels.rounded(), "strip x at \(scale)x, offset \(offset)")
+          for index in 0..<count {
+            let dotPixels = layout.dotMinX(index, offset: offset) * scale
+            #expect(dotPixels == dotPixels.rounded(),
+                    "dot \(index) of \(count) at width \(width), \(scale)x, offset \(offset)")
+          }
+        }
+      }
+    }
   }
 
   @Test func clampsTheOffset() {

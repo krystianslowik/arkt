@@ -140,6 +140,12 @@ final class SpaceDockOverflowTests: XCTestCase {
     XCTAssertFalse(dots.needsDisplay, "a swipe frame moves the strip, it does not redraw the dock")
     XCTAssertFalse(dots.needsLayout)
     XCTAssertLessThanOrEqual(dots.repaintCountForTesting - repaintsBefore, 3, "only the dots whose weight changed")
+    let scale = dots.shellBackingScale
+    let strip = try XCTUnwrap(dots.layer?.sublayers?.first?.sublayers?.first)
+    for (index, dot) in (strip.sublayers ?? []).enumerated() {
+      let px = (strip.frame.minX + dot.frame.minX) * scale
+      XCTAssertEqual(px, px.rounded(), accuracy: 0.0001, "dot \(index) sits on a whole device pixel")
+    }
   }
 
   func testRemovingSpacesUntilTheyFitCentersTheDots() throws {

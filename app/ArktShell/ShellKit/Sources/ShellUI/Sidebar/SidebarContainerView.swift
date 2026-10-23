@@ -71,7 +71,9 @@ public final class SpaceDotsView: NSView {
   public override var wantsUpdateLayer: Bool { true }
   public override var mouseDownCanMoveWindow: Bool { false }
 
-  private var dockLayout: SpaceDockLayout { SpaceDockLayout(count: count, width: bounds.width) }
+  private var dockLayout: SpaceDockLayout {
+    SpaceDockLayout(count: count, width: bounds.width, scale: shellBackingScale)
+  }
   public var contentWidth: CGFloat { dockLayout.contentWidth }
 
   private func rebuild() {
@@ -139,7 +141,8 @@ public final class SpaceDotsView: NSView {
   /// Moves the strip to `scrollOffset`, updates the fades and clips each dot's accessibility frame to the dock.
   private func placeStrip(_ layout: SpaceDockLayout) {
     scrollOffset = layout.clamp(scrollOffset)
-    stripLayer.frame = CGRect(x: -scrollOffset, y: 0, width: layout.stripWidth, height: bounds.height)
+    stripLayer.frame = CGRect(x: layout.stripMinX(offset: scrollOffset), y: 0,
+                              width: layout.stripWidth, height: bounds.height)
     let fades = layout.fades(offset: scrollOffset)
     let edge = layout.width > 0 ? Double(min(layout.fadeWidth / layout.width, 0.5)) : 0
     let opaque = CGColor(gray: 0, alpha: 1)
@@ -185,6 +188,11 @@ public final class SpaceDotsView: NSView {
   /// Number of dot fills set so far (for tests).
   private(set) var repaintCountForTesting = 0
 
+  public override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    needsDisplay = true
+  }
+
   public override func layout() {
     super.layout()
     needsDisplay = true
@@ -207,7 +215,11 @@ public final class SpaceDotsView: NSView {
     let dy = event.scrollingDeltaY
     var delta = abs(dx) >= abs(dy) ? dx : dy
     if !event.hasPreciseScrollingDeltas { delta *= layout.pitch }
-    setScrollOffset(scrollOffset - delta)
+    let next = scrollOffset - delta
+    let ends = event.phase.contains(.ended) || event.phase.contains(.cancelled)
+      || event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)
+      || (event.phase == [] && event.momentumPhase == [])
+    setScrollOffset(ends ? layout.align(next) : next)
   }
 }
 

@@ -7,8 +7,17 @@ import CoreGraphics
 struct SpaceDockLayout: Equatable {
   var count: Int
   var width: CGFloat
+  var scale: CGFloat = 2
+
+  private var pixelScale: CGFloat { scale > 0 ? scale : 1 }
+
+  /// Rounds `value` to the nearest device pixel at `scale`.
+  func align(_ value: CGFloat) -> CGFloat { (value * pixelScale).rounded() / pixelScale }
 
   var pitch: CGFloat { SidebarMetrics.spaceDotSize + SidebarMetrics.spaceDotSpacing }
+
+  /// Leading inset before the first dot in overflow mode, pixel-aligned at `scale`.
+  var inset: CGFloat { align(SidebarMetrics.spaceDotSpacing / 2) }
 
   /// First dot's left edge to the last dot's right edge.
   var contentWidth: CGFloat { count == 0 ? 0 : CGFloat(count) * pitch - SidebarMetrics.spaceDotSpacing }
@@ -25,27 +34,37 @@ struct SpaceDockLayout: Equatable {
 
   func clamp(_ offset: CGFloat) -> CGFloat { min(max(offset, 0), maxOffset) }
 
-  /// Left edge of dot `index` on the strip (offset 0).
+  /// Pixel-aligned origin of the scrolling strip for `offset`.
+  func stripMinX(offset: CGFloat) -> CGFloat {
+    guard overflows else { return 0 }
+    return -align(clamp(offset))
+  }
+
+  /// Left edge of dot `index` on the strip (offset 0), pixel-aligned at `scale`.
   func stripDotMinX(_ index: Int) -> CGFloat {
-    if overflows { return SidebarMetrics.spaceDotSpacing / 2 + CGFloat(index) * pitch }
-    return ((width - contentWidth) / 2).rounded() + CGFloat(index) * pitch
+    if overflows { return align(inset + CGFloat(index) * pitch) }
+    return align(((width - contentWidth) / 2).rounded() + CGFloat(index) * pitch)
   }
 
   /// Left edge of dot `index` in the dock when the strip is scrolled by `offset`.
-  func dotMinX(_ index: Int, offset: CGFloat) -> CGFloat { stripDotMinX(index) - clamp(offset) }
+  func dotMinX(_ index: Int, offset: CGFloat) -> CGFloat {
+    stripDotMinX(index) + stripMinX(offset: offset)
+  }
 
   /// Left edge of dot `index`'s hit box (the full pitch, centered on the dot).
   func hitMinX(_ index: Int, offset: CGFloat) -> CGFloat {
-    dotMinX(index, offset: offset) - SidebarMetrics.spaceDotSpacing / 2
+    if overflows { return CGFloat(index) * pitch + stripMinX(offset: offset) }
+    return dotMinX(index, offset: offset) - SidebarMetrics.spaceDotSpacing / 2
   }
 
-  /// The smallest scroll from `offset` that shows dot `index`'s whole hit box (an out-of-range index is clamped).
+  /// The smallest pixel-aligned scroll from `offset` that shows dot `index`'s whole hit box (an out-of-range
+  /// index is clamped).
   func offsetRevealing(_ index: Int, from offset: CGFloat) -> CGFloat {
     guard overflows, count > 0 else { return 0 }
     let start = CGFloat(min(max(index, 0), count - 1)) * pitch
-    let current = clamp(offset)
-    if start < current { return start }
-    if start + pitch > current + width { return clamp(start + pitch - width) }
+    let current = align(clamp(offset))
+    if start < current { return clamp(align(start)) }
+    if start + pitch > current + width { return clamp(align(start + pitch - width)) }
     return current
   }
 
