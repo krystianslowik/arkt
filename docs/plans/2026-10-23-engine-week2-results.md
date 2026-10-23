@@ -9,7 +9,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 |---|---|---|---|
 | W0 | Branch, baselines, results file, CDP helper, key-window log | DONE | see below |
 | W1 | Arkt-branded non-component build | DONE | no patch; `out/Arkt` built in 4 h 11 min at `-j 6`/`-j 4`, 0 failed; `com.arkt.Arkt`, `Arkt Helper*.app`, 0 `@rpath` dylibs; bundle 541M, `out/Arkt` 7.6G; launches; see "W1" below |
-| W2 | Sign `Arkt.app`, install in /Applications, smoke | TODO | |
+| W2 | Sign `Arkt.app`, install in /Applications, smoke | DONE (1Password test is the maintainer's, #23) | signed inside-out with an Apple Development certificate, hardened runtime; `codesign --verify --deep --strict` passes, `com.arkt.Arkt`; installed in `/Applications`; smoke passes on the native window; `spctl` rejects (not notarized, #125); see "W2" below |
 | W3 | Inventory of non-`BrowserView` window seams, variant decision | DONE | variant P (plain `NSWindow`); this week 3 seam patch files, 4-8 upstream files, 0 hot-file hunks (W: 3 / 4 / 0); see "W3" below |
 | W4 | Extensions menu lists every action (finding 1) | DONE | no upstream patch; see below |
 | W5a | `ArktBrowserWindow` skeleton behind `--arkt-native-window` | DONE | patch 0004; startup, tabs and `chrome.windows` work; 3 crash seams hit (sad tab, NTP footer, closing the active tab, which also blocks window close and quit), see "W5a" below |
@@ -378,6 +378,116 @@ file renames the bundle, framework, helpers and bundle id only, as planned. A fi
 interference recorded under W5c); it was stopped and is not counted.
 
 Not done here (W2, #12): re-signing and installing into `/Applications`.
+
+## W2
+
+Date 2026-10-24. Input: the W1 bundle `$REL/Arkt.app` (overlay `c61a576`, ad-hoc linker signed), not rebuilt and not
+modified: it was copied with `ditto` to `$CHROMIUM_ROOT/stage-w2/Arkt.app` and signed there. The commands are now
+the "Sign and install (out/Arkt)" block in `engine/README.md`.
+
+### Step 1: sign inside-out
+
+Identity: the only code-signing identity in the login keychain, an Apple Development certificate (passed by hash;
+its name, team id and hash are not recorded here). The keychain allowed signing without a prompt. `--timestamp=none`
+(offline; notarization is #125). Order and options follow `chrome/installer/mac/signing/parts.py` and the plan:
+
+| Part | Options | Entitlements |
+|---|---|---|
+| `Libraries/libaperitif.dylib`, `libvk_swiftshader.dylib`, `libvulkan.dylib` | none | none |
+| `Helpers/chrome_crashpad_handler`, `app_mode_loader`, `web_app_shortcut_copier` | runtime | none |
+| `Arkt Helper.app`, `(Alerts)`, `(Aperitif)`, `(Aperitif Alerts)` | runtime | none |
+| `Arkt Helper (Renderer).app`, `(Aperitif Renderer)` | runtime | `helper-renderer-entitlements.plist` (`cs.allow-jit`) |
+| `Arkt Helper (GPU).app`, `(Aperitif GPU)` | runtime | `helper-gpu-entitlements.plist` (`cs.allow-jit`) |
+| `Arkt Framework.framework` | none (a dylib) | none |
+| `Arkt.app` | runtime | `app-entitlements.plist` (audio-input, bluetooth, camera, print, usb, location, photos-library) |
+
+`Helpers` held exactly the 11 entries W1 listed; each was signed. Per-part check with `codesign -dv`: every helper and
+tool `flags=0x10000(runtime)`, the Renderer and GPU helpers carry `com.apple.security.cs.allow-jit`, nothing else
+carries entitlements.
+
+    codesign --verify --deep --strict --verbose=2 Arkt.app
+      -> Arkt.app: valid on disk
+      -> Arkt.app: satisfies its Designated Requirement
+    codesign -dv --verbose=2 Arkt.app
+      -> Identifier=com.arkt.Arkt
+      -> CodeDirectory v=20500 ... flags=0x10000(runtime)
+      -> Authority=Apple Development: (redacted) / Apple Worldwide Developer Relations Certification Authority / Apple Root CA
+      -> TeamIdentifier set (redacted)
+
+### Step 2: install
+
+| When | `df -h /` available | `sysctl vm.swapusage` |
+|---|---|---|
+| before the copy | 13 GiB | `total = 7168.00M  used = 6099.12M  free = 1068.88M` |
+| after the copy | 12 GiB | `total = 7168.00M  used = 6099.12M  free = 1068.88M` |
+
+`/Applications/Arkt.app` did not exist (nothing named `Arkt*` in `/Applications`); `ditto` installed it (`du -sh`
+554M). On the installed copy:
+
+    codesign --verify --deep --strict --verbose=2 /Applications/Arkt.app -> valid on disk, satisfies its Designated Requirement
+    codesign -dv /Applications/Arkt.app                                -> Identifier=com.arkt.Arkt
+    spctl --assess --type execute -vv /Applications/Arkt.app           -> rejected, origin=Apple Development: (redacted)
+    nm -gU ".../Arkt Framework.framework/Arkt Framework" | grep -c ' T _ChromeMain' -> 1
+
+`spctl` rejects as expected: Gatekeeper accepts only notarized Developer ID builds (#125). It was not worked around.
+Launching the binary directly (as below) is not subject to that assessment.
+
+### Step 3: smoke from /Applications
+
+No other Arkt or Chromium build was running (checked with `ps` before each launch). Fresh profiles under `$PROF`,
+own CDP ports, the standard flags (`--use-mock-keychain --no-first-run --no-default-browser-check
+--enable-logging=stderr`), no `--user-agent`; each run stopped by its PID and `ps -p` confirmed gone.
+
+Run A, default window (`$PROF/w2-sign-smoke`, port 9381, `https://example.com`):
+
+- `ARKT: browsers normal=1 arkt=0 views=1`, `ARKT: in-process hook alive`, `ARKT: mounted active tab after 1 attempt(s)`.
+- `cdp.mjs --port 9381 example.com 'document.title'` -> `"Example Domain"` 6 s after launch.
+- `navigator.userAgent` -> `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36` (no `Arkt`).
+- `navigator.userAgentData.brands` -> `["Not:A-Brand","Chromium"]`; `getHighEntropyValues(["fullVersionList"])` brands
+  -> `["Not:A-Brand","Chromium"]`. No `Arkt` brand.
+- Window-only screenshot `$PROF/shots/w2-sign-smoke.png`: the Views window with its Extensions button and an empty
+  content area, although CDP reported `visibilityState` `visible`. Same as W1's launch check on the Views path (finding
+  2, fixed on the native window only, W9 makes that the default); not a signing effect.
+- 0 `FATAL`/`Check failed`; no code-signing or library-validation messages in the log.
+
+Run B, `--arkt-native-window` (`$PROF/w2-sign-native`, port 9382, `https://example.com`):
+
+- `ARKT: native window created`, `ARKT: browsers normal=1 arkt=1 views=0`, `ARKT: in-process hook alive`,
+  `ARKT: key window` naming our window.
+- `document.title` -> `"Example Domain"` 3 s after launch; window-only screenshot `$PROF/shots/w2-sign-native-page.png`
+  shows the page rendered in the Arkt window with its tab row.
+- `cdp.mjs --port 9382 --navigate example.com chrome://extensions`, then on that target
+  `location.href`, `document.title` and `!!document.querySelector("extensions-manager")` -> `chrome://extensions/`,
+  `Extensions`, `true`. The extensions page opens.
+- 0 `FATAL`/`Check failed`.
+- Interference (as recorded under W5c): while the window was key, a second window and three tabs were opened and
+  closed by input this task did not send (it sent no input at all, only CDP and `screencapture`). The run was
+  stopped as soon as this showed in the log; the checks above came before or independently of it, and the browser
+  handled the extra windows and tabs without a crash. `w2-sign-native-extensions.png` shows a New Tab from that input
+  and is not counted.
+
+### Step 4: 1Password profile on the internal disk
+
+`$PROF/1password-test` was not in use (no process had it as `--user-data-dir`). `du -sh` 589M; `df -h /` 12 GiB
+available before the copy, 11 GiB after (`vm.swapusage` used 6252.31M of 7168.00M). `ditto` to `$IPROF/1password`;
+`$IPROF/1password/NativeMessagingHosts/com.1password.1password.json` is present. The copy carries the source
+profile's stale `Singleton*` links from its last run (that process is gone; Chromium takes the lock over).
+
+### Ready for the 1Password test (#23)
+
+Yes, to be tried now: `/Applications/Arkt.app` is the signed, self-contained bundle (no `@rpath` dylibs, nothing loaded
+from the external disk, hardened runtime, a real certificate rather than ad-hoc) that #23 was waiting for. What is
+still open is whether 1Password accepts a browser signed with an Apple Development certificate and not notarized;
+only the maintainer's run answers that. Steps (plan W2 "Needs the user"):
+
+1. 1Password > Settings > Browser > Add Browser > choose `/Applications/Arkt.app`; note any message.
+2. Quit any running Arkt, then launch `/Applications/Arkt.app/Contents/MacOS/Arkt` with
+   `--user-data-dir="$IPROF/1password"`, the standard flags and
+   `--arkt-extensions-demo=aeblfdkhhhdcdjpifhhbdiojplfjncoa https://example.com` (full command in the plan).
+3. PASS: the popup shows the account(s) or offers Touch ID / app unlock. FAIL: logo splash only or a Secret Key
+   sign-in form (do not sign in there).
+4. Send back the output of the plan's `grep` over the 1Password logs (`Verifying browser`, `code signature`,
+   `XPC connected`): PASS evidence is `XPC connected` and no `status 100001`.
 
 ## W4
 
