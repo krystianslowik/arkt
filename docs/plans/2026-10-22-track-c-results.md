@@ -730,3 +730,73 @@ tests (235 + 5, GUI included), 0 failures. `commandbar.showcpu.ms median=0.29 p9
 asserted (load 13.1 on 10 cores; `p95=17.53 bound=19.89`). Before the rebases the same suite gave
 `commandbar.earliestframe p95=17.25 bound=17.88 load1=9.72 cores=10 asserted=yes`. ArktCore `swift test`: 336
 tests, 0 failures. Debug app build: `** BUILD SUCCEEDED **`.
+
+## Measured Arc values applied to the shell tokens (#186)
+
+Source: `docs/plans/2026-10-23-arc-measurements.md` (Arc 1.168.0, one 1800 x 1072 pt window on a 2x display, Dark,
+window not key, Toolbar on). 18 of the 39 `TODO(measure)` markers are gone; 21 stay for #77's interaction checklist.
+Each changed value carries an "Arc 1.168" comment pointing at that file.
+
+| Token | Before | Now | Note |
+|---|---|---|---|
+| bottom bar button size (`SidebarMetrics.bottomBarButtonSize`, was a literal) | 28 | 32 | 8 pt from both sidebar edges |
+| `titleTrailing` | 10 | 9 | inferred (assumes the 8 pt row inset) |
+| `spaceTitleHeight` | 28 | 36 | |
+| `dividerHeight` | 13 | 25 | hairline inset 18 pt from the sidebar edges and 11.5 pt from the row top, as before |
+| `indentationPerLevel` | 14 | 16 | |
+| `favoritesTopGap` | 4 | 8 | Toolbar-on layout only: strip to tiles. Toolbar off it follows the URL bar, not measured |
+| `favoritesBottomGap` | 10 | 8 | |
+| `bottomBarHeight` | 36 | 50 | |
+| `spaceDotSize` | 6 | 4 | color kept, see deviations |
+| `spaceDotSpacing` | 8 | 17.5 | 21.5 pt pitch |
+| `toolbarSurface` | white / P3 #1C1C20 | unchanged | measured, not applied, see deviations |
+| Toolbar `height` | 40 | 33 | 32 pt strip plus a 1 pt hairline (was one device pixel) |
+| Toolbar `buttonSize` | 28 x 28 | 32 x 24 | 5 pt apart (`buttonSpacing`), 4 pt from the top |
+| Toolbar `iconSize` | 14 | 14 | confirmed (inferred from glyph boxes) |
+| Toolbar `horizontalPadding` | 8 | 5 | |
+| Toolbar `urlBarHeight` | 28 (pill) | 24, no pill | see behavior |
+| `trafficLightOrigin` | (16, 16) | (12, 16) | |
+| `sidebarTopBarHeight` | 44 | 36 | Toolbar-on layout only |
+
+Alpha-dependent levels, measured in the non-key dark 2x window and marked so in their comments: the sidebar divider
+(new `ShellTokens.sidebarDivider`, dark white 7.5 %, light unchanged), the Toolbar hairline (new
+`ShellTokens.toolbarHairline`, dark white 5 %, light the card border's black 10 %) and the Space dot (not applied).
+
+Related values (not tokens), decided here:
+
+- Applied: traffic-light pitch 20 -> 23 (`trafficLightSpacing`, exact AX) and `cardInsetTop` 9 -> 10 (the card now
+  has even 10 pt insets).
+- Not applied: sidebar width 192 (that window's resized width, not a default; Arkt keeps 190), Favorites tile height
+  47 and gap about 8.2 (depend on the sidebar width; FavoritesLayout keeps 46 and 9 until #77 measures them at a known
+  width), the 3 pt spacer row at the top of the tab list, the sidebar toggle next to the traffic lights and Arc's
+  trailing Toolbar button (Arkt has neither), and the Toolbar URL font size (about 11 to 12 pt, inferred; it shares
+  `urlBarFontSize`, still a #77 token).
+
+Behavior:
+
+- The sidebar URL bar hides while the Toolbar is on (`SidebarContainerView.showsURLBar`, set by
+  `ShellWindowController.applyToolbarVisibility`); the Favorites move up to 8 pt below the 36 pt strip (tiles at
+  y 44), as in Arc.
+- The Toolbar URL is plain text centered in the strip: no fill, border, radius or hover fill. Its frame keeps the
+  same inset on both sides (the width of the button cluster), so it stays centered in the card and clear of the
+  buttons. The press target is 24 pt tall like the buttons (Arc's text frame is 16 pt).
+- The titlebar container that hosts the traffic lights is now as tall as the strip (36 pt) instead of
+  `2 * origin.y + button height` (48 pt). With the shorter strip the old height would have covered the top 8 pt of the
+  sidebar URL bar (Toolbar off); `URLBarTests` now hit-tests the bar's top edge too.
+
+Deviations (accessibility first):
+
+- `toolbarSurface` keeps Arkt's opaque values. Arc draws the strip on the card's own surface, sRGB #878787 in the
+  measured theme, where `secondaryText` (dark white 0.76) reaches about 2.8:1 (Arc's own placeholder 2.75:1), below
+  4.5:1. `ShellTokensContrastTests.arcsMeasuredToolbarSurfaceWouldFailSecondaryText` records it.
+- Idle Space dots keep `sidebarForeground` (3:1 non-text, #72); Arc's dot is about white 8 % over the theme.
+
+Also in this change (follow-up from the #188 review): `EnvironmentOverrides.isUsableSuiteName` rejects
+`ARKT_DEFAULTS_SUITE` names that contain a slash or start with a dot, and compares against the bundle id and
+`NSGlobalDomain` without regard to case.
+
+Checks (rebased on #187 and #189): `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 423 tests (416 + 7: 2 in
+`EnvironmentOverridesTests`, 2 in `TabRowStateTests`, 2 in `ShellLayoutTests`, 1 in `ShellTokensContrastTests`), XCTest
+285 tests (280 + 5 in `URLBarTests`, GUI included), 0 failures. Pacing asserted: `space-swipe` and `space-key` 0 frames
+over 8.6 ms (load 9.79 on 10 cores); command bar earliest frame not asserted (load 11.7, `p95=16.81 bound=18.05`).
+Debug app build: `** BUILD SUCCEEDED **`.
