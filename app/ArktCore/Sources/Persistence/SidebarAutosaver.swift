@@ -105,21 +105,7 @@ public final class SidebarAutosaver {
   /// still drains main-actor jobs, so the `Task` above makes progress. Verify manually at app integration.
   @discardableResult
   public func flush() async -> Bool {
-    let attempt = Task { await self.flushNow() }
-    let race = FlushRace()
-    let (sleep, timeout) = (self.sleep, self.flushTimeout)
-    return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-      race.arm(continuation)
-      let deadline = Task {
-        do { try await sleep(timeout) } catch { return }
-        race.finish(false)
-      }
-      Task {
-        let saved = await attempt.value
-        deadline.cancel()
-        race.finish(saved)
-      }
-    }
+    await FlushRace.run(timeout: flushTimeout, sleep: sleep, attempt: Task { await self.flushNow() })
   }
 
   private func flushNow() async -> Bool {
@@ -203,18 +189,5 @@ public final class SidebarAutosaver {
   private func finishWrite() {
     writer = nil
     if pending != nil, timer == nil, !stopRequested { armTimer() }
-  }
-}
-
-/// Resumes the `flush` continuation exactly once: with the attempt's result or, at the deadline, with false.
-private final class FlushRace: Sendable {
-  private let continuation = Mutex<CheckedContinuation<Bool, Never>?>(nil)
-
-  func arm(_ continuation: CheckedContinuation<Bool, Never>) {
-    self.continuation.withLock { $0 = continuation }
-  }
-
-  func finish(_ saved: Bool) {
-    continuation.withLock { $0.take() }?.resume(returning: saved)
   }
 }

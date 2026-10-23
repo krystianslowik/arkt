@@ -151,11 +151,11 @@ struct CoreIsolationTests {
     #expect(!code.lowercased().contains("grdb"))
   }
 
-  /// The pure ArktCore targets that CoreBridge links depend only on each other (allowlist), never on a product.
+  /// The pure ArktCore targets that CoreBridge and its tests link depend only on each other (allowlist), never on a product.
   @Test func pureCoreTargetsDependOnlyOnPureTargets() throws {
     let manifest = try String(contentsOf: Self.coreManifest, encoding: .utf8)
-    let allowed: Set = ["SidebarModel", "Archive"]
-    for target in ["Archive", "ArcImport", "SidebarModel"] {
+    let allowed: Set = ["SidebarModel", "Archive", "ArcImport"]
+    for target in ["Archive", "ArcImport", "SidebarModel", "CoreTestSupport"] {
       let declaration = try #require(WebKitIsolationTests.declaration("target", named: target, in: manifest),
                                      "target \(target) not found in \(Self.coreManifest.path)")
       #expect(!declaration.contains(".product("), "\(target) must not depend on a package product")

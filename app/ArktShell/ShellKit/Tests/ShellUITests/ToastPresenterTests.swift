@@ -30,7 +30,7 @@ struct ToastPresenterTests {
   }
 
   @Test func replacedToastTimerDoesNotDismissTheNewToast() async {
-    let sleeper = ManualSleeper()
+    let sleeper = WakeQueueSleeper()
     let presenter = ToastPresenter(sleep: { _ in await sleeper.sleep() })
     presenter.show(Toast(text: "One"))
     await sleeper.waitForSleepers(1)
@@ -96,7 +96,7 @@ struct ToastPresenterTests {
 
 /// A sleeper whose sleeps end only when the test wakes them, oldest first. It ignores cancellation on purpose, so
 /// the presenter's own guard against a replaced toast's timer is what the tests exercise.
-private actor ManualSleeper {
+private actor WakeQueueSleeper {
   private var waiters: [CheckedContinuation<Void, Never>] = []
   private var registered = 0
 
