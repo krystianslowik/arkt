@@ -199,15 +199,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       bar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
     }
     toolbar.onBack = { [weak self] in
-      guard let self, let tab = self.currentTab else { return }
+      guard let self, let tab = self.toolbarTab else { return }
       self.engine.goBack(tab)
     }
     toolbar.onForward = { [weak self] in
-      guard let self, let tab = self.currentTab else { return }
+      guard let self, let tab = self.toolbarTab else { return }
       self.engine.goForward(tab)
     }
     toolbar.onReload = { [weak self] in
-      guard let self, let tab = self.currentTab else { return }
+      guard let self, let tab = self.toolbarTab else { return }
       self.engine.reload(tab)
     }
     toolbarSetting.addObserver(self)
@@ -219,6 +219,18 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     let url = currentTab.flatMap { engine.snapshot(of: $0)?.url }
     urlBar.url = url
     rootView.card.toolbar.urlBar.url = url
+    refreshToolbarHistory()
+  }
+
+  /// The tab the Toolbar's Back, Forward and Reload act on and show the history of. Split View will point this at
+  /// the focused pane.
+  private var toolbarTab: TabID? { currentTab }
+
+  /// Back and Forward follow `toolbarTab`'s `canGoBack` / `canGoForward` (engine contract rule 8).
+  private func refreshToolbarHistory() {
+    let snapshot = toolbarTab.flatMap { engine.snapshot(of: $0) }
+    rootView.card.toolbar.setHistory(canGoBack: snapshot?.canGoBack ?? false,
+                                     canGoForward: snapshot?.canGoForward ?? false)
   }
 
   // MARK: Close tab
@@ -353,6 +365,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       if tab == currentTab { refreshAddress() }
     case .faviconChanged(_, let data):
       faviconChanged(data, for: node)
+    case .historyChanged(let tab, _, _):
+      if tab == toolbarTab { refreshToolbarHistory() }
     case .tabClosed(let tab):
       tabsByNode[node] = nil
       nodeByTab[tab] = nil
