@@ -296,6 +296,30 @@ struct ArchiveCoordinatorTests {
     #expect(await harness.store.stored[first.id] == second)
   }
 
+  /// The post-write cleanup stops at the first non-add: an add queued behind a remove while the batch was in flight
+  /// is not mistaken for a written one, even when it equals a written entry (same id, same clock).
+  @Test func anEqualAddQueuedBehindARemoveDuringTheWriteIsStillSent() async throws {
+    let harness = try Harness(todayTabs: 3)
+    await harness.store.holdAdds()
+    let first = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    let middle = try #require(harness.coordinator.archive([harness.today[1]], reason: .manual).first)
+    harness.coordinator.archive([harness.today[2]], reason: .manual)
+    await eventually { await harness.store.addCalls.count == 1 }
+    #expect(await harness.store.addCalls.first?.ids == harness.today)
+
+    _ = try harness.coordinator.restore(first, fallbackSpace: nil)
+    let second = try #require(harness.coordinator.archive([first.id], reason: .manual).first)
+    #expect(second == first)
+    _ = try harness.coordinator.restore(middle, fallbackSpace: nil)
+    await harness.store.releaseAdds()
+    await harness.drain()
+
+    #expect(await harness.store.calls == [
+      .add(harness.today), .remove([first.id]), .add([first.id]), .remove([middle.id]),
+    ])
+    #expect(await harness.store.stored[first.id] == second)
+  }
+
   @Test func restoringTheSameItemTwiceIsANoOp() async throws {
     let harness = try Harness()
     let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
