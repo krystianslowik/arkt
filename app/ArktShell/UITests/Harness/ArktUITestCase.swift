@@ -19,10 +19,25 @@ class ArktUITestCase: XCTestCase {
 
   private(set) var sandbox: Sandbox?
   private(set) var app: XCUIApplication?
+  /// The loopback server for this test's pages (decision 2); started by `fixtureServer()`, stopped after the test.
+  private var server: FixtureServer?
 
   nonisolated override func setUpWithError() throws {
     try super.setUpWithError()
     continueAfterFailure = false
+  }
+
+  /// The test's loopback page server, started on first use and stopped in tear-down. Tests type only its URLs
+  /// (plan, Rules: "No network").
+  func fixtureServer() async throws -> FixtureServer {
+    if let server { return server }
+    let started = try await FixtureServer.start()
+    server = started
+    addTeardownBlock { @MainActor [self] in
+      server?.stop()
+      server = nil
+    }
+    return started
   }
 
   /// Runs as a tear-down block registered by `launch`. On failure attaches the artifacts; then stops the app if it still runs (a kill, only here) and removes the
