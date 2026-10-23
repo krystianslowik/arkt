@@ -51,9 +51,10 @@ import Testing
     #expect(overrides(environment).missingUITestOverrides(bundleIdentifier: bundleIdentifier) == ["ARKT_DATA_DIR"])
   }
 
-  /// A suite named after the app's own domain or the global domain would write the real defaults.
+  /// A suite named after the app's own domain or the global domain (in any letter case) would write the real
+  /// defaults; a name with a slash or a leading dot could address a file outside the preferences domain.
   @Test func aSuiteThatResolvesToTheRealDefaultsCountsAsMissing() {
-    for name in [bundleIdentifier, "NSGlobalDomain"] {
+    for name in [bundleIdentifier, "NSGlobalDomain", "DEV.ARKT.ArktShell", "nsglobaldomain", "dev/arkt", ".hidden"] {
       var environment = complete
       environment["ARKT_DEFAULTS_SUITE"] = name
       #expect(overrides(environment).missingUITestOverrides(bundleIdentifier: bundleIdentifier)
@@ -74,6 +75,26 @@ import Testing
     #expect(!EnvironmentOverrides.isUsableSuiteName(bundleIdentifier, bundleIdentifier: bundleIdentifier))
     #expect(!EnvironmentOverrides.isUsableSuiteName("NSGlobalDomain", bundleIdentifier: bundleIdentifier))
     #expect(!EnvironmentOverrides.isUsableSuiteName("", bundleIdentifier: bundleIdentifier))
+    #expect(EnvironmentOverrides.isUsableSuiteName("dev.arkt.uitest.sandbox", bundleIdentifier: nil))
+  }
+
+  /// The defaults system matches domain names without regard to case, so a case variant is the same domain.
+  @Test func suiteNamesDifferingOnlyInCaseFromTheRealDomainsAreUnusable() {
+    for name in ["DEV.ARKT.ARKTSHELL", "dev.arkt.arktshell", "Dev.Arkt.ArktShell", "NSGLOBALDOMAIN",
+                 "nsglobaldomain", "NsGlobalDomain"] {
+      #expect(!EnvironmentOverrides.isUsableSuiteName(name, bundleIdentifier: bundleIdentifier), "name \(name)")
+    }
+    #expect(!EnvironmentOverrides.isUsableSuiteName("nsglobaldomain", bundleIdentifier: nil))
+  }
+
+  /// A slash makes the name a path (an absolute one is read as a plist file), and a leading dot names a hidden
+  /// file or a relative path such as `..`.
+  @Test func suiteNamesThatLookLikePathsAreUnusable() {
+    for name in ["/tmp/arkt", "dev/arkt", "../dev.arkt", "dev.arkt/", ".", "..", ".hidden", ".dev.arkt.uitest"] {
+      #expect(!EnvironmentOverrides.isUsableSuiteName(name, bundleIdentifier: bundleIdentifier), "name \(name)")
+    }
+    #expect(EnvironmentOverrides.isUsableSuiteName("dev.arkt.uitest.sandbox.", bundleIdentifier: bundleIdentifier),
+            "a dot elsewhere is fine")
   }
 
   // MARK: - Autosave delay

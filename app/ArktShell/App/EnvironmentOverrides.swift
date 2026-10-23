@@ -25,9 +25,13 @@ struct EnvironmentOverrides {
     return .milliseconds(milliseconds)
   }
 
-  /// False for a name that would resolve to the real defaults: the app's own domain or the global domain.
+  /// False for a name that would resolve to the real defaults: the app's own domain or the global domain, compared
+  /// without regard to case as the defaults system does. Also false for a name that reads as a path: one with a
+  /// slash (an absolute one is opened as a plist file) or a leading dot (a hidden file, `.` or `..`).
   static func isUsableSuiteName(_ name: String, bundleIdentifier: String?) -> Bool {
-    !name.isEmpty && name != bundleIdentifier && name != UserDefaults.globalDomain
+    guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else { return false }
+    let reserved = [bundleIdentifier, UserDefaults.globalDomain].compactMap { $0 }
+    return !reserved.contains { name.caseInsensitiveCompare($0) == .orderedSame }
   }
 
   private func value(_ key: String) -> String? {
