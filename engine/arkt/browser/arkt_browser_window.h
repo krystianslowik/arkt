@@ -12,6 +12,11 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "ui/color/color_provider_source.h"
+#include "ui/gfx/geometry/rect.h"
+
+namespace new_tab_footer {
+class NewTabFooterController;
+}  // namespace new_tab_footer
 
 // The embedder seam of the engine window. ArktBrowserWindow never creates or
 // lays out a window: it asks its host for the NSWindow and for the view tab
@@ -42,6 +47,7 @@ namespace arkt {
 
 class ArktExclusiveAccessContext;
 class ArktModalDialogHost;
+class ArktSidePanelUI;
 class ArktStubLocationBar;
 
 // Chromium's BrowserWindow for a TYPE_NORMAL Browser, implemented on a plain
@@ -228,6 +234,11 @@ class ArktBrowserWindow : public BrowserWindow,
   std::unique_ptr<ArktExclusiveAccessContext> exclusive_access_context_;
   std::unique_ptr<ArktModalDialogHost> modal_dialog_host_;
   std::unique_ptr<ArktStubLocationBar> location_bar_;
+  std::unique_ptr<ArktSidePanelUI> side_panel_ui_;
+  std::unique_ptr<new_tab_footer::NewTabFooterController>
+      new_tab_footer_controller_;
+  // The window frame when native fullscreen began (GetRestoredBounds).
+  gfx::Rect bounds_before_fullscreen_;
 
   base::WeakPtrFactory<ArktBrowserWindow> weak_factory_{this};
 };

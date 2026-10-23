@@ -3,13 +3,14 @@
 #import <AppKit/AppKit.h>
 
 #include <algorithm>
-#include <set>
+#include <optional>
 #include <string>
 #include <utility>
 
 #import "arkt/browser/arkt_window_controller.h"
 #include "base/check.h"
 #include "base/containers/flat_set.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
@@ -30,10 +31,13 @@
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/fullscreen/browser_window_fullscreen_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
+#include "chrome/browser/ui/views/new_tab_footer/footer_controller.h"
 #include "components/input/native_web_keyboard_event.h"
+#include "components/search/ntp_features.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/eye_dropper.h"
@@ -58,7 +62,7 @@ constexpr CGFloat kCardRadius = 10;
 
 // Logs `ARKT: stub <scope>::<method>` the first time a stubbed method runs.
 void LogStubOnce(const char* scope, const char* method) {
-  static base::NoDestructor<std::set<std::string>> logged;
+  static base::NoDestructor<base::flat_set<std::string>> logged;
   std::string name = std::string(scope) + "::" + method;
   if (logged->insert(name).second) {
     LOG(WARNING) << "ARKT: stub " << name;
@@ -413,6 +417,71 @@ class ArktFindBar : public FindBar {
   bool visible_ = false;
 };
 
+// Arkt has no Views side panel. SidePanelUI::From() must still be non-null:
+// tab features such as ReadAnythingSidePanelController treat a missing
+// SidePanelUI outside tests as a bug (CHECK_IS_TEST) when the active tab
+// detaches, which every tab, window and app close does. Nothing is ever
+// shown, so every query answers "closed".
+class ArktSidePanelUI : public SidePanelUI {
+ public:
+  explicit ArktSidePanelUI(BrowserWindowInterface* browser)
+      : scoped_user_data_(browser->GetUnownedUserDataHost(), *this) {}
+  ArktSidePanelUI(const ArktSidePanelUI&) = delete;
+  ArktSidePanelUI& operator=(const ArktSidePanelUI&) = delete;
+  ~ArktSidePanelUI() override = default;
+
+  // SidePanelUI:
+  void Show(SidePanelEntryId entry_id,
+            std::optional<SidePanelOpenTrigger> open_trigger,
+            bool suppress_animations) override {
+    ARKT_STUB("SidePanelUI");
+  }
+  void Show(SidePanelEntryKey entry_key,
+            std::optional<SidePanelOpenTrigger> open_trigger,
+            bool suppress_animations) override {
+    ARKT_STUB("SidePanelUI");
+  }
+  void ShowFrom(SidePanelEntryKey entry_key,
+                gfx::Rect starting_bounds_in_browser_coordinates) override {
+    ARKT_STUB("SidePanelUI");
+  }
+  void Close(SidePanelEntryHideReason hide_reason,
+             bool suppress_animations) override {}
+  void Toggle(SidePanelEntryKey key,
+              SidePanelOpenTrigger open_trigger) override {
+    ARKT_STUB("SidePanelUI");
+  }
+  std::optional<SidePanelEntryId> GetCurrentEntryId() const override {
+    return std::nullopt;
+  }
+  int GetCurrentEntryDefaultContentWidth() const override { return 0; }
+  bool IsSidePanelShowing() const override { return false; }
+  bool IsSidePanelEntryShowing(
+      const SidePanelEntryKey& entry_key) const override {
+    return false;
+  }
+  bool IsSidePanelEntryShowing(const SidePanelEntryKey& entry_key,
+                               bool for_tab) const override {
+    return false;
+  }
+  base::CallbackListSubscription RegisterSidePanelShown(
+      ShownCallback callback) override {
+    return shown_callbacks_.Add(std::move(callback));
+  }
+  void OnActiveTabChanged(content::WebContents* old_contents,
+                          content::WebContents* new_contents,
+                          bool tab_removed_for_deletion) override {}
+  content::WebContents* GetWebContentsForTest(SidePanelEntryId id) override {
+    return nullptr;
+  }
+  void DisableAnimationsForTesting() override {}
+  void SetNoDelaysForTesting(bool no_delays_for_testing) override {}
+
+ private:
+  base::RepeatingCallbackList<void()> shown_callbacks_;
+  ui::ScopedUnownedUserData<SidePanelUI> scoped_user_data_;
+};
+
 // -----------------------------------------------------------------------------
 // ArktBrowserWindow
 
@@ -432,6 +501,17 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
       std::make_unique<ArktExclusiveAccessContext>(this);
   modal_dialog_host_ = std::make_unique<ArktModalDialogHost>(host_.cardView);
   location_bar_ = std::make_unique<ArktStubLocationBar>(browser_);
+  side_panel_ui_ = std::make_unique<ArktSidePanelUI>(browser_);
+  // BrowserWindowFeatures creates the NTP footer controller for BrowserView
+  // windows only, and the NTP handler CHECKs that it exists. With no contents
+  // container views it tracks nothing and reports the footer hidden.
+  if (base::FeatureList::IsEnabled(ntp_features::kNtpFooter)) {
+    new_tab_footer_controller_ =
+        std::make_unique<new_tab_footer::NewTabFooterController>(
+            browser_->GetProfile(),
+            std::vector<raw_ptr<ContentsContainerView, DanglingUntriaged>>(),
+            browser_->GetUnownedUserDataHost());
+  }
 
   browser_->GetTabStripModel()->AddObserver(this);
 
@@ -454,6 +534,14 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
                                   BrowserActiveStateManager::From(browser_)
                                       ->DidBecomeInactive();
                                 }]];
+  [notification_tokens_
+      addObject:[center
+                    addObserverForName:NSWindowWillEnterFullScreenNotification
+                                object:window
+                                 queue:nil
+                            usingBlock:^(NSNotification*) {
+                              bounds_before_fullscreen_ = GetBounds();
+                            }]];
   for (NSNotificationName name in @[
          NSWindowDidEnterFullScreenNotification,
          NSWindowDidExitFullScreenNotification
@@ -498,6 +586,11 @@ ArktBrowserWindow::~ArktBrowserWindow() {
   host_.closeRequested = nil;
   [host_.window orderOut:nil];
 
+  if (new_tab_footer_controller_) {
+    new_tab_footer_controller_->TearDown();
+    new_tab_footer_controller_.reset();
+  }
+  side_panel_ui_.reset();
   location_bar_.reset();
   modal_dialog_host_.reset();
   exclusive_access_context_.reset();
@@ -571,6 +664,7 @@ bool ArktBrowserWindow::IsActive() const {
 }
 
 bool ArktBrowserWindow::IsMaximized() const {
+  // As NativeWidgetMac::IsMaximized: zoomed is Mac's maximized.
   return host_.window.isZoomed && !IsFullscreen();
 }
 
@@ -587,6 +681,12 @@ gfx::NativeWindow ArktBrowserWindow::GetNativeWindow() const {
 }
 
 gfx::Rect ArktBrowserWindow::GetRestoredBounds() const {
+  // A minimized NSWindow keeps its frame; in fullscreen the frame is the
+  // screen, so report the frame from before entering it (as
+  // NativeWidgetMacNSWindowHost does).
+  if (IsFullscreen() && !bounds_before_fullscreen_.IsEmpty()) {
+    return bounds_before_fullscreen_;
+  }
   return GetBounds();
 }
 
@@ -661,7 +761,9 @@ void ArktBrowserWindow::Activate() {
 }
 
 void ArktBrowserWindow::Deactivate() {
-  [host_.window orderBack:nil];
+  // NativeWidgetMac::Deactivate is NOTIMPLEMENTED too; ordering the window
+  // back would do more than Chromium does on Mac.
+  ARKT_STUB("BrowserWindow");
 }
 
 void ArktBrowserWindow::Maximize() {
