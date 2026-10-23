@@ -1,0 +1,29 @@
+# Code owners per area. See CONTRIBUTING.md, section 1, "Areas and owners".
+# The last matching pattern wins, so the default comes first.
+#
+# Second developer: add your handle next to the areas you own, for example
+#   /app/ArktShell/  @krystianslowik @<your-handle>
+# and update the owner table in CONTRIBUTING.md in the same pull request.
+
+# Default: docs, plans, templates and anything not listed below
+*                                   @krystianslowik
+
+# Shell
+/app/ArktShell/                     @krystianslowik
+# /app/ArktShell/                   @krystianslowik @<second-developer-handle>
+
+# Core
+/app/ArktCore/                      @krystianslowik
+# /app/ArktCore/                    @krystianslowik @<second-developer-handle>
+
+# Import and archive
+/app/ArktCore/Sources/ArcImport/    @krystianslowik
+/app/ArktCore/Sources/Archive/      @krystianslowik
+/app/ArktCore/Tests/ArcImportTests/ @krystianslowik
+/app/ArktCore/Tests/ArchiveTests/   @krystianslowik
+# /app/ArktCore/Sources/ArcImport/  @krystianslowik @<second-developer-handle>
+# /app/ArktCore/Sources/Archive/    @krystianslowik @<second-developer-handle>
+
+# Engine
+/engine/                            @krystianslowik
+# /engine/                          @krystianslowik @<second-developer-handle>
