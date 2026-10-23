@@ -10,7 +10,7 @@ public final class SymbolImageCache {
   public static let shared = SymbolImageCache()
 
   /// Symbols the shell shows, prewarmed per flavor at launch.
-  static let sidebarSymbols = ["folder", "rectangle.split.2x1", "questionmark.square"]
+  static let sidebarSymbols = ["folder", "folder.fill", "rectangle.split.2x1", "questionmark.square"]
   static let bottomBarSymbols = ["archivebox", "plus"]
   static let commandBarSymbols = ["globe", "square.on.square", "magnifyingglass"]
 

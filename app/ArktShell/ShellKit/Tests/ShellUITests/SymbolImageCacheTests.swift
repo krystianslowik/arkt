@@ -116,6 +116,8 @@ struct SymbolImageCacheTests {
     #expect(warmed > 0)
     _ = SidebarGlyphs.symbol("folder", flavor: .dark, scale: 2, cache: cache)
     _ = SidebarGlyphs.symbol("folder", flavor: .light, scale: 2, cache: cache)
+    _ = SidebarGlyphs.symbol("folder.fill", flavor: .dark, scale: 2, cache: cache)
+    _ = SidebarGlyphs.symbol("folder.fill", flavor: .light, scale: 2, cache: cache)
     _ = SidebarGlyphs.close(flavor: .dark, scale: 2, cache: cache)
     _ = SidebarGlyphs.close(flavor: .light, scale: 2, cache: cache)
     #expect(cache.renderCount == warmed, "prewarm covered the sidebar's symbols")

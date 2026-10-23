@@ -26,7 +26,14 @@ public final class SidebarRowView: NSTableRowView {
     }
   }
   public var isPressed = false {
-    didSet { if isPressed != oldValue { needsDisplay = true } }
+    didSet {
+      guard isPressed != oldValue else { return }
+      needsDisplay = true
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      backgroundLayer.backgroundColor = displayedFill?.cgColor
+      CATransaction.commit()
+    }
   }
   /// Divider rows never draw a fill or react to the pointer.
   public var isInteractive = true {

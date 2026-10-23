@@ -3202,12 +3202,12 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
 ## C3 review follow-ups (deferred)
 
 - Removal and move handling in the sidebar outline that keeps folders' expanded or collapsed state, plus
-  `StubSidebar` remove/move with tests. Needed before drag and drop (index-before-removal convention).
-- Check that the pressed state is visible (the 6.5% fill under the pointer during `NSOutlineView`'s mouse tracking).
-- Hover staleness: rows and tiles keep `isHovered` when content scrolls or reloads under a still pointer.
-- Favorites grid first-responder and keyboard behavior.
+  `StubSidebar` remove/move with tests. Needed before drag and drop (index-before-removal convention). Done in #94 (`StubSidebar.moveNode`, `SidebarOutlineController.collapsedFolders` + `expandContainer`).
+- Check that the pressed state is visible (the 6.5% fill under the pointer during `NSOutlineView`'s mouse tracking). Done in #94 (`SidebarRowView.isPressed` updates `backgroundLayer.backgroundColor` immediately).
+- Hover staleness: rows and tiles keep `isHovered` when content scrolls or reloads under a still pointer. Done in #96 (`HoverResyncScheduler`).
+- Favorites grid first-responder and keyboard behavior. Done in #94 (`FavoritesCollectionView` arrow-key navigation across the 3-column grid).
 - Space dots: accessibility labels and keyboard selection. Done in C6: each dot is an accessibility button named after its Space (press selects); keyboard selection is Ctrl-1..9 and Cmd-Opt-Left/Right, the dots take no key focus yet.
-- Open-folder icon for expanded folders.
+- Open-folder icon for expanded folders. Done in #94 (`folder.fill` when expanded, `folder` when collapsed; prewarmed in `SymbolImageCache.sidebarSymbols`).
 
 ## C5 review follow-ups (deferred)
 

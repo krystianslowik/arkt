@@ -89,6 +89,39 @@ public final class StubSidebar: SidebarSource {
     hub.emit(.structure(node.parent))
   }
 
+  /// Moves a node to `location` at `index` (measured before removal, clamped). Ignores unknown nodes or destinations
+  /// and moves into `id`'s own subtree. Emits `.structure` only for locations whose child order changed (#94).
+  public func moveNode(_ id: NodeID, to location: SidebarLocation, at index: Int) {
+    guard let oldParent = nodes[id]?.parent, locationExists(location), !isInSubtree(location, of: id) else { return }
+    let oldSourceOrder = childOrder[oldParent] ?? []
+    let oldDestOrder = childOrder[location] ?? []
+    move(id, to: location, at: index)
+    if oldParent == location {
+      if (childOrder[location] ?? []) != oldSourceOrder { hub.emit(.structure(location)) }
+    } else {
+      if (childOrder[oldParent] ?? []) != oldSourceOrder { hub.emit(.structure(oldParent)) }
+      if (childOrder[location] ?? []) != oldDestOrder { hub.emit(.structure(location)) }
+    }
+  }
+
+  private func locationExists(_ location: SidebarLocation) -> Bool {
+    switch location {
+    case .favorites: true
+    case .pinned(let space), .today(let space): spaces[space] != nil
+    case .folder(let folder): if case .folder? = nodes[folder]?.info { true } else { false }
+    case .split(let split): if case .split? = nodes[split]?.info { true } else { false }
+    }
+  }
+
+  private func isInSubtree(_ location: SidebarLocation, of root: NodeID) -> Bool {
+    var cursor: SidebarLocation? = location
+    while let current = cursor?.containerNode {
+      if current == root { return true }
+      cursor = nodes[current]?.parent
+    }
+    return false
+  }
+
   @discardableResult
   public func addTab(url: URL, title: String, in location: SidebarLocation) -> NodeID {
     let id = NodeID()

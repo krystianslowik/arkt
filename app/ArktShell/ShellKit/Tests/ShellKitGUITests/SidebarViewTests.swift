@@ -339,6 +339,75 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertEqual(controller.rowState(for: today[0]), .previous)
     XCTAssertNil(try rowView(controller, today[1]).displayedFill)
   }
+
+  /// #94: expanded folders show the open-folder icon (`folder.fill`) and collapsed folders show `folder`; outline
+  /// removals and moves preserve folders' expanded/collapsed state; `isPressed` immediately updates
+  /// `backgroundLayer.backgroundColor` to the 6.5% pressed fill; and the Favorites grid supports first-responder
+  /// arrow-key navigation across rows and columns.
+  func testFolderExpansionIconPreservedAcrossMovesPressedLayerFillAndFavoritesKeyboard() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let space = sidebar.spaceOrder[0]
+    let outlineController = try XCTUnwrap(controller.currentPage?.outlineController)
+    let outline = outlineController.outlineView
+    let pinned = sidebar.children(of: .pinned(space))
+    let folder = try XCTUnwrap(pinned.first { !isTab(sidebar, $0) })
+
+    let expandedIcon = SidebarGlyphs.symbol("folder.fill", flavor: .light, scale: outline.shellBackingScale)
+    let collapsedIcon = SidebarGlyphs.symbol("folder", flavor: .light, scale: outline.shellBackingScale)
+    XCTAssertTrue(outline.isItemExpanded(outlineController.item(for: folder)))
+    XCTAssertTrue(try cell(controller, folder).faviconView.image === expandedIcon,
+                  "expanded folder uses open-folder icon")
+
+    // Clicking the folder row collapses it and switches the icon to the closed folder glyph.
+    outlineController.handleClick(row: outlineController.row(for: folder), modifiers: [])
+    XCTAssertFalse(outline.isItemExpanded(outlineController.item(for: folder)))
+    XCTAssertTrue(try cell(controller, folder).faviconView.image === collapsedIcon,
+                  "collapsed folder uses closed-folder icon")
+
+    // Moving the collapsed folder (and removing a sibling above it) keeps it collapsed.
+    sidebar.moveNode(folder, to: .pinned(space), at: 0)
+    XCTAssertFalse(outline.isItemExpanded(outlineController.item(for: folder)),
+                   "moving a collapsed folder preserves its collapsed state")
+    XCTAssertTrue(try cell(controller, folder).faviconView.image === collapsedIcon)
+    sidebar.moveNode(folder, to: .today(space), at: 1)
+    XCTAssertFalse(outline.isItemExpanded(outlineController.item(for: folder)),
+                   "moving a collapsed folder across sections preserves its collapsed state")
+
+    // Expanding it again and moving it back keeps it expanded.
+    outlineController.handleClick(row: outlineController.row(for: folder), modifiers: [])
+    XCTAssertTrue(outline.isItemExpanded(outlineController.item(for: folder)))
+    XCTAssertTrue(try cell(controller, folder).faviconView.image === expandedIcon)
+    sidebar.moveNode(folder, to: .pinned(space), at: 0)
+    XCTAssertTrue(outline.isItemExpanded(outlineController.item(for: folder)))
+
+    // Pressing a row immediately sets `backgroundLayer.backgroundColor` to the 6.5% pressed fill without waiting for
+    // a later layout pass.
+    let todayTab = sidebar.children(of: .today(space))[0]
+    let todayRow = try rowView(controller, todayTab)
+    todayRow.updateLayer()
+    todayRow.isPressed = true
+    let expectedPressed = ShellTokens.tabPressed.resolve(.light)
+    XCTAssertEqual(todayRow.displayedFill, expectedPressed)
+    XCTAssertEqual(todayRow.backgroundLayer.backgroundColor, expectedPressed.cgColor)
+    todayRow.isPressed = false
+
+    // Favorites grid first-responder and keyboard navigation across the 3-column grid.
+    let favorites = sidebar.children(of: .favorites(profile: "default"))
+    let grid = controller.view.favorites
+    XCTAssertTrue(grid.collectionView.acceptsFirstResponder)
+    var activated: [NodeID] = []
+    controller.onActivate = { activated.append($0) }
+    controller.activate(node: favorites[0])
+    grid.collectionView.moveRight(nil)
+    XCTAssertEqual(controller.current, favorites[1])
+    grid.collectionView.moveDown(nil)
+    XCTAssertEqual(controller.current, favorites[4], "moveDown advances by 3 columns to the next row")
+    grid.collectionView.moveLeft(nil)
+    XCTAssertEqual(controller.current, favorites[3])
+    grid.collectionView.moveUp(nil)
+    XCTAssertEqual(controller.current, favorites[0], "moveUp moves back up one 3-column row")
+  }
 }
 
 @MainActor

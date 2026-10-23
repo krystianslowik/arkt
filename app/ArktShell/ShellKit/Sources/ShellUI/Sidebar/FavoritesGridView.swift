@@ -165,7 +165,9 @@ public final class FavoriteTileItem: NSCollectionViewItem {
 final class FavoritesCollectionView: NSCollectionView {
   var onMouseDownBegan: (@MainActor () -> Void)?
   var onMouseDownEnded: (@MainActor (IndexPath?, NSPoint) -> Void)?
+  var onMoveCommand: (@MainActor (_ deltaColumns: Int, _ deltaRows: Int) -> Void)?
 
+  override var acceptsFirstResponder: Bool { true }
   override var mouseDownCanMoveWindow: Bool { false }
 
   override func mouseDown(with event: NSEvent) {
@@ -175,6 +177,21 @@ final class FavoritesCollectionView: NSCollectionView {
     let endEvent = NSApp.currentEvent ?? event
     onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
   }
+
+  override func keyDown(with event: NSEvent) {
+    switch event.keyCode {
+    case 123: moveLeft(self)
+    case 124: moveRight(self)
+    case 125: moveDown(self)
+    case 126: moveUp(self)
+    default: super.keyDown(with: event)
+    }
+  }
+
+  override func moveRight(_ sender: Any?) { onMoveCommand?(1, 0) }
+  override func moveLeft(_ sender: Any?) { onMoveCommand?(-1, 0) }
+  override func moveDown(_ sender: Any?) { onMoveCommand?(0, 1) }
+  override func moveUp(_ sender: Any?) { onMoveCommand?(0, -1) }
 
   override func accessibilityChildren() -> [Any]? {
     let items = (0..<numberOfItems(inSection: 0)).compactMap { item(at: IndexPath(item: $0, section: 0))?.view }
@@ -243,6 +260,9 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       }
       favoritesCollectionView.onMouseDownEnded = { [weak self] downIndexPath, point in
         self?.mouseDownEnded(downIndexPath: downIndexPath, at: point)
+      }
+      favoritesCollectionView.onMoveCommand = { [weak self] deltaColumns, deltaRows in
+        self?.moveKeyboardFocus(deltaColumns: deltaColumns, deltaRows: deltaRows)
       }
     }
     collectionView.dataSource = self
@@ -399,6 +419,22 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
           collectionView.indexPathForItem(at: point) == indexPath,
           let id = nodeID(at: indexPath) else { return }
     onActivate?(id)
+  }
+
+  /// Moves keyboard focus across the 3-column Favorites grid from the current Favorite (or the first tile when none is
+  /// current) and activates the destination tile (#94).
+  private func moveKeyboardFocus(deltaColumns: Int, deltaRows: Int) {
+    guard !nodeIDs.isEmpty else { return }
+    let step = deltaColumns + deltaRows * FavoritesLayout.columns
+    let targetIndex: Int
+    if let current = resolver.current, let currentIndex = nodeIDs.firstIndex(of: current) {
+      let proposed = currentIndex + step
+      guard nodeIDs.indices.contains(proposed) else { return }
+      targetIndex = proposed
+    } else {
+      targetIndex = step >= 0 ? 0 : nodeIDs.count - 1
+    }
+    onActivate?(nodeIDs[targetIndex])
   }
 
   // MARK: State and changes
