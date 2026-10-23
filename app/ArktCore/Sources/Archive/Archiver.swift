@@ -19,8 +19,9 @@ public enum Archiver {
   /// Removes `id` and its subtree and returns the archive entry, recording the containing Space as source (Favorites
   /// give `.unknown`) and the top-level section it sat in.
   ///
-  /// Precondition: for a split, pass the split root; the split archives as one unit. Archiving a single pane leaves
-  /// the split with its remaining panes and stale `widthFactors` (pane removal, BH-122/123, is a separate action).
+  /// A split root archives as one unit. A single pane archives as a plain tab entry and its split shrinks
+  /// (`Sidebar.removePane`: a split left with one pane becomes that tab; user decision 4,
+  /// PARITY(NEEDS-RUNTIME-CHECK BH-123)).
   /// Whether an action archives at all (pinned Cmd-W does not, BH-067; pinned and Favorites never auto-archive,
   /// BH-048, BH-054, BH-084) is the caller's decision.
   public static func archive(
@@ -33,7 +34,7 @@ public enum Archiver {
     case .favorites(let profile)?: (.unknown, .favorites(profile: profile))
     default: (.unknown, nil)
     }
-    sidebar.remove(id)
+    sidebar.removePane(id)
     return ArchivedItem(reason: reason, archivedAt: date, source: source, section: section, snapshot: snapshot)
   }
 
