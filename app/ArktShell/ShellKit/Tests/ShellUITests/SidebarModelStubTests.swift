@@ -164,4 +164,54 @@ struct SidebarModelStubTests {
     let tab = stub.addTab(url: URL(string: "https://a.example")!, title: "A", in: .folder(folder))
     #expect(stub.section(containing: tab) == .pinned(space))
   }
+
+  /// #94: `StubSidebar.removeNode` and `moveNode` (index-before-removal convention, subtree removal, and cross-location
+  /// moves) emit `.structure` only for locations that changed.
+  @Test func removeNodeAndMoveNodeFollowIndexBeforeRemovalAndSubtreeRules() {
+    let stub = StubSidebar()
+    let space = stub.addSpace(title: "S")
+    let url = URL(string: "https://a.example")!
+    let t0 = stub.addTab(url: url, title: "T0", in: .today(space))
+    let t1 = stub.addTab(url: url, title: "T1", in: .today(space))
+    let t2 = stub.addTab(url: url, title: "T2", in: .today(space))
+    let folder = stub.addFolder(title: "F", in: .pinned(space))
+    let subFolder = stub.addFolder(title: "Sub", in: .folder(folder))
+    let nestedTab = stub.addTab(url: url, title: "Nested", in: .folder(subFolder))
+
+    var changes: [SidebarChange] = []
+    let observation = stub.observe { changes.append($0) }
+
+    // Same-parent move uses index-before-removal: moving t0 to index 2 places it between t1 and t2.
+    stub.moveNode(t0, to: .today(space), at: 2)
+    #expect(stub.children(of: .today(space)) == [t1, t0, t2])
+    #expect(changes == [.structure(.today(space))])
+
+    // Moving to the same effective position, unknown node, or into own subtree changes nothing and emits nothing.
+    changes.removeAll()
+    stub.moveNode(t1, to: .today(space), at: 0)
+    stub.moveNode(t1, to: .today(space), at: 1)
+    stub.moveNode(NodeID(), to: .today(space), at: 0)
+    stub.moveNode(folder, to: .folder(folder), at: 0)
+    stub.moveNode(folder, to: .folder(subFolder), at: 0)
+    #expect(changes.isEmpty)
+
+    // Cross-location move updates parent and emits both locations.
+    stub.moveNode(t2, to: .folder(folder), at: 0)
+    #expect(stub.children(of: .today(space)) == [t1, t0])
+    #expect(stub.children(of: .folder(folder)) == [t2, subFolder])
+    #expect(stub.parent(of: t2) == .folder(folder))
+    #expect(changes == [.structure(.today(space)), .structure(.folder(folder))])
+
+    // Removing a folder drops its whole subtree and emits only the folder's parent location.
+    changes.removeAll()
+    stub.removeNode(NodeID())
+    #expect(changes.isEmpty)
+    stub.removeNode(folder)
+    #expect(stub.node(folder) == nil)
+    #expect(stub.node(subFolder) == nil)
+    #expect(stub.node(nestedTab) == nil)
+    #expect(stub.node(t2) == nil)
+    #expect(changes == [.structure(.pinned(space))])
+    _ = observation
+  }
 }

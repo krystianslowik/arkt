@@ -125,6 +125,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Pinned items, the divider, then Today items. Rebuilt only when the pinned or Today ids change.
   private var rootItems: [OutlineItem] = []
   private var containerChildren: [NodeID: [NodeID]] = [:]
+  /// Folders the user collapsed in this outline; preserved across moves and sibling removals (#94).
+  private var collapsedFolders: Set<NodeID> = []
 
   public init(source: any SidebarSource, spaceID: SpaceID) {
     self.source = source
@@ -162,8 +164,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.dataSource = self
     outlineView.delegate = self
     outlineView.reloadData()
-    for id in pinnedIDs + todayIDs where source.node(id)?.childLocation != nil {
-      outlineView.expandItem(item(for: id))
+    for id in pinnedIDs + todayIDs {
+      expandContainer(id)
     }
   }
 
@@ -287,7 +289,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
                                 scale: outlineView.shellBackingScale)
       return (title, image)
     case .folder(_, let title)?:
-      return (title, SidebarGlyphs.symbol("folder", flavor: flavor, scale: outlineView.shellBackingScale))
+      let symbol = collapsedFolders.contains(id) ? "folder" : "folder.fill"
+      return (title, SidebarGlyphs.symbol(symbol, flavor: flavor, scale: outlineView.shellBackingScale))
     case .split?:
       let titles = children(of: id).compactMap { child -> String? in
         if case .tab(_, _, let title)? = source.node(child) { return title }
@@ -459,16 +462,25 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       }
     }
     for change in difference.insertions {
-      if case .insert(let offset, _, _) = change, let id = new[offset].nodeID,
-         source.node(id)?.childLocation != nil {
-        outlineView.expandItem(new[offset])
+      if case .insert(let offset, _, _) = change, let id = new[offset].nodeID {
+        expandContainer(id)
       }
+    }
+  }
+
+  /// Expands `id` (unless it is a folder the user collapsed) and any non-collapsed containers inside it (#94).
+  private func expandContainer(_ id: NodeID) {
+    guard source.node(id)?.childLocation != nil, !collapsedFolders.contains(id) else { return }
+    outlineView.expandItem(item(for: id))
+    for child in children(of: id) where source.node(child)?.childLocation != nil {
+      expandContainer(child)
     }
   }
 
   /// Drops the cached item and child list of `id` and of its cached descendants that left the source.
   private func forget(_ id: NodeID) {
     items[id] = nil
+    collapsedFolders.remove(id)
     for child in containerChildren.removeValue(forKey: id) ?? [] where source.node(child) == nil {
       forget(child)
     }
@@ -489,7 +501,14 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let option = modifiers.intersection([.command, .option, .control, .shift]) == .option
     switch source.node(id) {
     case .folder?:
-      if outlineView.isItemExpanded(item) { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
+      if outlineView.isItemExpanded(item) {
+        collapsedFolders.insert(id)
+        outlineView.collapseItem(item)
+      } else {
+        collapsedFolders.remove(id)
+        expandContainer(id)
+      }
+      reload(node: id)
     case .split? where option:
       onSeparateSplit?(id)
     case .tab? where option && resolver.current == id && !isPane(id):

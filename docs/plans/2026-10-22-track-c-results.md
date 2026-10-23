@@ -984,3 +984,24 @@ Checks: ArktCore 342 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swif
 
 Checks: ArktCore 345 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 458 tests (+1
 `PagingMathTests`), 0 failures. `SpacePagerTests`: 20/20 GUI tests pass (+2).
+
+## Sidebar follow-ups from the Track C C3 review (#94)
+
+- `StubSidebar.moveNode(_:to:at:)` implements `Sidebar.move`'s index-before-removal convention, ignores unknown nodes or
+  destinations and moves into a node's own subtree, and emits `.structure` only for locations whose child order changed.
+- `SidebarOutlineController` tracks user-collapsed folders (`collapsedFolders: Set<NodeID>`) and expands inserted
+  containers through `expandContainer(_:)`, so outline removals and within- or cross-section moves preserve folders'
+  expanded or collapsed state. Expanded folders show `folder.fill` and collapsed folders show `folder` (both prewarmed
+  in `SymbolImageCache.sidebarSymbols`).
+- `SidebarRowView.isPressed` immediately updates `backgroundLayer.backgroundColor = displayedFill?.cgColor` (with
+  implicit animations disabled) in addition to `needsDisplay = true`, so the 6.5% pressed fill (`ShellTokens.tabPressed`)
+  is visible on the layer during `NSOutlineView`'s modal mouse tracking loop without waiting for a later layout pass.
+- `FavoritesCollectionView` accepts first responder and routes arrow-key navigation (`moveRight`, `moveLeft`,
+  `moveDown`, `moveUp`, and `keyDown` for arrow key codes) to `FavoritesGridView.moveKeyboardFocus`, stepping across the
+  3-column Favorites grid and activating the destination tile.
+- Tests: `SidebarModelStubTests.removeNodeAndMoveNodeFollowIndexBeforeRemovalAndSubtreeRules`,
+  `SymbolImageCacheTests.prewarmRendersEveryShellSymbolForBothFlavors` (`folder.fill`), and
+  `SidebarViewTests.testFolderExpansionIconPreservedAcrossMovesPressedLayerFillAndFavoritesKeyboard`.
+
+Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 459 tests (+1
+`SidebarModelStubTests`), 0 failures. `SidebarViewTests`: 18/18 GUI tests pass (+1).
