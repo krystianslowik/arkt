@@ -44,6 +44,8 @@ public enum ShellTokens {
   // Toasts (E3a): dark text on a light fill over light themes, light text on a dark fill over dark ones.
   public static let toastSurface = TokenPair(light: .white(0.96), dark: .p3(hex: 0x1C1C20, alpha: 0.96))  // TODO(measure)
   public static let toastText = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.90), dark: .white(0.85))
+  // Toolbar over the page (KB-018, BH-032): an opaque strip in the card, the card's hairline below it.
+  public static let toolbarSurface = TokenPair(light: .white(1), dark: .p3(hex: 0x1C1C20, alpha: 1))    // TODO(measure)
   // Space theme background (C6).
   /// Texture layer opacity at noiseFactor 1. TODO(parity): match Arc's grain intensity.
   public static let themeTextureMaxOpacity = 0.16

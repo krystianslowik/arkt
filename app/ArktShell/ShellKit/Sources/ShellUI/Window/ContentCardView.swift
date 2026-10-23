@@ -9,6 +9,16 @@ public final class ContentCardView: NSView {
   public private(set) var contentView: NSView?
   /// Covers the page inside `clipView` (rounded corners, hairline above it) while set; the first-run empty state.
   public private(set) var emptyStateView: NSView?
+  /// Back / Forward / Reload and the full URL at the top of the page while `showsToolbar` (KB-018, BH-032).
+  /// Inside `clipView`, so the card's corners clip it; the page and the empty state sit below it.
+  public let toolbar = ContentToolbarView(frame: .zero)
+  public var showsToolbar = false {
+    didSet {
+      guard showsToolbar != oldValue else { return }
+      toolbar.isHidden = !showsToolbar
+      needsLayout = true
+    }
+  }
   /// Drawn above the page (a sibling of `clipView`, added after it), centered near the bottom edge.
   var toastView: ToastView? {
     didSet {
@@ -33,7 +43,18 @@ public final class ContentCardView: NSView {
       clip.masksToBounds = true
     }
     addSubview(clipView)
+    toolbar.isHidden = true
+    toolbar.autoresizingMask = []
+    clipView.addSubview(toolbar)
     applyBorderWidth()
+  }
+
+  /// Where the page goes in `clipView`: everything below the Toolbar when it shows.
+  private var contentFrame: CGRect { split.contentFrame }
+
+  private var split: CardToolbarLayout {
+    CardToolbarLayout.compute(bounds: clipView.bounds, toolbarVisible: showsToolbar,
+                              toolbarHeight: ContentToolbarView.height)
   }
 
   @available(*, unavailable)
@@ -42,7 +63,8 @@ public final class ContentCardView: NSView {
   public override var wantsUpdateLayer: Bool { true }
   public override var mouseDownCanMoveWindow: Bool { false }
 
-  /// Removes the previous content and installs `view` filling `clipView` (autoresizing, no constraints).
+  /// Removes the previous content and installs `view` below the Toolbar, filling the rest of `clipView`
+  /// (autoresizing, no constraints).
   public func setContent(_ view: NSView?) {
     if contentView === view { return }
     contentView?.removeFromSuperview()
@@ -50,11 +72,11 @@ public final class ContentCardView: NSView {
     guard let view else { return }
     view.translatesAutoresizingMaskIntoConstraints = true
     view.autoresizingMask = [.width, .height]
-    view.frame = clipView.bounds
-    clipView.addSubview(view, positioned: .below, relativeTo: emptyStateView)
+    view.frame = contentFrame
+    clipView.addSubview(view, positioned: .below, relativeTo: nil)
   }
 
-  /// Installs `view` above the page, filling `clipView`, or removes the current one when nil.
+  /// Installs `view` above the page and the Toolbar, filling `clipView`, or removes the current one when nil.
   public func setEmptyState(_ view: NSView?) {
     if emptyStateView === view { return }
     emptyStateView?.removeFromSuperview()
@@ -76,7 +98,9 @@ public final class ContentCardView: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     clipView.frame = bounds
-    contentView?.frame = clipView.bounds
+    let split = split
+    toolbar.frame = split.toolbarFrame
+    contentView?.frame = split.contentFrame
     emptyStateView?.frame = clipView.bounds
     layoutToast()
     // An explicit shadow path avoids an offscreen pass to derive the shadow shape from content alpha.

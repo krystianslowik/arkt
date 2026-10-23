@@ -99,6 +99,8 @@ public final class FakeEngine: EngineClient {
   }
 
   public func reload(_ id: TabID) { entries[id]?.webView.reload() }
+  public func goBack(_ id: TabID) { entries[id]?.webView.goBack() }
+  public func goForward(_ id: TabID) { entries[id]?.webView.goForward() }
   public func snapshot(of id: TabID) -> TabSnapshot? { entries[id]?.snapshot }
   public func contentView(for id: TabID) -> NSView? { entries[id]?.webView }
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation { hub.add(handler) }

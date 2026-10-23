@@ -40,9 +40,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private var tabsByNode: [NodeID: TabID] = [:]
   private var nodeByTab: [TabID: NodeID] = [:]
   private var observation: EngineObservation?
+  /// Toolbar on or off (KB-018, BH-032). The app passes one backed by user defaults; the default is ephemeral.
+  public let toolbarSetting: ToolbarSetting
 
+  /// `toolbarSetting` defaults to an in-memory setting so windows built without one (tests, the smoke) never
+  /// write user defaults.
   public init(engine: any EngineClient, sidebar: any SidebarSource,
-              metrics: ShellMetrics = .standard) {
+              metrics: ShellMetrics = .standard, toolbarSetting: ToolbarSetting = .ephemeral()) {
     let window = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800))
     // Symbol bitmaps at the shell window's scale, before the first row or button draws. A later scale change
     // re-renders the views' glyphs (viewDidChangeBackingProperties) and prewarms again below.
@@ -56,6 +60,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.rootView = root
     self.commandBar = CommandBarController(parent: window)
     self.toasts = ToastPresenter()
+    self.toolbarSetting = toolbarSetting
     super.init(window: window)
     let toastView = ToastView(frame: .zero)
     toastView.presenter = toasts
@@ -76,6 +81,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
     commandBar.onSwitch = { [weak self] node in self?.activate(node: node) }
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
+    wireAddressBars()
     observation = engine.observe { [weak self] event in self?.handle(event) }
     // Space theme: the pager's continuous position drives the crossfade (design section 2).
     sidebarController.onSpacePosition = { [weak self, weak root] position in
@@ -97,6 +103,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   public func activate(node: NodeID) { sidebarController.activate(node: node) }
+  /// The sidebar URL bar (BH-031, GS-042).
+  public var urlBar: URLBarView { sidebarController.view.urlBar }
   public var pager: SpacePagerView { sidebarController.view.pager }
   public var themeBackground: ThemeBackgroundView { rootView.themeBackground }
   public var currentSpace: SpaceID? { sidebarController.currentSpace }
@@ -148,6 +156,51 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
   public func rowState(for node: NodeID) -> TabRowState { sidebarController.rowState(for: node) }
 
+  // MARK: URL bar and Toolbar
+
+  public var isToolbarVisible: Bool { toolbarSetting.isVisible }
+
+  /// Cmd-Shift-D (KB-018, BH-032), the View menu and the URL bars' context menu (BH-031, GS-042).
+  @objc public func toggleToolbar(_ sender: Any?) {
+    toolbarSetting.isVisible.toggle()
+    applyToolbarVisibility()
+  }
+
+  private func applyToolbarVisibility() {
+    let visible = toolbarSetting.isVisible
+    rootView.card.showsToolbar = visible
+    urlBar.isToolbarVisible = visible
+    rootView.card.toolbar.urlBar.isToolbarVisible = visible
+  }
+
+  private func wireAddressBars() {
+    let toolbar = rootView.card.toolbar
+    for bar in [urlBar, toolbar.urlBar] {
+      bar.onPress = { [weak self] in self?.openLocation(nil) }                        // same as Cmd-L, KB-002
+      bar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
+    }
+    toolbar.onBack = { [weak self] in
+      guard let self, let tab = self.currentTab else { return }
+      self.engine.goBack(tab)
+    }
+    toolbar.onForward = { [weak self] in
+      guard let self, let tab = self.currentTab else { return }
+      self.engine.goForward(tab)
+    }
+    toolbar.onReload = { [weak self] in
+      guard let self, let tab = self.currentTab else { return }
+      self.engine.reload(tab)
+    }
+    applyToolbarVisibility()
+  }
+
+  /// Both URL bars show the current tab's URL from the engine snapshot (nil: no tab shown).
+  private func refreshAddress() {
+    let url = currentTab.flatMap { engine.snapshot(of: $0)?.url }
+    urlBar.url = url
+    rootView.card.toolbar.urlBar.url = url
+  }
+
   // MARK: Command bar
 
   /// Cmd-T (KB-001, BH-100); Cmd-T while open closes (KB-003, BH-103).
@@ -192,6 +245,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
     currentTab = tab
     rootView.card.setContent(engine.contentView(for: tab))
+    refreshAddress()
   }
 
   private func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -212,14 +266,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     switch event {
     case .titleChanged(_, let title) where !title.isEmpty:
       sidebar.updateTab(node, url: nil, title: title)
-    case .urlChanged(_, let url?):
-      sidebar.updateTab(node, url: url, title: nil)
+    case .urlChanged(let tab, let url):
+      if let url { sidebar.updateTab(node, url: url, title: nil) }
+      if tab == currentTab { refreshAddress() }
     case .faviconChanged(_, let data):
       faviconChanged(data, for: node)
     case .tabClosed(let tab):
       tabsByNode[node] = nil
       nodeByTab[tab] = nil
-      if currentTab == tab { currentTab = nil; rootView.card.setContent(nil) }
+      if currentTab == tab { currentTab = nil; rootView.card.setContent(nil); refreshAddress() }
       sidebarController.deactivate(node: node)
     default:
       break
@@ -252,5 +307,16 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public func windowWillClose(_ notification: Notification) {
     commandBar.invalidate()
     pager.stopInteraction()        // a closed window's views keep their display links
+  }
+}
+
+extension ShellWindowController: NSMenuItemValidation {
+  /// Titles the Toggle Toolbar item for the current state (KB-018). Every other item stays enabled, as it was
+  /// before this controller validated menu items.
+  public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if menuItem.action == #selector(toggleToolbar(_:)) {
+      menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
+    }
+    return true
   }
 }

@@ -390,6 +390,8 @@ private final class EagerEngine: EngineClient {
   func closeTab(_ id: TabID) { inner.closeTab(id) }
   func navigate(_ id: TabID, to url: URL) { inner.navigate(id, to: url) }
   func reload(_ id: TabID) { inner.reload(id) }
+  func goBack(_ id: TabID) { inner.goBack(id) }
+  func goForward(_ id: TabID) { inner.goForward(id) }
   func snapshot(of id: TabID) -> TabSnapshot? { inner.snapshot(of: id) }
   func contentView(for id: TabID) -> NSView? { inner.contentView(for: id) }
   func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation { inner.observe(handler) }

@@ -55,6 +55,8 @@ public struct EngineHarness {
 /// 5. Cancelling or dropping an `EngineObservation` stops delivery to that handler only.
 /// 6. When a navigation commits on a different host, the old favicon is cleared
 ///    (`.faviconChanged(nil)`) before that load's `.loadingChanged(false)`.
+/// 7. `goBack` / `goForward` move through the tab's history and report the URL they land on with `.urlChanged`,
+///    like a navigation; at either end of the history they do nothing.
 @MainActor
 public enum EngineContract {
   static func require(_ condition: Bool, _ message: @autoclosure () -> String) throws {
@@ -206,6 +208,31 @@ public enum EngineContract {
     let finished = later.firstIndex(of: .loadingChanged(id, isLoading: false))
     try require(cleared != nil && finished != nil, "missing faviconChanged(nil) or load end: \(later)")
     try require(cleared! < finished!, "favicon must be cleared before the new load ends: \(later)")
+  }
+
+  public static func historyMovesBackAndForward(_ h: EngineHarness) async throws {
+    let engine = h.makeEngine()
+    let recorder = EventRecorder(engine)
+    let (first, second) = (try h.pageURL("HistoryFirst"), try h.pageURL("HistorySecond"))
+    let id = engine.createTab(url: first)
+    try await h.settle(engine, id)
+    engine.goBack(id)                                   // nothing behind the first page
+    try await Task.sleep(for: .milliseconds(50))
+    try require(engine.snapshot(of: id)?.url == first, "goBack at the start must do nothing")
+    engine.navigate(id, to: second)
+    try await h.settle(engine, id)
+    let mark = recorder.events(for: id).count
+    engine.goBack(id)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.url == first }
+    try await h.settle(engine, id)
+    let back = Array(recorder.events(for: id).dropFirst(mark))
+    try require(back.contains(.urlChanged(id, first)), "goBack must report the URL it lands on: \(back)")
+    engine.goForward(id)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.url == second }
+    try await h.settle(engine, id)
+    engine.goForward(id)                                // nothing ahead of the last page
+    try await Task.sleep(for: .milliseconds(50))
+    try require(engine.snapshot(of: id)?.url == second, "goForward at the end must do nothing")
   }
 
   static func requireValue<T>(_ value: T?, _ what: String = "value") throws -> T {

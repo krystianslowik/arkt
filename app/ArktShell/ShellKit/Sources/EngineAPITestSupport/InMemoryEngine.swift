@@ -7,6 +7,8 @@ import EngineAPI
 public final class InMemoryEngine: EngineClient {
   private var snapshots: [TabID: TabSnapshot] = [:]
   private var views: [TabID: NSView] = [:]
+  /// Per-tab history: URLs behind and ahead of the current one (nearest last).
+  private var history: [TabID: (back: [URL], forward: [URL])] = [:]
   private let hub = EngineEventHub()
   public private(set) var tabIDs: [TabID] = []
 
@@ -27,12 +29,32 @@ public final class InMemoryEngine: EngineClient {
     tabIDs.removeAll { $0 == id }
     views[id]?.removeFromSuperview()
     views[id] = nil
+    history[id] = nil
     hub.emit(.tabClosed(id))
   }
 
-  /// Starts a load and commits it at once: url, loading, then (on a host change) the favicon reset.
+  /// Starts a load and commits it at once: url, loading, then (on a host change) the favicon reset. A new
+  /// navigation drops the forward history.
   public func navigate(_ id: TabID, to url: URL) {
     guard let previous = snapshots[id] else { return }
+    if let current = previous.url { history[id, default: ([], [])].back.append(current) }
+    history[id, default: ([], [])].forward.removeAll()
+    load(id, url, previous: previous)
+  }
+
+  public func goBack(_ id: TabID) {
+    guard let previous = snapshots[id], let target = history[id]?.back.popLast() else { return }
+    if let current = previous.url { history[id, default: ([], [])].forward.append(current) }
+    load(id, target, previous: previous)
+  }
+
+  public func goForward(_ id: TabID) {
+    guard let previous = snapshots[id], let target = history[id]?.forward.popLast() else { return }
+    if let current = previous.url { history[id, default: ([], [])].back.append(current) }
+    load(id, target, previous: previous)
+  }
+
+  private func load(_ id: TabID, _ url: URL, previous: TabSnapshot) {
     snapshots[id]?.url = url
     snapshots[id]?.isLoading = true
     hub.emit(.urlChanged(id, url))

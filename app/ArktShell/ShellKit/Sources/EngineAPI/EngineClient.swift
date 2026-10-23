@@ -60,6 +60,10 @@ public protocol EngineClient: AnyObject {
   func closeTab(_ id: TabID)
   func navigate(_ id: TabID, to url: URL)
   func reload(_ id: TabID)
+  /// Moves one entry back in the tab's history (Toolbar Back); no-op when there is none (contract rule 7).
+  func goBack(_ id: TabID)
+  /// Moves one entry forward in the tab's history (Toolbar Forward); no-op when there is none (contract rule 7).
+  func goForward(_ id: TabID)
   func snapshot(of id: TabID) -> TabSnapshot?
   /// The view that draws the tab's page. Same instance for the tab's whole life; nil once closed.
   func contentView(for id: TabID) -> NSView?
