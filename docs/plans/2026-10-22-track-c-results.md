@@ -543,3 +543,23 @@ Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` o
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 334 tests (327 plus 7 new), XCTest 181 tests
 (GUI included), 0 failures. Debug app build: `** BUILD SUCCEEDED **`.
+
+## Toolbar Back and Forward enabled state (#79)
+
+`TabSnapshot` carries `canGoBack` / `canGoForward`, announced with `EngineEvent.historyChanged`. Engine contract
+rule 8 (`EngineContract.historyAvailabilityIsReported`) runs against `InMemoryEngine` (Swift Testing) and
+`FakeEngine` (ShellKitGUITests): a new tab has neither, a second page enables Back, `goBack` enables Forward,
+`goForward` restores Back, and the last `historyChanged` agrees with the snapshot. The rule polls the snapshot and
+does not pin the event's position relative to `urlChanged` / `loadingChanged`: WebKit reports `canGoBack` by KVO in
+its own order, and history moves served from the page cache may not toggle `isLoading`. `FakeEngine` observes both
+properties and copies both flags in each handler, so one back-forward list change emits one event; the flags are
+also synced before `loadingChanged(false)`. The FakeEngine rule passed four runs in a row (0.7 to 2.4 s).
+
+The Toolbar's Back and Forward are disabled until the shown tab can move that way; a disabled button sends no
+action and VoiceOver reads it as dimmed. `ShellWindowController.toolbarTab` (the current tab for now) is the one
+place the Toolbar's target is chosen, for Split View S4 to point at the focused pane.
+
+Remaining: ChromiumEngine (#33) provides the same fields by passing rule 8.
+
+Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 337 tests (2 new), XCTest 182 tests (GUI included,
+9 new), 0 failures. Debug app build: `** BUILD SUCCEEDED **`. Only `FakeEngine.swift` imports WebKit.
