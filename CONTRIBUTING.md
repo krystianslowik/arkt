@@ -392,7 +392,8 @@ Recommendations only; repository settings are changed by the maintainer.
   (`swift test --skip ShellKitGUITests`), and "App build (Debug)" (`xcodegen generate`, then a Debug `xcodebuild`
   without signing). The gate job **`Swift tests`** passes only when all four pass; it is the one check to require on
   `main`. "ShellKit GUI tests (informative)" runs the GUI suite on the runner's virtual display and may fail without
-  blocking; its frame-timing gates (command bar latency, Space swipe pacing) are printed but not asserted there,
-  because shared runners have no 120 Hz display and no stable load. GUI tests and timing gates stay a local check
+  blocking; its frame-timing gates (command bar latency, Space swipe pacing) and the two tests that catch a Space
+  settle mid-flight run in a separate step whose numbers are printed but not asserted, because shared runners have a
+  60 Hz virtual display and a load far above their core count. GUI tests and timing gates stay a local check
   (section 7). Chromium is not built in CI (hours of build time and over 100 GB of disk); engine changes are verified
   locally and reported in the pull request.

@@ -99,14 +99,18 @@ jobs:
         working-directory: app/ArktShell/ShellKit
         run: swift test --skip ShellKitGUITests
 
-  # Hosted macOS runners do have a window server, so the GUI tests can open windows, but the display is virtual and
-  # the machine is shared: results are informative, not required. Frame-timing gates run in their own step and are
-  # reported only (their numbers are in the log); they are asserted on a developer machine (CONTRIBUTING, section 7).
+  # Hosted macOS runners have a window server, so the GUI tests can open windows, but the display is a 60 Hz virtual
+  # one and the machine is shared (1-minute load far above its 3 cores). Results are informative, not required.
+  # Tests that depend on frame timing run in their own step and are reported, not asserted: the frame-timing gates
+  # (command bar latency, Space swipe pacing) and the two tests that catch a Space settle mid-flight, which a loaded
+  # 60 Hz runner can miss. They are asserted on a developer machine (CONTRIBUTING, section 7).
   shellkit-gui:
     name: ShellKit GUI tests (informative)
     runs-on: macos-26
     timeout-minutes: 30
     continue-on-error: true
+    env:
+      TIMING_TESTS: "CommandBarTests/testAppearsUnder16ms|SpacePagerTests/testFramePacingDuringSwipeAndKeyboardSwitch|SpacePagerTests/testInterruptingASettleContinuesFromTheSpring|SpacePagerTests/testTouchDownFreezesASettleAndVerticalResumesIt"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,19 +123,16 @@ jobs:
           path: app/ArktShell/ShellKit/.build
           key: shellkit-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktShell/ShellKit/Package.resolved') }}
           restore-keys: shellkit-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-
-      - name: GUI tests without timing gates
+      - name: GUI tests (functional)
         working-directory: app/ArktShell/ShellKit
-        run: |
-          swift test --filter ShellKitGUITests \
-            --skip 'CommandBarTests/testAppearsUnder16ms' \
-            --skip 'SpacePagerTests/testFramePacingDuringSwipeAndKeyboardSwitch'
-      - name: Timing gates (reported, not asserted)
+        run: swift test --filter ShellKitGUITests --skip "$TIMING_TESTS"
+      - name: Timing-dependent GUI tests (reported, not asserted)
         if: ${{ !cancelled() }}
         continue-on-error: true
         working-directory: app/ArktShell/ShellKit
         run: |
-          swift test --filter 'CommandBarTests/testAppearsUnder16ms|SpacePagerTests/testFramePacingDuringSwipeAndKeyboardSwitch' \
-            2>&1 | grep -E 'commandbar\.|spacepager\.|Test Case|error:|passed|failed'
+          swift test --filter "$TIMING_TESTS" 2>&1 \
+            | grep -E 'commandbar\.|spacepager\.|Test Case|error:|Executed'
 
   app:
     name: App build (Debug)
