@@ -92,6 +92,12 @@ targets:
     sources: [UITests, {path: ShellKit/Sources/ShellUI/Accessibility/AXID.swift}]
     dependencies:
       - target: ArktShell
+    # Xcode signs the sandboxed runner with these on top of its own (network.client only): the loopback fixture
+    # server (UITests/Harness/FixtureServer.swift) has to listen on 127.0.0.1.
+    entitlements:
+      path: ArktShellUITests.entitlements
+      properties:
+        com.apple.security.network.server: true
     settings:
       base:
         TEST_TARGET_NAME: ArktShell
