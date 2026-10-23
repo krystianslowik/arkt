@@ -319,6 +319,46 @@ final class URLBarTests: XCTestCase {
     XCTAssertEqual(first.urlBar.contextMenu().items.map(\.title), ["Show Toolbar"])
   }
 
+  /// #80: `ToolbarSetting.showsFullURL` switches every window's Toolbar URL bar (and Split View pane Toolbars) between
+  /// `.full` and `.host` live.
+  func testShowsFullURLSwitchesToolbarURLBarBetweenFullAndHostLive() throws {
+    let setting = ToolbarSetting.ephemeral()
+    setting.isVisible = true
+    let engine = InMemoryEngine()
+    let sidebar = StubSidebar.sample()
+    let space = sidebar.spaceOrder[0]
+    let split = sidebar.addSplit(in: .today(space))
+    let pane0 = sidebar.addTab(url: URL(string: "https://www.alpha.example/docs?q=1")!, title: "A", in: .split(split))
+    _ = sidebar.addTab(url: URL(string: "https://www.beta.example/guide")!, title: "B", in: .split(split))
+    let first = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: setting)
+    let second = makeController(setting: setting)
+    let firstTab = try currentTab(first)
+    let targetURL = try XCTUnwrap(URL(string: "https://www.example.org/docs/page?q=1"))
+    engine.navigate(firstTab, to: targetURL)
+
+    XCTAssertEqual(first.rootView.card.toolbar.urlBar.style, .full)
+    XCTAssertEqual(first.rootView.card.toolbar.urlBar.displayedText, targetURL.absoluteString)
+
+    setting.showsFullURL = false
+    XCTAssertEqual(first.rootView.card.toolbar.urlBar.style, .host)
+    XCTAssertEqual(first.rootView.card.toolbar.urlBar.displayedText, "example.org")
+    XCTAssertEqual(first.rootView.card.toolbar.urlBar.accessibilityValue() as? String, "example.org")
+    XCTAssertEqual(second.rootView.card.toolbar.urlBar.style, .host, "shared across windows")
+
+    first.activate(node: pane0)
+    XCTAssertEqual(first.rootView.split.paneCards[0].toolbar.urlBar.style, .host)
+    XCTAssertEqual(first.rootView.split.paneCards[0].toolbar.urlBar.displayedText, "alpha.example")
+    XCTAssertEqual(first.rootView.split.paneCards[1].toolbar.urlBar.displayedText, "beta.example")
+
+    setting.showsFullURL = true
+    XCTAssertEqual(first.rootView.card.toolbar.urlBar.style, .full)
+    XCTAssertEqual(first.rootView.split.paneCards[0].toolbar.urlBar.style, .full)
+    XCTAssertEqual(first.rootView.split.paneCards[0].toolbar.urlBar.displayedText,
+                   "https://www.alpha.example/docs?q=1")
+    first.close()
+    second.close()
+  }
+
   func testToolbarButtonsDriveTheEngine() throws {
     let engine = InMemoryEngine()
     let controller = makeController(engine: engine)

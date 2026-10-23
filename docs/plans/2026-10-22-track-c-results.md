@@ -948,3 +948,18 @@ Checks (`nice -n 10`, `-j 4`, rebased on #216): ArktCore 342 tests (342 + 0), 0 
 Checks: ArktCore 342 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 456 tests, 0 failures.
 `CommandBarTests`: 52 tests, 0 failures (`commandbar.showcpu.ms p95=0.28`, `commandbar.earliestframe p95=9.24
 bound=9.54 load1=11.23 cores=12 asserted=yes`).
+
+## Toolbar: host-only URL option (#80)
+
+- `ToolbarSetting.showsFullURL` (stored under Arc's key `toolbarShowFullURLsEnabledPreference` in user defaults,
+  default `true` until RT-30 is measured) notifies every observing window through `toolbarSettingDidChange(_:)`.
+- `URLBarView.style` is now mutable and refreshes `displayedText`, `label.stringValue` and `accessibilityValue` live
+  between `.full` and `.host` while keeping the Toolbar URL bar's centered plain-text layout (`showsPill` stays fixed
+  from `init(style:)`).
+- `ShellWindowController.applyToolbarVisibility()` and `configurePaneToolbars()` propagate `showsFullURL` to the card's
+  Toolbar and every Split View pane card's Toolbar.
+- Tests: `ToolbarSettingTests` (key name, default `true`, persistence, ephemeral, observer notification) and
+  `URLBarTests.testShowsFullURLSwitchesToolbarURLBarBetweenFullAndHostLive`.
+
+Checks: ArktCore 342 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 456 tests, 0 failures.
+`URLBarTests`: 22/22 GUI tests pass.
