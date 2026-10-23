@@ -59,4 +59,46 @@ final class LaunchTests: ArktUITestCase {
     XCTAssertEqual(merged["ARKT_DATA_DIR"], sandbox.dataDirectory.path)
     XCTAssertEqual(merged["ARKT_UITEST_TIMEOUT_SCALE"], "2")
   }
+
+  func test_E_arcFixtureRenderRewritesURLsAndMatchesExpectedCounts() throws {
+    let sandbox = try Sandbox()
+    defer { sandbox.remove() }
+    let base = "http://127.0.0.1:54321"
+    let checksums = try ArcFixture.render(into: sandbox.arcDirectory, base: base)
+    XCTAssertTrue(try checksums.unchanged(in: sandbox.arcDirectory))
+
+    let sidebarText = try String(
+      contentsOf: sandbox.arcDirectory.appendingPathComponent("StorableSidebar.json"), encoding: .utf8)
+    let archiveText = try String(
+      contentsOf: sandbox.arcDirectory.appendingPathComponent("StorableArchiveItems.json"), encoding: .utf8)
+    XCTAssertTrue(sidebarText.contains("\(base)/articles/one"))
+    XCTAssertTrue(archiveText.contains("\(base)/manual"))
+    XCTAssertFalse(sidebarText.contains(ArcFixture.placeholderOrigin))
+    XCTAssertFalse(archiveText.contains(ArcFixture.placeholderOrigin))
+
+    XCTAssertEqual(ArcFixture.expected.spaces, 2)
+    XCTAssertEqual(ArcFixture.expected.tabs, 9)
+    XCTAssertEqual(ArcFixture.expected.folders, 1)
+    XCTAssertEqual(ArcFixture.expected.splits, 1)
+    XCTAssertEqual(ArcFixture.expected.favorites, 2)
+    XCTAssertEqual(ArcFixture.expected.archive, 7)
+  }
+
+  func test_E_seededLaunchShowsImportedSpaces() async throws {
+    let server = try await fixtureServer()
+    let sandbox = try Sandbox()
+    let checksums = try sandbox.seedFromArcFixture(server: server)
+    let app = try launch(sandbox)
+
+    let dots = app.buttons.matching(identifier: AXID.Sidebar.spaceDot)
+    XCTAssertTrue(Waits.until("2 Space dots", { dots.count == ArcFixture.expected.spaces }))
+    let rows = app.outlineRows
+    XCTAssertTrue(Waits.until("current Space page has rows", { rows.count > 0 }))
+    XCTAssertTrue(Waits.until("fixture page requested from loopback server", { !server.requestedPaths.isEmpty }))
+    let unexpected = server.requestedPaths.filter { !ArcFixture.fixturePaths.contains($0) }
+    XCTAssertEqual(unexpected, [], "server saw non-fixture paths: \(unexpected)")
+
+    quit(app)
+    XCTAssertTrue(try checksums.unchanged(in: sandbox.arcDirectory), "rendered Arc copy must stay untouched")
+  }
 }

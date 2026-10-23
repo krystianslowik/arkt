@@ -70,7 +70,7 @@ class ArktUITestCase: XCTestCase {
 
   /// A proxy for the app under test, or a failure before anything is launched: the bundle must declare
   /// `ArktEnvironmentOverrides = YES`, and no instance of it may be running already (`launch()` would terminate it).
-  func makeApp() throws -> XCUIApplication {
+  static func makeApplication() throws -> XCUIApplication {
     let url = Self.appURL()
     let plistURL = url.appendingPathComponent("Contents/Info.plist")
     guard let data = try? Data(contentsOf: plistURL),
@@ -88,6 +88,10 @@ class ArktUITestCase: XCTestCase {
       }
     }
     return XCUIApplication(url: url)
+  }
+
+  func makeApp() throws -> XCUIApplication {
+    try Self.makeApplication()
   }
 
   /// Environment keys owned by `Sandbox` that `extraEnv` may never override (#199).
