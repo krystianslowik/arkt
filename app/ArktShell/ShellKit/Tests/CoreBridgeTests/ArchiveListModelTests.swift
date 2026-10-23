@@ -282,6 +282,22 @@ struct ArchiveListModelTests {
     #expect(changes == 2)
   }
 
+  /// A Space change is passed on too (#89): a Space added while the window is open makes Restore possible, and the
+  /// rows name their Space. Tab changes are not passed on.
+  @Test func spaceChangesAreReported() async throws {
+    let harness = try Harness(items: [Self.tab("Lonely", ago: 10)], withSpace: false)
+    var changes = 0
+    harness.model.onChange = { changes += 1 }
+    #expect(!harness.model.canRestore)
+
+    let space = try harness.source.addSpace(title: "Work")
+    #expect(changes == 1)
+    #expect(harness.model.canRestore)
+
+    try harness.source.addTab(url: URL(string: "https://t.example/x")!, title: "Tab", in: .today(space))
+    #expect(changes == 1)
+  }
+
   // MARK: - Row text
 
   @Test func rowTextForTabsFoldersSplitsAndSources() async throws {

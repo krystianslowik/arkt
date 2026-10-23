@@ -239,6 +239,30 @@ final class ArchiveWindowTests: XCTestCase {
     XCTAssertFalse(controller.restoreButton.isEnabled, "no Space to restore into")
   }
 
+  /// #89: opened with no Space, a row selected, Restore is off; creating a Space turns it on without a selection
+  /// change. Runs the app's list model over a model source.
+  func testCreatingASpaceEnablesRestore() async throws {
+    let source = ModelSidebarSource()
+    let item = ArchivedItem(
+      reason: .manual, archivedAt: .now, source: .unknown, section: .today,
+      snapshot: NodeSnapshot(kind: .tab(TabItem(url: URL(string: "https://a.example")!, title: "A")), createdAt: .now))
+    let store = FixedArchiveStore(items: [item])
+    let model = ArchiveListModel(
+      source: source, store: store, coordinator: ArchiveCoordinator(source: source, store: store))
+    let controller = ArchiveWindowController(dataSource: model)
+    if let window = controller.window { windows.append(window) }
+    controller.show()
+    await controller.pendingLoad?.value
+    controller.tableView.selectRowIndexes([0], byExtendingSelection: false)
+    XCTAssertFalse(controller.restoreButton.isEnabled, "no Space to restore into")
+
+    try source.addSpace(title: "Work")
+    await controller.pendingLoad?.value
+
+    XCTAssertEqual(controller.tableView.selectedRow, 0)
+    XCTAssertTrue(controller.restoreButton.isEnabled)
+  }
+
   func testRestoreButtonRestoresTheSelectedRowAndDropsIt() async throws {
     let source = StubArchiveSource()
     let rows = Self.rows(3)
@@ -345,6 +369,19 @@ final class ArchiveWindowTests: XCTestCase {
     let field = try XCTUnwrap(view?.subviews.compactMap { $0 as? NSTextField }.first, "row \(row) has a title")
     return field.stringValue
   }
+}
+
+/// An archive table that always holds the same items; writes are accepted and dropped.
+private actor FixedArchiveStore: ArchiveStoring {
+  let stored: [ArchivedItem]
+
+  init(items: [ArchivedItem]) { stored = items }
+
+  func add(_ items: [ArchivedItem], onConflict policy: ArchiveConflictPolicy) async throws -> Int { items.count }
+  func items(matching filter: ArchiveFilter, limit: Int?) async throws -> ArchivePage {
+    ArchivePage(items: Array(stored.prefix(limit ?? stored.count)), unreadable: 0)
+  }
+  func remove(_ ids: [NodeID]) async throws {}
 }
 
 /// Returns the queued pages in order (the last one repeats) and records every call.

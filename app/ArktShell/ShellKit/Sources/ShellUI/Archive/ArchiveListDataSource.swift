@@ -42,8 +42,8 @@ public struct ArchiveListPage: Equatable, Sendable {
 /// must report the newer state, never its own older rows.
 @MainActor
 public protocol ArchiveListDataSource: AnyObject {
-  /// Called when the list may have changed outside the window (an entry archived, or its archive write landed); the
-  /// window sets it and refreshes while on screen.
+  /// Called when the list or `canRestore` may have changed outside the window (an entry archived, its archive write
+  /// landed, or the Space list changed); the window sets it and refreshes while on screen.
   var onChange: (@MainActor () -> Void)? { get set }
   /// False while there is no Space to restore into.
   var canRestore: Bool { get }
