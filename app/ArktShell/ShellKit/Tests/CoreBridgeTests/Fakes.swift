@@ -70,21 +70,49 @@ actor FakeArchiveStore: ArchiveStoring {
   }
 }
 
-/// In-memory `ArchiveStateStoring` that records every clock reset.
+/// In-memory `ArchiveStateStoring` that records every clock reset. The resolved start is the last reset, else the
+/// stored start (`setStarted`), else `now` (which is then stored, like `SettingsStore`).
 actor FakeArchiveState: ArchiveStateStoring {
   private(set) var resets: [Date] = []
+  private var started: Date?
+  private var settings = ArchiveSettings()
   private var failsResets = false
+  private var failsLoads = false
 
   func setFailsResets(_ fails: Bool) { failsResets = fails }
+  func setFailsLoads(_ fails: Bool) { failsLoads = fails }
+  func setStarted(_ date: Date) { started = date }
+  func setSettings(_ settings: ArchiveSettings) { self.settings = settings }
 
-  func resolveAutoArchiveStart(now: Date) async throws -> Date { resets.last ?? now }
+  private var holdsLoads = false
+  private var heldLoads: [CheckedContinuation<Void, Never>] = []
+  /// While true, `resolveAutoArchiveStart` parks until `releaseLoads()`.
+  func holdLoads() { holdsLoads = true }
+  var heldLoadCount: Int { heldLoads.count }
+
+  func releaseLoads() {
+    holdsLoads = false
+    for held in heldLoads { held.resume() }
+    heldLoads = []
+  }
+
+  func resolveAutoArchiveStart(now: Date) async throws -> Date {
+    if holdsLoads { await withCheckedContinuation { heldLoads.append($0) } }
+    if failsLoads { throw FakeStoreError() }
+    if let last = resets.last { return last }
+    if started == nil { started = now }
+    return started ?? now
+  }
 
   func resetAutoArchiveStart(to date: Date) async throws {
     if failsResets { throw FakeStoreError() }
     resets.append(date)
   }
 
-  func loadArchiveSettings() async throws -> ArchiveSettings { ArchiveSettings() }
+  func loadArchiveSettings() async throws -> ArchiveSettings {
+    if failsLoads { throw FakeStoreError() }
+    return settings
+  }
 }
 
 /// In-memory `ArcImportRecordStoring` that unions like `SettingsStore` and records every write.

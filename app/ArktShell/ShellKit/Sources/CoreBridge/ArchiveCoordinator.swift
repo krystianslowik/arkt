@@ -102,6 +102,19 @@ public final class ArchiveCoordinator {
     return items
   }
 
+  /// One auto-archive pass (BH-080, BH-084, BH-054, BH-048, BH-083): archives, with reason `.auto`, the Today tabs
+  /// `AutoArchivePolicy` picks for `settings`' per-profile thresholds, idle time clamped to `startedAt`, minus
+  /// `exempt` (visible tabs; media-playing ones once the engine reports them, BH-076). Returns what was archived;
+  /// the caller shows the BH-085 toast when it is not empty.
+  @discardableResult
+  public func runAutoArchive(startedAt: Date, settings: ArchiveSettings, exempt: Set<UUID>) -> [ArchivedItem] {
+    let input = AutoArchiveInput(
+      now: now(), startedAt: startedAt, exempt: exempt, threshold: { settings.tabThreshold(forProfile: $0) })
+    let ids = AutoArchivePolicy.itemsToArchive(in: source.sidebar, input)
+    guard !ids.isEmpty else { return [] }
+    return archive(ids, reason: .auto)
+  }
+
   /// Puts `item` back into the sidebar (`Archiver.restore` rules: top of Today in its source Space, folders at the
   /// end of Pinned, fresh ids when an id is taken), then queues its removal from the store. `fallbackSpace` is used
   /// when the source Space is gone; when it is nil or gone too, the first Space is used. Returns nil and changes
