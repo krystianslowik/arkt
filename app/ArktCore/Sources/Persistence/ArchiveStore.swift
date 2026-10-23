@@ -7,9 +7,13 @@ import SidebarModel
 /// and section are columns. Every method is `@concurrent`: encoding and decoding run on the global executor even when
 /// called from the main actor, and SQL runs on GRDB's queue.
 ///
-/// Retention (Track D open question 9, #100): archived items are kept until the user restores them (`remove`) or
-/// clears the archive (`removeAll`, BH-087); no automatic time- or count-based pruning is performed.
+/// Retention (Track D open question 9, #100 maintainer decision 2026-10-23): archive entries older than 30 days
+/// (`retentionInterval`) are pruned automatically (like Arc) via `pruneExpired(now:)`, in addition to user restore
+/// (`remove`) and Clear Archive (`removeAll`, BH-087).
 public struct ArchiveStore: Sendable {
+  /// Archive retention window (30 days, matching Arc; #100 maintainer decision).
+  public static let retentionInterval: TimeInterval = 30 * 24 * 60 * 60
+
   let database: ArktDatabase
 
   public init(database: ArktDatabase) { self.database = database }
@@ -123,6 +127,19 @@ public struct ArchiveStore: Sendable {
     try await database.writer.write { db in
       try db.execute(sql: "DELETE FROM archived_item")
       try SidebarStore.writePendingArchiveRemovals(db, ids: [], updatedAt: 0)
+    }
+  }
+
+  /// Deletes archive entries whose `archived_at` is strictly older than `now - retentionInterval` (30 days, matching
+  /// Arc; #100 maintainer decision) and returns the number of pruned rows.
+  @concurrent
+  @discardableResult
+  public func pruneExpired(now: Date) async throws -> Int {
+    dispatchPrecondition(condition: .notOnQueue(.main))
+    let cutoff = now.timeIntervalSinceReferenceDate - Self.retentionInterval
+    return try await database.writer.write { db in
+      try db.execute(sql: "DELETE FROM archived_item WHERE archived_at < ?", arguments: [cutoff])
+      return db.changesCount
     }
   }
 

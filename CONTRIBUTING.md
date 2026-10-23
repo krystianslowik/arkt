@@ -301,7 +301,7 @@ and keep your hands off the keyboard and mouse until they finish:
 ```zsh
 cd app/ArktShell && xcodegen generate
 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
-  -resultBundlePath build/ui-$(date +%s).xcresult test
+  -resultBundlePath build/ui-$(date +%s).xcresult -collect-test-diagnostics never test
 ```
 
 Add `-only-testing:ArktShellUITests/<Class>/<test>` for one test. To scale the harness wait timeouts (default 10 s),

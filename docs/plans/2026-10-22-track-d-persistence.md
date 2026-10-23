@@ -3767,8 +3767,9 @@ git commit -m "Add typed archive settings with Arc defaults"
    value at profile creation instead; the difference shows only when Default changes later.
 8. Arc's per-profile thresholds (`autoArchiveTimeThresholdsPerProfile` entry shape is unknown, data-model unknown 3)
    are not imported; Arc's thresholds could be read later through a counts-only probe.
-9. Archive retention (#100, decided): no automatic time- or count-based pruning; entries stay in `archived_item` until
-   restored (`ArchiveStore.remove`) or cleared by the user (`ArchiveStore.removeAll`, BH-087).
+9. Archive retention (#100, decided 2026-10-23): archive entries older than 30 days (`ArchiveStore.retentionInterval`)
+   are pruned automatically (like Arc) via `ArchiveStore.pruneExpired(now:)`, in addition to restore
+   (`ArchiveStore.remove`) and Clear Archive (`ArchiveStore.removeAll`, BH-087).
 10. App Support directory name `Arkt` assumes the final bundle id; adjust `DatabaseLocation.applicationSupport()` if
     the product name or sandboxing changes.
 11. Window/session state (data-model section 3) is out of Track D scope; it will need its own table (`v4-...`).

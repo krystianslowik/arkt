@@ -247,6 +247,21 @@ struct ArchiveStoreTests {
     try await store.removeAll()
   }
 
+  /// #100 (maintainer decision): archive entries older than 30 days (`ArchiveStore.retentionInterval`) are pruned by
+  /// `pruneExpired(now:)`; entries at or within the 30-day window stay.
+  @Test func pruneExpiredRemovesEntriesOlderThanThirtyDays() async throws {
+    let store = ArchiveStore(database: try ArktDatabase.inMemory())
+    let thirtyDays = ArchiveStore.retentionInterval
+    let expired = Self.tab("Expired", url: "https://example.com/old", source: .unknown, at: 100)
+    let boundary = Self.tab("Boundary", url: "https://example.com/edge", source: .unknown, at: 101)
+    let recent = Self.tab("Recent", url: "https://example.com/new", source: .unknown, at: 100 + thirtyDays)
+    _ = try await store.add([expired, boundary, recent], onConflict: .replace)
+
+    let pruned = try await store.pruneExpired(now: Self.at(101 + thirtyDays))
+    #expect(pruned == 1)
+    #expect(try await store.items().items == [recent, boundary])
+  }
+
   /// An existing v1 file is backed up before `v2-archive` runs; a current file is not backed up again.
   @Test func openingAV1FileBacksItUpBeforeTheArchiveMigration() async throws {
     try await withTemporaryDirectory { directory in
