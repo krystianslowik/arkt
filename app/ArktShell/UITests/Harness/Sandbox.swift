@@ -49,6 +49,30 @@ final class Sandbox {
   /// Every path in `environment`, for tests that assert the app was given nothing else.
   var handedOutPaths: [String] { [dataDirectory.path, arcDirectory.path] }
 
+  /// Renders the synthetic Arc fixtures into `arcDirectory` with `server.base`, launches the app's import phase,
+  /// waits for `.notRunning` (30 s times the scale), asserts `data/Arkt.sqlite` exists, and returns the rendered
+  /// fixture checksums (Task U6, #171).
+  @MainActor
+  @discardableResult
+  func seedFromArcFixture(server: FixtureServer) throws -> ArcFixture.Checksums {
+    let checksums = try ArcFixture.render(into: arcDirectory, base: server.base)
+    let app = try ArktUITestCase.makeApplication()
+    var env = environment
+    env["ARKT_SMOKE"] = "import"
+    app.launchEnvironment = env
+    app.launchArguments = ArktUITestCase.launchArguments
+    app.launch()
+    guard Waits.until("seed import to finish", timeout: 30, { app.state == .notRunning }) else {
+      if app.state != .notRunning { app.terminate() }
+      throw HarnessError("seed import did not finish within \(Waits.scaled(30)) s")
+    }
+    let database = dataDirectory.appendingPathComponent("Arkt.sqlite")
+    guard FileManager.default.fileExists(atPath: database.path) else {
+      throw HarnessError("seed import did not create \(database.path)")
+    }
+    return checksums
+  }
+
   /// Deletes the folder and the defaults suite. Safe to call more than once.
   func remove() {
     try? FileManager.default.removeItem(at: root)

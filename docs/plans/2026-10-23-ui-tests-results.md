@@ -549,3 +549,34 @@ Base: `origin/main` at `c5f9db8`, branch `chore/199-harden-u2-harness`.
 | `LaunchTests` guard test | `xctest -XCTest ArktShellUITests.LaunchTests/test_E_sandboxGuardAndExtraEnvRestrictions` | pass (0.006 s) |
 | `AccessibilityIdentifierTests` | `swift test --filter AccessibilityIdentifierTests` | 15/15 pass |
 | ShellKit pure + isolation | `swift test --skip ShellKitGUITests` | 457 tests in 61 suites pass |
+
+## U6: Arc fixtures and seeding (#171)
+
+Base: `origin/main` at `ab08905`, branch `chore/171-ui-tests-u6`.
+
+### What was done
+
+- `project.yml` (own commit): `ArktShellUITests` bundles
+  `../ArktCore/Tests/ArcImportTests/Fixtures/StorableSidebar-synthetic.json` and
+  `../ArktCore/Tests/ArcImportTests/Fixtures/StorableArchiveItems-synthetic.json` by path reference with
+  `buildPhase: resources` (no copy in the repo).
+- `UITests/Harness/ArcFixture.swift`: `ArcFixture.render(into:base:)` reads both bundled fixtures, replaces every
+  `https://example.com` with `base`, writes `StorableSidebar.json` and `StorableArchiveItems.json` into `arcDir`, and
+  returns their SHA-256 digests (`Checksums`, with `unchanged(in:)`). `ArcFixture.expected` holds the E6 counts
+  (`spaces = 2`, `tabs = 9`, `folders = 1`, `splits = 1`, `favorites = 2`, `archive = 7`), each commented with
+  `docs/plans/2026-10-23-track-e-results.md`.
+- `UITests/Harness/Sandbox.swift`: `Sandbox.seedFromArcFixture(server:)` renders the fixture into `arcDirectory`,
+  launches the app with `ARKT_SMOKE=import`, waits for `.notRunning` (timeout 30 s times `Waits.scale`), asserts
+  `data/Arkt.sqlite` exists, and returns the rendered checksums. It is the only place `ARKT_SMOKE` appears in
+  `UITests/`.
+- `UITests/LaunchTests.swift`: added `test_E_arcFixtureRenderRewritesURLsAndMatchesExpectedCounts` and
+  `test_E_seededLaunchShowsImportedSpaces`.
+
+### Verification
+
+| Check | Command | Result |
+|---|---|---|
+| `Check UI test sources` | workflow grep step on `app/ArktShell/UITests` | `UI test sources OK`, exit 0 |
+| Single `ARKT_SMOKE` site | `grep -rn ARKT_SMOKE app/ArktShell/UITests` | 1 hit (`Sandbox.seedFromArcFixture`) |
+| `ArcFixture` render & checksums | `xctest -XCTest ArktShellUITests.LaunchTests/test_E_arcFixtureRenderRewritesURLsAndMatchesExpectedCounts` | pass (0.009 s) |
+| `build-for-testing` | `xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build build-for-testing` | `** TEST BUILD SUCCEEDED **` |
