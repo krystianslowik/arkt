@@ -1,0 +1,4 @@
+module ArktEngineABI {
+  umbrella header "arkt_engine.h"
+  export *
+}

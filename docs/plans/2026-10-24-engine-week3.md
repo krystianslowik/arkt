@@ -34,6 +34,7 @@ uses it, week-2 "Symbols" rule):
 | `navigate` | `NavigationController::LoadURLWithParams` (transition `PAGE_TRANSITION_TYPED`) | `.urlChanged` with the pending URL from `DidStartNavigation` (`GetVisibleURL`), then `.loadingChanged(true)` from `DidStartLoading` (rule 2 order) |
 | `reload` | `NavigationController::Reload(ReloadType::NORMAL, true)` | `DidStartLoading` / `DidStopLoading` |
 | `goBack`, `goForward` | `GoBack` / `GoForward`, guarded by `CanGoBack` / `CanGoForward` (rule 7 no-op) | `.urlChanged` from `DidStartNavigation` |
+| `history(of:)`, `goToHistory(_:offset:)`, `duplicateTab(_:)` (#81, pull request #238; rules 9 and 10) | the tab handle's `backEntries` / `forwardEntries` (nearest first) from `NavigationController` entries, `GoToOffset` guarded by `CanGoToOffset`, `chrome::DuplicateTabAt` | `.urlChanged` from `DidStartNavigation`; the duplicate as `.tabCreated` (`origin == .client`) |
 | `activateTab` | `TabStripModel::ActivateTabAt(index)` | `.activeTabChanged` from `OnTabStripModelChanged` selection |
 | `snapshot(of:)` | Swift table fed by: `GetVisibleURL`, `GetTitle`, `IsLoading`, `CanGoBack` / `CanGoForward`, favicon PNG | `TitleWasSet`, `DidStopLoading`, `NavigationEntryCommitted` / `NavigationListPruned` (`.historyChanged`), `FaviconDriverObserver::OnFaviconUpdated` (`.faviconChanged`), cleared on `DidFinishNavigation` committed to another host |
 | `contentView(for:)` | the handle's container `NSView` around `WebContents::GetNativeView()` | swapped on `TabStripModelChange::kReplaced` |
@@ -226,7 +227,7 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
     - The shell archives only after `.tabClosed`. While a close is held the row stays and the tab's container stays
       mounted (the dialog is tab-modal on that container), the row shows a "closing" state, and on a cancelled close
       (`.closeCancelled(TabID)`) the tab simply stays. The shell never removes a row and leaves a live tab behind.
-    - Contract rule 14 states this; `InMemoryEngine` gets drivers for a held close and its outcome.
+    - Contract rule 16 states this; `InMemoryEngine` gets drivers for a held close and its outcome.
 12. **Close reasons.** Every `.tabClosed` carries a reason: `.client` (this client asked), `.page` (`window.close()`),
     `.extension` (`chrome.tabs.remove`, `chrome.windows.remove`), `.windowClosing` (its window is being closed),
     `.appTerminating` (quit). The facade knows which: it marks tabs it closes, marks a window's tabs when the window
@@ -261,7 +262,7 @@ early task so both lanes can work in parallel.
 
 | Artifact | Owner | Consumer | Frozen in |
 |---|---|---|---|
-| `EngineAPI` additions (below), harness drivers and contract rules 9-14 | Swift lane | engine lane (`ChromiumEngine`) | W3-1 |
+| `EngineAPI` additions (below), harness drivers and contract rules 11-16 | Swift lane | engine lane (`ChromiumEngine`) | W3-1 |
 | `InMemoryEngine` and `FakeEngine` implementing the additions | Swift lane | ShellUI tests, the FakeEngine app | W3-1 |
 | `engine/arkt/api/arkt_engine.h`: protocols `ArktEngineEmbedder`, `ArktEngine`, `ArktBrowserHandle`, `ArktTabHandle`, `ArktWindowHost`, `ArktWindowRequest`, `ArktEngineEvent`; enums; no classes, no C++, no Chromium includes | engine lane | `ChromiumEngineKit` only (isolation test) | W3-2, after W3-0's class lookup |
 | `ChromiumEngineKit` (`ChromiumEngine: EngineClient, EngineExtensions`) | engine lane until W3-9 | composition root only | W3-6 |
@@ -275,7 +276,7 @@ in `EngineClient.swift`), and `.tabClosed` gains a reason.
 - Windows: `EngineWindowID` (opaque, `Hashable, Sendable`); `var windowIDs: [EngineWindowID]`;
   `func createWindow(host: any EngineWindowHosting) -> EngineWindowID` (synchronous); `func closeWindow(_:)`.
 - Tabs: `func createTab(url: URL?, in window: EngineWindowID) -> TabID`. The window-less `createTab(url:)` stays for the
-  existing contract tests and lands in the most recently active window (rule 13), **but W3-7 moves every shell call
+  existing contract tests and lands in the most recently active window (rule 15), **but W3-7 moves every shell call
   site to `createTab(url:in:)`** (`ShellWindowController.openEngineTab` today, `ShellWindowController.swift:371`), so
   with two windows a tab can never land in the wrong `Browser`. A lint test in ShellUITests fails on any ShellUI call to
   the window-less form.
@@ -325,20 +326,22 @@ applicable**, never as passed): `engineCreateTab(engine, window, opener, active)
 user activation), `answerDialog(engine, id, accept)`. `InMemoryEngine` implements them directly; the Chromium harness
 (W3-9) implements them through the facade's test API (script with a user gesture, dialog answer).
 
-**New contract rules** (in `EngineAPITestSupport/EngineContract.swift`, run by every engine):
+**New contract rules** (in `EngineAPITestSupport/EngineContract.swift`, run by every engine). Rules 1-10 exist
+already: rule 9 (`history(of:)`, `goToHistory(_:offset:)`) and rule 10 (`duplicateTab(_:)`) landed with #81 in pull
+request #238, so the new rules start at 11.
 
-9. A window from `createWindow(host:)` is listed in `windowIDs` and announced with `.windowOpened`; every tab's
-   snapshot names its window; `closeWindow` closes its tabs (`.tabClosed(reason: .windowClosing)` each) and then reports
-   `.windowClosed`.
-10. `activateTab` makes the tab its window's active tab: `.activeTabChanged(id)` and `isActive` in the snapshot, with
+11. A window from `createWindow(host:)` is listed in `windowIDs` and announced with `.windowOpened`; every tab's
+    snapshot names its window; `closeWindow` closes its tabs (`.tabClosed(reason: .windowClosing)` each) and then
+    reports `.windowClosed`.
+12. `activateTab` makes the tab its window's active tab: `.activeTabChanged(id)` and `isActive` in the snapshot, with
     exactly one active tab per window that has tabs.
-11. A tab the engine creates on its own is announced with `.tabCreated` and its snapshot has `origin == .engine`, its
+13. A tab the engine creates on its own is announced with `.tabCreated` and its snapshot has `origin == .engine`, its
     window, its opener (when there is one) and `isActive`; an engine-side activation is announced with
     `.activeTabChanged`.
-12. A tab the engine closes on its own ends with one `.tabClosed` with reason `.page` or `.extension`, and nothing after
+14. A tab the engine closes on its own ends with one `.tabClosed` with reason `.page` or `.extension`, and nothing after
     it, as rule 4.
-13. `createTab(url:)` without a window lands in the most recently active window.
-14. A held close keeps the tab listed with `isClosing` until `.tabClosed(reason: .client)`; a cancelled close reports
+15. `createTab(url:)` without a window lands in the most recently active window.
+16. A held close keeps the tab listed with `isClosing` until `.tabClosed(reason: .client)`; a cancelled close reports
     `.closeCancelled` and leaves the tab open with no `.tabClosed`; `.skipUnloadHandlers` never holds on a
     `beforeunload` page.
 
@@ -469,7 +472,7 @@ Time-box: 2 h.
 
 ---
 
-### Task W3-1: `EngineAPI` additions, harness drivers and contract rules 9-14 (Swift lane)
+### Task W3-1: `EngineAPI` additions, harness drivers and contract rules 11-16 (Swift lane)
 
 No Chromium. Can start at once. The `EngineCommand` values come from the engine lane in this pull request.
 
@@ -484,19 +487,19 @@ No Chromium. Can start at once. The `EngineCommand` values come from the engine 
 - Modify: every exhaustive `switch` over `EngineEvent` and every `.tabClosed` match in ShellUI (the non-additive part)
 - Modify: `app/ArktShell/ShellKit/Tests/EngineAPITests/*`, `Tests/FakeEngineKitTests/*`
 
-**Steps:** write rules 9-14 and the harness drivers first (failing against `InMemoryEngine`), then implement in
+**Steps:** write rules 11-16 and the harness drivers first (failing against `InMemoryEngine`), then implement in
 `InMemoryEngine` and `FakeEngine`. Shapes as in "Interface boundary"; this pull request is where both lanes agree on
 names. Decision 11's default (open decision 6) is part of the freeze: if the maintainer answers differently before
 the merge, only the `CloseMode` default used by the shell changes.
 
-**Acceptance criteria:** rules 1-14 pass for `InMemoryEngine`; FakeEngine passes 1-10 and 13 and reports 11, 12 and 14
+**Acceptance criteria:** rules 1-16 pass for `InMemoryEngine`; FakeEngine passes 1-12 and 15 and reports 13, 14 and 16
 as not applicable (no drivers); `EngineEventHub` tests cover the window stream and `observe(window:)`; the existing
 ShellUI tests still pass after the switch and `.tabClosed` updates; the engine lane has approved the pull request.
 
 **Verification:** `swift test --skip ShellKitGUITests` (baseline + N); FakeEngine GUI contract tests
 (`--filter ShellKitGUITests`) still pass.
 
-**Commit:** files named one by one; "Add windows, activation, close reasons and contract rules 9-14 to EngineAPI".
+**Commit:** files named one by one; "Add windows, activation, close reasons and contract rules 11-16 to EngineAPI".
 
 Time-box: 1 day.
 
@@ -524,8 +527,9 @@ Drafting can start at once; the header **freezes only after W3-0's class lookup*
   `NSArray<id<ArktEngineEvent>>`), and the test API (Task W3-5 step 5).
 - `ArktBrowserHandle`: `windowId` (session id), `tabs`, `activeTab`, `createTabWithURL:active:`, `close`.
 - `ArktTabHandle`: `containerView`, `sessionId`, `url`, `title`, `faviconPNG`, `isLoading`, `canGoBack`, `canGoForward`,
-  `opener`, `isClosing`, `wouldHoldClose`, `navigateToURL:`, `reload`, `goBack`, `goForward`, `activate`,
-  `closeWithMode:` (returns `ArktCloseResult`), `focus`.
+  `opener`, `isClosing`, `wouldHoldClose`, `backEntries` / `forwardEntries` (`ArktHistoryEntry`, nearest first),
+  `navigateToURL:`, `reload`, `goBack`, `goForward`, `goToHistoryOffset:`, `activate`, `closeWithMode:` (returns
+  `ArktCloseResult`), `focus`, `duplicate` (history and duplicate serve rules 9 and 10, landed in #238).
 - `ArktWindowHost`: the week-2 protocol from `arkt_window_host.h` (pure ObjC, AppKit), moved here; the placeholder-only
   `activateTab` block becomes optional. `ArktTabEvent` stays a class in `arkt_window_host.h`, used by the placeholder only.
 - `ArktWindowRequest`, `ArktEngineEvent` (kind, tab, browser, close reason, plain values), `ArktExtensionAction`:
@@ -703,7 +707,7 @@ changes a seam, the affected part is revised before W3-9.
 **Files:**
 - Create: `app/ArktShell/ShellKit/Sources/ChromiumEngineKit/ChromiumEngine.swift` (+ small helpers)
 - Create: `app/ArktShell/ShellKit/Tests/ChromiumEngineKitTests/` (a scripted Swift implementation of the facade
-  protocols that delivers batches on the next main-actor turn, like the real facade; contract tests 1-14 against it with
+  protocols that delivers batches on the next main-actor turn, like the real facade; contract tests 1-16 against it with
   all harness drivers)
 - Modify: `Package.swift`, `Tests/IsolationTests/` (only the app's composition root may import `ChromiumEngineKit`)
 
@@ -713,7 +717,7 @@ cancellations; close reasons; snapshots from events; window stream and `observe(
 wrapped into an `ArktWindowHost` object (claims first, then `forward`); `EngineCommand` passed through as its raw value;
 `EngineExtensions` over the action calls.
 
-**Acceptance criteria:** contract rules 1-14 pass against the scripted facade, including scripts that reorder title and
+**Acceptance criteria:** contract rules 1-16 pass against the scripted facade, including scripts that reorder title and
 load end within one batch, replace a tab's contents, hold and cancel a close, and close a window while a tab holds;
 isolation tests pass; no `@unchecked Sendable` or `nonisolated(unsafe)`. Instance scoping is defined and tested: a
 `ChromiumEngine` lists only the windows it created or was handed through its host provider, and only their tabs, so
@@ -825,7 +829,7 @@ Time-box: 6 h (inventory) plus 1 h after W3-9.
 - Modify: `$RES`
 
 **Steps:**
-1. Contract runner, modelled on `SmokeRunner`: runs rules 1-14 against a fresh `ChromiumEngine` per rule, each in its
+1. Contract runner, modelled on `SmokeRunner`: runs rules 1-16 against a fresh `ChromiumEngine` per rule, each in its
    own window. Harness: `pageURL` and `pagesOnTwoHosts` from the loopback fixture server (#170, or the runner's own,
    see Dependencies); `settle` waits for `loadingChanged(false)`; `retitle` through `evaluateScript`; drivers:
    `engineCreateTab` = `window.open(url)` with a user gesture in a tab of that window, `engineCloseTab` =
@@ -852,7 +856,7 @@ Time-box: 6 h (inventory) plus 1 h after W3-9.
    in a single tab and once with a Split View pane sliding; same gate (at most 1 % of intervals over 8.6 ms), or 16.8 ms
    on a 60 Hz display with a note.
 
-**Acceptance criteria:** the runner passes 14/14 with no rule reported not applicable; every smoke, startup and quit
+**Acceptance criteria:** the runner passes 16/16 with no rule reported not applicable; every smoke, startup and quit
 step passes or is recorded with its log lines as a known gap with an issue; 0 `FATAL`/`Check failed`; no new crash dump
 under `Arkt Dev Engine/Crashpad`; the 120 Hz gate holds or is recorded; the FakeEngine build still passes its own
 contract and UI tests.

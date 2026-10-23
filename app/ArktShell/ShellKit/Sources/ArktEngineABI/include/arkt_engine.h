@@ -1,0 +1,353 @@
+#ifndef ARKT_API_ARKT_ENGINE_H_
+#define ARKT_API_ARKT_ENGINE_H_
+
+// The engine facade: the only interface between the Swift shell and the
+// engine inside the Chromium framework (week-3 plan, Decision 1).
+//
+// Rules for this file:
+// - Objective-C only: Foundation and AppKit, no C++, no Chromium includes.
+// - Protocols and enums only, no classes. The framework hides every symbol
+//   except ChromeMain and the app never links it, so nothing in Swift may
+//   reference an engine class. Both sides meet through the Objective-C
+//   runtime: the hook finds the Swift embedder with
+//   NSClassFromString(@"ArktShellEmbedder"), and the facade hands Swift
+//   objects of private classes typed as these protocols.
+// - Every protocol is main-thread only (NS_SWIFT_UI_ACTOR). On macOS
+//   Chromium's browser UI thread is the main thread.
+// - Two byte-identical copies: engine/arkt/api/arkt_engine.h and
+//   app/ArktShell/ShellKit/Sources/ArktEngineABI/include/arkt_engine.h. A
+//   change is one pull request that both lanes approve and that edits both.
+//
+// Events are delivered in batches from a posted task, never from inside a
+// Chromium notification, in Chromium's order (Decision 3).
+
+#import <AppKit/AppKit.h>
+#import <Foundation/Foundation.h>
+
+NS_ASSUME_NONNULL_BEGIN
+
+@protocol ArktBrowserHandle;
+@protocol ArktEngine;
+@protocol ArktEngineEvent;
+@protocol ArktExtensionAction;
+@protocol ArktHistoryEntry;
+@protocol ArktTabHandle;
+@protocol ArktWindowHost;
+@protocol ArktWindowRequest;
+
+// How a tab close treats the page's unload handlers (Decision 11).
+typedef NS_ENUM(NSInteger, ArktCloseMode) {
+  // Chrome's behaviour: beforeunload may hold the close behind a dialog.
+  ArktCloseModeHonourUnloadHandlers = 0,
+  // Closes without firing beforeunload; unload handlers still run without
+  // blocking.
+  ArktCloseModeSkipUnloadHandlers = 1,
+};
+
+// The answer of -[ArktTabHandle closeWithMode:].
+typedef NS_ENUM(NSInteger, ArktCloseResult) {
+  // The tab is gone when the call returns.
+  ArktCloseResultClosed = 0,
+  // Unload processing holds the close (a dialog, an unload handler, attached
+  // DevTools, or a call made inside a nested run loop). The tab stays listed
+  // with isClosing until a TabClosed or a CloseCancelled event.
+  ArktCloseResultHeld = 1,
+};
+
+// Why a tab closed (Decision 12). None on every event other than TabClosed.
+typedef NS_ENUM(NSInteger, ArktCloseReason) {
+  ArktCloseReasonNone = 0,
+  // This client asked (closeWithMode:).
+  ArktCloseReasonClient = 1,
+  // The page closed itself (window.close()).
+  ArktCloseReasonPage = 2,
+  // An extension closed it (chrome.tabs.remove, chrome.windows.remove).
+  ArktCloseReasonExtension = 3,
+  // Its window is being closed.
+  ArktCloseReasonWindowClosing = 4,
+  // The application is quitting.
+  ArktCloseReasonAppTerminating = 5,
+};
+
+// Who created a tab.
+typedef NS_ENUM(NSInteger, ArktTabOrigin) {
+  // createTabWithURL:active: or duplicate on a handle.
+  ArktTabOriginClient = 0,
+  // The engine on its own: a link with target=_blank, window.open,
+  // chrome.tabs.create, a startup URL.
+  ArktTabOriginEngine = 1,
+};
+
+// What an ArktEngineEvent reports. Tab events carry `tab` and `browser`;
+// window events carry `browser` only.
+typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
+  // A tab was inserted. Values: url, title, opener, origin, isActive.
+  ArktEngineEventKindTabCreated = 0,
+  // A tab is gone. Values: closeReason. Nothing follows for this tab.
+  ArktEngineEventKindTabClosed = 1,
+  // The tab became its window's active tab.
+  ArktEngineEventKindActiveTabChanged = 2,
+  // A held close was cancelled; the tab stays open.
+  ArktEngineEventKindCloseCancelled = 3,
+  // Values: url (the visible URL, pending while a navigation starts).
+  ArktEngineEventKindURLChanged = 4,
+  // Values: title.
+  ArktEngineEventKindTitleChanged = 5,
+  // Values: faviconPNG (nil clears it).
+  ArktEngineEventKindFaviconChanged = 6,
+  // Values: isLoading.
+  ArktEngineEventKindLoadingChanged = 7,
+  // Values: canGoBack, canGoForward.
+  ArktEngineEventKindHistoryChanged = 8,
+  // The tab's contents were replaced (crash recovery, prerender). The
+  // handle and its containerView stay the same; sessionId may change.
+  ArktEngineEventKindTabReplaced = 9,
+  // The tab moved to another window (`browser` is the new one) or index.
+  ArktEngineEventKindTabMoved = 10,
+  // A window was created and is listed in -[ArktEngine browsers].
+  ArktEngineEventKindWindowOpened = 11,
+  // A window is gone, after the TabClosed events of its tabs.
+  ArktEngineEventKindWindowClosed = 12,
+  // The extension action list of `browser` changed.
+  ArktEngineEventKindExtensionActionsChanged = 13,
+};
+
+// Why the engine asks the embedder for a window host.
+typedef NS_ENUM(NSInteger, ArktWindowRequestKind) {
+  // chrome.windows.create, or a tab an extension moves to a new window.
+  ArktWindowRequestKindExtension = 0,
+  // A page asked (window.open with window features).
+  ArktWindowRequestKindPage = 1,
+  // Dock reopen, or a new window from a Chromium menu command.
+  ArktWindowRequestKindReopen = 2,
+  // A URL passed at startup or opened by another application.
+  ArktWindowRequestKindStartupURL = 3,
+};
+
+// One recorded engine change, as plain values. Fields that do not apply to
+// the kind are nil, NO or ArktCloseReasonNone.
+NS_SWIFT_UI_ACTOR
+@protocol ArktEngineEvent <NSObject>
+@property(nonatomic, readonly) ArktEngineEventKind kind;
+@property(nonatomic, readonly, nullable) id<ArktTabHandle> tab;
+@property(nonatomic, readonly, nullable) id<ArktBrowserHandle> browser;
+@property(nonatomic, readonly) ArktCloseReason closeReason;
+@property(nonatomic, readonly, nullable, copy) NSURL* url;
+@property(nonatomic, readonly, nullable, copy) NSString* title;
+@property(nonatomic, readonly, nullable, copy) NSData* faviconPNG;
+@property(nonatomic, readonly) BOOL isLoading;
+@property(nonatomic, readonly) BOOL canGoBack;
+@property(nonatomic, readonly) BOOL canGoForward;
+@property(nonatomic, readonly, nullable) id<ArktTabHandle> opener;
+@property(nonatomic, readonly) ArktTabOrigin origin;
+@property(nonatomic, readonly) BOOL isActive;
+@end
+
+// A request for a window the engine creates on its own, after
+// -[ArktEngine embedderReady] (Decision 2).
+NS_SWIFT_UI_ACTOR
+@protocol ArktWindowRequest <NSObject>
+@property(nonatomic, readonly) ArktWindowRequestKind kind;
+// The window the request came from, when there is one.
+@property(nonatomic, readonly, nullable) id<ArktBrowserHandle> opener;
+// The requested frame in screen coordinates; meaningful only when hasBounds.
+@property(nonatomic, readonly) NSRect bounds;
+@property(nonatomic, readonly) BOOL hasBounds;
+// Opaque profile identifier (one profile in week 3).
+@property(nonatomic, readonly, copy) NSString* profileId;
+@property(nonatomic, readonly, nullable, copy) NSURL* initialURL;
+@end
+
+// One extension toolbar action of a window, as plain values (Decision 10).
+NS_SWIFT_UI_ACTOR
+@protocol ArktExtensionAction <NSObject>
+@property(nonatomic, readonly, copy) NSString* actionId;
+@property(nonatomic, readonly, copy) NSString* name;
+// The 16 pt icon at 2x, PNG.
+@property(nonatomic, readonly, nullable, copy) NSData* iconPNG;
+@property(nonatomic, readonly) BOOL isEnabled;
+@end
+
+// One back or forward history entry of a tab.
+NS_SWIFT_UI_ACTOR
+@protocol ArktHistoryEntry <NSObject>
+@property(nonatomic, readonly, copy) NSURL* url;
+@property(nonatomic, readonly, copy) NSString* title;
+@end
+
+// The embedder seam of an engine window (week 2's protocol, moved here).
+// The engine never creates or lays out the window: it asks its host for the
+// NSWindow and for the fallback view, and sets the blocks below.
+NS_SWIFT_UI_ACTOR
+@protocol ArktWindowHost <NSObject>
+@property(nonatomic, readonly) NSWindow* window;
+// Fallback for the tab-modal dialog host and for the contents size when no
+// tab container is mounted. Never a mount point the engine fills: embedder
+// hosts mount tab containers themselves (Decision 6).
+@property(nonatomic, readonly) NSView* cardView;
+// Set by the engine. The host calls it when the user asks to close the
+// window (close button, Close Window menu item) and never closes the window
+// itself: the engine closes the Browser and then releases the host.
+@property(nonatomic, nullable, copy) void (^closeRequested)(void);
+// Set by the engine. Chrome's main menu sends browser commands
+// (commandDispatch:, tag = command id) down the key window's responder
+// chain; the host answers the commands it does not implement itself through
+// these blocks. `disposition` is a WindowOpenDisposition value.
+@property(nonatomic, nullable, copy) BOOL (^validateCommand)(NSInteger command);
+@property(nonatomic, nullable, copy) void (^executeCommand)
+    (NSInteger command, NSInteger disposition);
+
+@optional
+// Placeholder host only. Set by the engine; the host calls it when the user
+// picks a tab in its own tab list.
+@property(nonatomic, nullable, copy) void (^activateTab)(int32_t tabId);
+// Placeholder host only: tab list changes, in order. The elements are
+// ArktTabEvent objects (arkt/browser/arkt_window_host.h), a class this header
+// cannot name.
+- (void)tabListChanged:(NSArray*)events;
+@end
+
+// A tab. The handle is the tab's identity for its whole life, across contents
+// replacement and moves between windows (Decision 5).
+NS_SWIFT_UI_ACTOR
+@protocol ArktTabHandle <NSObject>
+// The tab's stable container. The current contents view fills it; the
+// embedder mounts and removes it (Decision 6).
+@property(nonatomic, readonly) NSView* containerView;
+// The Chromium session id (what chrome.tabs reports). Can change when the
+// contents are replaced; never the Swift identity.
+@property(nonatomic, readonly) int32_t sessionId;
+// The window the tab is in; nil once it has closed.
+@property(nonatomic, readonly, nullable) id<ArktBrowserHandle> browser;
+@property(nonatomic, readonly, nullable, copy) NSURL* url;
+@property(nonatomic, readonly, copy) NSString* title;
+@property(nonatomic, readonly, nullable, copy) NSData* faviconPNG;
+@property(nonatomic, readonly) BOOL isLoading;
+@property(nonatomic, readonly) BOOL canGoBack;
+@property(nonatomic, readonly) BOOL canGoForward;
+// Back and forward history, nearest first: backEntries[0] is one step back,
+// forwardEntries[0] one step forward (EngineClient.history(of:), contract
+// rule 9).
+@property(nonatomic, readonly, copy) NSArray<id<ArktHistoryEntry>>* backEntries;
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktHistoryEntry>>* forwardEntries;
+@property(nonatomic, readonly, nullable) id<ArktTabHandle> opener;
+@property(nonatomic, readonly) ArktTabOrigin origin;
+@property(nonatomic, readonly) BOOL isActive;
+// A held close is pending.
+@property(nonatomic, readonly) BOOL isClosing;
+// A close with ArktCloseModeHonourUnloadHandlers would be held now.
+@property(nonatomic, readonly) BOOL wouldHoldClose;
+
+- (void)navigateToURL:(NSURL*)url;
+- (void)reload;
+// No-ops when the tab cannot go back or forward.
+- (void)goBack;
+- (void)goForward;
+// -1 is one step back, +1 one step forward; 0 or out of range is a no-op
+// (EngineClient.goToHistory(_:offset:)).
+- (void)goToHistoryOffset:(NSInteger)offset
+    NS_SWIFT_NAME(goToHistory(offset:));
+// Makes the tab its window's active tab.
+- (void)activate;
+- (ArktCloseResult)closeWithMode:(ArktCloseMode)mode NS_SWIFT_NAME(close(mode:));
+// Makes the contents the first responder.
+- (void)focus;
+// A new tab next to this one with its URL, title and back and forward
+// history, reported with TabCreated and origin Client
+// (EngineClient.duplicateTab(_:), contract rule 10); nil when the tab cannot
+// be duplicated.
+- (nullable id<ArktTabHandle>)duplicate;
+@end
+
+// An engine window (one Browser).
+NS_SWIFT_UI_ACTOR
+@protocol ArktBrowserHandle <NSObject>
+// The Browser's session id (what chrome.windows reports).
+@property(nonatomic, readonly) int32_t windowId;
+@property(nonatomic, readonly) id<ArktWindowHost> host;
+// In tab strip order.
+@property(nonatomic, readonly, copy) NSArray<id<ArktTabHandle>>* tabs;
+@property(nonatomic, readonly, nullable) id<ArktTabHandle> activeTab;
+// Returns the new tab at once; a nil URL opens about:blank.
+- (id<ArktTabHandle>)createTabWithURL:(nullable NSURL*)url
+                               active:(BOOL)active
+    NS_SWIFT_NAME(createTab(url:active:));
+// Closes the Browser after unload processing of its tabs. A held tab whose
+// close is cancelled keeps the window open (CloseCancelled, no
+// WindowClosed).
+- (void)close;
+@end
+
+// The facade. Created by the hook and handed to -[ArktEngineEmbedder
+// engineDidStart:].
+NS_SWIFT_UI_ACTOR
+@protocol ArktEngine <NSObject>
+// The shell's session exists: create the queued engine-initiated windows,
+// in order (Decision 2).
+- (void)embedderReady;
+// The shell failed to start: drop the queue. The shell then quits.
+- (void)embedderFailed;
+@property(nonatomic, readonly, copy) NSArray<id<ArktBrowserHandle>>* browsers;
+// Creates a Browser in the host's window, synchronously.
+- (id<ArktBrowserHandle>)createBrowserWithHost:(id<ArktWindowHost>)host
+    NS_SWIFT_NAME(createBrowser(host:));
+- (NSArray<id<ArktExtensionAction>>*)extensionActionsForBrowser:
+    (id<ArktBrowserHandle>)browser NS_SWIFT_NAME(extensionActions(in:));
+// Runs the action; its popup is anchored to `anchor`.
+- (void)runExtensionAction:(NSString*)actionId
+                 inBrowser:(id<ArktBrowserHandle>)browser
+                    anchor:(NSView*)anchor
+    NS_SWIFT_NAME(runExtensionAction(_:in:anchor:));
+// Every sink receives every batch, in order. Returns a token for
+// removeEventSink:.
+- (id<NSObject>)addEventSink:
+    (void (^)(NSArray<id<ArktEngineEvent>>* events))sink;
+- (void)removeEventSink:(id<NSObject>)token;
+
+// Test API (Task W3-5 step 5). Enabled only at run time by
+// --arkt-engine-test-api; without the switch every call is a logged no-op
+// whose completion reports an error.
+@property(nonatomic, readonly) BOOL testAPIEnabled;
+// Runtime.evaluate semantics; `result` is the JSON-compatible value.
+- (void)evaluateScript:(NSString*)script
+                 inTab:(id<ArktTabHandle>)tab
+           userGesture:(BOOL)userGesture
+            completion:(void (^)(id _Nullable result,
+                                 NSError* _Nullable error))completion
+    NS_SWIFT_NAME(evaluateScript(_:in:userGesture:completion:))
+        NS_SWIFT_DISABLE_ASYNC;
+// Answers the tab's pending JavaScript dialog. Returns NO when none is
+// pending.
+- (BOOL)answerDialogInTab:(id<ArktTabHandle>)tab
+                   accept:(BOOL)accept NS_SWIFT_NAME(answerDialog(in:accept:));
+@end
+
+// Implemented by the Swift app: @objc(ArktShellEmbedder), in the main
+// executable. The hook looks the class up by name; absent, the engine keeps
+// its placeholder host.
+NS_SWIFT_UI_ACTOR
+@protocol ArktEngineEmbedder <NSObject>
++ (id<ArktEngineEmbedder>)sharedEmbedder NS_SWIFT_NAME(sharedEmbedder());
+// Records the facade and starts the shell. The shell calls embedderReady or
+// embedderFailed when its start finishes.
+- (void)engineDidStart:(id<ArktEngine>)engine;
+// A host for a window the engine creates on its own. Called inside Browser
+// construction: build the window and return its host, never call the engine
+// before the WindowOpened event.
+- (id<ArktWindowHost>)hostForEngineWindowRequest:
+    (id<ArktWindowRequest>)request NS_SWIFT_NAME(host(for:));
+// Quit started (the first Browser closing while trying to quit); the windows
+// still exist.
+- (void)engineWillBeginTerminating;
+// The quit was cancelled (a held beforeunload, or the user).
+- (void)engineDidCancelTerminating;
+// The application is terminating. Call `completion` when the shell has
+// flushed; the engine waits at most 5 s.
+- (void)engineWillTerminate:(void (^)(void))completion
+    NS_SWIFT_DISABLE_ASYNC;
+@end
+
+NS_ASSUME_NONNULL_END
+
+#endif  // ARKT_API_ARKT_ENGINE_H_

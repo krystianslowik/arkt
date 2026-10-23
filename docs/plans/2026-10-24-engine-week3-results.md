@@ -123,3 +123,78 @@ lines"); run 2 has no `ERROR` line. No probe process left afterwards.
    shell is idle when they run, and the W3-3 gate should add "facade batch arrives while a Swift-opened `NSAlert` is
    up" next to its existing "Swift modal inside a batch" case.
 5. Plan step 3's `grep` needs `-F` (above); W3-3's `nm -u` check has the same `$` and should also use `-F`.
+
+## W3-2: facade header and its Swift module
+
+Date 2026-10-24. Branch `engine/33-w3-2-facade` off `main`. No Chromium build, no engine worktree; `$CR` not touched.
+Swift builds used a scratch path on the Chromium disk at `nice -n 10`.
+
+**Frozen.** The plan freezes the header after the class lookup. W3-0a recorded the precondition the handshake rests on:
+the `@objc` probe class is defined in the app binary (`_OBJC_CLASS_$_ArktShellEmbedderProbe`, `__objc_data`), so a
+Swift class in the main executable is registered with the Objective-C runtime and reachable by
+`NSClassFromString` once loaded. The runtime lookup from the hook itself is W3-0 step 3; if it ever logs `absent` in
+the app, W3-0 stops and the handshake is redesigned with the maintainer (Decision 1), which reopens this header anyway.
+
+Files:
+- `engine/arkt/api/arkt_engine.h` and its byte-identical copy
+  `app/ArktShell/ShellKit/Sources/ArktEngineABI/include/arkt_engine.h` with `module.modulemap`. Protocols
+  `ArktEngineEmbedder`, `ArktEngine`, `ArktBrowserHandle`, `ArktTabHandle`, `ArktWindowHost`, `ArktWindowRequest`,
+  `ArktEngineEvent`, `ArktExtensionAction`, `ArktHistoryEntry`; enums `ArktCloseMode`, `ArktCloseResult`,
+  `ArktCloseReason`, `ArktTabOrigin`, `ArktEngineEventKind`, `ArktWindowRequestKind`. Every protocol is
+  `NS_SWIFT_UI_ACTOR` (imports as `@MainActor`), nullability is annotated (`NS_ASSUME_NONNULL`), and selectors carry
+  `NS_SWIFT_NAME`s (`createTab(url:active:)`, `close(mode:)`, `goToHistory(offset:)`, `host(for:)`, ...).
+- Beyond the plan's list, for EngineClient's rules 9 and 10 (#81, pull request #238): `ArktHistoryEntry`,
+  `backEntries` / `forwardEntries` (nearest first, as `TabHistory`), `goToHistoryOffset:` and `duplicate` on the tab
+  handle. Also `removeEventSink:` (so several `ChromiumEngine` instances over one facade can stop observing, W3-9),
+  `testAPIEnabled`, the window `host` on the browser handle, and two event kinds, `TabReplaced` and `TabMoved`.
+- `ArktWindowHost` moved from `arkt/browser/arkt_window_host.h`, which now imports the facade header and keeps
+  `ArktTabEvent`. The placeholder-only `activateTab` block and `tabListChanged:` are `@optional`; `tabListChanged:`
+  takes an untyped `NSArray*` (its elements are `ArktTabEvent`, a class the header cannot name). The engine blocks
+  (`closeRequested`, `validateCommand`, `executeCommand`) are `nullable`, as the engine nils them on teardown.
+- `ArktEngineABI` is a C-family SwiftPM target; SwiftPM needs one source file per such target
+  (`out/Products/Debug/ArktEngineABI.o` missing without it), so `arkt_engine_abi.m` imports the header and defines
+  nothing.
+- `ArktEngineABITests/ConformanceTests.swift` (12 tests): Swift `NSObject` classes implementing every protocol, a
+  scripted facade that delivers one batch per flush, an event batch and window requests, close modes, history and
+  duplicate, the termination seams and the embedder lookup by runtime name.
+- `IsolationTests/EngineABIIsolationTests.swift` (8 tests): only `Sources/ChromiumEngineKit`,
+  `Tests/ChromiumEngineKitTests` and `Tests/ArktEngineABITests` import `ArktEngineABI`; only those targets depend on
+  it in `Package.swift`; no product and not `project.yml` names it; the two header copies are byte-identical; the
+  header has no `#include`, `namespace`, `std::`, `template`, `@interface`, `@class` or `@implementation`, and imports
+  only AppKit and Foundation. Checked to fail: an import from ShellUI, a dependency from `Motion` and one byte added
+  to the copy each fail their test.
+
+Acceptance:
+
+```
+$ clang -fsyntax-only -fobjc-arc -x objective-c   -isysroot $(xcrun --show-sdk-path) engine/arkt/api/arkt_engine.h   # exit 0
+$ clang -fsyntax-only -fobjc-arc -x objective-c++ -isysroot $(xcrun --show-sdk-path) engine/arkt/api/arkt_engine.h   # exit 0
+$ grep -E '#include|namespace|std::|template|@interface' engine/arkt/api/arkt_engine.h                                # no output, exit 1
+$ swift test --filter 'IsolationTests|ArktEngineABITests'
+Test run with 23 tests in 3 suites passed      (IsolationTests: 15 before, + 8)
+Test run with 12 tests in 1 suite passed       (ArktEngineABITests)
+```
+
+`swift test --skip ShellKitGUITests`: baseline 461 tests (`main` at `d63d1a3`), now 481 (baseline + 20), all passing.
+
+Engine side, not built (no Chromium build in this task): `arkt_window_host.h`, `arkt_placeholder_window_host.h`,
+`arkt_window_host.mm` and `arkt_tab_list_view.mm` compile with `clang++ -fsyntax-only -fobjc-arc -std=c++20 -Werror
+-Wall -Wextra -Wobjc-missing-property-synthesis -Wnullability-completeness -I engine`, together with a file that
+repeats `ArktBrowserWindow`'s and `ArktPlaceholderWindowHost`'s uses of the moved protocol (`@synthesize` of the
+optional `activateTab`, `tabListChanged:` with `NSArray<ArktTabEvent*>*`, block assignments and `nil` resets through
+`id<ArktWindowHost>`). The header is not yet in a `BUILD.gn` target; W3-3 creates `engine/arkt/api/BUILD.gn` and its
+first incremental `out/Spike` build is the real check.
+
+Binary check without the framework (the app-binary variant stays with W3-3), with `-F` as W3-0a recorded:
+
+```
+$ nm -u <scratch>/out/Products/Debug/ArktEngineABITests.xctest/Contents/MacOS/ArktEngineABITests | grep -cF '_OBJC_CLASS_$_Arkt'
+0
+$ nm -m <same binary> | grep -F 'OBJC_CLASS_$_Arkt'
+000000000004e218 (__DATA,__objc_data) external _OBJC_CLASS_$_ArktEngineABITestEmbedder
+```
+
+The conformance tests reference no engine class; the only `Arkt` class symbol is the test's own embedder, defined.
+
+Plan: contract rules 9 and 10 now exist on `main` (#81, pull request #238: history and `duplicateTab`), so the plan's
+new rules are renumbered 11-16 (W3-1, W3-6 and W3-9 updated; the runner's target is 16/16), in a separate commit.
