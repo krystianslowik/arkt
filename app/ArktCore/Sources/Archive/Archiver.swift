@@ -38,6 +38,18 @@ public enum Archiver {
     return ArchivedItem(reason: reason, archivedAt: date, source: source, section: section, snapshot: snapshot)
   }
 
+  /// Removes Space `id` (decision on #86: its Pinned items, then its Today items, go to the archive with reason
+  /// `.manual`, each top-level item as one entry) and returns the entries in sidebar order. Unknown ids archive
+  /// nothing. The entries keep `.space(id)` as source, so a later restore uses its default rules in the fallback
+  /// Space. Asking for confirmation is the caller's job.
+  public static func removeSpace(_ id: SpaceID, from sidebar: inout Sidebar, at date: Date) -> [ArchivedItem] {
+    guard sidebar.spaces[id] != nil else { return [] }
+    let roots = sidebar.children(of: .pinned(id)) + sidebar.children(of: .today(id))
+    let items = roots.compactMap { try? archive($0, from: &sidebar, reason: .manual, at: date) }
+    sidebar.removeSpace(id)
+    return items
+  }
+
   /// Puts `item` back (BH-086). With a recorded section the item returns to the same kind of section [I]: Pinned
   /// (appended) or the top of Today in its source Space when that Space still exists, or the end of its profile's
   /// Favorites. Otherwise the default rules apply: folders appended to Pinned (BH-090) [I], tabs and splits at the

@@ -172,6 +172,17 @@ public struct Sidebar: Hashable, Sendable {
     spaceOrder.append(space.id)
   }
 
+  /// Removes Space `id` with every node in its Pinned and Today sections; Favorites belong to the profile and stay.
+  /// An unknown `id` is a silent no-op, like `remove(_:)`. Archiving the Space's items first is the caller's job
+  /// (`Archiver.removeSpace`).
+  public mutating func removeSpace(_ id: SpaceID) {
+    guard spaces.removeValue(forKey: id) != nil else { return }
+    spaceOrder.removeAll { $0 == id }
+    for section in [Location.pinned(id), .today(id)] {
+      for child in childOrder.removeValue(forKey: section) ?? [] { removeSubtree(child) }
+    }
+  }
+
   @discardableResult
   public mutating func addFolder(title: String, in location: Location, createdAt: Date = .now) throws -> NodeID {
     try insert(.folder(FolderItem(title: title)), in: location, createdAt: createdAt)

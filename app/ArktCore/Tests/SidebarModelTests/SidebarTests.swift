@@ -325,4 +325,33 @@ struct SidebarTests {
     #expect(throws: SidebarError.unknownNode(ghost)) { try sidebar.updateTab(ghost, title: "X") }
     #expect(sidebar == before)
   }
+
+  // MARK: - Space removal
+
+  @Test func removeSpaceDropsTheSpaceAndItsSections() throws {
+    var sidebar = try makeSidebar()
+    let work = sidebar.spaceOrder[0]
+    let other = sidebar.addSpace(title: "Other")
+    let kept = try sidebar.addTab(url: url, title: "Kept", in: .today(other))
+    let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: [1, 1], in: .today(work))
+    let pane = try sidebar.addTab(url: url, title: "P", in: .split(split))
+    let favorite = try sidebar.addTab(url: url, title: "F", in: .favorites(profile: "default"))
+    let removed = Set(sidebar.nodes.keys).subtracting([kept, favorite])
+    sidebar.removeSpace(work)
+    #expect(sidebar.spaces[work] == nil)
+    #expect(sidebar.spaceOrder == [other])
+    #expect(sidebar.children(of: .pinned(work)).isEmpty)
+    #expect(sidebar.children(of: .today(work)).isEmpty)
+    #expect(removed.contains(pane))
+    #expect(removed.allSatisfy { sidebar.nodes[$0] == nil })
+    #expect(Set(sidebar.nodes.keys) == [kept, favorite])
+    #expect(Set(sidebar.childOrder.keys) == [.today(other), .favorites(profile: "default")])
+  }
+
+  @Test func removeUnknownSpaceIsNoOp() throws {
+    var sidebar = try makeSidebar()
+    let before = sidebar
+    sidebar.removeSpace(SpaceID())
+    #expect(sidebar == before)
+  }
 }
