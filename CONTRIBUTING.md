@@ -43,6 +43,7 @@ the area's plan and results files current. Anyone may work in any area.
 | Core | `area:core` | `app/ArktCore` (SidebarModel, Persistence) | @krystianslowik |
 | Engine | `area:engine`, `area:compat` | `engine/` (overlay, patches, tools, branding) | @krystianslowik |
 | Import and archive | `area:import`, `area:archive` | `app/ArktCore/Sources/ArcImport`, `app/ArktCore/Sources/Archive` and their tests | @krystianslowik |
+| Design and brand | `area:design` | `design/` (brand kit, tokens, logos, social images) | @krystianslowik |
 | Docs and plans | `type:chore` | `docs/`, `README.md`, `CONTRIBUTING.md`, `.github/` | @krystianslowik |
 
 When the second developer joins, they add their GitHub handle as owner of the areas they take over, in this table
@@ -59,7 +60,7 @@ become an issue when scheduled. Use the issue templates: feature, bug or task. S
 | Kind | Labels | Meaning |
 |---|---|---|
 | Status | `status:*` (below) | Where the issue is. Exactly one per open issue. |
-| Area | `area:shell`, `area:core`, `area:engine`, `area:import`, `area:archive`, `area:compat` | Which code it touches. One or more. |
+| Area | `area:shell`, `area:core`, `area:engine`, `area:import`, `area:archive`, `area:compat`, `area:design` | Which code it touches. One or more. |
 | Type | `type:feature`, `type:bug`, `type:chore` | What kind of work. Exactly one. |
 | Order | `order:1` ... `order:6` | Priority. Lower runs first (below). |
 

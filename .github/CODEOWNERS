@@ -24,6 +24,10 @@
 # /app/ArktCore/Sources/ArcImport/  @krystianslowik @<second-developer-handle>
 # /app/ArktCore/Sources/Archive/    @krystianslowik @<second-developer-handle>
 
+# Design and brand
+/design/                           @krystianslowik
+# /design/                         @krystianslowik @<second-developer-handle>
+
 # Engine
 /engine/                            @krystianslowik
 # /engine/                          @krystianslowik @<second-developer-handle>
