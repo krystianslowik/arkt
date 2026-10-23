@@ -226,3 +226,98 @@ on the untouched worktree at `5db2b4e` before any change.
 
 - U2 (#165): add `AXID.swift` to the `ArktShellUITests` sources by path and confirm the identifiers in the real
   accessibility tree. That run needs the one-time permission steps 1 and 2 from U0 (developer mode, automation mode).
+
+## U2: UI test target, scheme and the first launch test (#165)
+
+Base: `origin/main` at `5db2b4e`, branch `chore/165-ui-tests-u2`. Same machine as U0; no Chromium build running, so
+`nice -n 10`, `-jobs 4`. Developer mode and Automation Mode (without authentication) were enabled by the maintainer
+before this task.
+
+### What was done
+
+- `project.yml` (own commit): target `ArktShellUITests` (`bundle.ui-testing`, sources `UITests`, depends on
+  `ArktShell`, `TEST_TARGET_NAME: ArktShell`, `dev.arkt.ArktShellUITests`, generated Info.plist) and scheme
+  `ArktShellUITests` (builds `ArktShell` and the UI test target, tests in Debug, coverage off). The `ArktShell` scheme
+  is unchanged.
+- `UITests/Harness/Sandbox.swift`: `<NSTemporaryDirectory()>/arkt-uitest-<UUID>/{data,arc}` and the suite
+  `dev.arkt.uitest.<UUID>`; `environment` gives `ARKT_UITEST=1`, `ARKT_DATA_DIR`, `ARKT_ARC_DIR`,
+  `ARKT_DEFAULTS_SUITE` and, when set, `ARKT_AUTOSAVE_DELAY_MS`. Every path must sit under the temp folder and contain
+  neither `/Library/Application Support/` nor `Arc` (case sensitive), or the sandbox throws. `remove()` deletes the
+  folder and the suite's persistent domain (only for `dev.arkt.uitest.` names). `listing()` gives names and sizes only.
+- `UITests/Harness/Waits.swift`: `waitFor(_:)`, `waitFor(_:value:)`, `waitFor(_:label:)`, `waitForEnabled`,
+  `waitForSelected`, `waitUntilGone`, `waitFor(app, state)`, all one `XCTNSPredicateExpectation` with `XCTWaiter`;
+  10 s default times `ARKT_UITEST_TIMEOUT_SCALE`.
+- `UITests/Harness/ArktUITestCase.swift`: `continueAfterFailure = false`. `makeApp()` resolves the bundle
+  (`ARKT_UITEST_APP`, else `ArktShell.app` next to the runner) and launches it with `XCUIApplication(url:)` in both
+  cases, so the bundle whose Info.plist was checked is the one that runs. It throws before creating the proxy when
+  `ArktEnvironmentOverrides` is not `YES`, and when an app with the same bundle identifier is already running
+  (`launch()` would terminate it). `launch` sets the sandbox environment and the Rules launch arguments, then waits for
+  the window (`app.windows.firstMatch` until `shell.window` lands with U4a, #167). `quit` activates the app, waits for
+  `.runningForeground`, then types Cmd-Q and waits for `.notRunning`. A tear-down block attaches, on failure only, the
+  window screenshot, the accessibility tree and the sandbox listing (`.keepAlways`), terminates the app if it still
+  runs and removes the sandbox. A test launches into one sandbox; a relaunch reuses it, a second sandbox throws.
+- `UITests/LaunchTests.swift`: `test_E_launchOnEmptyDataFolderShowsWindowAndQuitsCleanly`.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `xcodebuild ... -scheme ArktShellUITests ... test` (incremental) | `** TEST SUCCEEDED **`, `Executed 1 test, with 0 failures`; test 4.6 s, command 9.1 s wall |
+| Same from a clean derived data folder | `** TEST SUCCEEDED **`, 1 test; test 5.1 s, command 38.8 s wall (build included) |
+| No sleeps, no URLs in `UITests` | `grep -rnE '\b(sleep\|usleep\|Thread\.sleep\|Task\.sleep)\b'` and `grep -rn http` on `UITests`: 0 hits |
+| Import layering | the workflow's `Check import layering` step, run locally: `Import layering OK` |
+| Refusal probe | `TEST_RUNNER_ARKT_UITEST_APP` pointed at a scratch bundle that holds only a copy of the Debug Info.plist with `ArktEnvironmentOverrides = NO`: the test fails with "Fake.app does not declare ArktEnvironmentOverrides = YES; refusing to launch", nothing is launched |
+| Failure artifacts probe | a temporary `XCTFail` after launch (reverted, not committed): attachments `window`, `accessibility tree`, `sandbox listing`; then the app was terminated and the sandbox removed. A passing run adds no attachment |
+| `ArktShell` scheme unchanged | generated `ArktShell.xcscheme` from this branch and from `origin/main`'s `project.yml`: `diff` prints nothing |
+| ArktCore | `nice -n 10 swift test -j 4`: pass, 336 tests (84 + 97 + 59 + 96), no package change |
+| ShellKit pure | `nice -n 10 swift test -j 4 --skip ShellKitGUITests`: pass, 416 tests (176 + 33 + 15 + 4 + 22 + 166) on current `main`, no package change |
+| `git status` | only `project.yml` and `UITests/`; `ArktShell.xcodeproj` and `build/` stay ignored |
+
+Real data, read-only checks from the shell before and after all runs:
+
+| Value | Before | After |
+|---|---|---|
+| `defaults export dev.arkt.ArktShell - \| shasum -a 256` | `a75631db...2abb3` | `a75631db...2abb3` (unchanged, same as U1) |
+| `~/Library/Application Support/Arkt` | absent | absent |
+| `~/Library/Preferences/dev.arkt.uitest.*` | none | none |
+| `$TMPDIR/arkt-uitest-*` | none | none |
+
+### First-run permission prompts
+
+- State before the run: `DevToolsSecurity -status` "Developer mode is currently enabled."; `automationmodetool`
+  "Automation Mode is disabled." and "This device DOES NOT REQUIRE user authentication to enable Automation Mode."
+  After the runs `automationmodetool` still prints "Automation Mode is disabled.", so it is not left on between runs.
+- The first `xcodebuild test` passed without any prompt blocking it and without any manual step during the run. No
+  Accessibility or Automation grant had to be added by hand for the run from the terminal.
+
+### Signing probe (plan step 7)
+
+`build-for-testing` with the base identity (`CODE_SIGN_IDENTITY: "-"`, no command-line signing settings):
+`codesign -dv` shows `Signature=adhoc`, `TeamIdentifier=not set` for both `ArktShellUITests-Runner.app`
+(`dev.arkt.ArktShellUITests.xctrunner`) and `ArktShell.app`. The runner launched and drove the app; no signing
+override was needed.
+
+### Deviations from the plan
+
+- `ArktUITestCase` is `@MainActor` because `XCUIApplication` is main-actor isolated in this SDK. Clean-up runs as a
+  main-actor tear-down block registered by `launch` instead of an overridden `tearDown`: a nonisolated `tearDown`
+  cannot hand the test case to the main actor under Swift 6 checking.
+- The default `ArktShell` target is launched through `XCUIApplication(url:)` too (the plan has `XCUIApplication()`
+  for that case), so the Info.plist check and the launch always use the same bundle.
+- `makeApp()` also refuses to launch while an app with the bundle's identifier is running, because `launch()`
+  terminates a running instance, which could be a developer's own Debug build.
+
+### Notes for U3
+
+- Runner environment variables reach the test runner only through `xcodebuild`'s process environment:
+  `TEST_RUNNER_ARKT_UITEST_APP=... xcodebuild ... test` worked, while the same value passed as a build-setting
+  argument (`xcodebuild ... TEST_RUNNER_ARKT_UITEST_APP=... test`) did not reach the runner (the refusal probe
+  passed instead of failing). The CI step should therefore set `TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE: 3` in the
+  step's `env:` rather than on the command line.
+
+### What remains
+
+- Nothing for U2. The CI job is U3; `shell.window` replaces `windows.firstMatch` once U4a (#167) lands.
+- `Sandbox.remove()` clears the suite with `removePersistentDomain`, but the launch test never writes a defaults key,
+  so a populated suite was not exercised. U1 saw `defaults delete` leave an empty plist; U8 (Toolbar toggle) is the
+  first test that shows whether an empty `dev.arkt.uitest.*.plist` stays behind.
