@@ -7,18 +7,26 @@ template (`.github/ISSUE_TEMPLATE/rebase.md`), whose body is the checklist at th
 
 Shell is zsh. Set once per shell, in addition to the variables in `engine/README.md`:
 
-    export OLD=156.0.8078.48        # the current pin ($PIN in engine/README.md)
+    export OLD=$PIN                 # the current pin (engine/README.md)
     export NEW=<new tag>            # for example 156.0.8078.60 (security) or 157.0.xxxx.yy (milestone)
 
 ## 1. Trigger and deadline
 
 | Kind | Trigger | Deadline |
 |---|---|---|
-| Security | Chrome Stable (or Extended Stable, while the pin is on an Extended milestone) ships a new build of the pinned milestone with security fixes: the Chrome Releases blog post "Stable Channel Update for Desktop", Mac row on the Chromium Dash releases page. | Merged and installed within 7 days of the Chrome release (maintainer decision on #138). |
-| Milestone | A new Chrome milestone reaches Stable. | As planned on the roadmap (#30). |
+| Security | Chrome ships a new build of the pinned milestone with security fixes (which channel: Policy a): the Chrome Releases blog post "Stable Channel Update for Desktop", Mac row on the Chromium Dash releases page. | Merged and installed within 7 days of the Chrome release. |
+| Milestone | A new Chrome milestone reaches Stable. | As planned on the roadmap (#30), except Policy b. |
 
-When Chrome stops shipping fixes for the pinned milestone, the next security release is on the new milestone, and
-the milestone rebase then carries the 7-day deadline.
+### Policy
+
+The rebase rules every other document points to (maintainer decision on #138):
+
+- Every Chrome security release of the pinned milestone is rebased, merged and installed within 7 days of the
+  Chrome release; milestone rebases follow the roadmap (#30).
+- a. While the pin is on an Extended Stable milestone, the security path follows the Extended Stable releases of
+  that milestone.
+- b. When the pinned milestone stops receiving fixes, the next security release is on a newer milestone, and that
+  milestone rebase takes the 7-day deadline.
 
 Whoever sees the release opens the rebase issue the same day (template above), with the Chrome release date and
 the deadline in the title line of the body. The issue is claimed like any other (`CONTRIBUTING.md`, section 3).
@@ -54,7 +62,7 @@ by the merged rebase pull request.
    (`CONTRIBUTING.md`, section 8). Comment in the rebase issue "Exporting patches now" and in every open engine pull
    request (`gh pr list --state open`, branches `engine/*`). Those pull requests rebase and re-export after this one
    merges; no other `.patches` change lands while it is open.
-2. Clean state. `git -C $CR status --short` prints nothing, the Apply guard in `engine/README.md` passes (branch
+2. Clean state. `git -C $CR status --short --untracked-files=no` prints nothing, the Apply guard in `engine/README.md` passes (branch
    `arkt` commit count equals the `.patches` line count), and no build or engine process is running
    (`ps -axo pid,command | grep -E "out/Spike|out/Arkt" | grep -v grep`).
 3. Worktree. Create the repo worktree from `origin/main` (`CONTRIBUTING.md`, section 4) and point the overlay at it:
@@ -99,10 +107,12 @@ dropped patch).
 
 ### Sync the dependencies
 
-From the gclient root, with `arkt` checked out (gclient leaves the `src` branch alone and syncs the dependencies to
-the new `DEPS`):
+From the gclient root, with `arkt` checked out. Always pin `src` to the tag: `.gclient` names no revision and `arkt`
+tracks no upstream, so a plain `gclient sync` would rebase `arkt` onto `origin/main`. With the tag, the rebase of
+`arkt` onto `$NEW` is a no-op and only the dependencies move to the new `DEPS`:
 
-    cd $CHROMIUM_ROOT/chromium && gclient sync -D --no-history --with_tags -j 4 > $CHROMIUM_ROOT/sync-$NEW.log 2>&1
+    cd $CHROMIUM_ROOT/chromium && gclient sync -D --no-history --with_tags -j 4 --revision src@refs/tags/$NEW \
+      > $CHROMIUM_ROOT/sync-$NEW.log 2>&1
     tail -5 $CHROMIUM_ROOT/sync-$NEW.log
     cat $CR/chrome/VERSION        # MAJOR.MINOR.BUILD.PATCH must equal $NEW
 
@@ -219,7 +229,7 @@ Before the merge (a check fails and cannot be fixed by the deadline):
     git -C $CR branch -m arkt arkt-$NEW-failed
     git -C $CR branch -m arkt-$OLD arkt
     git -C $CR checkout arkt
-    cd $CHROMIUM_ROOT/chromium && gclient sync -D --no-history --with_tags -j 4
+    cd $CHROMIUM_ROOT/chromium && gclient sync -D --no-history --with_tags -j 4 --revision src@refs/tags/$OLD
 
 Then rebuild `out/Spike` and `out/Arkt` (incremental), re-sign, and if the new bundle was already installed, restore
 the saved one (`ditto $CHROMIUM_ROOT/releases/Arkt-$OLD.app /Applications/Arkt.app` after removing the new one).
@@ -247,7 +257,7 @@ The body of `.github/ISSUE_TEMPLATE/rebase.md`, repeated here for reference:
 - Announced "Exporting patches now" in this issue and on open engine pull requests
 - Clean `$CR`, Apply guard passes, disk and swap recorded, overlay link checked
 - `arkt` saved as `arkt-<OLD>`; `$NEW` fetched; patches applied (conflicts and dropped patches listed)
-- `gclient sync` done; `chrome/VERSION` equals `$NEW`
+- `gclient sync --revision src@refs/tags/$NEW` done; `chrome/VERSION` equals `$NEW`
 - Export done with `PIN=$NEW`; patch files and `.patches` committed
 - `out/Spike` and `out/Arkt` built, no `FAILED:`; overlay fixes listed
 - Patch budget gate passes; budget table updated

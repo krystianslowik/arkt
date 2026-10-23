@@ -30,7 +30,7 @@ Fresh checkout at the pinned tag; stops at the first patch that fails to apply. 
     if git -C $CR rev-parse -q --verify arkt >/dev/null && [ "$n_commits" != "$n_patches" ]; then
       echo "arkt has unexported commits; run Export first"
     else
-      git -C $CR checkout -B arkt $PIN
+      git -C $CR checkout -B arkt ${PIN:?}
       for p in $(cat $REPO/engine/patches/chromium/.patches); do
         git -C $CR am -3 "$REPO/engine/patches/chromium/$p" || { echo "stopped at $p"; break; }
       done
@@ -57,13 +57,12 @@ After editing upstream files (one commit per patch on branch `arkt`). Patches ar
 The pin moves by rebase only, following `engine/REBASE.md` step by step, tracked in an issue opened from the
 "Chromium rebase" template. In short:
 
-- Trigger: every Chrome Stable security release of the pinned milestone is rebased, merged and installed within
-  7 days of the Chrome release (maintainer decision, #138); milestone rebases follow the roadmap (#30). A security
-  release whose patches apply cleanly and whose overlay builds unchanged takes the fast path (fewer checks).
+- Trigger and deadline: the "Policy" list in `engine/REBASE.md` section 1 (security releases within 7 days). A
+  security release whose patches apply cleanly and whose overlay builds unchanged takes the fast path (fewer checks).
 - Procedure: save branch `arkt` as `arkt-<old tag>`, fetch the new tag (shallow), create a new `arkt` on it and
-  apply `.patches` with `git am -3`, resolving conflicts inside each patch's own commit; `gclient sync`; set `PIN`
-  above to the new tag and run Export. A rebase re-exports every patch, so announce it like any `.patches` change
-  (`CONTRIBUTING.md`, section 8).
+  apply `.patches` with `git am -3`, resolving conflicts inside each patch's own commit; `gclient sync` with
+  `--revision src@refs/tags/<new tag>` (never without it); set `PIN` above to the new tag and run Export. A rebase
+  re-exports every patch, so announce it like any `.patches` change (`CONTRIBUTING.md`, section 8).
 - Gate: `git -C $CR rev-list --count $PIN..arkt` equals the `.patches` line count, the patch budget holds (under 30
   patch files, no new patch, hot-file hunks not grown) and the budget table is updated.
 - Checks: rebuild `out/Spike` and `out/Arkt`, then the engine smoke (design section 5, testing item 5), the W5b

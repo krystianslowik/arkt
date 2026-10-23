@@ -28,7 +28,7 @@ Steps and commands: `engine/REBASE.md` (section numbers in brackets).
 - [ ] Announced "Exporting patches now" here and on every open engine pull request (3)
 - [ ] `$CR` clean, Apply guard passes, overlay link checked, disk and swap recorded (3)
 - [ ] `arkt` saved as `arkt-<old tag>`, new tag fetched, patches applied; conflicts and dropped patches listed (4)
-- [ ] `gclient sync` done; `chrome/VERSION` equals the new tag (4)
+- [ ] `gclient sync --revision src@refs/tags/<new tag>` done; `chrome/VERSION` equals the new tag (4)
 - [ ] `PIN` set in `engine/README.md`; Export done; patch files and `.patches` committed (4)
 - [ ] `out/Spike` and `out/Arkt` built with no `FAILED:` lines; overlay fixes listed (5)
 - [ ] Patch budget gate passes; budget table updated (6)
