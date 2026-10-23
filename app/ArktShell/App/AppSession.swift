@@ -236,8 +236,10 @@ final class AppSession {
     autosaver.needsFlush || archive.hasPendingWrites || (faviconWriter?.needsFlush ?? false)
   }
 
-  /// Stamps visible tabs before the flush (decision 10). E5b fills it in once the window reports its visible nodes.
-  func prepareForTermination() {}
+  /// Runs before the termination flush. Stamping visible tabs (decision 10) comes with E5b, after the stop.
+  func prepareForTermination() {
+    autoArchive.stop()  // stop first: no auto-archive pass may run between the sidebar write and the outbox write
+  }
 
   /// Writes what is pending: the sidebar and the archive outbox together, each bounded by its own flush timeout
   /// (1 s, decision 11); favicons get at most `faviconFlushTimeout` more (they are re-fetched by the engine anyway).

@@ -84,7 +84,20 @@ actor FakeArchiveState: ArchiveStateStoring {
   func setStarted(_ date: Date) { started = date }
   func setSettings(_ settings: ArchiveSettings) { self.settings = settings }
 
+  private var holdsLoads = false
+  private var heldLoads: [CheckedContinuation<Void, Never>] = []
+  /// While true, `resolveAutoArchiveStart` parks until `releaseLoads()`.
+  func holdLoads() { holdsLoads = true }
+  var heldLoadCount: Int { heldLoads.count }
+
+  func releaseLoads() {
+    holdsLoads = false
+    for held in heldLoads { held.resume() }
+    heldLoads = []
+  }
+
   func resolveAutoArchiveStart(now: Date) async throws -> Date {
+    if holdsLoads { await withCheckedContinuation { heldLoads.append($0) } }
     if failsLoads { throw FakeStoreError() }
     if let last = resets.last { return last }
     if started == nil { started = now }

@@ -37,6 +37,8 @@ public final class AutoArchiveTimer {
   private var isStarting = false
   /// The stored clock start and the settings are loaded; no tick archives before that.
   private var isLoaded = false
+  /// Set by `stop()`: no tick archives afterwards, and a `start()` still loading does not begin the loop.
+  private var stopRequested = false
 
   public init(
     coordinator: ArchiveCoordinator,
@@ -53,16 +55,18 @@ public final class AutoArchiveTimer {
   }
 
   /// Loads the clock start and the settings, ticks once, then ticks every `interval`. Throws the store's error and
-  /// then never ticks. A call while starting or running does nothing.
+  /// then never ticks. A call while starting or running does nothing; a `stop()` during the load wins.
   public func start() async throws {
     guard loop == nil, !isStarting else { return }
     isStarting = true
+    stopRequested = false
     defer { isStarting = false }
     let resolved = try await state.resolveAutoArchiveStart(now: now())
     let loaded = try await state.loadArchiveSettings()
     settings = loaded
     clockDidReset(to: resolved)
     isLoaded = true
+    guard !stopRequested else { return }
     tick()
     let (sleep, interval) = (self.sleep, self.interval)
     loop = Task { [weak self] in
@@ -74,7 +78,10 @@ public final class AutoArchiveTimer {
     }
   }
 
+  /// Ends the timer, also while `start()` is still loading; no tick archives afterwards. Termination calls it before
+  /// the flush, so nothing is archived between the sidebar write and the outbox write.
   public func stop() {
+    stopRequested = true
     loop?.cancel()
     loop = nil
   }
@@ -88,7 +95,7 @@ public final class AutoArchiveTimer {
   /// archived.
   @discardableResult
   public func tick() -> [ArchivedItem] {
-    guard isLoaded, let startedAt else { return [] }
+    guard isLoaded, !stopRequested, let startedAt else { return [] }
     let archived = coordinator.runAutoArchive(startedAt: startedAt, settings: settings, exempt: exempt())
     if !archived.isEmpty { onArchived?(archived) }
     return archived

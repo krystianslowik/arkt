@@ -175,6 +175,42 @@ struct AutoArchiveTimerTests {
     #expect(!harness.timer.isRunning)
   }
 
+  @Test func noTickRunsAfterStop() async throws {  // quit: nothing archives during the termination flush
+    let harness = Harness()
+    await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))
+    try await harness.timer.start()
+    await eventually { harness.sleeper.parkedCount == 1 }
+    let tab = try harness.addTodayTab(idleHours: 40)
+
+    harness.timer.stop()
+    harness.sleeper.resume(AutoArchiveTimer.defaultInterval)  // a wake-up racing the stop
+    for _ in 0..<100 { await Task.yield() }
+
+    #expect(harness.timer.tick().isEmpty)
+    #expect(harness.reports.isEmpty)
+    #expect(harness.today == [tab])
+  }
+
+  @Test func stopWhileStartIsLoadingKeepsItStopped() async throws {
+    let harness = Harness()
+    await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))
+    await harness.state.holdLoads()
+    let tab = try harness.addTodayTab(idleHours: 40)
+    let starting = Task { try await harness.timer.start() }
+    await eventually { await harness.state.heldLoadCount == 1 }
+
+    harness.timer.stop()
+    await harness.state.releaseLoads()
+    try await starting.value
+    for _ in 0..<100 { await Task.yield() }
+
+    #expect(!harness.timer.isRunning)
+    #expect(harness.sleeper.parkedCount == 0)
+    #expect(harness.timer.tick().isEmpty)
+    #expect(harness.reports.isEmpty)
+    #expect(harness.today == [tab])
+  }
+
   @Test func startTwiceRunsOneLoop() async throws {
     let harness = Harness()
     try await harness.timer.start()
