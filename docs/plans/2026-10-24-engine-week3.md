@@ -58,7 +58,7 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
 | `$SWT` | a Swift-lane worktree under `arkt-wt/` (one per task, branch per issue); never repoints `$CR/arkt` |
 | `$CR`, `$OUT`, `$PROF` | as in week 2 (`$OUT` = `$CR/out/Spike`) |
 | `$EMB` | `$CHROMIUM_ROOT/embed-week3`: the development bundle layout (W3-0a, W3-3), on the Chromium disk |
-| `$RES` | `$REPO/docs/plans/2026-10-24-engine-week3-results.md` (created in W3-0) |
+| `$RES` | `$REPO/docs/plans/2026-10-24-engine-week3-results.md` (created by W3-0a, pull request #229) |
 
 - **Two lanes, one owner each.** The engine lane owns `engine/`, the `Engine` configuration in `project.yml`,
   `app/ArktShell/App/Engine/` and the `ChromiumEngineKit` target (until W3-9, open decision 5). The Swift lane owns
@@ -84,7 +84,10 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
   uses its own profile and CDP port, and moves its window clear of other apps under test right after launch
   (week-2 results, "Interference"). Never launch without `--user-data-dir`.
 - **No nested loops in engine handlers.** No Swift code runs a modal session, `NSMenu` tracking or any nested run loop
-  from inside an engine event handler or a host-provider call (Decision 3). Present modals from a fresh main-actor turn.
+  from inside an engine event handler or a host-provider call (Decision 3). Open menus and alerts from an AppKit action
+  or event callout, as a sheet (`beginSheetModal`), or through `RunLoop.main.perform(inModes: [.common])`; never
+  synchronously from a `Task` or a `DispatchQueue.main.async` block (a loop opened there starves the main queue,
+  W3-0a).
 - **Contract runs.** `ChromiumEngine` is checked twice: in `swift test` against a scripted facade (W3-6, no
   Chromium), and in the app against the real engine (W3-9, the contract runner).
 - **No personal paths, ids or names** in code, docs, logs that are committed, commits or pull requests.
@@ -135,17 +138,24 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
      `WebContentsObserver`): it records plain-value events and delivers them in one batch from a posted task
      (`base::SequencedTaskRunner::GetCurrentDefault()->PostTask`), in order. A facade call that arrives while the facade
      is inside a notification `CHECK`s.
-   - *Nested run loops.* Swift main-actor jobs run from the main dispatch queue, which drains in every common-mode run
-     loop spin, including native nested loops Chromium enters with its own code on the stack (context menus, `NSAlert`,
-     live resize; Chromium bans its own tasks there, `thread_controller_with_message_pump_impl.cc:389`, `:448`). So
-     facade mutators (`close`, `navigate`, `activate`, `createTab`, `createBrowser`, `closeBrowser`) check
+   - *Nested run loops* (measured in W3-0a, results file). Swift main-actor jobs run from the main dispatch queue. A
+     nested loop opened from an AppKit event, timer or Chromium-source callout (`NSMenu` tracking, `NSAlert`
+     `runModal`) drains it: about 30 main-actor and main-queue ticks in 3 s. A nested loop opened from inside a
+     main-actor job (a `Task` or `DispatchQueue.main.async` block) does not: 0 ticks for the whole menu or alert.
+     Chromium tasks keep running in all four cases (CDP calls never over 33 ms). So Swift code can run while Chromium
+     code that opened a native loop is on the stack (context menus, `NSAlert`, live resize; Chromium bans its own tasks
+     there, `thread_controller_with_message_pump_impl.cc:389`, `:448`); the engine-opened context menu case could not
+     be measured in the spike and stays in the W3-3 gate. Facade mutators (`close`, `navigate`, `activate`, `createTab`, `createBrowser`, `closeBrowser`) check
      `base::RunLoop::IsNestedOnCurrentThread()` and the pump's native nesting; while nested they defer the work through
      `PostTask` and answer accordingly (`close` answers `held`; `createTab` still returns a handle at once and inserts
      it when the posted task runs). Read-only calls are always allowed.
-   - *Swift modals.* A Swift handler that ran a modal inside a facade batch would stall every Chromium UI task (the batch
-     is itself a Chromium task). Rules forbid it ("No nested loops in engine handlers").
-   - W3-0a checks that Swift's main-actor executor runs under Chromium's pump at all; W3-3's gate measures the nested
-     cases.
+   - *Swift menus and modals.* Facade batches are posted Chromium tasks, and Chromium tasks keep running while a Swift
+     menu or modal is up, so engine event handlers can run on the stack of a Swift `NSMenu` or `NSAlert`. Handlers must
+     tolerate that (no assumption that the shell is idle), and the W3-3 gate tests a batch arriving while a Swift
+     `NSAlert` is up. A Swift handler must never open a modal itself inside a batch (Rules, "No nested loops in engine
+     handlers").
+   - W3-0a showed that Swift's main-actor executor runs under Chromium's pump (Risk 1 retired); W3-3's gate measures
+     the remaining nested cases.
 4. **Synchronous parts of the contract stay in Swift.** Contract rule 1 (`.tabCreated` before anything else, visible
    right after `createTab` returns) and rule 4 (`closeTab` is terminal at once when the close is not held) need
    synchronous answers, while engine events arrive one task later (Decision 3). `ChromiumEngine` therefore emits
@@ -370,9 +380,8 @@ table current with the week-2 commands.
 
 ## Risks
 
-1. **Main-actor executor under Chromium's pump.** If `MessagePumpNSApplication` does not drain the main dispatch queue,
-   `Task.sleep` on the main actor never resumes and neither the contract runner nor ShellUI's async launch works.
-   Checked first, in W3-0a, on the existing `Spike` configuration (no Chromium build).
+1. **Main-actor executor under Chromium's pump. Retired by W3-0a (pull request #229):** main-actor tasks and the main
+   queue run under `MessagePumpNSApplication`; the remaining nested-loop cases are in Decision 3 and the W3-3 gate.
 2. **Event order versus the contract.** Rule 2 (title before load end) and rule 6 (favicon cleared before load end on a
    host change) depend on the order of `TitleWasSet`, `DidFinishNavigation`, `DidStopLoading` and favicon callbacks.
    FakeEngine needed a bounded title wait (`titleTimeout`). The facade emits per-tab events in Chromium's order and
@@ -404,7 +413,7 @@ Needs no engine worktree and no Chromium build: it uses the `Spike` configuratio
 
 **Files:**
 - Modify: `app/ArktShell/App/ChromiumSpikeMain.swift` (probe lines only, under `ARKT_CHROMIUM_SPIKE`)
-- Create: `$RES` (if W3-0 has not yet; otherwise append)
+- Create: `$RES` (done in #229)
 
 **Steps:**
 1. In `chromiumSpikeMain()`, before `ChromeMain`: `_ = ArktShellEmbedderProbe.self` for a tiny
@@ -412,7 +421,7 @@ Needs no engine worktree and no Chromium build: it uses the `Spike` configuratio
    .milliseconds(500)); log("ARKT probe: main actor resumed") }` and
    `DispatchQueue.main.async { log("ARKT probe: main queue drained") }`. Nothing touches `NSApplication`.
 2. Build the `Spike` configuration, copy into the Run B layout under `$EMB`, launch with a fresh profile.
-3. `nm -m <app binary> | grep 'OBJC_CLASS_$_ArktShellEmbedderProbe'` shows the class defined in the binary (dead-strip
+3. `nm -m <app binary> | grep -F 'OBJC_CLASS_$_ArktShellEmbedderProbe'` shows the class defined in the binary (dead-strip
    safeguard works).
 
 **Acceptance criteria:** both probe lines appear within 3 s of `ARKT: in-process hook alive`; the process stays alive
@@ -431,7 +440,7 @@ Time-box: 3 h (including one fresh-copy launch).
 
 **Depends on:** #18 merged (pull request #217) and its worktree released.
 
-**Files:** Create or extend `$RES`; modify `engine/arkt/browser/arkt_browser_main_extra_parts.mm` (lookup log only).
+**Files:** Extend `$RES` (`docs/plans/2026-10-24-engine-week3-results.md`, created by #229); modify `engine/arkt/browser/arkt_browser_main_extra_parts.mm` (lookup log only).
 
 **Steps:**
 1. `git worktree add ../arkt-wt/engine-week3 -b engine/33-chromium-engine origin/main`; repoint `$CR/arkt` (week-2 W0
@@ -532,7 +541,7 @@ Drafting can start at once; the header **freezes only after W3-0's class lookup*
   the two header copies differ.
 
 **Verification:** both `clang` commands exit 0; `swift test --filter 'IsolationTests|ArktEngineABITests'` passes.
-W3-3 adds the binary check (`nm -u` on the Engine app lists no `_OBJC_CLASS_$_Arkt*`).
+W3-3 adds the binary check (`nm -u <app binary> | grep -cF '_OBJC_CLASS_$_Arkt'` prints `0`).
 
 **Commit:** the two header copies, the module map, `Package.swift`, the two test files, `arkt_window_host.h`; "Add the
 engine facade header and its Swift module".
@@ -578,7 +587,7 @@ Time-box: 5 h.
 **Acceptance criteria (GATE):**
 - Launch from `$EMB`: `ARKT: embedder class found`, `engineDidStart`, no startup window, `embedderReady` after about
   2 s, process alive 30 s, 0 `FATAL`/`Check failed`; `ARKT: default user data dir` ends in `Arkt Dev Engine`.
-- `nm -u <app binary> | grep -c 'OBJC_CLASS_\$_Arkt'` prints `0`; `nm -m` shows `ArktShellEmbedder` defined.
+- `nm -u <app binary> | grep -cF '_OBJC_CLASS_$_Arkt'` prints `0`; `nm -m <app binary> | grep -F 'OBJC_CLASS_$_ArktShellEmbedder'` shows it defined (`grep -F`: the `$` is literal).
 - Readiness: a launch with a URL argument and a Dock-style reopen (debug switch calling `chrome::NewEmptyWindow`)
   before `embedderReady` are queued and replayed after it (log order: request queued, ready, host asked).
 - Quit: Cmd-Q (CDP `Browser.close` is not the same path; use the menu item through AX after the checks) logs
@@ -586,7 +595,9 @@ Time-box: 5 h.
   after the completion; a quit cancelled by a held `beforeunload` logs `engineDidCancelTerminating` and the process
   stays. No `Check failed` from the keep-alive registry.
 - Re-entrancy probes recorded; facade mutators called during menu tracking or an alert are deferred (no crash, no
-  `CHECK`), and the forbidden case is documented with its stall time.
+  `CHECK`), and the forbidden case is documented with its stall time; a facade batch that arrives while a Swift `NSAlert` (opened from
+  an AppKit action) is up runs its handlers without a crash and the shell state stays consistent; the engine-opened page
+  context menu case (not measurable in W3-0a) is measured here.
 - `out/Spike/Chromium.app` logs `embedder class absent` and the W5c checks still pass; `Debug` unchanged (Rules).
 
 If any readiness or quit seam does not fire as described, stop and record before W3-7 wires the start and quit part.
