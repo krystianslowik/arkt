@@ -273,6 +273,30 @@ final class SplitDragTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// The first pane dropped on the right side moves to the back; its factor follows it.
+  func testDropFirstPaneOnTheRightMovesItLast() throws {
+    var world = try Self.makeWorld(panes: 3)
+    try world.sidebar.setSplitWidthFactors(world.split, [0.5, 0.3, 0.2])
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.panes[1])
+    let overlay = try harness.beginDrag(world.panes[0])
+    let right = harness.point(overlay, 0.9, 0.5)
+
+    guard case .pane(let frame) = overlay.preview(at: right) else {
+      return XCTFail("a pane moving to the back previews its new place")
+    }
+    XCTAssertTrue(overlay.drop(node: world.panes[0], at: right))
+    try harness.endDrag()
+
+    XCTAssertEqual(harness.children(.split(world.split)), [world.panes[1], world.panes[2], world.panes[0]])
+    XCTAssertEqual(harness.layout(of: world.split)?.widthFactors, [0.3, 0.2, 0.5], "factors follow their panes")
+    waitUntil("the reordered split shown with the moved pane focused") {
+      harness.split.focusedIndex == 2 && harness.current == world.panes[0]
+    }
+    XCTAssertEqual(harness.split.paneCards[2].frame, frame, "the preview matched the moved pane's frame")
+    harness.controller.close()
+  }
+
   /// Refused drops: the current tab onto itself, a split row's id, and a pane already where the zone puts it. None
   /// shows a preview or changes the source.
   func testRefusedDropsChangeNothing() throws {

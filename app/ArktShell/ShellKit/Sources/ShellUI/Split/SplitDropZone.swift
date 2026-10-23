@@ -21,11 +21,12 @@ public enum SplitDropZone: Sendable, Equatable {
     return .right
   }
 
-  /// The axis of the split a drop on a plain tab makes.
-  public var axis: SplitAxis { self == .left || self == .right ? .sideBySide : .stacked }
+  /// The orientation of the split a drop on a plain tab makes: side by side for left and right, stacked for top and
+  /// bottom.
+  public var orientation: SplitOrientation { self == .left || self == .right ? .horizontal : .vertical }
 
-  /// `axis` as the stored orientation (decision 1).
-  public var orientation: SplitOrientation { axis == .sideBySide ? .horizontal : .vertical }
+  /// `orientation` as an axis, through the one place that maps it (decision 1).
+  public var axis: SplitAxis { SplitLayout.axis(for: orientation) }
 
   /// The dropped pane goes before the others (left or top) rather than after them.
   public var isBefore: Bool { self == .left || self == .top }
