@@ -50,6 +50,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
   /// does nothing.
   public var onArchive: (@MainActor ([NodeID]) -> Void)?
+  /// Removes a Space (the app's ArchiveCoordinator: its pinned and Today items are archived, decision on #86); Delete
+  /// Space calls it once `confirmSpaceRemoval` said yes. Nil: Delete Space is disabled.
+  public var onRemoveSpace: (@MainActor (SpaceID) -> Void)?
+  /// Asks before Delete Space removes a Space and calls back with the answer. Default: an alert sheet on the window.
+  public var confirmSpaceRemoval: (@MainActor (SpaceRemovalPrompt, @escaping @MainActor (Bool) -> Void) -> Void)?
   /// A tab stopped being visible in this window: another tab became current, or the window closed (decision 10; the
   /// app stamps `lastActiveAt`).
   public var onTabHidden: (@MainActor (NodeID) -> Void)?
@@ -90,6 +95,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error)))
     }
     onNewSpace = { [weak self] in self?.createSpace() }
+    confirmSpaceRemoval = { [weak self] prompt, answer in self?.presentSpaceRemovalSheet(prompt, answer: answer) }
     emptyState.onNewSpace = { [weak self] in self?.onNewSpace?() }
     emptyState.onImport = { [weak self] in self?.onImportFromArc?() }
     window.contentView = root
@@ -470,10 +476,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 }
 
 extension ShellWindowController: NSMenuItemValidation {
-  /// Titles the Toggle Toolbar item for the current state (KB-018) and validates the Split View items (S5). Every
-  /// other item stays enabled, as it was before this controller validated menu items.
+  /// Titles the Toggle Toolbar item for the current state (KB-018) and validates the Split View items (S5) and Delete
+  /// Space (#206). Every other item stays enabled, as it was before this controller validated menu items.
   public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     if let enabled = validateSplitMenuItem(menuItem) { return enabled }
+    if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
     }
