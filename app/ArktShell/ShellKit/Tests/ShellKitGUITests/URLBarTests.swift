@@ -114,6 +114,55 @@ final class URLBarTests: XCTestCase {
     XCTAssertFalse(controller.commandBar.isVisible, "a second press closes it, like Cmd-L")
   }
 
+  /// An event value handed straight to the view's handler; nothing is posted to the window or the system.
+  private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, in bar: URLBarView) throws -> NSEvent {
+    let window = try XCTUnwrap(bar.window)
+    return try XCTUnwrap(NSEvent.mouseEvent(with: type, location: bar.convert(point, to: nil),
+                                            modifierFlags: [], timestamp: 0,
+                                            windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                            clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0))
+  }
+
+  func testClickPressesOnMouseUpInside() throws {
+    let controller = makeController()
+    let bar = controller.urlBar
+    var presses = 0
+    bar.onPress = { presses += 1 }
+    let center = NSPoint(x: bar.bounds.midX, y: bar.bounds.midY)
+    bar.mouseDown(with: try mouseEvent(.leftMouseDown, at: center, in: bar))
+    XCTAssertEqual(presses, 0, "mouse down alone does not press")
+    bar.mouseUp(with: try mouseEvent(.leftMouseUp, at: center, in: bar))
+    XCTAssertEqual(presses, 1)
+  }
+
+  func testReleasingOutsideCancelsThePress() throws {
+    let controller = makeController()
+    let bar = controller.urlBar
+    var presses = 0
+    bar.onPress = { presses += 1 }
+    let center = NSPoint(x: bar.bounds.midX, y: bar.bounds.midY)
+    bar.mouseDown(with: try mouseEvent(.leftMouseDown, at: center, in: bar))
+    bar.mouseUp(with: try mouseEvent(.leftMouseUp, at: NSPoint(x: bar.bounds.maxX + 40, y: center.y), in: bar))
+    XCTAssertEqual(presses, 0, "dragging out before release cancels")
+    bar.mouseUp(with: try mouseEvent(.leftMouseUp, at: center, in: bar))
+    XCTAssertEqual(presses, 0, "a mouse up without its mouse down does not press")
+  }
+
+  func testLabelHeightIsFixedByTheFont() throws {
+    let bar = URLBarView(style: .full)
+    bar.frame = NSRect(x: 0, y: 0, width: 400, height: SidebarMetrics.urlBarHeight)
+    bar.layoutSubtreeIfNeeded()
+    let empty = bar.label.frame
+    bar.url = try XCTUnwrap(URL(string: "https://www.example.org/a/long/path?with=query&and=more"))
+    bar.needsLayout = true
+    bar.layoutSubtreeIfNeeded()
+    XCTAssertEqual(bar.label.frame, empty)
+    let probe = NSTextField(labelWithString: "example.org")
+    probe.font = bar.label.font
+    XCTAssertEqual(URLBarView.labelHeight, ceil(probe.intrinsicContentSize.height))
+    XCTAssertEqual(bar.label.frame.height, URLBarView.labelHeight)
+  }
+
   func testContextMenuTogglesTheToolbar() throws {
     let controller = makeController()
     let menu = controller.urlBar.contextMenu()
@@ -168,6 +217,23 @@ final class URLBarTests: XCTestCase {
     let second = makeController(setting: ToolbarSetting(defaults: defaults))
     XCTAssertTrue(second.isToolbarVisible)
     XCTAssertFalse(second.rootView.card.toolbar.isHidden)
+  }
+
+  func testToggleUpdatesEveryWindowSharingTheSetting() throws {
+    let setting = ToolbarSetting.ephemeral()
+    let first = makeController(setting: setting)
+    let second = makeController(setting: setting)
+    first.toggleToolbar(nil)
+    for controller in [first, second] {
+      controller.rootView.card.layoutSubtreeIfNeeded()
+      XCTAssertTrue(controller.isToolbarVisible)
+      XCTAssertFalse(controller.rootView.card.toolbar.isHidden)
+      XCTAssertEqual(controller.urlBar.contextMenu().items.map(\.title), ["Hide Toolbar"])
+      XCTAssertEqual(controller.rootView.card.toolbar.urlBar.contextMenu().items.map(\.title), ["Hide Toolbar"])
+    }
+    second.toggleToolbar(nil)
+    XCTAssertTrue(first.rootView.card.toolbar.isHidden, "a toggle in the second window hides the first's too")
+    XCTAssertEqual(first.urlBar.contextMenu().items.map(\.title), ["Show Toolbar"])
   }
 
   func testToolbarButtonsDriveTheEngine() throws {
