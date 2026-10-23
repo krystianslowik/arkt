@@ -1,18 +1,29 @@
 import AppKit
 
+@MainActor
+final class CommandBarTableView: NSTableView {
+  override func accessibilityChildren() -> [Any]? {
+    NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
+  }
+}
+
 /// Root view of the command bar: input row, divider, results table. Frames are set in `layout()`.
 @MainActor
 final class CommandBarView: NSView {
   let field = NSTextField()
   let divider = NSView()
   let scrollView = NSScrollView()
-  let table = NSTableView()
+  let table: NSTableView = CommandBarTableView()
 
   override var isFlipped: Bool { true }
 
   override init(frame: NSRect) {
     super.init(frame: frame)
     wantsLayer = true
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
+    setAccessibilityIdentifier(AXID.CommandBar.root)
+    setAccessibilityValue(AXID.CommandBar.closed)
     layer?.cornerRadius = CommandBarGeometry.cornerRadius
     layer?.cornerCurve = .continuous
     layer?.masksToBounds = true
@@ -33,7 +44,7 @@ final class CommandBarView: NSView {
       .font: NSFont.systemFont(ofSize: 18),
       .foregroundColor: ShellTokens.commandBarSecondaryText.nsColor(),
     ])
-    field.setAccessibilityIdentifier("commandBar.field")
+    field.setAccessibilityIdentifierWithCell(AXID.CommandBar.field)
     addSubview(field)
 
     divider.wantsLayer = true
@@ -50,7 +61,7 @@ final class CommandBarView: NSView {
     table.backgroundColor = .clear
     table.refusesFirstResponder = true            // the field keeps focus; arrows are routed by the controller
     table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-    table.setAccessibilityIdentifier("commandBar.results")
+    table.setAccessibilityIdentifier(AXID.CommandBar.results)
 
     // One tracking area for the life of the view (never per show): pointer moves select the row under them.
     table.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
@@ -101,7 +112,36 @@ final class CommandBarView: NSView {
 final class CommandBarRowView: NSTableRowView {
   static let identifier = NSUserInterfaceItemIdentifier("commandBar.row")
 
-  override var isSelected: Bool { didSet { if isSelected != oldValue { needsDisplay = true } } }
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    setAccessibilityElement(true)
+    setAccessibilityRole(.row)
+    setAccessibilityIdentifier(AXID.CommandBar.row)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override var isSelected: Bool {
+    didSet {
+      if isSelected != oldValue { needsDisplay = true }
+      setAccessibilitySelected(isSelected)
+    }
+  }
+
+  override func isAccessibilitySelected() -> Bool { isSelected }
+
+  private var resultCell: CommandBarCellView? {
+    numberOfColumns > 0 ? view(atColumn: 0) as? CommandBarCellView : nil
+  }
+
+  override func accessibilityLabel() -> String? {
+    resultCell?.title.stringValue ?? super.accessibilityLabel()
+  }
+
+  override func accessibilityValue() -> Any? {
+    resultCell?.accessibilityValue() ?? super.accessibilityValue()
+  }
 
   override func drawBackground(in dirtyRect: NSRect) {
     guard isSelected else { return }
@@ -158,6 +198,8 @@ final class CommandBarCellView: NSTableCellView {
     subtitle.stringValue = result.subtitle
     hint.stringValue = result.trailingHint.map { $0 + " \u{2192}" } ?? ""
     hint.isHidden = result.trailingHint == nil
+    setAccessibilityLabel(result.title)
+    setAccessibilityValue(result.accessibilityCaption)
     needsLayout = true
   }
 

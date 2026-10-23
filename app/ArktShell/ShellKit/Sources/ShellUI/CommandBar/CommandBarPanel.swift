@@ -28,6 +28,7 @@ final class CommandBarPanel: NSPanel {
       guard isPresented != oldValue else { return }
       alphaValue = isPresented ? 1 : 0
       ignoresMouseEvents = !isPresented
+      contentView?.setAccessibilityValue(isPresented ? AXID.CommandBar.open : AXID.CommandBar.closed)
     }
   }
 

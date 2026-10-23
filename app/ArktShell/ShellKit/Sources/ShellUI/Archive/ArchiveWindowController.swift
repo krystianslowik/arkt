@@ -1,5 +1,34 @@
 import AppKit
 
+@MainActor
+final class ArchiveTableView: NSTableView {
+  override func accessibilityChildren() -> [Any]? {
+    NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
+  }
+}
+
+@MainActor
+final class ArchiveRowView: NSTableRowView {
+  static let identifier = NSUserInterfaceItemIdentifier("ArchiveRow")
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    identifier = Self.identifier
+    setAccessibilityElement(true)
+    setAccessibilityRole(.row)
+    setAccessibilityIdentifier(AXID.Archive.row)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override var isSelected: Bool {
+    didSet { setAccessibilitySelected(isSelected) }
+  }
+
+  override func isAccessibilitySelected() -> Bool { isSelected }
+}
+
 /// The minimal Archive window (E5c; Window > Show Archive, unbound by default, KB-043): archived items newest first
 /// in a one-column AppKit table, a footer for unreadable items, "Load More" while more may exist, and Restore
 /// (button or double-click). While on screen it refreshes when the data source reports a change (an entry archived or
@@ -11,7 +40,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   private static let barHeight: CGFloat = 44
   private static let margin: CGFloat = 12
 
-  public let tableView = NSTableView()
+  public let tableView: NSTableView = ArchiveTableView()
   public let restoreButton = NSButton(title: "Restore", target: nil, action: nil)
   public let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
   /// "N items could not be read", or the load failure; hidden when there is nothing to say.
@@ -31,6 +60,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     window.title = "Archive"
     window.isReleasedWhenClosed = false
     window.minSize = NSSize(width: 360, height: 240)
+    window.setAccessibilityIdentifier(AXID.Archive.window)
     super.init(window: window)
     buildContent(in: window)
     dataSource.onChange = { [weak self] in self?.dataSourceDidChange() }
@@ -131,6 +161,13 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     return cell
   }
 
+  public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+    let rowView = tableView.makeView(withIdentifier: ArchiveRowView.identifier, owner: self) as? ArchiveRowView
+      ?? ArchiveRowView(frame: .zero)
+    if rows.indices.contains(row) { rowView.setAccessibilityLabel(rows[row].title) }
+    return rowView
+  }
+
   public func tableViewSelectionDidChange(_ notification: Notification) { updateRestoreButton() }
 
   // MARK: Layout
@@ -152,6 +189,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     tableView.delegate = self
     tableView.target = self
     tableView.doubleAction = #selector(rowDoubleClicked(_:))
+    tableView.setAccessibilityIdentifier(AXID.Archive.table)
 
     let scroll = NSScrollView(frame: NSRect(
       x: 0, y: Self.barHeight, width: Self.contentSize.width, height: Self.contentSize.height - Self.barHeight))
@@ -164,6 +202,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     restoreButton.target = self
     restoreButton.action = #selector(restoreSelected(_:))
     restoreButton.isEnabled = false
+    restoreButton.setAccessibilityIdentifierWithCell(AXID.Archive.restore)
     restoreButton.sizeToFit()
     restoreButton.frame.origin = NSPoint(
       x: Self.contentSize.width - Self.margin - restoreButton.frame.width,
@@ -175,6 +214,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     loadMoreButton.target = self
     loadMoreButton.action = #selector(loadMoreClicked(_:))
     loadMoreButton.isHidden = true
+    loadMoreButton.setAccessibilityIdentifierWithCell(AXID.Archive.loadMore)
     loadMoreButton.sizeToFit()
     loadMoreButton.frame.origin = NSPoint(
       x: restoreButton.frame.minX - 8 - loadMoreButton.frame.width,
@@ -186,6 +226,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     footerLabel.textColor = .secondaryLabelColor
     footerLabel.lineBreakMode = .byTruncatingTail
     footerLabel.isHidden = true
+    footerLabel.setAccessibilityIdentifierWithCell(AXID.Archive.footer)
     let labelHeight: CGFloat = 16
     footerLabel.frame = NSRect(
       x: Self.margin, y: (Self.barHeight - labelHeight) / 2,

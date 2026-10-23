@@ -1,7 +1,7 @@
 import AppKit
 import EngineAPITestSupport
 import XCTest
-@testable import ShellUI
+@_spi(Smoke) @testable import ShellUI
 
 /// The UI test suite drives the shell only through accessibility identifiers (`AXID`). These tests walk the window's
 /// accessibility tree the way an accessibility client sees it (unignored children only) and check each identifier
@@ -348,6 +348,154 @@ final class AccessibilityIdentifierTests: XCTestCase {
     tileView.isHovered = false
     tileView.setCloseButtonShown(false, animated: false)
     XCTAssertEqual(try elements(AXID.Favorites.tileClose, in: controller).count, 0)
+    controller.close()
+  }
+
+  // MARK: Command bar (U4c)
+
+  func testCommandBarAndResultRowsHaveIdentifiersLabelsValuesAndSelection() throws {
+    let controller = makeController()
+    let bar = controller.commandBar
+    bar.prewarm()
+
+    // While hidden, the panel stays ordered in but is inert; its content view carries `commandBar` with value `closed`.
+    XCTAssertEqual(bar.barView.accessibilityIdentifier(), AXID.CommandBar.root)
+    XCTAssertEqual(bar.barView.accessibilityValue() as? String, AXID.CommandBar.closed)
+    XCTAssertEqual(descendants(of: bar.panel).count, 0, "hidden panel exposes no accessibility children")
+
+    controller.newTab(nil)
+    bar.setQueryForTesting("example.com")
+    bar.panel.layoutIfNeeded()
+    bar.barView.layoutSubtreeIfNeeded()
+
+    let panelElements = descendants(of: bar.panel).compactMap { $0 as? NSAccessibilityProtocol }
+    func inPanel(_ id: String) -> [NSAccessibilityProtocol] {
+      panelElements.filter { identifier(of: $0) == id }
+    }
+
+    let root = try XCTUnwrap(inPanel(AXID.CommandBar.root).first)
+    XCTAssertEqual(root.accessibilityRole(), .group)
+    XCTAssertEqual(root.accessibilityValue() as? String, AXID.CommandBar.open)
+    XCTAssertEqual(inPanel(AXID.CommandBar.field).count, 1)
+    XCTAssertEqual(inPanel(AXID.CommandBar.results).count, 1)
+
+    let rows = inPanel(AXID.CommandBar.row)
+    XCTAssertEqual(rows.count, bar.results.count)
+    XCTAssertGreaterThanOrEqual(rows.count, 2)
+    for row in rows { XCTAssertEqual(row.accessibilityRole(), .row) }
+    XCTAssertEqual(rows.map { $0.accessibilityLabel() }, bar.results.map(\.title))
+    XCTAssertEqual(rows.first?.accessibilityValue() as? String, "Open")
+    XCTAssertEqual(rows.last?.accessibilityValue() as? String, "Search")
+    XCTAssertEqual(rows.map { $0.isAccessibilitySelected() }, [true] + Array(repeating: false, count: rows.count - 1))
+
+    bar.barView.table.selectRowIndexes([rows.count - 1], byExtendingSelection: false)
+    let reselected = inPanel(AXID.CommandBar.row)
+    XCTAssertEqual(reselected.map { $0.isAccessibilitySelected() },
+                   Array(repeating: false, count: rows.count - 1) + [true])
+
+    bar.hide(restoreFocus: false)
+    XCTAssertEqual(bar.barView.accessibilityValue() as? String, AXID.CommandBar.closed)
+    controller.close()
+  }
+
+  // MARK: Archive window (U4c)
+
+  func testArchiveWindowTableRowsButtonsAndFooterHaveIdentifiers() async throws {
+    XCTAssertEqual(AXID.Archive.search, "archive.search", "reserved constant for #111")
+
+    @MainActor
+    final class FixedArchiveDataSource: ArchiveListDataSource {
+      var canRestore = true
+      var onChange: (@MainActor () -> Void)?
+      func loadPage() async -> ArchiveListPage {
+        ArchiveListPage(
+          rows: [
+            ArchiveRow(id: UUID(), title: "First Archived", detail: "a.example - Work", reason: "Closed"),
+            ArchiveRow(id: UUID(), title: "Second Archived", detail: "b.example - Work", reason: "Auto-archived"),
+          ],
+          unreadable: 2,
+          mayHaveMore: true)
+      }
+      func loadMore() async -> ArchiveListPage { await loadPage() }
+      func refresh() async -> ArchiveListPage { await loadPage() }
+      func restore(_ id: UUID) -> Bool { true }
+    }
+
+    let source = FixedArchiveDataSource()
+    let archive = ArchiveWindowController(dataSource: source)
+    await archive.reload()
+    let window = try XCTUnwrap(archive.window)
+    window.contentView?.layoutSubtreeIfNeeded()
+    archive.tableView.layoutSubtreeIfNeeded()
+
+    XCTAssertEqual(window.accessibilityIdentifier(), AXID.Archive.window)
+    let all = descendants(of: window).compactMap { $0 as? NSAccessibilityProtocol }
+    func inArchive(_ id: String) -> [NSAccessibilityProtocol] {
+      all.filter { identifier(of: $0) == id }
+    }
+
+    XCTAssertEqual(inArchive(AXID.Archive.table).count, 1)
+    let rows = inArchive(AXID.Archive.row)
+    XCTAssertEqual(rows.count, 2)
+    for row in rows { XCTAssertEqual(row.accessibilityRole(), .row) }
+    XCTAssertEqual(rows.map { $0.accessibilityLabel() }, ["First Archived", "Second Archived"])
+    XCTAssertEqual(rows.map { $0.isAccessibilitySelected() }, [false, false])
+
+    archive.tableView.selectRowIndexes([1], byExtendingSelection: false)
+    XCTAssertEqual(inArchive(AXID.Archive.row).map { $0.isAccessibilitySelected() }, [false, true])
+
+    let restore = try XCTUnwrap(inArchive(AXID.Archive.restore).first)
+    XCTAssertEqual(restore.accessibilityRole(), .button)
+    XCTAssertTrue(restore.isAccessibilityEnabled())
+
+    let loadMore = try XCTUnwrap(inArchive(AXID.Archive.loadMore).first)
+    XCTAssertEqual(loadMore.accessibilityRole(), .button)
+
+    let footer = try XCTUnwrap(inArchive(AXID.Archive.footer).first)
+    XCTAssertEqual(footer.accessibilityValue() as? String, "2 items could not be read")
+    archive.close()
+  }
+
+  // MARK: Split View (U4c)
+
+  func testSplitViewContainerPanesDividerAndReopenButtonHaveIdentifiers() throws {
+    let sidebar = StubSidebar.sample()
+    let space = sidebar.spaceOrder[0]
+    let split = sidebar.addSplit(in: .pinned(space),
+                                 layout: SplitLayoutInfo(orientation: .horizontal, widthFactors: [0.4, 0.6]))
+    let pane0 = sidebar.addTab(url: URL(string: "https://example.com/a")!, title: "Pane A", in: .split(split))
+    let pane1 = sidebar.addTab(url: URL(string: "https://example.com/b")!, title: "Pane B", in: .split(split))
+    let controller = makeController(sidebar)
+
+    // Before showing a split, Split View elements are absent from the unignored tree.
+    XCTAssertEqual(try elements(AXID.Split.container, in: controller).count, 0)
+    XCTAssertEqual(try elements(AXID.Split.pane, in: controller).count, 0)
+
+    controller.activate(node: pane0)
+    controller.rootView.layoutSubtreeIfNeeded()
+
+    let container = try element(AXID.Split.container, in: controller)
+    XCTAssertEqual(container.accessibilityRole(), .splitGroup)
+
+    let panes = try elements(AXID.Split.pane, in: controller)
+    XCTAssertEqual(panes.count, 2)
+    XCTAssertEqual(panes.map { $0.isAccessibilitySelected() }, [true, false])
+
+    let divider = try element(AXID.Split.divider, in: controller)
+    XCTAssertEqual(divider.accessibilityRole(), .splitter)
+    XCTAssertEqual((divider.accessibilityValue() as? NSNumber)?.doubleValue ?? 0, 0.4, accuracy: 0.001)
+    XCTAssertEqual(try elements(AXID.Split.reopen, in: controller).count, 0, "both panes are open")
+
+    controller.activate(node: pane1)
+    controller.rootView.layoutSubtreeIfNeeded()
+    XCTAssertEqual(try elements(AXID.Split.pane, in: controller).map { $0.isAccessibilitySelected() }, [false, true])
+
+    // Close the Pinned pane1 (Cmd-W on a Pinned pane closes its page and leaves a placeholder with `split.reopen`).
+    controller.close(node: pane1)
+    controller.rootView.layoutSubtreeIfNeeded()
+    let reopen = try element(AXID.Split.reopen, in: controller)
+    XCTAssertEqual(reopen.accessibilityRole(), .button)
+    XCTAssertEqual(reopen.accessibilityLabel(), "Reopen page")
     controller.close()
   }
 }

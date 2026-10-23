@@ -481,3 +481,41 @@ Base: `origin/main` at `8b1a570`, branch `chore/168-ui-tests-u4b`.
 | `AccessibilityIdentifierTests` | `swift test --filter AccessibilityIdentifierTests` | 12/12 pass (8 U4a + 4 U4b) |
 | ShellKit pure + isolation | `swift test --skip ShellKitGUITests` | 456 tests in 61 suites pass |
 | `AXID.swift` standalone | `xcrun swiftc -typecheck app/ArktShell/ShellKit/Sources/ShellUI/Accessibility/AXID.swift` | exit 0 |
+
+## U4c: Accessibility identifiers: command bar, Archive window and Split View (#169)
+
+Base: `origin/main` at `d318d0c`, branch `chore/169-ui-tests-u4c`.
+
+### What was done
+
+- `ShellKit/Sources/ShellUI/Accessibility/AXID.swift`: added `AXID.CommandBar` (`root`, `field`, `results`, `row`,
+  `open`, `closed`), `AXID.Archive` (`window`, `table`, `row`, `restore`, `loadMore`, `footer`, plus the documented
+  `search = "archive.search"` constant reserved for #111), and `AXID.Split` (`container`, `pane`, `divider`, `reopen`).
+- Identifiers, labels, values and selected state set:
+  - `CommandBarView`, `CommandBarPanel`, `CommandBarController`, `CommandBarResults`: `CommandBarView` carries
+    `commandBar` with value `open` while shown and `closed` while hidden and inert; `field` carries
+    `commandBar.field` (on the control and cell); `table` (`CommandBarTableView`) carries `commandBar.results` and
+    exposes its unignored `CommandBarRowView`s (`commandBar.row`, role `.row`, label = result title, value =
+    `accessibilityCaption` ("Switch to Tab", "Switch to Split View", "Open", "Search"), selected = `isSelected`).
+  - `ArchiveWindowController`: `window` carries `archive.window`; `tableView` (`ArchiveTableView`) carries
+    `archive.table` and exposes its `ArchiveRowView`s (`archive.row`, role `.row`, label = row title, selected =
+    `isSelected`); `restoreButton` (`archive.restore`), `loadMoreButton` (`archive.loadMore`) and `footerLabel`
+    (`archive.footer`, value = footer text) set their identifiers on both control and cell.
+  - `SplitContainerView` and `SplitDividerView`: `SplitContainerView` carries `split.container` and orders its
+    `accessibilityChildren()` in pane order (`paneCards` then `dividers` then `toastView`); each pane card carries
+    `split.pane` with `isAccessibilitySelected() == (index == focusedIndex)`; each `SplitDividerView` carries
+    `split.divider` with value = share factor (`NSNumber`); `SplitPanePlaceholderView` carries `split.reopen`.
+- Tests: `AccessibilityIdentifierTests` gains 3 tests
+  (`testCommandBarAndResultRowsHaveIdentifiersLabelsValuesAndSelection`,
+  `testArchiveWindowTableRowsButtonsAndFooterHaveIdentifiers`,
+  `testSplitViewContainerPanesDividerAndReopenButtonHaveIdentifiers`), written first (failed before the view changes,
+  then 15/15 pass).
+
+### Verification
+
+| Check | Command | Result |
+|---|---|---|
+| `AccessibilityIdentifierTests` | `swift test --filter AccessibilityIdentifierTests` | 15/15 pass (8 U4a + 4 U4b + 3 U4c) |
+| `ArchiveWindowTests` | `swift test --filter ArchiveWindowTests` | 19/19 pass |
+| ShellKit pure + isolation | `swift test --skip ShellKitGUITests` | 456 tests in 61 suites pass |
+| `AXID.swift` standalone | `xcrun swiftc -typecheck app/ArktShell/ShellKit/Sources/ShellUI/Accessibility/AXID.swift` | exit 0 |

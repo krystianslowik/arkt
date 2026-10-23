@@ -81,4 +81,40 @@ public enum AXID {
     public static let loaded = "loaded"
     public static let unloaded = "unloaded"
   }
+
+  /// Command bar panel, field, results table and result rows (group U4c).
+  public enum CommandBar {
+    /// On the panel's content view (`CommandBarView`). Value: `open` while shown, `closed` while hidden and inert.
+    public static let root = "commandBar"
+    public static let field = "commandBar.field"
+    public static let results = "commandBar.results"
+    /// Label: title. Selected: selection. Value: caption ("Switch to Tab", "Switch to Split View", "Open", "Search").
+    public static let row = "commandBar.row"
+    public static let open = "open"
+    public static let closed = "closed"
+  }
+
+  /// Archive window, table, rows, buttons and footer (group U4c).
+  public enum Archive {
+    public static let window = "archive.window"
+    public static let table = "archive.table"
+    /// Label: archived item title.
+    public static let row = "archive.row"
+    public static let restore = "archive.restore"
+    public static let loadMore = "archive.loadMore"
+    /// Value: footer text.
+    public static let footer = "archive.footer"
+    /// Reserved for #111 (Archive search); unused until #111 lands.
+    public static let search = "archive.search"
+  }
+
+  /// Split View container, pane cards, dividers and closed-pane reopen button (group U4c).
+  public enum Split {
+    public static let container = "split.container"
+    /// Selected: focused pane.
+    public static let pane = "split.pane"
+    /// Value: pane share factor (`NSNumber`).
+    public static let divider = "split.divider"
+    public static let reopen = "split.reopen"
+  }
 }
