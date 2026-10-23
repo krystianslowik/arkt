@@ -430,6 +430,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       } else {
         if wasCurrent { rootView.card.setContent(nil); refreshAddress() }
         sidebarController.deactivate(node: node)
+        hiddenPaneDidClose(node)
       }
     default:
       break
