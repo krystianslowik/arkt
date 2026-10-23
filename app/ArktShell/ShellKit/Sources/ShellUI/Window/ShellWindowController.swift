@@ -97,7 +97,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onActivate = { [weak self] node in self?.show(node: node) }
     sidebarController.onClose = { [weak self] node in self?.close(node: node) }       // hover X (GS-043)
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
-    commandBar.onOpen = { [weak self] url, inNewTab in self?.open(url, inNewTab: inNewTab) }
+    commandBar.onOpen = { [weak self] url, target in
+      switch target {
+      case .currentTab, .newTab: self?.open(url, inNewTab: target == .newTab)
+      case .newSplitPane: self?.openInNewSplitPane(url)                                 // KB-070, BH-117
+      }
+    }
     commandBar.onReload = { [weak self] in                                                // KB-004, BH-102
       guard let self, let tab = self.currentTab else { return }
       self.engine.reload(tab)
@@ -323,7 +328,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   /// Cmd-T: new Today tab in the current Space (BH-100). Cmd-L: navigate the current tab (BH-101).
-  private func open(_ url: URL, inNewTab: Bool) {
+  func open(_ url: URL, inNewTab: Bool) {
     if inNewTab || currentTab == nil {
       // Cmd-T with no Space creates the Space first, then the tab (decision 3) [I].
       guard let space = sidebarController.currentSpace ?? createSpace() else { return }
@@ -463,9 +468,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 }
 
 extension ShellWindowController: NSMenuItemValidation {
-  /// Titles the Toggle Toolbar item for the current state (KB-018). Every other item stays enabled, as it was
-  /// before this controller validated menu items.
+  /// Titles the Toggle Toolbar item for the current state (KB-018) and validates the Split View items (S5). Every
+  /// other item stays enabled, as it was before this controller validated menu items.
   public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if let enabled = validateSplitMenuItem(menuItem) { return enabled }
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
     }
