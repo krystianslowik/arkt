@@ -43,6 +43,11 @@ final class EmptyStateView: NSView {
     importButton.action = #selector(importPressed(_:))
     newSpaceButton.action = #selector(newSpacePressed(_:))
     for view in [headingLabel, bodyLabel, importButton, newSpaceButton] { addSubview(view) }
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
+    setAccessibilityIdentifier(AXID.EmptyState.root)
+    importButton.setAccessibilityIdentifierWithCell(AXID.EmptyState.importFromArc)
+    newSpaceButton.setAccessibilityIdentifierWithCell(AXID.EmptyState.newSpace)
     applyImportVisibility()
   }
 

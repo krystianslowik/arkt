@@ -52,6 +52,9 @@ public final class ContentCardView: NSView {
     toolbar.autoresizingMask = []
     clipView.addSubview(toolbar)
     applyBorderWidth()
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
+    setAccessibilityIdentifier(AXID.Content.card)
   }
 
   /// Where the page goes in `clipView`: everything below the Toolbar when it shows.

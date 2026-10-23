@@ -53,6 +53,11 @@ public final class ContentToolbarView: NSView {
     setAccessibilityElement(true)
     setAccessibilityRole(.toolbar)
     setAccessibilityLabel("Toolbar")
+    setAccessibilityIdentifier(AXID.Toolbar.root)
+    backButton.setAccessibilityIdentifierWithCell(AXID.Toolbar.back)
+    forwardButton.setAccessibilityIdentifierWithCell(AXID.Toolbar.forward)
+    reloadButton.setAccessibilityIdentifierWithCell(AXID.Toolbar.reload)
+    urlBar.setAccessibilityIdentifier(AXID.Toolbar.urlBar)
     applyFlavor()
   }
 

@@ -18,6 +18,7 @@ public final class ShellWindow: NSWindow {
     isReleasedWhenClosed = false
     minSize = NSSize(width: 640, height: 420)
     collectionBehavior.insert(.fullScreenPrimary)
+    setAccessibilityIdentifier(AXID.Shell.window)
   }
 
   /// Moves close/minimize/zoom so the close button's top-left sits at `metrics.trafficLightOrigin`
