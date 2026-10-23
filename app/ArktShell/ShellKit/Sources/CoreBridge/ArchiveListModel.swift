@@ -24,6 +24,8 @@ public final class ArchiveListModel: ArchiveListDataSource {
   public var currentSpaceProvider: @MainActor () -> UUID? = { nil }
   /// After a restore: what came back and the toast text (BH-086).
   public var onRestored: (@MainActor (RestoredItem, String) -> Void)?
+  /// A restore the sidebar model refused (a `SidebarError`): the toast text (#91).
+  public var onRestoreFailed: (@MainActor (String) -> Void)?
 
   /// The rows loaded so far, newest first.
   public private(set) var rows: [ArchiveRow] = []
@@ -86,12 +88,15 @@ public final class ArchiveListModel: ArchiveListDataSource {
 
   /// Restores the row's item (`ArchiveCoordinator.restore`: its source Space, else the current one, else the first),
   /// drops the row and reports the toast. False, and nothing changes, with no Space, an unknown row, or a restore the
-  /// model refused.
+  /// model refused; the refusal is reported through `onRestoreFailed`.
   @discardableResult
   public func restore(_ id: UUID) -> Bool {
     guard canRestore, let item = items[id] else { return false }
     let result: RestoredItem?
-    do { result = try coordinator.restore(item, fallbackSpace: currentSpaceProvider()) } catch { return false }
+    do { result = try coordinator.restore(item, fallbackSpace: currentSpaceProvider()) } catch {
+      onRestoreFailed?(ToastText.restoreFailed)
+      return false
+    }
     restored[id] = item.archivedAt
     items[id] = nil
     rows.removeAll { $0.id == id }

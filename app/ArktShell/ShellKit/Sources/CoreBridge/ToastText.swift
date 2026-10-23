@@ -35,4 +35,7 @@ public enum ToastText {
   public static func restored(kind: RestoredKind, spaceTitle: String?) -> String {
     "\(kind.noun) restored to \(spaceTitle ?? "Favorites"). Click to view."
   }
+
+  /// Shown when the sidebar model refuses a restore (#91).
+  public static let restoreFailed = "Couldn't restore from the Archive."
 }

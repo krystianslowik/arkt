@@ -125,6 +125,29 @@ struct ArchiveListModelTests {
     #expect(harness.model.restore(newerPage.rows[0].id))
   }
 
+  /// #91: a "Load More" that returns after a reload started later leaves the limit at the reload's first page, so the
+  /// next "Load More" asks for the second page, not the third.
+  @Test func aLoadMoreLandingAfterAReloadKeepsTheLimitInStep() async throws {
+    let harness = try Harness(items: Self.tabs(450))
+    _ = await harness.model.loadPage()
+    await harness.store.holdReads()
+    let more = Task { await harness.model.loadMore() }
+    await eventually { await harness.store.heldReadCount == 1 }
+    let reload = Task { await harness.model.loadPage() }
+    await eventually { await harness.store.heldReadCount == 2 }
+
+    await harness.store.releaseLastRead()
+    let reloadPage = await reload.value
+    await harness.store.releaseReads()
+    let morePage = await more.value
+    let next = await harness.model.loadMore()
+
+    #expect(reloadPage.rows.count == 200)
+    #expect(morePage.rows.count == 200)
+    #expect(await harness.store.limits == [200, 400, 200, 400])
+    #expect(next.rows.count == 400)
+  }
+
   @Test func refreshReloadsAtTheLoadedDepth() async throws {
     let harness = try Harness(items: Self.tabs(450))
     _ = await harness.model.loadPage()
@@ -408,6 +431,30 @@ struct ArchiveListModelTests {
     #expect(harness.restored.isEmpty)
     #expect(harness.model.rows.count == 1)
     #expect(harness.source.sidebar.nodes.isEmpty)
+  }
+
+  /// #91: a restore the sidebar model refuses (folders nested deeper than `Sidebar.maximumNestingDepth`) keeps the
+  /// row and reports the failure toast instead of failing silently.
+  @Test func aRestoreTheModelRefusesIsReported() async throws {
+    let harness = try Harness()
+    let space = try #require(harness.space)
+    let tooDeep = (0..<Sidebar.maximumNestingDepth).reduce(
+      NodeSnapshot(kind: .folder(FolderItem(title: "Deepest")), createdAt: Self.now)
+    ) { inner, _ in NodeSnapshot(kind: .folder(FolderItem(title: "Outer")), createdAt: Self.now, children: [inner]) }
+    let item = ArchivedItem(
+      reason: .manual, archivedAt: Self.now.addingTimeInterval(-10), source: .space(space), section: .pinned,
+      snapshot: tooDeep)
+    let id = item.id
+    await harness.store.seed([item])
+    _ = await harness.model.loadPage()
+    var failures: [String] = []
+    harness.model.onRestoreFailed = { failures.append($0) }
+
+    #expect(!harness.model.restore(id))
+
+    #expect(failures == ["Couldn't restore from the Archive."])
+    #expect(harness.restored.isEmpty)
+    #expect(harness.model.rows.map(\.id) == [id])
   }
 
   @Test func unknownRowIsIgnored() async throws {
