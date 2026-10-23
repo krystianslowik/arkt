@@ -8,9 +8,10 @@ on:
   push:
     branches: [main]
 
-# A new push to the same pull request cancels the run it supersedes; runs on main always finish.
+# A new push to a pull request cancels the run it supersedes. Push runs on main get one group per commit: GitHub keeps
+# only one pending run per group, so a shared group would drop queued runs, and they always finish.
 concurrency:
-  group: swift-tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: swift-tests-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -50,6 +51,11 @@ jobs:
           grdb=$(imports 'Persistence|GRDB' app/ArktShell/ShellKit/Sources)
           if [[ -n $grdb ]]; then
             print "::error::ShellKit sources must not import Persistence or GRDB:"; print -r -- $grdb; failed=1
+          fi
+          persistence=$(imports 'Persistence' app/ArktShell \
+            | grep -v -e '^app/ArktShell/App/' -e '^app/ArktShell/ShellKit/Tests/IsolationTests/' || true)
+          if [[ -n $persistence ]]; then
+            print "::error::Only the app target (app/ArktShell/App) may import Persistence:"; print -r -- $persistence; failed=1
           fi
           ui=$(imports 'SidebarModel|Archive|ArcImport|Persistence|GRDB' app/ArktShell/ShellKit/Sources/ShellUI)
           if [[ -n $ui ]]; then
@@ -118,7 +124,8 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restore only: the shellkit job saves this key, a second save from here would only fail with "already exists".
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: app/ArktShell/ShellKit/.build
           key: shellkit-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktShell/ShellKit/Package.resolved') }}
