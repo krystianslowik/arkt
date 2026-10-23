@@ -21,6 +21,9 @@ let package = Package(
     .target(name: "EngineAPITestSupport", dependencies: ["EngineAPI"]),
     .target(name: "FakeEngineKit", dependencies: ["EngineAPI"]),
     .target(name: "Motion"),
+    // The engine facade header (engine/arkt/api/arkt_engine.h, a byte-identical copy): protocols and enums only, no
+    // code. Only ChromiumEngineKit and its tests may depend on it (EngineABIIsolationTests).
+    .target(name: "ArktEngineABI"),
     .target(name: "ShellUI", dependencies: ["EngineAPI", "Motion"]),
     .target(
       name: "CoreBridge",
@@ -35,6 +38,7 @@ let package = Package(
     .testTarget(name: "MotionTests", dependencies: ["Motion"]),
     .testTarget(name: "ShellUITests", dependencies: ["ShellUI", "EngineAPITestSupport"]),
     .testTarget(name: "IsolationTests"),
+    .testTarget(name: "ArktEngineABITests", dependencies: ["ArktEngineABI"]),
     .testTarget(name: "FakeEngineKitTests", dependencies: ["FakeEngineKit"]),
     .testTarget(
       name: "CoreBridgeTests",

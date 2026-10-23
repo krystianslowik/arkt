@@ -1,0 +1,493 @@
+import AppKit
+import ArktEngineABI
+import Testing
+
+// Swift implementations of every protocol in arkt_engine.h. They prove the header imports into Swift 6 as main-actor
+// protocols that plain NSObject subclasses can adopt, with no engine class symbol and without the framework. W3-6's
+// scripted facade grows from these.
+
+final class TestHistoryEntry: NSObject, ArktHistoryEntry {
+  let url: URL
+  let title: String
+  init(url: URL, title: String) { self.url = url; self.title = title }
+}
+
+final class TestExtensionAction: NSObject, ArktExtensionAction {
+  let actionId: String
+  let name: String
+  let iconPNG: Data?
+  let isEnabled: Bool
+  init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true) {
+    self.actionId = actionId; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
+  }
+}
+
+/// A host as the shell will write it: no optional placeholder members.
+final class TestWindowHost: NSObject, ArktWindowHost {
+  let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+                        backing: .buffered, defer: true)
+  let cardView = NSView()
+  var closeRequested: (() -> Void)?
+  var validateCommand: ((Int) -> Bool)?
+  var executeCommand: ((Int, Int) -> Void)?
+}
+
+final class TestWindowRequest: NSObject, ArktWindowRequest {
+  let kind: ArktWindowRequestKind
+  let opener: (any ArktBrowserHandle)?
+  let bounds: NSRect
+  let hasBounds: Bool
+  let profileId = "Default"
+  let initialURL: URL?
+  init(kind: ArktWindowRequestKind, opener: (any ArktBrowserHandle)?, bounds: NSRect?, initialURL: URL?) {
+    self.kind = kind; self.opener = opener; self.bounds = bounds ?? .zero; self.hasBounds = bounds != nil
+    self.initialURL = initialURL
+  }
+}
+
+final class TestEvent: NSObject, ArktEngineEvent {
+  let kind: ArktEngineEventKind
+  let tab: (any ArktTabHandle)?
+  let browser: (any ArktBrowserHandle)?
+  var closeReason: ArktCloseReason = .none
+  var url: URL?
+  var title: String?
+  var faviconPNG: Data?
+  var isLoading = false
+  var canGoBack = false
+  var canGoForward = false
+  var opener: (any ArktTabHandle)?
+  var origin: ArktTabOrigin = .client
+  var isActive = false
+  init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
+    self.kind = kind; self.tab = tab; self.browser = browser
+  }
+}
+
+final class TestTab: NSObject, ArktTabHandle {
+  let containerView = NSView()
+  let sessionId: Int32
+  weak var owner: TestBrowser?
+  var browser: (any ArktBrowserHandle)? { owner }
+  var url: URL?
+  var title = ""
+  var faviconPNG: Data?
+  var isLoading = false
+  /// Nearest first, as the header specifies.
+  var backEntries: [any ArktHistoryEntry] = []
+  var forwardEntries: [any ArktHistoryEntry] = []
+  var canGoBack: Bool { !backEntries.isEmpty }
+  var canGoForward: Bool { !forwardEntries.isEmpty }
+  let opener: (any ArktTabHandle)?
+  let origin: ArktTabOrigin
+  var isActive: Bool { owner?.activeTab === self }
+  var isClosing = false
+  var wouldHoldClose = false
+
+  init(sessionId: Int32, owner: TestBrowser, url: URL?, opener: (any ArktTabHandle)?, origin: ArktTabOrigin) {
+    self.sessionId = sessionId; self.owner = owner; self.url = url; self.opener = opener; self.origin = origin
+  }
+
+  private var here: (any ArktHistoryEntry)? { url.map { TestHistoryEntry(url: $0, title: title) } }
+
+  func navigate(to url: URL) {
+    if let here { backEntries.insert(here, at: 0) }
+    forwardEntries = []
+    self.url = url
+  }
+  func reload() { isLoading = true }
+  func goBack() { goToHistory(offset: -1) }
+  func goForward() { goToHistory(offset: 1) }
+  func goToHistory(offset: Int) {
+    guard let here else { return }
+    if offset < 0, -offset <= backEntries.count {
+      let steps = -offset
+      url = backEntries[steps - 1].url
+      forwardEntries = backEntries[..<(steps - 1)].reversed() + [here] + forwardEntries
+      backEntries.removeFirst(steps)
+    } else if offset > 0, offset <= forwardEntries.count {
+      url = forwardEntries[offset - 1].url
+      backEntries = forwardEntries[..<(offset - 1)].reversed() + [here] + backEntries
+      forwardEntries.removeFirst(offset)
+    }
+  }
+  func activate() { owner?.activate(self) }
+  func close(mode: ArktCloseMode) -> ArktCloseResult {
+    if wouldHoldClose && mode == .honourUnloadHandlers {
+      isClosing = true
+      return .held
+    }
+    owner?.remove(self, reason: .client)
+    return .closed
+  }
+  func focus() {}
+  func duplicate() -> (any ArktTabHandle)? {
+    guard let owner else { return nil }
+    let copy = owner.insertTab(url: url, active: false, opener: self, origin: .client)
+    copy.title = title
+    copy.backEntries = backEntries
+    copy.forwardEntries = forwardEntries
+    return copy
+  }
+}
+
+final class TestBrowser: NSObject, ArktBrowserHandle {
+  let windowId: Int32
+  let host: any ArktWindowHost
+  unowned let engine: TestEngine
+  private(set) var tabList: [TestTab] = []
+  private(set) weak var active: TestTab?
+  var tabs: [any ArktTabHandle] { tabList }
+  var activeTab: (any ArktTabHandle)? { active }
+
+  init(windowId: Int32, host: any ArktWindowHost, engine: TestEngine) {
+    self.windowId = windowId; self.host = host; self.engine = engine
+  }
+
+  func createTab(url: URL?, active: Bool) -> any ArktTabHandle {
+    insertTab(url: url, active: active, opener: nil, origin: .client)
+  }
+
+  @discardableResult
+  func insertTab(url: URL?, active: Bool, opener: (any ArktTabHandle)?, origin: ArktTabOrigin) -> TestTab {
+    let tab = TestTab(sessionId: engine.nextId(), owner: self, url: url ?? URL(string: "about:blank"),
+                      opener: opener, origin: origin)
+    tabList.append(tab)
+    let created = TestEvent(.tabCreated, tab: tab, browser: self)
+    created.url = tab.url; created.opener = opener; created.origin = origin
+    engine.record(created)
+    if active || self.active == nil { activate(tab) }
+    created.isActive = tab.isActive
+    return tab
+  }
+
+  func activate(_ tab: TestTab) {
+    guard active !== tab else { return }
+    active = tab
+    engine.record(TestEvent(.activeTabChanged, tab: tab, browser: self))
+  }
+
+  func remove(_ tab: TestTab, reason: ArktCloseReason) {
+    tabList.removeAll { $0 === tab }
+    tab.owner = nil
+    if active === tab { active = nil }
+    let closed = TestEvent(.tabClosed, tab: tab, browser: self)
+    closed.closeReason = reason
+    engine.record(closed)
+  }
+
+  func close() {
+    for tab in tabList { remove(tab, reason: .windowClosing) }
+    engine.closeBrowser(self)
+  }
+}
+
+/// A facade that records events and delivers them as one batch on `flush()`, as the real facade does from a posted
+/// task.
+final class TestEngine: NSObject, ArktEngine {
+  private var lastId: Int32 = 0
+  private var pending: [any ArktEngineEvent] = []
+  private var sinks: [ObjectIdentifier: (token: NSObject, sink: ([any ArktEngineEvent]) -> Void)] = [:]
+  private(set) var browserList: [TestBrowser] = []
+  private(set) var isReady = false
+  private(set) var failed = false
+  private(set) var ranActions: [String] = []
+  var testAPIEnabled = true
+  var browsers: [any ArktBrowserHandle] { browserList }
+
+  func nextId() -> Int32 { lastId += 1; return lastId }
+  func record(_ event: any ArktEngineEvent) { pending.append(event) }
+  func flush() {
+    let batch = pending
+    pending = []
+    for entry in sinks.values { entry.sink(batch) }
+  }
+
+  func embedderReady() { isReady = true }
+  func embedderFailed() { failed = true }
+
+  func createBrowser(host: any ArktWindowHost) -> any ArktBrowserHandle {
+    let browser = TestBrowser(windowId: nextId(), host: host, engine: self)
+    browserList.append(browser)
+    host.closeRequested = { [unowned browser] in browser.close() }
+    host.validateCommand = { $0 > 0 }
+    host.executeCommand = { _, _ in }
+    record(TestEvent(.windowOpened, tab: nil, browser: browser))
+    return browser
+  }
+
+  func closeBrowser(_ browser: TestBrowser) {
+    browserList.removeAll { $0 === browser }
+    browser.host.closeRequested = nil
+    record(TestEvent(.windowClosed, tab: nil, browser: browser))
+  }
+
+  func extensionActions(in browser: any ArktBrowserHandle) -> [any ArktExtensionAction] {
+    [TestExtensionAction(actionId: "action-probe", name: "Action Probe")]
+  }
+
+  func runExtensionAction(_ actionId: String, in browser: any ArktBrowserHandle, anchor: NSView) {
+    ranActions.append(actionId)
+  }
+
+  func addEventSink(_ sink: @escaping ([any ArktEngineEvent]) -> Void) -> any NSObjectProtocol {
+    let token = NSObject()
+    sinks[ObjectIdentifier(token)] = (token, sink)
+    return token
+  }
+
+  func removeEventSink(_ token: any NSObjectProtocol) {
+    guard let object = token as? NSObject else { return }
+    sinks[ObjectIdentifier(object)] = nil
+  }
+
+  func evaluateScript(_ script: String, in tab: any ArktTabHandle, userGesture: Bool,
+                      completion: @escaping (Any?, (any Error)?) -> Void) {
+    completion(testAPIEnabled ? script.count : nil, nil)
+  }
+
+  func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool { false }
+}
+
+/// The app's embedder, as `ArktShellEmbedder` will be: found by name, never linked by the engine.
+@objc(ArktEngineABITestEmbedder)
+final class TestEmbedder: NSObject, ArktEngineEmbedder {
+  static let shared = TestEmbedder()
+  private(set) var engine: (any ArktEngine)?
+  private(set) var requests: [any ArktWindowRequest] = []
+  private(set) var terminationLog: [String] = []
+
+  static func sharedEmbedder() -> any ArktEngineEmbedder { shared }
+
+  func engineDidStart(_ engine: any ArktEngine) {
+    self.engine = engine
+    engine.embedderReady()
+  }
+
+  func host(for request: any ArktWindowRequest) -> any ArktWindowHost {
+    requests.append(request)
+    return TestWindowHost()
+  }
+
+  func engineWillBeginTerminating() { terminationLog.append("begin") }
+  func engineDidCancelTerminating() { terminationLog.append("cancel") }
+  func engineWillTerminate(_ completion: @escaping () -> Void) {
+    terminationLog.append("terminate")
+    completion()
+  }
+}
+
+@MainActor
+struct ConformanceTests {
+  static func url(_ path: String) -> URL { URL(string: "https://example.com/\(path)")! }
+
+  @Test func embedderIsFoundByItsRuntimeNameAndAnswersTheHook() throws {
+    // What the hook does: NSClassFromString, then +sharedEmbedder through the protocol.
+    let found = try #require(NSClassFromString("ArktEngineABITestEmbedder") as? any ArktEngineEmbedder.Type)
+    let embedder = found.sharedEmbedder()
+    #expect(embedder === TestEmbedder.shared)
+
+    let engine = TestEngine()
+    embedder.engineDidStart(engine)
+    #expect(engine.isReady)
+    #expect(TestEmbedder.shared.engine === engine)
+  }
+
+  @Test func engineCreatesBrowsersAndTabsThroughTheProtocols() {
+    let engine: any ArktEngine = TestEngine()
+    let host = TestWindowHost()
+    let browser = engine.createBrowser(host: host)
+    #expect(engine.browsers.count == 1)
+    #expect(browser.host === host)
+
+    let first = browser.createTab(url: Self.url("a"), active: true)
+    let second = browser.createTab(url: nil, active: false)
+    #expect(browser.tabs.map(\.sessionId) == [first.sessionId, second.sessionId])
+    #expect(browser.activeTab === first)
+    #expect(second.url == URL(string: "about:blank"))
+    #expect(second.origin == .client && second.browser === browser && second.containerView !== first.containerView)
+
+    second.activate()
+    #expect(browser.activeTab === second && second.isActive && !first.isActive)
+    first.focus()
+    first.reload()
+    #expect(first.isLoading)
+  }
+
+  /// The facade serves EngineClient's history(of:), goToHistory(_:offset:) and duplicateTab(_:) (contract rules 9
+  /// and 10): entries nearest first, offsets as steps, a duplicate with the source's history.
+  @Test func historyIsNearestFirstAndDuplicatesCarryIt() throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: Self.url("a"), active: true)
+    tab.navigate(to: Self.url("b"))
+    tab.navigate(to: Self.url("c"))
+    #expect(tab.backEntries.map(\.url) == [Self.url("b"), Self.url("a")])
+
+    tab.goToHistory(offset: -2)
+    #expect(tab.url == Self.url("a") && !tab.canGoBack)
+    #expect(tab.forwardEntries.map(\.url) == [Self.url("b"), Self.url("c")])
+    tab.goToHistory(offset: 0)
+    tab.goToHistory(offset: 3)
+    #expect(tab.url == Self.url("a"), "0 and out-of-range offsets are no-ops")
+    tab.goForward()
+    #expect(tab.url == Self.url("b"))
+    #expect(tab.backEntries.map(\.url) == [Self.url("a")] && tab.forwardEntries.map(\.url) == [Self.url("c")])
+
+    let copy = try #require(tab.duplicate())
+    #expect(copy.url == tab.url && copy.title == tab.title && copy.origin == .client && copy.opener === tab)
+    #expect(copy.backEntries.map(\.url) == tab.backEntries.map(\.url))
+    #expect(copy.forwardEntries.map(\.url) == tab.forwardEntries.map(\.url))
+    #expect(browser.tabs.count == 2 && browser.activeTab === tab)
+  }
+
+  @Test func closesAnswerClosedOrHeldByMode() throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+    try #require(tab as? TestTab).wouldHoldClose = true
+
+    #expect(tab.wouldHoldClose)
+    #expect(tab.close(mode: .honourUnloadHandlers) == .held)
+    #expect(tab.isClosing && browser.tabs.count == 1)
+    #expect(tab.close(mode: .skipUnloadHandlers) == .closed)
+    #expect(browser.tabs.isEmpty && tab.browser == nil)
+    #expect(tab.duplicate() == nil, "a closed tab cannot be duplicated")
+  }
+
+  @Test func eventBatchArrivesInOrderWithPlainValues() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let opener = browser.createTab(url: Self.url("opener"), active: true)
+    let popup = try #require(browser as? TestBrowser).insertTab(url: nil, active: true, opener: opener, origin: .engine)
+    #expect(opener.close(mode: .honourUnloadHandlers) == .closed)
+    #expect(batches.isEmpty, "events are delivered from a posted task, never from inside the call")
+    engine.flush()
+
+    #expect(batches.count == 1)
+    let batch = try #require(batches.first)
+    #expect(batch.map(\.kind) == [.windowOpened, .tabCreated, .activeTabChanged, .tabCreated, .activeTabChanged,
+                                  .tabClosed])
+    try #require(batch.count == 6)
+    #expect(batch[0].tab == nil && batch[0].browser === browser)
+    #expect(batch[1].url == Self.url("opener") && batch[1].origin == .client && batch[1].isActive)
+    #expect(batch[3].tab === popup && batch[3].opener === opener && batch[3].origin == .engine)
+    #expect(batch[5].tab === opener && batch[5].closeReason == .client)
+    #expect(batch.dropLast().allSatisfy { $0.closeReason == .none })
+
+    engine.removeEventSink(token)
+    browser.close()
+    engine.flush()
+    #expect(batches.count == 1, "a removed sink receives nothing")
+  }
+
+  @Test func windowCloseClosesTabsWithWindowClosingThenReportsTheWindow() throws {
+    let engine = TestEngine()
+    var kinds: [ArktEngineEventKind] = []
+    var reasons: [ArktCloseReason] = []
+    _ = engine.addEventSink { batch in
+      kinds += batch.map(\.kind)
+      reasons += batch.filter { $0.kind == .tabClosed }.map(\.closeReason)
+    }
+    let host = TestWindowHost()
+    let browser = engine.createBrowser(host: host)
+    _ = browser.createTab(url: nil, active: true)
+    _ = browser.createTab(url: nil, active: false)
+    engine.flush()
+    kinds = []
+
+    // The host never closes its window itself: it calls the block the engine set.
+    let closeRequested = try #require(host.closeRequested)
+    closeRequested()
+    engine.flush()
+    #expect(kinds == [.tabClosed, .tabClosed, .windowClosed])
+    #expect(reasons == [.windowClosing, .windowClosing])
+    #expect(engine.browsers.isEmpty && host.closeRequested == nil)
+  }
+
+  @Test func windowRequestIsAnsweredWithAHost() {
+    let engine = TestEngine()
+    let opener = engine.createBrowser(host: TestWindowHost())
+    let request = TestWindowRequest(kind: .extension, opener: opener,
+                                    bounds: NSRect(x: 10, y: 20, width: 800, height: 600),
+                                    initialURL: Self.url("popup"))
+    let unsized = TestWindowRequest(kind: .reopen, opener: nil, bounds: nil, initialURL: nil)
+
+    let embedder = TestEmbedder()
+    let host = (embedder as any ArktEngineEmbedder).host(for: request)
+    _ = (embedder as any ArktEngineEmbedder).host(for: unsized)
+    _ = engine.createBrowser(host: host)
+
+    #expect(request.hasBounds && request.bounds.width == 800 && request.opener === opener)
+    #expect(!unsized.hasBounds && unsized.opener == nil && unsized.initialURL == nil)
+    #expect(engine.browsers.count == 2)
+    #expect(embedder.requests.map(\.kind) == [.extension, .reopen])
+  }
+
+  @Test func hostAnswersCommandsThroughEngineBlocksAndOmitsPlaceholderMembers() throws {
+    let host = TestWindowHost()
+    _ = TestEngine().createBrowser(host: host)
+    let validate = try #require(host.validateCommand)
+    #expect(validate(34014) && !validate(0))
+    host.executeCommand?(34014, 1)
+    // The placeholder-only members are optional, so a shell host does not implement them.
+    #expect(!host.responds(to: #selector(ArktWindowHost.tabListChanged(_:))))
+    #expect(!host.responds(to: #selector(setter: ArktWindowHost.activateTab)))
+    #expect(host.responds(to: #selector(setter: ArktWindowHost.closeRequested)))
+  }
+
+  @Test func extensionActionsAndTestAPIGoThroughTheFacade() {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+
+    let actions = engine.extensionActions(in: browser)
+    #expect(actions.map(\.actionId) == ["action-probe"])
+    #expect(actions.allSatisfy { $0.isEnabled && $0.iconPNG == nil && !$0.name.isEmpty })
+    engine.runExtensionAction("action-probe", in: browser, anchor: NSView())
+    #expect(facade.ranActions == ["action-probe"])
+
+    var result: Any?
+    engine.evaluateScript("1 + 1", in: tab, userGesture: true) { value, _ in result = value }
+    #expect(result as? Int == 5)
+    #expect(engine.testAPIEnabled && !engine.answerDialog(in: tab, accept: true))
+  }
+
+  @Test func terminationSeamsRunTheCompletion() {
+    let embedder = TestEmbedder()
+    var completed = false
+    embedder.engineWillBeginTerminating()
+    embedder.engineDidCancelTerminating()
+    embedder.engineWillBeginTerminating()
+    embedder.engineWillTerminate { completed = true }
+    #expect(completed)
+    #expect(embedder.terminationLog == ["begin", "cancel", "begin", "terminate"])
+  }
+
+  @Test func readinessAndFailureReachTheFacade() {
+    let ready = TestEngine()
+    let failed = TestEngine()
+    let engines: [any ArktEngine] = [ready, failed]
+    engines[0].embedderReady()
+    engines[1].embedderFailed()
+    #expect(ready.isReady && !ready.failed)
+    #expect(failed.failed && !failed.isReady)
+  }
+
+  /// Raw values cross the boundary as integers; pinning them catches a reordered enum.
+  @Test func enumRawValuesAreStable() {
+    #expect([ArktCloseMode.honourUnloadHandlers, .skipUnloadHandlers].map(\.rawValue) == [0, 1])
+    #expect([ArktCloseResult.closed, .held].map(\.rawValue) == [0, 1])
+    #expect([ArktCloseReason.none, .client, .page, .extension, .windowClosing, .appTerminating].map(\.rawValue)
+      == Array(0...5))
+    #expect([ArktTabOrigin.client, .engine].map(\.rawValue) == [0, 1])
+    #expect([ArktEngineEventKind.tabCreated, .tabClosed, .activeTabChanged, .closeCancelled, .urlChanged,
+             .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
+             .windowOpened, .windowClosed, .extensionActionsChanged].map(\.rawValue) == Array(0...13))
+    #expect([ArktWindowRequestKind.extension, .page, .reopen, .startupURL].map(\.rawValue) == Array(0...3))
+  }
+}
