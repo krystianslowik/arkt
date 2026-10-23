@@ -19,9 +19,12 @@ final class WindowChromeTests: XCTestCase {
     window.setContentSize(NSSize(width: 1200, height: 800))
     window.contentView?.layoutSubtreeIfNeeded()
     let (topLeft, inWindow) = try closeButtonTopLeft(window)
-    XCTAssertEqual(topLeft.x, 16, accuracy: 0.5)
+    XCTAssertEqual(topLeft.x, 12, accuracy: 0.5)
     XCTAssertEqual(topLeft.y, 16, accuracy: 0.5)
     XCTAssertLessThan(inWindow.maxX, 190, "traffic lights must stay inside the sidebar")
+    let zoom = try XCTUnwrap(window.standardWindowButton(.zoomButton)).convert(NSPoint.zero, to: nil)
+    let close = try XCTUnwrap(window.standardWindowButton(.closeButton)).convert(NSPoint.zero, to: nil)
+    XCTAssertEqual(zoom.x - close.x, 2 * 23, accuracy: 0.5, "Arc's 23 pt pitch")
   }
 
   func testTrafficLightsStayPutAfterResize() throws {
@@ -30,7 +33,7 @@ final class WindowChromeTests: XCTestCase {
     window.setContentSize(NSSize(width: 900, height: 600))
     window.contentView?.layoutSubtreeIfNeeded()
     let (topLeft, _) = try closeButtonTopLeft(window)
-    XCTAssertEqual(topLeft.x, 16, accuracy: 0.5)
+    XCTAssertEqual(topLeft.x, 12, accuracy: 0.5)
     XCTAssertEqual(topLeft.y, 16, accuracy: 0.5)
   }
 
@@ -51,7 +54,7 @@ final class WindowChromeTests: XCTestCase {
     XCTAssertEqual(clip.cornerCurve, .continuous)
     XCTAssertTrue(clip.masksToBounds)
     XCTAssertEqual(clip.borderWidth, 1 / (controller.window?.backingScaleFactor ?? 2), accuracy: 0.001)
-    XCTAssertEqual(root.card.frame, CGRect(x: 190, y: 9, width: root.bounds.width - 200, height: root.bounds.height - 19))
+    XCTAssertEqual(root.card.frame, CGRect(x: 190, y: 10, width: root.bounds.width - 200, height: root.bounds.height - 20))
   }
 
   func testCardHostsTheEngineContentView() throws {
@@ -84,6 +87,8 @@ final class WindowChromeTests: XCTestCase {
     let container = try XCTUnwrap(window.standardWindowButton(.closeButton)?.superview?.superview)
     XCTAssertEqual(container.frame.minX, 0)
     XCTAssertEqual(container.frame.width, 190)
+    // As tall as the sidebar's traffic-light strip, so it never covers the URL bar below it.
+    XCTAssertEqual(container.frame.height, ShellMetrics.standard.sidebarTopBarHeight)
   }
 
   func testClickNearWindowTopInsideCardReachesCard() throws {

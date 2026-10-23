@@ -123,7 +123,7 @@ public final class SidebarDividerView: NSView {
   public override func updateLayer() {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    line.backgroundColor = ShellTokens.sidebarItemHovered.resolve(flavor).cgColor
+    line.backgroundColor = ShellTokens.sidebarDivider.resolve(flavor).cgColor
     let scale = window?.backingScaleFactor ?? 2
     line.frame = CGRect(x: SidebarMetrics.faviconLeading, y: (bounds.height / 2).rounded(),
                         width: max(0, bounds.width - 2 * SidebarMetrics.faviconLeading), height: 1 / scale)

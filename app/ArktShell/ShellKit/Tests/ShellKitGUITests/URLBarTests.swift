@@ -91,11 +91,38 @@ final class URLBarTests: XCTestCase {
     XCTAssertEqual(bar.frame.width, sidebar.bounds.width - 2 * SidebarMetrics.horizontalPadding)
     XCTAssertEqual(bar.frame.height, SidebarMetrics.urlBarHeight)
     XCTAssertFalse(bar.mouseDownCanMoveWindow, "clicking the URL bar must not drag the window")
-    // The traffic lights' titlebar container must not cover the bar.
-    let center = bar.convert(NSPoint(x: bar.bounds.midX, y: bar.bounds.midY), to: nil)
+    // The traffic lights' titlebar container must not cover any of the bar, its top edge included.
     let themeFrame = try XCTUnwrap(window.contentView?.superview)
-    let hit = themeFrame.hitTest(themeFrame.convert(center, from: nil))
-    XCTAssertTrue(hit === bar || hit?.isDescendant(of: bar) == true, "hit \(String(describing: hit))")
+    for y in [bar.bounds.minY + 1, bar.bounds.midY, bar.bounds.maxY - 1] {
+      let point = bar.convert(NSPoint(x: bar.bounds.midX, y: y), to: nil)
+      let hit = themeFrame.hitTest(themeFrame.convert(point, from: nil))
+      XCTAssertTrue(hit === bar || hit?.isDescendant(of: bar) == true, "y \(y): hit \(String(describing: hit))")
+    }
+  }
+
+  /// Arc hides the sidebar URL bar while the Toolbar is on: the favorites move up under the traffic-light strip
+  /// (36 pt, tiles 8 pt below it).
+  func testSidebarURLBarHidesWhileTheToolbarIsOn() throws {
+    let controller = makeController()
+    let sidebar = controller.sidebarController.view
+    XCTAssertFalse(controller.urlBar.isHidden)
+    controller.toggleToolbar(nil)
+    sidebar.layoutSubtreeIfNeeded()
+    XCTAssertTrue(controller.urlBar.isHidden)
+    XCTAssertEqual(sidebar.favorites.frame.minY, sidebar.topBar.frame.maxY + SidebarMetrics.favoritesTopGap)
+    XCTAssertEqual(sidebar.favorites.frame.minY, 44)
+    controller.toggleToolbar(nil)
+    sidebar.layoutSubtreeIfNeeded()
+    XCTAssertFalse(controller.urlBar.isHidden)
+    XCTAssertEqual(sidebar.favorites.frame.minY, controller.urlBar.frame.maxY + SidebarMetrics.favoritesTopGap)
+  }
+
+  func testWindowOpenedWithTheToolbarOnHidesTheSidebarURLBar() throws {
+    let setting = ToolbarSetting.ephemeral()
+    setting.isVisible = true
+    let controller = makeController(setting: setting)
+    XCTAssertTrue(controller.urlBar.isHidden)
+    XCTAssertEqual(controller.sidebarController.view.favorites.frame.minY, 44)
   }
 
   // MARK: Press and menu
@@ -209,6 +236,60 @@ final class URLBarTests: XCTestCase {
     XCTAssertEqual(card.contentView?.frame, card.clipView.bounds)
   }
 
+  /// Arc's Toolbar: a 32 pt strip and a 1 pt hairline; 32 x 24 buttons 4 pt from the top, 5 pt apart and 5 pt
+  /// from the leading edge; the URL as plain text centered in the strip.
+  func testToolbarLayoutFollowsArc() throws {
+    let controller = makeController()
+    controller.toggleToolbar(nil)
+    let toolbar = controller.rootView.card.toolbar
+    controller.rootView.card.layoutSubtreeIfNeeded()
+    toolbar.layoutSubtreeIfNeeded()
+    XCTAssertEqual(toolbar.bounds.height, 33)
+    XCTAssertEqual(toolbar.backButton.frame, CGRect(x: 5, y: 4, width: 32, height: 24))
+    XCTAssertEqual(toolbar.forwardButton.frame, CGRect(x: 42, y: 4, width: 32, height: 24))
+    XCTAssertEqual(toolbar.reloadButton.frame, CGRect(x: 79, y: 4, width: 32, height: 24))
+    XCTAssertEqual(toolbar.hairline.frame, CGRect(x: 0, y: 32, width: toolbar.bounds.width, height: 1))
+    let bar = toolbar.urlBar.frame
+    XCTAssertEqual(bar.midX, toolbar.bounds.midX, accuracy: 0.5, "centered in the strip, not after the buttons")
+    XCTAssertGreaterThanOrEqual(bar.minX, toolbar.reloadButton.frame.maxX + 5)
+    XCTAssertEqual(bar.minY, 4)
+    XCTAssertEqual(bar.height, 24)
+    XCTAssertEqual(toolbar.urlBar.label.alignment, .center)
+  }
+
+  /// No pill in the Toolbar: no fill, border or radius, hovered or not. The sidebar bar keeps its pill.
+  func testToolbarURLIsPlainTextWithoutAPill() throws {
+    let controller = makeController()
+    controller.toggleToolbar(nil)
+    let bar = controller.rootView.card.toolbar.urlBar
+    let event = try XCTUnwrap(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [],
+                                                      timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                                      trackingNumber: 0, userData: nil))
+    for hovered in [false, true] {
+      if hovered { bar.mouseEntered(with: event) }
+      bar.updateLayer()
+      let layer = try XCTUnwrap(bar.layer)
+      XCTAssertNil(layer.backgroundColor, "hovered \(hovered)")
+      XCTAssertEqual(layer.cornerRadius, 0)
+      XCTAssertEqual(layer.borderWidth, 0)
+    }
+    let sidebarBar = URLBarView(style: .host)
+    sidebarBar.updateLayer()
+    XCTAssertEqual(sidebarBar.layer?.cornerRadius, SidebarMetrics.urlBarCornerRadius)
+    XCTAssertNotNil(sidebarBar.layer?.backgroundColor)
+    XCTAssertEqual(sidebarBar.label.alignment, .natural)
+  }
+
+  func testToolbarHairlineUsesTheMeasuredDarkLevel() throws {
+    let controller = makeController()
+    controller.window?.appearance = NSAppearance(named: .darkAqua)
+    controller.toggleToolbar(nil)
+    let toolbar = controller.rootView.card.toolbar
+    toolbar.viewDidChangeEffectiveAppearance()
+    toolbar.updateLayer()
+    XCTAssertEqual(toolbar.hairline.backgroundColor, ShellTokens.toolbarHairline.dark.cgColor)
+  }
+
   func testToolbarSettingPersistsAcrossWindows() throws {
     let defaults = try makeDefaults()
     let first = makeController(setting: ToolbarSetting(defaults: defaults))
@@ -228,11 +309,13 @@ final class URLBarTests: XCTestCase {
       controller.rootView.card.layoutSubtreeIfNeeded()
       XCTAssertTrue(controller.isToolbarVisible)
       XCTAssertFalse(controller.rootView.card.toolbar.isHidden)
+      XCTAssertTrue(controller.urlBar.isHidden, "the sidebar URL bar hides while the Toolbar is on")
       XCTAssertEqual(controller.urlBar.contextMenu().items.map(\.title), ["Hide Toolbar"])
       XCTAssertEqual(controller.rootView.card.toolbar.urlBar.contextMenu().items.map(\.title), ["Hide Toolbar"])
     }
     second.toggleToolbar(nil)
     XCTAssertTrue(first.rootView.card.toolbar.isHidden, "a toggle in the second window hides the first's too")
+    XCTAssertFalse(first.urlBar.isHidden)
     XCTAssertEqual(first.urlBar.contextMenu().items.map(\.title), ["Show Toolbar"])
   }
 

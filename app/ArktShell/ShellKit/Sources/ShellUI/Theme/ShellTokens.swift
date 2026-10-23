@@ -56,8 +56,18 @@ public enum ShellTokens {
   // Toasts (E3a): dark text on a light fill over light themes, light text on a dark fill over dark ones.
   public static let toastSurface = TokenPair(light: .white(0.96), dark: .p3(hex: 0x1C1C20, alpha: 0.96))  // TODO(measure)
   public static let toastText = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.90), dark: .white(0.85))
-  // Toolbar over the page (KB-018, BH-032): an opaque strip in the card, the card's hairline below it.
-  public static let toolbarSurface = TokenPair(light: .white(1), dark: .p3(hex: 0x1C1C20, alpha: 1))    // TODO(measure)
+  // Toolbar over the page (KB-018, BH-032): an opaque strip in the card, a hairline below it.
+  /// Arc 1.168 draws the strip on the content card's own surface (sRGB #878787 in the one dark theme measured, window
+  /// not key). Not applied: `secondaryText` reaches only about 2.8:1 there and Arc's own placeholder 2.75:1, below
+  /// 4.5:1, so Arkt keeps these opaque surfaces (accessibility first, see `ShellTokensContrastTests`). Light, a key
+  /// window and other themes were not measured.
+  public static let toolbarSurface = TokenPair(light: .white(1), dark: .p3(hex: 0x1C1C20, alpha: 1))
+  /// The Toolbar's 1 pt hairline. Dark: Arc 1.168, about white 5 % over the strip, measured in a non-key dark 2x
+  /// window (a key window may draw it brighter). Light: not measured, the card border's level.
+  public static let toolbarHairline = TokenPair(light: .black(0.10), dark: .white(0.05))
+  /// The sidebar hairline between pinned and Today. Dark: Arc 1.168, about white 7.5 % over the sidebar, measured in a
+  /// non-key dark 2x window. Light: not measured, the hovered item level as before. Decorative, no contrast minimum.
+  public static let sidebarDivider = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.10), dark: .white(0.075))
   // Space theme background (C6).
   /// Texture layer opacity at noiseFactor 1. TODO(parity): match Arc's grain intensity.
   public static let themeTextureMaxOpacity = 0.16

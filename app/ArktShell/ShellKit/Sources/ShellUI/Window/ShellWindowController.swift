@@ -209,6 +209,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private func applyToolbarVisibility() {
     let visible = toolbarSetting.isVisible
     rootView.card.showsToolbar = visible
+    sidebarController.view.showsURLBar = !visible   // Arc hides the sidebar URL bar while the Toolbar is on
     urlBar.isToolbarVisible = visible
     rootView.card.toolbar.urlBar.isToolbarVisible = visible
     configurePaneToolbars()
