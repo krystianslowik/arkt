@@ -929,3 +929,22 @@ Checks (`nice -n 10`, `-j 4`, rebased on #216): ArktCore 342 tests (342 + 0), 0 
 `--filter ShellKitGUITests`: XCTest 350 tests (341 + 9: 8 in `DeleteSpaceTests`, 1 in `MainMenuKeyEquivalentTests`),
 0 failures; pacing not asserted at load 11.65 (`space-key` 2 frames over 8.6 ms; before the rebase, at load 3.09,
 `space-swipe` and `space-key` 0 frames, asserted). Debug app build: `** BUILD SUCCEEDED **`.
+
+## Command bar: cross-display icon scale and closed-panel screen change (#212)
+
+- Open bar across displays of different backing scales: `CommandBarController` now also observes the parent window's
+  `didChangeBackingProperties` notification and runs `refreshCellScaleIfNeeded()` from `parentFrameDidChange(_:)`
+  whenever `isVisible`. When `backingScale != cellScale`, the table reloads at the new `cellScale` and restores the
+  selected row index, so result icons are re-rendered immediately without waiting for the next `show()`.
+- Closed panel on `didChangeScreen`: `parentFrameDidChange(_:)` now updates the hidden (alpha 0) panel's frame on
+  `didChangeScreenNotification` only (ordinary `didMove` and `didResize` notifications while closed still do nothing).
+  Moving the hidden panel when the parent crosses displays takes the `panel.setFrame` window-server call out of the
+  first `show()` after a display change (`with-closed-follow`: `show()` CPU median 0.20 ms / p95 0.21 ms, wall median
+  0.27 ms / p95 0.31 ms, total p95 9.07 ms <= bound 9.15 ms; `without-closed-follow`: `show()` CPU median 0.23 ms /
+  p95 0.25 ms, wall median 0.34 ms / p95 0.39 ms, total p95 7.43 ms <= bound 9.22 ms).
+- Tests (`CommandBarTests`, waiting on conditions via `waitUntil`): `testOpenBarReRendersIconsWhenBackingScaleChanges`
+  and `testClosedBarDoesNotFollowTheParent` (extended for `didChangeScreen`).
+
+Checks: ArktCore 342 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 456 tests, 0 failures.
+`CommandBarTests`: 52 tests, 0 failures (`commandbar.showcpu.ms p95=0.28`, `commandbar.earliestframe p95=9.24
+bound=9.54 load1=11.23 cores=12 asserted=yes`).

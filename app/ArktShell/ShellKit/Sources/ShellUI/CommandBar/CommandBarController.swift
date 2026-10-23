@@ -80,7 +80,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.table.action = #selector(rowClicked(_:))
     barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
-    for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification] {
+    for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification,
+                 NSWindow.didChangeBackingPropertiesNotification] {
       NotificationCenter.default.addObserver(self, selector: #selector(parentFrameDidChange(_:)), name: name,
                                              object: parent)
     }
@@ -226,11 +227,29 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     }
   }
 
-  /// The open bar follows the parent when it moves, resizes or changes screen. Only the frame is set (equal
-  /// frames are skipped); a closed bar does nothing here, the next show() places it.
+  /// The open bar follows the parent when it moves, resizes, changes screen or changes backing scale (re-rendering
+  /// result icons at the new scale without waiting for the next show, #212). A closed bar follows only on
+  /// `didChangeScreen` (frame only), so the first show after a display change is already on the parent's display;
+  /// ordinary moves and resizes while closed do nothing.
   @objc private func parentFrameDidChange(_ notification: Notification) {
-    guard isVisible, let parent else { return }
-    setPanelFrame(frame(in: parent), display: false)
+    guard let parent else { return }
+    if isVisible {
+      setPanelFrame(frame(in: parent), display: false)
+      refreshCellScaleIfNeeded()
+    } else if notification.name == NSWindow.didChangeScreenNotification {
+      setPanelFrame(frame(in: parent), display: false)
+    }
+  }
+
+  private func refreshCellScaleIfNeeded() {
+    let scale = backingScale
+    guard scale != cellScale else { return }
+    cellScale = scale
+    let selected = barView.table.selectedRow
+    barView.table.reloadData()
+    if selected >= 0, selected < results.count {
+      barView.table.selectRowIndexes([selected], byExtendingSelection: false)
+    }
   }
 
   // MARK: Field and keys
