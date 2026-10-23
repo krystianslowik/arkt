@@ -1,6 +1,7 @@
 import Foundation
 
-/// What a sidebar row's (or a Favorite tile's) hover close button does (GS-043), which decides its tooltip and its VoiceOver action name.
+/// What a sidebar row's (or a Favorite tile's) hover close button does (GS-043), which decides its tooltip and its
+/// VoiceOver action name.
 /// The action itself is the window's: the same close as Cmd-W (`ShellWindowController.close(node:)`).
 public enum RowCloseAction: Equatable, Sendable {
   /// A Today tab or a Today split pane: archived (BH-071; a pane alone, user decision 4).
