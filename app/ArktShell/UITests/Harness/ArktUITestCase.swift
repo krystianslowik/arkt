@@ -78,6 +78,10 @@ class ArktUITestCase: XCTestCase {
   /// Launches the app into `sandbox` and waits for its window.
   @discardableResult
   func launch(_ sandbox: Sandbox, extraEnv: [String: String] = [:]) throws -> XCUIApplication {
+    // One sandbox per test; a relaunch (quit, then launch again) reuses it.
+    if let current = self.sandbox, current !== sandbox {
+      throw HarnessError("a test launches into one sandbox only")
+    }
     if self.sandbox == nil {
       addTeardownBlock { @MainActor [self] in cleanUp() }
     }
