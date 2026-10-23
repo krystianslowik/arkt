@@ -27,3 +27,6 @@ Items found outside a track plan. Pull into a track when scheduled.
   sites could sniff), kept in sync on every Chromium rebase; check the brand list Arc sent for parity. For the
   FakeEngine dev build, set `customUserAgent` to a current Safari UA so test pages render normally. Verify with
   google.com, a UA echo page and `navigator.userAgentData` in a test.
+  Status: the FakeEngine part is done (`Version/<installed Safari version> Safari/605.1.15` via
+  `applicationNameForUserAgent`, unit and GUI tests); the engine rules and rebase checks are in `engine/README.md`
+  ("Web identity") and run in week-2 Tasks W2 and W10.

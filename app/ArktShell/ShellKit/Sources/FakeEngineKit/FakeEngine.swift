@@ -40,8 +40,8 @@ public final class FakeEngine: EngineClient {
   public init() {
     configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
-    // Without a Safari token sites treat WebKit as an unknown browser and serve legacy pages.
-    configuration.applicationNameForUserAgent = "Version/27.0 Safari/605.1.15"
+    // Appended to WebKit's own platform and engine tokens, so only the Safari part is ours to set.
+    configuration.applicationNameForUserAgent = SafariUserAgent.applicationName()
   }
 
   @discardableResult

@@ -41,11 +41,11 @@ enum BridgeMapping {
     guard let theme, !theme.baseColors.isEmpty else { return .bridgeDefault }
     return SpaceThemeInfo(
       baseColors: theme.baseColors.map(rgba), overlayColors: theme.overlayColors.map(rgba), texture: theme.texture,
-      // [I] Arc's noiseFactor is not in the core model yet (data-model 1.6); a mid value until it is.
+      // Arc's noiseFactor is not in the core model yet; a mid value until it is.
       noiseFactor: theme.texture == nil ? 0 : 0.5, isDark: theme.isDark)
   }
 
-  /// Arc stores `extendedSRGB` components (data-model doc); values outside 0...1 are kept.
+  /// Arc stores `extendedSRGB` components; values outside 0...1 are kept.
   static func rgba(_ color: SidebarModel.RGBA) -> ShellUI.RGBA {
     ShellUI.RGBA(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha, space: .sRGB)
   }

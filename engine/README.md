@@ -50,3 +50,32 @@ After editing upstream files (one commit per patch on branch `arkt`). Patches ar
       fi
     fi
     rm -rf $tmp
+
+## Web identity (check on every rebase)
+
+Sites must see Arkt as Chrome. Issue #9 owns the product side; the checks run in the week-2 plan
+(`docs/plans/2026-10-23-engine-week2.md`, Task W2 Step 3 and Task W10 Step 2).
+
+- The engine sends Chromium's stock reduced user agent for the pinned milestone, unchanged:
+  `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<major>.0.0.0 Safari/537.36`.
+  No patch touches it, and no `Arkt` token is added anywhere sites can read it.
+- The client hints follow from the branding: with our branding file the build is `CHROMIUM_BRANDING`, so
+  `Sec-CH-UA` and `navigator.userAgentData.brands` carry `Chromium` plus a GREASE brand and no product brand.
+  Whether to also send a "Google Chrome" brand for parity is an open question (week-2 plan, "Open questions" 6).
+- Never pass `--user-agent`, in any launch or test: it replaces the UA string but not the client hints, so the two
+  disagree, and it hides what the build really sends.
+
+After a rebase, on the rebuilt and installed bundle (launched with `--remote-debugging-port=9333`; the CDP helper
+`engine/tools/cdp.mjs` comes with week-2 Task W0):
+
+    node $REPO/engine/tools/cdp.mjs example.com 'navigator.userAgent'
+    node $REPO/engine/tools/cdp.mjs example.com 'navigator.userAgentData.brands.map(b=>b.brand)'
+    node $REPO/engine/tools/cdp.mjs example.com 'navigator.userAgentData.getHighEntropyValues(["fullVersionList"]).then(v=>v.fullVersionList.map(b=>b.brand))'
+
+Expected: the UA contains `Chrome/<new major>.0.0.0 Safari/537.36` for the new milestone and no `Arkt`; neither brand
+list contains `Arkt`.
+
+The dev engine (`FakeEngine`, WKWebView) is not Chrome and does not pretend to be: it keeps WebKit's own UA and
+appends `Version/<installed Safari version> Safari/605.1.15` through `applicationNameForUserAgent`, read from the
+installed Safari at launch, so test pages get the same markup Safari gets. Setting `customUserAgent` instead would
+replace WebKit's platform and engine tokens with a hand-written copy that drifts.
