@@ -105,6 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// File > Import from Arc... (nil-targeted; the app delegate ends the responder chain).
   @objc func importFromArc(_ sender: Any?) { session?.importFromArc() }
+
+  /// Window > Show Archive (E5c, unbound by default, KB-043).
+  @objc func showArchive(_ sender: Any?) { session?.showArchive() }
 }
 
 extension AppDelegate: NSMenuItemValidation {
@@ -113,6 +116,7 @@ extension AppDelegate: NSMenuItemValidation {
       session?.refreshArcImportAvailability()           // off main; applies from the next validation
       return session?.canImportFromArc ?? false
     }
+    if menuItem.action == #selector(showArchive(_:)) { return session != nil }
     return true
   }
 }

@@ -43,6 +43,10 @@ enum MainMenu {
       spaces.append(space)
     }
     main.addItem(submenu(title: "Spaces", items: spaces))
+    // KB-043: Show Archive is unbound by default; Cmd-Shift-L stays reserved for the Library (KB-065).
+    main.addItem(submenu(title: "Window", items: [
+      item("Show Archive", #selector(AppDelegate.showArchive(_:)), "", []),
+    ]))
     return main
   }
 
