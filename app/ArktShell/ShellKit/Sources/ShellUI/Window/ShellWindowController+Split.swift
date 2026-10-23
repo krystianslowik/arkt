@@ -23,6 +23,8 @@ struct SplitWindowState {
   var mouseMonitor: Any?
   /// Where the pane the split pane command bar is open for goes; read when its Enter commits.
   var pendingSide: SplitPaneSide = .afterFocus
+  /// The drop target above the page, made on the first sidebar drag and in the view tree only while one runs (S7).
+  var dropOverlay: SplitDropOverlayView?
 }
 
 /// Where a new pane goes relative to the focused tab, and the orientation of a split made from a plain tab (BH-117).
@@ -46,6 +48,7 @@ extension ShellWindowController {
     container.onFocusRequest = { [weak self] index in self?.focusPane(at: index) }
     sidebarController.preferredPane = { [weak self] split in self?.preferredPane(of: split) }
     wireSplitRows()
+    wireSplitDrag()
     splitState.mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
       MainActor.assumeIsolated { self?.paneMouseDown(event) }
       return event                                              // the page still gets the click
@@ -469,5 +472,125 @@ extension ShellWindowController {
     } catch {
       onError?(.addPane, error)
     }
+  }
+}
+
+// MARK: - Drag a sidebar tab onto the page (S7)
+
+/// What dropping a sidebar tab on the page does (decision 11, GS-011, BH-116, BH-117).
+enum SplitDrop: Equatable {
+  /// The current plain tab and the dropped tab become a split at the current tab's place, the dropped tab at `index`
+  /// (0: first, 1: second).
+  case newSplit(target: NodeID, index: Int, orientation: SplitOrientation)
+  /// The dropped tab joins the shown split at `index`, and all shares become equal (RT-35). The split's orientation
+  /// stays, as for Add Left / Right / Top / Bottom Split [I].
+  case addPane(split: NodeID, index: Int)
+  /// A pane of the shown split moves from `from` to `to` (both final indexes); its factor follows it.
+  case movePane(split: NodeID, from: Int, to: Int)
+  /// The shown split is full: the drop shows "Cannot Add New Pane" (BH-116) and changes nothing.
+  case full
+}
+
+/// The window side of drag-to-split: the drop overlay lives above the page only while a sidebar tab is dragged, its
+/// preview shows the pane's future frame, and the drop becomes one source write. Like the menu actions, the drop
+/// reads the current tab's split from the source.
+extension ShellWindowController {
+  func wireSplitDrag() {
+    sidebarController.onNodeDragBegan = { [weak self] node in self?.sidebarDragBegan(node) }
+    sidebarController.onNodeDragEnded = { [weak self] in self?.sidebarDragEnded() }
+  }
+
+  /// Puts the overlay above the page (the single card or the split container; both have the content area's frame).
+  private func sidebarDragBegan(_ node: NodeID) {
+    let overlay = splitState.dropOverlay ?? makeDropOverlay()
+    overlay.frame = rootView.split.frame
+    rootView.addSubview(overlay, positioned: .above, relativeTo: rootView.split)
+    overlay.begin(node: node)
+  }
+
+  private func sidebarDragEnded() {
+    guard let overlay = splitState.dropOverlay else { return }
+    overlay.end()
+    overlay.removeFromSuperview()
+  }
+
+  private func makeDropOverlay() -> SplitDropOverlayView {
+    let overlay = SplitDropOverlayView(metrics: rootView.metrics)
+    overlay.autoresizingMask = []
+    overlay.onTarget = { [weak self] node, zone, bounds in
+      self?.dropTarget(of: node, in: zone, bounds: bounds) ?? .none
+    }
+    overlay.onDrop = { [weak self] node, zone in self?.performDrop(of: node, in: zone) ?? false }
+    splitState.dropOverlay = overlay
+    return overlay
+  }
+
+  /// What a drop of `node` in `zone` does, nil when it does nothing: no current tab, `node` is not a tab, the current
+  /// plain tab onto itself, or a pane dropped where it already is. The zone's side puts the tab first or last; its
+  /// axis only matters for a new split [I] PARITY(NEEDS-RUNTIME-CHECK RT-32).
+  func splitDrop(of node: NodeID, in zone: SplitDropZone) -> SplitDrop? {
+    guard case .tab? = sidebar.node(node), let current = currentNode else { return nil }
+    guard let split = split(holding: current) else {
+      guard node != current else { return nil }
+      return .newSplit(target: current, index: zone.isBefore ? 0 : 1, orientation: zone.orientation)
+    }
+    let panes = sidebar.children(of: .split(split))
+    if let from = panes.firstIndex(of: node) {
+      let to = zone.isBefore ? 0 : panes.count - 1
+      return from == to ? nil : .movePane(split: split, from: from, to: to)
+    }
+    guard panes.count < SplitLayoutInfo.maximumPanes else { return .full }
+    return .addPane(split: split, index: zone.isBefore ? 0 : panes.count)
+  }
+
+  /// The preview of a drop: the frame the pane gets in `bounds` (the content area) once the split shows, from the same
+  /// `SplitLayout.frames` the split container uses.
+  private func dropTarget(of node: NodeID, in zone: SplitDropZone, bounds: CGRect) -> SplitDropTarget {
+    guard let drop = splitDrop(of: node, in: zone) else { return .none }
+    let axis: SplitAxis
+    var factors: [Double]
+    let index: Int
+    switch drop {
+    case .full:
+      return .full
+    case .newSplit(_, let at, let orientation):
+      (axis, factors, index) = (SplitLayout.axis(for: orientation), SplitLayout.equalShares(2), at)
+    case .addPane(let split, let at):
+      guard case .split(_, let layout)? = sidebar.node(split) else { return .none }
+      let count = sidebar.children(of: .split(split)).count + 1
+      (axis, factors, index) = (SplitLayout.axis(for: layout.orientation), SplitLayout.equalShares(count), at)
+    case .movePane(let split, let from, let to):
+      guard case .split(_, let layout)? = sidebar.node(split) else { return .none }
+      factors = SplitLayout.normalized(layout.widthFactors, count: sidebar.children(of: .split(split)).count)
+      factors.insert(factors.remove(at: from), at: to)
+      (axis, index) = (SplitLayout.axis(for: layout.orientation), to)
+    }
+    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    let frames = SplitLayout.frames(in: bounds, axis: axis, factors: factors, gap: rootView.split.gap, scale: scale)
+    return frames.panes.indices.contains(index) ? .pane(frames.panes[index]) : .none
+  }
+
+  /// Performs a drop as one source write; the dropped tab gets focus. A full split shows "Cannot Add New Pane".
+  private func performDrop(of node: NodeID, in zone: SplitDropZone) -> Bool {
+    guard let drop = splitDrop(of: node, in: zone) else { return false }
+    let mutation: SidebarMutation
+    if case .movePane = drop { mutation = .editSplit } else { mutation = .addPane }
+    do {
+      switch drop {
+      case .full:
+        throw SplitEditError.splitFull
+      case .newSplit(let target, let index, let orientation):
+        try sidebar.addToSplit(.existing(node), target: target, at: index, orientation: orientation)
+      case .addPane(let split, let index):
+        try sidebar.addToSplit(.existing(node), target: split, at: index, orientation: .horizontal)
+      case .movePane(_, let from, let to):
+        try sidebar.movePane(node, to: to > from ? to + 1 : to)   // counted before the pane leaves its place
+      }
+    } catch {
+      onError?(mutation, error)
+      return false
+    }
+    activate(node: node)
+    return true
   }
 }

@@ -875,6 +875,30 @@ a US keyboard layout.
 
 **Commit:** `Drag a sidebar tab onto the page to split it, with a drop preview`
 
+**Notes from S7 (#57)** (S8 and S9 build on these):
+- **Drag source.** `SidebarOutlineController` writes a `NSPasteboardItem` with `.sidebarNode`
+  (`dev.arkt.sidebar-node`, the node's UUID string) for tab rows only: plain tabs, tabs in folders and panes. The
+  mask is `.move` inside the app and none outside it. `draggingSessionWillBegin(items:)` and `draggingSessionEnded()`
+  forward `onNodeDragBegan` / `onNodeDragEnded` through `SidebarController` to `wireSplitDrag()`. Favorites tiles are
+  not drag sources yet (`FavoritesGridView` has no drag support), so "a Favorite dragged in is moved" waits for that.
+- **Overlay.** `SplitDropOverlayView` is made on the first drag, kept in `SplitWindowState.dropOverlay`, and added
+  above the split container (at the content area's frame) only between drag start and end. It registers only
+  `.sidebarNode` and its `hitTest` returns nil. The preview layer moves only when the zone under the pointer (or the
+  bounds) changes, inside `CATransaction.setDisableActions(true)`; the pasteboard is read once, at the drop.
+- **Drop rules** (`ShellWindowController.splitDrop(of:in:)`, `SplitDrop`).
+  - Current plain tab: a new split at its place, the dropped tab first for left and top, second for right and
+    bottom, with the zone's axis. The current tab dropped on itself is refused.
+  - Shown split (the current tab is a pane): the dropped tab is inserted first (left, top) or last (right, bottom);
+    the split keeps its orientation, so a top or bottom drop on a side-by-side split adds a pane side by side [I]
+    (RT-32). A full split takes the drop, shows no preview, and the drop shows "Cannot Add New Pane" (BH-116).
+  - A pane of the shown split, focused or not, moves to the front or the back (`movePane`, factors follow). A pane
+    dropped where it already is is refused. The plan's "dropped tab == current tab → reject" applies to a plain
+    current tab only.
+  - The dropped tab gets focus. Errors go to `onError` (`.addPane`, or `.editSplit` for a reorder).
+- **Preview.** `SplitDropTarget.pane(frame)` comes from `SplitLayout.frames` with the container's gap and backing
+  scale, with equal shares for a new pane (RT-35) and the moved factor for a reorder, so it equals the pane card's
+  frame after the drop (`testPreviewFrameMatchesFutureLayout`).
+
 ---
 
 ### Task S8: Archive, restore, auto-archive and persistence with splits
