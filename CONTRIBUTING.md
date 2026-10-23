@@ -381,12 +381,18 @@ Recommendations only; repository settings are changed by the maintainer.
 
 - **Branch protection on `main`:** require a pull request before merging, 1 approving review, dismiss stale approvals
   on new commits, require review from code owners (this is what enforces `.github/CODEOWNERS`), require linear
-  history, block force pushes and deletions, and require status checks once CI exists.
+  history, block force pushes and deletions, and require the status check **`Swift tests`** (CI, below).
 - **Merge options:** allow squash merging only; turn on "Automatically delete head branches".
 - **Projects board:** a GitHub Projects board for the repository with a Status field whose values mirror the labels
   (Triage, Ready, In progress, In review, Blocked, Needs user, Done), plus Order and Area fields. The labels stay the
   source of truth until the board is automated.
-- **CI:** a GitHub Actions workflow on macOS runners that runs `swift test` in `app/ArktCore` and
-  `swift test --skip ShellKitGUITests` in `app/ArktShell/ShellKit` on every pull request and on `main`. Chromium is
-  not built in CI (hours of build time and over 100 GB of disk); engine changes are verified locally and reported in
-  the pull request.
+- **CI:** `.github/workflows/swift-tests.yml` runs on every pull request and on pushes to `main`, on GitHub-hosted
+  `macos-26` runners with a pinned Xcode. Jobs: "Isolation greps" (the import layering rules of section 6 as a
+  source grep), "ArktCore tests" (`swift test` in `app/ArktCore`), "ShellKit tests"
+  (`swift test --skip ShellKitGUITests`), and "App build (Debug)" (`xcodegen generate`, then a Debug `xcodebuild`
+  without signing). The gate job **`Swift tests`** passes only when all four pass; it is the one check to require on
+  `main`. "ShellKit GUI tests (informative)" runs the GUI suite on the runner's virtual display and may fail without
+  blocking; its frame-timing gates (command bar latency, Space swipe pacing) are printed but not asserted there,
+  because shared runners have no 120 Hz display and no stable load. GUI tests and timing gates stay a local check
+  (section 7). Chromium is not built in CI (hours of build time and over 100 GB of disk); engine changes are verified
+  locally and reported in the pull request.
