@@ -64,6 +64,19 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     }
   }
 
+  /// #206: the Spaces menu ends with Delete Space, without a key (PARITY(NEEDS-RUNTIME-CHECK): Arc's title and place).
+  func testSpacesMenuEndsWithDeleteSpace() throws {
+    _ = NSApplication.shared
+    let windowsMenu = NSApp.windowsMenu
+    defer { NSApp.windowsMenu = windowsMenu }
+    let spaces = try XCTUnwrap(MainMenu.make().items.first { $0.title == "Spaces" }?.submenu)
+    let item = try XCTUnwrap(spaces.items.last)
+    XCTAssertEqual(item.title, "Delete Space...")
+    XCTAssertEqual(item.action, #selector(ShellWindowController.deleteSpace(_:)))
+    XCTAssertEqual(item.keyEquivalent, "")
+    XCTAssertTrue(spaces.items.dropLast().last?.isSeparatorItem ?? false)
+  }
+
   /// No two items share a key equivalent.
   func testKeyEquivalentsAreUnique() {
     var seen: [String: String] = [:]
