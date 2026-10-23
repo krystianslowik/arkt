@@ -1,4 +1,4 @@
-import CoreBridge
+@testable import CoreBridge
 import Foundation
 import ShellUI
 import SidebarModel

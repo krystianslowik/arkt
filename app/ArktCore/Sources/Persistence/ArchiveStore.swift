@@ -36,6 +36,7 @@ public struct ArchiveStore: Sendable {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       \(conflictClause)
       """
+    let addedIDs = policy == .replace ? items.map(\.id) : []
     return try await database.writer.write { db in
       var written = 0
       for row in rows {
@@ -46,6 +47,11 @@ public struct ArchiveStore: Sendable {
             row.sourceSpaceID, row.sectionKind, row.sectionProfile, row.title, row.url, row.snapshot,
           ])
         written += db.changesCount
+      }
+      if !addedIDs.isEmpty {
+        var pending = try SidebarStore.fetchPendingArchiveRemovals(db)
+        for id in addedIDs where !pending.contains(id) { pending.append(id) }
+        try SidebarStore.writePendingArchiveRemovals(db, ids: pending, updatedAt: rows.last?.archivedAt ?? 0)
       }
       return written
     }
@@ -92,6 +98,7 @@ public struct ArchiveStore: Sendable {
   public func remove(_ ids: [NodeID]) async throws {
     dispatchPrecondition(condition: .notOnQueue(.main))
     guard !ids.isEmpty else { return }
+    let removedSet = Set(ids)
     let strings = ids.map(\.uuidString)
     try await database.writer.write { db in
       // Chunked to stay far below SQLite's bound-parameter limit.
@@ -101,6 +108,8 @@ public struct ArchiveStore: Sendable {
         try db.execute(
           sql: "DELETE FROM archived_item WHERE id IN (\(placeholders))", arguments: StatementArguments(chunk))
       }
+      let pending = try SidebarStore.fetchPendingArchiveRemovals(db).filter { !removedSet.contains($0) }
+      try SidebarStore.writePendingArchiveRemovals(db, ids: pending, updatedAt: 0)
     }
   }
 
@@ -108,7 +117,10 @@ public struct ArchiveStore: Sendable {
   @concurrent
   public func removeAll() async throws {
     dispatchPrecondition(condition: .notOnQueue(.main))
-    try await database.writer.write { try $0.execute(sql: "DELETE FROM archived_item") }
+    try await database.writer.write { db in
+      try db.execute(sql: "DELETE FROM archived_item")
+      try SidebarStore.writePendingArchiveRemovals(db, ids: [], updatedAt: 0)
+    }
   }
 
   /// The last row of a batch; the next batch starts strictly after it in (archived_at DESC, id) order.

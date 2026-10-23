@@ -1,3 +1,4 @@
+import Archive
 import Foundation
 import Synchronization
 import Testing
@@ -231,6 +232,59 @@ struct SidebarAutosaverTests {
     retry.resumeAll()  // the sleep returns normally although its task was cancelled
     #expect(await flush.value == false)  // flush's own single attempt hit the second failure
     #expect(store.started == 2)  // the cancelled loop did not attempt again
+  }
+
+  /// #213: a crash between the archive write and the sidebar save never loses archived items in either order:
+  /// (1) when the archive write fails or has not finished yet, `beforeSave` prevents the post-archive sidebar from
+  ///     being saved, so a crash leaves the items in `SidebarStore`;
+  /// (2) when the archive write lands first and the process crashes before `SidebarStore.save`, `ArchiveStore` holds
+  ///     the items and `SidebarStore.load()` replays the pending removals idempotently on launch.
+  @Test func crashBetweenArchiveWriteAndSidebarSaveLosesNoItems() async throws {
+    let database = try ArktDatabase.inMemory()
+    let sidebarStore = SidebarStore(database: database)
+    let archiveStore = ArchiveStore(database: database)
+
+    var initial = Sidebar()
+    let space = initial.addSpace(title: "Work")
+    let pinned = try initial.addTab(url: URL(string: "https://p.example")!, title: "Pinned", in: .pinned(space))
+    let today0 = try initial.addTab(url: URL(string: "https://t0.example")!, title: "T0", in: .today(space))
+    let today1 = try initial.addTab(url: URL(string: "https://t1.example")!, title: "T1", in: .today(space))
+    _ = try await sidebarStore.save(initial, at: Date(timeIntervalSinceReferenceDate: 10))
+
+    // Case 1: Archive write fails when the sidebar autosaver tries to save, then the app crashes before retry.
+    var afterArchive = initial
+    let archivedT0 = try Archiver.archive(today0, from: &afterArchive, reason: .manual,
+                                          at: Date(timeIntervalSinceReferenceDate: 20))
+    let saver = SidebarAutosaver(
+      store: sidebarStore, delay: .milliseconds(500), retryDelays: [.seconds(1)],
+      now: { Date(timeIntervalSinceReferenceDate: 20) }, sleep: sleeper.sleep,
+      beforeSave: { false })
+    saver.scheduleSave(afterArchive)
+    await waitUntil { sleeper.parkedCount == 1 }
+    sleeper.resumeNext()
+    await waitUntil { sleeper.parkedDurations == [.seconds(1)] }
+    // Simulate a crash here (before the archive write succeeds): the on-disk sidebar still has `today0`.
+    let recoveredBeforeArchiveWrite = try #require(try await sidebarStore.load())
+    #expect(recoveredBeforeArchiveWrite.nodes[today0] != nil, "sidebar save waited for the archive write")
+
+    // Case 2: The archive write lands first, and the app crashes before the sidebar save runs.
+    _ = try await archiveStore.add([archivedT0], onConflict: .replace)
+    // Simulate a crash here (between the archive write and the sidebar save) and reload on next launch:
+    let archivedOnLaunch = try await archiveStore.items().items
+    #expect(archivedOnLaunch == [archivedT0], "the archived item is durable in ArchiveStore")
+    let sidebarOnLaunch = try #require(try await sidebarStore.load())
+    #expect(sidebarOnLaunch.nodes[today0] == nil, "pending archive removal is replayed idempotently on launch")
+    #expect(sidebarOnLaunch.nodes[pinned] != nil && sidebarOnLaunch.nodes[today1] != nil)
+    // Replaying again (idempotent) or re-adding with `.replace` loses nothing.
+    _ = try await archiveStore.add([archivedT0], onConflict: .replace)
+    #expect(try await archiveStore.items().items == [archivedT0])
+    #expect(try await sidebarStore.load() == afterArchive)
+
+    // Once the sidebar save completes, the pending removal marker is cleared.
+    saver.beforeSave = { true }
+    sleeper.resumeNext()
+    await waitUntil { !saver.hasPendingChanges }
+    #expect(try await sidebarStore.load() == afterArchive)
   }
 }
 

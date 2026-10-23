@@ -1,6 +1,6 @@
 import AppKit
 import Archive
-import CoreBridge
+@testable import CoreBridge
 import EngineAPITestSupport
 import SidebarModel
 import XCTest

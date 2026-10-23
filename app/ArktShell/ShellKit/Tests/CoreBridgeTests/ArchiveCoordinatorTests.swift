@@ -92,6 +92,65 @@ struct ArchiveCoordinatorTests {
     #expect(await harness.store.addCalls == [.init(ids: items.map(\.id), policy: .replace)])
   }
 
+  /// #213: `pendingItems` is populated before `source.onDidChange` fires, and `flushPendingAdds()` holds back a
+  /// sidebar save while the archive write is failing or in flight, so a crash between the two writes never loses
+  /// archived items (for both `archive` and `removeSpace`).
+  @Test func crashBetweenArchiveWriteAndSidebarSaveLosesNoItems() async throws {
+    let harness = try Harness(todayTabs: 2)
+    var onDiskSidebar = harness.source.sidebar
+    var pendingAtDidChange: [[ArchivedItem]] = []
+    harness.source.onDidChange = { [unowned harness] _ in
+      harness.didChangeCount += 1
+      pendingAtDidChange.append(harness.coordinator.pendingItems)
+    }
+
+    // 1. Archive write fails when the sidebar save tries to run, then the app crashes before retry.
+    await harness.store.setFailsAdds(true)
+    let archivedTab = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    #expect(pendingAtDidChange.last == [archivedTab], "outbox holds the entry before onDidChange schedules a save")
+    await eventually { harness.sleeper.parkedDurations == [.seconds(1)] }
+    // Sidebar save gates on `flushPendingAdds()`: while the archive write fails, the sidebar save does not run.
+    let canSaveSidebarWhileFailing = await harness.coordinator.flushPendingAdds()
+    #expect(!canSaveSidebarWhileFailing)
+    if canSaveSidebarWhileFailing { onDiskSidebar = harness.source.sidebar }
+    // Simulate a crash here: `today[0]` is still in the on-disk sidebar, so nothing is lost.
+    #expect(onDiskSidebar.nodes[harness.today[0]] != nil)
+
+    // 2. Archive write succeeds (Write 1), then the app crashes before the sidebar save (Write 2) lands.
+    await harness.store.setFailsAdds(false)
+    #expect(await harness.coordinator.flushPendingAdds())
+    // Simulate a crash here, between Write 1 (archive store) and Write 2 (sidebar save):
+    #expect(await harness.store.stored[archivedTab.id] == archivedTab, "entry is already durable in the archive store")
+    #expect(onDiskSidebar.nodes[archivedTab.id] != nil, "still in the on-disk sidebar until Write 2 lands")
+    // Replaying the archive on the next launch is idempotent (`.replace`).
+    let relaunchedSource = ModelSidebarSource(sidebar: onDiskSidebar, now: { Self.now })
+    let relaunchedCoordinator = ArchiveCoordinator(source: relaunchedSource, store: harness.store, now: { Self.now })
+    let rearchived = relaunchedCoordinator.archive([archivedTab.id], reason: .manual)
+    await eventually { !relaunchedCoordinator.hasPendingWrites }
+    #expect(rearchived == [archivedTab])
+    #expect(await harness.store.stored[archivedTab.id] == archivedTab)
+
+    // Now Write 2 lands for `archive`, and `removeSpace` follows the same rule.
+    onDiskSidebar = harness.source.sidebar
+    await harness.store.setFailsAdds(true)
+    let spaceItems = harness.coordinator.removeSpace(harness.space)
+    #expect(spaceItems.map(\.id) == [harness.pinned, harness.today[1]])
+    #expect(pendingAtDidChange.last == [archivedTab] + spaceItems || pendingAtDidChange.last == spaceItems)
+    await eventually { harness.sleeper.parkedDurations == [.seconds(1)] }
+    #expect(await harness.coordinator.flushPendingAdds() == false)
+    // Crash before the Space's archive write lands: the Space and its items are still in `onDiskSidebar`.
+    #expect(onDiskSidebar.spaces[harness.space] != nil)
+    #expect(onDiskSidebar.nodes[harness.pinned] != nil && onDiskSidebar.nodes[harness.today[1]] != nil)
+
+    await harness.store.setFailsAdds(false)
+    #expect(await harness.coordinator.flushPendingAdds())
+    onDiskSidebar = harness.source.sidebar
+    #expect(onDiskSidebar.spaces.isEmpty)
+    for item in spaceItems {
+      #expect(await harness.store.stored[item.id] == item)
+    }
+  }
+
   @Test func removingAnEmptySpaceQueuesNothing() async throws {
     let harness = try Harness(todayTabs: 0)
     let empty = try harness.source.addSpace(title: "Empty")

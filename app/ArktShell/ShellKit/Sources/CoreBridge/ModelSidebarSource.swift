@@ -194,14 +194,28 @@ public final class ModelSidebarSource: SidebarSource {
 
   /// Archives nodes through `Archiver` and returns the entries in the order of `ids`; all of them leave the value in
   /// one mutation (one `onDidChange`). Unknown ids are skipped. Which nodes may be archived is the caller's decision.
+  /// Production callers go through `ArchiveCoordinator.archive(_:reason:)` so the entries are queued to the archive
+  /// outbox before the sidebar save (#213).
   public func archive(_ ids: [UUID], reason: ArchiveReason, at date: Date) -> [ArchivedItem] {
-    mutate { sidebar in ids.compactMap { try? Archiver.archive($0, from: &sidebar, reason: reason, at: date) } }
+    archive(ids, reason: reason, at: date, beforeDidChange: { _ in })
+  }
+
+  func archive(
+    _ ids: [UUID], reason: ArchiveReason, at date: Date, beforeDidChange: ([ArchivedItem]) -> Void
+  ) -> [ArchivedItem] {
+    mutate(
+      { sidebar in ids.compactMap { try? Archiver.archive($0, from: &sidebar, reason: reason, at: date) } },
+      beforeDidChange: beforeDidChange)
   }
 
   /// Removes Space `id` through `Archiver.removeSpace` (its pinned and Today items are archived) in one mutation, which
   /// reports `.spaceRemoved` only. Returns the entries; an unknown id changes nothing. Asking first is the caller's job.
-  public func removeSpace(_ id: UUID, at date: Date) -> [ArchivedItem] {
-    mutate { Archiver.removeSpace(id, from: &$0, at: date) }
+  /// Internal so production callers go through `ArchiveCoordinator.removeSpace(_:)`, which queues the entries to the
+  /// archive outbox before the sidebar save (#213).
+  func removeSpace(
+    _ id: UUID, at date: Date, beforeDidChange: ([ArchivedItem]) -> Void = { _ in }
+  ) -> [ArchivedItem] {
+    mutate({ Archiver.removeSpace(id, from: &$0, at: date) }, beforeDidChange: beforeDidChange)
   }
 
   /// Puts `item` back through `Archiver.restore` (its placement rules and fresh ids when an id is taken). Throws the
@@ -217,12 +231,20 @@ public final class ModelSidebarSource: SidebarSource {
   /// synchronously while a change is being delivered (the remaining changes would describe a stale value); defer it.
   @discardableResult
   public func mutate<T>(_ body: (inout SidebarModel.Sidebar) throws -> T) rethrows -> T {
+    try mutate(body, beforeDidChange: { _ in })
+  }
+
+  @discardableResult
+  func mutate<T>(
+    _ body: (inout SidebarModel.Sidebar) throws -> T, beforeDidChange: (T) -> Void
+  ) rethrows -> T {
     var copy = sidebar
     let result = try body(&copy)
     guard copy != sidebar else { return result }
     let old = sidebar
     sidebar = copy
     for change in SidebarDiff.changes(from: old, to: copy) { hub.emit(change) }
+    beforeDidChange(result)
     onDidChange?(copy)
     return result
   }
