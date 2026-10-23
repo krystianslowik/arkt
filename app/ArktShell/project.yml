@@ -89,7 +89,7 @@ targets:
   ArktShellUITests:
     type: bundle.ui-testing
     platform: macOS
-    sources: [UITests]
+    sources: [UITests, {path: ShellKit/Sources/ShellUI/Accessibility/AXID.swift}]
     dependencies:
       - target: ArktShell
     settings:
