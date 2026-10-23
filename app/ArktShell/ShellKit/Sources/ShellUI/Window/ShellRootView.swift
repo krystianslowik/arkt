@@ -1,7 +1,8 @@
 import AppKit
 
-/// Window content view. Owns (back to front) the theme background, the sidebar container, the content card
-/// and the sidebar resize handle. Frames come from `ShellLayout` and are set directly (no Auto Layout).
+/// Window content view. Owns (back to front) the theme background, the sidebar container, the content card, the
+/// split container (shown instead of the card for a split) and the sidebar resize handle. Frames come from
+/// `ShellLayout` and are set directly (no Auto Layout).
 @MainActor
 public final class ShellRootView: NSView {
   public let metrics: ShellMetrics
@@ -10,6 +11,8 @@ public final class ShellRootView: NSView {
   /// The sidebar column (C3): traffic-light strip, favorites, Space page, bottom bar.
   public let sidebarContainer: SidebarContainerView
   public let card: ContentCardView
+  /// The pane cards of a shown split, laid out at the card's frame. Hidden until a split is shown (S4).
+  public let split: SplitContainerView
   public let resizeHandle: SidebarResizeHandle
 
   public var sidebarWidth: CGFloat {
@@ -26,10 +29,12 @@ public final class ShellRootView: NSView {
     self.sidebarContainer = sidebar
       ?? SidebarContainerView(source: StubSidebar(), topBarHeight: metrics.sidebarTopBarHeight)
     self.card = ContentCardView(metrics: metrics)
+    self.split = SplitContainerView(metrics: metrics)
     self.resizeHandle = SidebarResizeHandle(metrics: metrics)
     super.init(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
     wantsLayer = true
-    for view in [themeBackground, sidebarContainer, card, resizeHandle] {
+    split.isHidden = true
+    for view in [themeBackground, sidebarContainer, card, split, resizeHandle] {
       view.autoresizingMask = []
       addSubview(view)
     }
@@ -53,6 +58,7 @@ public final class ShellRootView: NSView {
     themeBackground.frame = bounds
     sidebarContainer.frame = l.sidebarFrame
     card.frame = l.cardFrame
+    split.frame = l.cardFrame
     resizeHandle.frame = l.resizeHandleFrame
     CATransaction.commit()
     (window as? ShellWindow)?.layoutTrafficLights(sidebarWidth: l.sidebarFrame.width)

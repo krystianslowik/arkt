@@ -212,6 +212,11 @@ struct ModelSidebarSourceTests {
     #expect(recorder.source.sidebar.nodes[split]?.createdAt == stamp)
   }
 
+  /// The shell's cap must match the model's (CF-06), or the stub and the menus would allow a pane the model refuses.
+  @Test func maximumPanesMirrorsTheModel() {
+    #expect(SplitLayoutInfo.maximumPanes == Sidebar.maximumSplitPanes)
+  }
+
   @Test func errorsMapToSplitEditError() throws {
     let recorder = Recorder()
     let space = try recorder.source.addSpace(title: "S")

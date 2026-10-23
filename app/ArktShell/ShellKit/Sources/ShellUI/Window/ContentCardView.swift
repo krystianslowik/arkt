@@ -28,6 +28,11 @@ public final class ContentCardView: NSView {
       needsLayout = true
     }
   }
+  /// Multiplies the hairline border's opacity. A split draws its focused pane at 1 and the others at 0.5 [I]
+  /// PARITY(NEEDS-RUNTIME-CHECK RT-37).
+  public var borderEmphasis: CGFloat = 1 {
+    didSet { if borderEmphasis != oldValue { needsDisplay = true } }
+  }
   private let metrics: ShellMetrics
 
   public init(metrics: ShellMetrics = .standard) {
@@ -116,7 +121,9 @@ public final class ContentCardView: NSView {
     layer.shadowColor = ShellTokens.cardShadow.resolve(flavor).cgColor
     layer.shadowRadius = 3
     layer.shadowOffset = CGSize(width: 0, height: -1)
-    clip.borderColor = ShellTokens.cardBorder.resolve(flavor).cgColor
+    var border = ShellTokens.cardBorder.resolve(flavor)
+    border.alpha *= Double(borderEmphasis)
+    clip.borderColor = border.cgColor
     applyBorderWidth()
   }
 
