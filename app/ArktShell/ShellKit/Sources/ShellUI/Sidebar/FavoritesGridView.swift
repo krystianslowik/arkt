@@ -1,12 +1,35 @@
 import AppKit
 
-/// One favorite tile: rounded fill (resting / hovered / current) with a centered 20 pt favicon.
+/// One favorite tile: rounded fill (resting / hovered / current) with a centered 20 pt favicon, and the hover close
+/// (X) in the top trailing corner while a loaded tile is hovered (#82). Frames set in `layout()`; no constraints.
 @MainActor
 public final class FavoriteTileView: NSView {
   public let faviconView = NSImageView()
-  public var flavor: ThemeFlavor = .light { didSet { if flavor != oldValue { needsDisplay = true } } }
+  /// Shown while the tile is hovered and has a close action (its page is loaded). Target and action are set by the
+  /// grid; hidden (so neither hit-tested nor in the accessibility tree) otherwise.
+  public let closeButton = NSButton()
+  public var flavor: ThemeFlavor = .light {
+    didSet {
+      guard flavor != oldValue else { return }
+      needsDisplay = true
+      closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale)
+    }
+  }
   public var isCurrent = false { didSet { if isCurrent != oldValue { needsDisplay = true } } }
-  public var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
+  /// Also shows or hides the X, fading with the fill.
+  public var isHovered = false {
+    didSet {
+      guard isHovered != oldValue else { return }
+      needsDisplay = true
+      setCloseButtonShown(isHovered, animated: true)
+    }
+  }
+  /// The Favorite this tile shows; the grid sets it, the X reports it.
+  public internal(set) var nodeID: NodeID?
+  /// What the X does; nil (no loaded page) never shows it.
+  public private(set) var closeAction: RowCloseAction?
+  /// Whether the X is shown or fading in (the tile is hovered and there is a close action).
+  public private(set) var isCloseButtonShown = false
   private var hoverArea: NSTrackingArea?
 
   /// The fill currently drawn. Exposed for tests.
@@ -22,7 +45,16 @@ public final class FavoriteTileView: NSView {
     faviconView.imageScaling = .scaleProportionallyUpOrDown
     faviconView.autoresizingMask = []
     faviconView.setAccessibilityElement(false)
+    closeButton.isBordered = false
+    closeButton.bezelStyle = .regularSquare
+    closeButton.imagePosition = .imageOnly
+    closeButton.imageScaling = .scaleNone
+    closeButton.autoresizingMask = []
+    closeButton.wantsLayer = true
+    closeButton.isHidden = true
+    closeButton.alphaValue = 0
     addSubview(faviconView)
+    addSubview(closeButton)
     setAccessibilityElement(true)
     setAccessibilityRole(.button)
   }
@@ -55,6 +87,48 @@ public final class FavoriteTileView: NSView {
     let size = SidebarMetrics.favoriteFaviconSize
     faviconView.frame = NSRect(x: ((bounds.width - size) / 2).rounded(), y: ((bounds.height - size) / 2).rounded(),
                                width: size, height: size)
+    let box = SidebarMetrics.favoriteCloseButtonSize
+    let inset = SidebarMetrics.favoriteCloseButtonInset
+    closeButton.frame = NSRect(x: bounds.width - inset - box, y: bounds.height - inset - box, width: box, height: box)
+  }
+
+  public override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale)
+  }
+
+  /// Sets what the X does (nil: nothing to close) and its tooltip. A tile that gains or loses its action under the
+  /// pointer shows or hides the X at once.
+  func setCloseAction(_ action: RowCloseAction?) {
+    if closeButton.image == nil { closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale) }
+    closeAction = action
+    closeButton.toolTip = action?.tooltip
+    closeButton.setAccessibilityLabel(action?.tooltip)
+    if (isHovered && action != nil) != isCloseButtonShown { setCloseButtonShown(isHovered, animated: false) }
+  }
+
+  /// Shows or hides the X (only when there is a close action), fading with the hover state. Only the button's
+  /// opacity and hidden flag change; nothing is laid out.
+  public func setCloseButtonShown(_ shown: Bool, animated: Bool) {
+    let shown = shown && closeAction != nil
+    guard shown != isCloseButtonShown || !animated else { return }   // unanimated calls always settle the state
+    isCloseButtonShown = shown
+    if shown { closeButton.isHidden = false }
+    guard animated, window != nil else {
+      closeButton.alphaValue = shown ? 1 : 0
+      closeButton.isHidden = !shown
+      return
+    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = SidebarMetrics.closeButtonFadeDuration
+      context.allowsImplicitAnimation = true
+      closeButton.animator().alphaValue = shown ? 1 : 0
+    } completionHandler: { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, !self.isCloseButtonShown else { return }
+        self.closeButton.isHidden = true      // a faded-out X takes no clicks
+      }
+    }
   }
 
   public override func updateTrackingAreas() {
@@ -64,6 +138,24 @@ public final class FavoriteTileView: NSView {
                               owner: self, userInfo: nil)
     addTrackingArea(area)
     hoverArea = area
+    resyncHoverWithPointer { syncHover(pointerInWindow: $0) }   // a tile shifted or reused under a still pointer
+  }
+
+  /// Sets the hover state from a pointer location in window coordinates (nil: the pointer is not over this window).
+  func syncHover(pointerInWindow point: NSPoint?) {
+    guard let point else { isHovered = false; return }
+    isHovered = bounds.contains(convert(point, from: nil))
+  }
+
+  /// Clears what belongs to the Favorite shown before (item reuse).
+  public override func prepareForReuse() {
+    super.prepareForReuse()
+    isHovered = false
+    isCurrent = false
+    nodeID = nil
+    setCloseAction(nil)
+    setCloseButtonShown(false, animated: false)        // no fade on a reused tile
+    setAccessibilityCustomActions([])
   }
 
   public override func mouseEntered(with event: NSEvent) { isHovered = true }
@@ -81,8 +173,7 @@ public final class FavoriteTileItem: NSCollectionViewItem {
 
   public override func prepareForReuse() {
     super.prepareForReuse()
-    tileView.isHovered = false
-    tileView.isCurrent = false
+    tileView.prepareForReuse()
   }
 }
 
@@ -99,6 +190,10 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
 
   public var onActivate: (@MainActor (NodeID) -> Void)?
   public var faviconProvider: (@MainActor (NodeID) -> NSImage?)?
+  /// A tile's hover close (X) or its VoiceOver close action was used (#82); the window runs the same close as Cmd-W.
+  public var onClose: (@MainActor (NodeID) -> Void)?
+  /// Whether the Favorite's page is loaded in this window; only a loaded tile shows the X and the close action.
+  public var pageLoadedProvider: (@MainActor (NodeID) -> Bool)?
 
   private let flowLayout = NSCollectionViewFlowLayout()
 
@@ -172,6 +267,30 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
                               scale: collectionView.shellBackingScale)
     tile.toolTip = title
     tile.setAccessibilityLabel(title)
+    tile.nodeID = id
+    let action = pageLoadedProvider?(id) == true ? RowCloseAction.resolve(id, in: source) : nil
+    tile.closeButton.target = self
+    tile.closeButton.action = #selector(closeClicked(_:))
+    tile.setCloseAction(action)
+    tile.setAccessibilityCustomActions(closeAccessibilityActions(for: id, action: action))
+  }
+
+  // MARK: Close
+
+  /// The X of a tile; same close as the rows' X (`RowCloseAction.closeFavorite`).
+  @objc private func closeClicked(_ sender: NSButton) {
+    guard let id = (sender.superview as? FavoriteTileView)?.nodeID else { return }
+    onClose?(id)
+  }
+
+  /// VoiceOver's "Close" on a loaded tile; none otherwise.
+  private func closeAccessibilityActions(for id: NodeID, action: RowCloseAction?) -> [NSAccessibilityCustomAction] {
+    guard let action else { return [] }
+    return [NSAccessibilityCustomAction(name: action.accessibilityName) { [weak self] in
+      guard let self, self.source.node(id) != nil else { return false }
+      self.onClose?(id)
+      return true
+    }]
   }
 
   // MARK: Delegate
@@ -203,7 +322,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     }
   }
 
-  /// Refreshes one tile (favicon or title).
+  /// Refreshes one tile (favicon, title or whether its page is loaded).
   public func reload(node id: NodeID) {
     guard let index = nodeIDs.firstIndex(of: id),
           let item = collectionView.item(at: IndexPath(item: index, section: 0)) as? FavoriteTileItem else { return }

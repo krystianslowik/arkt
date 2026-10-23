@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a sidebar row's hover close button does (GS-043), which decides its tooltip and its VoiceOver action name.
+/// What a sidebar row's (or a Favorite tile's) hover close button does (GS-043), which decides its tooltip and its VoiceOver action name.
 /// The action itself is the window's: the same close as Cmd-W (`ShellWindowController.close(node:)`).
 public enum RowCloseAction: Equatable, Sendable {
   /// A Today tab or a Today split pane: archived (BH-071; a pane alone, user decision 4).
@@ -9,7 +9,7 @@ public enum RowCloseAction: Equatable, Sendable {
   case archiveSplit
   /// A pinned tab, pane or split: its pages close and the row stays (BH-067; BH-070 is NEEDS-RUNTIME-CHECK RT-17).
   case closeKeepPinned
-  /// A Favorite: its page closes and the tile stays (BH-048 [I]). Favorites are tiles, not rows; the grid shows no X.
+  /// A Favorite: its page closes and the tile stays (BH-048 [I]). The grid shows the X only on a loaded tile (#82).
   case closeFavorite
 
   /// The action for the row of `id`, by its top-level section and kind. Nil for folders (they only expand and

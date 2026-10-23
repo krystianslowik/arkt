@@ -33,6 +33,9 @@ public final class SidebarController {
   /// Decoded favicons by node; kept while the node exists in the source (its engine tab may close and reopen),
   /// dropped when the node leaves it (`.structure` and `.spaces` changes, `deactivate(node:)`).
   private(set) var favicons: [NodeID: NSImage] = [:]
+  /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page, and the
+  /// window calls `deactivate(node:)` when the page closes. Decides whether a Favorite tile shows its X (#82).
+  private(set) var loadedNodes: Set<NodeID> = []
   private var observation: SidebarObservation?
   private let buttonTarget = ButtonTarget()
 
@@ -43,6 +46,8 @@ public final class SidebarController {
     self.view = SidebarContainerView(source: source, profile: profile, topBarHeight: topBarHeight)
     view.favorites.onActivate = { [weak self] id in self?.activate(node: id) }
     view.favorites.faviconProvider = { [weak self] id in self?.favicons[id] }
+    view.favorites.onClose = { [weak self] id in self?.onClose?(id) }
+    view.favorites.pageLoadedProvider = { [weak self] id in self?.loadedNodes.contains(id) ?? false }
     view.spaceDots.onSelect = { [weak self] index in self?.goToSpace(at: index) }
     view.pager.onPosition = { [weak self] position in self?.pagerMoved(to: position) }
     view.pager.onSettle = { [weak self] index in self?.pagerSettled(on: index) }
@@ -171,20 +176,24 @@ public final class SidebarController {
     let space = source.spaceID(containing: tab)
     if let space, space != currentSpace { showSpace(space) }
     if let space { lastActive[space] = tab }
+    let loadedNow = loadedNodes.insert(tab).inserted
     if tab != current {
       previous = current
       current = tab
       let states = resolver
       for page in pages.values { page.outlineController.setRowStates(states) }
-      view.favorites.setRowStates(states)
+      view.favorites.setRowStates(states)       // refreshes the visible tiles, a newly loaded one included
+    } else if loadedNow {
+      view.favorites.reload(node: tab)
     }
     onActivate?(tab)
   }
 
-  /// Forgets a node that no longer has a tab (engine tab closed): any current/previous role, and its favicon only
-  /// when the node itself is gone from the source.
+  /// Forgets a node that no longer has a tab (engine tab closed): its loaded state, any current/previous role, and
+  /// its favicon only when the node itself is gone from the source.
   public func deactivate(node: NodeID) {
     if source.node(node) == nil { favicons[node] = nil }
+    if loadedNodes.remove(node) != nil { view.favorites.reload(node: node) }   // a background Favorite drops its X
     guard node == current || node == previous else { return }
     if node == current { current = nil }
     if node == previous { previous = nil }
