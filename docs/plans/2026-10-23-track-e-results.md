@@ -232,3 +232,18 @@ Debug app build: `** BUILD SUCCEEDED **`.
 |---|---|---|---|
 | ArktCore `swift test` | 342 | 343 | +1 `SidebarAutosaverTests` |
 | ShellKit `swift test --skip ShellKitGUITests` | 456 | 457 | +1 `ArchiveCoordinatorTests` |
+
+## Shared test-support target and FlushRace helper (#93)
+
+- `SidebarModel` gains `FlushRace` (`Sources/SidebarModel/FlushRace.swift`), used by both `SidebarAutosaver.flush()` and
+  `ArchiveCoordinator.flush()` so neither carries a duplicate copy; covered by `FlushRaceTests`.
+- `ArktCore` gains the pure `CoreTestSupport` target and library product (`Sources/CoreTestSupport/CoreTestSupport.swift`,
+  depending only on `SidebarModel`, `Archive` and `ArcImport`, verified by
+  `CoreIsolationTests.pureCoreTargetsDependOnlyOnPureTargets`), holding `ManualSleeper`, `UncancellableSleeper`,
+  `TestSidebars`, `TestClock`, `FakeStoreError`, `FakeArchiveStore`, `FakeArchiveState`, `FakeArcImportRecordStore` and
+  `FakeSidebarPersist`, shared by `PersistenceTests` and `CoreBridgeTests`.
+
+| Suite | Baseline (`3554f04`) | Final | Delta |
+|---|---|---|---|
+| ArktCore `swift test` | 343 | 345 | +2 `FlushRaceTests` |
+| ShellKit `swift test --skip ShellKitGUITests` | 457 | 457 | 0 |

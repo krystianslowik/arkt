@@ -43,6 +43,7 @@ let package = Package(
         .product(name: "SidebarModel", package: "ArktCore"),
         .product(name: "Archive", package: "ArktCore"),
         .product(name: "ArcImport", package: "ArktCore"),
+        .product(name: "CoreTestSupport", package: "ArktCore"),
       ],
       // Synthetic Arc files only (copies of ArktCore's ArcImportTests fixtures); never real Arc data.
       resources: [.copy("Fixtures")]

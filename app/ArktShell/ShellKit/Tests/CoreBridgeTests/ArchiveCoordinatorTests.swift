@@ -647,14 +647,6 @@ struct ArchiveCoordinatorTests {
 
 // MARK: - Helpers
 
-/// A clock the tests move by hand.
-@MainActor
-final class TestClock {
-  var now: Date
-
-  init(_ now: Date) { self.now = now }
-}
-
 /// Yields until `condition` holds; records an issue if it never does.
 @MainActor
 private func eventually(
@@ -665,59 +657,4 @@ private func eventually(
     await Task.yield()
   }
   Issue.record("condition never became true", sourceLocation: sourceLocation)
-}
-
-/// A manual stand-in for `Task.sleep` (as in ArktCore's persistence tests): each call parks until the test resumes
-/// it, or throws `CancellationError` when its task is cancelled (also when cancelled before it parked).
-final class ManualSleeper: Sendable {
-  private struct Parked {
-    let id: Int
-    let duration: Duration
-    let continuation: CheckedContinuation<Void, any Error>
-  }
-
-  private struct State {
-    var nextID = 0
-    var parked: [Parked] = []
-    var cancelledEarly: Set<Int> = []
-  }
-
-  private let state = Mutex(State())
-
-  var sleep: @Sendable (Duration) async throws -> Void { { [self] duration in try await self.park(duration) } }
-  var parkedCount: Int { state.withLock { $0.parked.count } }
-  var parkedDurations: [Duration] { state.withLock { $0.parked.map(\.duration) } }
-
-  /// Resumes the parked sleeper with `duration` (the oldest one if several).
-  func resume(_ duration: Duration) {
-    let parked = state.withLock { state -> Parked? in
-      guard let index = state.parked.firstIndex(where: { $0.duration == duration }) else { return nil }
-      return state.parked.remove(at: index)
-    }
-    parked?.continuation.resume()
-  }
-
-  private func park(_ duration: Duration) async throws {
-    let id = state.withLock { state -> Int in
-      state.nextID += 1
-      return state.nextID
-    }
-    try await withTaskCancellationHandler {
-      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-        let cancelled = state.withLock { state -> Bool in
-          if state.cancelledEarly.remove(id) != nil { return true }
-          state.parked.append(Parked(id: id, duration: duration, continuation: continuation))
-          return false
-        }
-        if cancelled { continuation.resume(throwing: CancellationError()) }
-      }
-    } onCancel: {
-      let parked = state.withLock { state -> Parked? in
-        if let index = state.parked.firstIndex(where: { $0.id == id }) { return state.parked.remove(at: index) }
-        state.cancelledEarly.insert(id)
-        return nil
-      }
-      parked?.continuation.resume(throwing: CancellationError())
-    }
-  }
 }

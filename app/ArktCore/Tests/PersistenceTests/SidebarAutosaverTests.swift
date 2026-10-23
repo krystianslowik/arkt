@@ -287,32 +287,3 @@ struct SidebarAutosaverTests {
     #expect(try await sidebarStore.load() == afterArchive)
   }
 }
-
-/// A sleep that ignores cancellation (it only records it), modelling a sleep that finished as it was cancelled.
-final class UncancellableSleeper: Sendable {
-  private struct State {
-    var parked: [CheckedContinuation<Void, Never>] = []
-    var cancelled = 0
-  }
-
-  private let state = Mutex(State())
-
-  var parkedCount: Int { state.withLock { $0.parked.count } }
-  var cancelledCount: Int { state.withLock { $0.cancelled } }
-
-  func park() async {
-    await withTaskCancellationHandler {
-      await withCheckedContinuation { continuation in state.withLock { $0.parked.append(continuation) } }
-    } onCancel: {
-      state.withLock { $0.cancelled += 1 }
-    }
-  }
-
-  func resumeAll() {
-    let parked = state.withLock { state -> [CheckedContinuation<Void, Never>] in
-      defer { state.parked = [] }
-      return state.parked
-    }
-    for continuation in parked { continuation.resume() }
-  }
-}
