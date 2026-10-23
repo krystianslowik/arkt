@@ -80,6 +80,7 @@ final class AppSession {
     startFavicons(prune: outcome == .opened)          // before the window can create engine tabs
     window.onImportFromArc = { [weak self] in self?.importFromArc() }
     window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
+    window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
     window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
     window.window?.center()
     window.showWindow(nil)

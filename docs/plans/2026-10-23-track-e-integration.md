@@ -2025,7 +2025,7 @@ into `spike/week1`, `git worktree remove ../arkt-wt/track-e`, `git worktree prun
 - Drag and drop, moves, renames, Space deletion, the C3 removal/move follow-ups beyond cache pruning. Space
   deletion's model, archive path and events landed in #86 (decision on #86, 2026-10-23: deleting a Space that has
   pinned tabs or folders asks for confirmation first, then moves its pinned and Today items to the Archive); the menu
-  entry and the confirmation sheet are still open.
+  entry (Spaces > Delete Space...) and the confirmation sheet landed in #206, which asks for every Space.
 - Clear / Archive Below / multi-select archive (BH-075, BH-077, BH-078, BH-072), Cmd-Shift-T (BH-074), archive search
   and filters UI (BH-087, BH-088, Unicode search follow-up), Clear Archive, education banner (BH-089).
 - Split pane removal (BH-122, BH-123), Air Traffic Control restore routing (BH-157), Little Arc archive (BH-137, BH-138).

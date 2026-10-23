@@ -44,6 +44,8 @@ enum MainMenu {
       space.tag = n - 1
       spaces.append(space)
     }
+    // #206, decision on #86: asks, then archives the Space's items. PARITY(NEEDS-RUNTIME-CHECK): Arc's title and place.
+    spaces += [.separator(), item("Delete Space...", #selector(ShellWindowController.deleteSpace(_:)), "", [])]
     main.addItem(submenu(title: "Spaces", items: spaces))
     // KB-043: Show Archive is unbound by default; Cmd-Shift-L stays reserved for the Library (KB-065).
     let window = submenu(title: "Window", items: [
