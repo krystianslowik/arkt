@@ -220,6 +220,114 @@ final class FavoriteTileCloseTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// The grid reads the pointer once for all its tiles, in any visible window (key or not), and a tile under another
+  /// window (a child panel such as the command bar) drops its hover.
+  func testResyncHoversTheTileUnderThePointerUnlessAnotherWindowCoversIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.favorites[0])
+    let tile = try harness.tile(world.favorites[0])
+    let other = try harness.tile(world.favorites[1])
+    other.isHovered = true
+    let window = try XCTUnwrap(tile.window)
+    let pointer = HoverPointerStub(window: window)
+    pointer.move(toCenterOf: tile)
+    harness.grid.hoverPointerLookup = pointer.lookup
+    XCTAssertFalse(window.isKeyWindow)
+
+    harness.grid.resyncHoverWithPointer()
+
+    XCTAssertTrue(tile.isHovered)
+    XCTAssertTrue(tile.isCloseButtonShown)
+    XCTAssertFalse(other.isHovered)
+    XCTAssertEqual(pointer.windowServerQueries, 1)
+
+    pointer.coveringWindowNumber = window.windowNumber + 1
+    harness.grid.resyncHoverWithPointer()
+    XCTAssertFalse(tile.isHovered)
+    XCTAssertFalse(tile.isCloseButtonShown)
+    harness.controller.close()
+  }
+
+  /// A Favorite removed before the hovered tile shifts the tiles under a still pointer: after the change the tile now
+  /// under the pointer is hovered and the shifted one is not (no stale X).
+  func testTilesShiftedByARemovedFavoriteResyncTheirHover() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let last = try harness.tile(world.favorites[2])
+    let middle = try harness.tile(world.favorites[1])
+    let pointer = HoverPointerStub(window: try XCTUnwrap(last.window))
+    pointer.move(toCenterOf: middle)
+    harness.grid.hoverPointerLookup = pointer.lookup
+    harness.grid.resyncHoverWithPointer()
+    XCTAssertTrue(middle.isHovered)
+
+    harness.source.mutate { $0.remove(world.favorites[0]) }
+    harness.grid.collectionView.layoutSubtreeIfNeeded()
+    drainMainQueue()
+
+    XCTAssertEqual(harness.grid.nodeIDs, [world.favorites[1], world.favorites[2]])
+    XCTAssertFalse(try harness.tile(world.favorites[1]).isHovered, "moved out from under the pointer")
+    XCTAssertTrue(try harness.tile(world.favorites[2]).isHovered, "moved under the pointer")
+    harness.controller.close()
+  }
+
+  /// Reduce Motion: the tile's X appears and hides at once, without a fade.
+  func testReduceMotionShowsAndHidesTheTileCloseButtonWithoutAFade() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.favorites[0])
+    let tile = try harness.tile(world.favorites[0])
+    tile.closeButton.reducesMotion = { true }
+
+    tile.isHovered = true
+    XCTAssertEqual(tile.closeButton.alphaValue, 1)
+    XCTAssertFalse(tile.closeButton.isHidden)
+
+    tile.isHovered = false
+    XCTAssertEqual(tile.closeButton.alphaValue, 0)
+    XCTAssertTrue(tile.closeButton.isHidden)
+    XCTAssertNil(tile.closeButton.layer?.animation(forKey: "opacity"))
+    harness.controller.close()
+  }
+
+  // MARK: Loaded state
+
+  /// A loaded Favorite removed from the source leaves the loaded set like it leaves the favicon cache, also for a
+  /// sidebar without a window to report the closed page.
+  func testRemovedFavoriteLeavesTheLoadedSet() throws {
+    let world = try Self.makeWorld()
+    let source = ModelSidebarSource(sidebar: world.sidebar, now: { FavoriteTileCloseTests.now })
+    let sidebar = SidebarController(source: source)
+    sidebar.activate(node: world.favorites[0])
+    sidebar.activate(node: world.favorites[1])
+    XCTAssertEqual(sidebar.loadedNodes, [world.favorites[0], world.favorites[1]])
+
+    source.mutate { $0.remove(world.favorites[0]) }
+
+    XCTAssertEqual(sidebar.loadedNodes, [world.favorites[1]])
+  }
+
+  /// Closing the current Favorite's page refreshes its tile once (the row-state refresh covers it).
+  func testDeactivatingTheCurrentFavoriteConfiguresItsTileOnce() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.favorites[0])
+    _ = try harness.tile(world.favorites[0])
+    var configured = 0
+    let favicons = harness.grid.faviconProvider
+    harness.grid.faviconProvider = { id in
+      if id == world.favorites[0] { configured += 1 }
+      return favicons?(id)
+    }
+
+    harness.controller.sidebarController.deactivate(node: world.favorites[0])
+
+    XCTAssertEqual(configured, 1)
+    XCTAssertNil(try harness.tile(world.favorites[0]).closeAction)
+    harness.controller.close()
+  }
+
   // MARK: Click
 
   /// BH-048 [I]: the X on the current Favorite closes its page and keeps the Favorite; nothing is archived, and the

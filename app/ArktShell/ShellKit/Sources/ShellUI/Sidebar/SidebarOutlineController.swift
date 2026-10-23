@@ -16,7 +16,22 @@ public final class OutlineItem: NSObject {
 /// Outline view with Arc's flat geometry: no disclosure triangle, children indented by a fixed step, and a
 /// pressed state shown on the row under the pointer while the button is down.
 @MainActor
-public final class SidebarOutlineView: NSOutlineView {
+public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
+  private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
+    enumerateAvailableRowViews { rowView, _ in (rowView as? SidebarRowView)?.syncHover(pointerInWindow: pointer) }
+  }
+  /// Where hover resyncs read the pointer; tests replace it.
+  var hoverPointerLookup: HoverPointerLookup {
+    get { hoverResync.lookup }
+    set { hoverResync.lookup = newValue }
+  }
+
+  /// Rows ask on every tracking-area update (a scroll updates all of them); one lookup serves them all.
+  func setNeedsHoverResync() { hoverResync.setNeeded() }
+
+  /// Reads the pointer once and sets the hover state of every realized row from it.
+  func resyncHoverWithPointer() { hoverResync.resyncNow() }
+
   public override func frameOfOutlineCell(atRow row: Int) -> NSRect { .zero }
 
   public override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {

@@ -96,7 +96,7 @@ public final class SidebarRowView: NSTableRowView {
                               owner: self, userInfo: nil)
     addTrackingArea(area)
     hoverArea = area
-    resyncHoverWithPointer { syncHover(pointerInWindow: $0) }   // a row scrolled or reused under a still pointer
+    setNeedsHoverResyncInHost()                     // a row scrolled or reused under a still pointer
   }
 
   /// Sets the hover state from a pointer location in window coordinates (nil: the pointer is not over this
