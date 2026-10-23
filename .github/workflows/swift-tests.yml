@@ -187,6 +187,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # First, before anything is built: no sleeps and no URL other than the loopback fixture server in the suite.
+      - name: Check UI test sources
+        run: scripts/ui-tests/check-sources.sh
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
