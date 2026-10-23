@@ -171,7 +171,7 @@ final class SmokeRunner {
     guard bar.isVisible else { return nil }
     _ = await waitFor(seconds: 2) { latency != nil }
     bar.toggle(.newTab)                                             // close again
-    try? await Task.sleep(for: .milliseconds(30))                   // same gap as the GUI latency test
+    try? await Task.sleep(for: .milliseconds(25))                   // 3 x 8.33 ms frames: keep show() off vsync edge
     return latency.map { $0 * 1000 }
   }
 
@@ -203,7 +203,7 @@ final class SmokeRunner {
     let deadline = Date().addingTimeInterval(seconds)
     while Date() < deadline {
       if condition() { return true }
-      try? await Task.sleep(for: .milliseconds(5))
+      try? await Task.sleep(for: .milliseconds(1))
     }
     return condition()
   }

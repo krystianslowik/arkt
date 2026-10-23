@@ -348,6 +348,29 @@ final class CommandBarTests: XCTestCase {
     bar.toggle(.newTab)
   }
 
+  /// #25: `prewarm()` attaches the field editor (`currentEditor() != nil`) before the first `show()`, and a warm show
+  /// with row 0 already selected does not emit a redundant `selectionDidChangeNotification`.
+  func testWarmShowWithEmptyFieldPrewarmsEditorAndSkipsRedundantSelectionNotification() throws {
+    XCTAssertNotNil(bar.barView.field.currentEditor(), "prewarm installs the field editor before the first show")
+    let tabs: [CommandBarResults.OpenTab] = [
+      .init(node: UUID(), title: "One", url: URL(string: "https://one.example")!),
+    ]
+    bar.openTabsProvider = { tabs }
+    bar.toggle(.newTab)
+    XCTAssertEqual(bar.barView.table.selectedRow, 0)
+    bar.toggle(.newTab)
+
+    var selectionChanges = 0
+    let token = NotificationCenter.default.addObserver(
+      forName: NSTableView.selectionDidChangeNotification, object: bar.barView.table, queue: nil
+    ) { _ in MainActor.assumeIsolated { selectionChanges += 1 } }
+    defer { NotificationCenter.default.removeObserver(token) }
+
+    bar.toggle(.newTab)
+    XCTAssertEqual(selectionChanges, 0, "row 0 was already selected")
+    bar.toggle(.newTab)
+  }
+
   // Pre-merge review: unchanged results keep the cells, but not across a backing scale change (the shell
   // window moved to a display of another scale): the icons are bitmaps at the old scale.
   func testShowAfterBackingScaleChangeReloadsTheIcons() async throws {
