@@ -94,6 +94,27 @@ struct ToolbarSettingTests {
     #expect(ToolbarSetting.ephemeral().isVisible == false)
   }
 
+  @Test func observersHearEachChangeUntilTheyGo() {
+    final class Counter: ToolbarSettingObserver {
+      var count = 0
+      func toolbarSettingDidChange(_ setting: ToolbarSetting) { count += 1 }
+    }
+    let setting = ToolbarSetting.ephemeral()
+    let kept = Counter()
+    var dropped: Counter? = Counter()
+    weak let droppedRef = dropped
+    setting.addObserver(kept)
+    setting.addObserver(dropped!)
+    setting.addObserver(kept)                                  // added twice, told once
+    setting.isVisible = true
+    setting.isVisible = true                                   // no change, no call
+    #expect(kept.count == 1 && dropped?.count == 1)
+    dropped = nil
+    #expect(droppedRef == nil, "the setting holds observers weakly")
+    setting.isVisible = false
+    #expect(kept.count == 2)
+  }
+
   @Test func menuTitleFollowsTheState() {
     #expect(ToolbarSetting.menuTitle(isVisible: false) == "Show Toolbar")
     #expect(ToolbarSetting.menuTitle(isVisible: true) == "Hide Toolbar")

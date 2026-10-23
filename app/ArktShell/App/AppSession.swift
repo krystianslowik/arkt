@@ -20,6 +20,8 @@ final class AppSession {
   let source: ModelSidebarSource
   let autosaver: SidebarAutosaver
   let window: ShellWindowController
+  /// One instance for every window, so Show / Hide Toolbar reaches all of them.
+  let toolbarSetting = ToolbarSetting(defaults: .standard)
   let archiveStore: ArchiveStore
   let settingsStore: SettingsStore
   let importer: ArcImportCoordinator
@@ -50,7 +52,7 @@ final class AppSession {
     // Toolbar on / off is an app-level setting in the standard user defaults (`topBarURLEnabled`), not in the
     // database: see ToolbarSetting.
     self.window = ShellWindowController(engine: engine, sidebar: source,
-                                        toolbarSetting: ToolbarSetting(defaults: .standard))
+                                        toolbarSetting: toolbarSetting)
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
     self.archiveStore = archiveStore

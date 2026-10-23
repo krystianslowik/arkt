@@ -161,9 +161,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var isToolbarVisible: Bool { toolbarSetting.isVisible }
 
   /// Cmd-Shift-D (KB-018, BH-032), the View menu and the URL bars' context menu (BH-031, GS-042).
+  /// Every window sharing the setting, this one included, applies the change as an observer.
   @objc public func toggleToolbar(_ sender: Any?) {
     toolbarSetting.isVisible.toggle()
-    applyToolbarVisibility()
   }
 
   private func applyToolbarVisibility() {
@@ -191,6 +191,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       guard let self, let tab = self.currentTab else { return }
       self.engine.reload(tab)
     }
+    toolbarSetting.addObserver(self)
     applyToolbarVisibility()
   }
 
@@ -319,4 +320,8 @@ extension ShellWindowController: NSMenuItemValidation {
     }
     return true
   }
+}
+
+extension ShellWindowController: ToolbarSettingObserver {
+  public func toolbarSettingDidChange(_ setting: ToolbarSetting) { applyToolbarVisibility() }
 }

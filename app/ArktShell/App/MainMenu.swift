@@ -15,6 +15,19 @@ enum MainMenu {
       .separator(),
       item("Import from Arc...", #selector(AppDelegate.importFromArc(_:)), "", []),       // E4c, no shortcut
     ]))
+    main.addItem(submenu(title: "Edit", items: [
+      item("Undo", Selector(("undo:")), "z"),
+      item("Redo", Selector(("redo:")), "Z"),
+      .separator(),
+      item("Cut", #selector(NSText.cut(_:)), "x"),
+      item("Copy", #selector(NSText.copy(_:)), "c"),
+      item("Paste", #selector(NSText.paste(_:)), "v"),
+      item("Select All", #selector(NSText.selectAll(_:)), "a"),
+    ]))
+    // KB-018, BH-032: Cmd-Shift-D. ShellWindowController.validateMenuItem titles it Show / Hide Toolbar.
+    main.addItem(submenu(title: "View", items: [
+      item("Show Toolbar", #selector(ShellWindowController.toggleToolbar(_:)), "D"),
+    ]))
     // KB-033, KB-034 (Cmd-Opt-Right / Left) and KB-035, BH-041 (Ctrl-1 ... Ctrl-9).
     let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)
     let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
@@ -29,19 +42,6 @@ enum MainMenu {
       spaces.append(space)
     }
     main.addItem(submenu(title: "Spaces", items: spaces))
-    // KB-018, BH-032: Cmd-Shift-D. ShellWindowController.validateMenuItem titles it Show / Hide Toolbar.
-    main.addItem(submenu(title: "View", items: [
-      item("Show Toolbar", #selector(ShellWindowController.toggleToolbar(_:)), "D"),
-    ]))
-    main.addItem(submenu(title: "Edit", items: [
-      item("Undo", Selector(("undo:")), "z"),
-      item("Redo", Selector(("redo:")), "Z"),
-      .separator(),
-      item("Cut", #selector(NSText.cut(_:)), "x"),
-      item("Copy", #selector(NSText.copy(_:)), "c"),
-      item("Paste", #selector(NSText.paste(_:)), "v"),
-      item("Select All", #selector(NSText.selectAll(_:)), "a"),
-    ]))
     return main
   }
 

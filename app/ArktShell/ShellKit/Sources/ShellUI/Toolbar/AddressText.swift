@@ -37,14 +37,24 @@ public struct CardToolbarLayout: Equatable, Sendable {
 /// Persistence: an app-level setting, stored in the app's standard user defaults (domain `dev.arkt.ArktShell`)
 /// under Arc's key name `topBarURLEnabled`, so every window shares it and it survives relaunch. It is not part
 /// of the sidebar database. `ephemeral()` keeps the value in memory only (tests, the scripted smoke).
+///
+/// Every window of the app shares one instance and registers as an observer, so a toggle in one window shows or
+/// hides the Toolbar in all of them.
 @MainActor
 public final class ToolbarSetting {
   public static let defaultsKey = "topBarURLEnabled"
 
   private let defaults: UserDefaults?
+  /// Held weakly: a closed window drops out on its own.
+  private var observers: [WeakObserver] = []
 
   public var isVisible: Bool {
-    didSet { if isVisible != oldValue { defaults?.set(isVisible, forKey: Self.defaultsKey) } }
+    didSet {
+      guard isVisible != oldValue else { return }
+      defaults?.set(isVisible, forKey: Self.defaultsKey)
+      observers.removeAll { $0.value == nil }
+      for observer in observers { observer.value?.toolbarSettingDidChange(self) }
+    }
   }
 
   /// Reads the stored value (hidden when never set) and writes every change back to `defaults`.
@@ -55,9 +65,25 @@ public final class ToolbarSetting {
     self.isVisible = store?.bool(forKey: Self.defaultsKey) ?? false
   }
 
+  /// `observer` hears every change of `isVisible` until it is deallocated.
+  public func addObserver(_ observer: any ToolbarSettingObserver) {
+    observers.removeAll { $0.value == nil || $0.value === observer }
+    observers.append(WeakObserver(value: observer))
+  }
+
   /// Starts hidden and never touches user defaults.
   public static func ephemeral() -> ToolbarSetting { ToolbarSetting(store: nil) }
 
   /// The View menu item and the URL bars' context menu (KB-018 "Show / hide Toolbar", BH-031).
   public static func menuTitle(isVisible: Bool) -> String { isVisible ? "Hide Toolbar" : "Show Toolbar" }
+
+  private struct WeakObserver {
+    weak var value: (any ToolbarSettingObserver)?
+  }
+}
+
+/// Told when a shared `ToolbarSetting` changes (see `ToolbarSetting.addObserver`).
+@MainActor
+public protocol ToolbarSettingObserver: AnyObject {
+  func toolbarSettingDidChange(_ setting: ToolbarSetting)
 }

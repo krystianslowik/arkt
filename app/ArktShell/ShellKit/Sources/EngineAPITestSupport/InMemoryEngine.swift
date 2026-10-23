@@ -34,11 +34,14 @@ public final class InMemoryEngine: EngineClient {
   }
 
   /// Starts a load and commits it at once: url, loading, then (on a host change) the favicon reset. A new
-  /// navigation drops the forward history.
+  /// navigation drops the forward history; navigating to the URL the tab already shows leaves the history alone,
+  /// like a reload.
   public func navigate(_ id: TabID, to url: URL) {
     guard let previous = snapshots[id] else { return }
-    if let current = previous.url { history[id, default: ([], [])].back.append(current) }
-    history[id, default: ([], [])].forward.removeAll()
+    if let current = previous.url, current != url {
+      history[id, default: ([], [])].back.append(current)
+      history[id, default: ([], [])].forward.removeAll()
+    }
     load(id, url, previous: previous)
   }
 
