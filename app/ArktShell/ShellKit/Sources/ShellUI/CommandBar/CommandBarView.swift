@@ -5,6 +5,12 @@ final class CommandBarTableView: NSTableView {
   override func accessibilityChildren() -> [Any]? {
     NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
   }
+
+  override func accessibilityRows() -> [any NSAccessibilityRow]? {
+    (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) }
+  }
+
+  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
 }
 
 /// Root view of the command bar: input row, divider, results table. Frames are set in `layout()`.
@@ -130,6 +136,14 @@ final class CommandBarRowView: NSTableRowView {
   }
 
   override func isAccessibilitySelected() -> Bool { isSelected }
+
+  override func accessibilityParent() -> Any? {
+    superview.flatMap(NSAccessibility.unignoredAncestor(of:))
+  }
+
+  override func accessibilityChildren() -> [Any]? {
+    NSAccessibility.unignoredChildren(from: subviews)
+  }
 
   private var resultCell: CommandBarCellView? {
     numberOfColumns > 0 ? view(atColumn: 0) as? CommandBarCellView : nil

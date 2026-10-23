@@ -25,8 +25,8 @@ final class Sandbox {
     arcDirectory = root.appendingPathComponent("arc", isDirectory: true)
     defaultsSuite = Self.suitePrefix + id
 
-    for url in [root, dataDirectory, arcDirectory] {
-      try Self.checkSafe(url.path, under: temp.path)
+    for url in [dataDirectory, arcDirectory] {
+      try Self.checkSafe(url.path, root: root.path, under: temp.path)
     }
     try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: arcDirectory, withIntermediateDirectories: true)
@@ -80,10 +80,16 @@ final class Sandbox {
     var description: String { "sandbox refused unsafe path \(path)" }
   }
 
-  /// A sandbox path must sit under the temp folder and must not look like the real Arkt or Arc folders. The check
-  /// is case sensitive: the sandbox's own `arc` folder is lowercase, and a UUID is uppercase hex.
-  static func checkSafe(_ path: String, under temp: String) throws {
-    guard path.hasPrefix(temp),
+  /// A handed-out sandbox path must sit under the sandbox `root` (with a trailing `/`), `root` must sit under `temp`
+  /// (with a trailing `/`), and neither may look like the real Arkt or Arc folders (#199). The check is case
+  /// sensitive: the sandbox's own `arc` folder is lowercase, and a UUID is uppercase hex.
+  static func checkSafe(_ path: String, root: String, under temp: String = NSTemporaryDirectory()) throws {
+    let tempPrefix = temp.hasSuffix("/") ? temp : temp + "/"
+    let rootPrefix = root.hasSuffix("/") ? root : root + "/"
+    guard !temp.isEmpty,
+          !root.isEmpty,
+          root.hasPrefix(tempPrefix),
+          path.hasPrefix(rootPrefix),
           !path.contains("/Library/Application Support/"),
           !path.contains("Arc") else { throw UnsafePath(path: path) }
   }

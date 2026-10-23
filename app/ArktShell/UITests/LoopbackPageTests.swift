@@ -8,17 +8,15 @@ final class LoopbackPageTests: ArktUITestCase {
 
     // Cmd-T on an empty profile creates the first Space, then the tab (decision 3).
     app.typeKey("t", modifierFlags: .command)
-    let field = app.textFields["commandBar.field"]
+    let field = app.textFields[AXID.CommandBar.field]
     XCTAssertTrue(waitFor(field))
     field.typeText(server.page("alpha"))
     field.typeKey(.return, modifierFlags: [])
 
-    // The sidebar row takes the page's title once the page has loaded. Until `sidebar.row.today` lands (U4b, #168)
-    // the row is found as the title text inside the sidebar outline.
+    // The sidebar row (`sidebar.row.today`, U4b #168) takes the page's title once the page has loaded.
     let title = FixtureServer.title(ofPage: "alpha")
-    let row = app.outlines.firstMatch.staticTexts
-      .matching(NSPredicate(format: "value == %@ OR label == %@", title, title)).firstMatch
-    XCTAssertTrue(waitFor(row))
+    let row = app.outlineRows[AXID.Sidebar.rowToday].firstMatch
+    XCTAssertTrue(waitFor(row, label: title))
     XCTAssertTrue(server.requestedPaths.contains("/p/alpha"), "\(server.requestedPaths)")
   }
 }

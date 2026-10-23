@@ -5,6 +5,12 @@ final class ArchiveTableView: NSTableView {
   override func accessibilityChildren() -> [Any]? {
     NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
   }
+
+  override func accessibilityRows() -> [any NSAccessibilityRow]? {
+    (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) }
+  }
+
+  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
 }
 
 @MainActor
@@ -27,6 +33,14 @@ final class ArchiveRowView: NSTableRowView {
   }
 
   override func isAccessibilitySelected() -> Bool { isSelected }
+
+  override func accessibilityParent() -> Any? {
+    superview.flatMap(NSAccessibility.unignoredAncestor(of:))
+  }
+
+  override func accessibilityChildren() -> [Any]? {
+    NSAccessibility.unignoredChildren(from: subviews)
+  }
 }
 
 /// The minimal Archive window (E5c; Window > Show Archive, unbound by default, KB-043): archived items newest first
