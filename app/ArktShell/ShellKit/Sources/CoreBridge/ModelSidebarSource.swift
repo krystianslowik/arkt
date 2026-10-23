@@ -1,3 +1,4 @@
+import Archive
 import Foundation
 import ShellUI
 import SidebarModel
@@ -70,6 +71,20 @@ public final class ModelSidebarSource: SidebarSource {
     mutate { sidebar in
       for id in ids { try? sidebar.updateTab(id, lastActiveAt: date) }
     }
+  }
+
+  // MARK: - Archive
+
+  /// Archives nodes through `Archiver` and returns the entries in the order of `ids`; all of them leave the value in
+  /// one mutation (one `onDidChange`). Unknown ids are skipped. Which nodes may be archived is the caller's decision.
+  public func archive(_ ids: [UUID], reason: ArchiveReason, at date: Date) -> [ArchivedItem] {
+    mutate { sidebar in ids.compactMap { try? Archiver.archive($0, from: &sidebar, reason: reason, at: date) } }
+  }
+
+  /// Puts `item` back through `Archiver.restore` (its placement rules and fresh ids when an id is taken). Throws the
+  /// model's `SidebarError` and leaves the value untouched on throw.
+  public func restore(_ item: ArchivedItem, fallbackSpace: UUID) throws -> RestoredItem {
+    try mutate { try Archiver.restore(item, into: &$0, fallbackSpace: fallbackSpace) }
   }
 
   // MARK: - Mutation

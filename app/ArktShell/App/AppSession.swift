@@ -23,6 +23,8 @@ final class AppSession {
   let archiveStore: ArchiveStore
   let settingsStore: SettingsStore
   let importer: ArcImportCoordinator
+  /// Archive and restore: the model first, then an outbox to `archiveStore` (decision 11).
+  let archive: ArchiveCoordinator
   /// Arc's folder; read only when the user asks for an import.
   let arcFiles = ArcSourceFiles(directory: AppEnvironment.arcDirectory)
   /// Arc's sidebar file existed at the last check (existence only, off the main actor): at launch and again each
@@ -58,6 +60,7 @@ final class AppSession {
     self.importer = ArcImportCoordinator(
       source: source, archive: archiveStore, archiveState: settingsStore, importRecord: settingsStore,
       persistSidebar: { await autosaver.flush() })     // the import record waits for the merged sidebar on disk
+    self.archive = ArchiveCoordinator(source: source, store: archiveStore)
     self.faviconStore = faviconStore
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
@@ -204,22 +207,26 @@ final class AppSession {
 
   // MARK: - Termination
 
-  /// True while a sidebar change is unsaved or being written, or a favicon batch is pending. E5a adds the archive
-  /// outbox.
-  var needsFlush: Bool { autosaver.needsFlush || (faviconWriter?.needsFlush ?? false) }
+  /// True while a sidebar change is unsaved or being written, an archived entry is not yet in the archive store, or a
+  /// favicon batch is pending.
+  var needsFlush: Bool {
+    autosaver.needsFlush || archive.hasPendingWrites || (faviconWriter?.needsFlush ?? false)
+  }
 
   /// Stamps visible tabs before the flush (decision 10). E5b fills it in once the window reports its visible nodes.
   func prepareForTermination() {}
 
-  /// Writes what is pending, bounded by the autosaver's flush timeout; favicons get at most `faviconFlushTimeout`
-  /// more (they are re-fetched by the engine anyway). E5a also flushes the archive outbox.
+  /// Writes what is pending: the sidebar and the archive outbox together, each bounded by its own flush timeout
+  /// (1 s, decision 11); favicons get at most `faviconFlushTimeout` more (they are re-fetched by the engine anyway).
   func flush() async -> Bool {
     let favicons = Task { [faviconWriter] in
       if let faviconWriter { await faviconWriter.flush() }
     }
-    let saved = await autosaver.flush()
+    async let sidebarSaved = autosaver.flush()
+    async let archiveSaved = archive.flush()
+    let (sidebar, archived) = await (sidebarSaved, archiveSaved)
     await Self.wait(for: favicons, atMost: Self.faviconFlushTimeout)
-    return saved
+    return sidebar && archived
   }
 
   static let faviconFlushTimeout: Duration = .seconds(1)

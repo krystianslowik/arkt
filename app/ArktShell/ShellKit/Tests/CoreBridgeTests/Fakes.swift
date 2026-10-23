@@ -15,14 +15,38 @@ actor FakeArchiveStore: ArchiveStoring {
     var policy: ArchiveConflictPolicy
   }
 
+  /// Every store call in arrival order.
+  enum Call: Equatable, Sendable {
+    case add([NodeID])
+    case remove([NodeID])
+  }
+
+  private(set) var calls: [Call] = []
   private(set) var addCalls: [AddCall] = []
+  private(set) var addedItems: [[ArchivedItem]] = []
+  private(set) var removeCalls: [[NodeID]] = []
   private(set) var stored: [NodeID: ArchivedItem] = [:]
   private var failsAdds = false
+  private var failsRemoves = false
+  private var holdsAdds = false
+  private var heldAdds: [CheckedContinuation<Void, Never>] = []
 
   func setFailsAdds(_ fails: Bool) { failsAdds = fails }
+  func setFailsRemoves(_ fails: Bool) { failsRemoves = fails }
+  /// While true, `add` parks after recording the call until `releaseAdds()`.
+  func holdAdds() { holdsAdds = true }
+
+  func releaseAdds() {
+    holdsAdds = false
+    for held in heldAdds { held.resume() }
+    heldAdds = []
+  }
 
   func add(_ items: [ArchivedItem], onConflict policy: ArchiveConflictPolicy) async throws -> Int {
     addCalls.append(AddCall(ids: items.map(\.id), policy: policy))
+    calls.append(.add(items.map(\.id)))
+    addedItems.append(items)
+    if holdsAdds { await withCheckedContinuation { heldAdds.append($0) } }
     if failsAdds { throw FakeStoreError() }
     var written = 0
     for item in items {
@@ -39,6 +63,9 @@ actor FakeArchiveStore: ArchiveStoring {
   }
 
   func remove(_ ids: [NodeID]) async throws {
+    removeCalls.append(ids)
+    calls.append(.remove(ids))
+    if failsRemoves { throw FakeStoreError() }
     for id in ids { stored[id] = nil }
   }
 }
