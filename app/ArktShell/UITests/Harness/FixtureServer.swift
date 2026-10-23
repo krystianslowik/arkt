@@ -63,7 +63,9 @@ final class FixtureServer: Sendable {
             listener.cancel()
             continuation.resume(throwing: HarnessError("fixture server is ready without a port"))
           }
-        case .failed(let error):
+        case .failed(let error), .waiting(let error):
+          // A listener waits when it cannot bind (for example a sandbox without network.server); that never fixes
+          // itself during a test.
           listener.stateUpdateHandler = nil
           listener.cancel()
           continuation.resume(throwing: error)
