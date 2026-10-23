@@ -150,8 +150,8 @@ final class AppSession {
   /// and the ids of every archived node (E5c, `FaviconRetention`), and every favicon write (engine or import) is queued behind it, so the prune can never remove a favicon written
   /// after launch. It runs only when the database opened normally (`prune`): after a restore from backup or an empty
   /// re-creation the loaded sidebar is not the one the favicons were written for, and pruning against it would
-  /// delete favicons of nodes the user may get back. The stored favicons are then loaded once; ids the engine
-  /// reported meanwhile keep the newer one, and the writer stops tracking them afterwards.
+  /// delete favicons of nodes the user may get back. The stored favicons are loaded once, without waiting for the
+  /// prune (it keeps every sidebar id); ids the engine reported meanwhile keep the newer one (#91).
   private func startFavicons(prune: Bool) {
     guard let store = faviconStore else { return }
     let ids = Set(source.sidebar.nodes.keys)
@@ -163,13 +163,11 @@ final class AppSession {
     } : nil
     let writer = FaviconWriter(store: store, after: pruning)
     faviconWriter = writer
+    let launchLoad = writer.loadStored(ids)
     window.onFaviconChanged = { [weak writer] id, data in writer?.record(data, for: id) }
     Task { [weak self] in
-      await pruning?.value
-      let loaded = await store.loadAll(for: ids)
-      guard let self, let writer = self.faviconWriter else { return }
-      self.window.sidebarController.setFavicons(loaded.filter { !writer.touched.contains($0.key) })
-      writer.launchLoadDidComplete()
+      let loaded = await launchLoad.value
+      self?.window.sidebarController.setFavicons(loaded)
     }
   }
 
@@ -187,23 +185,25 @@ final class AppSession {
     // The source Space wins; when it is gone the item lands in the Space on screen (BH-157 routing comes later).
     model.currentSpaceProvider = { [weak self] in self?.window.currentSpace }
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
+    model.onRestoreFailed = { [weak self] text in self?.window.toasts.show(Toast(text: text)) }
     let controller = ArchiveWindowController(dataSource: model)
     archiveWindow = controller
     controller.show()
   }
 
   /// BH-086: the restore toast in the browser window; "View" focuses the restored item. The item's favicons come
-  /// back from the favicon folder (the sidebar dropped them when the item left).
+  /// back from the favicon folder (the sidebar dropped them when the item left); ids the engine reports meanwhile
+  /// keep the newer one (#91).
   private func didRestore(_ restored: RestoredItem, toast text: String) {
     window.toasts.show(Toast(text: text, actionTitle: "View")) { [weak self] in
       guard let self else { return }
       self.window.showWindow(nil)
       self.window.activate(node: restored.nodeID)
     }
-    guard let store = faviconStore, let snapshot = source.sidebar.snapshot(of: restored.nodeID) else { return }
-    let ids = Set(FaviconRetention.ids(in: snapshot))
+    guard let writer = faviconWriter, let snapshot = source.sidebar.snapshot(of: restored.nodeID) else { return }
+    let load = writer.loadStored(Set(FaviconRetention.ids(in: snapshot)))
     Task { [weak self] in
-      let loaded = await store.loadAll(for: ids)
+      let loaded = await load.value
       self?.window.sidebarController.setFavicons(loaded)
     }
   }
