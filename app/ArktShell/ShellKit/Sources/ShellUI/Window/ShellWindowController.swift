@@ -5,6 +5,10 @@ import EngineAPI
 public enum SidebarMutation: Hashable, Sendable {
   case addTab
   case addSpace
+  /// A pane was added to a split, or a split created (`SidebarSource.addToSplit`).
+  case addPane
+  /// Any other split write: separate, expand, reorder, widths, orientation, duplicate.
+  case editSplit
 }
 
 /// Owns the shell window and wires it to the engine. Grows through C3-C6.
@@ -34,7 +38,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// caught up from the snapshot when a tab is created and for later `.faviconChanged` events.
   public var onFaviconChanged: (@MainActor (NodeID, Data?) -> Void)?
   /// A sidebar mutation failed (for example `addTab` into a location the model refuses). Default: a toast whose
-  /// text names the failed mutation (`errorText(for:)`).
+  /// text names the failed mutation (`errorText(for:error:)`).
   public var onError: (@MainActor (SidebarMutation, any Error) -> Void)?
   /// Engine tabs are created lazily, on first activation of a sidebar node.
   private var tabsByNode: [NodeID: TabID] = [:]
@@ -77,7 +81,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     toastView.presenter = toasts
     root.card.toastView = toastView
     toasts.view = toastView
-    onError = { [weak self] mutation, _ in self?.toasts.show(Toast(text: Self.errorText(for: mutation))) }
+    onError = { [weak self] mutation, error in
+      self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error)))
+    }
     onNewSpace = { [weak self] in self?.createSpace() }
     emptyState.onNewSpace = { [weak self] in self?.onNewSpace?() }
     emptyState.onImport = { [weak self] in self?.onImportFromArc?() }
@@ -144,11 +150,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     toasts.view?.flavor = themes[index].flavor
   }
 
-  /// The default error toast's text for a failed `mutation`.
-  public static func errorText(for mutation: SidebarMutation) -> String {
+  /// The default error toast's text for a failed `mutation`. A full split says "Cannot Add New Pane" (BH-116).
+  public static func errorText(for mutation: SidebarMutation, error: any Error) -> String {
     switch mutation {
     case .addTab: "Couldn't add the tab."
     case .addSpace: "Couldn't create a Space."
+    case .addPane, .editSplit:
+      // Arc's toast for a full split; the generic text is [I].
+      error as? SplitEditError == .splitFull ? "Cannot Add New Pane" : "Couldn't change the Split View."
     }
   }
 

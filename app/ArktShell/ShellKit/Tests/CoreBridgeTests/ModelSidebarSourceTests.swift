@@ -26,6 +26,13 @@ struct ModelSidebarSourceTests {
     func reset() { changes = []; saved = [] }
   }
 
+  /// A settable `now` for the source under test.
+  @MainActor
+  private final class Clock {
+    var date: Date
+    init(_ date: Date) { self.date = date }
+  }
+
   @Test func addTabIntoUnknownSpaceThrowsAndReportsNothing() {
     let recorder = Recorder()
     let unknown = UUID()
@@ -114,7 +121,7 @@ struct ModelSidebarSourceTests {
     }
     let left = try source.addTab(url: Self.url, title: "L", in: .split(split))
     let right = try source.addTab(url: Self.url, title: "R", in: .split(split))
-    #expect(source.node(split) == .split(id: split))
+    #expect(source.node(split) == .split(id: split, layout: SplitLayoutInfo(orientation: .horizontal, widthFactors: [0.5, 0.5])))
     #expect(source.node(left) == .tab(id: left, url: Self.url, title: "L"))
     #expect(source.children(of: .split(split)) == [left, right])
     #expect(source.parent(of: right) == .split(split))
@@ -173,5 +180,88 @@ struct ModelSidebarSourceTests {
     let plain = try source.addTab(url: Self.url, title: "Page", in: .today(space))
     #expect(source.node(renamed) == .tab(id: renamed, url: Self.url, title: "Mine"))
     #expect(source.node(plain) == .tab(id: plain, url: Self.url, title: "Page"))
+  }
+
+  // MARK: - Split
+
+  @Test func splitLayoutMapsOrientationAndPassesStoredFactorsThrough() throws {
+    let source = ModelSidebarSource()
+    let space = try source.addSpace(title: "S")
+    // An imported split whose factors do not match its panes: the bridge does not repair it (decision 2).
+    let split = try source.mutate {
+      try $0.addSplit(orientation: .vertical, widthFactors: [1], in: .today(space))
+    }
+    _ = try source.addTab(url: Self.url, title: "L", in: .split(split))
+    _ = try source.addTab(url: Self.url, title: "R", in: .split(split))
+    #expect(source.node(split) == .split(id: split, layout: SplitLayoutInfo(orientation: .vertical, widthFactors: [1])))
+  }
+
+  @Test func addToSplitIsOneMutationAndStampsTheNewTab() throws {
+    let stamp = Date(timeIntervalSinceReferenceDate: 2_000)
+    let recorder = Recorder(ModelSidebarSource(now: { stamp }))
+    let space = try recorder.source.addSpace(title: "S")
+    let target = try recorder.source.addTab(url: Self.url, title: "A", in: .today(space))
+    recorder.reset()
+    let (split, pane) = try recorder.source.addToSplit(
+      .new(url: Self.url, title: "N"), target: target, at: 1, orientation: .horizontal)
+    #expect(recorder.saved == [recorder.source.sidebar])
+    let node = try #require(recorder.source.sidebar.nodes[pane])
+    #expect(node.createdAt == stamp)
+    guard case .tab(let item) = node.kind else { Issue.record("not a tab"); return }
+    #expect(item.lastActiveAt == stamp)
+    #expect(recorder.source.sidebar.nodes[split]?.createdAt == stamp)
+  }
+
+  @Test func errorsMapToSplitEditError() throws {
+    let recorder = Recorder()
+    let space = try recorder.source.addSpace(title: "S")
+    let target = try recorder.source.addTab(url: Self.url, title: "A", in: .today(space))
+    let folder = try recorder.source.mutate { try $0.addFolder(title: "F", in: .today(space)) }
+    let (split, _) = try recorder.source.addToSplit(
+      .new(url: Self.url, title: "N"), target: target, at: 1, orientation: .horizontal)
+    for _ in 0..<2 {
+      _ = try recorder.source.addToSplit(.new(url: Self.url, title: "P"), target: split, at: 9, orientation: .horizontal)
+    }
+    let before = recorder.source.sidebar
+    recorder.reset()
+    #expect(throws: SplitEditError.splitFull) {
+      try recorder.source.addToSplit(.new(url: Self.url, title: "X"), target: split, at: 0, orientation: .horizontal)
+    }
+    #expect(throws: SplitEditError.invalid) {
+      try recorder.source.addToSplit(.new(url: Self.url, title: "X"), target: folder, at: 0, orientation: .horizontal)
+    }
+    #expect(throws: SplitEditError.invalid) {
+      try recorder.source.addToSplit(.existing(folder), target: split, at: 0, orientation: .horizontal)
+    }
+    #expect(throws: SplitEditError.invalid) { try recorder.source.setSplitWidthFactors(split, [1]) }
+    #expect(throws: SplitEditError.invalid) { try recorder.source.separatePane(folder) }
+    #expect(throws: SplitEditError.invalid) { try recorder.source.separateSplit(folder) }
+    // Errors that are not about the split pass through unmapped.
+    let unknown = UUID()
+    #expect(throws: SidebarError.unknownNode(unknown)) { try recorder.source.separatePane(unknown) }
+    #expect(recorder.source.sidebar == before)
+    #expect(recorder.changes.isEmpty)
+    #expect(recorder.saved.isEmpty)
+  }
+
+  @Test func duplicateSplitGetsFreshIDsAndStartsItsIdleClockNow() throws {
+    let stamp = Date(timeIntervalSinceReferenceDate: 3_000)
+    let clock = Clock(Date(timeIntervalSinceReferenceDate: 1_000))
+    let source = ModelSidebarSource(now: { clock.date })
+    let space = try source.addSpace(title: "S")
+    let target = try source.addTab(url: Self.url, title: "A", in: .today(space))
+    let (split, _) = try source.addToSplit(.new(url: Self.url, title: "N"), target: target, at: 1, orientation: .vertical)
+    clock.date = stamp
+    let copy = try source.duplicateSplit(split)
+    let original = try #require(source.sidebar.snapshot(of: split))
+    let duplicate = try #require(source.sidebar.snapshot(of: copy))
+    #expect(duplicate.kind == original.kind)
+    #expect(Set(duplicate.allIDs).isDisjoint(with: original.allIDs))
+    #expect(duplicate.createdAt == stamp)
+    for pane in duplicate.children {
+      #expect(pane.createdAt == stamp)
+      guard case .tab(let item) = pane.kind else { Issue.record("not a tab"); continue }
+      #expect(item.lastActiveAt == stamp)
+    }
   }
 }

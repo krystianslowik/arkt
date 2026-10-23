@@ -73,6 +73,123 @@ public final class ModelSidebarSource: SidebarSource {
     }
   }
 
+  // MARK: - Split writes
+
+  /// One mutation: a new tab is created next to the target (or next to the split, never inside it, so the pane cap
+  /// is checked when it moves in) and then joins the split, so a refused edit leaves no orphan tab. The new tab's
+  /// idle clock starts now, as in `addTab`.
+  @discardableResult
+  public func addToSplit(_ pane: SplitPaneSource, target: UUID, at index: Int, orientation: SplitOrientation)
+    throws -> (split: UUID, pane: UUID)
+  {
+    let stamp = now()
+    return try mapSplitErrors {
+      try mutate { sidebar in
+        let (existingSplit, newTabLocation) = try Self.splitTarget(target, in: sidebar)
+        let paneID: UUID
+        switch pane {
+        case .existing(let id): paneID = id
+        case .new(let url, let title):
+          paneID = try sidebar.addTab(
+            url: url, title: title, lastActiveAt: stamp, in: newTabLocation, createdAt: stamp)
+        }
+        if let existingSplit {
+          try sidebar.addPane(paneID, to: existingSplit, at: index)
+          return (existingSplit, paneID)
+        }
+        let split = try sidebar.createSplit(
+          of: [target, paneID], orientation: BridgeMapping.orientation(orientation), createdAt: stamp)
+        if index <= 0 { try sidebar.movePane(paneID, to: 0) }
+        return (split, paneID)
+      }
+    }
+  }
+
+  public func separatePane(_ pane: UUID) throws {
+    try mapSplitErrors { try mutate { try $0.separatePane(pane) } }
+  }
+
+  @discardableResult
+  public func separateSplit(_ split: UUID) throws -> [UUID] {
+    try mapSplitErrors { try mutate { try $0.separateSplit(split) } }
+  }
+
+  public func expandPane(_ pane: UUID) throws {
+    try mapSplitErrors { try mutate { try $0.expandPane(pane) } }
+  }
+
+  public func movePane(_ pane: UUID, to index: Int) throws {
+    try mapSplitErrors { try mutate { try $0.movePane(pane, to: index) } }
+  }
+
+  public func setSplitWidthFactors(_ split: UUID, _ factors: [Double]) throws {
+    try mapSplitErrors { try mutate { try $0.setSplitWidthFactors(split, factors) } }
+  }
+
+  public func setSplitOrientation(_ split: UUID, _ orientation: SplitOrientation) throws {
+    try mapSplitErrors { try mutate { try $0.setSplitOrientation(split, BridgeMapping.orientation(orientation)) } }
+  }
+
+  /// The copy is new: fresh ids, and it and its panes are created now with their idle clocks starting now [I], so
+  /// auto-archive does not take it for an old split.
+  @discardableResult
+  public func duplicateSplit(_ split: UUID) throws -> UUID {
+    let stamp = now()
+    return try mapSplitErrors {
+      try mutate { sidebar in
+        guard let node = sidebar.nodes[split], let snapshot = sidebar.snapshot(of: split) else {
+          throw SidebarError.unknownNode(split)
+        }
+        guard case .split = node.kind else { throw SidebarError.invalidSplit(split) }
+        let copy = Self.restamped(snapshot.withFreshIDs(), at: stamp)
+        let position = sidebar.children(of: node.parent).firstIndex(of: split) ?? 0
+        try sidebar.insert(copy, in: node.parent, at: position + 1)
+        return copy.id
+      }
+    }
+  }
+
+  /// The split that `target` adds to (itself, or the split holding it) and where a new tab is created first: the
+  /// location holding that split, or the target tab's own location when a new split is made. Throws
+  /// `SplitEditError.invalid` for unknown ids and folders.
+  private static func splitTarget(_ target: UUID, in sidebar: SidebarModel.Sidebar) throws
+    -> (split: UUID?, newTabLocation: SidebarModel.Location)
+  {
+    guard let node = sidebar.nodes[target] else { throw SplitEditError.invalid }
+    switch (node.kind, node.parent) {
+    case (.split, _): return (target, node.parent)
+    case (.tab, .split(let split)):
+      guard let splitParent = sidebar.nodes[split]?.parent else { throw SplitEditError.invalid }
+      return (split, splitParent)
+    case (.tab, _): return (nil, node.parent)
+    case (.folder, _): throw SplitEditError.invalid
+    }
+  }
+
+  /// `snapshot` with every node created at `date` and every tab's idle clock starting then. A split's children are
+  /// tabs, so the recursion is one level deep for the snapshots this is used on.
+  private static func restamped(_ snapshot: NodeSnapshot, at date: Date) -> NodeSnapshot {
+    var kind = snapshot.kind
+    if case .tab(var tab) = kind {
+      tab.lastActiveAt = date
+      kind = .tab(tab)
+    }
+    return NodeSnapshot(
+      id: snapshot.id, kind: kind, createdAt: date, children: snapshot.children.map { restamped($0, at: date) })
+  }
+
+  /// BH-116 and the plan's error surface (decision 13): `.splitFull` becomes `SplitEditError.splitFull`,
+  /// `.invalidSplit` becomes `.invalid`; every other error passes through unchanged.
+  private func mapSplitErrors<T>(_ body: () throws -> T) throws -> T {
+    do {
+      return try body()
+    } catch SidebarError.splitFull {
+      throw SplitEditError.splitFull
+    } catch SidebarError.invalidSplit {
+      throw SplitEditError.invalid
+    }
+  }
+
   // MARK: - Archive
 
   /// Archives nodes through `Archiver` and returns the entries in the order of `ids`; all of them leave the value in
