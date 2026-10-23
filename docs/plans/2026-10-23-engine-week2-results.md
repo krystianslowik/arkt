@@ -169,7 +169,7 @@ symlink to `$OUT/Chromium.app/Contents/Frameworks/Chromium Framework.framework`.
      `$OUT`, so `IsBackgroundOnlyProcess()` is false and `GetFrameworkBundlePath` takes the main-app branch:
      `FATAL:base/apple/bundle_locations.mm:74] Check failed: bundle. Failed to load the bundle at
      $OUT/Chromium.app/.../Helpers/Chromium Helper (Aperitif).app/Contents/Frameworks/Chromium
-     Framework.framework/Versions/156.0.8078.48` (18 times; 10 more for `(Aperitif Renderer)`).
+     Framework.framework/Versions/156.0.8078.48` (19 times; 10 more for `(Aperitif Renderer)`, 29 in total).
   2. Mach port rendezvous: the browser registers `<BaseBundleID>.MachPortRendezvousServer.<pid>` with its own
      bundle id (`dev.arkt.ArktShell`; `SetUpBundleOverrides` in `chrome/app/chrome_main_mac.mm` takes it from the
      main bundle in the browser), while a helper derives its outer bundle from its real framework path
@@ -196,11 +196,34 @@ sandbox's component path (the bundle's parent). Log `$PROF/w2-we-b-copy.log`, sc
   `ARKT: in-process hook alive`, key window, window number, `mounted active tab after 1 attempt(s)`.
 - 30 s after the hook: process alive; children 1 GPU, 9 renderer, network and storage utility services, crashpad
   handlers, all running from `$SPK/ArktShell.app/Contents/Frameworks/.../Helpers/Chromium Helper (Aperitif*).app`
-  with the sandbox on. Zero `FATAL` and zero `ERROR` lines other than
-  `ARKT: extension not installed ddkjiahejlhfcafbddmgiahcphecmpfh` (fresh profile).
+  with the sandbox on. Zero `FATAL` lines. Three `ERROR` lines: `ARKT: extension not installed
+  ddkjiahejlhfcafbddmgiahcphecmpfh` (fresh profile, line 43) and, as the last two lines of the log (46-47), one
+  rendezvous failure from helper pid 88969:
+  `[88969:...:1023/143124.852295:ERROR:base/apple/mach_port_rendezvous_mac.cc:256] bootstrap_look_up
+  dev.arkt.ArktShell.MachPortRendezvousServer.1: Permission denied (1100)` then
+  `[88969:...:1023/143124.852531:ERROR:base/memory/shared_memory_switch.cc:261] No rendezvous client, terminating
+  process (parent died?)`. They are logged 58.5 s after the hook (14:30:26.378), after the 30 s check, and nothing
+  follows them (the log was last written at 14:31:24, the same second). See "Teardown rendezvous lines" below.
 
 **Run C: warm relaunch of the Run B layout.** Log `$PROF/w2-we-c-warm.log`. Hook alive 2.9 s after launch, process
-alive at 30 s, zero `FATAL`/`ERROR` lines.
+alive at 30 s. Zero `FATAL` lines. The only `ERROR` lines are the same pair as in Run B, the last two lines of the
+log (32-33), from helper pid 92169:
+`[92169:...:1023/143207.143684:ERROR:base/apple/mach_port_rendezvous_mac.cc:256] bootstrap_look_up
+dev.arkt.ArktShell.MachPortRendezvousServer.1: Permission denied (1100)` then
+`[92169:...:1023/143207.144007:ERROR:base/memory/shared_memory_switch.cc:261] No rendezvous client, terminating
+process (parent died?)`, 30.2 s after the hook (14:31:36.922), that is right after the 30 s check that preceded the
+kill; the log was last written at 14:32:07.
+
+**Teardown rendezvous lines (Runs B and C).** The suffix of the rendezvous service name is the parent pid as the
+helper sees it (`getppid()`). `.1` means the helper's parent, the browser, was already gone and the helper had been
+reparented to launchd, so there was no server to look up. The service prefix is the correct one
+(`dev.arkt.ArktShell`), unlike Run A, where helpers looked up `org.chromium.Chromium.MachPortRendezvousServer.<real
+browser pid>` while the browser was alive, failed with `Unknown service name (1102)`, and took down GPU and network
+over and over. The logs do not timestamp the kill itself; what they show is that in each run this pair is a single
+helper, occurs once, is the last output in the log, comes at or after the 30 s liveness check that preceded the
+kill, and that by then the browser pid no longer existed (parent pid 1). That places it at teardown, most likely a helper that
+was starting when the browser was killed. It is not the Run A failure mode, and no GPU, network or renderer helper
+failed while the browser was running.
 
 ### Conflicts and findings
 
