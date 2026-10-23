@@ -15,6 +15,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   #endif
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    #if DEBUG
+    // Strict UI-test mode: refuse to start, before any disk access, unless every override points away from the real
+    // data and defaults.
+    if AppEnvironment.isUITest {
+      let missing = AppEnvironment.missingUITestOverrides()
+      if !missing.isEmpty {
+        AppSession.log.error("uitest missing overrides \(missing.joined(separator: " "), privacy: .public)")
+        exit(64)
+      }
+    }
+    #endif
     NSApp.mainMenu = MainMenu.make()
     NSApp.activate()
     #if DEBUG || ARKT_SMOKE_BUILD

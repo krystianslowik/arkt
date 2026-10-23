@@ -22,9 +22,15 @@ settings:
     ENABLE_APP_SANDBOX: NO
     DEAD_CODE_STRIPPING: YES
     ARKT_PRINCIPAL_CLASS: NSApplication
+    # Info.plist `ArktEnvironmentOverrides`: YES only where the build reads the ARKT_* environment overrides (Debug,
+    # Profile); NO in Release, Spike and any new config. The UI test harness refuses to launch a bundle without YES.
+    ARKT_ENV_OVERRIDES: "NO"
   configs:
+    Debug:
+      ARKT_ENV_OVERRIDES: "YES"
     Profile:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_SMOKE_BUILD"
+      ARKT_ENV_OVERRIDES: "YES"
     Spike:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_CHROMIUM_SPIKE"
       # Chromium CHECKs that NSApp is a BrowserCrApplication (chrome_browser_application_mac.mm).
@@ -54,6 +60,7 @@ targets:
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "15.0"
         NSPrincipalClass: $(ARKT_PRINCIPAL_CLASS)
+        ArktEnvironmentOverrides: $(ARKT_ENV_OVERRIDES)
         NSHighResolutionCapable: true
         LSApplicationCategoryType: public.app-category.productivity
     settings:
