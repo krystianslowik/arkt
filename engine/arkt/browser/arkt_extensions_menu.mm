@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/extensions/extension_action_delegate.h"
 #include "chrome/browser/ui/extensions/extension_action_view_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/models/image_model.h"
 #include "ui/gfx/image/image.h"
@@ -137,7 +138,9 @@ NSImage* MenuIcon(ExtensionActionViewModel* view_model,
 ArktExtensionsMenu::ArktExtensionsMenu(BrowserWindowInterface* browser,
                                        content::WebContents* tab,
                                        NSView* anchor)
-    : browser_(browser), tab_(tab->GetWeakPtr()), anchor_(anchor) {
+    : browser_(browser),
+      tab_(tab ? tab->GetWeakPtr() : nullptr),
+      anchor_(anchor) {
   target_ = [[ArktExtensionsMenuTarget alloc] init];
   base::WeakPtr<ArktExtensionsMenu> weak_this = weak_factory_.GetWeakPtr();
   target_.onChoose = ^(NSString* extension_id) {
@@ -204,7 +207,13 @@ void ArktExtensionsMenu::Show() {
 }
 
 content::WebContents* ArktExtensionsMenu::active_web_contents() const {
-  return tab_.get();
+  if (tab_) {
+    return tab_.get();
+  }
+  // No fixed tab (native window): the browser's active tab.
+  return browser_ && browser_->GetTabStripModel()
+             ? browser_->GetTabStripModel()->GetActiveWebContents()
+             : nullptr;
 }
 
 NSView* ArktExtensionsMenu::anchor() const {

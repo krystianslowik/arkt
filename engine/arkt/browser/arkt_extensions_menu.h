@@ -32,7 +32,8 @@ namespace arkt {
 // the Arkt delegate's TriggerPopup) or dispatches the click event.
 class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
  public:
-  // `tab` is the WebContents Arkt shows; actions run against it. `anchor` is
+  // `tab` is the WebContents Arkt shows; actions run against it. A null `tab`
+  // means the browser's active tab (native window). `anchor` is
   // the sidebar Extensions button; popups and the menu attach to it.
   ArktExtensionsMenu(BrowserWindowInterface* browser,
                      content::WebContents* tab,

@@ -13,7 +13,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W3 | Inventory of non-`BrowserView` window seams, variant decision | DONE | variant P (plain `NSWindow`); this week 3 seam patch files, 4-8 upstream files, 0 hot-file hunks (W: 3 / 4 / 0); see "W3" below |
 | W4 | Extensions menu lists every action (finding 1) | DONE | no upstream patch; see below |
 | W5a | `ArktBrowserWindow` skeleton behind `--arkt-native-window` | DONE | patch 0004; startup, tabs and `chrome.windows` work; 3 crash seams hit (sad tab, NTP footer, closing the active tab, which also blocks window close and quit), see "W5a" below |
-| W5b | Seam fixes found by the smoke matrix (GATE) | TODO | |
+| W5b | Seam fixes found by the smoke matrix (GATE) | DONE: gate passes | 17/17 scenarios pass; patches 0005-0006 (2 patch files, 3 upstream files, 0 hot-file hunks); close, quit, NTP, main-menu commands and the extension popup fixed on our side; see "W5b" below |
 | W5c | Arkt-owned tab list and visibility (finding 2) | TODO | |
 | W6 | Extension window identity, extension-created tabs and windows (finding 3) | TODO | |
 | W7 | Web Store install on the native window | TODO | |
@@ -30,9 +30,10 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | 0002 | Let a WebContents view draw again after leaving Views | exists; W9 tries to drop it | 4 | 0 |
 | 0003 | Arkt keychain item name (W8) | exists | 1 (`keychain_password_mac.mm`) | 0 |
 | 0004 | `BrowserWindow` factory hook for Arkt (W5a) | exists | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
-| 0005+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new; W3 projects 3 patch files (P); W5a adds `read_anything_side_panel_controller.cc` | 5-9 (W3 estimate plus 1, P; 9-14 with week-3 rows) | 0 (W3 estimate) |
+| 0005 | Tolerate a non-`BrowserView` window in tab features (W5b) | exists | 1 (`sad_tab_controller.cc`) | 0 |
+| 0006 | Tolerate a non-`BrowserView` window in dialogs (W5b) | exists | 2 (`bubble_anchor_util_views.cc`, `exclusive_access_permission_prompt.cc`) | 0 |
 
-Current totals: 4 patch files, 9 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 9 files changed, 36 insertions, 2 deletions).
+Current totals: 6 patch files, 12 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 12 files changed, 56 insertions, 4 deletions). Seam patches (W5b): 2 patch files, 3 upstream files, 0 hot-file hunks, no header.
 
 ## W0
 
@@ -762,6 +763,93 @@ prompts).
 Not done in W5a: the extensions menu is not wired to the native window (the placeholder button does nothing;
 W5b scenario 4 needs it, W6 registers the `ExtensionsContainer`); tab-modal dialogs are not attached with
 `addChildWindow:` yet (W5b scenario 10).
+
+## W5b: Seam fixes and the native-window smoke matrix (GATE)
+
+Date 2026-10-23. Branch `engine/16-native-window-seams`, issue #16. Variant P (plain `NSWindow`). Every row below
+comes from a fresh launch of the final `out/Spike` build (profile `$PROF/week2-native`, both probe extensions,
+`--remote-debugging-port=9333`, `https://example.com`, downloads pointed at `$PROF/downloads` with
+`prompt_for_download` false). Builds: `nice -n 15 autoninja -C out/Spike chrome`, `The build has finished
+successfully.`, 0 `FAILED:` (twice); one build waited about 25 min for `/` to get back above 8 GiB free (it was at
+6.7 GiB from other jobs). `gn check out/Spike '//arkt/browser:*'`: `Header dependency check OK`.
+
+### Seams fixed
+
+| Seam | Symptom | Fix |
+|---|---|---|
+| `ReadAnythingSidePanelController::TabWillDetach` (`read_anything_side_panel_controller.cc:243-247`) | closing the active tab, a window, or quitting: `CHECK_IS_TEST()` (no `SidePanelUI`, Webium off) | **ours**: `ArktSidePanelUI`, a no-op `SidePanelUI` registered on the browser's `UnownedUserDataHost` (every query answers "closed"). No upstream file |
+| `NewTabPageHandler` (`new_tab_page_handler.cc:885`, :1215) | `chrome://newtab`: `Check failed: footer_controller` | **ours**: `ArktBrowserWindow` creates a `NewTabFooterController` with no contents container views (tracks nothing, footer hidden) when `kNtpFooter` is on, torn down in the destructor. No upstream file |
+| `SadTabController` `FindContentsWebView` (`sad_tab_controller.cc:31-34`) | renderer crash: SEGV on a null `BrowserView` | **patch 0005**: return nullptr without a `BrowserView`; the controller keeps the sad tab view unparented (its existing no-contents-view path). No Arkt-side route: `SadTab::Create` is a fixed factory and `GetNativeWindow()` is non-null |
+| `GetPageInfoAnchorConfiguration` / `GetPageInfoAnchorRect` (`bubble_anchor_util_views.cc`) | permission prompt: SEGV (`SEGV_ACCERR` at 0x550) right after the stub `GetChipController` call; the first unguarded `browser_view->` is `GetIsPictureInPictureType()` in the `kLocationBar` path (W3 had predicted the later `GetPageInfoAnchorRect:185`) | **patch 0006**: empty configuration without a `BrowserView`; anchor rect = window top-left plus `kNoToolbarLeftOffset`. Arkt-side alternative rejected: an element anchor from `ArktStubLocationBar::GetChipAnchor()` would need a `ui::TrackedElement`, and `BubbleDialogDelegate::SetAnchor` `CHECK`s that a non-Views element is backed by a Widget, which a plain `NSWindow` cannot give |
+| `ExclusiveAccessPermissionPrompt` (`exclusive_access_permission_prompt.cc:25`) | pointer/keyboard lock prompt dereferences `GetChipController()` (nullptr from the stub) | **patch 0006**: also require a chip controller. Not reached in the matrix (`kKeyboardLockPrompt` is off by default); null-checked so the pointer-lock prompt cannot crash once it is on |
+| Main menu commands (new) | every browser command in the menu bar is disabled for an Arkt window (Find, Close Tab, Reload, ...): Chrome routes `commandDispatch:` through the key window's responder chain to the Views window's command handler, and a plain `NSWindow` has none, so only `AppController`'s window-less commands remain. Scenario 13 found it: `Find...` had `enabled false` | **ours**: the placeholder host (window delegate, in the responder chain) answers `commandDispatch:`, `commandDispatchUsingKeyModifiers:` and `validateUserInterfaceItem:` through two new `ArktWindowHost` blocks (`validateCommand`, `executeCommand`) that `ArktBrowserWindow` binds to `chrome::IsCommandEnabled`/`chrome::ExecuteCommand`. The ShellUI host must forward the same two selectors in week 3 |
+| Extensions menu on the native window (W5a gap) | `--arkt-extensions-demo` and the sidebar button did nothing on the native path | **ours**: the factory attaches an `ArktExtensionsMenu` to the placeholder host's button once the `Browser` exists (posted task, weak window pointer); a null tab means "the browser's active tab" |
+
+Also from the #142 review: `Deactivate()` is a logged no-op (`NativeWidgetMac::Deactivate` is `NOTIMPLEMENTED`);
+`GetRestoredBounds()` reports the frame from before native fullscreen (saved on
+`NSWindowWillEnterFullScreenNotification`; a minimized `NSWindow` keeps its frame); `LogStubOnce` uses
+`base::flat_set`. `IsMaximized()` stays `isZoomed`: that is what `NativeWidgetMac::IsMaximized` reports on Mac too.
+Splitting `arkt_browser_window.mm` (now about 1280 lines) stays with W5c, as the review proposed.
+
+### Destructor and quit
+
+| Path | Result |
+|---|---|
+| `chrome.tabs.remove` of the active tab | removed, next tab mounted, process alive, 0 `Check failed` |
+| `chrome.windows.remove` of every window (scenario 7) | `ARKT: browsers normal=0 arkt=0 views=0`, then `ARKT: native window destroyed`; process keeps running with no windows |
+| `kill -TERM` after that | gone within 10 s, 0 `FATAL`/`Check failed`, no new dump |
+| CDP `Browser.close` with the window open | `normal=0 arkt=0`, `native window destroyed`, process exits, no new dump |
+
+The whole `Close()` -> tabs close -> `TabStripEmpty()` -> `Close()` -> `DeleteBrowserWindow()` sequence ran.
+
+### Matrix
+
+Pass = process alive 10 s after the driver, 0 `FATAL`/`Check failed` lines, no new crash dump (count of
+`~/Library/Application Support/Chromium/Crashpad`, never opened).
+
+| # | Scenario | Result | Dumps | UI |
+|---|---|---|---|---|
+| 1 | Startup, idle 30 s | pass | 81 -> 81 | |
+| 2 | Navigate the tab | pass (`example.org`) | 81 -> 81 | |
+| 3 | Extension adds a background tab | pass (index 1, not mounted) | 81 -> 81 | |
+| 4 | Extension opens a popup (`--arkt-extensions-demo=<action-probe>`) | pass | 81 -> 81 | shown: `popup loaded .../popup.html`, `popup auto-resize 244x129`, `popup.html` target in `/json/list` |
+| 5 | `chrome.windows.create` | pass (`normal`, census `normal=2 arkt=2 views=0`) | 81 -> 82 once, then 83 -> 83 in two reruns (see flakes) | |
+| 6 | Close a tab (last tab; also the active tab in a second launch) | pass | 82 -> 82 | |
+| 7 | Close every window, then quit | pass (census 0/0/0, destroyed, gone after `kill -TERM`) | 82 -> 82 | |
+| 8 | Page `window.open` with a gesture | pass (`true`, `windows.getAll` = one `normal` window with 2 tabs, census `views=0`) | 82 -> 82 | |
+| 9 | Renderer crash (sad tab) | pass (browser alive) | 82 -> 83: the renderer's own dump from `chrome://crash` | **not shown**: the card stays empty |
+| 10 | `alert`, then (second launch) `confirm` | pass | 83 -> 83 | shown, as a separate unparented window `example.com says` (P-only: not attached to the Arkt window) |
+| 11 | Permission prompt (notifications, gesture) | pass | 81 -> 81 | **shown**: window `example.com wants to: Show notifications` (unparented; anchored at the window's top-left) |
+| 12 | `requestFullscreen` / `exitFullscreen` with a gesture | pass (`ok`, `fullscreenElement` true, `ok`; `ARKT: enter/exit fullscreen`) | 83 -> 84 once, 84 -> 84 in two reruns (see flakes) | native fullscreen shown; no exit bubble |
+| 13 | Find (AX `Edit > Find > Find...` after the frontmost and key-window checks) | pass | 81 -> 81 | menu item enabled, `ARKT: stub FindBar::Show`: **find bar not shown** (`ArktFindBar` has no UI) |
+| 14 | A download | pass | 84 -> 84 | file in `$PROF/downloads/arkt-w5b.txt`; **download bubble not shown** |
+| 15 | `<input type=file>` | pass | 84 -> 84 | open panel shown as a sheet on the Arkt window (1 sheet); left alone, process killed |
+| 16 | `--auto-open-devtools-for-tabs` | pass | 84 -> 84 | DevTools shown **undocked** in its own Views window (`views=1`) |
+| 17 | `<datalist>` dropdown | pass | 84 -> 84 | shown (an untitled popup window) |
+
+Flakes, not fixed: two runs (scenarios 5 and 12) left one new dump each while the browser stayed alive and logged
+no `FATAL`/`Check failed` line; origin not identified. In both, the count moved during a run that began a few seconds
+after the previous launch was stopped with `kill -TERM` (scenario 3 before 5, the `confirm` launch before 12).
+Neither reproduced in two reruns each (no dump during the driver, in fullscreen, after it, or after the stop). The
+helper line `No rendezvous client, terminating process (parent died?)` at shutdown is not the cause: three
+launch/`kill -TERM` cycles on the week-1 path (no `--arkt-native-window`) log it every time and leave no dump
+(84 -> 84). Crashpad dumps in total: 78 before W5b, 84 after: 3 from `chrome://crash` (intended), 1 from the
+scenario 11 crash before patch 0006, 2 flakes above.
+
+### Known gaps for week 3 (not fixed here)
+
+Sad tab page; find bar UI; download bubble; docked DevTools; fullscreen exit bubble; tab-modal dialogs and the
+permission bubble are unparented windows (P: `addChildWindow:` from the Arkt modal dialog host, or a bridge fix);
+pointer/keyboard lock chip; link-target status bubble (`GetStatusBubbles()` stays empty); `GetAutofillBubbleHandler`
+(nullptr, six unchecked callers); extension keyboard commands; Share menu; page context menu and passkey sheet (W3,
+P-only).
+
+### Gate (Step 3)
+
+Seam patches: **2 patch files** (limit 8), **3 upstream files** (limit 25; 12 in total minus the 9 files of
+0001-0004), **0 hot-file hunks** (limit 6; `git -C $CR diff 156.0.8078.48..arkt -- <hot files> | grep -c '^@@'` =
+0), **no header** touched (all three are `.cc`). Measured after each theme commit (0005: 1 file; 0006: 3 files). The
+gate passes in variant P; no switch to W. All patches are authored `Arkt contributors <noreply@arkt.invalid>`.
 
 ## W8
 

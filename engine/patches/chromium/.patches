@@ -2,3 +2,5 @@
 0002-Arkt-let-a-WebContents-view-draw-again-after-leaving.patch
 0003-Arkt-use-the-Arkt-Safe-Storage-keychain-item.patch
 0004-Arkt-let-Arkt-create-normal-browser-windows.patch
+0005-Arkt-tolerate-a-non-BrowserView-window-in-tab-featur.patch
+0006-Arkt-tolerate-a-non-BrowserView-window-in-dialogs.patch
