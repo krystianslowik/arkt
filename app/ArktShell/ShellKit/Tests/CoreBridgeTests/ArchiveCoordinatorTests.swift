@@ -81,6 +81,25 @@ struct ArchiveCoordinatorTests {
     #expect(harness.coordinator.pendingItems.isEmpty)
   }
 
+  @Test func removeSpaceQueuesItsPinnedAndTodayItems() async throws {
+    let harness = try Harness(todayTabs: 2)
+    let items = harness.coordinator.removeSpace(harness.space)
+    #expect(items.map(\.id) == [harness.pinned] + harness.today)
+    #expect(harness.source.spaceOrder.isEmpty)
+    #expect(harness.changes == [.spaceRemoved(harness.space)])
+    #expect(harness.coordinator.pendingItems == items)
+    await harness.drain()
+    #expect(await harness.store.addCalls == [.init(ids: items.map(\.id), policy: .replace)])
+  }
+
+  @Test func removingAnEmptySpaceQueuesNothing() async throws {
+    let harness = try Harness(todayTabs: 0)
+    let empty = try harness.source.addSpace(title: "Empty")
+    #expect(harness.coordinator.removeSpace(empty).isEmpty)
+    #expect(harness.source.spaceOrder == [harness.space])
+    #expect(!harness.coordinator.hasPendingWrites)
+  }
+
   @Test func unknownIdsAreSkipped() async throws {
     let harness = try Harness()
     #expect(harness.coordinator.archive([UUID()], reason: .manual).isEmpty)

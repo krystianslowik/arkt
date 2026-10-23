@@ -77,6 +77,29 @@ struct ModelSidebarSourceTests {
     #expect(recorder.changes.isEmpty)
   }
 
+  /// Decision on #86: the Space's pinned and Today items are archived and the Space goes, in one mutation that
+  /// reports only the Space event (its sections have no rows left to update).
+  @Test func removeSpaceArchivesItsItemsInOneMutation() throws {
+    let recorder = Recorder()
+    let work = try recorder.source.addSpace(title: "Work")
+    let other = try recorder.source.addSpace(title: "Other")
+    let pinned = try recorder.source.addTab(url: Self.url, title: "P", in: .pinned(work))
+    let today = try recorder.source.addTab(url: Self.url, title: "T", in: .today(work))
+    recorder.reset()
+    let date = Date(timeIntervalSinceReferenceDate: 700_000_000)
+    let items = recorder.source.removeSpace(work, at: date)
+    #expect(items.map(\.id) == [pinned, today])
+    #expect(items.allSatisfy { $0.archivedAt == date })
+    #expect(recorder.source.spaceOrder == [other])
+    #expect(recorder.source.node(pinned) == nil)
+    #expect(recorder.changes == [.spaceRemoved(work)])
+    #expect(recorder.saved.count == 1)
+    recorder.reset()
+    #expect(recorder.source.removeSpace(work, at: date).isEmpty)
+    #expect(recorder.changes.isEmpty)
+    #expect(recorder.saved.isEmpty)
+  }
+
   @Test func addTabStampsLastActiveAtWithCreation() throws {
     let stamp = Date(timeIntervalSinceReferenceDate: 1_000)
     let source = ModelSidebarSource(now: { stamp })
