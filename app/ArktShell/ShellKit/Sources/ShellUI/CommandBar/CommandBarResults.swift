@@ -39,8 +39,11 @@ public enum CommandBarResults {
     let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     var results: [Result] = []
 
-    if let url = URLInputParser.url(from: query) {
-      results.append(Result(kind: .open(url), title: query, subtitle: url.absoluteString, trailingHint: nil))
+    let url = URLInputParser.url(from: query)
+    if let url {
+      // The subtitle shows what the input expands to; when the input is that URL already (Cmd-L), it adds nothing.
+      let subtitle = url.absoluteString == query ? "" : url.absoluteString
+      results.append(Result(kind: .open(url), title: query, subtitle: subtitle, trailingHint: nil))
     }
 
     let matching = query.isEmpty ? openTabs : openTabs.filter { tab in
@@ -51,7 +54,11 @@ public enum CommandBarResults {
                             trailingHint: switchHint))
     }
 
-    if !query.isEmpty {
+    // #96: an explicit http(s) scheme makes the input a URL for certain (Cmd-L prefills one), so a search row
+    // would only repeat it. Chromium keeps a demoted search-what-you-typed row there; Arc unverified [I] (RT-08).
+    // Schemeless input such as `example.com` stays ambiguous and keeps both rows.
+    let isExplicitURL = url != nil && URLInputParser.hasExplicitScheme(query)
+    if !query.isEmpty, !isExplicitURL {
       results.append(Result(kind: .search(URLInputParser.searchURL(for: query)), title: query,
                             subtitle: "Search Google", trailingHint: nil))
     }

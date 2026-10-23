@@ -142,6 +142,14 @@ final class CommandBarTests: XCTestCase {
     XCTAssertFalse(bar.isVisible)
   }
 
+  // #96: Cmd-L on a URL lists it once: no "Search Google" row with the same text, no subtitle repeating it.
+  func testCmdLOnAURLShowsOneOpenRow() async throws {
+    bar.toggle(.currentTab(URL(string: "https://example.com/a")))
+    XCTAssertEqual(bar.results.map(\.kind.name), ["open"])
+    XCTAssertEqual(bar.results.first?.subtitle, "")
+    XCTAssertEqual(bar.panel.frame.height, CommandBarGeometry.contentHeight(rowCount: 1))
+  }
+
   func testCmdLEditedEnterNavigatesCurrentTab() async throws {
     var result: (URL, Bool)?
     bar.onOpen = { result = ($0, $1) }
