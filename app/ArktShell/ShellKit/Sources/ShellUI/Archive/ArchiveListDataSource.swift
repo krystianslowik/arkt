@@ -38,6 +38,8 @@ public struct ArchiveListPage: Equatable, Sendable {
 }
 
 /// What the Archive window reads and restores through. The app's implementation is CoreBridge's `ArchiveListModel`.
+/// Loads may overlap; the window applies every page it gets back, so a load that returns after a newer one started
+/// must report the newer state, never its own older rows.
 @MainActor
 public protocol ArchiveListDataSource: AnyObject {
   /// False while there is no Space to restore into.

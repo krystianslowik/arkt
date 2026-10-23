@@ -102,6 +102,29 @@ struct ArchiveListModelTests {
     #expect(page.rows.count == 3)
   }
 
+  /// Overlapping loads: an older load that returns after a newer one leaves the model's rows and restorable items
+  /// as the newer load set them, and reports that state too.
+  @Test func anOlderLoadFinishingLastDoesNotOverwriteANewerOne() async throws {
+    let harness = try Harness(items: Self.tabs(2))
+    await harness.store.holdReads()
+    let older = Task { await harness.model.loadPage() }
+    await eventually { await harness.store.heldReadCount == 1 }
+    await harness.store.seed([Self.tab("Newest", ago: 0.5)])
+    let newer = Task { await harness.model.loadPage() }
+    await eventually { await harness.store.heldReadCount == 2 }
+
+    await harness.store.releaseLastRead()
+    let newerPage = await newer.value
+    await harness.store.releaseReads()
+    let olderPage = await older.value
+
+    let expected = ["Newest", "Item 0", "Item 1"]
+    #expect(newerPage.rows.map(\.title) == expected)
+    #expect(olderPage.rows.map(\.title) == expected)
+    #expect(harness.model.rows.map(\.title) == expected)
+    #expect(harness.model.restore(newerPage.rows[0].id))
+  }
+
   // MARK: - Row text
 
   @Test func rowTextForTabsFoldersSplitsAndSources() async throws {
@@ -235,6 +258,8 @@ actor PagedArchiveStore: ArchiveStoring {
   private var fails = false
   private var holdsRemoves = false
   private var heldRemoves: [CheckedContinuation<Void, Never>] = []
+  private var holdsReads = false
+  private var heldReads: [CheckedContinuation<Void, Never>] = []
   private(set) var limits: [Int?] = []
   private(set) var removed: [[NodeID]] = []
 
@@ -259,11 +284,25 @@ actor PagedArchiveStore: ArchiveStoring {
     return items.count
   }
 
+  /// Reads after this answer from the items at call time but wait to return until released.
+  func holdReads() { holdsReads = true }
+  var heldReadCount: Int { heldReads.count }
+  /// Lets the read that started last return.
+  func releaseLastRead() { heldReads.removeLast().resume() }
+
+  func releaseReads() {
+    holdsReads = false
+    for held in heldReads { held.resume() }
+    heldReads = []
+  }
+
   func items(matching filter: ArchiveFilter, limit: Int?) async throws -> ArchivePage {
     limits.append(limit)
     if fails { throw FakeStoreError() }
     let sorted = items.sorted { $0.archivedAt > $1.archivedAt }
-    return ArchivePage(items: limit.map { Array(sorted.prefix($0)) } ?? sorted, unreadable: unreadable)
+    let page = ArchivePage(items: limit.map { Array(sorted.prefix($0)) } ?? sorted, unreadable: unreadable)
+    if holdsReads { await withCheckedContinuation { heldReads.append($0) } }
+    return page
   }
 
   func remove(_ ids: [NodeID]) async throws {

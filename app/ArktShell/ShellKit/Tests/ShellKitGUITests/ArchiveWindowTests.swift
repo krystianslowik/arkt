@@ -50,6 +50,19 @@ final class ArchiveWindowTests: XCTestCase {
     XCTAssertTrue(controller.tableView.enclosingScrollView != nil)
   }
 
+  /// Escape (`cancelOperation:` up the responder chain from the table) closes the window like its close button.
+  func testEscapeClosesTheWindow() throws {
+    let controller = makeWindow(StubArchiveSource())
+    let window = try XCTUnwrap(controller.window)
+    window.orderFront(nil)
+    XCTAssertTrue(window.makeFirstResponder(controller.tableView))
+    XCTAssertTrue(window.isVisible)
+
+    controller.tableView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+
+    XCTAssertFalse(window.isVisible)
+  }
+
   func testListsRowsAndReportsUnreadableItems() async throws {
     let source = StubArchiveSource()
     source.pages = [ArchiveListPage(rows: Self.rows(3), unreadable: 3, mayHaveMore: true)]

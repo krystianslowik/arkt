@@ -32,6 +32,8 @@ public final class ArchiveListModel: ArchiveListDataSource {
   /// Entries restored here (id and archive date): hidden from later pages, where the store may still hold them until
   /// the remove the coordinator queued lands. A later archive of the same id has a newer date and shows.
   private var restored: [UUID: Date] = [:]
+  /// Bumped by every load, so a slower, older load never overwrites the state a newer one set.
+  private var generation = 0
 
   public init(
     source: ModelSidebarSource, store: any ArchiveStoring, coordinator: ArchiveCoordinator,
@@ -81,10 +83,18 @@ public final class ArchiveListModel: ArchiveListDataSource {
 
   // MARK: - Loading
 
+  /// A load that a newer one overtook changes nothing and reports the current state (the newer load's, once it
+  /// landed), so the window never shows older rows.
   private func load(limit wanted: Int) async -> ArchiveListPage {
+    generation += 1
+    let current = generation
     let page: ArchivePage
     do { page = try await store.items(matching: ArchiveFilter(), limit: wanted) } catch {
-      return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore, failed: true)
+      let failed = current == generation
+      return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore, failed: failed)
+    }
+    guard current == generation else {
+      return ArchiveListPage(rows: rows, unreadable: unreadable, mayHaveMore: mayHaveMore)
     }
     limit = wanted
     mayHaveMore = page.items.count >= wanted       // fewer than asked: the store ran out
