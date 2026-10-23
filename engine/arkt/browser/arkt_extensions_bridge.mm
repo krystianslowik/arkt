@@ -44,6 +44,10 @@ class PopoverExtensionView : public extensions::ExtensionView {
   ~PopoverExtensionView() override {
     [popover_ close];
     host_->set_view(nullptr);
+    // The popup never showed: report the failure, as Chrome's popup does.
+    if (on_loaded_) {
+      std::move(on_loaded_).Run(nullptr);
+    }
   }
 
   const extensions::ExtensionId& extension_id() const {

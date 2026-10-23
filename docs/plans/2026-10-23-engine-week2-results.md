@@ -17,7 +17,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W5c | Arkt-owned tab list and visibility (finding 2) | TODO | |
 | W6 | Extension window identity, extension-created tabs and windows (finding 3) | TODO | |
 | W7 | Web Store install on the native window | TODO | |
-| W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | TODO | |
+| W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | DONE (user steps open) | patch 0003; see below |
 | W9 | Native window as default; try dropping patch 0002 | TODO | |
 | W10 | Release bundle rebuild, re-sign, final smoke, housekeeping | TODO | |
 | WE | Embedding spike (lane C) | DONE: GO (framework copied into the app bundle) | see below; branch `spike/embedding` |
@@ -28,11 +28,11 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 |---|---|---|---|---|
 | 0001 | Register in-process browser hook | exists | 2 | 0 |
 | 0002 | Let a WebContents view draw again after leaving Views | exists; W9 tries to drop it | 4 | 0 |
-| 0003 | `BrowserWindow` factory hook for Arkt (W5a) | new | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
-| 0004+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new; W3 projects 3 patch files (P) | 4-8 (W3 estimate, P; 8-13 with week-3 rows) | 0 (W3 estimate) |
-| next | Arkt keychain item name (W8) | new | 1 | 0 |
+| 0003 | Arkt keychain item name (W8) | exists | 1 (`keychain_password_mac.mm`) | 0 |
+| 0004 | `BrowserWindow` factory hook for Arkt (W5a) | new | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
+| 0005+ | Non-`BrowserView` normal window seams (W5b), grouped by theme | new; W3 projects 3 patch files (P) | 4-8 (W3 estimate, P; 8-13 with week-3 rows) | 0 (W3 estimate) |
 
-Current totals: 2 patch files, 6 upstream files, 0 hot-file hunks.
+Current totals: 3 patch files, 7 upstream files, 0 hot-file hunks.
 
 ## W0
 
@@ -507,7 +507,7 @@ For grep 7 the line number is the argument line the command prints.
 | 3 | `tab_features.cc:646` (`SadTabHelper`) | (a) | see sad tab | see sad tab |
 | 3 | `browser_window_features.cc:352` (`BrowserElementsViewsImpl`, returns no views for us) | (c) | | |
 | 3 | `read_anything_side_panel_controller.cc:246` (`CHECK_IS_TEST()` without a side panel), `side_panel_helper.cc:38`, `customize_chrome_page_handler.cc:550`, `reading_list_ui.cc:70`, `chrome_browser_interface_binders_webui_parts_desktop.cc:635` | (b) | | |
-| 3 | `session_restore.cc:859` (Ash), `browser_window_factory.cc:35` (the factory, patch 0003) | (n) | | |
+| 3 | `session_restore.cc:859` (Ash), `browser_window_factory.cc:35` (the factory, patch 0004) | (n) | | |
 | 4 | `browser_focus_controller.cc:42` (`RotatePaneFocus`, null-checked) | (c) | F6 does nothing | works |
 | 4 | `permission_prompt_base_view.cc:91`, :299, `permission_prompt_bubble_base_view.cc:225`, `embedded_permission_prompt_system_settings_view.cc:27` | (c) | prompt shown inactive | as Chrome |
 | 4 | `webui_permission_chip.cc:297`, `profile_dynamic_menu.cc:455`, `glic_widget.cc:228` | (b) | | |
@@ -644,3 +644,73 @@ Beyond W5a Step 3's list, this inventory adds or confirms:
 Known gaps recorded for W5b (both variants, no fix this week): sad tab UI, download bubble, docked DevTools, zoom
 bubble, fullscreen exit control, extension keyboard commands, Share menu. If item 9 is not done, payments and Autofill AI bubbles join this list for
 week 3.
+
+## W8
+
+Date 2026-10-23. Branch `engine/w8-keychain`.
+
+### Step 1: audit of a test run (metadata only)
+
+Commands from the plan (no `-w`, no `-g`), before and after a launch of `out/Spike` with `--use-mock-keychain`
+(profile `$PROF/w8-keychain`, page `https://example.com`, about 2 min, stopped by its PID):
+
+| Check | Before | After the mock launch |
+|---|---|---|
+| "Chromium Safe Storage" `acct` | `Chromium` | `Chromium` |
+| "Chromium Safe Storage" `mdat` | `20261023080451Z` | `20261023080451Z` (unchanged) |
+| "Arkt Safe Storage" (`find-generic-password` exit) | 44 (not found) | 44 (not found) |
+
+The existing item was created at the same time as its `mdat` (08:04:51Z, before week 2 started), most likely by a
+week-1 launch without the mock flag. It was left in place (maintainer decision pending).
+
+`engine/README.md` gained a "Launch flags" section: `--use-mock-keychain` and `--user-data-dir` are mandatory for
+every test launch. `grep -n 'Contents/MacOS/' engine/README.md` has one hit, the example in that section, and it
+carries both flags.
+
+### Step 2: patch
+
+Chromium branch `arkt`, commit `Arkt: use the Arkt Safe Storage keychain item`, exported as
+`0003-Arkt-use-the-Arkt-Safe-Storage-keychain-item.patch`. Non-Chrome-branded constants in
+`components/os_crypt/common/keychain_password_mac.mm`: `kDefaultServiceName` "Arkt Safe Storage",
+`kDefaultAccountName` "Arkt". The Chrome-branded arm is unchanged.
+
+Build: `nice -n 15 autoninja -C out/Spike chrome`: `The build has finished successfully.`, 0 `FAILED:` lines.
+Before the build: `df -h /` 11 GiB available; `vm.swapusage` used 6842.50M, free 1349.50M.
+
+### Step 3: verification without the keychain
+
+In the component build the constant lives in `libchrome_dll.dylib` (`keychain_password_mac` is a source set linked
+there), not in an os_crypt dylib, and the `Chromium Framework` binary is only the loader. The plan's
+`strings | grep -E "^(Arkt|Chromium) Safe Storage$"` finds nothing, because the linker packs the string right after
+`saltysalt` (`strings` prints `saltysaltArkt Safe Storage`). Use `grep -a -o` instead:
+
+```
+grep -a -o -E "(Arkt|Chromium|Chrome) Safe Storage" $OUT/libchrome_dll.dylib | sort | uniq -c
+   1 Arkt Safe Storage
+grep -l -a -E "(Chromium|Chrome) Safe Storage" $OUT/*.dylib     # no output
+```
+
+`Arkt Safe Storage` present, `Chromium Safe Storage` absent. W10 runs the same `grep -a -o` on `Arkt Framework`.
+
+A second mock-keychain launch of the patched build (`ARKT: mounted active tab after 1 attempt(s)`, no `FATAL` or
+`Check failed` lines, stopped by its PID) left the audit unchanged: same `mdat`, no "Arkt Safe Storage" item.
+
+Profiles: test profiles encrypted with the mock keychain are unaffected. A profile created without the mock flag
+before this patch can no longer decrypt its saved passwords and cookies (it looked up "Chromium Safe Storage");
+that is throwaway test data.
+
+### Follow-ups from the W4 review (separate commit)
+
+- `PopoverExtensionView` runs its pending show callback with `nullptr` when it is destroyed before the popup loaded,
+  as Chrome's `ExtensionPopup` does.
+- `ArktExtensionsMenu::Shutdown` also clears `browser_`.
+
+Both compiled in the W8 build above.
+
+### Needs the user (open)
+
+1. Decide about the existing "Chromium Safe Storage" item (created 2026-10-23 08:04:51Z, account `Chromium`). It was
+   not deleted. If you know only Arkt test builds created it, delete it yourself in Keychain Access.
+2. After W10 installs the rebuilt `/Applications/Arkt.app`, launch it once without `--use-mock-keychain` (plan W8,
+   "Needs the user" step 2). Expected: no prompt about "Chromium Safe Storage", and an "Arkt Safe Storage" item
+   (account `Arkt`) afterwards.

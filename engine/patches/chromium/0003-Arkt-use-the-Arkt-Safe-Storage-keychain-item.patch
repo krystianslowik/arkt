@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Fri, 23 Oct 2026 14:53:42 +0200
+Subject: [PATCH] Arkt: use the Arkt Safe Storage keychain item
+
+---
+ components/os_crypt/common/keychain_password_mac.mm | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/components/os_crypt/common/keychain_password_mac.mm b/components/os_crypt/common/keychain_password_mac.mm
+index 212b930952..7e3a35a2b2 100644
+--- a/components/os_crypt/common/keychain_password_mac.mm
++++ b/components/os_crypt/common/keychain_password_mac.mm
+@@ -35,8 +35,8 @@ namespace {
+ const char kDefaultServiceName[] = "Chrome Safe Storage";
+ const char kDefaultAccountName[] = "Chrome";
+ #else
+-const char kDefaultServiceName[] = "Chromium Safe Storage";
+-const char kDefaultAccountName[] = "Chromium";
++const char kDefaultServiceName[] = "Arkt Safe Storage";
++const char kDefaultAccountName[] = "Arkt";
+ #endif
+ 
+ // These values are persisted to logs. Entries should not be renumbered and

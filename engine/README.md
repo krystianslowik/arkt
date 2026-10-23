@@ -51,6 +51,25 @@ After editing upstream files (one commit per patch on branch `arkt`). Patches ar
     fi
     rm -rf $tmp
 
+## Launch flags (every test launch)
+
+Every test launch of a built engine (`out/Spike`, `out/Arkt`, or an installed test bundle) passes both of these:
+
+- `--use-mock-keychain`: an in-memory fake keychain, so a test run never reads, creates or changes an item in the
+  login keychain and never shows a keychain prompt. Encrypted profile data (cookies, saved passwords) therefore does
+  not survive a relaunch of a test profile; extension installs and extension state do.
+- `--user-data-dir=<test profile>`: a throwaway profile under `$CHROMIUM_ROOT/profiles` (or
+  `~/Library/Application Support/ArktTest` for an installed bundle), never a real browser profile.
+
+Usual companions: `--no-first-run --no-default-browser-check --enable-logging=stderr`. For example:
+
+    "$CR/out/Spike/Chromium.app/Contents/MacOS/Chromium" --user-data-dir=$CHROMIUM_ROOT/profiles/<name> \
+      --use-mock-keychain --no-first-run --no-default-browser-check --enable-logging=stderr <url>
+
+Without the mock flag the product stores its encryption key in the login keychain as the generic password
+"Arkt Safe Storage" (account "Arkt"); patch 0003 renames Chromium's "Chromium Safe Storage" item. Only a maintainer
+runs a build without `--use-mock-keychain`, and only for the one release check that needs the real item.
+
 ## Web identity (check on every rebase)
 
 Sites must see Arkt as Chrome. Issue #9 owns the product side; the checks run in the week-2 plan
