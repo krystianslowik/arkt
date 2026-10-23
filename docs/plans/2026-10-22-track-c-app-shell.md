@@ -3222,9 +3222,9 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
 - Reposition the open bar when the parent moves or changes screen; prewarm on `parent.screen`.
 - Cmd-Enter / Opt-Enter (KB-085, RT-08), hover selection, PageUp/PageDown, arrow wrap (RT-08). Done in #95 as [I] rules until RT-08 runs: Cmd-Enter and Opt-Enter open the selected result in a new tab from Cmd-T and Cmd-L (no reload; a "Switch to Tab" result still switches); Up / Down wrap; PageUp / PageDown move by `maxVisibleRows` and stop at the ends; pointer moves select the row under them.
 - Menu routing test through `NSApp.sendAction` (Cmd-T/Cmd-L reach `ShellWindowController` while the bar is key). Done in #95 (`testMenuActionsReachTheShellWhileTheBarIsKey`).
-- URL parsing: trailing-dot hosts (`example.com.`), underscore hosts, user-info (`user@host`).
-- Cmd-L on a URL shows the same text in the "open" and "Search Google" rows; dedupe or relabel.
-- IPv4 octets with leading zeros (`010.0.0.1`) are accepted but Chromium reads them as octal; reject or canonicalise (C5 re-review minor).
+- URL parsing: trailing-dot hosts (`example.com.`), underscore hosts, user-info (`user@host`). Done in #96, following Chromium's omnibox: the trailing dot is kept, underscores are allowed outside the TLD, `user@host` alone stays a search and a password, port or path makes it a URL.
+- Cmd-L on a URL shows the same text in the "open" and "Search Google" rows; dedupe or relabel. Done in #96 (dedupe): an explicit http(s) URL gets no search row, and the open row drops a subtitle equal to its title [I] (RT-08).
+- IPv4 octets with leading zeros (`010.0.0.1`) are accepted but Chromium reads them as octal; reject or canonicalise (C5 re-review minor). Done in #96: rejected (the input is a query); with an explicit scheme the engine canonicalises.
 - Run `testAppearsUnder16ms` once on an idle machine and record the `asserted=yes` line in the results doc before sign-off.
 
 ## C6 review follow-ups (deferred)
