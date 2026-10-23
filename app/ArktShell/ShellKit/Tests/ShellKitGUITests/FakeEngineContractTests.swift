@@ -35,6 +35,8 @@ final class FakeEngineContractTests: XCTestCase {
   func testHostChangeClearsFavicon() async throws { try await EngineContract.hostChangeClearsFavicon(harness) }
   func testHistoryMovesBackAndForward() async throws { try await EngineContract.historyMovesBackAndForward(harness) }
   func testHistoryAvailabilityIsReported() async throws { try await EngineContract.historyAvailabilityIsReported(harness) }
+  func testHistoryEntriesAndOffsetNavigation() async throws { try await EngineContract.historyEntriesAndOffsetNavigation(harness) }
+  func testDuplicateTabCopiesURLTitleAndHistory() async throws { try await EngineContract.duplicateTabCopiesURLTitleAndHistory(harness) }
 
   /// FakeEngine only: a favicon that is not HTTP 200 + image/* is ignored.
   func testRejectsNonImageFavicon() async throws {

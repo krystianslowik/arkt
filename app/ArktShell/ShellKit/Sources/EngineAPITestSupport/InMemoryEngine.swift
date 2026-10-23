@@ -7,8 +7,8 @@ import EngineAPI
 public final class InMemoryEngine: EngineClient {
   private var snapshots: [TabID: TabSnapshot] = [:]
   private var views: [TabID: NSView] = [:]
-  /// Per-tab history: URLs behind and ahead of the current one (nearest last).
-  private var history: [TabID: (back: [URL], forward: [URL])] = [:]
+  /// Per-tab history: entries behind and ahead of the current one (nearest last on each stack).
+  private var history: [TabID: (back: [HistoryEntry], forward: [HistoryEntry])] = [:]
   private let hub = EngineEventHub()
   public private(set) var tabIDs: [TabID] = []
 
@@ -39,26 +39,71 @@ public final class InMemoryEngine: EngineClient {
   public func navigate(_ id: TabID, to url: URL) {
     guard let previous = snapshots[id] else { return }
     if let current = previous.url, current != url {
-      history[id, default: ([], [])].back.append(current)
+      history[id, default: ([], [])].back.append(HistoryEntry(url: current, title: previous.title))
       history[id, default: ([], [])].forward.removeAll()
     }
-    load(id, url, previous: previous)
+    load(id, url, title: nil, previous: previous)
   }
 
-  public func goBack(_ id: TabID) {
-    guard let previous = snapshots[id], let target = history[id]?.back.popLast() else { return }
-    if let current = previous.url { history[id, default: ([], [])].forward.append(current) }
-    load(id, target, previous: previous)
+  public func goBack(_ id: TabID) { goToHistory(id, offset: -1) }
+
+  public func goForward(_ id: TabID) { goToHistory(id, offset: 1) }
+
+  public func goToHistory(_ id: TabID, offset: Int) {
+    guard offset != 0, let previous = snapshots[id] else { return }
+    var stack = history[id] ?? ([], [])
+    var current: HistoryEntry? = previous.url.map { HistoryEntry(url: $0, title: previous.title) }
+    let target: HistoryEntry
+    if offset < 0 {
+      let steps = -offset
+      guard stack.back.count >= steps else { return }
+      var popped: HistoryEntry!
+      for _ in 0..<steps {
+        if let current { stack.forward.append(current) }
+        popped = stack.back.popLast()
+        current = popped
+      }
+      target = popped
+    } else {
+      let steps = offset
+      guard stack.forward.count >= steps else { return }
+      var popped: HistoryEntry!
+      for _ in 0..<steps {
+        if let current { stack.back.append(current) }
+        popped = stack.forward.popLast()
+        current = popped
+      }
+      target = popped
+    }
+    history[id] = stack
+    load(id, target.url, title: target.title, previous: previous)
   }
 
-  public func goForward(_ id: TabID) {
-    guard let previous = snapshots[id], let target = history[id]?.forward.popLast() else { return }
-    if let current = previous.url { history[id, default: ([], [])].back.append(current) }
-    load(id, target, previous: previous)
+  public func history(of id: TabID) -> TabHistory? {
+    guard snapshots[id] != nil else { return nil }
+    let stack = history[id] ?? ([], [])
+    return TabHistory(back: Array(stack.back.reversed()), forward: Array(stack.forward.reversed()))
   }
 
-  private func load(_ id: TabID, _ url: URL, previous: TabSnapshot) {
+  @discardableResult
+  public func duplicateTab(_ id: TabID) -> TabID? {
+    guard let source = snapshots[id] else { return nil }
+    let copy = TabID()
+    snapshots[copy] = TabSnapshot(id: copy)
+    tabIDs.append(copy)
+    history[copy] = history[id] ?? ([], [])
+    hub.emit(.tabCreated(copy))
+    if let url = source.url, let initial = snapshots[copy] {
+      load(copy, url, title: source.title, previous: initial)
+    } else {
+      reportHistory(copy)
+    }
+    return copy
+  }
+
+  private func load(_ id: TabID, _ url: URL, title: String?, previous: TabSnapshot) {
     snapshots[id]?.url = url
+    if let title, !title.isEmpty { snapshots[id]?.title = title }
     snapshots[id]?.isLoading = true
     hub.emit(.urlChanged(id, url))
     if !previous.isLoading { hub.emit(.loadingChanged(id, isLoading: true)) }

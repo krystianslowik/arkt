@@ -19,6 +19,8 @@ struct InMemoryEngineContractTests {
   @Test func hostChangeClearsFavicon() async throws { try await EngineContract.hostChangeClearsFavicon(harness) }
   @Test func historyMovesBackAndForward() async throws { try await EngineContract.historyMovesBackAndForward(harness) }
   @Test func historyAvailabilityIsReported() async throws { try await EngineContract.historyAvailabilityIsReported(harness) }
+  @Test func historyEntriesAndOffsetNavigation() async throws { try await EngineContract.historyEntriesAndOffsetNavigation(harness) }
+  @Test func duplicateTabCopiesURLTitleAndHistory() async throws { try await EngineContract.duplicateTabCopiesURLTitleAndHistory(harness) }
 }
 
 @MainActor

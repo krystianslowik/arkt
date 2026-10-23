@@ -1,4 +1,118 @@
 import AppKit
+import EngineAPI
+
+/// Toolbar button (Back, Forward, Reload) that records click modifiers, handles middle-click (`buttonNumber == 2`),
+/// and shows a history menu on right-click or long-press (#81, GS-024..026, BH-027, BH-165, BH-166).
+@MainActor
+public final class ToolbarNavigationButton: NSButton {
+  public static let longPressDuration: Duration = .milliseconds(350)
+
+  /// Modifier flags of the mouse-down currently firing the button's action.
+  private(set) var clickModifiers: NSEvent.ModifierFlags = []
+  /// Builds the history menu for right-click, long-press or VoiceOver Show Menu (nil for Reload or when disabled).
+  var menuProvider: (@MainActor () -> NSMenu?)?
+  /// Middle-click (`buttonNumber == 2`) action (Back / Forward open the entry in a new background Today tab).
+  var onMiddleClick: (@MainActor () -> Void)?
+  /// Presents the menu on long-press or VoiceOver Show Menu; tests replace it to inspect the menu without a modal loop.
+  public var onShowHistoryMenu: (@MainActor (NSMenu) -> Void)?
+
+  private var longPressTask: Task<Void, Never>?
+  private var longPressTriggered = false
+  private var isTrackingMiddleClick = false
+
+  public override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    onShowHistoryMenu = { [weak self] menu in
+      guard let self else { return }
+      menu.popUp(positioning: nil, at: NSPoint(x: 0, y: self.bounds.maxY), in: self)
+    }
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  public override func mouseDown(with event: NSEvent) {
+    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    if modifiers == .control, let menu = menu(for: event) {
+      onShowHistoryMenu?(menu)
+      return
+    }
+    clickModifiers = modifiers
+    longPressTriggered = false
+    if isEnabled, modifiers.isEmpty, menuProvider != nil {
+      longPressTask?.cancel()
+      longPressTask = Task { @MainActor [weak self] in
+        try? await Task.sleep(for: Self.longPressDuration)
+        guard !Task.isCancelled else { return }
+        self?.triggerLongPressMenu()
+      }
+    }
+    super.mouseDown(with: event)
+    longPressTask?.cancel()
+    longPressTask = nil
+    clickModifiers = []
+    longPressTriggered = false
+  }
+
+  public override func sendAction(_ action: Selector?, to target: Any?) -> Bool {
+    guard !longPressTriggered else { return false }
+    return super.sendAction(action, to: target)
+  }
+
+  public override func otherMouseDown(with event: NSEvent) {
+    guard event.buttonNumber == 2, isEnabled, onMiddleClick != nil else {
+      super.otherMouseDown(with: event)
+      return
+    }
+    isTrackingMiddleClick = true
+  }
+
+  public override func otherMouseUp(with event: NSEvent) {
+    guard event.buttonNumber == 2, isTrackingMiddleClick else {
+      super.otherMouseUp(with: event)
+      return
+    }
+    isTrackingMiddleClick = false
+    if isEnabled, bounds.contains(convert(event.locationInWindow, from: nil)) {
+      onMiddleClick?()
+    }
+  }
+
+  public override func menu(for event: NSEvent) -> NSMenu? {
+    isEnabled ? menuProvider?() : nil
+  }
+
+  public override func accessibilityPerformShowMenu() -> Bool {
+    guard isEnabled, let menu = menuProvider?() else { return false }
+    onShowHistoryMenu?(menu)
+    return true
+  }
+
+  private func triggerLongPressMenu() {
+    guard isEnabled, let menu = menuProvider?() else { return }
+    longPressTriggered = true
+    onShowHistoryMenu?(menu)
+  }
+
+  // MARK: Test hooks
+
+  func performClickWithModifiers(_ modifiers: NSEvent.ModifierFlags) {
+    guard isEnabled else { return }
+    clickModifiers = modifiers
+    defer { clickModifiers = [] }
+    _ = sendAction(action, to: target)
+  }
+
+  func performMiddleClick() {
+    guard isEnabled else { return }
+    onMiddleClick?()
+  }
+
+  func triggerLongPressForTesting() {
+    triggerLongPressMenu()
+    longPressTriggered = false
+  }
+}
 
 /// The Toolbar at the top of the content card (Toggle Toolbar, Cmd-Shift-D; KB-018, BH-032): Back, Forward,
 /// Reload and the full URL as plain text centered in the strip. Shown and laid out by `ContentCardView`; actions are
@@ -19,13 +133,25 @@ public final class ContentToolbarView: NSView {
   /// in the strip.
   static let urlBarHeight: CGFloat = 24
 
-  public let backButton = NSButton(frame: .zero)
-  public let forwardButton = NSButton(frame: .zero)
-  public let reloadButton = NSButton(frame: .zero)
+  public let backButton = ToolbarNavigationButton(frame: .zero)
+  public let forwardButton = ToolbarNavigationButton(frame: .zero)
+  public let reloadButton = ToolbarNavigationButton(frame: .zero)
   public let urlBar = URLBarView(style: .full)
   public var onBack: (@MainActor () -> Void)?
   public var onForward: (@MainActor () -> Void)?
   public var onReload: (@MainActor () -> Void)?
+  /// Cmd-click or middle-click Back: opens the previous history entry in a new background Today tab (#81, GS-025,
+  /// BH-165).
+  public var onBackInNewTab: (@MainActor () -> Void)?
+  /// Cmd-click or middle-click Forward: opens the next history entry in a new background Today tab (#81, GS-025,
+  /// BH-165).
+  public var onForwardInNewTab: (@MainActor () -> Void)?
+  /// Cmd-click Reload: duplicates the current tab with its history (#81, GS-026, BH-027).
+  public var onDuplicateTab: (@MainActor () -> Void)?
+  /// Supplies the active tab's back and forward entries for the Back and Forward history menus (#81, GS-024, BH-166).
+  public var historyProvider: (@MainActor () -> TabHistory?)?
+  /// A history menu item was chosen (`offset < 0` from Back, `offset > 0` from Forward; #81, GS-024, BH-166).
+  public var onSelectHistory: (@MainActor (Int) -> Void)?
 
   /// The hairline under the strip.
   let hairline = CALayer()
@@ -48,6 +174,10 @@ public final class ContentToolbarView: NSView {
       addSubview(button)
     }
     setHistory(canGoBack: false, canGoForward: false)
+    backButton.menuProvider = { [weak self] in self?.backHistoryMenu() }
+    forwardButton.menuProvider = { [weak self] in self?.forwardHistoryMenu() }
+    backButton.onMiddleClick = { [weak self] in self?.onBackInNewTab?() }
+    forwardButton.onMiddleClick = { [weak self] in self?.onForwardInNewTab?() }
     urlBar.autoresizingMask = []
     addSubview(urlBar)
     setAccessibilityElement(true)
@@ -68,7 +198,7 @@ public final class ContentToolbarView: NSView {
   public override var wantsUpdateLayer: Bool { true }
   public override var mouseDownCanMoveWindow: Bool { false }
 
-  private var buttons: [(NSButton, String, String, Selector)] {
+  private var buttons: [(ToolbarNavigationButton, String, String, Selector)] {
     [(backButton, "chevron.left", "Back", #selector(back(_:))),
      (forwardButton, "chevron.right", "Forward", #selector(forward(_:))),
      (reloadButton, "arrow.clockwise", "Reload", #selector(reload(_:)))]
@@ -80,9 +210,45 @@ public final class ContentToolbarView: NSView {
     forwardButton.isEnabled = canGoForward
   }
 
-  @objc private func back(_ sender: Any?) { onBack?() }
-  @objc private func forward(_ sender: Any?) { onForward?() }
-  @objc private func reload(_ sender: Any?) { onReload?() }
+  /// Back history menu (nearest entry first, tags `-1, -2, ...`), or nil when disabled or empty (#81, GS-024, BH-166).
+  public func backHistoryMenu() -> NSMenu? {
+    guard backButton.isEnabled, let entries = historyProvider?()?.back, !entries.isEmpty else { return nil }
+    return makeHistoryMenu(entries: entries, sign: -1)
+  }
+
+  /// Forward history menu (nearest entry first, tags `+1, +2, ...`), or nil when disabled or empty (#81, GS-024).
+  public func forwardHistoryMenu() -> NSMenu? {
+    guard forwardButton.isEnabled, let entries = historyProvider?()?.forward, !entries.isEmpty else { return nil }
+    return makeHistoryMenu(entries: entries, sign: 1)
+  }
+
+  private func makeHistoryMenu(entries: [HistoryEntry], sign: Int) -> NSMenu {
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    for (index, entry) in entries.enumerated() {
+      let title = entry.title.isEmpty ? entry.url.absoluteString : entry.title
+      let item = NSMenuItem(title: title, action: #selector(historyMenuItemChosen(_:)), keyEquivalent: "")
+      item.target = self
+      item.tag = sign * (index + 1)
+      menu.addItem(item)
+    }
+    return menu
+  }
+
+  @objc private func historyMenuItemChosen(_ sender: NSMenuItem) {
+    guard sender.tag != 0 else { return }
+    onSelectHistory?(sender.tag)
+  }
+
+  @objc private func back(_ sender: Any?) {
+    if backButton.clickModifiers.contains(.command) { onBackInNewTab?() } else { onBack?() }
+  }
+  @objc private func forward(_ sender: Any?) {
+    if forwardButton.clickModifiers.contains(.command) { onForwardInNewTab?() } else { onForward?() }
+  }
+  @objc private func reload(_ sender: Any?) {
+    if reloadButton.clickModifiers.contains(.command) { onDuplicateTab?() } else { onReload?() }
+  }
 
   /// The card follows the window's appearance, not the Space theme; so does the Toolbar.
   private func applyFlavor() {

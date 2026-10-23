@@ -248,7 +248,9 @@ final class SpaceDotElement: NSAccessibilityElement {
 @MainActor
 public final class SidebarContainerView: NSView {
   private let dragSurface = WindowDragView(frame: .zero)
-  /// Reserved for the traffic lights (and later back / forward / reload).
+  /// Reserved for the traffic lights. Back / forward / reload next to the traffic lights when the Toolbar is off could
+  /// not be measured in the passive Toolbar-on pass (`docs/plans/2026-10-23-arc-measurements.md`, interaction checklist
+  /// item 4) and are recorded as a parity gap (#81).
   public let topBar: NSView = WindowDragView(frame: .zero)
   /// The active tab's host under the traffic lights (BH-031, GS-042); the window controller binds it.
   public let urlBar = URLBarView(style: .host)

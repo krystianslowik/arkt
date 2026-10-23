@@ -17,6 +17,8 @@ public final class FakeEngine: EngineClient {
     /// Identifies the pending end-of-load step; nil when none is pending.
     var pendingFinish: Int?
     var finishCounter = 0
+    /// Cloned history stacks (nearest last) when this tab was created by `duplicateTab(_:)` (#81, BH-027).
+    var clonedHistory: (back: [HistoryEntry], forward: [HistoryEntry])?
     init(webView: WKWebView, navigation: NavigationObserver, snapshot: TabSnapshot) {
       self.webView = webView; self.navigation = navigation; self.snapshot = snapshot
     }
@@ -96,7 +98,15 @@ public final class FakeEngine: EngineClient {
   }
 
   public func navigate(_ id: TabID, to url: URL) {
-    guard let web = entries[id]?.webView else { return }
+    guard let entry = entries[id] else { return }
+    if entry.clonedHistory != nil, let current = entry.snapshot.url, current != url {
+      entry.clonedHistory?.back.append(HistoryEntry(url: current, title: entry.snapshot.title))
+      entry.clonedHistory?.forward.removeAll()
+    }
+    loadURL(url, in: entry.webView)
+  }
+
+  private func loadURL(_ url: URL, in web: WKWebView) {
     if url.isFileURL {
       web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     } else {
@@ -105,8 +115,74 @@ public final class FakeEngine: EngineClient {
   }
 
   public func reload(_ id: TabID) { entries[id]?.webView.reload() }
-  public func goBack(_ id: TabID) { entries[id]?.webView.goBack() }
-  public func goForward(_ id: TabID) { entries[id]?.webView.goForward() }
+  public func goBack(_ id: TabID) { goToHistory(id, offset: -1) }
+  public func goForward(_ id: TabID) { goToHistory(id, offset: 1) }
+
+  public func goToHistory(_ id: TabID, offset: Int) {
+    guard offset != 0, let entry = entries[id] else { return }
+    if var stack = entry.clonedHistory {
+      var current: HistoryEntry? = entry.snapshot.url.map { HistoryEntry(url: $0, title: entry.snapshot.title) }
+      let target: HistoryEntry
+      if offset < 0 {
+        let steps = -offset
+        guard stack.back.count >= steps else { return }
+        var popped: HistoryEntry!
+        for _ in 0..<steps {
+          if let current { stack.forward.append(current) }
+          popped = stack.back.popLast()
+          current = popped
+        }
+        target = popped
+      } else {
+        let steps = offset
+        guard stack.forward.count >= steps else { return }
+        var popped: HistoryEntry!
+        for _ in 0..<steps {
+          if let current { stack.back.append(current) }
+          popped = stack.forward.popLast()
+          current = popped
+        }
+        target = popped
+      }
+      entry.clonedHistory = stack
+      syncHistory(id)
+      loadURL(target.url, in: entry.webView)
+      return
+    }
+    guard let item = entry.webView.backForwardList.item(at: offset) else { return }
+    entry.webView.go(to: item)
+  }
+
+  public func history(of id: TabID) -> TabHistory? {
+    guard let entry = entries[id] else { return nil }
+    if let stack = entry.clonedHistory {
+      return TabHistory(back: Array(stack.back.reversed()), forward: Array(stack.forward.reversed()))
+    }
+    let back = entry.webView.backForwardList.backList.reversed().map {
+      HistoryEntry(url: $0.url, title: $0.title ?? "")
+    }
+    let forward = entry.webView.backForwardList.forwardList.map {
+      HistoryEntry(url: $0.url, title: $0.title ?? "")
+    }
+    return TabHistory(back: back, forward: forward)
+  }
+
+  @discardableResult
+  public func duplicateTab(_ id: TabID) -> TabID? {
+    guard let sourceEntry = entries[id], let sourceHistory = history(of: id) else { return nil }
+    let copy = createTab(url: nil)
+    guard let copyEntry = entries[copy] else { return nil }
+    copyEntry.clonedHistory = (
+      back: Array(sourceHistory.back.reversed()),
+      forward: Array(sourceHistory.forward.reversed())
+    )
+    syncHistory(copy)
+    if let url = sourceEntry.snapshot.url {
+      loadURL(url, in: copyEntry.webView)
+    }
+    return copy
+  }
+
   public func snapshot(of id: TabID) -> TabSnapshot? { entries[id]?.snapshot }
   public func contentView(for id: TabID) -> NSView? { entries[id]?.webView }
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation { hub.add(handler) }
@@ -173,8 +249,15 @@ public final class FakeEngine: EngineClient {
   /// Copies both history flags from WebKit, so one back-forward list change emits one `.historyChanged` whichever
   /// KVO fires first (contract rule 8). Also run before a load ends, so the snapshot is current by then.
   private func syncHistory(_ id: TabID) {
-    guard let web = entries[id]?.webView else { return }
-    let (back, forward) = (web.canGoBack, web.canGoForward)
+    guard let entry = entries[id] else { return }
+    let (back, forward): (Bool, Bool)
+    if let stack = entry.clonedHistory {
+      back = !stack.back.isEmpty
+      forward = !stack.forward.isEmpty
+    } else {
+      back = entry.webView.canGoBack
+      forward = entry.webView.canGoForward
+    }
     update(id) { $0.canGoBack = back; $0.canGoForward = forward } event: {
       .historyChanged(id, canGoBack: back, canGoForward: forward)
     }

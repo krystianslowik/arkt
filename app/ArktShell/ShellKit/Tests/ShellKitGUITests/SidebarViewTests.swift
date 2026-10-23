@@ -465,6 +465,9 @@ private final class EagerEngine: EngineClient {
   func reload(_ id: TabID) { inner.reload(id) }
   func goBack(_ id: TabID) { inner.goBack(id) }
   func goForward(_ id: TabID) { inner.goForward(id) }
+  func goToHistory(_ id: TabID, offset: Int) { inner.goToHistory(id, offset: offset) }
+  func history(of id: TabID) -> TabHistory? { inner.history(of: id) }
+  func duplicateTab(_ id: TabID) -> TabID? { inner.duplicateTab(id) }
   func snapshot(of id: TabID) -> TabSnapshot? { inner.snapshot(of: id) }
   func contentView(for id: TabID) -> NSView? { inner.contentView(for: id) }
   func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation { inner.observe(handler) }

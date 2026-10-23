@@ -1021,3 +1021,32 @@ Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swif
 
 Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 459 tests, 0 failures.
 `SpacePagerTests`: 22/22 GUI tests pass (+2).
+
+## Toolbar: history menus and modifier clicks on Back, Forward and Reload (#81)
+
+- Engine API (`EngineClient`, `InMemoryEngine`, `FakeEngine`, `EngineContract` rules 9 and 10):
+  - `HistoryEntry` (`url`, `title`) and `TabHistory` (`back` and `forward`, both ordered nearest-first).
+  - `history(of:) -> TabHistory?`, `goToHistory(_:offset:)` (`-k` = `k` steps back, `+k` = `k` steps forward), and
+    `duplicateTab(_:) -> TabID?` (copies the source tab's URL, title and back/forward history, `BH-027`).
+- `ToolbarNavigationButton` & `ContentToolbarView`:
+  - Right-click (`menu(for:)`), Ctrl-click, long-press (`ToolbarNavigationButton.longPressDuration`), and VoiceOver
+    Show Menu (`accessibilityPerformShowMenu()`) on Back and Forward present `backHistoryMenu()` /
+    `forwardHistoryMenu()` (`GS-024`, `BH-166`); choosing an item jumps via `onSelectHistory` ->
+    `engine.goToHistory(_:offset:)`.
+  - Cmd-click or middle-click (`buttonNumber == 2`) on Back or Forward opens the nearest back/forward entry in a new
+    background Today tab in the current Space without changing the active tab (`GS-025`, `BH-165`).
+  - Cmd-click on Reload duplicates the current tab into Today with its back/forward history and activates the duplicate
+    (`GS-026`, `BH-027`).
+  - Both the single-card Toolbar and Split View pane card Toolbars wire all history menu and modifier-click handlers.
+- Navigation controls when the Toolbar is off: recorded as a parity gap pending the interactive Toolbar-off measurement
+  pass (`docs/plans/2026-10-23-arc-measurements.md`, interaction checklist item 4; in the passive Toolbar-on capture,
+  only the 28 x 28 sidebar toggle button at `(77, 9.5)` was present next to the traffic lights).
+- Tests: `EngineContract.historyEntriesAndOffsetNavigation` and `EngineContract.duplicateTabCopiesURLTitleAndHistory`
+  (in `InMemoryEngineContractTests` and `FakeEngineContractTests`), plus
+  `ToolbarHistoryTests.testBackAndForwardHistoryMenusListEntriesAndJumpToSelectedOffset`,
+  `testCommandClickAndMiddleClickOnBackAndForwardOpenEntryInBackgroundTodayTab`, and
+  `testCommandClickReloadDuplicatesCurrentTabWithHistory`.
+
+Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 461 tests (+2
+`InMemoryEngineContractTests`), 0 failures. `ToolbarHistoryTests`: 11/11 GUI tests pass (+3);
+`FakeEngineContractTests`: 16/16 GUI tests pass (+2).
