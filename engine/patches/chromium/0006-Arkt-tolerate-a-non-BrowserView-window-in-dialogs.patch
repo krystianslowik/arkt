@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Fri, 23 Oct 2026 16:02:53 +0200
+Subject: [PATCH] Arkt: tolerate a non-BrowserView window in dialogs
+
+Permission bubbles anchor through GetPageInfoAnchorConfiguration and
+GetPageInfoAnchorRect, which dereferenced the window's BrowserView. For a
+normal window that is not a BrowserView, the configuration is empty and the
+anchor rect is the window's top-left corner. The pointer and keyboard lock
+prompt no longer assumes the location bar has a chip controller.
+---
+ chrome/browser/ui/views/bubble_anchor_util_views.cc | 13 +++++++++++++
+ .../exclusive_access_permission_prompt.cc           |  3 ++-
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/views/bubble_anchor_util_views.cc b/chrome/browser/ui/views/bubble_anchor_util_views.cc
+index bd418d5445..9d14d4429f 100644
+--- a/chrome/browser/ui/views/bubble_anchor_util_views.cc
++++ b/chrome/browser/ui/views/bubble_anchor_util_views.cc
+@@ -66,6 +66,12 @@ AnchorConfiguration GetPageInfoAnchorConfiguration(
+     }
+   }
+ 
++  // A normal window that is not a BrowserView (Arkt) has no toolbar to anchor
++  // to; callers then fall back to GetPageInfoAnchorRect().
++  if (!browser_view) {
++    return {};
++  }
++
+   if (anchor == Anchor::kLocationBar) {
+     LocationBar* location_bar =
+         browser_view ? browser_view->GetLocationBar() : nullptr;
+@@ -183,6 +189,13 @@ gfx::Rect GetPageInfoAnchorRect(BrowserWindowInterface* browser) {
+   DCHECK(GetPageInfoAnchorConfiguration(browser).anchor.IsNull());
+ 
+   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
++  if (!browser_view) {
++    // Not a BrowserView (Arkt): the top-left corner of the window.
++    gfx::Point origin =
++        BrowserWindow::FromBrowser(browser)->GetBounds().origin();
++    origin += gfx::Vector2d(kNoToolbarLeftOffset, 0);
++    return gfx::Rect(origin, gfx::Size());
++  }
+   // Get position in view (taking RTL UI into account).
+   int x_within_browser_view = browser_view->GetMirroredXInView(
+       bubble_anchor_util::kNoToolbarLeftOffset);
+diff --git a/chrome/browser/ui/views/permissions/exclusive_access_permission_prompt.cc b/chrome/browser/ui/views/permissions/exclusive_access_permission_prompt.cc
+index c7b8006adf..e25d37e886 100644
+--- a/chrome/browser/ui/views/permissions/exclusive_access_permission_prompt.cc
++++ b/chrome/browser/ui/views/permissions/exclusive_access_permission_prompt.cc
+@@ -20,7 +20,8 @@ ExclusiveAccessPermissionPrompt::ExclusiveAccessPermissionPrompt(
+     // Before showing a chip make sure the LocationBar is in a valid state. That
+     // fixes a bug when a chip overlays the padlock icon. The LocationBarView
+     // may be null for non-BrowserView windows (e.g., WebUIBrowserWindow).
+-    if (lb) {
++    // A non-Views location bar (Arkt) has no chip controller.
++    if (lb && lb->GetChipController()) {
+       lb->InvalidateLayout();
+       lb->GetChipController()->ShowPermissionChip(delegate->GetWeakPtr());
+     }
