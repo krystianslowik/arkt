@@ -1215,6 +1215,30 @@ returned window `1230561966` (the logged session id) index 1; table 2 rows; `win
 | `--arkt-extensions-demo=<action-probe>` (W5b scenario 4, menu owned by the container now) | `run action ... source 1`, `TriggerPopup ... by_user=1`, `popup loaded` |
 | `chrome.windows.remove` of every window, then `kill -TERM` (scenario 7) | census `0/0/0`, `native window destroyed` (container and menu torn down with it), gone within 6 s, 0 `FATAL`/`Check failed`, dumps 87 -> 87 |
 
+### Review fix (#217)
+
+- **Use-after-free while the menu is open.** `NSMenu` tracking runs a nested run loop in which Chromium keeps running
+  tasks; now that the window owns its menu, a window close there destroyed the menu while `Show()` was still on the
+  stack. `Show()` takes a weak pointer before tracking and touches no member after it if the menu is gone, and
+  `Shutdown()` cancels an open menu first.
+- **Popups scoped to their window.** With one process-wide popover, hiding by extension id let one window's
+  `Shutdown()` close another window's popup of the same extension. The popover now records which menu showed it, and
+  `IsShowingPopover`/`HidePopover`/`GetPopoverNativeView` only match that owner.
+
+Verification on the rebuilt `out/Spike` (`The build has finished successfully.`, 0 `FAILED:`; one compile fix for the
+`raw_ptr` plugin, the owner is kept as an address), fresh profiles, port 9363:
+
+| Check | Result |
+|---|---|
+| Window A focused, window B created unfocused; `openPopup` in A; `chrome.windows.remove(B)` | census `normal=1 arkt=1`; A's popover still open (`popup.html` target present, `document.title` answers) |
+| Extensions menu opened by one AXPress on A's `Extensions` button (after the frontmost and key-window checks; the call blocks while the menu tracks), then `chrome.windows.remove(A)` over CDP while it is open | `extensions menu shown 2 items`, census `0/0/0`, `native window destroyed`, then `extensions menu closed`; process alive 10 s later; 0 `FATAL`/`Check failed`/`Received signal`; dumps 87 -> 87, also after the stop |
+| W6 rows again (fresh launch): identity, background and foreground `tabs.create`, welcome page, `openPopup`, `window.open` from the popup, `chrome.windows.create` | all as in Step 3 and 4 above (`views=0` throughout, `normal=2 arkt=2` and two matching session ids at the end); 0 `FATAL`/`Check failed` |
+
+Flake: two of the stops by PID with a popover open left one Crashpad dump each (87 -> 88 after the W6 rerun, 88 -> 89
+in one of three `openPopup` launches), with no `FATAL`/`Check failed`/`Received signal` line; the only marker read from
+the dumps is `--type=renderer`. Six more launches with the popup open (three native, three on the week-1 path, 20 s
+between stop and launch) left none. Same pattern as the W5b and W5c shutdown flakes; not fixed.
+
 ### Known gaps (not fixed here)
 
 - The popover is still not closed when the active tab changes (Chrome's `ExtensionPopup` closes then) or when the
