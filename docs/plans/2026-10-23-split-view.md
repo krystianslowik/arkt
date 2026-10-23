@@ -217,6 +217,10 @@ user decision 4.
     - Convert to Horizontal / Vertical Split View (BH-120) and Add Right / Left / Top / Bottom Split (BH-117).
 
     `validateMenuItem` disables the pane items when the current tab is not in a split.
+
+    Amended in S5 (#55) by the RT-38 passive read in #78: Arc's View menu holds Add Split View, Close this Split
+    Pane, Separate Page from Split View and Expand Current Split directly, with those titles. The other items sit in
+    the "Split View" submenu [I]. See "Notes from S5".
 13. **Error surface.** ShellUI cannot see `SidebarError`. `ModelSidebarSource` turns `.splitFull` into
     `ShellUI.SplitEditError.splitFull` and the other split errors into `.invalid`. New `SidebarMutation` cases are
     `.addPane` and `.editSplit`. `errorText(for:)` returns "Cannot Add New Pane" (BH-116, exact [S] string) for
@@ -725,6 +729,30 @@ Run the GUI, pure and isolation tests and the App build. Manual check in the app
 a US keyboard layout.
 
 **Commit:** `Split View shortcuts and View menu items: add, close, focus, next and previous pane, expand, convert`
+
+**Notes from S5 (#55)** (S6 to S9 build on these):
+- **Menu shape.** `ShellUI.SplitMenu.items()` builds the items and `MainMenu` appends them to the View menu after the
+  Toolbar item. Directly in View, with Arc's titles (RT-38, passive read in #78, no split showing): Add Split View
+  (Ctrl-Shift-=), Close this Split Pane (Ctrl-Shift--), Separate Page from Split View, Expand Current Split. In a
+  "Split View" submenu [I]: Convert to Vertical / Horizontal Split View, Add Right / Left / Top / Bottom Split, Next /
+  Previous Split View Pane (Ctrl-Shift-] / [), Switch to Split View 1 to 4 (Ctrl-Shift-1 to 4). The titles while a
+  split is showing are still RT-38.
+- **Key equivalents** (for the S9 results file). Each item uses the unshifted US character with `[.control, .shift]`
+  ("=", "-", "]", "[", "1" to "4"). A real Ctrl-Shift-= arrives with charactersIgnoringModifiers "+"; AppKit still
+  matches the "=" item when the event carries the keyboard layout, and does not match a "+" item with Ctrl-Shift.
+  Checked with Quartz-built key events (`NSEvent(cgEvent:)`, translated by the current layout) in
+  `SplitShortcutTests` and `MainMenuKeyEquivalentTests`; the latter also checks that every split shortcut matches only
+  its own item and that Ctrl-1 to Ctrl-4 still reach only the Space items. No keyCode monitor fallback was needed.
+  Non-US layouts are a recorded risk: the tests skip when the layout's keys differ from US.
+- **Command bar.** `CommandBarController.onOpen` is `(URL, OpenTarget)`, `OpenTarget` = `.currentTab`, `.newTab`,
+  `.newSplitPane`. In `.newSplitPane` mode Cmd-Enter / Opt-Enter still open a plain new tab, and a "Switch to Tab"
+  result still switches [I]. The side the bar was opened for is `SplitWindowState.pendingSide`, read at Enter.
+- **Validation.** `ShellWindowController.validateSplitMenuItem` (in `+Split.swift`) answers for the split items;
+  `validateMenuItem` delegates to it first. The actions read the split from the source, not from `splitState`, so they
+  work between a source change and its deferred re-show.
+- **Focus.** Close this Split Pane focuses the pane after the separated one, else the one before (decision 9).
+  Separate Page from Split View keeps focus on the separated page [I]; Expand Current Split keeps it on the expanded
+  pane.
 
 ---
 
