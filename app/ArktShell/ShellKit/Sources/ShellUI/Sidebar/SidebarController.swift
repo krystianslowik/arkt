@@ -67,6 +67,8 @@ public final class SidebarController {
     view.favorites.faviconProvider = { [weak self] id in self?.favicons[id] }
     view.favorites.onClose = { [weak self] id in self?.onClose?(id) }
     view.favorites.pageLoadedProvider = { [weak self] id in self?.loadedNodes.contains(id) ?? false }
+    view.favorites.onNodeDragBegan = { [weak self] id in self?.onNodeDragBegan?(id) }
+    view.favorites.onNodeDragEnded = { [weak self] in self?.onNodeDragEnded?() }
     view.spaceDots.onSelect = { [weak self] index in self?.goToSpace(at: index) }
     view.pager.onPosition = { [weak self] position in self?.pagerMoved(to: position) }
     view.pager.onSettle = { [weak self] index in self?.pagerSettled(on: index) }

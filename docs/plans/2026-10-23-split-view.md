@@ -879,8 +879,9 @@ a US keyboard layout.
 - **Drag source.** `SidebarOutlineController` writes a `NSPasteboardItem` with `.sidebarNode`
   (`dev.arkt.sidebar-node`, the node's UUID string) for tab rows only: plain tabs, tabs in folders and panes. The
   mask is `.move` inside the app and none outside it. `draggingSessionWillBegin(items:)` and `draggingSessionEnded()`
-  forward `onNodeDragBegan` / `onNodeDragEnded` through `SidebarController` to `wireSplitDrag()`. Favorites tiles are
-  not drag sources yet (`FavoritesGridView` has no drag support), so "a Favorite dragged in is moved" waits for that.
+  forward `onNodeDragBegan` / `onNodeDragEnded` through `SidebarController` to `wireSplitDrag()`. `FavoritesGridView`
+  (#214) is a drag source for tab tiles too (not folders), with the same `.sidebarNode` item, `.move` local mask and
+  session hooks, so a Favorite dragged onto the page is moved into the split.
 - **Overlay.** `SplitDropOverlayView` is made on the first drag, kept in `SplitWindowState.dropOverlay`, and added
   above the split container (at the content area's frame) only between drag start and end. It registers only
   `.sidebarNode` and its `hitTest` returns nil. The preview layer moves only when the zone under the pointer (or the
