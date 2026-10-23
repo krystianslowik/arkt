@@ -2,8 +2,9 @@ import AppKit
 
 /// The URL bar: the active tab's address in a rounded pill. One class serves the sidebar (host only, under the
 /// traffic lights) and the Toolbar (full URL). A press opens the command bar prefilled with the URL (the owner
-/// wires `onPress` to Cmd-L, KB-002); right-click or Ctrl-click offers Show / Hide Toolbar (BH-031, GS-042).
-/// Frames are set by the owner; the label is laid out here. Text changes only when the URL does.
+/// wires `onPress` to Cmd-L, KB-002; a click presses on mouse up inside); right-click or Ctrl-click offers
+/// Show / Hide Toolbar (BH-031, GS-042). Frames are set by the owner; the label is laid out here. Text changes only
+/// when the URL does.
 @MainActor
 public final class URLBarView: NSView {
   public enum Style: Sendable {
@@ -30,7 +31,18 @@ public final class URLBarView: NSView {
     didSet { if flavor != oldValue { applyColors() } }
   }
 
-  private let label = NSTextField(labelWithString: "")
+  /// The bars' only font; it never changes.
+  private static let font = NSFont.systemFont(ofSize: SidebarMetrics.urlBarFontSize, weight: .medium)
+  /// One line of `font`, measured once for every bar instead of on each layout pass.
+  static let labelHeight: CGFloat = {
+    let probe = NSTextField(labelWithString: "")
+    probe.font = font
+    return ceil(probe.intrinsicContentSize.height)
+  }()
+
+  let label = NSTextField(labelWithString: "")
+  /// A left mouse down landed on the bar and its mouse up has not arrived yet.
+  private var isTrackingPress = false
   private var isHovered = false {
     didSet { if isHovered != oldValue { needsDisplay = true } }
   }
@@ -42,7 +54,7 @@ public final class URLBarView: NSView {
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
     layer?.cornerCurve = .continuous
-    label.font = .systemFont(ofSize: SidebarMetrics.urlBarFontSize, weight: .medium)
+    label.font = Self.font
     label.lineBreakMode = style == .host ? .byTruncatingTail : .byTruncatingMiddle
     label.maximumNumberOfLines = 1
     label.cell?.usesSingleLineMode = true
@@ -89,7 +101,7 @@ public final class URLBarView: NSView {
   public override func layout() {
     super.layout()
     let inset = SidebarMetrics.urlBarTextInset
-    let height = ceil(label.intrinsicContentSize.height)
+    let height = Self.labelHeight
     label.frame = NSRect(x: inset, y: ((bounds.height - height) / 2).rounded(),
                          width: max(0, bounds.width - 2 * inset), height: height)
   }
@@ -101,12 +113,19 @@ public final class URLBarView: NSView {
     !isHidden && frame.contains(point) ? self : nil
   }
 
+  /// Presses on mouse up, like a button: releasing outside the bar cancels.
   public override func mouseDown(with event: NSEvent) {
     if event.modifierFlags.contains(.control) {
       NSMenu.popUpContextMenu(contextMenu(), with: event, for: self)
       return
     }
-    onPress?()
+    isTrackingPress = true
+  }
+
+  public override func mouseUp(with event: NSEvent) {
+    guard isTrackingPress else { return }
+    isTrackingPress = false
+    if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress?() }
   }
 
   public override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
