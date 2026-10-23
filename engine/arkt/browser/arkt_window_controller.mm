@@ -102,6 +102,12 @@ CASpringAnimation* SlideSpring(CGFloat from, CGFloat to) {
   if ((self = [super initWithWindow:window])) {
     _webContents = webContents;
     [self buildLayout];
+    // Scripts check this line before sending synthetic input to the window.
+    [NSNotificationCenter.defaultCenter
+        addObserver:self
+           selector:@selector(windowDidBecomeKey:)
+               name:NSWindowDidBecomeKeyNotification
+             object:window];
     __weak ArktWindowController* weakSelf = self;
     _keyMonitor = [NSEvent
         addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
@@ -181,6 +187,10 @@ CASpringAnimation* SlideSpring(CGFloat from, CGFloat to) {
     [page.topAnchor constraintEqualToAnchor:_card.topAnchor],
     [page.bottomAnchor constraintEqualToAnchor:_card.bottomAnchor],
   ]];
+}
+
+- (void)windowDidBecomeKey:(NSNotification*)notification {
+  LOG(WARNING) << "ARKT: key window " << self.window.windowNumber;
 }
 
 @synthesize extensionsButtonAction = _extensionsButtonAction;
@@ -304,6 +314,7 @@ CASpringAnimation* SlideSpring(CGFloat from, CGFloat to) {
                       [self.window.firstResponder class]))
                << ", window number " << self.window.windowNumber
                << ", page hidden " << widget.isHiddenOrHasHiddenAncestor;
+  LOG(WARNING) << "ARKT: window number " << self.window.windowNumber;
 }
 
 @end
