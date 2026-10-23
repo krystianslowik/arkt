@@ -2,19 +2,17 @@
 
 #import <AppKit/AppKit.h>
 
-#include <algorithm>
-#include <optional>
 #include <string>
 #include <utility>
 
-#import "arkt/browser/arkt_window_controller.h"
+#include "arkt/browser/arkt_browser_window_parts.h"
 #include "base/check.h"
+#include "base/command_line.h"
 #include "base/containers/flat_set.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
-#include "base/observer_list.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,55 +20,35 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_active_state_manager/browser_active_state_manager.h"
-#include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-#include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
-#include "chrome/browser/ui/find_bar/find_bar.h"
-#include "chrome/browser/ui/fullscreen/browser_window_fullscreen_controller.h"
-#include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
 #include "chrome/browser/ui/unload_controller.h"
-#include "chrome/browser/ui/views/bubble_anchor_util_views.h"
 #include "chrome/browser/ui/views/new_tab_footer/footer_controller.h"
 #include "components/input/native_web_keyboard_event.h"
 #include "components/search/ntp_features.h"
 #include "components/sessions/content/session_tab_helper.h"
-#include "components/web_modal/web_contents_modal_dialog_host.h"
+#include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/eye_dropper.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
+#include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/mojom/window_show_state.mojom.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/color/color_provider_manager.h"
 #include "ui/color/color_provider_utils.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
-#include "ui/gfx/range/range.h"
 #include "ui/native_theme/native_theme.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
 namespace {
-
-constexpr CGFloat kSidebarWidth = 190;
-constexpr CGFloat kCardInset = 10;
-constexpr CGFloat kCardRadius = 10;
-
-// Logs `ARKT: stub <scope>::<method>` the first time a stubbed method runs.
-void LogStubOnce(const char* scope, const char* method) {
-  static base::NoDestructor<base::flat_set<std::string>> logged;
-  std::string name = std::string(scope) + "::" + method;
-  if (logged->insert(name).second) {
-    LOG(WARNING) << "ARKT: stub " << name;
-  }
-}
-
-#define ARKT_STUB(scope) LogStubOnce(scope, __func__)
 
 // The windows constructed and not yet destroyed. Chromium has no RTTI, so this
 // set is how a BrowserWindow is recognised as ours.
@@ -79,442 +57,28 @@ base::flat_set<arkt::ArktBrowserWindow*>& LiveWindows() {
   return *windows;
 }
 
-int TabId(content::WebContents* contents) {
+// Logs ARKT: visibility lines after every tab change (W5c verification).
+constexpr char kTraceVisibilitySwitch[] = "arkt-trace-visibility";
+
+int32_t TabId(content::WebContents* contents) {
   return contents ? sessions::SessionTabHelper::IdForTab(contents).id() : -1;
 }
 
-NSDictionary<NSString*, id>* TabEvent(NSString* kind,
-                                      content::WebContents* contents,
-                                      int index) {
-  return @{@"kind" : kind, @"tabId" : @(TabId(contents)), @"index" : @(index)};
+const char* VisibilityName(content::Visibility visibility) {
+  switch (visibility) {
+    case content::Visibility::VISIBLE:
+      return "visible";
+    case content::Visibility::HIDDEN:
+      return "hidden";
+    case content::Visibility::OCCLUDED:
+      return "occluded";
+  }
+  return "unknown";
 }
 
 }  // namespace
 
-// -----------------------------------------------------------------------------
-// ArktPlaceholderWindowHost
-
-@interface ArktPlaceholderWindowHost () <NSWindowDelegate>
-@end
-
-@implementation ArktPlaceholderWindowHost {
-  ArktWindow* __strong _window;
-  NSView* __strong _card;
-  NSButton* __strong _extensionsButton;
-}
-
-@synthesize closeRequested = _closeRequested;
-@synthesize extensionsButtonAction = _extensionsButtonAction;
-@synthesize validateCommand = _validateCommand;
-@synthesize executeCommand = _executeCommand;
-
-- (instancetype)init {
-  if ((self = [super init])) {
-    _window = [[ArktWindow alloc]
-        initWithContentRect:NSMakeRect(0, 0, 1400, 900)
-                  styleMask:NSWindowStyleMaskTitled |
-                            NSWindowStyleMaskClosable |
-                            NSWindowStyleMaskMiniaturizable |
-                            NSWindowStyleMaskResizable |
-                            NSWindowStyleMaskFullSizeContentView
-                    backing:NSBackingStoreBuffered
-                      defer:NO];
-    _window.titlebarAppearsTransparent = YES;
-    _window.titleVisibility = NSWindowTitleHidden;
-    _window.title = @"Arkt";
-    _window.releasedWhenClosed = NO;
-    _window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
-    _window.delegate = self;
-    [_window center];
-
-    // Frames and autoresizing masks, not constraints: the card must have its
-    // final size before the first tab is mounted, so the page never lays out
-    // in a zero-sized view.
-    NSView* root = _window.contentView;
-    root.wantsLayer = YES;
-    root.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
-    NSRect bounds = root.bounds;
-    _card = [[NSView alloc]
-        initWithFrame:NSMakeRect(kSidebarWidth, kCardInset,
-                                 NSWidth(bounds) - kSidebarWidth - kCardInset,
-                                 NSHeight(bounds) - 2 * kCardInset)];
-    _card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    _card.wantsLayer = YES;
-    _card.layer.cornerRadius = kCardRadius;
-    _card.layer.masksToBounds = YES;
-    _card.postsFrameChangedNotifications = YES;
-    [root addSubview:_card];
-
-    _extensionsButton =
-        [NSButton buttonWithTitle:@"Extensions"
-                           target:self
-                           action:@selector(extensionsButtonClicked:)];
-    [_extensionsButton sizeToFit];
-    _extensionsButton.frameOrigin = NSMakePoint(
-        16, NSHeight(bounds) - 44 - NSHeight(_extensionsButton.frame));
-    _extensionsButton.autoresizingMask = NSViewMaxXMargin | NSViewMinYMargin;
-    [root addSubview:_extensionsButton];
-  }
-  return self;
-}
-
-- (void)dealloc {
-  _window.delegate = nil;
-  [_window close];
-}
-
-- (NSWindow*)window {
-  return _window;
-}
-
-- (NSView*)cardView {
-  return _card;
-}
-
-- (NSButton*)extensionsButton {
-  return _extensionsButton;
-}
-
-// Main menu commands. The window delegate is in the key window's responder
-// chain, ahead of the app controller (which only handles window-less
-// commands).
-
-- (void)commandDispatch:(id)sender {
-  if (_executeCommand) {
-    _executeCommand([sender tag]);
-  }
-}
-
-- (void)commandDispatchUsingKeyModifiers:(id)sender {
-  [self commandDispatch:sender];
-}
-
-- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
-  SEL action = item.action;
-  if (action == @selector(commandDispatch:) ||
-      action == @selector(commandDispatchUsingKeyModifiers:)) {
-    return _validateCommand && _validateCommand(item.tag);
-  }
-  return [self respondsToSelector:action];
-}
-
-- (void)extensionsButtonClicked:(id)sender {
-  if (_extensionsButtonAction) {
-    _extensionsButtonAction();
-  }
-}
-
-- (void)tabListChanged:(NSArray<NSDictionary<NSString*, id>*>*)events {
-  for (NSDictionary<NSString*, id>* event in events) {
-    LOG(WARNING) << "ARKT: tab event "
-                 << base::SysNSStringToUTF8(event[@"kind"]) << " tab "
-                 << [event[@"tabId"] intValue] << " index "
-                 << [event[@"index"] intValue];
-  }
-}
-
-// NSWindowDelegate:
-
-- (BOOL)windowShouldClose:(NSWindow*)sender {
-  if (_closeRequested) {
-    _closeRequested();
-    return NO;
-  }
-  return YES;
-}
-
-- (void)windowDidBecomeKey:(NSNotification*)notification {
-  // Scripts check this line before sending synthetic input to the window.
-  LOG(WARNING) << "ARKT: key window " << _window.windowNumber;
-}
-
-@end
-
 namespace arkt {
-
-// -----------------------------------------------------------------------------
-// Window-side objects
-
-// Fullscreen through the host window's native fullscreen. There is no
-// exclusive access bubble this week.
-class ArktExclusiveAccessContext : public ExclusiveAccessContext {
- public:
-  explicit ArktExclusiveAccessContext(ArktBrowserWindow* window)
-      : window_(window) {}
-  ArktExclusiveAccessContext(const ArktExclusiveAccessContext&) = delete;
-  ArktExclusiveAccessContext& operator=(const ArktExclusiveAccessContext&) =
-      delete;
-  ~ArktExclusiveAccessContext() override = default;
-
-  // ExclusiveAccessContext:
-  Profile* GetProfile() override { return window_->browser()->GetProfile(); }
-  bool IsFullscreen() const override { return window_->IsFullscreen(); }
-  void EnterFullscreen(const url::Origin& origin,
-                       ExclusiveAccessBubbleType bubble_type,
-                       FullscreenTabParams fullscreen_tab_params) override {
-    if (IsFullscreen()) {
-      return;
-    }
-    LOG(WARNING) << "ARKT: enter fullscreen";
-    [window_->host().window toggleFullScreen:nil];
-  }
-  void ExitFullscreen() override {
-    if (BrowserWindowFullscreenController::From(window_->browser())
-            ->IsForceFullscreen() ||
-        !IsFullscreen()) {
-      return;
-    }
-    LOG(WARNING) << "ARKT: exit fullscreen";
-    [window_->host().window toggleFullScreen:nil];
-  }
-  void UpdateExclusiveAccessBubble(
-      const ExclusiveAccessBubbleParams& params,
-      ExclusiveAccessBubbleHideCallback first_hide_callback) override {
-    ARKT_STUB("ExclusiveAccessContext");
-    if (first_hide_callback) {
-      std::move(first_hide_callback)
-          .Run(ExclusiveAccessBubbleHideReason::kNotShown);
-    }
-  }
-  bool IsExclusiveAccessBubbleDisplayed() const override { return false; }
-  void OnExclusiveAccessUserInput() override {}
-  content::WebContents* GetWebContentsForExclusiveAccess() override {
-    return window_->browser()->GetTabStripModel()->GetActiveWebContents();
-  }
-  bool CanUserEnterFullscreen() const override { return true; }
-  bool CanUserExitFullscreen() const override { return true; }
-
- private:
-  const raw_ptr<ArktBrowserWindow> window_;
-};
-
-// Tab-modal dialogs are positioned against the card: top centre, at most the
-// card's size.
-class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost {
- public:
-  explicit ArktModalDialogHost(NSView* card) : card_(card) {}
-  ArktModalDialogHost(const ArktModalDialogHost&) = delete;
-  ArktModalDialogHost& operator=(const ArktModalDialogHost&) = delete;
-  ~ArktModalDialogHost() override {
-    for (auto& observer : observers_) {
-      observer.OnHostDestroying();
-    }
-  }
-
-  // web_modal::WebContentsModalDialogHost:
-  gfx::NativeView GetHostView() const override {
-    return gfx::NativeView(card_);
-  }
-  gfx::Point GetDialogPosition(const gfx::Size& size) override {
-    return gfx::Point(
-        std::max(0, (static_cast<int>(NSWidth(card_.bounds)) - size.width()) /
-                        2),
-        0);
-  }
-  gfx::Size GetMaximumDialogSize() override {
-    return gfx::Size(static_cast<int>(NSWidth(card_.bounds)),
-                     static_cast<int>(NSHeight(card_.bounds)));
-  }
-  void AddObserver(web_modal::ModalDialogHostObserver* observer) override {
-    observers_.AddObserver(observer);
-  }
-  void RemoveObserver(web_modal::ModalDialogHostObserver* observer) override {
-    observers_.RemoveObserver(observer);
-  }
-  void NotifyPositionRequiresUpdate() override {
-    for (auto& observer : observers_) {
-      observer.OnPositionRequiresUpdate();
-    }
-  }
-
- private:
-  NSView* __weak card_;
-  base::ObserverList<web_modal::ModalDialogHostObserver> observers_;
-};
-
-// Arkt has no omnibox. Non-null so the callers that dereference
-// GetLocationBar() without a check stay safe; IsDrawn() is false, so anchored
-// UI (permission chips, page action bubbles) takes its no-location-bar path.
-class ArktStubLocationBar : public LocationBar {
- public:
-  explicit ArktStubLocationBar(BrowserWindowInterface* browser)
-      : LocationBar(chrome::BrowserCommandController::From(browser)),
-        browser_(browser) {}
-  ArktStubLocationBar(const ArktStubLocationBar&) = delete;
-  ArktStubLocationBar& operator=(const ArktStubLocationBar&) = delete;
-  ~ArktStubLocationBar() override = default;
-
-  // LocationBar:
-  void FocusLocation(bool is_user_initiated,
-                     bool clear_focus_if_failed) override {
-    ARKT_STUB("LocationBar");
-  }
-  void FocusSearch() override { ARKT_STUB("LocationBar"); }
-  void UpdateFocusBehavior(bool toolbar_visible) override {}
-  void UpdateContentSettingsIcons() override {}
-  void SaveStateToContents(content::WebContents* contents) override {}
-  void Revert() override {}
-  OmniboxView* GetOmniboxView() override { return nullptr; }
-  OmniboxPopupView* GetOmniboxPopupView() override { return nullptr; }
-  OmniboxController* GetOmniboxController() override { return nullptr; }
-  bool ShouldCloseOmniboxPopup(ui::MouseEvent* event) override {
-    return false;
-  }
-  content::WebContents* GetWebContents() override {
-    return browser_->GetTabStripModel()->GetActiveWebContents();
-  }
-  LocationBarModel* GetLocationBarModel() override { return nullptr; }
-  std::optional<bubble_anchor_util::AnchorConfiguration> GetChipAnchor()
-      override {
-    return std::nullopt;
-  }
-  ChipController* GetChipController() override {
-    ARKT_STUB("LocationBar");
-    return nullptr;
-  }
-  void AnnounceAlert(const std::u16string& announcement) override {}
-  void OnChanged() override {}
-  void UpdateWithoutTabRestore() override {}
-  ui::TrackedElement* GetAnchorOrNull() override { return nullptr; }
-  BrowserWindowInterface* GetBrowser() override { return browser_; }
-  Profile* GetProfile() override { return browser_->GetProfile(); }
-  bool IsInitialized() const override { return true; }
-  bool IsVisible() const override { return false; }
-  bool IsDrawn() const override { return false; }
-  bool IsFullscreen() const override { return false; }
-  bool IsEditingOrEmpty() const override { return false; }
-  bool IsMouseHovered() const override { return false; }
-  bool IsFocusWithin() const override { return false; }
-  void InvalidateLayout() override {}
-  gfx::Rect Bounds() const override { return gfx::Rect(); }
-  gfx::Rect BoundsInScreen() const override { return gfx::Rect(); }
-  gfx::Size MinimumSize() const override { return gfx::Size(); }
-  gfx::Size PreferredSize() const override { return gfx::Size(); }
-  void Update(content::WebContents* contents) override {}
-  void ResetTabState(content::WebContents* contents) override {}
-  bool HasSecurityStateChanged() override { return false; }
-  LocationBarTesting* GetLocationBarForTesting() override { return nullptr; }
-
- private:
-  const raw_ptr<BrowserWindowInterface> browser_;
-};
-
-// Find in page without UI this week: the controller always gets a bar, so
-// FindBarController never dereferences nullptr (find_bar_controller.cc).
-class ArktFindBar : public FindBar {
- public:
-  ArktFindBar() = default;
-  ArktFindBar(const ArktFindBar&) = delete;
-  ArktFindBar& operator=(const ArktFindBar&) = delete;
-  ~ArktFindBar() override = default;
-
-  // FindBar:
-  FindBarController* GetFindBarController() const override {
-    return controller_;
-  }
-  void SetFindBarController(FindBarController* controller) override {
-    controller_ = controller;
-  }
-  void Show(bool animate, bool focus) override {
-    ARKT_STUB("FindBar");
-    visible_ = true;
-  }
-  void Hide(bool animate) override { visible_ = false; }
-  void SetFocusAndSelection() override {}
-  void ClearResults(
-      const find_in_page::FindNotificationDetails& results) override {}
-  void StopAnimation() override {}
-  void MoveWindowIfNecessary() override {}
-  void SetFindTextAndSelectedRange(const std::u16string& find_text,
-                                   const gfx::Range& selected_range) override {
-    find_text_ = find_text;
-  }
-  std::u16string_view GetFindText() const override { return find_text_; }
-  gfx::Range GetSelectedRange() const override { return gfx::Range(); }
-  void UpdateUIForFindResult(
-      const find_in_page::FindNotificationDetails& result,
-      const std::u16string& find_text) override {}
-  void AudibleAlert() override {}
-  bool IsFindBarVisible() const override { return visible_; }
-  void RestoreSavedFocus() override {}
-  bool HasGlobalFindPasteboard() const override { return false; }
-  void UpdateFindBarForChangedWebContents() override {}
-  bool CanPopulateFromSelectedText() override { return false; }
-  const FindBarTesting* GetFindBarTesting() const override { return nullptr; }
-  bool HasFocus() const override { return false; }
-  void CloseOverlappingBubbles() override {}
-  views::Widget* GetHostWidget() override { return nullptr; }
-
- private:
-  raw_ptr<FindBarController> controller_ = nullptr;
-  std::u16string find_text_;
-  bool visible_ = false;
-};
-
-// Arkt has no Views side panel. SidePanelUI::From() must still be non-null:
-// tab features such as ReadAnythingSidePanelController treat a missing
-// SidePanelUI outside tests as a bug (CHECK_IS_TEST) when the active tab
-// detaches, which every tab, window and app close does. Nothing is ever
-// shown, so every query answers "closed".
-class ArktSidePanelUI : public SidePanelUI {
- public:
-  explicit ArktSidePanelUI(BrowserWindowInterface* browser)
-      : scoped_user_data_(browser->GetUnownedUserDataHost(), *this) {}
-  ArktSidePanelUI(const ArktSidePanelUI&) = delete;
-  ArktSidePanelUI& operator=(const ArktSidePanelUI&) = delete;
-  ~ArktSidePanelUI() override = default;
-
-  // SidePanelUI:
-  void Show(SidePanelEntryId entry_id,
-            std::optional<SidePanelOpenTrigger> open_trigger,
-            bool suppress_animations) override {
-    ARKT_STUB("SidePanelUI");
-  }
-  void Show(SidePanelEntryKey entry_key,
-            std::optional<SidePanelOpenTrigger> open_trigger,
-            bool suppress_animations) override {
-    ARKT_STUB("SidePanelUI");
-  }
-  void ShowFrom(SidePanelEntryKey entry_key,
-                gfx::Rect starting_bounds_in_browser_coordinates) override {
-    ARKT_STUB("SidePanelUI");
-  }
-  void Close(SidePanelEntryHideReason hide_reason,
-             bool suppress_animations) override {}
-  void Toggle(SidePanelEntryKey key,
-              SidePanelOpenTrigger open_trigger) override {
-    ARKT_STUB("SidePanelUI");
-  }
-  std::optional<SidePanelEntryId> GetCurrentEntryId() const override {
-    return std::nullopt;
-  }
-  int GetCurrentEntryDefaultContentWidth() const override { return 0; }
-  bool IsSidePanelShowing() const override { return false; }
-  bool IsSidePanelEntryShowing(
-      const SidePanelEntryKey& entry_key) const override {
-    return false;
-  }
-  bool IsSidePanelEntryShowing(const SidePanelEntryKey& entry_key,
-                               bool for_tab) const override {
-    return false;
-  }
-  base::CallbackListSubscription RegisterSidePanelShown(
-      ShownCallback callback) override {
-    return shown_callbacks_.Add(std::move(callback));
-  }
-  void OnActiveTabChanged(content::WebContents* old_contents,
-                          content::WebContents* new_contents,
-                          bool tab_removed_for_deletion) override {}
-  content::WebContents* GetWebContentsForTest(SidePanelEntryId id) override {
-    return nullptr;
-  }
-  void DisableAnimationsForTesting() override {}
-  void SetNoDelaysForTesting(bool no_delays_for_testing) override {}
-
- private:
-  base::RepeatingCallbackList<void()> shown_callbacks_;
-  ui::ScopedUnownedUserData<SidePanelUI> scoped_user_data_;
-};
 
 // -----------------------------------------------------------------------------
 // ArktBrowserWindow
@@ -523,7 +87,9 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
                                      id<ArktWindowHost> host)
     : browser_(browser),
       host_(host),
-      notification_tokens_([[NSMutableArray alloc] init]) {
+      notification_tokens_([[NSMutableArray alloc] init]),
+      trace_visibility_(base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kTraceVisibilitySwitch)) {
   CHECK(host_.window);
   CHECK(host_.cardView);
   LiveWindows().insert(this);
@@ -603,12 +169,20 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
     }
   };
   host_.validateCommand = ^BOOL(NSInteger command) {
-    return weak && chrome::IsCommandEnabled(weak->browser_,
-                                            static_cast<int>(command));
+    return weak &&
+           chrome::SupportsCommand(weak->browser_, static_cast<int>(command)) &&
+           chrome::IsCommandEnabled(weak->browser_, static_cast<int>(command));
   };
-  host_.executeCommand = ^(NSInteger command) {
+  host_.executeCommand = ^(NSInteger command, NSInteger disposition) {
     if (weak) {
-      chrome::ExecuteCommand(weak->browser_, static_cast<int>(command));
+      chrome::ExecuteCommandWithDisposition(
+          weak->browser_, static_cast<int>(command),
+          static_cast<WindowOpenDisposition>(disposition));
+    }
+  };
+  host_.activateTab = ^(int32_t tab_id) {
+    if (weak) {
+      weak->ActivateTab(tab_id);
     }
   };
   LOG(WARNING) << "ARKT: native window created";
@@ -629,6 +203,7 @@ ArktBrowserWindow::~ArktBrowserWindow() {
   host_.closeRequested = nil;
   host_.validateCommand = nil;
   host_.executeCommand = nil;
+  host_.activateTab = nil;
   [host_.window orderOut:nil];
 
   if (new_tab_footer_controller_) {
@@ -702,7 +277,7 @@ void ArktBrowserWindow::OnFullscreenChanged() {
   }
 }
 
-// ui::BaseWindow ---------------------------------------------------------------
+// ui::BaseWindow --------------------------------------------------------------
 
 bool ArktBrowserWindow::IsActive() const {
   return host_.window.isKeyWindow;
@@ -854,7 +429,7 @@ void ArktBrowserWindow::SetZOrderLevel(ui::ZOrderLevel order) {
                            : NSFloatingWindowLevel;
 }
 
-// BrowserWindow: window state ---------------------------------------------------
+// BrowserWindow: window state -------------------------------------------------
 
 bool ArktBrowserWindow::IsOnCurrentWorkspace() const {
   return host_.window.isOnActiveSpace;
@@ -908,7 +483,7 @@ bool ArktBrowserWindow::IsUnframedModeEnabled() const {
   return false;
 }
 
-// BrowserWindow: tabs ----------------------------------------------------------
+// BrowserWindow: tabs ---------------------------------------------------------
 
 void ArktBrowserWindow::OnActiveTabChanged(content::WebContents* old_contents,
                                            content::WebContents* new_contents,
@@ -924,44 +499,137 @@ void ArktBrowserWindow::OnTabDetached(content::WebContents* contents,
   Unmount(contents);
 }
 
+ArktTabEvent* ArktBrowserWindow::EntryEvent(ArktTabEventKind kind,
+                                            content::WebContents* contents,
+                                            int index,
+                                            int32_t previous_tab_id) {
+  TabEntry& entry = entries_[static_cast<size_t>(index)];
+  entry.id = sessions::SessionTabHelper::IdForTab(contents);
+  entry.title = contents->GetTitle();
+  entry.url = contents->GetVisibleURL();
+  return [[ArktTabEvent alloc]
+       initWithKind:kind
+              tabId:entry.id.id()
+              index:index
+          fromIndex:-1
+      previousTabId:previous_tab_id
+              title:base::SysUTF16ToNSString(entry.title)
+                url:base::SysUTF8ToNSString(entry.url.spec())];
+}
+
 void ArktBrowserWindow::OnTabStripModelChanged(
     TabStripModel* tab_strip_model,
     const TabStripModelChange& change,
     const TabStripSelectionChange& selection) {
-  NSMutableArray<NSDictionary<NSString*, id>*>* events =
-      [[NSMutableArray alloc] init];
+  // `entries_` follows the model one change at a time, in the order the
+  // change lists them (see TabStripModelChange::Insert and Remove).
+  NSMutableArray<ArktTabEvent*>* events = [[NSMutableArray alloc] init];
   switch (change.type()) {
     case TabStripModelChange::kInserted:
       for (const auto& inserted : change.GetInsert()->contents) {
-        [events addObject:TabEvent(@"inserted", inserted.contents,
-                                   inserted.index)];
+        entries_.insert(entries_.begin() + inserted.index, TabEntry());
+        [events addObject:EntryEvent(ArktTabEventKindInserted,
+                                     inserted.contents, inserted.index, -1)];
       }
       break;
     case TabStripModelChange::kRemoved:
       for (const auto& removed : change.GetRemove()->contents) {
+        entries_.erase(entries_.begin() + removed.index);
         [events
-            addObject:TabEvent(@"removed", removed.contents, removed.index)];
+            addObject:[[ArktTabEvent alloc] initWithKind:ArktTabEventKindRemoved
+                                                   tabId:TabId(removed.contents)
+                                                   index:removed.index]];
       }
       break;
     case TabStripModelChange::kMoved: {
       const TabStripModelChange::Move* move = change.GetMove();
-      NSMutableDictionary<NSString*, id>* event =
-          [TabEvent(@"moved", move->contents, move->to_index) mutableCopy];
-      event[@"fromIndex"] = @(move->from_index);
-      [events addObject:event];
+      TabEntry entry = std::move(entries_[move->from_index]);
+      entries_.erase(entries_.begin() + move->from_index);
+      entries_.insert(entries_.begin() + move->to_index, std::move(entry));
+      [events addObject:[[ArktTabEvent alloc] initWithKind:ArktTabEventKindMoved
+                                                     tabId:TabId(move->contents)
+                                                     index:move->to_index
+                                                 fromIndex:move->from_index
+                                             previousTabId:-1
+                                                     title:nil
+                                                       url:nil]];
       break;
     }
-    case TabStripModelChange::kReplaced:
+    case TabStripModelChange::kReplaced: {
+      // Same tab, new WebContents (and session id), e.g. a prerender
+      // activation.
+      const TabStripModelChange::Replace* replace = change.GetReplace();
+      [events
+          addObject:EntryEvent(ArktTabEventKindUpdated, replace->new_contents,
+                               replace->index, TabId(replace->old_contents))];
+      break;
+    }
     case TabStripModelChange::kSelectionOnly:
       break;
   }
   if (selection.active_tab_changed() && selection.new_contents) {
-    [events addObject:TabEvent(@"activated", selection.new_contents,
-                               tab_strip_model->active_index())];
+    [events addObject:[[ArktTabEvent alloc]
+                          initWithKind:ArktTabEventKindActivated
+                                 tabId:TabId(selection.new_contents)
+                                 index:tab_strip_model->active_index()]];
   }
   if (events.count) {
     [host_ tabListChanged:events];
   }
+  if (trace_visibility_ &&
+      (change.type() != TabStripModelChange::kSelectionOnly ||
+       selection.active_tab_changed())) {
+    TraceVisibility();
+  }
+}
+
+void ArktBrowserWindow::OnTabChangedAt(tabs::TabInterface* tab,
+                                       TabChangeType change_type) {
+  int index = browser_->GetTabStripModel()->GetIndexOfTab(tab);
+  if (index < 0 || static_cast<size_t>(index) >= entries_.size()) {
+    return;
+  }
+  content::WebContents* contents = tab->GetContents();
+  const TabEntry& entry = entries_[static_cast<size_t>(index)];
+  if (entry.title == contents->GetTitle() &&
+      entry.url == contents->GetVisibleURL()) {
+    return;
+  }
+  [host_ tabListChanged:@[ EntryEvent(ArktTabEventKindUpdated, contents, index,
+                                      -1) ]];
+}
+
+bool ArktBrowserWindow::ActivateTab(int32_t tab_id) {
+  TabStripModel* model = browser_->GetTabStripModel();
+  for (int i = 0; i < model->count(); ++i) {
+    if (TabId(model->GetWebContentsAt(i)) == tab_id) {
+      model->ActivateTabAt(
+          i, TabStripUserGestureDetails(
+                 TabStripUserGestureDetails::GestureType::kOther));
+      return true;
+    }
+  }
+  return false;
+}
+
+void ArktBrowserWindow::TraceVisibility() {
+  // Visibility reaches WebContents through the view's window notifications;
+  // read it once the current change has run to completion.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](base::WeakPtr<ArktBrowserWindow> window) {
+            if (!window) {
+              return;
+            }
+            TabStripModel* model = window->browser_->GetTabStripModel();
+            for (int i = 0; i < model->count(); ++i) {
+              content::WebContents* contents = model->GetWebContentsAt(i);
+              LOG(WARNING) << "ARKT: visibility " << TabId(contents) << " "
+                           << VisibilityName(contents->GetVisibility());
+            }
+          },
+          weak_factory_.GetWeakPtr()));
 }
 
 bool ArktBrowserWindow::IsTabStripEditable() const {
@@ -984,7 +652,7 @@ void ArktBrowserWindow::UpdateTitleBar() {
 
 void ArktBrowserWindow::UpdateLoadingAnimations(bool is_visible) {}
 
-// BrowserWindow: theme and colours ---------------------------------------------
+// BrowserWindow: theme and colours --------------------------------------------
 
 ui::NativeTheme* ArktBrowserWindow::GetNativeTheme() {
   return ui::NativeTheme::GetInstanceForNativeUi();
@@ -1026,7 +694,7 @@ ui::RendererColorMap ArktBrowserWindow::GetRendererColorMap(
   return ui::CreateRendererColorMap(*provider);
 }
 
-// BrowserWindow: window-side objects -------------------------------------------
+// BrowserWindow: window-side objects ------------------------------------------
 
 std::vector<StatusBubble*> ArktBrowserWindow::GetStatusBubbles() {
   // Empty, as in WebUIBrowserWindow: BrowserWebContentsDelegate casts every
@@ -1062,7 +730,7 @@ BrowserView* ArktBrowserWindow::AsBrowserView() {
   return nullptr;
 }
 
-// BrowserWindow: keyboard ------------------------------------------------------
+// BrowserWindow: keyboard -----------------------------------------------------
 
 content::KeyboardEventProcessingResult
 ArktBrowserWindow::PreHandleKeyboardEvent(
@@ -1096,7 +764,7 @@ ui::AcceleratorProvider* ArktBrowserWindow::GetAcceleratorProvider() {
   return nullptr;
 }
 
-// BrowserWindow: toolbar and location bar (Arkt has neither) --------------------
+// BrowserWindow: toolbar and location bar (Arkt has neither) ------------------
 
 bool ArktBrowserWindow::IsToolbarVisible() const {
   // extension_action_api.cc only lets chrome.action.openPopup run when true.
@@ -1167,7 +835,7 @@ autofill::AutofillBubbleHandler* ArktBrowserWindow::GetAutofillBubbleHandler() {
   return nullptr;
 }
 
-// BrowserWindow: bubbles and dialogs Arkt does not show this week ---------------
+// BrowserWindow: bubbles and dialogs Arkt does not show this week -------------
 
 void ArktBrowserWindow::ShowUpdateChromeDialog() {
   ARKT_STUB("BrowserWindow");
