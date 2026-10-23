@@ -102,6 +102,30 @@ final class SplitSidebarTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// The real right-click path: `menu(for:)` sets `clickedRow`, and `menuNeedsUpdate` fills the outline's menu for it.
+  func testRightClickFillsTheMenuForTheClickedRow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let outline = try harness.outline()
+    let view = outline.outlineView
+    func rightClick(_ node: UUID) throws -> [String] {
+      let rect = view.rect(ofRow: try harness.row(node))
+      let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+      let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: point, modifierFlags: [],
+                                                   timestamp: 0, windowNumber: view.window?.windowNumber ?? 0,
+                                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+      let menu = try XCTUnwrap(view.menu(for: event))
+      menu.delegate?.menuNeedsUpdate?(menu)
+      return menu.items.map(\.title)
+    }
+
+    XCTAssertEqual(try rightClick(world.split),
+                   ["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"])
+    XCTAssertEqual(try rightClick(world.panes[0]), ["Remove Tab from Split View"])
+    XCTAssertEqual(try rightClick(world.today[0]), [], "a plain tab row gets an empty menu, which does not open")
+    harness.controller.close()
+  }
+
   func testPaneRowMenuHasRemoveFromSplit() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
