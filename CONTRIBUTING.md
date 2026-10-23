@@ -51,9 +51,9 @@ and in `.github/CODEOWNERS` (the commented placeholder lines there show where), 
 
 ## 2. Issues and statuses
 
-Every piece of work is a GitHub issue. Backlog items found outside a plan go to `docs/plans/backlog.md` first and
-become an issue when scheduled. Use the issue templates: feature, bug or task. Small docs or housekeeping changes
-(typos, templates, this file) may go straight to a pull request without an issue.
+Every piece of work is a GitHub issue. Backlog items found outside a plan become an issue right away
+(`status:triage`); the Roadmap issue (#30) lists them by order. Use the issue templates: feature, bug or task. Small
+docs or housekeeping changes (typos, templates, this file) may go straight to a pull request without an issue.
 
 ### Labels
 
@@ -62,7 +62,7 @@ become an issue when scheduled. Use the issue templates: feature, bug or task. S
 | Status | `status:*` (below) | Where the issue is. Exactly one per open issue. |
 | Area | `area:shell`, `area:core`, `area:engine`, `area:import`, `area:archive`, `area:compat`, `area:design` | Which code it touches. One or more. |
 | Type | `type:feature`, `type:bug`, `type:chore` | What kind of work. Exactly one. |
-| Order | `order:1` ... `order:6` | Priority. Lower runs first (below). |
+| Order | `order:1` ... `order:7` | Priority. Lower runs first (below). |
 
 ### Statuses
 

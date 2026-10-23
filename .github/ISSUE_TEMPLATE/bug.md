@@ -41,5 +41,5 @@ assignees: []
 Triage (maintainer):
 - Status: status:triage now; status:ready once the definition of ready is met (CONTRIBUTING.md, section 2).
 - Area: add one or more of area:shell, area:core, area:engine, area:import, area:archive, area:compat, area:design.
-- Order: add one of order:1 ... order:6 (lower runs first).
+- Order: add one of order:1 ... order:7 (lower runs first).
 -->
