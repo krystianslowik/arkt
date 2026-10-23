@@ -8,7 +8,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | Task | Title | Status | Notes |
 |---|---|---|---|
 | W0 | Branch, baselines, results file, CDP helper, key-window log | DONE | see below |
-| W1 | Arkt-branded non-component build | IN PROGRESS | build running, see below |
+| W1 | Arkt-branded non-component build | STOPPED | build stopped on low swap; config done, see below |
 | W2 | Sign `Arkt.app`, install in /Applications, smoke | TODO | |
 | W3 | Inventory of non-`BrowserView` window seams, variant decision | TODO | |
 | W4 | Extensions menu lists every action (finding 1) | TODO | |
@@ -278,3 +278,24 @@ Before the start:
 - `df -h $CHROMIUM_ROOT`: 2.0 TiB available.
 - `df -h /`: 11 GiB available (of 460 GiB).
 - `sysctl vm.swapusage`: `total = 7168.00M  used = 5605.50M  free = 1562.50M`.
+
+Started 14:05. Stopped 14:17 (about 12 min in) by SIGINT to the recorded `siso` PID, because free swap fell below
+500 MB while other jobs were also running on the machine:
+
+| Time | `df -h /` available | `sysctl vm.swapusage` | Build |
+|---|---|---|---|
+| 14:05 | 11 GiB | `total = 7168.00M  used = 5605.50M  free = 1562.50M` | started |
+| ~14:16 | - | `free = 229.38M` | running |
+| 14:16 | 5.9 GiB | `total = 10240.00M  used = 9119.38M  free = 1120.62M` | running (macOS added a swap file, 3 GB of `/`) |
+| 14:17 | 5.9 GiB | `total = 10240.00M  used = 9555.44M  free = 684.56M` | stopped |
+
+Last log lines: `Build Failure: 6344 done, 0 failed, 76953 remaining`, `interrupt by signal`. No `FAILED:` lines;
+the stop was clean and the next run resumes incrementally from the 6344 finished steps.
+
+Swap grows by adding swap files on `/`, so free swap and free disk shrink together: one more swap file would take
+`/` to about 3 GiB, under the 4 GiB stop rule. `/` was already below the 8 GiB floor after the first one. The build
+can only resume once `/` has at least 8 GiB free and the machine is quiet (no other Chromium or Swift builds),
+which needs the user (freeing space on `/` is not ours to do).
+
+Resume command (incremental): `cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1`.
+Step 7 (verification) has not run.
