@@ -588,3 +588,25 @@ Remaining: ChromiumEngine (#33) provides the same fields by passing rule 8.
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 337 tests (2 new), XCTest 182 tests (GUI included,
 9 new), 0 failures. Debug app build: `** BUILD SUCCEEDED **`. Only `FakeEngine.swift` imports WebKit.
+
+## Favorite tiles: hover close (X) (#82)
+
+A Favorite tile shows the X (`SidebarGlyphs.close`, the rows' glyph and fade) in its top trailing corner while it is
+hovered and its page is loaded. The X and VoiceOver's "Close" custom action call `FavoritesGridView.onClose`, which
+`SidebarController` forwards to the same `onClose` the rows use, so the window runs `close(node:)` as Cmd-W does: the
+page closes, the Favorite stays, nothing is archived (`RowCloseAction.closeFavorite`, tooltip "Close this tab" [I]).
+A tile without a loaded page shows no X and has no custom action.
+
+"Loaded" is `SidebarController.loadedNodes`: a tab is inserted on activation (activating shows the tab, which creates
+its page) and removed in `deactivate(node:)`, which the window calls on `.tabClosed`. It is per window, like the close
+path. Closing a background Favorite reloads that tile from `deactivate`, so its X hides at once under a still
+pointer. `ShellWindowController` is unchanged.
+
+Hover resync: the guard from `SidebarRowView.resyncHoverWithPointer` moved unchanged into a shared
+`NSView.resyncHoverWithPointer(_:)` (`HoverResync.swift`); rows and tiles call it from `updateTrackingAreas`. The
+guard's polish (child panels, fade interruption, Reduce Motion) stays with #87 and now applies to both. Frames are set
+directly in `layout()`; no per-frame work. Metrics `favoriteCloseButtonSize` (16) and `favoriteCloseButtonInset` (3)
+are TODO(measure).
+
+Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 359 tests, XCTest 193 tests (GUI included, 11 new in
+`FavoriteTileCloseTests`, baseline 182), 0 failures. Debug app build: `** BUILD SUCCEEDED **`.

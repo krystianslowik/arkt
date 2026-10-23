@@ -28,6 +28,9 @@ public enum SidebarMetrics {
   public static let favoritesBottomGap: CGFloat = 10     // TODO(measure): favorites to Space title
   public static let bottomBarHeight: CGFloat = 36        // TODO(measure)
   public static let favoriteFaviconSize: CGFloat = 20
+  // Hover close (X) on a loaded Favorite tile (#82); same glyph and fade as the rows'.
+  public static let favoriteCloseButtonSize: CGFloat = 16   // TODO(measure): hit box
+  public static let favoriteCloseButtonInset: CGFloat = 3   // TODO(measure): tile top and trailing edge to hit box
   public static let bottomBarIconSize: CGFloat = 16       // archive and new-tab symbols
   public static let spaceDotSize: CGFloat = 6            // TODO(measure)
   public static let spaceDotSpacing: CGFloat = 8         // TODO(measure)
