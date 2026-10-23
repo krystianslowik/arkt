@@ -172,9 +172,9 @@ final class CommandBarTests: XCTestCase {
     XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
     XCTAssertEqual(bar.barView.table.selectedRow, 1)
     _ = bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:)))
-    XCTAssertEqual(bar.barView.table.selectedRow, 1)                           // clamps, no wrap (RT-08)
+    XCTAssertEqual(bar.barView.table.selectedRow, 0)                           // wraps to the first [I] (RT-08)
     _ = bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveUp(_:)))
-    _ = bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:)))
+    XCTAssertEqual(bar.barView.table.selectedRow, 1)                           // and up wraps to the last
     _ = bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:)))
     XCTAssertEqual(opened, URLInputParser.searchURL(for: "example.com"))
   }
@@ -458,5 +458,248 @@ final class CommandBarTests: XCTestCase {
     XCTAssertGreaterThan(latency, 0)
     XCTAssertGreaterThanOrEqual(bar.lastShowCommitDelay, 0, "the show's transaction committed")
     XCTAssertLessThanOrEqual(bar.lastShowCommitDelay, latency)
+  }
+
+  // MARK: - Keys and hover (#95; KB-084, KB-085, RT-08). Behaviors marked [I] wait on RT-08.
+
+  /// A key-down delivered in-process to the bar's own panel (no OS-level input).
+  func sendKey(_ keyCode: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws {
+    let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                               windowNumber: bar.panel.windowNumber, context: nil,
+                                               characters: characters, charactersIgnoringModifiers: characters,
+                                               isARepeat: false, keyCode: keyCode))
+    bar.panel.sendEvent(event)
+  }
+
+  func sendReturn(_ flags: NSEvent.ModifierFlags = []) throws { try sendKey(36, "\r", flags) }
+
+  func tabs(_ count: Int) -> [CommandBarResults.OpenTab] {
+    (1...count).map { .init(node: UUID(), title: "Tab \($0)", url: URL(string: "https://t\($0).example")!) }
+  }
+
+  func testReturnKeyEventOpensTheSelectedResult() async throws {
+    var result: (URL, Bool)?
+    bar.onOpen = { result = ($0, $1) }
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("example.com")
+    try sendReturn()
+    XCTAssertEqual(result?.0.absoluteString, "https://example.com")
+    XCTAssertEqual(result?.1, true)
+    XCTAssertFalse(bar.isVisible)
+  }
+
+  // [I] KB-085: Opt-Enter opens the selected result in a new tab, also from Cmd-L (Chromium omnibox convention).
+  func testOptionReturnFromCmdLOpensInANewTab() async throws {
+    var result: (URL, Bool)?
+    bar.onOpen = { result = ($0, $1) }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    bar.setQueryForTesting("example.org")
+    try sendReturn(.option)
+    XCTAssertEqual(result?.0.absoluteString, "https://example.org")
+    XCTAssertEqual(result?.1, true, "new tab, not the current one")
+    XCTAssertFalse(bar.isVisible)
+  }
+
+  // [I] KB-085: Cmd-Enter opens the selected result in a new tab, also from Cmd-L.
+  func testCommandReturnFromCmdLOpensInANewTab() async throws {
+    var result: (URL, Bool)?
+    bar.onOpen = { result = ($0, $1) }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    bar.setQueryForTesting("example.org")
+    try sendReturn(.command)
+    XCTAssertEqual(result?.0.absoluteString, "https://example.org")
+    XCTAssertEqual(result?.1, true)
+    XCTAssertFalse(bar.isVisible)
+  }
+
+  // [I] A modified Enter on an unedited Cmd-L opens the URL in a new tab instead of reloading (KB-004 is plain Enter).
+  func testModifiedReturnOnUneditedCmdLOpensANewTabInsteadOfReloading() async throws {
+    var reloaded = false
+    var result: (URL, Bool)?
+    bar.onReload = { reloaded = true }
+    bar.onOpen = { result = ($0, $1) }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    try sendReturn(.command)
+    XCTAssertFalse(reloaded)
+    XCTAssertEqual(result?.0.absoluteString, "https://example.com")
+    XCTAssertEqual(result?.1, true)
+  }
+
+  // [I] A modified Enter on a "Switch to Tab" result still switches: the tab is already open.
+  func testModifiedReturnOnASwitchResultSwitches() async throws {
+    let node = UUID()
+    var switched: UUID?
+    var opened: URL?
+    bar.openTabsProvider = { [.init(node: node, title: "Example Domain", url: URL(string: "https://example.com")!)] }
+    bar.onSwitch = { switched = $0 }
+    bar.onOpen = { url, _ in opened = url }
+    bar.toggle(.newTab)
+    try sendReturn(.option)
+    XCTAssertEqual(switched, node)
+    XCTAssertNil(opened)
+  }
+
+  // Only Cmd and Opt are taken over: Shift-Return (KB-086, Arc Max, out of scope) reaches the field editor as before.
+  func testShiftReturnIsNotTreatedAsANewTabKey() async throws {
+    var result: (URL, Bool)?
+    bar.onOpen = { result = ($0, $1) }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    bar.setQueryForTesting("example.org")
+    try sendReturn(.shift)
+    XCTAssertEqual(result?.0.absoluteString, "https://example.org")
+    XCTAssertEqual(result?.1, false, "plain commit: Cmd-L navigates the current tab")
+  }
+
+  // [I] RT-08: Enter on an empty query with no results closes the bar and opens nothing.
+  func testEnterOnAnEmptyQueryWithNoResultsCloses() async throws {
+    var opened = false
+    var switched = false
+    bar.onOpen = { _, _ in opened = true }
+    bar.onSwitch = { _ in switched = true }
+    bar.toggle(.newTab)
+    XCTAssertTrue(bar.results.isEmpty)
+    try sendReturn()
+    XCTAssertFalse(bar.isVisible)
+    XCTAssertFalse(opened)
+    XCTAssertFalse(switched)
+  }
+
+  // [I] RT-08: Enter on an empty query switches to the first listed open tab.
+  func testEnterOnAnEmptyQuerySwitchesToTheFirstOpenTab() async throws {
+    let list = tabs(3)
+    var switched: UUID?
+    bar.openTabsProvider = { list }
+    bar.onSwitch = { switched = $0 }
+    bar.toggle(.newTab)
+    try sendReturn()
+    XCTAssertEqual(switched, list[0].node)
+  }
+
+  // KB-084: the Esc key event closes the bar.
+  func testEscapeKeyEventCloses() async throws {
+    bar.toggle(.newTab)
+    try sendKey(53, "\u{1b}")
+    XCTAssertFalse(bar.isVisible)
+  }
+
+  // [I] KB-085: Down past the last result wraps to the first, Up from the first wraps to the last.
+  func testArrowKeyEventsWrap() async throws {
+    bar.openTabsProvider = { self.tabs(3) }
+    bar.toggle(.newTab)
+    let down = String(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!)
+    let up = String(UnicodeScalar(UInt16(NSUpArrowFunctionKey))!)
+    try sendKey(125, down, [.function, .numericPad])
+    try sendKey(125, down, [.function, .numericPad])
+    XCTAssertEqual(bar.barView.table.selectedRow, 2)
+    try sendKey(125, down, [.function, .numericPad])
+    XCTAssertEqual(bar.barView.table.selectedRow, 0)
+    try sendKey(126, up, [.function, .numericPad])
+    XCTAssertEqual(bar.barView.table.selectedRow, 2)
+  }
+
+  // [I] PageDown / PageUp move by the visible row count and stop at the ends.
+  func testPageDownAndPageUpMoveByAPageAndClamp() async throws {
+    bar.openTabsProvider = { self.tabs(6) }
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("example")                  // open-tab matches plus the search row
+    let count = bar.results.count
+    XCTAssertGreaterThan(count, 2)
+    let pageDown = String(UnicodeScalar(UInt16(NSPageDownFunctionKey))!)
+    let pageUp = String(UnicodeScalar(UInt16(NSPageUpFunctionKey))!)
+    try sendKey(121, pageDown, [.function])
+    XCTAssertEqual(bar.barView.table.selectedRow, min(CommandBarGeometry.maxVisibleRows, count - 1))
+    try sendKey(121, pageDown, [.function])
+    XCTAssertEqual(bar.barView.table.selectedRow, count - 1, "clamps at the last row")
+    try sendKey(116, pageUp, [.function])
+    try sendKey(116, pageUp, [.function])
+    XCTAssertEqual(bar.barView.table.selectedRow, 0, "clamps at the first row")
+    XCTAssertTrue(bar.isVisible)
+  }
+
+  /// A pointer move over `row`, delivered in-process to the results view.
+  func hover(row: Int) throws {
+    bar.panel.displayIfNeeded()
+    let table = bar.barView.table
+    let rect = table.convert(table.rect(ofRow: row), to: nil)
+    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: NSPoint(x: rect.midX, y: rect.midY),
+                                                 modifierFlags: [], timestamp: 0,
+                                                 windowNumber: bar.panel.windowNumber, context: nil,
+                                                 eventNumber: 0, clickCount: 0, pressure: 0))
+    bar.barView.mouseMoved(with: event)
+  }
+
+  // [I] Hover selects the row under the pointer; Enter then opens it.
+  func testHoverSelectsTheRowUnderThePointer() async throws {
+    let list = tabs(4)
+    var switched: UUID?
+    bar.openTabsProvider = { list }
+    bar.onSwitch = { switched = $0 }
+    bar.toggle(.newTab)
+    XCTAssertEqual(bar.barView.table.selectedRow, 0)
+    try hover(row: 2)
+    XCTAssertEqual(bar.barView.table.selectedRow, 2)
+    try sendReturn()
+    XCTAssertEqual(switched, list[2].node)
+  }
+
+  // The results view tracks pointer moves with one tracking area, installed once (not per show).
+  func testHoverTrackingIsInstalledOnce() async throws {
+    let table = bar.barView.table
+    let moved = table.trackingAreas.filter { $0.options.contains(.mouseMoved) && $0.owner === bar.barView }
+    XCTAssertEqual(moved.count, 1)
+    bar.toggle(.newTab)
+    bar.toggle(.newTab)
+    bar.toggle(.newTab)
+    XCTAssertEqual(table.trackingAreas.filter { $0.owner === bar.barView }.count, 1)
+    bar.toggle(.newTab)
+  }
+
+  // A pointer move outside any row (the input row) leaves the selection alone.
+  func testHoverOutsideTheRowsKeepsTheSelection() async throws {
+    bar.openTabsProvider = { self.tabs(3) }
+    bar.toggle(.newTab)
+    bar.panel.displayIfNeeded()
+    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: NSPoint(x: 40, y: bar.panel.frame.height - 10),
+                                                 modifierFlags: [], timestamp: 0,
+                                                 windowNumber: bar.panel.windowNumber, context: nil,
+                                                 eventNumber: 0, clickCount: 0, pressure: 0))
+    bar.barView.mouseMoved(with: event)
+    XCTAssertEqual(bar.barView.table.selectedRow, 0)
+  }
+
+  /// The responder in `window` that a nil-targeted action reaches, as AppKit searches one window: the first
+  /// responder up its `nextResponder` chain (the window, then its window controller), then the window's delegate.
+  func handler(of action: Selector, in window: NSWindow) -> AnyObject? {
+    var responder: NSResponder? = window.firstResponder
+    while let current = responder {
+      if current.responds(to: action) { return current }
+      responder = current.nextResponder
+    }
+    if let delegate = window.delegate, delegate.responds(to: action) { return delegate }
+    return nil
+  }
+
+  // #95: menu actions (Cmd-T / Cmd-L) reach ShellWindowController through NSApp.sendAction while the bar is key.
+  // A nil-targeted action searches the key window (the panel), then the main window (the shell: the panel cannot
+  // become main), then the app. The test runner cannot activate itself, so the per-window search is checked
+  // directly; when the app is active, the real NSApp.sendAction path runs as well.
+  func testMenuActionsReachTheShellWhileTheBarIsKey() async throws {
+    let window = try XCTUnwrap(shell.window)
+    let panel = shell.commandBar.panel
+    for (action, name) in [(#selector(ShellWindowController.newTab(_:)), "Cmd-T"),
+                           (#selector(ShellWindowController.openLocation(_:)), "Cmd-L")] {
+      shell.newTab(nil)
+      XCTAssertTrue(shell.commandBar.isVisible)
+      XCTAssertTrue(panel.firstResponder === shell.commandBar.barView.field.currentEditor(), "typing goes to the bar")
+      XCTAssertFalse(panel.canBecomeMain, "the shell window stays main")
+      XCTAssertNil(handler(of: action, in: panel), "\(name): nothing in the bar's chain takes the action")
+      XCTAssertTrue(handler(of: action, in: window) === shell, "\(name): the shell window's chain reaches the controller")
+      if NSApp.isActive, NSApp.keyWindow === panel, NSApp.mainWindow === window {
+        XCTAssertTrue(NSApp.sendAction(action, to: nil, from: nil))
+      } else {
+        XCTAssertTrue(NSApp.sendAction(action, to: handler(of: action, in: window), from: nil))
+      }
+      XCTAssertFalse(shell.commandBar.isVisible, "\(name) closes the open bar (KB-003)")
+    }
   }
 }
