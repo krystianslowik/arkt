@@ -8,7 +8,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | Task | Title | Status | Notes |
 |---|---|---|---|
 | W0 | Branch, baselines, results file, CDP helper, key-window log | DONE | see below |
-| W1 | Arkt-branded non-component build | STOPPED | build stopped on low swap; config done, see below |
+| W1 | Arkt-branded non-component build | DONE | no patch; `out/Arkt` built in 4 h 11 min at `-j 6`/`-j 4`, 0 failed; `com.arkt.Arkt`, `Arkt Helper*.app`, 0 `@rpath` dylibs; bundle 541M, `out/Arkt` 7.6G; launches; see "W1" below |
 | W2 | Sign `Arkt.app`, install in /Applications, smoke | TODO | |
 | W3 | Inventory of non-`BrowserView` window seams, variant decision | DONE | variant P (plain `NSWindow`); this week 3 seam patch files, 4-8 upstream files, 0 hot-file hunks (W: 3 / 4 / 0); see "W3" below |
 | W4 | Extensions menu lists every action (finding 1) | DONE | no upstream patch; see below |
@@ -299,7 +299,85 @@ can only resume once `/` has at least 8 GiB free and the machine is quiet (no ot
 which needs the user (freeing space on `/` is not ours to do).
 
 Resume command (incremental): `cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1`.
-Step 7 (verification) has not run.
+
+### Step 6, resumed (2026-10-23 20:12 to 2026-10-24 00:23)
+
+Overlay: `$REPO` on branch `engine/11-release-build` at `c61a576` (`main`; its `engine/` tree is identical to
+`fe86b8d`, W6), `readlink $CR/arkt` = `arkt-wt/engine/engine/arkt`, unchanged for the whole build. `$CR` branch
+`arkt` at `baeb143765` (patches 0001-0006, all exported). `gn gen out/Arkt` again first (`Made 36370 targets`),
+`branding_file_path = "//arkt/branding/BRANDING"`, `toolchain.ninja` names `Arkt.app/Contents/Resources/...`.
+
+The parallelism is capped with `-j` because swap (not CPU) is the limit on this machine:
+
+| Run | Command | Time | Steps | Result |
+|---|---|---|---|---|
+| 1 | `nice -n 10 autoninja -C out/Arkt -j 6 chrome` | 20:12-20:33 (20 min 46 s) | 14270 done, 52048 remaining | stopped by SIGINT to the `siso` PID: swap used rose from 5984M to 7572M (of 8192M) in 20 min; 0 failed |
+| 2 | `nice -n 10 autoninja -C out/Arkt -j 4 chrome` | 20:33-00:23 (3 h 49 min 58 s) | 51585 | `The build has finished successfully.` |
+
+Total wall time 4 h 11 min (plus the 12 min of the 14:05 run); `grep -c FAILED:` on both logs: `0`. The
+`Arkt Framework` link took under a minute (`ld64.lld`, about 1.7 GB RSS) on a quiet machine. A monitor checked
+every 30 s and would have stopped `siso` (`kill -STOP`) at swap used above 8 GB or under 5 GiB free on `/`; it never
+fired.
+
+| Time | `df -h /` available | swap used (`sysctl vm.swapusage`) | `memory_pressure` free | Steps (`siso ps`) |
+|---|---|---|---|---|
+| 20:12 | 10 GiB | 5984M of 7168M | - | started |
+| 20:33 | 8.8 GiB | 7572M of 8192M | 55% | run 1 stopped at 14270 |
+| 20:43 | 9 GiB | 7564M | 55% | 1126/51510 |
+| 21:24 | 9 GiB | 7123M | 54% | 9059/49595 |
+| 22:01 | 9 GiB | 7035M | 52% | 11535/49260 |
+| 22:31 | 8 GiB | 7027M | 52% | 16336/48683 |
+| 23:01 | 10 GiB | 6931M | 51% | 20639/46968 |
+| 23:31 | 12 GiB | 6867M | 50% | 29255/39320 |
+| 00:14 | 13 GiB | 6827M | 47% | 35549/37335 |
+| 00:23 | 12 GiB | 6507M of 8192M | - | finished |
+
+Swap used does not shrink when pressure drops, so it is a ratchet: once near the limit, only a lower `-j` keeps a
+build going. At `-j 4` it stayed flat and then fell slightly. `autoninja` adds `--quiet` in some environments, so
+the log holds no step counter; `third_party/siso/cipd/siso ps -C out/Arkt -n 1` prints it.
+
+### Step 7: verification
+
+    tail -3 build-arkt.log         -> The build has finished successfully.
+    grep -c FAILED: build-arkt.log -> 0
+    plutil -extract CFBundleIdentifier raw Arkt.app/Contents/Info.plist -> com.arkt.Arkt
+    CFBundleName, CFBundleDisplayName, CFBundleExecutable -> Arkt; CFBundleShortVersionString -> 156.0.8078.48
+    otool -L ".../Arkt Framework" | grep -c '@rpath/lib.*\.dylib' -> 0   (and 0 lines naming @rpath at all)
+    otool -L Arkt.app/Contents/MacOS/Arkt -> /usr/lib/libSystem.B.dylib only
+    codesign -dv Arkt.app -> Signature=adhoc, flags=0x20002(adhoc,linker-signed), TeamIdentifier=not set
+
+`Arkt Framework.framework/Versions/Current/Helpers`: `Arkt Helper.app`, `Arkt Helper (Alerts).app`,
+`Arkt Helper (GPU).app`, `Arkt Helper (Renderer).app`, `Arkt Helper (Aperitif).app`, `Arkt Helper (Aperitif Alerts).app`,
+`Arkt Helper (Aperitif GPU).app`, `Arkt Helper (Aperitif Renderer).app`, plus `app_mode_loader`,
+`chrome_crashpad_handler`, `web_app_shortcut_copier`. The only dylibs in the bundle are the framework's own
+`Libraries/` (`libaperitif.dylib`, `libvk_swiftshader.dylib`, `libvulkan.dylib`), loaded at run time, not linked.
+
+Sizes: `du -sh Arkt.app` 541M (the `Arkt Framework` binary alone 448 MB); `du -sh out/Arkt` 7.6G. Both under the
+plan's estimates (400-600 MB bundle, 10-15 GB output) because `symbol_level = 0`.
+
+### Launch check
+
+One GUI run at a time, nothing else from `out/Spike` or `out/Arkt` running, fresh profiles under `$PROF`, port 9344,
+the standard flags (`--use-mock-keychain --no-first-run --no-default-browser-check --enable-logging=stderr`), each
+stopped by its PID:
+
+- Default window (`$PROF/w1-release`): `ARKT: browsers normal=1 arkt=0 views=1`, `ARKT: in-process hook alive`,
+  `ARKT: mounted active tab after 1 attempt(s)`. CDP `/json/version`: `Chrome/156.0.8078.48`. `chrome://version`
+  (opened through CDP) renders: `Chromium: 156.0.8078.48 (Developer Build) (arm64)`, `Linker: lld`, executable path
+  `out/Arkt/Arkt.app/Contents/MacOS/Arkt`. Child processes run from `Arkt Helper (Aperitif).app` and
+  `Arkt Helper (Aperitif Renderer).app`. 0 `FATAL`/`Check failed`. The page drew at first; a few seconds later, with
+  the window in the background, it reported `document.visibilityState` `hidden` and went blank: the week-1 blackout
+  (finding 2) on the Views path, fixed only on the native window (W5c); W9 makes that the default.
+- `--arkt-native-window` (`$PROF/w1-release-native2`): `ARKT: browsers normal=1 arkt=1 views=0`,
+  `ARKT: native window created`, the tab list, `ARKT: key window`; the New Tab page renders in the Arkt window
+  (`$PROF/shots/w1-release-native-version.png`, window-only). 0 `FATAL`/`Check failed`.
+
+UI strings stay Chromium's (`chrome://version` says "Chromium", the NTP says "Customize Chromium"); the branding
+file renames the bundle, framework, helpers and bundle id only, as planned. A first native-window run
+(`$PROF/w1-release-native`) navigated to an external site 8 s after launch with no input from this task (the
+interference recorded under W5c); it was stopped and is not counted.
+
+Not done here (W2, #12): re-signing and installing into `/Applications`.
 
 ## W4
 
