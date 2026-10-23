@@ -650,6 +650,24 @@ it by hand with FakeEngine: open the Work Space split and check that both pages 
 
 **Commit:** `Show splits in the window: one engine tab per pane, focused pane drives URL bar, Toolbar and Cmd-L`
 
+**Notes from S4 (#54)** (S5 to S8 build on these):
+- **Loaded state (#156 review).** Every engine tab the window creates goes through
+  `ShellWindowController.openEngineTab(for:)`, which also calls `SidebarController.markLoaded(node:)`; every
+  `.tabClosed` still calls `deactivate(node:)`. So `loadedNodes` stays equal to the window's engine tabs while pane
+  pages are created outside `activate`. New engine-tab creation paths (popups, background opens) must use the same
+  helper.
+- **Closed panes.** `SplitWindowState.closedPanes` holds panes whose page closed while the node stayed (Pinned,
+  Favorites). They show the placeholder until clicked or activated; activating a pane always opens it. When no pane of
+  the split has a page, the set is cleared for that split and the content area empties, so the split row opens every
+  pane again.
+- **Focus after a source change.** The deferred re-show keeps focus on the focused node wherever it now is (a
+  separated or expanded pane stays focused as a plain tab). Decision 9's "focus stays on the surviving pane" is S5's
+  job: the shortcut activates the survivor after `separatePane`.
+- **Toasts.** While a split is shown, `ShellRootView.showsSplit` moves the toast view from the hidden single card to
+  the split container, centered on the whole content area.
+- **Click focus in tests.** Local event monitors run in `NSApplication.sendEvent`, not `NSWindow.sendEvent`; GUI
+  tests post the synthetic mouse-down through `NSApp.sendEvent`.
+
 ---
 
 ### Task S5: Shortcuts and menu items
