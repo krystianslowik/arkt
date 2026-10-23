@@ -23,6 +23,24 @@ public enum PagingMath {
     return (1 - 1 / (x * rubberBandCoefficient / d + 1)) * d
   }
 
+  /// Inverse of `rubberBand(_:dimension:)` for a rubber-banded distance `0 <= y < d`.
+  public static func unrubberBand(_ y: CGFloat, dimension d: CGFloat) -> CGFloat {
+    guard d > 0, y > 0 else { return 0 }
+    let clamped = min(y, d * 0.999999)
+    return (clamped * d) / (rubberBandCoefficient * (d - clamped))
+  }
+
+  /// Initial finger translation for `beginTracking()` at `offset` from page `index`, inverting rubber-band resistance
+  /// when `offset` is already overshot past the first or last page so catching an overshooting settle keeps the exact
+  /// position (#99, M3).
+  public static func initialTranslation(offset: CGFloat, index: Int, pageWidth: CGFloat, count: Int) -> CGFloat {
+    let base = -CGFloat(index) * pageWidth
+    let minOffset = -CGFloat(max(count - 1, 0)) * pageWidth
+    if offset > 0 { return unrubberBand(offset, dimension: pageWidth) - base }
+    if offset < minOffset { return minOffset - unrubberBand(minOffset - offset, dimension: pageWidth) - base }
+    return offset - base
+  }
+
   /// Page to settle on after a release: at most one page away from `current`, clamped to the strip.
   public static func targetIndex(current: Int, translation: CGFloat, velocity: CGFloat,
                                  pageWidth: CGFloat, count: Int) -> Int {

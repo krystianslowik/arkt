@@ -208,6 +208,55 @@ final class SpacePagerTests: XCTestCase {
     await awaitSettle { pager.endTracking() }
   }
 
+  /// #99 (M3): catching a settle while it overshoots past the first or last page keeps the exact position without
+  /// re-applying rubber-band resistance on the first tracking tick.
+  func testCatchingAnOvershootingSettleKeepsTheExactPosition() async throws {
+    let pager = controller.pager
+    let width = pager.bounds.width
+
+    // Overshoot past the last page (page 2): position > 2 (offset < -2 * width).
+    let pastLast = -2 * width - 16
+    pager.setPositionForTesting(-pastLast / width)
+    XCTAssertEqual(pager.offset, pastLast, accuracy: 0.001)
+    pager.beginTracking()
+    pager.track(delta: 0, at: 1)
+    XCTAssertEqual(pager.offset, pastLast, accuracy: 0.001, "catching overshoot past last page keeps exact offset")
+    await awaitSettle { pager.endTracking() }
+    XCTAssertEqual(pager.index, 2)
+
+    // Overshoot past the first page (page 0): position < 0 (offset > 0).
+    let pastFirst: CGFloat = 14
+    pager.setPositionForTesting(-pastFirst / width)
+    XCTAssertEqual(pager.offset, pastFirst, accuracy: 0.001)
+    pager.beginTracking()
+    pager.track(delta: 0, at: 2)
+    XCTAssertEqual(pager.offset, pastFirst, accuracy: 0.001, "catching overshoot past first page keeps exact offset")
+    await awaitSettle { pager.endTracking() }
+    XCTAssertEqual(pager.index, 0)
+  }
+
+  /// #99 (M4): resizing the sidebar during an active swipe updates the page frames and strip offset to the new width
+  /// immediately instead of keeping the old page width until the gesture ends.
+  func testPageWidthFollowsASidebarResizeDuringASwipe() async throws {
+    let pager = controller.pager
+    await awaitSettle { controller.nextSpace(nil) }
+    XCTAssertEqual(pager.index, 1)
+
+    pager.beginTracking()
+    pager.track(delta: -30, at: 0.01)
+    XCTAssertEqual(pager.offset, -pager.bounds.width - 30, accuracy: 0.001)
+
+    controller.rootView.sidebarWidth = 260
+    controller.rootView.layoutSubtreeIfNeeded()
+    XCTAssertEqual(pager.bounds.width, 260, accuracy: 0.001)
+    for (index, page) in pager.pages.enumerated() {
+      XCTAssertEqual(page.frame.width, 260, accuracy: 0.001)
+      XCTAssertEqual(page.frame.minX, CGFloat(index) * 260, accuracy: 0.001)
+    }
+    XCTAssertEqual(pager.offset, -260 - 30, accuracy: 0.001, "strip offset follows the new page width during swipe")
+    await awaitSettle { pager.endTracking() }
+  }
+
   // Design section 2: the theme crossfades with the pager position.
   func testThemeBlendFollowsPosition() throws {
     controller.pager.setPositionForTesting(0.5)
@@ -300,12 +349,23 @@ final class SpacePagerTests: XCTestCase {
     await awaitSettle { controller.nextSpace(nil) }
     let key = try XCTUnwrap(pager.lastPacing)
     XCTAssertEqual(controller.currentSpace, sidebar.spaceOrder[2])
+    XCTAssertEqual(controller.sidebarController.view.flavor, .dark)
+    // #99 (M9): swipe from Dev (.dark) back to Work (.light) crosses the halfway flavor flip (.darkAqua -> .aqua).
+    await awaitSettle {
+      pager.gestureMayBegin()
+      pager.beginTracking()
+      _ = FrameScript(view: pager, frames: 20, step: { t in pager.track(delta: 9, at: t) },
+                      done: { pager.endTracking() })
+    }
+    let flavorSwipe = try XCTUnwrap(pager.lastPacing)
+    XCTAssertEqual(controller.currentSpace, sidebar.spaceOrder[1])
+    XCTAssertEqual(controller.sidebarController.view.flavor, .light)
 
     var load = [0.0]
     let cores = ProcessInfo.processInfo.activeProcessorCount
     let loaded = getloadavg(&load, 1) != 1 || load[0] >= Double(cores)
     let fps = NSScreen.main?.maximumFramesPerSecond ?? 0
-    for (label, stats) in [("space-swipe", swipe), ("space-key", key)] {
+    for (label, stats) in [("space-swipe", swipe), ("space-key", key), ("space-swipe-flavor", flavorSwipe)] {
       // "frame@ms": which frame of the interaction went over (the swipe tracks for 20 frames, then settles).
       // Indices count from the first gated interval; the lead-in (display-link start-up) is printed apart.
       let hitches = stats.intervals.enumerated().filter { $0.element > stats.hitchThreshold }
