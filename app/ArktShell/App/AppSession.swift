@@ -27,6 +27,8 @@ final class AppSession {
   let importer: ArcImportCoordinator
   /// Archive and restore: the model first, then an outbox to `archiveStore` (decision 11).
   let archive: ArchiveCoordinator
+  /// The auto-archive pass every minute (E5d).
+  let autoArchive: AutoArchiveTimer
   /// Arc's folder; read only when the user asks for an import.
   let arcFiles = ArcSourceFiles(directory: AppEnvironment.arcDirectory)
   /// Arc's sidebar file existed at the last check (existence only, off the main actor): at launch and again each
@@ -62,7 +64,9 @@ final class AppSession {
     self.importer = ArcImportCoordinator(
       source: source, archive: archiveStore, archiveState: settingsStore, importRecord: settingsStore,
       persistSidebar: { await autosaver.flush() })     // the import record waits for the merged sidebar on disk
-    self.archive = ArchiveCoordinator(source: source, store: archiveStore)
+    let archive = ArchiveCoordinator(source: source, store: archiveStore)
+    self.archive = archive
+    self.autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
     self.faviconStore = faviconStore
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
@@ -77,6 +81,7 @@ final class AppSession {
     window.window?.center()
     window.showWindow(nil)
     refreshArcImportAvailability()
+    startAutoArchive()
     if let notice = Self.notice(for: outcome) {
       // The notice case only: `OpenOutcome` carries file names, which never go to the log.
       Self.log.notice("launch outcome \(String(describing: notice), privacy: .public)")
@@ -92,6 +97,22 @@ final class AppSession {
       MainActor.assumeIsolated {
         guard let self, self.changedSinceBackup else { return }
         self.backUp()
+      }
+    }
+  }
+
+  /// E5d: the visible tab is exempt (BH-076 media-playing tabs join once the engine reports audio state), each
+  /// pass that archived something shows the BH-085 toast, and an Arc import that adds a Space restarts the clock for
+  /// the running timer before the merged tabs appear (plan decision 7).
+  private func startAutoArchive() {
+    autoArchive.exempt = { [weak self] in self?.window.sidebarController.resolver.visible ?? [] }
+    autoArchive.onArchived = { [weak self] archived in
+      self?.window.toasts.show(Toast(text: ToastText.autoArchived(archived.count)))
+    }
+    importer.onAutoArchiveClockReset = { [weak self] date in self?.autoArchive.clockDidReset(to: date) }
+    Task { [autoArchive] in
+      do { try await autoArchive.start() } catch {
+        Self.log.error("auto-archive unavailable \(String(describing: type(of: error)), privacy: .public)")
       }
     }
   }

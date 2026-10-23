@@ -101,6 +101,22 @@ struct ArcImportCoordinatorTests {
     #expect(try arc.unchanged())
   }
 
+  /// E5d: the running auto-archive timer learns the new clock before the merged Today tabs reach the sidebar, so no
+  /// tick in between can archive them with the old clock; an archive-only re-import does not report a reset.
+  @Test func clockResetIsReportedBeforeTheMerge() async throws {
+    let arc = try ArcFixtureFolder()
+    let harness = Harness()
+    var reported: [(date: Date, spacesAtReport: Int)] = []
+    let source = harness.source
+    harness.coordinator.onAutoArchiveClockReset = { reported.append(($0, source.sidebar.spaces.count)) }
+
+    _ = try await harness.coordinator.run(arc.files)
+    _ = try await harness.coordinator.run(arc.files)
+
+    #expect(reported.map(\.date) == [Self.importTime])
+    #expect(reported.map(\.spacesAtReport) == [0])
+  }
+
   @Test func reimportAddsMissingSpacesAndLeavesTheRestAlone() async throws {
     let withoutBeta = try ArcFixtureFolder { global in
       try ArcFixtureFolder.removeEntry(ArcFixtureFolder.betaID, in: "spaces", of: &global)

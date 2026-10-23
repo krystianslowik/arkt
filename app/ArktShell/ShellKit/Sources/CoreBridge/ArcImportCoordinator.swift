@@ -153,6 +153,9 @@ enum ArcImportRead {
 @MainActor
 public final class ArcImportCoordinator {
   public private(set) var isRunning = false
+  /// Called with the new auto-archive start right after a run reset it and before the merge, so a running timer
+  /// never sees the imported Today tabs with the old clock.
+  public var onAutoArchiveClockReset: (@MainActor (Date) -> Void)?
   private let source: ModelSidebarSource
   private let archive: any ArchiveStoring
   private let archiveState: any ArchiveStateStoring
@@ -186,7 +189,9 @@ public final class ArcImportCoordinator {
     let imported = bundle.sidebar
     let record = try await importRecord.loadArcImportRecord()
     if !ArcImportMerge.missingSpaces(in: imported, comparedTo: source.sidebar, record: record).isEmpty {
-      try await archiveState.resetAutoArchiveStart(to: now())
+      let resetAt = now()
+      try await archiveState.resetAutoArchiveStart(to: resetAt)
+      onAutoArchiveClockReset?(resetAt)
     }
     // Merged against the sidebar as it is now, after the awaits (the user may have edited it meanwhile).
     var counts = ArcImportMergeCounts()
