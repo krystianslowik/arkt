@@ -293,6 +293,32 @@ Run the GUI tests (`swift test --filter ShellKitGUITests`, logged-in GUI session
 build the app (`xcodegen generate`, then `xcodebuild`, see `README.md`) when you touch `app/ArktShell/App` or
 `project.yml`.
 
+Run the UI tests (XCUITest, scheme `ArktShellUITests`) when you touch `app/ArktShell/App`, `ShellUI` accessibility
+identifiers or a flow they cover. They launch the Debug app into a throwaway data folder and defaults suite and drive
+it with the real pointer and keyboard, so run them in a logged-in GUI session with the display awake and unlocked,
+and keep your hands off the keyboard and mouse until they finish:
+
+```zsh
+cd app/ArktShell && xcodegen generate
+xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
+  -resultBundlePath build/ui-$(date +%s).xcresult test
+```
+
+Add `-only-testing:ArktShellUITests/<Class>/<test>` for one test. To scale the harness wait timeouts (default 10 s),
+set `TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE=3` in the environment of `xcodebuild`; as a build setting argument it does
+not reach the test runner.
+
+One-time setup on a developer Mac (admin password once each):
+
+1. Developer mode for the tools: `DevToolsSecurity -enable` (your account must be in the `_developer` group).
+2. Automation mode without a password prompt on every run:
+   `automationmodetool enable-automationmode-without-authentication`.
+3. If macOS asks on the first run to let the test runner, Terminal or Xcode control the computer, allow it in System
+   Settings > Privacy & Security > Accessibility (and Automation if asked). If the prompt was dismissed, add your
+   terminal app there and run again.
+4. Signing stays ad hoc (`CODE_SIGN_IDENTITY: "-"` in `project.yml`); no Apple Development identity is needed. Do
+   not pass `CODE_SIGNING_ALLOWED=NO` to the UI test run: the test runner needs the ad-hoc signature.
+
 ### Privacy
 
 Test fixtures are synthetic. Never commit real browsing data, Arc data, titles, URLs, credentials or signing
@@ -395,5 +421,9 @@ Recommendations only; repository settings are changed by the maintainer.
   blocking; its frame-timing gates (command bar latency, Space swipe pacing) and the two tests that catch a Space
   settle mid-flight run in a separate step whose numbers are printed but not asserted, because shared runners have a
   60 Hz virtual display and a load far above their core count. GUI tests and timing gates stay a local check
-  (section 7). Chromium is not built in CI (hours of build time and over 100 GB of disk); engine changes are verified
+  (section 7). "UI tests (informative)" builds the Debug app and runs the XCUITest scheme `ArktShellUITests` with
+  wait timeouts scaled by 3; it is not part of the gate and may fail without blocking. When it fails it uploads the
+  result bundle (`ui-tests-xcresult`, kept 7 days) with the failing test's window screenshot, accessibility tree and
+  sandbox file listing. It is promoted to a required check only after 10 consecutive green runs on `main` and a local
+  20-iteration run without a failure (`-test-iterations 20 -run-tests-until-failure`). Chromium is not built in CI (hours of build time and over 100 GB of disk); engine changes are verified
   locally and reported in the pull request.

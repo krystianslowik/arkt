@@ -321,3 +321,54 @@ override was needed.
 - `Sandbox.remove()` clears the suite with `removePersistentDomain`, but the launch test never writes a defaults key,
   so a populated suite was not exercised. U1 saw `defaults delete` leave an empty plist; U8 (Toolbar toggle) is the
   first test that shows whether an empty `dev.arkt.uitest.*.plist` stays behind.
+
+## U3: CI job (informative) and the local how-to (#166)
+
+Base: `origin/main` at `a79d75f`, branch `chore/166-ui-tests-u3`. No local build or UI test run: the change is CI
+YAML and docs, verified on the pull request's own runs.
+
+### What was done
+
+- `.github/workflows/swift-tests.yml` (own commit): job `ui-tests`, name `UI tests (informative)`, `macos-26`,
+  `timeout-minutes: 40`, `continue-on-error: true`, not in the gate's `needs`. Steps: checkout, setup-xcode, XcodeGen
+  with the `app` job's pinned version and SHA-256, restore-only cache of `app/ArktShell/build/SourcePackages`,
+  `xcodegen generate`, then `xcodebuild -scheme ArktShellUITests ... -resultBundlePath $RUNNER_TEMP/ui.xcresult
+  -parallel-testing-enabled NO test` with `TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE: "3"` in the step's `env:`. No
+  `CODE_SIGNING_ALLOWED=NO`. On failure, `actions/upload-artifact` (v7.0.2, pinned by SHA) uploads the result bundle
+  as `ui-tests-xcresult`, kept 7 days.
+- `CONTRIBUTING.md` (own commit): section 7 gains the local UI test run, the hands-off rule, the timeout-scale note
+  and the one-time setup list; section 12 describes the job, its artifact and the promotion criteria (decision 8).
+- `actionlint` on the workflow: no findings.
+
+### CI run on the pull request
+
+| | |
+|---|---|
+| Run | `39988982373`, head `32a1372`, workflow conclusion `success` |
+| `UI tests (informative)` | `success`, job 2 min 30 s (16:49:40 to 16:52:09 UTC) |
+| `xcodebuild test` step | 2 min 12 s, build included (no derived data cache); `** TEST SUCCEEDED **` |
+| Tests | `Executed 1 test, with 0 failures` (`LaunchTests/test_E_launchOnEmptyDataFolderShowsWindowAndQuitsCleanly`, 10.07 s; "Setting up automation session" at 3.9 s) |
+| SPM cache | restored from the `app` job's `app-spm-macOS-ARM64-...` key |
+| Signing | `ArktShell.app` and `ArktShellUITests-Runner.app` signed "Sign to Run Locally" (`codesign --sign -`), accepted by the runner |
+| Permission steps | none: no Accessibility, Automation or developer mode step was needed on the hosted runner |
+| `Swift tests` gate | `success`; its `needs` are still `isolation, arktcore, shellkit, app` |
+| Result bundle upload | skipped (the tests passed); the failure path was not exercised in this pull request |
+
+The CI build (Xcode 26.6) prints 11 Swift 6 concurrency warnings in `UITests/Harness/Waits.swift` ("main
+actor-isolated property 'exists' / 'value' / 'label' / 'isEnabled' / 'isSelected' / 'state' can not be referenced
+from a nonisolated context") that the local Xcode 27.1 build of U2 did not show. They do not fail the build; they
+are left for a follow-up because U3 does not change the harness.
+
+### Deviations from the plan
+
+- The result bundle is uploaded only when the job fails (`if: ${{ failure() }}`), not on every non-cancelled run: a
+  passing run has no attachments (decision 7), so its bundle carries nothing a reviewer needs.
+- `TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE=3` is set in the step's `env:` instead of on the `xcodebuild` command line
+  (U2 notes for U3: only the process environment reaches the test runner).
+- `-parallel-testing-enabled NO` added to the command, from the plan's flakiness strategy.
+- The issue was moved from `status:blocked` (not `status:ready`) to `status:in-progress`, since U2 (#165) had merged.
+
+### What remains
+
+- Promotion to a required check (U16): 10 consecutive green runs on `main` and a local 20-iteration run.
+- The `Waits.swift` concurrency warnings under Xcode 26.6.
