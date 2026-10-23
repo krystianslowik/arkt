@@ -69,7 +69,8 @@ public struct ArcImportResult: Hashable, Sendable {
   public var report: ImportReport
   /// The Arkt node created for each imported Arc item id. Root containers and skipped items have no entry.
   public var nodeIDsByArcID: [String: NodeID]
-  /// The Arkt Space created for each imported Arc space id.
+  /// The Arkt Space created for each imported Arc space id. Space ids are `StableID.uuid(forArcID:)` of the Arc id,
+  /// so they are the same on every import; node ids are freshly minted.
   public var spaceIDsByArcID: [String: SpaceID]
 
   public init(
@@ -87,8 +88,9 @@ public enum ArcSidebarImporter {
   /// The creation date used for items that have none. Fixed, so imports are deterministic.
   public static let defaultFallbackCreatedAt = Date(timeIntervalSinceReferenceDate: 0)
 
-  /// Builds the sidebar. Bad or unsupported items are skipped and listed in the report; only a file without a
-  /// global container throws.
+  /// Builds the sidebar. Bad or unsupported items and spaces are skipped and listed in the report (a space the model
+  /// refuses, such as a second space with an id already used, is skipped too). Only a file without a global container
+  /// throws.
   public static func makeSidebar(
     from file: ArcSidebarFile,
     fallbackCreatedAt: Date = defaultFallbackCreatedAt
@@ -144,7 +146,17 @@ private struct Builder {
     if theme == nil, Self.hasWindowTheme(space.customInfo) {
       report.warnings.append(.unsupportedTheme(spaceID: space.id))
     }
-    let spaceID = sidebar.addSpace(title: space.title, profile: profileName(space.profile), theme: theme)
+    // Stable ids (Track E decision 6c): a re-import maps Arc spaces and archive entry sources to the same Spaces.
+    let spaceID = StableID.uuid(forArcID: space.id)
+    do {
+      try sidebar.addSpace(Space(id: spaceID, title: space.title, profile: profileName(space.profile), theme: theme))
+    } catch SidebarError.duplicateID {
+      // Two spaces with one id cannot occur in a valid file; the second one's items are reported as unreachable.
+      return skip(space.id, .decodeFailed("second space with this id"))
+    } catch {
+      // Any other refusal skips this Space the same way; one bad Space never aborts the whole import.
+      return skip(space.id, .decodeFailed(String(describing: error)))
+    }
     spaceIDsByArcID[space.id] = spaceID
     report.spaces += 1
     let roots = Self.rootIDs(of: space)

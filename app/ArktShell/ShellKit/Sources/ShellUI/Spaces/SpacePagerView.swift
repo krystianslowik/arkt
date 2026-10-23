@@ -23,6 +23,7 @@ public final class SpacePagerView: NSView {
   public var onPosition: (@MainActor (CGFloat) -> Void)?
   /// A swipe or `go(to:)` came to rest on a page (not called for `jump(to:)` or interrupted settles).
   public var onSettle: (@MainActor (Int) -> Void)?
+  /// Test hook: called after `onSettle`.
   @_spi(Smoke) public var onSettleForTesting: (@MainActor (Int) -> Void)?
 
   let strip = NSView(frame: .zero)
@@ -200,6 +201,8 @@ public final class SpacePagerView: NSView {
   }
 
   // MARK: Tracking (scrollWheel and scripted swipes share these)
+  // `@_spi(Smoke)` only limits who else may call these; the one outside caller (the app's SmokeRunner) is compiled
+  // into Debug and Profile builds only.
 
   @_spi(Smoke) public func beginTracking() {
     guard !pages.isEmpty, pageWidth > 0 else { return }

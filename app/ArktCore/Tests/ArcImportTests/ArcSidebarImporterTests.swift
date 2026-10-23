@@ -564,4 +564,53 @@ struct ArcSidebarImporterTests {
     #expect(alpha.theme == nil)
     #expect(report.warnings == [.unsupportedTheme(spaceID: Self.alphaID)])
   }
+
+  // MARK: Stable Space ids
+
+  @Test func spaceIDsAreStableAcrossImports() throws {
+    let file = try ArcSidebarFile.decode(ArcSidebarFileTests.fixture())
+    let first = try ArcSidebarImporter.makeSidebar(from: file)
+    let second = try ArcSidebarImporter.makeSidebar(from: file)
+    #expect(!first.spaceIDsByArcID.isEmpty)
+    #expect(first.spaceIDsByArcID == second.spaceIDsByArcID)
+    #expect(first.sidebar.spaceOrder == second.sidebar.spaceOrder)
+    for (arcID, spaceID) in first.spaceIDsByArcID where UUID(uuidString: arcID) != nil {
+      #expect(spaceID == UUID(uuidString: arcID))
+    }
+  }
+
+  /// A non-UUID Arc space id maps through `StableID`, the same rule the archive importer uses for item ids (see
+  /// `ArcArchiveImporterTests.nonUUIDItemKeyUsesStableID`), so a re-import finds the Spaces of the first import.
+  @Test func nonUUIDSpaceIDUsesTheSharedStableRule() throws {
+    let result = try Self.importMutatedResult { global in
+      try Self.mutateEntry(Self.betaID, in: "spaces", of: &global) { $0["id"] = "legacy-space" }
+    }
+    let spaceID = try #require(result.spaceIDsByArcID["legacy-space"])
+    #expect(spaceID == StableID.uuid(forArcID: "legacy-space"))
+    #expect(result.sidebar.spaces[spaceID]?.title == "Beta")
+  }
+
+  @Test func repeatedSpaceIDIsSkippedNotDuplicated() throws {
+    let result = try Self.importMutatedResult { global in
+      try Self.mutateEntry(Self.betaID, in: "spaces", of: &global) { $0["id"] = Self.alphaID }
+    }
+    #expect(result.report.spaces == 1)
+    #expect(result.sidebar.spaceOrder.count == 1)
+    #expect(result.sidebar.spaces[try #require(UUID(uuidString: Self.alphaID))]?.title == "Alpha")
+    #expect(result.report.skipped.contains(
+      SkippedItem(itemID: Self.alphaID, reason: .decodeFailed("second space with this id"))))
+  }
+
+  /// A Space the model refuses is skipped like an undecodable one: the import goes on, and every item under the
+  /// skipped Space is reported (unreachable), not lost and not thrown.
+  @Test func repeatedSpaceIDStillAccountsForEveryItem() throws {
+    let file = try Self.mutatedFile { global in
+      try Self.mutateEntry(Self.betaID, in: "spaces", of: &global) { $0["id"] = Self.alphaID }
+    }
+    let result = try ArcSidebarImporter.makeSidebar(from: file)
+    try Self.expectEveryItemAccounted(file, result)
+    let unreachable = Set(result.report.skipped.filter { $0.reason == .unreachable }.map(\.itemID))
+    #expect(unreachable.isSuperset(of: [Self.easelID, Self.betaTodayTabID]))
+    #expect(result.sidebar.nodes.count == result.nodeIDsByArcID.count)
+  }
 }

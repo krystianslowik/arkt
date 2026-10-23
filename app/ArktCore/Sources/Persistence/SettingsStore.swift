@@ -1,3 +1,4 @@
+import ArcImport
 import Archive
 import Foundation
 import GRDB
@@ -16,6 +17,11 @@ extension ArchiveSettings: SettingsGroup {
 extension ArchiveState: SettingsGroup {
   public static let storageKey = "archive.state"
   public static var defaultValue: ArchiveState { ArchiveState() }
+}
+
+extension ArcImportRecord: SettingsGroup {
+  public static let storageKey = "arcImport.record"
+  public static var defaultValue: ArcImportRecord { ArcImportRecord() }
 }
 
 /// Profile data settings in SQLite (`setting` table): they travel with the database and its backups. App-level
@@ -59,6 +65,43 @@ public struct SettingsStore: Sendable {
     }
   }
 
+  /// Sets `ArchiveState.autoArchiveStartedAt` to `date`, overwriting any stored start and keeping the other fields,
+  /// in one transaction. An Arc sidebar import calls it with the import time (Track E decision 7), so imported Today
+  /// tabs each get one full threshold from the import instead of archiving on the first tick.
+  @concurrent
+  public func resetAutoArchiveStart(to date: Date) async throws {
+    dispatchPrecondition(condition: .notOnQueue(.main))
+    let key = ArchiveState.storageKey
+    let updatedAt = date.timeIntervalSinceReferenceDate
+    try await database.writer.write { db in
+      var state = Self.decode(ArchiveState.self, from: try Self.fetchValue(db, key: key))
+      state.autoArchiveStartedAt = date
+      try Self.store(db, key: key, value: try Self.encode(state), updatedAt: updatedAt)
+    }
+  }
+
+  /// The Arc ids earlier Arc imports handled, or an empty record.
+  @concurrent
+  public func loadArcImportRecord() async throws -> ArcImportRecord { try await load(ArcImportRecord.self) }
+
+  /// Adds `record`'s ids to the stored record (read, union, write in one transaction), so two imports can never
+  /// drop each other's ids. An unreadable stored record counts as empty.
+  @concurrent
+  public func recordArcImport(_ record: ArcImportRecord, at date: Date) async throws {
+    dispatchPrecondition(condition: .notOnQueue(.main))
+    let key = ArcImportRecord.storageKey
+    let updatedAt = date.timeIntervalSinceReferenceDate
+    try await database.writer.write { db in
+      var stored = Self.decode(ArcImportRecord.self, from: try Self.fetchValue(db, key: key))
+      stored.formUnion(record)
+      try Self.store(db, key: key, value: try Self.encode(stored), updatedAt: updatedAt)
+    }
+  }
+
+  /// The stored `ArchiveSettings`, or the defaults.
+  @concurrent
+  public func loadArchiveSettings() async throws -> ArchiveSettings { try await load(ArchiveSettings.self) }
+
   private static func fetchValue(_ db: Database, key: String) throws -> Data? {
     // Optional read: the table is STRICT, so a non-BLOB value cannot occur; nil means missing.
     try Data.fetchOne(db, sql: "SELECT value FROM setting WHERE key = ?", arguments: [key])
@@ -84,3 +127,7 @@ public struct SettingsStore: Sendable {
     return (try? JSONDecoder().decode(Group.self, from: data)) ?? Group.defaultValue
   }
 }
+
+extension SettingsStore: ArchiveStateStoring {}
+
+extension SettingsStore: ArcImportRecordStoring {}

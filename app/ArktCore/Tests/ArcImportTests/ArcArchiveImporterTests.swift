@@ -208,14 +208,14 @@ struct ArcArchiveImporterTests {
 
   @Test func nodeIDForAUUIDKeyIsThatUUID() throws {
     let key = "C0000000-0000-4000-8000-000000000001"
-    #expect(ArcArchiveImporter.nodeID(forArcID: key) == UUID(uuidString: key))
-    #expect(ArcArchiveImporter.nodeID(forArcID: key.lowercased()) == UUID(uuidString: key))
+    #expect(StableID.uuid(forArcID: key) == UUID(uuidString: key))
+    #expect(StableID.uuid(forArcID: key.lowercased()) == UUID(uuidString: key))
   }
 
   @Test func nodeIDForANonUUIDKeyIsStableVersion8AndDistinct() throws {
     let keys = ["legacy-item", "other-item", "", "legacy-item "]
-    let ids = keys.map(ArcArchiveImporter.nodeID(forArcID:))
-    #expect(keys.map(ArcArchiveImporter.nodeID(forArcID:)) == ids)
+    let ids = keys.map(StableID.uuid(forArcID:))
+    #expect(keys.map(StableID.uuid(forArcID:)) == ids)
     #expect(Set(ids).count == keys.count)
     for id in ids {
       let bytes = withUnsafeBytes(of: id.uuid) { Array($0) }
@@ -223,5 +223,10 @@ struct ArcArchiveImporterTests {
       #expect(bytes[8] >> 6 == 0b10)  // RFC 4122 variant
       #expect(Array(id.uuidString)[14] == "8")
     }
+  }
+
+  @Test func nonUUIDItemKeyUsesStableID() throws {
+    let result = try Self.importItems(["legacy-item", Self.tabEntry(id: "legacy-item", url: "https://example.com/a")])
+    #expect(result.items.map(\.id) == [StableID.uuid(forArcID: "legacy-item")])
   }
 }

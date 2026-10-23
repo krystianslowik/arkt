@@ -257,4 +257,28 @@ struct SidebarTests {
     #expect(NodeKind.tab(tab) != .folder(folder))
     #expect(NodeKind.split(split) != .folder(folder))
   }
+
+  @Test func updateTabChangesOnlyGivenFields() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "S")
+    let tab = try sidebar.addTab(url: URL(string: "https://a.example")!, title: "A", in: .today(space))
+    let when = Date(timeIntervalSinceReferenceDate: 800_000_000)
+    try sidebar.updateTab(tab, title: "B", lastActiveAt: when)
+    guard case .tab(let item)? = sidebar.nodes[tab]?.kind else { Issue.record("not a tab"); return }
+    #expect(item.url == URL(string: "https://a.example")!)
+    #expect(item.title == "B")
+    #expect(item.lastActiveAt == when)
+    #expect(sidebar.children(of: .today(space)) == [tab])          // position untouched
+  }
+
+  @Test func updateTabRejectsUnknownAndNonTabNodes() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "S")
+    let folder = try sidebar.addFolder(title: "F", in: .pinned(space))
+    let before = sidebar
+    #expect(throws: SidebarError.unknownNode(folder)) { try sidebar.updateTab(folder, title: "X") }
+    let ghost = NodeID()
+    #expect(throws: SidebarError.unknownNode(ghost)) { try sidebar.updateTab(ghost, title: "X") }
+    #expect(sidebar == before)
+  }
 }

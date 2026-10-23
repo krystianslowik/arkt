@@ -21,7 +21,8 @@ public struct DatabaseLocation: Hashable, Sendable {
   }
 }
 
-/// Rolling file backups: `Backups/Arkt-<UTC stamp>.sqlite`, newest `DatabaseLocation.backupsKept` kept.
+/// Rolling file backups: `Backups/Arkt-<UTC stamp>.sqlite`, newest `DatabaseLocation.backupsKept` kept. Backups
+/// launch found unusable live in `Backups/Unusable/`, outside the rotation.
 enum Backups {
   static func stamp(_ date: Date) -> String {
     let formatter = DateFormatter()
@@ -43,10 +44,42 @@ enum Backups {
       .map { directory.appendingPathComponent($0, isDirectory: false) }
   }
 
-  /// Serializes every backup and leftover sweep in the process (routine `makeBackup`, pre-migration backups and the
-  /// launch sweep), so the free-name check and the temp files of one backup can never race another.
-  /// NOT re-entrant (`Mutex` deadlocks or traps on a nested lock): nothing called inside `writeLocked` or
-  /// `removeLeftoversLocked` may call `write` or `removeLeftovers`.
+  /// `Backups/Unusable/`: backups launch could not use (damaged, or written by a newer build and so possibly holding
+  /// the user's newest real data). `list` never returns them, so they are never restored and never pruned.
+  static func unusableDirectory(in directory: URL) -> URL {
+    directory.appendingPathComponent("Unusable", isDirectory: true)
+  }
+
+  /// Moves `backup` into `unusableDirectory`, keeping its name or adding `-2`, `-3`, ... before the extension; never
+  /// overwrites a file already set aside. Returns the new location. Runs under the backup lock, so its free-name
+  /// check never races another set-aside or a backup's pruning.
+  @discardableResult
+  static func setAside(_ backup: URL) throws -> URL {
+    try lock.withLock { _ in try setAsideLocked(backup) }
+  }
+
+  private static func setAsideLocked(_ backup: URL) throws -> URL {
+    let fileManager = FileManager.default
+    let destination = unusableDirectory(in: backup.deletingLastPathComponent())
+    try ArktDatabase.createOwnedDirectory(at: destination)
+    let stem = backup.deletingPathExtension().lastPathComponent
+    let pathExtension = backup.pathExtension
+    var target = destination.appendingPathComponent(backup.lastPathComponent, isDirectory: false)
+    var counter = 1
+    while fileManager.fileExists(atPath: target.path) {
+      counter += 1
+      target = destination.appendingPathComponent("\(stem)-\(counter).\(pathExtension)", isDirectory: false)
+    }
+    try fileManager.moveItem(at: backup, to: target)
+    syncDirectory(destination)
+    syncDirectory(backup.deletingLastPathComponent())
+    return target
+  }
+
+  /// Serializes every backup, set-aside and leftover sweep in the process (routine `makeBackup`, pre-migration
+  /// backups, `setAside` and the launch sweep), so the free-name check and the temp files of one backup can never race
+  /// another. NOT re-entrant (`Mutex` deadlocks or traps on a nested lock): nothing called inside `writeLocked`,
+  /// `setAsideLocked` or `removeLeftoversLocked` may call `write`, `setAside` or `removeLeftovers`.
   private static let lock = Mutex(())
 
   /// Copies `source` with SQLite's online backup API into a hidden temp file, renames it into place, then prunes to

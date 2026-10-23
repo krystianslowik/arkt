@@ -213,7 +213,12 @@ struct ArktLaunchTests {
       }
       #expect(file == older.lastPathComponent)
       #expect(recovered.sidebar == sidebar)
-      #expect(try Data(contentsOf: newer) == Data("not sqlite".utf8))  // a bad backup is left as it was
+      // A bad backup is set aside unchanged, out of rotation, under its own name.
+      let setAside = Backups.unusableDirectory(in: location.backupsDirectory)
+        .appendingPathComponent(newer.lastPathComponent)
+      #expect(try Data(contentsOf: setAside) == Data("not sqlite".utf8))
+      #expect(!FileManager.default.fileExists(atPath: newer.path))
+      #expect(try Backups.list(in: location.backupsDirectory) == [older])
     }
   }
 
@@ -286,7 +291,61 @@ struct ArktLaunchTests {
       for second in 4...9 {
         #expect(try await recreated.database.makeBackup(in: location, now: Self.at(Double(second))) == nil)
       }
-      #expect(try Backups.list(in: location.backupsDirectory) == [real])
+      #expect(try Backups.list(in: location.backupsDirectory).isEmpty)
+      let setAside = Backups.unusableDirectory(in: location.backupsDirectory)
+        .appendingPathComponent(real.lastPathComponent)
+      #expect(FileManager.default.fileExists(atPath: setAside.path))
+    }
+  }
+
+  /// A backup from a newer build may hold the user's newest real data: once launch finds it unusable it moves to
+  /// `Backups/Unusable/`, where later routine backups and their pruning never reach it.
+  @Test func newerSchemaBackupSetAsideSurvivesLaterPruning() async throws {
+    try await withTemporaryDirectory { directory in
+      let location = DatabaseLocation(directory: directory)
+      let state = try await ArktLaunch.openAndLoad(location, now: Self.at(0))
+      _ = try await SidebarStore(database: state.database).save(TestSidebars.make("real"), at: Self.at(1))
+      let real = try await Self.backup(state.database, location, at: 2)
+      try state.database.close()
+      try markAsMigratedByANewerBuild(real)
+      let realBytes = try Data(contentsOf: real)
+      try Data("not sqlite".utf8).write(to: location.databaseURL)
+
+      let recreated = try await ArktLaunch.openAndLoad(location, now: Self.at(3))
+      defer { try? recreated.database.close() }
+      guard case .recreatedEmpty = recreated.outcome else {
+        Issue.record("unexpected outcome \(recreated.outcome)")
+        return
+      }
+      _ = try await SidebarStore(database: recreated.database).save(TestSidebars.make("new"), at: Self.at(4))
+      for second in 5...(5 + DatabaseLocation.backupsKept + 2) {
+        _ = try await Self.backup(recreated.database, location, at: Double(second))
+      }
+      #expect(try Backups.list(in: location.backupsDirectory).count == DatabaseLocation.backupsKept)
+      let setAside = Backups.unusableDirectory(in: location.backupsDirectory)
+        .appendingPathComponent(real.lastPathComponent)
+      #expect(try Data(contentsOf: setAside) == realBytes)
+    }
+  }
+
+  @Test func settingAsideNeverOverwritesAnEarlierUnusableBackup() async throws {
+    try await withTemporaryDirectory { directory in
+      let location = DatabaseLocation(directory: directory)
+      let name = Backups.fileName(for: Self.at(0))
+      let unusable = Backups.unusableDirectory(in: location.backupsDirectory)
+      try FileManager.default.createDirectory(at: unusable, withIntermediateDirectories: true)
+      try Data("earlier".utf8).write(to: unusable.appendingPathComponent(name))
+      try Data("not sqlite".utf8).write(to: location.backupsDirectory.appendingPathComponent(name))
+
+      let state = try await ArktLaunch.openAndLoad(location, now: Self.at(1))
+      defer { try? state.database.close() }
+      #expect(state.outcome == .recreatedEmpty(quarantinedAs: nil))
+      #expect(try Backups.list(in: location.backupsDirectory).isEmpty)
+      #expect(try Data(contentsOf: unusable.appendingPathComponent(name)) == Data("earlier".utf8))
+      let names = try FileManager.default.contentsOfDirectory(atPath: unusable.path).sorted()
+      #expect(names.count == 2)
+      let moved = try #require(names.first { $0 != name })
+      #expect(try Data(contentsOf: unusable.appendingPathComponent(moved)) == Data("not sqlite".utf8))
     }
   }
 

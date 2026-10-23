@@ -7,6 +7,17 @@ import AppKit
 public final class ContentCardView: NSView {
   public let clipView = NSView()
   public private(set) var contentView: NSView?
+  /// Covers the page inside `clipView` (rounded corners, hairline above it) while set; the first-run empty state.
+  public private(set) var emptyStateView: NSView?
+  /// Drawn above the page (a sibling of `clipView`, added after it), centered near the bottom edge.
+  var toastView: ToastView? {
+    didSet {
+      guard toastView !== oldValue else { return }
+      oldValue?.removeFromSuperview()
+      if let toastView { addSubview(toastView, positioned: .above, relativeTo: nil) }
+      needsLayout = true
+    }
+  }
   private let metrics: ShellMetrics
 
   public init(metrics: ShellMetrics = .standard) {
@@ -40,7 +51,19 @@ public final class ContentCardView: NSView {
     view.translatesAutoresizingMaskIntoConstraints = true
     view.autoresizingMask = [.width, .height]
     view.frame = clipView.bounds
-    clipView.addSubview(view)
+    clipView.addSubview(view, positioned: .below, relativeTo: emptyStateView)
+  }
+
+  /// Installs `view` above the page, filling `clipView`, or removes the current one when nil.
+  public func setEmptyState(_ view: NSView?) {
+    if emptyStateView === view { return }
+    emptyStateView?.removeFromSuperview()
+    emptyStateView = view
+    guard let view else { return }
+    view.translatesAutoresizingMaskIntoConstraints = true
+    view.autoresizingMask = [.width, .height]
+    view.frame = clipView.bounds
+    clipView.addSubview(view, positioned: .above, relativeTo: nil)
   }
 
   public override func setFrameSize(_ newSize: NSSize) {
@@ -54,6 +77,8 @@ public final class ContentCardView: NSView {
     CATransaction.setDisableActions(true)
     clipView.frame = bounds
     contentView?.frame = clipView.bounds
+    emptyStateView?.frame = clipView.bounds
+    layoutToast()
     // An explicit shadow path avoids an offscreen pass to derive the shadow shape from content alpha.
     layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: metrics.cardCornerRadius,
                                cornerHeight: metrics.cardCornerRadius, transform: nil)
@@ -84,6 +109,14 @@ public final class ContentCardView: NSView {
   public override func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
     applyBorderWidth()
+  }
+
+  /// Centered, `ToastView.bottomInset` above the bottom edge, at most `ToastView.maxWidth` wide.
+  private func layoutToast() {
+    guard let toastView else { return }
+    let size = toastView.preferredSize(maxWidth: max(0, bounds.width - 2 * ToastView.bottomInset))
+    toastView.frame = NSRect(x: ((bounds.width - size.width) / 2).rounded(),
+                             y: ToastView.bottomInset, width: size.width, height: size.height)
   }
 
   /// One physical pixel at the current backing scale.

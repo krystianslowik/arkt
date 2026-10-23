@@ -1,0 +1,917 @@
+{
+  "version": 1,
+  "sidebar": {
+    "containers": [
+      {
+        "global": {}
+      },
+      {
+        "spaces": [
+          "A0000000-0000-4000-8000-0000000000A1",
+          {
+            "id": "A0000000-0000-4000-8000-0000000000A1",
+            "title": "Alpha",
+            "profile": {
+              "default": true
+            },
+            "containerIDs": [
+              "pinned",
+              "A0000000-0000-4000-8000-000000000101",
+              "unpinned",
+              "A0000000-0000-4000-8000-000000000102"
+            ],
+            "newContainerIDs": [
+              {
+                "pinned": {}
+              },
+              "A0000000-0000-4000-8000-000000000101",
+              {
+                "unpinned": {
+                  "_0": {
+                    "shared": {}
+                  }
+                }
+              },
+              "A0000000-0000-4000-8000-000000000102"
+            ],
+            "customInfo": {
+              "iconType": {
+                "icon": "star"
+              },
+              "windowTheme": {
+                "background": {
+                  "single": {
+                    "_0": {
+                      "style": {
+                        "color": {
+                          "_0": {
+                            "blendedGradient": {
+                              "_0": {
+                                "baseColors": [
+                                  {
+                                    "red": 0.2,
+                                    "green": 0.4,
+                                    "blue": 0.9,
+                                    "alpha": 1.0,
+                                    "colorSpace": "extendedSRGB"
+                                  },
+                                  {
+                                    "red": 0.9,
+                                    "green": 0.3,
+                                    "blue": 0.5,
+                                    "alpha": 1.0,
+                                    "colorSpace": "extendedSRGB"
+                                  }
+                                ],
+                                "overlayColors": [
+                                  {
+                                    "red": 1.0,
+                                    "green": 1.0,
+                                    "blue": 1.0,
+                                    "alpha": 0.3,
+                                    "colorSpace": "extendedSRGB"
+                                  }
+                                ],
+                                "translucencyStyle": "light",
+                                "modifiers": {
+                                  "intensityFactor": 0.6,
+                                  "noiseFactor": 0.25,
+                                  "overlay": "grain"
+                                },
+                                "wheel": {
+                                  "complimentary": {}
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "isVibrant": false,
+                      "contentOverBackgroundAppearance": "light"
+                    }
+                  }
+                },
+                "primaryColorPalette": {
+                  "midTone": {
+                    "red": 0.5,
+                    "green": 0.5,
+                    "blue": 0.5,
+                    "alpha": 1.0,
+                    "colorSpace": "extendedSRGB"
+                  },
+                  "shaded": {
+                    "red": 0.5,
+                    "green": 0.5,
+                    "blue": 0.5,
+                    "alpha": 1.0,
+                    "colorSpace": "extendedSRGB"
+                  },
+                  "shadedDark": {
+                    "red": 0.5,
+                    "green": 0.5,
+                    "blue": 0.5,
+                    "alpha": 1.0,
+                    "colorSpace": "extendedSRGB"
+                  },
+                  "tintedLight": {
+                    "red": 0.5,
+                    "green": 0.5,
+                    "blue": 0.5,
+                    "alpha": 1.0,
+                    "colorSpace": "extendedSRGB"
+                  }
+                },
+                "semanticColorPalette": {
+                  "appearanceBased": {
+                    "light": {
+                      "background": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "backgroundExtra": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundPrimary": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundSecondary": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundTertiary": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "title": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "subtitle": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "hover": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "focus": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "cutoutColor": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "minContrastColor": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "maxContrastColor": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      }
+                    },
+                    "dark": {
+                      "background": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "backgroundExtra": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundPrimary": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundSecondary": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundTertiary": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "title": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "subtitle": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "hover": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "focus": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "cutoutColor": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "minContrastColor": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "maxContrastColor": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-0000000000B1",
+          {
+            "id": "A0000000-0000-4000-8000-0000000000B1",
+            "title": "Beta",
+            "profile": {
+              "default": true
+            },
+            "containerIDs": [
+              "pinned",
+              "A0000000-0000-4000-8000-000000000201",
+              "unpinned",
+              "A0000000-0000-4000-8000-000000000202"
+            ],
+            "newContainerIDs": [
+              {
+                "pinned": {}
+              },
+              "A0000000-0000-4000-8000-000000000201",
+              {
+                "unpinned": {
+                  "_0": {
+                    "shared": {}
+                  }
+                }
+              },
+              "A0000000-0000-4000-8000-000000000202"
+            ],
+            "customInfo": {
+              "windowTheme": {
+                "background": {
+                  "single": {
+                    "_0": {
+                      "style": {
+                        "color": {
+                          "_0": {
+                            "blendedSingleColor": {
+                              "_0": {
+                                "color": {
+                                  "red": 0.1,
+                                  "green": 0.7,
+                                  "blue": 0.4,
+                                  "alpha": 1.0,
+                                  "colorSpace": "extendedSRGB"
+                                },
+                                "translucencyStyle": "light",
+                                "modifiers": {
+                                  "intensityFactor": 0.5,
+                                  "noiseFactor": 0.0,
+                                  "overlay": "sand"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "isVibrant": false,
+                      "contentOverBackgroundAppearance": "light"
+                    }
+                  }
+                },
+                "primaryColorPalette": {
+                  "midTone": {
+                    "red": 0.5,
+                    "green": 0.5,
+                    "blue": 0.5,
+                    "alpha": 1.0,
+                    "colorSpace": "extendedSRGB"
+                  },
+                  "shaded": {
+                    "red": 0.5,
+                    "green": 0.5,
+                    "blue": 0.5,
+                    "alpha": 1.0,
+                    "colorSpace": "extendedSRGB"
+                  },
+                  "shadedDark": {
+                    "red": 0.5,
+                    "green": 0.5,
+                    "blue": 0.5,
+                    "alpha": 1.0,
+                    "colorSpace": "extendedSRGB"
+                  },
+                  "tintedLight": {
+                    "red": 0.5,
+                    "green": 0.5,
+                    "blue": 0.5,
+                    "alpha": 1.0,
+                    "colorSpace": "extendedSRGB"
+                  }
+                },
+                "semanticColorPalette": {
+                  "appearanceBased": {
+                    "light": {
+                      "background": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "backgroundExtra": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundPrimary": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundSecondary": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundTertiary": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "title": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "subtitle": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "hover": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "focus": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "cutoutColor": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "minContrastColor": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "maxContrastColor": {
+                        "red": 0.95,
+                        "green": 0.95,
+                        "blue": 0.95,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      }
+                    },
+                    "dark": {
+                      "background": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "backgroundExtra": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundPrimary": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundSecondary": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "foregroundTertiary": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "title": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "subtitle": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "hover": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "focus": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "cutoutColor": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "minContrastColor": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      },
+                      "maxContrastColor": {
+                        "red": 0.1,
+                        "green": 0.1,
+                        "blue": 0.1,
+                        "alpha": 1.0,
+                        "colorSpace": "extendedSRGB"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "items": [
+          "A0000000-0000-4000-8000-000000000301",
+          {
+            "id": "A0000000-0000-4000-8000-000000000301",
+            "parentID": null,
+            "childrenIds": [
+              "A0000000-0000-4000-8000-000000000311",
+              "A0000000-0000-4000-8000-000000000312"
+            ],
+            "title": null,
+            "createdAt": 780000060.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "topApps": {
+                    "_0": {
+                      "default": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000311",
+          {
+            "id": "A0000000-0000-4000-8000-000000000311",
+            "parentID": "A0000000-0000-4000-8000-000000000301",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780000121.0,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/mail",
+                "savedTitle": "Example Mail",
+                "savedMuteStatus": "allowAudio",
+                "timeLastActiveAt": 790000000.25
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000312",
+          {
+            "id": "A0000000-0000-4000-8000-000000000312",
+            "parentID": "A0000000-0000-4000-8000-000000000301",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780000181.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/calendar",
+                "savedTitle": "Example Calendar",
+                "savedMuteStatus": "allowAudio"
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000101",
+          {
+            "id": "A0000000-0000-4000-8000-000000000101",
+            "parentID": null,
+            "childrenIds": [
+              "A0000000-0000-4000-8000-000000000111",
+              "A0000000-0000-4000-8000-000000000121"
+            ],
+            "title": null,
+            "createdAt": 780000242.0,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "A0000000-0000-4000-8000-0000000000A1"
+                  }
+                }
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000111",
+          {
+            "id": "A0000000-0000-4000-8000-000000000111",
+            "parentID": "A0000000-0000-4000-8000-000000000101",
+            "childrenIds": [
+              "A0000000-0000-4000-8000-000000000112",
+              "A0000000-0000-4000-8000-000000000113"
+            ],
+            "title": "Reading",
+            "createdAt": 780000302.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "list": {
+                "customInfo": {
+                  "iconType": {
+                    "icon": "folder"
+                  }
+                }
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000112",
+          {
+            "id": "A0000000-0000-4000-8000-000000000112",
+            "parentID": "A0000000-0000-4000-8000-000000000111",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780000363.0,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/articles/one",
+                "savedTitle": "Article One",
+                "savedMuteStatus": "allowAudio",
+                "timeLastActiveAt": 790000000.25
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000113",
+          {
+            "id": "A0000000-0000-4000-8000-000000000113",
+            "parentID": "A0000000-0000-4000-8000-000000000111",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780000423.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/articles/two",
+                "savedTitle": "Article Two",
+                "savedMuteStatus": "allowAudio",
+                "timeLastActiveAt": 790000000.25
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000121",
+          {
+            "id": "A0000000-0000-4000-8000-000000000121",
+            "parentID": "A0000000-0000-4000-8000-000000000101",
+            "childrenIds": [
+              "A0000000-0000-4000-8000-000000000122",
+              "A0000000-0000-4000-8000-000000000123"
+            ],
+            "title": null,
+            "createdAt": 780000484.0,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "splitView": {
+                "layoutOrientation": "vertical",
+                "itemWidthFactors": [
+                  0.5,
+                  0.5
+                ],
+                "focusItemID": "A0000000-0000-4000-8000-000000000122",
+                "customInfo": null,
+                "timeLastActiveAt": null
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000122",
+          {
+            "id": "A0000000-0000-4000-8000-000000000122",
+            "parentID": "A0000000-0000-4000-8000-000000000121",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780000544.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/docs/left",
+                "savedTitle": "Left Pane",
+                "savedMuteStatus": "allowAudio",
+                "timeLastActiveAt": 790000000.25
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000123",
+          {
+            "id": "A0000000-0000-4000-8000-000000000123",
+            "parentID": "A0000000-0000-4000-8000-000000000121",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780000605.0,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/docs/right",
+                "savedTitle": "Right Pane",
+                "savedMuteStatus": "allowAudio",
+                "timeLastActiveAt": 790000000.25
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000102",
+          {
+            "id": "A0000000-0000-4000-8000-000000000102",
+            "parentID": null,
+            "childrenIds": [
+              "A0000000-0000-4000-8000-000000000131"
+            ],
+            "title": null,
+            "createdAt": 780000665.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "A0000000-0000-4000-8000-0000000000A1"
+                  }
+                }
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000131",
+          {
+            "id": "A0000000-0000-4000-8000-000000000131",
+            "parentID": "A0000000-0000-4000-8000-000000000102",
+            "childrenIds": [],
+            "title": "My Renamed Tab",
+            "createdAt": 780000726.0,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/news",
+                "savedTitle": "Example News",
+                "savedMuteStatus": "allowAudio",
+                "timeLastActiveAt": 790000000.25
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000201",
+          {
+            "id": "A0000000-0000-4000-8000-000000000201",
+            "parentID": null,
+            "childrenIds": [
+              "A0000000-0000-4000-8000-000000000211",
+              "A0000000-0000-4000-8000-000000000212"
+            ],
+            "title": null,
+            "createdAt": 780000786.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "A0000000-0000-4000-8000-0000000000B1"
+                  }
+                }
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000211",
+          {
+            "id": "A0000000-0000-4000-8000-000000000211",
+            "parentID": "A0000000-0000-4000-8000-000000000201",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780000847.0,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/wiki",
+                "savedTitle": "Example Wiki",
+                "savedMuteStatus": "allowAudio",
+                "timeLastActiveAt": 790000000.25
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000212",
+          {
+            "id": "A0000000-0000-4000-8000-000000000212",
+            "parentID": "A0000000-0000-4000-8000-000000000201",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780000907.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "easel": {}
+            }
+          },
+          "A0000000-0000-4000-8000-000000000202",
+          {
+            "id": "A0000000-0000-4000-8000-000000000202",
+            "parentID": null,
+            "childrenIds": [
+              "A0000000-0000-4000-8000-000000000221"
+            ],
+            "title": null,
+            "createdAt": 780000968.0,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "A0000000-0000-4000-8000-0000000000B1"
+                  }
+                }
+              }
+            }
+          },
+          "A0000000-0000-4000-8000-000000000221",
+          {
+            "id": "A0000000-0000-4000-8000-000000000221",
+            "parentID": "A0000000-0000-4000-8000-000000000202",
+            "childrenIds": [],
+            "title": null,
+            "createdAt": 780001028.5,
+            "isUnread": false,
+            "originatingDevice": "D0D0D0D0-0000-4000-8000-00000000DE01",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/search?q=arkt",
+                "savedTitle": "Example Search",
+                "savedMuteStatus": "allowAudio",
+                "timeLastActiveAt": 790000000.25
+              }
+            }
+          }
+        ],
+        "topAppsContainerIDs": [
+          {
+            "default": true
+          },
+          "A0000000-0000-4000-8000-000000000301"
+        ]
+      }
+    ]
+  },
+  "firebaseSyncState": {},
+  "sidebarSyncState": {}
+}

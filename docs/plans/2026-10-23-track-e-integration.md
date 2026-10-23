@@ -121,18 +121,25 @@ Traffic Control routing of restores), BH-211 (onboarding).
 5. **Backups.** `makeBackup` once after a successful load, then every 30 minutes while the sidebar changed (Track D
    open question 2, proposed cadence adopted). `makeBackup` returns nil while the database is empty, so a first run
    writes none.
-6. **Arc import rules.** (a) The sidebar part runs only when the Arkt sidebar is empty (no Spaces and no nodes);
-   `ArcSidebarImporter` mints fresh node ids, so importing it into a non-empty sidebar would duplicate everything.
-   (b) The archive part always runs and is idempotent: `ArchiveStore.add(_, onConflict: .keepExisting)` with Arc's
-   stable item ids. (c) Space ids become deterministic (Arc's space UUID, or a SHA-256-derived UUID for a non-UUID key,
-   the same rule `ArcArchiveImporter` uses), so a later archive-only re-import maps entry sources to the same Arkt
-   Spaces. (d) The result UI shows counts only.
+6. **Arc import rules.** (a) The sidebar part is merged, not replaced (user decisions 2 and 5, 2026-10-23): a run
+   adds only Arc Spaces and top-level Favorites never imported before. `ArcImportRecord` (`SettingsStore`, key
+   `arcImport.record`) holds the Arc Space ids and Arc Favorite item ids every earlier run handled; anything in it is
+   skipped whatever the sidebar holds now, so items deleted in Arkt are not restored and a Favorite whose URL drifted
+   in Arc is not added again. A Space whose stable id is already in Arkt is skipped too (left untouched), and a
+   Favorite tab whose URL is already a Favorite is skipped (no duplicates across profiles). With an empty record (a
+   database filled by an import that ran before the record existed) the id and URL matches are all there is for that
+   run, which then records what it saw. `ArcSidebarImporter` mints fresh node ids, which never collide with existing
+   nodes. (b) The archive part always runs and is idempotent: `ArchiveStore.add(_, onConflict: .keepExisting)` with
+   Arc's stable item ids; an unreadable archive file is reported (`archiveFailed`) and never costs the sidebar part.
+   (c) Space ids become deterministic (Arc's space UUID, or a SHA-256-derived UUID for a non-UUID key, the same rule
+   `ArcArchiveImporter` uses), so a re-import maps Spaces and archive entry sources to the same Arkt Spaces. (d) The
+   result UI shows counts only.
 7. **Open question 6 (Track D), decided: an Arc sidebar import resets `ArchiveState.autoArchiveStartedAt` to the
    import time.** Imported Today tabs carry Arc's old `lastActiveAt` values; without the reset the first tick after
    import would archive almost all of them at once. With it, every imported Today tab gets one full threshold (12 h by
-   default) from the import. Archive-only re-imports do not reset it. Arc's own `autoArchiveStartTime` is not carried
-   over. This is a product call the user may overrule (summary, open question 1); it is one line in
-   `ArcImportCoordinator`.
+   default) from the import. The reset happens whenever a run adds at least one Space (first import or a re-import
+   that adds a missing Space); a run that adds no Space does not reset it. Arc's own `autoArchiveStartTime` is not
+   carried over. Confirmed by the user (User decisions 1).
 8. **Favicons.** Imported favicons (Arc's `SidebarItemsFaviconCache`, read through `ArcFaviconCache`) and engine
    favicons are written to `<Arkt data dir>/Favicons/<node UUID>.png` by `FaviconStore` (atomic writes, off-main) and
    loaded once after launch. They are not in SQLite and not in backups (re-fetched by the engine later). The sidebar
@@ -151,9 +158,9 @@ Traffic Control routing of restores), BH-211 (onboarding).
     autosaver together, bounded by 1 s each. Residual risk, documented: a crash after the sidebar save landed but before
     the outbox write succeeded loses that archived entry; the outbox write is issued ~500 ms before the debounced
     sidebar save, so this needs a failing archive write plus a crash.
-12. **Profiles.** `SidebarController` shows one profile (`"default"`). Spaces imported from non-default Arc profiles are
-    imported and saved but not shown until profile switching exists. The import summary states how many Spaces are
-    hidden for that reason (summary, open question 5).
+12. **Profiles.** `SidebarController` shows one profile (`"default"`). Spaces and Favorites imported from non-default
+    Arc profiles are merged into the default profile and shown immediately (User decisions 3); they lose separate
+    cookies and logins. The import summary counts the Spaces that came from other profiles.
 
 ## File map (end state)
 
@@ -163,9 +170,10 @@ app/ArktCore/
   Sources/Archive/ArchiveQuery.swift                 (E4a: moved ArchiveFilter, ArchiveConflictPolicy, ArchivePage)
   Sources/Archive/ArchiveStoring.swift               (E4a: ArchiveStoring, ArchiveStateStoring)
   Sources/Persistence/ArchiveStore.swift             (E4a: types moved out, conformance added)
-  Sources/Persistence/SettingsStore.swift            (E4a: resetAutoArchiveStart(to:), conformance)
+  Sources/Persistence/SettingsStore.swift            (E4a: resetAutoArchiveStart(to:), conformance; E4c: import record)
   Sources/ArcImport/ArcSidebarImporter.swift         (E4a: deterministic Space ids)
   Sources/ArcImport/StableID.swift                   (E4a: shared stable-id helper, used by both importers)
+  Sources/ArcImport/ArcImportRecord.swift            (E4c: Arc ids earlier imports handled, store protocol)
   Tests/SidebarModelTests/SidebarTests.swift         (E2a)
   Tests/PersistenceTests/SettingsStoreTests.swift    (E4a)
   Tests/PersistenceTests/ArchiveStoreTests.swift     (E4a: import Archive where the moved types are used)
@@ -184,6 +192,8 @@ app/ArktShell/
   ShellKit/Sources/CoreBridge/RecoveryNotice.swift   (E3c)
   ShellKit/Sources/CoreBridge/FaviconStore.swift     (E4b)
   ShellKit/Sources/CoreBridge/ArcImportCoordinator.swift (E4c)
+  ShellKit/Sources/CoreBridge/ArcImportMerge.swift   (E4c: merge against the import record)
+  ShellKit/Sources/CoreBridge/FaviconWriter.swift    (E4c: favicon writes queued behind the launch prune)
   ShellKit/Sources/CoreBridge/ArchiveCoordinator.swift (E5a, E5d)
   ShellKit/Sources/CoreBridge/ArchiveListModel.swift (E5c)
   ShellKit/Sources/CoreBridge/ToastText.swift        (E5a)
@@ -649,7 +659,6 @@ struct SidebarSourceContractTests {
 - `space(_:)` maps title, profile and theme: an Arc `extendedSRGB` color maps to `ShellUI.RGBA(space: .sRGB)` with the
   same components; a nil theme or empty `baseColors` maps to `SpaceThemeInfo.bridgeDefault`.
 - Tab title is `customTitle ?? title`.
-- `replaceAll(with:)` on an empty source emits `.spaces` first, then `.structure` for each non-empty section.
 
 `SidebarDiffTests` (pure functions over two `Sidebar` values):
 - Removing a folder with children emits `.structure(.pinned(space))` and NOT `.structure(.folder(folder))`.
@@ -813,12 +822,6 @@ public final class ModelSidebarSource: SidebarSource {
     mutate { sidebar in for id in ids { try? sidebar.updateTab(id, lastActiveAt: date) } }
   }
 
-  /// Import into an empty sidebar (E4c). Precondition: `sidebar` holds no Space and no node.
-  public func replaceAll(with imported: SidebarModel.Sidebar) {
-    precondition(sidebar.spaces.isEmpty && sidebar.nodes.isEmpty, "replaceAll is for an empty sidebar")
-    mutate { $0 = imported }
-  }
-
   // MARK: Mutation
 
   @discardableResult
@@ -940,6 +943,13 @@ heading "Welcome to Arkt", one line "Bring your Spaces, pinned tabs and Archive 
 buttons: "Import from Arc" (default button, only when `isArcImportAvailable`) and "New Space". The sidebar column stays
 (empty pages, no dots); Cmd-T still works (decision 3). The panel disappears as soon as a Space exists (`.spaces`
 through C6's `onSpacesChanged`). No onboarding beyond this (BH-211 is a later track).
+
+**Note (from the E2b review).** `SidebarController.apply(.spaces)` calls `showSpace(first)` when the current Space is
+no longer listed, but `showSpace` only commits the page; it does not activate a tab. Whenever the current Space is
+removed and another Space becomes current (here, and in E5 when an archive or restore empties or removes a Space),
+also activate `tabToRestore(in:)` for the new Space, the way `pagerSettled(on:)` does, and cover it with a GUI test.
+When the last Space goes away, E2b already sets `currentSpace = nil` and clears the current page; the empty state
+above takes over.
 
 **Step 1: Failing GUI tests**
 
@@ -1391,171 +1401,149 @@ cd $REPO && git add app/ArktShell/ShellKit/Sources/CoreBridge/FaviconStore.swift
 
 ---
 
-### Task E4c: Arc import (coordinator, menu, summary)
+### Task E4c: Arc import (coordinator, merge, record, menu, summary)
+
+As built (including the review follow-ups). The rules are decision 6 and User decisions 1, 2, 3 and 5: a run
+adds only Arc Spaces and top-level Favorites never imported before, merges other Arc profiles into the default one,
+imports the archive idempotently, and never restores items the user deleted in Arkt.
 
 **Files:**
-- Create: `$KIT/Sources/CoreBridge/ArcImportCoordinator.swift`, `$KIT/Tests/CoreBridgeTests/ArcImportCoordinatorTests.swift`,
-  `$KIT/Tests/CoreBridgeTests/Fakes.swift` (`FakeArchiveStore`, `FakeArchiveState`), and copy the two synthetic
-  fixtures into `$KIT/Tests/CoreBridgeTests/Fixtures/` (declare `resources: [.copy("Fixtures")]` on the test target)
-- Modify: `$APP/App/AppSession.swift`, `$APP/App/MainMenu.swift`
+- Create: `$CORE/Sources/ArcImport/ArcImportRecord.swift` (`ArcImportRecord`, `ArcImportRecordStoring`)
+- Modify: `$CORE/Package.swift` (`Persistence` and `PersistenceTests` depend on `ArcImport`),
+  `$CORE/Sources/Persistence/SettingsStore.swift` (`ArcImportRecord: SettingsGroup` under key `arcImport.record`,
+  `loadArcImportRecord()`, `recordArcImport(_:at:)` as read, union, write in one transaction, conformance),
+  `$CORE/Tests/PersistenceTests/SettingsStoreTests.swift`
+- Create: `$KIT/Sources/CoreBridge/ArcImportMerge.swift` (pure merge), `$KIT/Sources/CoreBridge/ArcImportCoordinator.swift`,
+  `$KIT/Sources/CoreBridge/FaviconWriter.swift`, `$KIT/Tests/CoreBridgeTests/ArcImportMergeTests.swift`,
+  `$KIT/Tests/CoreBridgeTests/ArcImportCoordinatorTests.swift`, `$KIT/Tests/CoreBridgeTests/FaviconWriterTests.swift`,
+  `$KIT/Tests/CoreBridgeTests/Fakes.swift` (`FakeArchiveStore`, `FakeArchiveState`, `FakeArcImportRecordStore`,
+  `ArcFixtureFolder`), and the two synthetic fixtures copied into `$KIT/Tests/CoreBridgeTests/Fixtures/`
+  (`resources: [.copy("Fixtures")]` on the test target)
+- Modify: `$KIT/Package.swift`, `$KIT/Sources/CoreBridge/FaviconStore.swift` (init doc: it does disk I/O, never on
+  the main actor), `$APP/App/AppSession.swift`, `$APP/App/AppDelegate.swift`, `$APP/App/MainMenu.swift`,
+  `$APP/App/AppEnvironment.swift`. `ModelSidebarSource` gets no import entry point: the coordinator uses `mutate`.
 
 **Step 1: Failing tests** (fixtures only; the Arc "directory" is a temp folder holding copies named
 `StorableSidebar.json` and `StorableArchiveItems.json`, plus one hand-made favicon file named
-`ArcFaviconCache.fileName(forItemID:)` of a fixture tab id inside `SidebarItemsFaviconCache/`)
+`ArcFaviconCache.fileName(forItemID:)` of a fixture tab id inside `SidebarItemsFaviconCache/`; `arc.unchanged()`
+compares SHA-256 digests of every file before and after)
 
-```swift
-@MainActor
-struct ArcImportCoordinatorTests {
-  @Test func firstImportFillsEmptySidebarAndArchiveAndResetsClock() async throws {
-    let arc = try ArcFixtureFolder()          // temp copy, removed on deinit
-    let source = ModelSidebarSource()
-    let archive = FakeArchiveStore()
-    let state = FakeArchiveState()
-    let coordinator = ArcImportCoordinator(source: source, archive: archive, archiveState: state,
-                                           now: { Date(timeIntervalSinceReferenceDate: 900_000_000) })
-    let result = try await coordinator.run(ArcSourceFiles(directory: arc.url))
-    #expect(result.summary.sidebarImported)
-    #expect(result.summary.spaces == source.sidebar.spaces.count && result.summary.spaces > 0)
-    #expect(await archive.addCalls.map(\.policy) == [.keepExisting])
-    #expect(await state.resets == [Date(timeIntervalSinceReferenceDate: 900_000_000)])
-    #expect(result.favicons.count == 1)
-    #expect(try arc.unchanged())              // SHA-256 of every fixture file before == after
-  }
+`SettingsStoreTests`: an empty record until something is recorded; `recordArcImport` unions with what is stored;
+the stored JSON has sorted arrays and survives a reopen; `SettingsStore` is an `ArcImportRecordStoring`.
 
-  @Test func reimportIntoNonEmptySidebarImportsArchiveOnly() async throws {
-    // run twice: second summary.sidebarImported == false, sidebar unchanged, archive add called again with
-    // .keepExisting (FakeArchiveStore honors it: written == 0), no second clock reset
-  }
+`ArcImportMergeTests` (pure, `ArcImportResult` built by hand with Arc ids):
+- An existing Space (same id) is left exactly as it is, and its Arc id is recorded (`counts.handled`).
+- An added Space keeps its tree and moves to the target profile.
+- Favorites of every profile merge without duplicate URLs; without a record the URL match still prevents duplicates.
+- A folder (and a split) Favorite imported twice is added once (`previouslyImportedFavorites == 2`).
+- A deleted Space is not restored (`missingSpaces` is empty, so no clock reset; `previouslyImportedSpaces == 1`).
+- A deleted Favorite is not restored; a Favorite whose URL drifted in Arc is not added again.
+- Never imported items are still added when a record exists.
 
-  @Test func archiveSourcesMapToTheSameSpacesOnReimport() async throws {
-    // import, then archive-only re-import into the same source: every .space(id) source of the second batch is a
-    // Space present in source.sidebar (stable Space ids, E4a)
-  }
+`ArcImportCoordinatorTests` (fakes for the archive, the archive state and the record):
+- First import fills the empty sidebar (2 Spaces, 7 tabs, 1 folder, 1 split, 2 Favorites), adds the archive with
+  `.keepExisting`, resets the clock once, returns 1 favicon, records both Space ids and both Favorite ids.
+- Re-import of the same file adds nothing, keeps the clock, archive delta 0, `previouslyImportedFavorites == 2`.
+- Re-import adds a missing Space (and resets the clock) and leaves the rest alone, user Space order kept.
+- Archive sources map to the same Spaces on re-import.
+- A Favorite deleted in Arkt is not restored; recorded Spaces missing from Arkt are not restored and keep the clock.
+- An import from before the record existed falls back to the id and URL matches, then records everything it saw.
+- Other-profile Spaces and Favorites merge into the default profile without duplicate URLs.
+- Failures: no archive file (`archiveImported == nil`); an unreadable or wrong-version archive file keeps the
+  sidebar part (`archiveFailed`, no archive write); an undecodable sidebar throws and changes nothing; a failed
+  record load or clock reset throws before anything changed; a failed archive write or record write keeps the
+  sidebar part and is reported (`archiveFailed`, `recordFailed`); the record is written only after the persist hook
+  saw the merged sidebar, and when it reports the sidebar unsaved nothing is recorded (`recordFailed`); a second run
+  while one is running is refused.
+- Summary lines are counts only (no fixture title or URL fragment).
 
-  @Test func missingArchiveFileStillImportsSidebar() async throws { /* summary.archiveImported == nil */ }
-  @Test func undecodableSidebarThrowsAndChangesNothing() async throws { /* garbage file: throws, source empty */ }
-  @Test func summaryLinesAreCountsOnly() async throws {
-    // every line matches /^[A-Za-z ,:()]+[0-9]+/ style: no titles, no URLs (assert no fixture title substring)
-  }
-  @Test func hiddenProfileSpacesAreCounted() async throws { /* fixture Space with a non-default profile -> hiddenSpaces */ }
-}
-```
+`FaviconWriterTests`: coalescing, delay, ordering, waiting for the launch task, `touched`, and `touched` is cleared
+and stops growing after `launchLoadDidComplete()`.
 
-**Step 2:** Run `--filter ArcImportCoordinatorTests`; expect compile errors.
+**Step 2:** Run the filters; expect compile errors.
 
 **Step 3: Implement**
 
+- `ArcImportRead.read` (`@concurrent`, reads only): decodes the sidebar (a failure throws), then the archive file in
+  its own `do`/`catch` (a decode or version failure sets `archiveUnreadable`, the archive is nil), then the favicons
+  of imported tabs from `SidebarItemsFaviconCache`.
+- `ArcImportMerge.merge(_ imported: ArcImportResult, into:profile:record:)`: per Space, skip when the id is in Arkt
+  (`existingSpaces`) or its Arc id is recorded (`previouslyImportedSpaces`), else add it with its Pinned and Today
+  trees into `profile`. Per top-level Favorite of every Arc profile (the target profile first), skip when its Arc id
+  is recorded (`previouslyImportedFavorites`) or, for a tab, when its URL is already a Favorite
+  (`duplicateFavorites`), else add it. `counts.handled` collects every Arc id it added or skipped (not refused ones),
+  so an import from before the record existed records what it matched. `missingSpaces(in:comparedTo:record:)` drives
+  the clock reset.
+- `ArcImportCoordinator.run(_:)`:
+
 ```swift
-import Archive
-import ArcImport
-import Foundation
-import SidebarModel
-
-public struct ArcSourceFiles: Sendable {
-  public let directory: URL
-  public init(directory: URL) { self.directory = directory }
-  public var sidebarFile: URL { directory.appendingPathComponent("StorableSidebar.json") }
-  public var archiveFile: URL { directory.appendingPathComponent("StorableArchiveItems.json") }
-  public var faviconDirectory: URL { directory.appendingPathComponent("SidebarItemsFaviconCache", isDirectory: true) }
-  /// Existence only; never reads (decision 3).
-  public var isAvailable: Bool { FileManager.default.fileExists(atPath: sidebarFile.path) }
+let bundle = try await ArcImportRead.read(files)
+let imported = bundle.sidebar
+let record = try await importRecord.loadArcImportRecord()
+if !ArcImportMerge.missingSpaces(in: imported, comparedTo: source.sidebar, record: record).isEmpty {
+  try await archiveState.resetAutoArchiveStart(to: now())
 }
-
-public struct ArcImportSummary: Equatable, Sendable {
-  public var sidebarImported: Bool
-  public var spaces = 0, hiddenSpaces = 0, tabs = 0, folders = 0, splits = 0, favorites = 0, skipped = 0
-  public var archiveImported: Int?     // rows written (0 on a re-import), nil when there was no archive file
-  public var archiveSkipped = 0
-  /// For the summary sheet and logs: counts only.
-  public var lines: [String] { ... }
-}
-
-public struct ArcImportOutcome: Sendable {
-  public var summary: ArcImportSummary
-  public var favicons: [UUID: Data]     // by Arkt node id, only when the sidebar was imported
-}
-
-/// Everything read from Arc's folder, off the main thread. Reads only; never writes, never lists other files.
-enum ArcImportRead {
-  struct Bundle: Sendable {
-    var sidebar: ArcImportResult
-    var archive: ArcArchiveImportResult?
-    var favicons: [UUID: Data]
-  }
-
-  @concurrent
-  static func read(_ files: ArcSourceFiles) async throws -> Bundle {
-    let file = try ArcSidebarFile.decode(Data(contentsOf: files.sidebarFile))
-    let sidebar = try ArcSidebarImporter.makeSidebar(from: file)
-    var archive: ArcArchiveImportResult?
-    if FileManager.default.isReadableFile(atPath: files.archiveFile.path) {
-      let decoded = try ArcArchiveFile.decode(Data(contentsOf: files.archiveFile))
-      try ArcArchiveImporter.checkVersion(decoded)
-      archive = ArcArchiveImporter.makeItems(from: decoded, spaceIDsByArcID: sidebar.spaceIDsByArcID)
-    }
-    let cache = ArcFaviconCache(directory: files.faviconDirectory)
-    var favicons: [UUID: Data] = [:]
-    for (arcID, nodeID) in sidebar.nodeIDsByArcID {
-      guard case .tab? = sidebar.sidebar.nodes[nodeID]?.kind, let png = cache.pngData(forItemID: arcID) else { continue }
-      favicons[nodeID] = png
-    }
-    return Bundle(sidebar: sidebar, archive: archive, favicons: favicons)
+var counts = ArcImportMergeCounts()
+source.mutate { counts = ArcImportMerge.merge(imported, into: &$0, profile: visibleProfile, record: record) }
+// Record only once the merged sidebar is on disk: recorded ids are never imported again, so a record ahead of the
+// saved sidebar would lose those items for good after a crash or force quit in the autosave debounce.
+var recordFailed = false
+if !counts.handled.isEmpty {
+  if await persistSidebar() {
+    do { try await importRecord.recordArcImport(counts.handled, at: now()) } catch { recordFailed = true }
+  } else {
+    recordFailed = true
   }
 }
-
-@MainActor
-public final class ArcImportCoordinator {
-  public init(source: ModelSidebarSource, archive: any ArchiveStoring, archiveState: any ArchiveStateStoring,
-              visibleProfile: String = "default", now: @escaping @MainActor () -> Date = { Date() })
-
-  /// Decision 6: sidebar only into an empty sidebar; archive always, `.keepExisting`; clock reset after a sidebar
-  /// import (decision 7). The in-memory sidebar changes first (and autosaves through `onDidChange`).
-  public func run(_ files: ArcSourceFiles) async throws -> ArcImportOutcome {
-    let bundle = try await ArcImportRead.read(files)
-    var summary = ArcImportSummary(sidebarImported: false)
-    var favicons: [UUID: Data] = [:]
-    if source.sidebar.spaces.isEmpty && source.sidebar.nodes.isEmpty {   // re-checked after the await
-      source.replaceAll(with: bundle.sidebar.sidebar)
-      summary.sidebarImported = true
-      favicons = bundle.favicons
-      try await archiveState.resetAutoArchiveStart(to: now())
-    }
-    if let archive = bundle.archive {
-      summary.archiveImported = try await self.archive.add(archive.items, onConflict: .keepExisting)
-      summary.archiveSkipped = archive.report.skipped.count
-    }
-    // fill counts from bundle.sidebar.report and the Spaces whose profile != visibleProfile
-    return ArcImportOutcome(summary: summary, favicons: favicons)
-  }
+// summary from counts; archiveFailed = bundle.archiveUnreadable
+if let items = bundle.archive {
+  do { summary.archiveImported = try await archive.add(items.items, onConflict: .keepExisting) }
+  catch { summary.archiveFailed = true }
 }
+return ArcImportOutcome(summary: summary, favicons: bundle.favicons.filter { counts.addedNodes.contains($0.key) })
 ```
+
+  `persistSidebar: @MainActor () async -> Bool` is injected: the app passes `{ await autosaver.flush() }`, tests a
+  fake. `isRunning` guards a second run (`ArcImportCoordinatorError.alreadyRunning`).
+- `ArcImportSummary` fields: `spaces`, `existingSpaces`, `previouslyImportedSpaces`, `otherProfileSpaces`, `tabs`,
+  `folders`, `splits`, `favorites`, `duplicateFavorites`, `previouslyImportedFavorites`, `skipped`,
+  `archiveImported` (nil: no file or failed), `archiveSkipped`, `archiveFailed`, `recordFailed` (sidebar not saved
+  or record write failed; logged, not shown).
 
 **Step 4: App wiring**
 
-- `AppSession` creates `ArchiveStore(database:)`, `SettingsStore(database:)`,
-  `FaviconStore(directory: location.directory.appendingPathComponent("Favicons"))` and the coordinator; sets
-  `window.isArcImportAvailable = ArcSourceFiles(directory: AppEnvironment.arcDirectory).isAvailable` (existence check
-  only) and `window.onImportFromArc = { [weak self] in self?.importFromArc() }`.
-- `importFromArc()`: disable the menu item and button while running; `Task { do { let outcome = try await
-  coordinator.run(...); try? await faviconStore.save(outcome.favicons); window.sidebarController.setFavicons(outcome.favicons);
-  showSummary(outcome.summary) } catch { toast "Couldn't import from Arc." + log type and code only } }`.
-- `showSummary`: an `NSAlert` sheet on the window titled "Imported from Arc" with `summary.lines` joined, e.g.
-  (example with made-up numbers) "3 Spaces, 40 tabs, 4 folders, 0 splits", "250 archived items",
-  "2 items could not be read", "1 Space belongs to another profile and is hidden for now". On an archive-only re-import:
-  "Your sidebar already has Spaces, so only the Archive was imported (N new items)."
-- After launch (in `start`): `Task { let map = await faviconStore.loadAll(for: Set(source.sidebar.nodes.keys));
-  window.sidebarController.setFavicons(map); await faviconStore.prune(keeping: Set(source.sidebar.nodes.keys)) }`.
-- `window.onFaviconChanged = { id, data in Task { try? await faviconStore.save(data.map { [id: $0] } ?? [:]) } }`.
+- `AppSession` creates `ArchiveStore(database:)`, `SettingsStore(database:)` and the coordinator
+  (`archiveState` and `importRecord` are both the `SettingsStore`, `persistSidebar` flushes the `SidebarAutosaver`); the `FaviconStore` comes from
+  `AppEnvironment.faviconStore(in:)` (`@concurrent`). `window.onImportFromArc` calls `importFromArc()`.
+- Availability: `refreshArcImportAvailability()` runs `ArcSourceFiles.isAvailable()` (`@concurrent`, existence only)
+  in one cached `Task` at launch and each time `AppDelegate.validateMenuItem` validates "Import from Arc..."; the
+  validation returns the cached value and the result updates `window.isArcImportAvailable` (empty-state button).
+- Favicons at launch, in this order: prune (only when the launch outcome is `.opened`; a restored or re-created
+  database is not the sidebar the favicons were written for), then the one launch load
+  (`loadAll(for:)` of the loaded node ids, skipping ids in `FaviconWriter.touched`), then
+  `writer.launchLoadDidComplete()`. Every `FaviconWriter` batch (engine changes, import favicons) is queued behind
+  the prune task (`FaviconWriter(after:)`), so the prune never removes a favicon written after launch.
+- `importFromArc()`: guarded by `canImportFromArc` (available and not running); `Task { outcome = try await
+  coordinator.run(...); faviconWriter.save(outcome.favicons); window.sidebarController.setFavicons(outcome.favicons);
+  log counts; showSummary(outcome.summary) }`, errors: toast "Couldn't import from Arc." and a log line with the
+  error type and code only.
+- `showSummary`: an `NSAlert` sheet titled "Imported from Arc" with `summary.lines` joined, for example
+  "2 Spaces, 7 tabs, 1 folder, 1 split", "1 Space already in Arkt left unchanged",
+  "1 Space imported before and removed in Arkt not restored", "1 Space from other Arc profiles added to the default
+  profile", "2 favorites added, 1 already in Arkt, 2 imported before", "4 new archived items" (or "0 archived items:
+  the Archive could not be imported" / "0 archived items: no Archive file"), "1 item could not be imported". A
+  re-import of the same file starts with "0 new Spaces: all 2 Spaces from Arc are already in Arkt".
 - `MainMenu`: File > "Import from Arc..." (no shortcut) targeting `AppDelegate.importFromArc(_:)` (forwards to the
-  session), enabled when the session exists and Arc's file exists.
+  session), enabled through `validateMenuItem`.
 
-**Step 5:** CoreBridge filter and full pure suite pass; App builds.
+**Step 5:** Core suite, CoreBridge filter and the full pure suite pass; App builds.
 
-**Step 6: Commit**
+**Step 6: Commits** (as landed)
 
-```zsh
-cd $REPO && git add app/ArktShell/ShellKit/Package.swift app/ArktShell/ShellKit/Sources/CoreBridge/ArcImportCoordinator.swift app/ArktShell/ShellKit/Tests/CoreBridgeTests app/ArktShell/App && git commit -m "Import from Arc: sidebar into an empty sidebar, archive idempotently, favicons, counts-only summary"
-```
+- Import from Arc: add missing Spaces, merge profiles, archive idempotently, favicons, counts-only summary
+- Record the Arc ids each Arc import handled
+- Arc re-import adds only items never imported before; keep the sidebar on a bad archive file; favicon launch fixes
+- Record Arc import ids only after the merged sidebar is saved (persistSidebar)
 
 ---
 
@@ -1672,6 +1660,8 @@ cd $REPO && git add app/ArktShell/ShellKit/Sources/CoreBridge app/ArktShell/Shel
 - Modify: `$KIT/Sources/ShellUI/Window/ShellWindowController.swift`, `$APP/App/MainMenu.swift`, `$APP/App/AppSession.swift`
 - Create: `$KIT/Tests/ShellKitGUITests/CloseTabTests.swift`
 
+(See the E3b note: a removed current Space must hand activation to `tabToRestore(in:)` of the next Space.)
+
 **Step 1: Failing GUI tests** (`StubSidebar.sample()` + `InMemoryEngine` or `FakeEngine`; the archive handler is a
 closure that records ids and removes them from the stub through a test-only remove helper, or use
 `ModelSidebarSource` directly since ShellKitGUITests may depend on CoreBridge; add the dependency if needed)
@@ -1750,6 +1740,14 @@ cd $REPO && git add app/ArktShell/ShellKit/Sources/ShellUI/Window/ShellWindowCon
 - Create: `$KIT/Tests/ShellKitGUITests/ArchiveWindowTests.swift`
 - Modify: `$APP/App/AppSession.swift`, `$APP/App/MainMenu.swift`
 
+**Note (from E4c, decide here): favicons of archived nodes.** `AppSession.startFavicons` prunes
+`<data dir>/Favicons` once at launch, keeping only the node ids in the loaded sidebar. An archived tab leaves the
+sidebar, so its favicon is deleted at the next launch, and a restore (same node id) comes back with the letter
+placeholder until the engine reports the favicon again. Decide whether archived node ids count as kept: either add
+the archive's root ids (and their snapshot descendants) to the keep set, which needs an id-only archive query at
+launch so the prune stays cheap, or accept the placeholder and document it. Whichever is chosen, the prune must
+still run before any favicon write (`FaviconWriter(after:)`).
+
 **Step 1: Failing tests**
 
 `ArchiveListModelTests` (fake store with 450 readable items and 3 unreadable rows):
@@ -1765,6 +1763,11 @@ cd $REPO && git add app/ArktShell/ShellKit/Sources/ShellUI/Window/ShellWindowCon
 
 GUI: the window lists rows from a stub data source, shows "3 items could not be read" in the footer when
 `unreadable == 3`, "Load More" visible only while `mayHaveMore`, double-click and the Restore button call `restore`.
+
+Required GUI test (covers the E2b outline cache pruning): through `ModelSidebarSource`, a `SidebarController` shows a
+folder (or split) with children, expanded; remove it (archive, or `mutate`), then insert a node under the SAME id with
+a different title and different children (restore, or `mutate`). The outline must show the new title and children,
+not the cached ones (`SidebarOutlineController` drops `items` and `containerChildren` for removed nodes).
 
 **Step 2:** Run the filters; expect compile errors.
 
@@ -1884,7 +1887,7 @@ cd $REPO && git add app/ArktShell/ShellKit/Sources/ShellUI/Archive app/ArktShell
     if !archived.isEmpty { window.toasts.show(Toast(text: ToastText.autoArchived(archived.count))) }   // BH-085
   }
 ```
-After an Arc import with `summary.sidebarImported`, set `startedAt` to the coordinator's reset date (re-read with
+After an Arc import with `summary.spaces > 0` (the run added a Space, so it reset the clock), set `startedAt` to the coordinator's reset date (re-read with
 `resolveAutoArchiveStart`) so the running timer uses the new clock immediately.
 
 **Step 4:** Filters pass; App builds. Manual (Debug, scratch data dir): set the profile threshold through a temporary
@@ -1917,9 +1920,12 @@ cd $REPO && git add app/ArktShell/ShellKit/Sources/CoreBridge/ArchiveCoordinator
 The line is counts and case names only:
 
 ```
-ARKT_SMOKE phase=verify outcome=opened spaces=3 hidden=0 tabs=12 folders=2 splits=1 favorites=2 archive=4 sidebarImported=-
+ARKT_SMOKE phase=verify outcome=opened spaces=3 tabs=12 folders=2 splits=1 favorites=2 archive=4 added=- existing=- archiveAdded=-
 ```
-(`archive` comes from `ArchiveStore.items(limit: nil).items.count`; `outcome` is the `OpenOutcome` case name.)
+(`archive` comes from `ArchiveStore.items(limit: nil).items.count`; `outcome` is the `OpenOutcome` case name. On
+the `import` phase `added`, `existing` and `archiveAdded` are the run's `summary.spaces`, `summary.existingSpaces`
+and `summary.archiveImported`; `verify` prints `-`. Spaces of other Arc profiles are merged into the default
+profile, so `spaces` counts them.)
 
 **Step 2: Build Debug** (App command). Expected `** BUILD SUCCEEDED **`.
 
@@ -1962,10 +1968,12 @@ ls $SMOKE/data | grep -c 'corrupt'
 
 Expected:
 1. `outcome=created spaces=0 ... archive=0`, and `0` backups.
-2. `phase=import ... sidebarImported=yes` with spaces/tabs/folders/splits matching the CLI's section totals and
-   `archive` matching the CLI's `archive imported` line.
+2. `phase=import ... added=N existing=0` with N and spaces/tabs/folders/splits matching the CLI's section totals,
+   and `archive` and `archiveAdded` matching the CLI's `archive imported` line.
 3. `outcome=opened` with the same counts as step 2; `1` backup; the `sqlite3` count equals `archive`.
-4. Import line shows `sidebarImported=no` and the archive delta `0`; verify counts unchanged.
+4. Re-import adds only Arc items never imported before, and the copy is unchanged, so the import line shows
+   `added=0 existing=N archiveAdded=0` with every count (Favorites included) equal to step 3; the verify line
+   matches step 3.
 5. Every line `OK`.
 6. `outcome=restoredFromBackup` with the same counts; `1` quarantined file.
 
@@ -2004,7 +2012,8 @@ into `spike/week1`, `git worktree remove ../arkt-wt/track-e`, `git worktree prun
 
 - `ChromiumEngine` (replaces `FakeEngine` in `AppDelegate.launch`), media state for BH-076, per-frame engine event
   batching.
-- Profile switching in the window (Spaces of non-default profiles are imported but hidden, decision 12).
+- Profile switching in the window (Spaces of non-default Arc profiles are merged into the default profile for now,
+  decision 12).
 - Drag and drop, moves, renames, Space deletion, the C3 removal/move follow-ups beyond cache pruning.
 - Clear / Archive Below / multi-select archive (BH-075, BH-077, BH-078, BH-072), Cmd-Shift-T (BH-074), archive search
   and filters UI (BH-087, BH-088, Unicode search follow-up), Clear Archive, education banner (BH-089).
@@ -2016,16 +2025,25 @@ into `spike/week1`, `git worktree remove ../arkt-wt/track-e`, `git worktree prun
 
 ## Open questions (product decisions)
 
-1. Arc import resets the auto-archive clock to the import time (decided here, Track D open question 6). Alternative:
-   carry Arc's `autoArchiveStartTime` over, which archives most imported Today tabs within the first minute.
-2. Re-import when Arkt already has Spaces: archive only (decided here). Alternative: add Arc Spaces that are missing.
+1. Resolved (User decisions 1): Arc import resets the auto-archive clock to the import time.
+2. Resolved (User decisions 2 and 5): a re-import imports the archive and adds only Arc Spaces and Favorites never
+   imported before; items deleted in Arkt are not restored.
 3. First-run wording and naming: the empty-state text, and the name of a Space created by "New Space" or by Cmd-T with
    no Space (placeholder "Space").
 4. Cmd-W on a split pane archives the whole split until BH-123 is checked in Arc; Cmd-W on a Favorite closes the page
    and keeps it (like pinned). Confirm both.
-5. Spaces from non-default Arc profiles: import and hide until profile switching exists (decided here), or merge them
-   into the default profile, or skip them.
+5. Resolved (User decisions 3): Spaces and Favorites from non-default Arc profiles are merged into the default
+   profile.
 6. Favicons imported from Arc live in Arkt's data folder and are not part of database backups. Acceptable?
 7. Recovery notices stay until dismissed; "Show Files" reveals Arkt's data folder. Acceptable, or should it be a sheet?
 8. The Archive window is reached from Window > Show Archive with no shortcut (KB-043). Confirm, given Cmd-Shift-L is
    kept for the Library (KB-065).
+
+## User decisions (2026-10-23)
+
+1. Arc import resets the auto-archive clock to the import time (`SettingsStore.resetAutoArchiveStart(to: importTime)`).
+2. Re-import when Arkt already has Spaces: import the archive AND add Arc Spaces that Arkt doesn't have yet (matched by the fixed Space ids from E4a), with their pinned/Today/folder trees; existing Spaces are left untouched, nothing is duplicated.
+3. Spaces from non-default Arc profiles are merged into the default profile (shown immediately; they lose separate cookies/logins). Their favorites merge into the default profile's favorites without duplicates.
+4. Cmd-W on a split pane closes/archives only that pane; the split shrinks (a split left with one pane becomes a plain tab). Cmd-W on a Favorite closes the page and keeps the Favorite, like a pinned tab (BH-067). Mark the pane rule PARITY(NEEDS-RUNTIME-CHECK BH-123).
+5. Re-import adds only Arc items never imported before; items deleted in Arkt are not restored.
+Other open questions use the plan's defaults (first-run copy and new Space name "Space" placeholder; favicons in the data folder but not in DB backups; recovery notices are non-blocking toasts with "Show Files"; "Show Archive" in the Window menu without a shortcut).

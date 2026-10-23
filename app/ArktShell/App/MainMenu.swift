@@ -12,6 +12,8 @@ enum MainMenu {
     main.addItem(submenu(title: "File", items: [
       item("New Tab", #selector(ShellWindowController.newTab(_:)), "t"),                  // KB-001
       item("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l"),    // KB-002
+      .separator(),
+      item("Import from Arc...", #selector(AppDelegate.importFromArc(_:)), "", []),       // E4c, no shortcut
     ]))
     // KB-033, KB-034 (Cmd-Opt-Right / Left) and KB-035, BH-041 (Ctrl-1 ... Ctrl-9).
     let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)

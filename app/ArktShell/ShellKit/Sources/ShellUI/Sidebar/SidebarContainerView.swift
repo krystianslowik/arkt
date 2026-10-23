@@ -55,11 +55,10 @@ public final class SpaceDotsView: NSView {
     dots.forEach { layer?.addSublayer($0) }
     paintedWeights = []
     elements = (0..<count).map { index in
-      let element = SpaceDotElement()
+      let element = SpaceDotElement { [weak self] in self?.onSelect?(index) }
       element.setAccessibilityParent(self)
       element.setAccessibilityRole(.button)
       element.setAccessibilitySelected(index == selectedIndex)
-      element.onPress = { [weak self] in self?.onSelect?(index) }
       return element
     }
     needsDisplay = true
@@ -122,13 +121,18 @@ public final class SpaceDotsView: NSView {
 
 /// One dot as an accessibility button.
 final class SpaceDotElement: NSAccessibilityElement {
-  /// Set once on the main thread before the element is published.
-  nonisolated(unsafe) var onPress: (@MainActor () -> Void)?
+  /// Immutable and `Sendable`, so a press arriving off the main thread can read it safely.
+  private let onPress: @MainActor @Sendable () -> Void
+
+  init(onPress: @escaping @MainActor @Sendable () -> Void) {
+    self.onPress = onPress
+    super.init()
+  }
 
   /// Runs the press on the main queue (accessibility clients may call from elsewhere).
   override func accessibilityPerformPress() -> Bool {
     let press = onPress
-    DispatchQueue.main.async { press?() }
+    DispatchQueue.main.async { press() }
     return true
   }
 }

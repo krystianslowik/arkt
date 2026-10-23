@@ -22,8 +22,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Seconds from show() entry to the presentation time of the first frame with the panel.
   public private(set) var lastShowLatency: Double?
   public var onFirstFrame: ((Double) -> Void)?
-  /// Diagnostics for the latency budget: show() main-thread CPU time and wall time (seconds), seconds from
-  /// show() entry to the vsync that started the first tick (`timestamp`), and that tick's refresh interval.
+  /// Diagnostics for the latency budget (the smoke and the GUI tests): show() main-thread CPU time and
+  /// wall time (seconds), and seconds from show() entry to the vsync that started the first tick (`timestamp`).
   @_spi(Smoke) public private(set) var lastShowCPUTime: Double = 0
   @_spi(Smoke) public private(set) var lastShowWallTime: Double = 0
   @_spi(Smoke) public private(set) var lastShowVsyncWait: Double = 0

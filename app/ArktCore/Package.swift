@@ -19,7 +19,7 @@ let package = Package(
     .target(name: "ArcImport", dependencies: ["SidebarModel", "Archive"]),
     .target(
       name: "Persistence",
-      dependencies: ["SidebarModel", "Archive", .product(name: "GRDB", package: "GRDB.swift")]
+      dependencies: ["SidebarModel", "Archive", "ArcImport", .product(name: "GRDB", package: "GRDB.swift")]
     ),
     .target(name: "Archive", dependencies: ["SidebarModel"]),
     .executableTarget(name: "arkt-import-check", dependencies: ["ArcImport"]),
@@ -31,7 +31,7 @@ let package = Package(
     ),
     .testTarget(
       name: "PersistenceTests",
-      dependencies: ["Persistence", "SidebarModel", "Archive", .product(name: "GRDB", package: "GRDB.swift")]
+      dependencies: ["Persistence", "SidebarModel", "Archive", "ArcImport", .product(name: "GRDB", package: "GRDB.swift")]
     ),
     .testTarget(name: "ArchiveTests", dependencies: ["Archive", "SidebarModel"]),
   ]
