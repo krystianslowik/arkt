@@ -22,6 +22,23 @@ land as Today tabs, and `ChromiumEngine` passes the shared `EngineContract`. The
   protocols. ShellUI never sees the header: it only knows `EngineAPI`. The app's composition root picks FakeEngine or
   ChromiumEngine.
 
+**How `EngineClient` maps to Chromium** (facade on the UI thread; every name is checked against 156 in the task that
+uses it, week-2 "Symbols" rule):
+
+| `EngineClient` | Chromium | Event source |
+|---|---|---|
+| `createTab(url:in:)` | `chrome::AddTabAt(browser, url, -1, active)` (no URL: `about:blank`), returns the new `ArktTabHandle` at once | `.tabCreated` emitted by `ChromiumEngine` (Decision 4) |
+| `closeTab` | `TabStripModel::CloseWebContentsAt(index, CLOSE_USER_GESTURE)`; result `closed` or `held` (Decision 11) | `.tabClosed` from `ChromiumEngine` (closed) or from the facade's removal event (held, then closed) |
+| `navigate` | `NavigationController::LoadURLWithParams` (transition `PAGE_TRANSITION_TYPED`) | `.urlChanged` with the pending URL from `DidStartNavigation` (`GetVisibleURL`), then `.loadingChanged(true)` from `DidStartLoading` (rule 2 order) |
+| `reload` | `NavigationController::Reload(ReloadType::NORMAL, true)` | `DidStartLoading` / `DidStopLoading` |
+| `goBack`, `goForward` | `GoBack` / `GoForward`, guarded by `CanGoBack` / `CanGoForward` (rule 7 no-op) | `.urlChanged` from `DidStartNavigation` |
+| `activateTab` | `TabStripModel::ActivateTabAt(index)` | `.activeTabChanged` from `OnTabStripModelChanged` selection |
+| `snapshot(of:)` | Swift table fed by: `GetVisibleURL`, `GetTitle`, `IsLoading`, `CanGoBack` / `CanGoForward`, favicon PNG | `TitleWasSet`, `DidStopLoading`, `NavigationEntryCommitted` / `NavigationListPruned` (`.historyChanged`), `FaviconDriverObserver::OnFaviconUpdated` (`.faviconChanged`), cleared on `DidFinishNavigation` committed to another host |
+| `contentView(for:)` | the handle's container `NSView` around `WebContents::GetNativeView()` | swapped on `TabStripModelChange::kReplaced` |
+| `createWindow(host:)` | `Browser::Create(Browser::CreateParams(profile, true))` with the host chosen first | `.windowOpened` posted after construction |
+| engine-created tabs and closes | `TabStripModelObserver::OnTabStripModelChanged` (`kInserted`, `kRemoved`), opener from `TabInterface` / `WebContents::GetOpener` | `.tabCreated` (`origin == .engine`), `.tabClosed` |
+| `extensionActions(in:)`, `runExtensionAction` | `ToolbarActionsModel`, `ExtensionActionViewModel::ExecuteUserAction` (week-2 W4) | `.extensionActionsChanged` |
+
 **Tech Stack:** Chromium 156.0.8078.48 (GN + Siso, `out/Spike` component build), ObjC++ in `//arkt`, Swift 6 (strict
 concurrency) in ShellKit and the app, XcodeGen, `xcodebuild`, Node 26 (`engine/tools/cdp.mjs`), `codesign` (ad hoc).
 
@@ -142,6 +159,13 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
     facade as plain values (id, name, 16 pt icon PNG, enabled); running an action passes the shell's anchor `NSView`,
     and the popup is the existing `PopoverExtensionView` anchored to it. Extension-created windows follow Decision 2.
     Context menus, pinning, keyboard commands and the native install sheet stay in #121.
+11. **A page may hold a close.** `CloseWebContentsAt` runs a page's `beforeunload` handler whatever the close type
+    (`tab_strip_model.cc:4129-4191`, through the delegate's `RunUnloadListenerBeforeClosing`), and the user can cancel
+    the "Leave site?" dialog. So the facade's `close` answers `closed` (no handler: the tab is gone when the call
+    returns) or `held`. For `closed`, `ChromiumEngine` emits `.tabClosed` at once (rule 4 as today). For `held`, the tab
+    stays listed until the facade reports its removal, and a cancelled close leaves it open. Contract rule 14 states this;
+    `InMemoryEngine` gets a driver for a held close. Whether Arc-style archiving (Cmd-W) should skip `beforeunload` is
+    open question 6.
 
 ## Interface boundary (Swift lane vs engine lane)
 
@@ -150,9 +174,9 @@ early task so both lanes can work in parallel.
 
 | Artifact | Owner | Consumer | Frozen in |
 |---|---|---|---|
-| `EngineAPI` additions: windows, activation, tab origin, engine-initiated closes, `EngineWindowHosting`, `EngineExtensions` (below) and contract rules 9-13 | Swift lane | engine lane (`ChromiumEngine`) | W3-1 |
+| `EngineAPI` additions: windows, activation, tab origin, engine-initiated closes, `EngineWindowHosting`, `EngineExtensions` (below) and contract rules 9-14 | Swift lane | engine lane (`ChromiumEngine`) | W3-1 |
 | `InMemoryEngine` and `FakeEngine` implementing the additions | Swift lane | ShellUI tests, the FakeEngine app | W3-1 |
-| `engine/arkt/api/arkt_engine.h`: ObjC protocols `ArktEngineEmbedder`, `ArktEngine`, `ArktBrowserHandle`, `ArktTabHandle`, `ArktWindowHostDelegate`, event value classes; no C++, no Chromium includes | engine lane | `ChromiumEngineKit` only (isolation test) | W3-2 |
+| `engine/arkt/api/arkt_engine.h`: ObjC protocols `ArktEngineEmbedder`, `ArktEngine`, `ArktBrowserHandle`, `ArktTabHandle`, `ArktWindowHost`, event value classes; no C++, no Chromium includes | engine lane | `ChromiumEngineKit` only (isolation test) | W3-2 |
 | `ChromiumEngineKit` (`ChromiumEngine: EngineClient, EngineExtensions`) | engine lane | composition root only | W3-6 |
 | Composition entry `AppComposition.start(engine:windowHostProvider:)` and `AppComposition.prepareToTerminate() async` | Swift lane | `ArktShellEmbedder` (engine lane) | W3-7 |
 | `ShellWindowController` as `EngineWindowHosting` (window, card, command forwarding, close request) | Swift lane | `ChromiumEngine` | W3-7 |
@@ -193,9 +217,11 @@ early task so both lanes can work in parallel.
 12. A tab the engine closes on its own (`chrome.tabs.remove`, `window.close()`) ends with one `.tabClosed`, exactly as
     a `closeTab` does (rule 4).
 13. `createTab(url:)` without a window lands in the most recently active window.
+14. A close the page holds (`beforeunload`) keeps the tab listed until the engine reports `.tabClosed`; a cancelled
+    close leaves the tab open with no `.tabClosed` (Decision 11).
 
 `InMemoryEngine` gains test drivers for engine-side behaviour (`engineCreateTab(in:opener:active:)`,
-`engineCloseTab(_:)`, `engineActivate(_:)`), so ShellUI tests cover rules 11 and 12 without Chromium.
+`engineCloseTab(_:)`, `engineActivate(_:)`, `engineHoldClose(_:)`), so ShellUI tests cover rules 11, 12 and 14 without Chromium.
 
 ## What the Swift side (shell) needs
 
@@ -283,7 +309,7 @@ Time-box: 1.5 h.
 
 ---
 
-### Task W3-1: `EngineAPI` additions and contract rules 9-13 (Swift lane)
+### Task W3-1: `EngineAPI` additions and contract rules 9-14 (Swift lane)
 
 No Chromium. Can start at once.
 
@@ -296,12 +322,12 @@ No Chromium. Can start at once.
   WKWebView tabs created by pages stay out of scope: FakeEngine reports `origin == .client` only)
 - Modify: `app/ArktShell/ShellKit/Tests/EngineAPITests/*`, `Tests/FakeEngineKitTests/*`
 
-**Steps:** write rules 9-13 as `EngineContract` functions first (failing against `InMemoryEngine`), then implement in
+**Steps:** write rules 9-14 as `EngineContract` functions first (failing against `InMemoryEngine`), then implement in
 `InMemoryEngine` (with the engine-side test drivers) and `FakeEngine`. Shapes as in "Interface boundary"; W3-1's pull
 request is where both lanes agree on names. Keep every existing call site compiling (additive API, defaults).
 
-**Acceptance criteria:** rules 1-13 pass for `InMemoryEngine`; rules 1-10 and 13 for `FakeEngine` (11 and 12 are
-engine-initiated; FakeEngine documents them as not applicable); `EngineEventHub` tests cover the window stream;
+**Acceptance criteria:** rules 1-14 pass for `InMemoryEngine`; rules 1-10 and 13 for `FakeEngine` (11, 12 and 14 are
+engine-initiated or need `beforeunload`; FakeEngine documents them as not applicable); `EngineEventHub` tests cover the window stream;
 the engine lane has approved the pull request.
 
 **Verification:** `swift test --skip ShellKitGUITests` (baseline + N); FakeEngine GUI contract tests
@@ -324,15 +350,16 @@ Needs no engine worktree: the header is authored and syntax-checked anywhere; GN
 
 **Contents of the header:**
 - `ArktEngineEmbedder` (implemented in Swift): `+sharedEmbedder`, `-engineDidStart:(id<ArktEngine>)`,
-  `-hostForEngineWindowRequest:(ArktWindowRequest*)` returning `id<ArktWindowHostDelegate>`, `-engineWillTerminate:`
+  `-hostForEngineWindowRequest:(ArktWindowRequest*)` returning `id<ArktWindowHost>`, `-engineWillTerminate:`
   with a completion block.
 - `ArktEngine`: `browsers`, `createBrowserWithHost:`, `extensionActionsForBrowser:`,
   `runExtensionAction:inBrowser:anchor:`, `addEventSink:` (batched events), test-only `evaluateScript:inTab:completion:`.
 - `ArktBrowserHandle`: `windowId` (session id), `tabs`, `activeTab`, `createTabWithURL:active:`, `close`.
 - `ArktTabHandle`: `containerView`, `sessionId`, `url`, `title`, `faviconPNG`, `isLoading`, `canGoBack`, `canGoForward`,
   `opener`, `navigateToURL:`, `reload`, `goBack`, `goForward`, `activate`, `close`, `focus`.
-- `ArktWindowHostDelegate` (what the engine needs from a host; the week-2 `ArktWindowHost` minus the placeholder's
-  `activateTab`): `window`, `cardView`, `closeRequested`, `validateCommand`, `executeCommand`.
+- The host protocol: `engine/arkt/browser/arkt_window_host.h` is already pure ObjC and AppKit, so its `ArktWindowHost`
+  protocol and `ArktTabEvent` move into `arkt_engine.h` (the old header includes the new one) instead of a near-copy.
+  The placeholder-only `activateTab` block becomes optional.
 - Event value classes (`ArktEngineEvent`: kind, tab handle, browser handle, plain values), all `NS_SWIFT_UI_ACTOR`,
   nullability annotated, `NS_SWIFT_NAME` where the Swift name should differ.
 
@@ -343,6 +370,9 @@ Needs no engine worktree: the header is authored and syntax-checked anywhere; GN
 `WebKitIsolationTests` reads sources).
 
 **Verification:** both `clang` commands exit 0; `swift build` and `swift test --filter IsolationTests` pass.
+
+**Commit:** the two header copies, the module map, `Package.swift`, the isolation test, `arkt_window_host.h`; "Add the
+engine facade header and its Swift module".
 
 Time-box: 4 h.
 
@@ -362,7 +392,9 @@ Time-box: 4 h.
 - Modify: `app/ArktShell/App/main.swift` (`#if ARKT_CHROMIUM_ENGINE`: `engineMain()` and nothing else)
 - Modify: `engine/arkt/browser/arkt_browser_main_extra_parts.mm`, `BUILD.gn` (new `arkt_embedder.{h,mm}`: class lookup,
   `engineDidStart:` from `PostBrowserStart`, terminate callback)
-- Local only (gitignored): an xcconfig naming the engine output directory (`ARKT_ENGINE_OUT`), so no path is committed
+- Modify: `.gitignore` (one line for `app/ArktShell/Local.xcconfig`)
+- Local only (that ignored file): an xcconfig naming the engine output directory (`ARKT_ENGINE_OUT`), so no path is
+  committed
 
 **Steps:**
 1. `EngineMain.swift`: read the two keys from `Bundle.main`, build the versioned path as `chrome_exe_main_mac.cc`
@@ -380,9 +412,10 @@ Time-box: 4 h.
 **Acceptance criteria (GATE):** launched from `$EMB` with a fresh profile under `$PROF`: `ARKT: embedder found`,
 `ARKT embedder: engine started 0 browsers` (no startup window), both probe lines within 2 s of the hook, process alive
 30 s, 0 `FATAL`/`Check failed`. `out/Spike/Chromium.app` logs `ARKT: no embedder` and the W5c checks still pass.
-`Debug` app unchanged (Rules). The profile folder is the one passed with `--user-data-dir`; a launch without it (one
-time, with `--use-mock-keychain`) creates `~/Library/Application Support/<CrProductDirName>`, recorded and then left
-for the maintainer (never deleted by the task).
+`Debug` app unchanged (Rules). The profile folder is the one passed with `--user-data-dir`, and the hook logs
+`ARKT: default user data dir <path>` from `chrome::GetDefaultUserDataDirectory`, which must end in the
+`CrProductDirName` value. No launch without `--user-data-dir`: a real launch on the default folder is a maintainer
+step after W3-11, like week-2 W8.
 
 If the probe line `main actor resumed` never appears: stop, record, and raise it with the maintainer before W3-4
 (Risk 1; the alternative is driving Swift work only from posted engine callbacks, which changes W3-6 and W3-9). If the
@@ -426,6 +459,8 @@ switch every W5b row re-run in W3-0 still passes.
 **Verification:** logs and census lines; CDP `chrome.windows.getAll` ids equal the facade's window ids; window-only
 screenshots.
 
+**Commit:** overlay files named one by one, plus `$RES`; "Let ShellUI-style hosts own Arkt browser windows".
+
 Time-box: 1 day.
 
 ---
@@ -459,9 +494,13 @@ Time-box: 1 day.
 produces `tabCreated` with `origin=engine`, `activeTabChanged`, and `visibilityState` as in W5c when the self-test host
 mounts containers; a navigation logs url, loading start, title, loading end in that order; a host change logs the
 favicon clear before load end; `chrome://crash` then reload keeps the same container (no new handle); the action list
-equals `--arkt-extensions-menu-dump`'s items; running action-probe logs `popup loaded` anchored to the self-test view.
+equals `--arkt-extensions-menu-dump`'s items; running action-probe logs `popup loaded` anchored to the self-test view;
+closing a tab whose page set `onbeforeunload` (over CDP, with a user gesture) answers `held`, shows the dialog, and
+logs the removal only after the dialog is accepted (cancelled: the tab stays, no removal).
 
 **Verification:** logs, CDP, window-only screenshots; `gn check out/Spike '//arkt/*'`.
+
+**Commit:** overlay files named one by one, plus `$RES`; "Add the tab facade: handles, containers, state, actions".
 
 Time-box: 1.5 days.
 
@@ -475,18 +514,24 @@ Time-box: 1.5 days.
 - Create: `app/ArktShell/ShellKit/Sources/ChromiumEngineKit/ChromiumEngine.swift` (+ small helpers)
 - Create: `app/ArktShell/ShellKit/Tests/ChromiumEngineKitTests/` (a scripted Swift implementation of the
   `ArktEngine`/`ArktBrowserHandle`/`ArktTabHandle` protocols that delivers batches on the next main-actor turn, like the
-  real facade; contract tests 1-13 against it)
+  real facade; contract tests 1-14 against it)
 - Modify: `Package.swift`, `Tests/IsolationTests/` (only the app's composition root may import `ChromiumEngineKit`)
 
 **Steps:** map `TabID` to tab handles and `EngineWindowID` to browser handles; synchronous `.tabCreated` / `.tabClosed`
 for client calls with deduplication of the facade's later events (Decision 4); snapshots from events; window stream;
-`EngineWindowHosting` wrapped into an `ArktWindowHostDelegate` object; `EngineExtensions` over the action calls.
+`EngineWindowHosting` wrapped into an `ArktWindowHost` object; `EngineExtensions` over the action calls.
 
-**Acceptance criteria:** contract rules 1-13 pass against the scripted facade, including a script that reorders title
-and load end within one batch and one that replaces a tab's contents; isolation tests pass; no `@unchecked Sendable`
-or `nonisolated(unsafe)`.
+**Acceptance criteria:** contract rules 1-14 pass against the scripted facade, including a script that reorders title
+and load end within one batch, one that replaces a tab's contents and one that holds a close; isolation tests pass; no
+`@unchecked Sendable` or `nonisolated(unsafe)`. Instance scoping is defined and tested: a `ChromiumEngine` lists only
+the windows it created or was handed through its host provider, and only their tabs, so several instances over one
+facade (the W3-9 runner) never see each other's tabs; `createTab(url:)` on an instance with no window is a
+precondition failure, and the runner's `makeEngine` creates the instance's window first.
 
 **Verification:** `swift test --skip ShellKitGUITests` (baseline + N).
+
+**Commit:** the new target, its tests, `Package.swift`, the isolation test; "Add ChromiumEngine over the engine
+facade".
 
 Time-box: 1.5 days.
 
@@ -547,6 +592,12 @@ The inventory is read-only on `$CR` and needs no engine worktree; the runtime co
 **Acceptance criteria:** the table covers every Chromium menu command with "reaches the Arkt Browser: yes/no" and the
 Arkt mapping; the decision and its evidence are in `$RES` and on #33.
 
+**Verification:** the item count in the table equals the count of `IDC_` items in `main_menu_builder.mm`
+(`git -C $CR grep -c 'IDC_' -- chrome/browser/ui/cocoa/main_menu_builder.mm`, adjusted for non-item uses, recorded);
+every "reaches" cell cites a log line or an observed effect from W3-9.
+
+**Commit:** `$RES`; "Record the main menu inventory and owner".
+
 Time-box: 4 h (inventory) plus 1 h after W3-9.
 
 ---
@@ -563,7 +614,7 @@ Time-box: 4 h (inventory) plus 1 h after W3-9.
 - Modify: `$RES`
 
 **Steps:**
-1. Contract runner, modelled on `SmokeRunner`: runs `EngineContract` rules 1-13 against a fresh `ChromiumEngine` per
+1. Contract runner, modelled on `SmokeRunner`: runs `EngineContract` rules 1-14 against a fresh `ChromiumEngine` per
    rule, each in its own window; `pageURL` and `pagesOnTwoHosts` from the loopback fixture server of #170 (two host
    names on the loopback address, favicons served); `settle` waits for `loadingChanged(false)`; `retitle` uses the
    facade's test-only script call. Prints one line per rule and exits non-zero on any failure.
@@ -576,11 +627,13 @@ Time-box: 4 h (inventory) plus 1 h after W3-9.
 3. Web identity on the embedded app (#9): `navigator.userAgent` contains `Chrome/156.0.0.0 Safari/537.36`, no `Arkt`
    in either brand list, no `--user-agent` switch.
 
-**Acceptance criteria:** the runner passes 13/13 on the engine; every smoke step passes or is recorded with its log
+**Acceptance criteria:** the runner passes 14/14 on the engine; every smoke step passes or is recorded with its log
 lines as a known gap with an issue; 0 `FATAL`/`Check failed`; no new crash dump in the engine configuration's crash
 folder; the FakeEngine build still passes its own contract and UI tests.
 
 **Verification:** runner output, logs, CDP, window-only screenshots, dump counts.
+
+**Commit:** the embedder and runner files, `$RES`; "Run ShellUI and the engine contract on ChromiumEngine".
 
 Time-box: 2 days.
 
@@ -589,6 +642,12 @@ Time-box: 2 days.
 ### Task W3-10: Infobars from `ContentInfoBarManager`, or a recorded gap (engine lane, Swift lane draws)
 
 **Depends on:** W3-5 (engine), W3-7 (shell).
+
+**Files:**
+- Create: `engine/arkt/api/arkt_infobar_bridge.{h,mm}`; modify `arkt_engine.h` (both copies, through a W3-2-style
+  joint pull request), `arkt_tab_handle.mm`
+- Modify: `ChromiumEngineKit` and `EngineAPI` (an `infobars` list on the snapshot or a small protocol, agreed in that
+  pull request); create `ShellUI/Card/InfobarView.swift`
 
 **Steps:** list the infobars Arkt can still show (unsupported command-line flag warning, the automation and
 `--no-sandbox` warnings, session-crashed bubble path, any `ConfirmInfoBarDelegate` a feature adds); the facade
@@ -599,6 +658,11 @@ action call; the shell draws a native bar above the tab's container. If the time
 **Acceptance criteria:** launching with an unsupported flag (for example `--no-sandbox` in a throwaway profile) shows the
 warning natively above the page with a working close button; or the gap is recorded with the identifier list.
 
+**Verification:** window-only screenshot of the bar; `ARKT: infobar` log lines; ShellUI test for the bar against
+`InMemoryEngine`.
+
+**Commit:** files named one by one, plus `$RES`; "Draw engine infobars natively".
+
 Time-box: 1 day.
 
 ---
@@ -608,6 +672,8 @@ Time-box: 1 day.
 **Depends on:** #11 and #12 (`out/Arkt` built and signable). If they have not finished by W3-9, this task is deferred
 and recorded; development continues on `out/Spike`.
 
+**Files:** Modify `engine/README.md` (section "Embedding in the app": layout, signing order, launch), `$RES`.
+
 **Steps:** run the `Engine` configuration against `out/Arkt`'s `Arkt Framework.framework` (no dylibs next to the
 bundle), sign inside-out with one identity (helpers with their entitlements, framework, app; hardened runtime on),
 `codesign --verify --deep --strict`, run the W3-9 smoke and the #9 checks from the internal disk with a profile under
@@ -615,6 +681,16 @@ bundle), sign inside-out with one identity (helpers with their entitlements, fra
 (`<app bundle id>.MachPortRendezvousServer.<pid>` in the log).
 
 **Acceptance criteria:** signed bundle verifies; smoke and identity checks pass; no helper `FATAL`.
+
+**Verification:** `codesign --verify --deep --strict --verbose=2` output, `codesign -dv` identifier and runtime lines,
+smoke log lines, CDP output.
+
+**Commit:** `engine/README.md`, `$RES`; "Embed and sign the release framework in the app".
+
+#### Needs the maintainer
+
+Once, after this task: launch the signed app without `--user-data-dir` and without `--use-mock-keychain` (the real
+default folder and the "Arkt Safe Storage" item), and report any keychain prompt.
 
 Time-box: 4 h plus the build.
 
@@ -626,6 +702,13 @@ Time-box: 4 h plus the build.
 issues); kill every PID the track started; check that no engine process remains from `$OUT`, `$EMB` or `/Applications`;
 leave test profiles in place; comment the outcome on #33 and on the issues this week touched (#9, #21, #121, #122,
 #128, #207). Merged branches and worktrees are removed, unmerged ones are kept and listed.
+
+**Files:** Modify `$RES`.
+
+**Verification:** `ps -axo pid,command | grep -E "out/Spike|embed-week3|/Applications/Arkt" | grep -v grep` prints
+nothing; `wc -l < $REPO/engine/patches/chromium/.patches` equals `git -C $CR rev-list --count 156.0.8078.48..arkt`.
+
+**Commit:** `$RES`; "Record engine week 3 results".
 
 Time-box: 2 h.
 
@@ -653,6 +736,7 @@ Time-box: 2 h.
 |---|---|
 | #18 (W6, pull request #217) | Blocks W3-0 and every engine-worktree task: same files, and extension-created windows need `ArktExtensionsContainer`. Swift-lane tasks are not blocked. |
 | #21 (W9, native window default) | Not blocking: the Engine configuration passes `--arkt-native-window` until #21 lands; W3-12 removes it then. #21's patch 0002 test is independent. |
+| #170 (loopback fixture server, pull request #215) | W3-9's harness serves its pages and favicons from it. If it has not merged by then, the runner starts a minimal loopback server of its own (two host names on the loopback address, a title page and a favicon per host). |
 | #9 (UA and client hints) | No code dependency; W3-9 and W3-11 repeat the identity checks on the embedded app. |
 | #11, #12 (release build, signing) | Gate W3-11 only. |
 | #22 (W10 rebuild) | Independent; W3 overlay changes enter the next `out/Arkt` build. Do not run the W10 framework link while W3 builds run (week-2 Capacity). |
@@ -679,3 +763,5 @@ Time-box: 2 h.
 4. Should a shell-initiated window without any Space (first run) still create an engine `Browser` at once, or only when
    the first tab is shown? (Affects whether extensions see a window with zero tabs.)
 5. Ownership of `ChromiumEngineKit`: engine lane (this plan), or Swift lane once W3-9 has passed?
+6. Should archiving a tab (Cmd-W, auto-archive) honour a page's `beforeunload` dialog, as Chrome's close does
+   (Decision 11), or close without it?
