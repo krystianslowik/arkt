@@ -1,12 +1,22 @@
 import AppKit
 
-/// Favicon (16 pt at x 10) and title (14 pt medium at x 34). Frames set in `layout()`; no constraints.
+/// Favicon (16 pt at x 10), title (14 pt medium at x 34) and the hover close (X) button at the trailing edge
+/// (GS-043). Frames set in `layout()`; no constraints.
 @MainActor
 public final class SidebarTabCellView: NSTableCellView {
   public static let reuseIdentifier = NSUserInterfaceItemIdentifier("SidebarTabCellView")
 
   public let faviconView = NSImageView()
   public let titleField = NSTextField(labelWithString: "")
+  /// Shown while the row is hovered and the row has a close action. Its target and action are set by the
+  /// outline controller; it is hidden (so neither hit-tested nor in the accessibility tree) otherwise.
+  public let closeButton = NSButton()
+
+  /// What the X does for this row; nil (folders) never shows it.
+  public private(set) var closeAction: RowCloseAction?
+  /// Whether the X is shown or fading in (the row is hovered and there is a close action).
+  public private(set) var isCloseButtonShown = false
+  private var flavor: ThemeFlavor = .light
 
   public override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -18,8 +28,17 @@ public final class SidebarTabCellView: NSTableCellView {
     titleField.maximumNumberOfLines = 1
     titleField.cell?.truncatesLastVisibleLine = true
     titleField.autoresizingMask = []
+    closeButton.isBordered = false
+    closeButton.bezelStyle = .regularSquare
+    closeButton.imagePosition = .imageOnly
+    closeButton.imageScaling = .scaleNone
+    closeButton.autoresizingMask = []
+    closeButton.wantsLayer = true
+    closeButton.isHidden = true
+    closeButton.alphaValue = 0
     addSubview(faviconView)
     addSubview(titleField)
+    addSubview(closeButton)
     imageView = faviconView
     textField = titleField
   }
@@ -27,11 +46,54 @@ public final class SidebarTabCellView: NSTableCellView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-  public func configure(title: String, image: NSImage, flavor: ThemeFlavor) {
+  public func configure(title: String, image: NSImage, flavor: ThemeFlavor, closeAction: RowCloseAction? = nil) {
     titleField.stringValue = title
     titleField.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     faviconView.image = image
+    if flavor != self.flavor || closeButton.image == nil {
+      self.flavor = flavor
+      closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale)
+    }
+    self.closeAction = closeAction
+    closeButton.toolTip = closeAction?.tooltip
+    closeButton.setAccessibilityLabel(closeAction?.tooltip)
+    if closeAction == nil { setCloseButtonShown(false, animated: false) }
     needsLayout = true
+  }
+
+  /// Shows or hides the X (only when there is a close action), fading with the row's hover state. Only the button's
+  /// opacity and hidden flag and the title's width change: two frames set directly, nothing else is laid out.
+  public func setCloseButtonShown(_ shown: Bool, animated: Bool) {
+    let shown = shown && closeAction != nil
+    guard shown != isCloseButtonShown || !animated else { return }   // unanimated calls always settle the state
+    isCloseButtonShown = shown
+    layoutTitle()
+    if shown { closeButton.isHidden = false }
+    guard animated, window != nil else {
+      closeButton.alphaValue = shown ? 1 : 0
+      closeButton.isHidden = !shown
+      return
+    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = SidebarMetrics.closeButtonFadeDuration
+      context.allowsImplicitAnimation = true
+      closeButton.animator().alphaValue = shown ? 1 : 0
+    } completionHandler: { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, !self.isCloseButtonShown else { return }
+        self.closeButton.isHidden = true      // a faded-out X takes no clicks
+      }
+    }
+  }
+
+  public override func prepareForReuse() {
+    super.prepareForReuse()
+    setCloseButtonShown(false, animated: false)
+  }
+
+  public override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale)
   }
 
   public override func layout() {
@@ -39,11 +101,22 @@ public final class SidebarTabCellView: NSTableCellView {
     let size = SidebarMetrics.faviconSize
     faviconView.frame = NSRect(x: SidebarMetrics.faviconLeading, y: ((bounds.height - size) / 2).rounded(),
                                width: size, height: size)
+    let box = SidebarMetrics.closeButtonSize
+    closeButton.frame = NSRect(x: bounds.width - SidebarMetrics.closeButtonTrailing - box,
+                               y: ((bounds.height - box) / 2).rounded(), width: box, height: box)
+    layoutTitle()
+  }
+
+  /// The title ends before the X while it is shown, else at the usual trailing inset.
+  private func layoutTitle() {
     let titleHeight = ceil(titleField.intrinsicContentSize.height)
     let titleX = SidebarMetrics.titleLeading
+    let end = isCloseButtonShown
+      ? bounds.width - SidebarMetrics.closeButtonTrailing - SidebarMetrics.closeButtonSize
+        - SidebarMetrics.closeButtonTitleGap
+      : bounds.width - SidebarMetrics.titleTrailing
     titleField.frame = NSRect(x: titleX, y: ((bounds.height - titleHeight) / 2).rounded(),
-                              width: max(0, bounds.width - titleX - SidebarMetrics.titleTrailing),
-                              height: titleHeight)
+                              width: max(0, end - titleX), height: titleHeight)
   }
 }
 
@@ -108,6 +181,12 @@ enum SidebarGlyphs {
       let textSize = text.size()
       text.draw(at: NSPoint(x: rect.midX - textSize.width / 2, y: rect.midY - textSize.height / 2))
     }
+  }
+
+  /// The hover close (X) glyph for `flavor` (GS-043).
+  static func close(flavor: ThemeFlavor, scale: CGFloat, cache: SymbolImageCache = .shared) -> NSImage {
+    cache.symbol("xmark", box: SidebarMetrics.closeButtonGlyphSize, weight: .semibold,
+                 color: ShellTokens.sidebarForeground.resolve(flavor), scale: scale)
   }
 
   /// Row symbol in the row's text color for `flavor`.

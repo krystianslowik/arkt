@@ -14,8 +14,13 @@ public final class SidebarRowView: NSTableRowView {
   public var flavor: ThemeFlavor = .light {
     didSet { if flavor != oldValue { needsDisplay = true } }
   }
+  /// Also shows or hides the cell's hover close (X) button (GS-043), fading with the fill.
   public var isHovered = false {
-    didSet { if isHovered != oldValue { needsDisplay = true } }
+    didSet {
+      guard isHovered != oldValue else { return }
+      needsDisplay = true
+      tabCell?.setCloseButtonShown(isHovered, animated: true)
+    }
   }
   public var isPressed = false {
     didSet { if isPressed != oldValue { needsDisplay = true } }
@@ -91,6 +96,37 @@ public final class SidebarRowView: NSTableRowView {
                               owner: self, userInfo: nil)
     addTrackingArea(area)
     hoverArea = area
+    resyncHoverWithPointer()
+  }
+
+  /// A row scrolled or reused under a still pointer gets no enter or exit event; tracking areas are updated after
+  /// both, so the hover state is read from the pointer then. Only in the key window of the active app, and only
+  /// when no other window covers the pointer.
+  private func resyncHoverWithPointer() {
+    guard NSApp.isActive, let window, window.isKeyWindow else { return }
+    let covered = NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0)
+      != window.windowNumber
+    syncHover(pointerInWindow: covered ? nil : window.mouseLocationOutsideOfEventStream)
+  }
+
+  /// Sets the hover state from a pointer location in window coordinates (nil: the pointer is not over this
+  /// window).
+  func syncHover(pointerInWindow point: NSPoint?) {
+    guard let point else { isHovered = false; isPressed = false; return }
+    let inside = bounds.contains(convert(point, from: nil))
+    isHovered = inside
+    if !inside { isPressed = false }
+  }
+
+  /// The tab cell this row hosts (nil for divider rows).
+  private var tabCell: SidebarTabCellView? {
+    numberOfColumns > 0 ? view(atColumn: 0) as? SidebarTabCellView : nil
+  }
+
+  /// A cell added to a hovered row (a reload under the pointer) shows its X at once.
+  public override func didAddSubview(_ subview: NSView) {
+    super.didAddSubview(subview)
+    (subview as? SidebarTabCellView)?.setCloseButtonShown(isHovered, animated: false)
   }
 
   public override func mouseEntered(with event: NSEvent) { isHovered = true }
