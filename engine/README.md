@@ -140,5 +140,13 @@ Check the result with `tail -3 $CHROMIUM_ROOT/build-arkt.log` (expect `The build
 `grep -c FAILED: $CHROMIUM_ROOT/build-arkt.log` (expect `0`). The build compiles whatever overlay and patches are in
 `$CR` at the time, so the branch providing `arkt/branding/BRANDING` must stay checked out until it finishes.
 
+Measured on this Mac (10 cores, 32 GB, 2026-10-24): 4 h 11 min, about 66k steps, 0 failed; `Arkt.app` 541 MB,
+`out/Arkt` 7.6 GB; the framework link took under a minute. Swap, not CPU, is the limit: at `-j 6` swap use grew by
+1.6 GB in 20 minutes, at `-j 4` it stayed flat. Swap use does not shrink afterwards, so pass `-j 4` to `autoninja`
+when swap is already above about 6 GB. To pause or stop the build, signal the `siso ninja` process
+(`ps -axo pid,command | grep '[s]iso ninja'`), not the shell PID from `$!`; `siso ps -C out/Arkt -n 1` (in
+`third_party/siso/cipd/`) shows progress when the log is quiet. The result is ad-hoc (linker) signed and launches
+as is; it must be re-signed after every rebuild before it goes into `/Applications` (W2).
+
 `out/Arkt` must be re-signed after every rebuild, incremental ones included (plan W2): a rebuild replaces the signed
 binaries.
