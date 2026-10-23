@@ -5,15 +5,25 @@ import Synchronization
 
 /// Archives and restores sidebar items (decision 11: the model first, then an outbox to the archive store).
 ///
-/// `archive` removes the nodes from the sidebar synchronously, so the user action never waits on disk, and queues the
-/// entries. A single writer sends each batch to the store right away (`.replace`, not debounced); on failure the
-/// entries stay in memory and the writer retries after `retryDelays` (the last one repeats), so an archived item
-/// never vanishes because the store was unavailable. `restore` inserts into the model first and only then removes the
-/// entry from the store; a failed remove leaves a harmless duplicate in the archive and is not retried.
+/// `archive` removes the nodes from the sidebar synchronously, so the user action never waits on disk, and queues an
+/// add of the entries; `restore` inserts into the model first and then queues a remove of the entry. The outbox is a
+/// FIFO of store operations drained by a single writer, one at a time, so a restore followed by a re-archive of the
+/// same id always reaches the store as add, remove, add and the new entry survives. Consecutive adds go as one
+/// `.replace` batch, right away (not debounced).
 ///
-/// `flush()` is for termination: it stops a retry wait, waits for a write in flight and makes one attempt, bounded
-/// by `flushTimeout`. Residual risk (documented in the plan): a crash after the sidebar save but before a failing
-/// archive write finally succeeds loses that entry.
+/// On failure the operation stays at the head of the outbox and the writer retries after `retryDelays` (the last one
+/// repeats), so an archived item never vanishes because the store was unavailable. A failed remove is retried the
+/// same way, except for ids a later queued add of the same id supersedes: that `.replace` add overwrites the entry
+/// anyway, so those ids are dropped and the add goes next instead of waiting behind a retry.
+///
+/// `flush()` is for termination: it stops a retry wait, waits for a write in flight, then sends the outbox in order
+/// until it is empty or an add fails, bounded by `flushTimeout`. A remove that fails during the flush is dropped (a
+/// harmless duplicate in the archive), so it cannot hold back an add queued behind it at quit.
+///
+/// Crash and quit window (decision 11, accepted): the outbox lives in memory only. An entry is lost when the sidebar
+/// save (which no longer holds the node) lands while its archive write has not: a crash while the write fails or
+/// stalls, or a quit where the outbox flush fails or times out while the sidebar flush succeeds (termination does not
+/// wait any longer). A slow store widens the window as much as a failing one.
 @MainActor
 public final class ArchiveCoordinator {
   public enum RestoreError: Error, Equatable, Sendable {
@@ -29,10 +39,22 @@ public final class ArchiveCoordinator {
   ]
   nonisolated public static let defaultFlushTimeout: Duration = .seconds(1)
 
+  /// One store call waiting in the outbox.
+  private enum Operation {
+    case add([ArchivedItem])
+    case remove([NodeID])
+  }
+
   /// Archived entries not yet written to the store, oldest first.
-  public private(set) var pendingItems: [ArchivedItem] = []
-  /// True while an entry is unwritten or a write is still running. Termination must check this (or always flush).
-  public var hasPendingWrites: Bool { !pendingItems.isEmpty || writer != nil }
+  public var pendingItems: [ArchivedItem] {
+    outbox.flatMap { operation -> [ArchivedItem] in
+      if case .add(let items) = operation { items } else { [] }
+    }
+  }
+
+  /// True while an add or remove is unsent or a write is still running. Termination must check this (or always
+  /// flush).
+  public var hasPendingWrites: Bool { !outbox.isEmpty || writer != nil }
 
   private let source: ModelSidebarSource
   private let store: any ArchiveStoring
@@ -40,10 +62,12 @@ public final class ArchiveCoordinator {
   private let flushTimeout: Duration
   private let sleep: Sleep
 
+  /// Store operations in the order they must reach the store; only the writer sends them.
+  private var outbox: [Operation] = []
+  /// Ids restored and not archived again since; restoring one of them again is a no-op.
+  private var restoredIDs: Set<NodeID> = []
   /// The one write loop (or flush attempt) in progress.
   private var writer: Task<Void, Never>?
-  /// The store write in progress; a restore waits for it before removing, so a late add cannot resurrect an entry.
-  private var inFlight: Task<Bool, Never>?
   private var consecutiveFailures = 0
   /// True while the write loop sleeps between retries; only then may `flush` cancel it.
   private var isBackingOff = false
@@ -72,35 +96,38 @@ public final class ArchiveCoordinator {
   public func archive(_ ids: [UUID], reason: ArchiveReason) -> [ArchivedItem] {
     let items = source.archive(ids, reason: reason, at: now())
     guard !items.isEmpty else { return [] }
-    pendingItems += items
+    restoredIDs.subtract(items.map(\.id))
+    outbox.append(.add(items))
     startWriter(delayFirst: false)
     return items
   }
 
   /// Puts `item` back into the sidebar (`Archiver.restore` rules: top of Today in its source Space, folders at the
-  /// end of Pinned, fresh ids when an id is taken), then removes it from the store. `fallbackSpace` is used when the
-  /// source Space is gone; when it is nil or gone too, the first Space is used. Throws `.noSpaceForRestore` when the
-  /// sidebar has no Space, and the model's `SidebarError`s; nothing changes on throw.
-  public func restore(_ item: ArchivedItem, fallbackSpace: UUID?) throws -> RestoredItem {
+  /// end of Pinned, fresh ids when an id is taken), then queues its removal from the store. `fallbackSpace` is used
+  /// when the source Space is gone; when it is nil or gone too, the first Space is used. Returns nil and changes
+  /// nothing when `item.id` was already restored and not archived again since (a repeated click). Throws
+  /// `.noSpaceForRestore` when the sidebar has no Space, and the model's `SidebarError`s; nothing changes on throw.
+  @discardableResult
+  public func restore(_ item: ArchivedItem, fallbackSpace: UUID?) throws -> RestoredItem? {
+    guard !restoredIDs.contains(item.id) else { return nil }
     let sidebar = source.sidebar
     let fallback = fallbackSpace.flatMap { sidebar.spaces[$0] == nil ? nil : $0 } ?? sidebar.spaceOrder.first
     guard let fallback else { throw RestoreError.noSpaceForRestore }
     let restored = try source.restore(item, fallbackSpace: fallback)
-    pendingItems.removeAll { $0.id == item.id }
-    let (store, write, id) = (store, inFlight, item.id)
-    Task {
-      _ = await write?.value
-      try? await store.remove([id])  // a failure leaves a harmless duplicate in the archive
-    }
+    restoredIDs.insert(item.id)
+    dropUnsentAdds(of: item.id)
+    // Queued even when the add was never sent: a failed add may still have landed, and an extra remove is harmless.
+    outbox.append(.remove([item.id]))
+    startWriter(delayFirst: false)
     return restored
   }
 
   // MARK: - Flush
 
-  /// Writes everything pending now: stops a retry wait, waits for a write in flight, then makes exactly one attempt.
-  /// Returns true when nothing is left unwritten; false when the attempt failed, an entry arrived meanwhile, or
-  /// `flushTimeout` passed first (the write then finishes in the background). Unwritten entries stay pending and the
-  /// writer keeps retrying.
+  /// Sends everything pending now: stops a retry wait, waits for a write in flight, then sends the outbox in order
+  /// until it is empty or an add fails (a failing remove is dropped). Returns true when nothing is left unsent; false
+  /// when an add failed, an operation arrived meanwhile, or `flushTimeout` passed first (the write then finishes in the background).
+  /// Unsent operations stay queued and the writer keeps retrying.
   @discardableResult
   public func flush() async -> Bool {
     let attempt = Task { await self.flushNow() }
@@ -127,25 +154,30 @@ public final class ArchiveCoordinator {
       await running.value
     }
     stopRequested = false
-    guard !pendingItems.isEmpty else { return true }
-    let attempt = Task { await self.attemptWrite() }
+    guard !outbox.isEmpty else { return true }
+    let attempt = Task { () -> Bool in
+      while !self.outbox.isEmpty {
+        guard await self.sendNext(droppingFailedRemove: true) else { return false }
+      }
+      return true
+    }
     writer = Task { _ = await attempt.value }
     let written = await attempt.value
     writer = nil
-    startWriter(delayFirst: !written)  // keeps retrying what is still pending, after a backoff when this failed
-    return written && pendingItems.isEmpty
+    startWriter(delayFirst: !written)  // keeps retrying what is still queued, after a backoff when this failed
+    return written && outbox.isEmpty
   }
 
   // MARK: - Writer
 
   private func startWriter(delayFirst: Bool) {
-    guard writer == nil, !pendingItems.isEmpty else { return }
+    guard writer == nil, !outbox.isEmpty else { return }
     writer = Task { [weak self] in await self?.writeLoop(delayFirst: delayFirst) }
   }
 
   private func writeLoop(delayFirst: Bool) async {
     var backOff = delayFirst
-    while !pendingItems.isEmpty {
+    while !outbox.isEmpty {
       if backOff {
         let delay = Self.retryDelays[min(max(consecutiveFailures, 1) - 1, Self.retryDelays.count - 1)]
         isBackingOff = true
@@ -156,41 +188,105 @@ public final class ArchiveCoordinator {
         isBackingOff = false
         if Task.isCancelled || stopRequested { break }  // flush makes the attempt
       }
-      if await attemptWrite() {
+      if await sendNext(droppingFailedRemove: false) {
         backOff = false
-        continue  // entries archived during the write go next
+        continue  // operations queued during the write go next
       }
       if stopRequested { break }
       backOff = true
     }
+    // Unconditional: this loop is the writer. Only `flushNow` installs another one, and it waits for this loop to
+    // finish first, so this never clears a newer writer.
     writer = nil
   }
 
-  /// Sends a snapshot of the pending entries; on success drops exactly those entries (an entry restored and archived
-  /// again meanwhile is a different value and stays).
-  private func attemptWrite() async -> Bool {
-    let batch = pendingItems
-    guard !batch.isEmpty else { return true }
+  /// Sends the operation at the head of the outbox (the leading adds as one batch). Returns false when it failed and
+  /// is still queued; with `droppingFailedRemove` (flush) a failed remove is dropped instead.
+  private func sendNext(droppingFailedRemove: Bool) async -> Bool {
+    guard let head = outbox.first else { return true }
+    switch head {
+    case .add:
+      return await sendLeadingAdds()
+    case .remove(let ids):
+      return await sendRemove(ids, droppingOnFailure: droppingFailedRemove)
+    }
+  }
+
+  /// Sends a snapshot of the leading adds; on success drops exactly those entries from them (an entry restored
+  /// meanwhile is already gone, and a re-archived one sits behind its remove).
+  private func sendLeadingAdds() async -> Bool {
+    let leading = outbox.prefix { if case .add = $0 { true } else { false } }.count
+    let batch = pendingItems(inFirst: leading)
     let store = self.store
-    let write = Task { () -> Bool in
+    let written = await Task { () -> Bool in
       do {
         _ = try await store.add(batch, onConflict: .replace)
         return true
       } catch {
         return false
       }
+    }.value
+    guard written else { return recordFailure() }
+    let done = Set(batch)
+    for index in outbox.indices.prefix(leading) {
+      if case .add(let items) = outbox[index] { outbox[index] = .add(items.filter { !done.contains($0) }) }
     }
-    inFlight = write
-    let written = await write.value
-    inFlight = nil
-    if written {
-      let done = Set(batch)
-      pendingItems.removeAll { done.contains($0) }
+    dropEmptyAdds()
+    consecutiveFailures = 0
+    return true
+  }
+
+  /// Sends the head remove. On failure, ids that a later queued add of the same id supersedes are dropped (that
+  /// `.replace` add overwrites the entry); the rest stay at the head for a retry after a backoff, or are dropped too
+  /// when `droppingOnFailure`.
+  private func sendRemove(_ ids: [NodeID], droppingOnFailure: Bool) async -> Bool {
+    let store = self.store
+    let removed = await Task { () -> Bool in
+      do {
+        try await store.remove(ids)
+        return true
+      } catch {
+        return false
+      }
+    }.value
+    if removed {
+      outbox.removeFirst()
       consecutiveFailures = 0
-    } else {
-      consecutiveFailures += 1
+      return true
     }
-    return written
+    let superseded = Set(pendingItems.map(\.id))
+    let remaining = ids.filter { !superseded.contains($0) }
+    guard remaining.isEmpty || droppingOnFailure else {
+      outbox[0] = .remove(remaining)
+      return recordFailure()
+    }
+    outbox.removeFirst()
+    return true
+  }
+
+  private func recordFailure() -> Bool {
+    consecutiveFailures += 1
+    return false
+  }
+
+  private func pendingItems(inFirst count: Int) -> [ArchivedItem] {
+    outbox.prefix(count).flatMap { operation -> [ArchivedItem] in
+      if case .add(let items) = operation { items } else { [] }
+    }
+  }
+
+  /// Removes `id` from every add not yet sent; an add in flight is a snapshot and is not affected.
+  private func dropUnsentAdds(of id: NodeID) {
+    for index in outbox.indices {
+      if case .add(let items) = outbox[index] { outbox[index] = .add(items.filter { $0.id != id }) }
+    }
+    dropEmptyAdds()
+  }
+
+  private func dropEmptyAdds() {
+    outbox.removeAll { operation in
+      if case .add(let items) = operation { items.isEmpty } else { false }
+    }
   }
 }
 

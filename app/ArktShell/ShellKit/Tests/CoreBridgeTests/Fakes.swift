@@ -15,6 +15,13 @@ actor FakeArchiveStore: ArchiveStoring {
     var policy: ArchiveConflictPolicy
   }
 
+  /// Every store call in arrival order.
+  enum Call: Equatable, Sendable {
+    case add([NodeID])
+    case remove([NodeID])
+  }
+
+  private(set) var calls: [Call] = []
   private(set) var addCalls: [AddCall] = []
   private(set) var addedItems: [[ArchivedItem]] = []
   private(set) var removeCalls: [[NodeID]] = []
@@ -37,6 +44,7 @@ actor FakeArchiveStore: ArchiveStoring {
 
   func add(_ items: [ArchivedItem], onConflict policy: ArchiveConflictPolicy) async throws -> Int {
     addCalls.append(AddCall(ids: items.map(\.id), policy: policy))
+    calls.append(.add(items.map(\.id)))
     addedItems.append(items)
     if holdsAdds { await withCheckedContinuation { heldAdds.append($0) } }
     if failsAdds { throw FakeStoreError() }
@@ -56,6 +64,7 @@ actor FakeArchiveStore: ArchiveStoring {
 
   func remove(_ ids: [NodeID]) async throws {
     removeCalls.append(ids)
+    calls.append(.remove(ids))
     if failsRemoves { throw FakeStoreError() }
     for id in ids { stored[id] = nil }
   }

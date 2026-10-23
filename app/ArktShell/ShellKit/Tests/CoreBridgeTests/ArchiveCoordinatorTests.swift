@@ -20,6 +20,7 @@ struct ArchiveCoordinatorTests {
     let source: ModelSidebarSource
     let store = FakeArchiveStore()
     let sleeper = ManualSleeper()
+    let clock: TestClock
     let coordinator: ArchiveCoordinator
     let space: UUID
     let pinned: UUID
@@ -31,6 +32,8 @@ struct ArchiveCoordinatorTests {
     init(todayTabs: Int = 2, withSpace: Bool = true) throws {
       let source = ModelSidebarSource(now: { ArchiveCoordinatorTests.now })
       self.source = source
+      let clock = TestClock(ArchiveCoordinatorTests.now)
+      self.clock = clock
       if withSpace {
         let space = try source.addSpace(title: "Work")
         self.space = space
@@ -42,7 +45,7 @@ struct ArchiveCoordinatorTests {
         (space, pinned, today) = (UUID(), UUID(), [])
       }
       coordinator = ArchiveCoordinator(
-        source: source, store: store, now: { ArchiveCoordinatorTests.now },
+        source: source, store: store, now: { clock.now },
         flushTimeout: ArchiveCoordinatorTests.flushTimeout, sleep: sleeper.sleep)
       observation = source.observe { [unowned self] in self.changes.append($0) }
       source.onDidChange = { [unowned self] _ in self.didChangeCount += 1 }
@@ -174,6 +177,21 @@ struct ArchiveCoordinatorTests {
     #expect(harness.coordinator.pendingItems.isEmpty)
   }
 
+  @Test func flushDropsAFailingRemoveSoItCannotHoldBackAnAdd() async throws {
+    let harness = try Harness()
+    let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    await harness.drain()
+    await harness.store.setFailsRemoves(true)
+    _ = try harness.coordinator.restore(item, fallbackSpace: nil)
+    await eventually { harness.sleeper.parkedDurations == [.seconds(1)] }
+    let other = try #require(harness.coordinator.archive([harness.today[1]], reason: .manual).first)
+
+    #expect(await harness.coordinator.flush())
+    #expect(!harness.coordinator.hasPendingWrites)
+    #expect(await harness.store.stored[other.id] == other)
+    #expect(await harness.store.removeCalls == [[item.id], [item.id]])
+  }
+
   // MARK: - Restore
 
   @Test func restorePutsATabAtTheTopOfTodayThenRemovesItFromTheStore() async throws {
@@ -181,7 +199,7 @@ struct ArchiveCoordinatorTests {
     let item = try #require(harness.coordinator.archive([harness.today[1]], reason: .manual).first)
     await harness.drain()
 
-    let restored = try harness.coordinator.restore(item, fallbackSpace: nil)
+    let restored = try #require(try harness.coordinator.restore(item, fallbackSpace: nil))
 
     #expect(restored.nodeID == item.id)
     #expect(restored.space == harness.space)
@@ -199,7 +217,7 @@ struct ArchiveCoordinatorTests {
     let snapshot = try #require(other.snapshot(of: folder))
     let item = ArchivedItem(reason: .manual, archivedAt: Self.now, source: .space(harness.space), snapshot: snapshot)
 
-    let restored = try harness.coordinator.restore(item, fallbackSpace: nil)
+    let restored = try #require(try harness.coordinator.restore(item, fallbackSpace: nil))
 
     #expect(restored.location == .pinned(harness.space))
     #expect(harness.source.children(of: .pinned(harness.space)) == [harness.pinned, folder])
@@ -213,13 +231,13 @@ struct ArchiveCoordinatorTests {
     moved.source = .space(UUID())
     let second = try harness.source.addSpace(title: "Second")
 
-    let restored = try harness.coordinator.restore(moved, fallbackSpace: second)
+    let restored = try #require(try harness.coordinator.restore(moved, fallbackSpace: second))
 
     #expect(restored.space == second)
     #expect(harness.source.children(of: .today(second)) == [item.id])
   }
 
-  @Test func aFailingRemoveKeepsTheRestoreAndIsNotRetried() async throws {
+  @Test func aFailingRemoveKeepsTheRestoreAndIsRetriedAfterABackoff() async throws {
     let harness = try Harness()
     let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
     await harness.drain()
@@ -227,11 +245,68 @@ struct ArchiveCoordinatorTests {
 
     _ = try harness.coordinator.restore(item, fallbackSpace: nil)
 
-    await eventually { await harness.store.removeCalls.count == 1 }
-    for _ in 0..<100 { await Task.yield() }
+    await eventually { harness.sleeper.parkedDurations == [.seconds(1)] }
     #expect(await harness.store.removeCalls.count == 1)
     #expect(harness.source.node(item.id) != nil)
+    #expect(harness.coordinator.hasPendingWrites)
+
+    await harness.store.setFailsRemoves(false)
+    harness.sleeper.resume(.seconds(1))
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id], [item.id]])
+    #expect(await harness.store.stored[item.id] == nil)
+  }
+
+  @Test func aFailedRemoveSupersededByALaterArchiveIsDropped() async throws {
+    let harness = try Harness()
+    let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    await harness.drain()
+    await harness.store.holdAdds()
+    await harness.store.setFailsRemoves(true)
+    harness.coordinator.archive([harness.today[1]], reason: .manual)  // holds the writer
+    await eventually { await harness.store.addCalls.count == 2 }
+    _ = try harness.coordinator.restore(item, fallbackSpace: nil)
+    harness.clock.now += 60
+    let again = try #require(harness.coordinator.archive([item.id], reason: .manual).first)
+
+    await harness.store.releaseAdds()
+    await harness.drain()
+
+    // The remove failed; the queued `.replace` add of the same id makes a retry pointless, so it went next.
+    #expect(await harness.store.calls.suffix(2) == [.remove([item.id]), .add([item.id])])
+    #expect(await harness.store.removeCalls.count == 1)
     #expect(harness.sleeper.parkedCount == 0)
+    #expect(await harness.store.stored[item.id] == again)
+  }
+
+  @Test func restoreThenArchiveAgainKeepsTheNewEntry() async throws {
+    let harness = try Harness()
+    await harness.store.holdAdds()
+    let first = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    await eventually { await harness.store.addCalls.count == 1 }
+
+    _ = try harness.coordinator.restore(first, fallbackSpace: nil)
+    harness.clock.now += 60
+    let second = try #require(harness.coordinator.archive([first.id], reason: .manual).first)
+    #expect(second != first)
+    await harness.store.releaseAdds()
+    await harness.drain()
+
+    #expect(await harness.store.calls == [.add([first.id]), .remove([first.id]), .add([first.id])])
+    #expect(await harness.store.stored[first.id] == second)
+  }
+
+  @Test func restoringTheSameItemTwiceIsANoOp() async throws {
+    let harness = try Harness()
+    let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    await harness.drain()
+    _ = try harness.coordinator.restore(item, fallbackSpace: nil)
+    let before = harness.source.sidebar
+
+    #expect(try harness.coordinator.restore(item, fallbackSpace: nil) == nil)
+    #expect(harness.source.sidebar == before)
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id]])
   }
 
   @Test func restoringAnIdAlreadyInTheSidebarUsesFreshIds() async throws {
@@ -240,7 +315,7 @@ struct ArchiveCoordinatorTests {
     await harness.drain()
     try harness.source.mutate { try $0.insert(item.snapshot, in: .today(harness.space)) }
 
-    let restored = try harness.coordinator.restore(item, fallbackSpace: nil)
+    let restored = try #require(try harness.coordinator.restore(item, fallbackSpace: nil))
 
     #expect(restored.nodeID != item.id)
     #expect(harness.source.node(item.id) != nil)
@@ -271,9 +346,11 @@ struct ArchiveCoordinatorTests {
     _ = try harness.coordinator.restore(item, fallbackSpace: nil)
 
     #expect(harness.coordinator.pendingItems.isEmpty)
+    await harness.store.setFailsAdds(false)
     harness.sleeper.resume(.seconds(1))
     await harness.drain()
-    #expect(await harness.store.addCalls.count == 1)
+    #expect(await harness.store.addCalls.count == 1)  // the unwritten entry is not sent any more
+    #expect(await harness.store.removeCalls == [[item.id]])
   }
 
   @Test func restoreWaitsForTheWriteInFlightBeforeRemoving() async throws {
@@ -293,6 +370,14 @@ struct ArchiveCoordinatorTests {
 }
 
 // MARK: - Helpers
+
+/// A clock the tests move by hand.
+@MainActor
+final class TestClock {
+  var now: Date
+
+  init(_ now: Date) { self.now = now }
+}
 
 /// Yields until `condition` holds; records an issue if it never does.
 @MainActor
