@@ -138,6 +138,7 @@ extension ShellWindowController {
       card.showsToolbar = visible
       let toolbar = card.toolbar
       toolbar.urlBar.isToolbarVisible = visible
+      toolbar.urlBar.style = toolbarSetting.showsFullURL ? .full : .host
       toolbar.urlBar.onPress = { [weak self] in
         guard let self, self.focusPaneForToolbar(index) != nil else { return }
         self.openLocation(nil)

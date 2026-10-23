@@ -68,11 +68,14 @@ struct ToolbarSettingTests {
 
   @Test func usesArcsKeyName() {
     #expect(ToolbarSetting.defaultsKey == "topBarURLEnabled")
+    #expect(ToolbarSetting.showsFullURLDefaultsKey == "toolbarShowFullURLsEnabledPreference")
   }
 
-  @Test func hiddenByDefault() {
+  @Test func hiddenAndFullURLByDefault() {
     withSuite { defaults in
-      #expect(ToolbarSetting(defaults: defaults).isVisible == false)
+      let setting = ToolbarSetting(defaults: defaults)
+      #expect(setting.isVisible == false)
+      #expect(setting.showsFullURL == true)
     }
   }
 
@@ -80,18 +83,26 @@ struct ToolbarSettingTests {
     withSuite { defaults in
       let first = ToolbarSetting(defaults: defaults)
       first.isVisible = true
+      first.showsFullURL = false
       #expect(defaults.bool(forKey: ToolbarSetting.defaultsKey))
+      #expect(defaults.bool(forKey: ToolbarSetting.showsFullURLDefaultsKey) == false)
       #expect(ToolbarSetting(defaults: defaults).isVisible)
+      #expect(ToolbarSetting(defaults: defaults).showsFullURL == false)
       first.isVisible = false
+      first.showsFullURL = true
       #expect(ToolbarSetting(defaults: defaults).isVisible == false)
+      #expect(ToolbarSetting(defaults: defaults).showsFullURL == true)
     }
   }
 
   @Test func ephemeralSettingKeepsItsValueInMemoryOnly() {
     let setting = ToolbarSetting.ephemeral()
     setting.isVisible = true
+    setting.showsFullURL = false
     #expect(setting.isVisible)
+    #expect(setting.showsFullURL == false)
     #expect(ToolbarSetting.ephemeral().isVisible == false)
+    #expect(ToolbarSetting.ephemeral().showsFullURL == true)
   }
 
   @Test func observersHearEachChangeUntilTheyGo() {
@@ -109,10 +120,13 @@ struct ToolbarSettingTests {
     setting.isVisible = true
     setting.isVisible = true                                   // no change, no call
     #expect(kept.count == 1 && dropped?.count == 1)
+    setting.showsFullURL = false
+    setting.showsFullURL = false                               // no change, no call
+    #expect(kept.count == 2 && dropped?.count == 2)
     dropped = nil
     #expect(droppedRef == nil, "the setting holds observers weakly")
     setting.isVisible = false
-    #expect(kept.count == 2)
+    #expect(kept.count == 3)
   }
 
   @Test func menuTitleFollowsTheState() {

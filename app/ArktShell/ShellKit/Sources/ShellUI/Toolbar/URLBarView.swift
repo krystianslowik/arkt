@@ -14,7 +14,15 @@ public final class URLBarView: NSView {
     case full
   }
 
-  public let style: Style
+  /// Whether the bar shows the host only or the full URL (#80: the Toolbar switches live).
+  public var style: Style {
+    didSet {
+      guard style != oldValue else { return }
+      refreshText()
+    }
+  }
+  /// The sidebar bar draws a rounded pill and natural-aligned text; the Toolbar bar is centered plain text.
+  private let showsPill: Bool
   /// The active tab's URL; nil while no tab is shown.
   public var url: URL? {
     didSet { if url != oldValue { refreshText() } }
@@ -50,13 +58,14 @@ public final class URLBarView: NSView {
 
   public init(style: Style) {
     self.style = style
+    self.showsPill = style == .host
     super.init(frame: .zero)
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
     layer?.cornerCurve = .continuous
     label.font = Self.font
-    label.lineBreakMode = style == .host ? .byTruncatingTail : .byTruncatingMiddle
-    label.alignment = style == .host ? .natural : .center
+    label.lineBreakMode = showsPill ? .byTruncatingTail : .byTruncatingMiddle
+    label.alignment = showsPill ? .natural : .center
     label.maximumNumberOfLines = 1
     label.cell?.usesSingleLineMode = true
     label.autoresizingMask = []
@@ -93,7 +102,7 @@ public final class URLBarView: NSView {
   }
 
   public override func updateLayer() {
-    guard let layer, style == .host else { return }   // the Toolbar's URL is plain text
+    guard let layer, showsPill else { return }   // the Toolbar's URL is plain text
     layer.cornerRadius = SidebarMetrics.urlBarCornerRadius
     let token = isHovered ? ShellTokens.sidebarItemHovered : ShellTokens.sidebarItemBackground
     layer.backgroundColor = token.resolve(flavor).cgColor
@@ -101,7 +110,7 @@ public final class URLBarView: NSView {
 
   public override func layout() {
     super.layout()
-    let inset = style == .host ? SidebarMetrics.urlBarTextInset : 0
+    let inset = showsPill ? SidebarMetrics.urlBarTextInset : 0
     let height = Self.labelHeight
     label.frame = NSRect(x: inset, y: ((bounds.height - height) / 2).rounded(),
                          width: max(0, bounds.width - 2 * inset), height: height)

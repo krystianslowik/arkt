@@ -218,6 +218,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.view.showsURLBar = !visible   // Arc hides the sidebar URL bar while the Toolbar is on
     urlBar.isToolbarVisible = visible
     rootView.card.toolbar.urlBar.isToolbarVisible = visible
+    rootView.card.toolbar.urlBar.style = toolbarSetting.showsFullURL ? .full : .host
     configurePaneToolbars()
   }
 

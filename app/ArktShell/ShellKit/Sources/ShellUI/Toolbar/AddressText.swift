@@ -12,8 +12,7 @@ public enum AddressText {
     return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
   }
 
-  /// The Toolbar's form: the full URL (Arc's "Show full URL when Toolbar is enabled"; Arkt has no setting for the
-  /// host-only variant yet).
+  /// The Toolbar's full-URL form ("Show full URL when Toolbar is enabled", `toolbarShowFullURLsEnabledPreference`).
   public static func full(_ url: URL?) -> String { url?.absoluteString ?? "" }
 }
 
@@ -43,6 +42,8 @@ public struct CardToolbarLayout: Equatable, Sendable {
 @MainActor
 public final class ToolbarSetting {
   public static let defaultsKey = "topBarURLEnabled"
+  /// Arc's "Show full URL when Toolbar is enabled" preference key (#80, BH-032).
+  public static let showsFullURLDefaultsKey = "toolbarShowFullURLsEnabledPreference"
 
   private let defaults: UserDefaults?
   /// Held weakly: a closed window drops out on its own.
@@ -52,17 +53,32 @@ public final class ToolbarSetting {
     didSet {
       guard isVisible != oldValue else { return }
       defaults?.set(isVisible, forKey: Self.defaultsKey)
-      observers.removeAll { $0.value == nil }
-      for observer in observers { observer.value?.toolbarSettingDidChange(self) }
+      notifyObservers()
     }
   }
 
-  /// Reads the stored value (hidden when never set) and writes every change back to `defaults`.
+  /// Whether the Toolbar URL bar shows the full URL (`.full`) or the host only (`.host`). Defaults to `true`
+  /// (PARITY(NEEDS-RUNTIME-CHECK RT-30)).
+  public var showsFullURL: Bool {
+    didSet {
+      guard showsFullURL != oldValue else { return }
+      defaults?.set(showsFullURL, forKey: Self.showsFullURLDefaultsKey)
+      notifyObservers()
+    }
+  }
+
+  /// Reads the stored values (hidden and full URL when never set) and writes every change back to `defaults`.
   public convenience init(defaults: UserDefaults) { self.init(store: defaults) }
 
   private init(store: UserDefaults?) {
     self.defaults = store
     self.isVisible = store?.bool(forKey: Self.defaultsKey) ?? false
+    self.showsFullURL = store?.object(forKey: Self.showsFullURLDefaultsKey) as? Bool ?? true
+  }
+
+  private func notifyObservers() {
+    observers.removeAll { $0.value == nil }
+    for observer in observers { observer.value?.toolbarSettingDidChange(self) }
   }
 
   /// `observer` hears every change of `isVisible` until it is deallocated.
