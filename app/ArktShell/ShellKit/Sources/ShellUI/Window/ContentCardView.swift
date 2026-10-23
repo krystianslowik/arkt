@@ -145,9 +145,7 @@ public final class ContentCardView: NSView {
   /// Centered, `ToastView.bottomInset` above the bottom edge, at most `ToastView.maxWidth` wide.
   private func layoutToast() {
     guard let toastView else { return }
-    let size = toastView.preferredSize(maxWidth: max(0, bounds.width - 2 * ToastView.bottomInset))
-    toastView.frame = NSRect(x: ((bounds.width - size.width) / 2).rounded(),
-                             y: ToastView.bottomInset, width: size.width, height: size.height)
+    toastView.frame = toastView.frame(centeredIn: bounds)
   }
 
   /// One physical pixel at the current backing scale.

@@ -20,6 +20,16 @@ public final class SplitContainerView: NSView {
   }
   /// Pacing of the last finished divider drag.
   public private(set) var lastPacing: FrameStats?
+  /// Toasts while a split is shown (the single card is hidden then): above every pane, centered on the whole content
+  /// area like on the single card [I] (BH-190 deferred). `ShellRootView.showsSplit` moves it here and back.
+  var toastView: ToastView? {
+    didSet {
+      guard toastView !== oldValue else { return }
+      oldValue?.removeFromSuperview()
+      if let toastView { addSubview(toastView, positioned: .above, relativeTo: nil) }
+      needsLayout = true
+    }
+  }
 
   /// The new factors after a drag, a double-click or an accessibility adjustment; called once per change, and not
   /// for a drag that ends where it began.
@@ -105,6 +115,7 @@ public final class SplitContainerView: NSView {
   public override func layout() {
     super.layout()
     applyFrames()
+    layoutToast()
   }
 
   private var backingScale: CGFloat { window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2 }
@@ -116,6 +127,14 @@ public final class SplitContainerView: NSView {
     CATransaction.setDisableActions(true)
     for (card, frame) in zip(cards, frames.panes) where card.frame != frame { card.frame = frame }
     for (divider, frame) in zip(dividerViews, frames.dividers) where divider.frame != frame { divider.frame = frame }
+    CATransaction.commit()
+  }
+
+  private func layoutToast() {
+    guard let toastView else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    toastView.frame = toastView.frame(centeredIn: bounds)
     CATransaction.commit()
   }
 
@@ -209,7 +228,7 @@ public final class SplitContainerView: NSView {
   private func makeDivider(_ index: Int) -> SplitDividerView {
     let divider = SplitDividerView(index: index)
     divider.container = self
-    addSubview(divider, positioned: .above, relativeTo: nil)
+    addSubview(divider, positioned: toastView == nil ? .above : .below, relativeTo: toastView)
     return divider
   }
 
