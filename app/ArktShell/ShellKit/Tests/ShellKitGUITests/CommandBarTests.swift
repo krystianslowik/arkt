@@ -395,6 +395,76 @@ final class CommandBarTests: XCTestCase {
     XCTAssertEqual(bar.panel.alphaValue, 0, "hidden by alpha; the panel stays ordered in")
   }
 
+  // MARK: - Following the parent window (#97)
+
+  /// Where the bar belongs over the parent's actual frame (the window server may clamp a requested one).
+  func expectedFrame() throws -> NSRect {
+    let window = try XCTUnwrap(shell.window)
+    return CommandBarGeometry.frame(parentFrame: window.frame,
+                                    contentHeight: CommandBarGeometry.contentHeight(rowCount: bar.results.count))
+  }
+
+  /// Within 1 pt: panel origins snap to backing pixels.
+  func isClose(_ a: NSRect, _ b: NSRect) -> Bool {
+    abs(a.minX - b.minX) <= 1 && abs(a.minY - b.minY) <= 1 && abs(a.width - b.width) <= 1
+      && abs(a.height - b.height) <= 1
+  }
+
+  func barIsOverTheParent() -> Bool { (try? isClose(bar.panel.frame, expectedFrame())) == true }
+
+  func testPrewarmPutsThePanelOnTheParentScreen() throws {
+    let window = try XCTUnwrap(shell.window)
+    let screen = try XCTUnwrap(window.screen)
+    XCTAssertTrue(screen.frame.intersects(bar.panel.frame), "pre-warmed on the parent's display, not off-screen")
+    XCTAssertTrue(bar.panel.screen === screen)
+  }
+
+  func testOpenBarFollowsTheParentWhenItMoves() throws {
+    let window = try XCTUnwrap(shell.window)
+    bar.toggle(.newTab)
+    window.setFrameOrigin(NSPoint(x: window.frame.minX + 40, y: window.frame.minY + 30))
+    waitUntil("the bar over the moved parent") { barIsOverTheParent() }
+    bar.toggle(.newTab)
+  }
+
+  func testOpenBarFollowsTheParentWhenItResizes() throws {
+    let window = try XCTUnwrap(shell.window)
+    bar.toggle(.newTab)
+    window.setFrame(NSRect(x: 160, y: 120, width: 700, height: 600), display: true)
+    waitUntil("the bar over the resized parent") { barIsOverTheParent() }
+    XCTAssertEqual(bar.panel.frame.width, min(766, window.frame.width - 48), accuracy: 1)
+    bar.toggle(.newTab)
+  }
+
+  /// One display in tests: displace the panel and post the parent's screen change, which must put it back.
+  func testOpenBarRepositionsWhenTheParentChangesScreen() throws {
+    let window = try XCTUnwrap(shell.window)
+    bar.toggle(.newTab)
+    bar.panel.setFrameOrigin(NSPoint(x: bar.panel.frame.minX - 200, y: bar.panel.frame.minY - 100))
+    XCTAssertFalse(barIsOverTheParent())
+    NotificationCenter.default.post(name: NSWindow.didChangeScreenNotification, object: window)
+    waitUntil("the bar back over the parent") { barIsOverTheParent() }
+    bar.toggle(.newTab)
+  }
+
+  /// A closed bar does no work while the parent moves; the next show places it.
+  func testClosedBarDoesNotFollowTheParent() throws {
+    let window = try XCTUnwrap(shell.window)
+    bar.toggle(.newTab)
+    bar.toggle(.newTab)
+    let before = bar.panel.frame
+    var moved = false
+    let token = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: window,
+                                                       queue: nil) { _ in moved = true }
+    defer { NotificationCenter.default.removeObserver(token) }
+    window.setFrameOrigin(NSPoint(x: window.frame.minX + 40, y: window.frame.minY + 30))
+    waitUntil("the parent's move notification") { moved }
+    XCTAssertEqual(bar.panel.frame, before)
+    bar.toggle(.newTab)
+    XCTAssertTrue(barIsOverTheParent(), "the next show places it")
+    bar.toggle(.newTab)
+  }
+
   // C7 fix 2: the panel stays ordered in at alpha 0, so a show is an alpha change plus makeKey.
   func testHiddenPanelStaysOrderedInButIsInert() async throws {
     let panel = bar.panel

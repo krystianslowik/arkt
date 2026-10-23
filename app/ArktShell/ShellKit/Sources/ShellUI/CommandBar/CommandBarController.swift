@@ -80,18 +80,22 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.table.action = #selector(rowClicked(_:))
     barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
+    for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification] {
+      NotificationCenter.default.addObserver(self, selector: #selector(parentFrameDidChange(_:)), name: name,
+                                             object: parent)
+    }
   }
 
-  /// Creates the window-server backing store, lays out and draws once off-screen, and leaves the panel ordered
-  /// in at alpha 0, so a show() does no allocation, first-draw work or window ordering.
+  /// Creates the window-server backing store, lays out and draws once over the parent window (on its display,
+  /// at alpha 0 and inert, as after a hide), and leaves the panel ordered in, so a show() does no allocation,
+  /// first-draw work or window ordering.
   public func prewarm() {
     cellScale = backingScale
     results = CommandBarResults.make(query: "warm.example", openTabs: [
       .init(node: UUID(), title: "warm", url: URL(string: "https://warm.example")!),
     ])
     barView.table.reloadData()
-    panel.setFrame(NSRect(x: -10_000, y: -10_000, width: CommandBarGeometry.preferredWidth,
-                          height: CommandBarGeometry.contentHeight(rowCount: results.count)), display: true)
+    if let parent { panel.setFrame(frame(in: parent), display: true) }
     barView.table.selectRowIndexes([0], byExtendingSelection: false)
     panel.orderFrontRegardless()                  // ordered in for good, at alpha 0 (see CommandBarPanel)
     panel.displayIfNeeded()
@@ -112,6 +116,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// the controller does not show again afterwards.
   public func invalidate() {
     invalidated = true
+    NotificationCenter.default.removeObserver(self)
     firstFrameLink?.invalidate()
     firstFrameLink = nil
     hide(restoreFocus: false)
@@ -219,6 +224,13 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       guard let self, !self.isVisible else { return }
       self.parent?.makeKey()
     }
+  }
+
+  /// The open bar follows the parent when it moves, resizes or changes screen. Only the frame is set (equal
+  /// frames are skipped); a closed bar does nothing here, the next show() places it.
+  @objc private func parentFrameDidChange(_ notification: Notification) {
+    guard isVisible, let parent else { return }
+    setPanelFrame(frame(in: parent), display: false)
   }
 
   // MARK: Field and keys

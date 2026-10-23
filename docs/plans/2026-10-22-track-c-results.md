@@ -885,3 +885,26 @@ Checks (rebased on #192, #195, #197, #198, #200, #202 and #204): `nice -n 10 swi
 `ArchiveCoordinatorTests`), 0 failures. ShellKit `--filter ShellKitGUITests`: XCTest 322 tests (317 + 5: 4 in
 `SpaceListChangeTests`, 1 in `CloseTabTests`), 0 failures; pacing asserted, `space-swipe` and `space-key` 0 frames
 over 8.6 ms, command bar earliest frame asserted (load 5.44 on 10 cores). Debug app build: `** BUILD SUCCEEDED **`.
+
+## Command bar: follow the parent window (#97)
+
+- The open bar follows its parent window: `CommandBarController` observes the parent's `didMove`, `didResize` and
+  `didChangeScreen` notifications and sets the panel frame from `CommandBarGeometry` (no layout or reload; an equal
+  frame is skipped). A closed bar does nothing on these notifications; the next show places it, as before.
+- Prewarm lays the panel out over the parent window (alpha 0 and inert, the state a hidden bar is in after a hide)
+  instead of at (-10000, -10000), so it is warmed on the parent's display and at its backing scale.
+- Not changed: icons of an open bar keep their scale until the next show when the parent moves to a display of
+  another scale (the show-time scale check stays). The "move between a 1x and a 2x display" manual check (#26) covers
+  it.
+
+Tests (written first, 4 failed before the change; the fifth guards the closed-bar case): `CommandBarTests`
+`testPrewarmPutsThePanelOnTheParentScreen`, `testOpenBarFollowsTheParentWhenItMoves`,
+`testOpenBarFollowsTheParentWhenItResizes`, `testOpenBarRepositionsWhenTheParentChangesScreen` (one display in tests:
+the panel is displaced and the parent's screen change is posted) and `testClosedBarDoesNotFollowTheParent`. They wait
+on conditions, not timers.
+
+Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 424 tests, XCTest 315 tests (310 + 5, GUI included),
+0 failures. Latency gate (#25) unchanged: `commandbar.showcpu.ms p95=0.24`, `commandbar.earliestframe p95=10.38
+bound=17.42 load1=5.14 cores=10 asserted=yes`. Rebased on #198 and #204: Swift Testing 433 tests, XCTest 322 tests
+(317 + 5), 0 failures; `commandbar.showcpu.ms p95=0.31`, `commandbar.earliestframe p95=11.16 bound=17.73 load1=11.74
+asserted=no`. Debug app build: `** BUILD SUCCEEDED **`.
