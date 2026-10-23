@@ -81,8 +81,10 @@ public enum SplitLayout {
   }
 
   /// New factors after divider `index` moved so that pane `index` ends at main-axis `position` (measured from the
-  /// leading edge of `bounds`). Only panes `index` and `index + 1` change, each kept at least `minimum` long; the
-  /// other entries are returned unchanged. When `bounds` cannot fit every pane at `minimum`, all shares are equal.
+  /// leading edge of `bounds`). Only panes `index` and `index + 1` change; the other entries are returned unchanged.
+  /// Each of the two keeps at least `minimum` when together they are at least `2 * minimum` long; otherwise (a window
+  /// shrank after uneven shares) both get half their total, since a drag never takes length from other panes.
+  /// When `bounds` cannot fit every pane at `minimum`, all shares are equal.
   public static func factors(dragging index: Int, to position: CGFloat, in bounds: CGRect, axis: SplitAxis,
                              factors: [Double], gap: CGFloat, minimum: CGFloat) -> [Double] {
     var shares = normalized(factors, count: factors.count)

@@ -204,6 +204,29 @@ final class SplitContainerViewTests: XCTestCase {
     XCTAssertEqual(container.paneCards.map(\.frame.width), [400, 400, 400])
   }
 
+  func testDoubleClickOnAnEqualSplitCommitsNothing() throws {
+    let container = makeContainer()
+    show(container, [page(.systemRed), page(.systemBlue)], factors: [0.5, 0.5])
+    var commits: [[Double]] = []
+    container.onCommitFactors = { commits.append($0) }
+    let divider = container.dividers[0]
+    let point = NSPoint(x: divider.frame.midX, y: 300)
+    divider.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+    divider.mouseUp(with: try mouseEvent(.leftMouseUp, at: point, in: container))
+    divider.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container, clickCount: 2))
+    divider.mouseUp(with: try mouseEvent(.leftMouseUp, at: point, in: container, clickCount: 2))
+    XCTAssertTrue(commits.isEmpty, "equal shares are already stored; nothing to write")
+    XCTAssertEqual(container.liveFactors, [0.5, 0.5])
+  }
+
+  func testBackingScaleChangeRequestsLayout() throws {
+    let container = makeContainer()
+    show(container, [page(.systemRed), page(.systemBlue)])
+    XCTAssertFalse(container.needsLayout)
+    container.viewDidChangeBackingProperties()
+    XCTAssertTrue(container.needsLayout)
+  }
+
   func testWindowResizeKeepsFactors() throws {
     let container = makeContainer()
     show(container, [page(.systemRed), page(.systemBlue)], factors: [0.3, 0.7])

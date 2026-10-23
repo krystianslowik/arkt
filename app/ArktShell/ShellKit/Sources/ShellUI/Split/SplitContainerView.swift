@@ -95,6 +95,12 @@ public final class SplitContainerView: NSView {
     needsLayout = true
   }
 
+  /// A move between 1x and 2x screens puts the pane edges on the new pixel grid.
+  public override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    needsLayout = true
+  }
+
   /// A window resize keeps `liveFactors` and only recomputes frames.
   public override func layout() {
     super.layout()
@@ -158,7 +164,10 @@ public final class SplitContainerView: NSView {
   /// Double-click on a divider: every pane gets an equal share, committed once. [I] PARITY(NEEDS-RUNTIME-CHECK RT-33)
   func equalize() {
     guard draggingIndex == nil, paneCount >= 2 else { return }
-    liveFactors = SplitLayout.equalShares(paneCount)
+    let equal = SplitLayout.equalShares(paneCount)
+    // Already equal (every new split starts that way): no source write.
+    guard liveFactors != equal else { return }
+    liveFactors = equal
     applyFrames()
     onCommitFactors?(liveFactors)
   }
