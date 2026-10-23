@@ -442,6 +442,37 @@ struct ArktLaunchTests {
     }
   }
 
+  /// #100: `Backups.write` (`makeBackup`) never sweeps other `.Arkt-*.sqlite.tmp` files in `Backups/`; only
+  /// `ArktLaunch.openAndLoad` sweeps leftovers at launch, and a failed `Backups.write` removes only its own temp file.
+  @Test func leftoversAreSweptAtLaunchOnlyNotDuringMakeBackup() async throws {
+    try await withTemporaryDirectory { directory in
+      let location = DatabaseLocation(directory: directory)
+      let fileManager = FileManager.default
+      let state = try await ArktLaunch.openAndLoad(location, now: Self.at(0))
+      _ = try await SidebarStore(database: state.database).save(TestSidebars.make("a"), at: Self.at(1))
+
+      try fileManager.createDirectory(at: location.backupsDirectory, withIntermediateDirectories: true)
+      let leftoverTmp = location.backupsDirectory.appendingPathComponent(".Arkt-20260101T000000000Z.sqlite.tmp")
+      let leftoverJournal = location.backupsDirectory.appendingPathComponent(
+        ".Arkt-20260101T000000000Z.sqlite.tmp-journal")
+      try Data("leftover".utf8).write(to: leftoverTmp)
+      try Data("journal".utf8).write(to: leftoverJournal)
+
+      // Routine backups (including pruning past `backupsKept`) leave the leftover temp files alone.
+      for second in 2...8 { _ = try await Self.backup(state.database, location, at: Double(second)) }
+      #expect(fileManager.fileExists(atPath: leftoverTmp.path))
+      #expect(fileManager.fileExists(atPath: leftoverJournal.path))
+      try state.database.close()
+
+      // The next launch deterministically sweeps both leftovers while keeping the real backups.
+      let relaunched = try await ArktLaunch.openAndLoad(location, now: Self.at(10))
+      defer { try? relaunched.database.close() }
+      #expect(!fileManager.fileExists(atPath: leftoverTmp.path))
+      #expect(!fileManager.fileExists(atPath: leftoverJournal.path))
+      #expect(try Backups.list(in: location.backupsDirectory).count == DatabaseLocation.backupsKept)
+    }
+  }
+
   @Test func existingAppDirectoryIsMadePrivate() async throws {
     try await withTemporaryDirectory { directory in
       let location = DatabaseLocation(directory: directory.appendingPathComponent("Arkt", isDirectory: true))

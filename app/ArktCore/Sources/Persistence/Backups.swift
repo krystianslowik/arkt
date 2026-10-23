@@ -21,8 +21,11 @@ public struct DatabaseLocation: Hashable, Sendable {
   }
 }
 
-/// Rolling file backups: `Backups/Arkt-<UTC stamp>.sqlite`, newest `DatabaseLocation.backupsKept` kept. Backups
-/// launch found unusable live in `Backups/Unusable/`, outside the rotation.
+/// Rolling file backups: `Backups/Arkt-<UTC stamp>.sqlite`, newest `DatabaseLocation.backupsKept` (5) kept. Cadence
+/// (Track D open question 2, #100): one backup at launch after a successful open, one before any pending schema
+/// migration, and one every 30 minutes (`AppSession.backupInterval`) while the sidebar changed since the last backup
+/// (never time-spread buckets: backups are written only when `hasContent` holds and data changed). Backups launch
+/// found unusable live in `Backups/Unusable/`, outside the rotation.
 enum Backups {
   static func stamp(_ date: Date) -> String {
     let formatter = DateFormatter()
@@ -128,9 +131,12 @@ enum Backups {
   }
 
   /// User data is a sidebar with any Space or node, or at least one `archived_item` row. Archive rows only come from
-  /// real use or a real import, so counting them cannot let a seeded empty sidebar start evicting real backups. A
-  /// schema without `archived_item` (v1) falls back to the sidebar check. Unknown content (a damaged row, an
-  /// unreadable file) counts as content: skipping a backup must never risk skipping user data.
+  /// real use or a real import, so counting them cannot let a seeded empty sidebar start evicting real backups. Rows
+  /// in `setting` (archive thresholds, `autoArchiveStartedAt`, import record) deliberately do not count as backup
+  /// content (#100): an empty install that only resolved `autoArchiveStartedAt` or changed a preference holds no
+  /// browsing data and must not evict older backups that do. A schema without `archived_item` (v1) falls back to the
+  /// sidebar check. Unknown content (a damaged row, an unreadable file) counts as content: skipping a backup must
+  /// never risk skipping user data.
   static func hasContent(_ source: some DatabaseReader) -> Bool {
     do {
       let (stored, archivedItems) = try source.read { db -> (SidebarStore.StoredSnapshot?, Int) in

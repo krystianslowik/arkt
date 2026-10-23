@@ -3753,8 +3753,10 @@ git commit -m "Add typed archive settings with Arc defaults"
 ## Open questions
 
 1. Debounce delay: 500 ms chosen. Longer windows mean fewer writes but more loss on a crash (flush covers clean quits).
-2. Backup cadence: launch + pre-migration + every 30 min (app side) is proposed; confirm, and whether backups should
-   also be time-spread (for example keep one per day) instead of the newest 5.
+2. Backup cadence (#100, decided): launch + pre-migration + every 30 min while changed (`AppSession.backupInterval`),
+   keeping the newest 5 (`DatabaseLocation.backupsKept = 5`); no time-spread buckets. `setting` rows do not count as
+   backup content (`Backups.hasContent`), and an unreadable `setting` group falls back to `defaultValue` on `load` and
+   is overwritten on the next `save`.
 3. Restore position: tabs to the top of Today and folders to the end of Pinned are inferences; needs a runtime check
    in Arc (add to parity spec section 6).
 4. Splits in Today: archived as one unit when the most recent pane is idle [I]. BH-122/123 remain runtime checks.
@@ -3765,7 +3767,8 @@ git commit -m "Add typed archive settings with Arc defaults"
    value at profile creation instead; the difference shows only when Default changes later.
 8. Arc's per-profile thresholds (`autoArchiveTimeThresholdsPerProfile` entry shape is unknown, data-model unknown 3)
    are not imported; Arc's thresholds could be read later through a counts-only probe.
-9. Archive retention: Arc's growth policy is unknown. No pruning is implemented.
+9. Archive retention (#100, decided): no automatic time- or count-based pruning; entries stay in `archived_item` until
+   restored (`ArchiveStore.remove`) or cleared by the user (`ArchiveStore.removeAll`, BH-087).
 10. App Support directory name `Arkt` assumes the final bundle id; adjust `DatabaseLocation.applicationSupport()` if
     the product name or sandboxing changes.
 11. Window/session state (data-model section 3) is out of Track D scope; it will need its own table (`v4-...`).

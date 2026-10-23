@@ -58,19 +58,76 @@ public struct ArcContainer: Decodable, Sendable {
   }
 }
 
+/// Counts-only classification of a `DecodingError` by case and allowlisted Arc schema key (#100). Never stores
+/// arbitrary keys, values, or debug descriptions.
+public struct ArcDecodeFailureKind: Hashable, Sendable {
+  public enum Case: String, Hashable, Sendable, CaseIterable {
+    case keyNotFound
+    case valueNotFound
+    case typeMismatch
+    case dataCorrupted
+    case other
+  }
+
+  /// Known Arc schema keys allowed in counts-only output. Any other key name is reported as `"other"`.
+  public static let allowlistedKeys: Set<String> = [
+    "id", "reason", "archivedAt", "source", "sidebarItem", "parentID", "childrenIds",
+    "title", "createdAt", "data", "savedURL", "savedTitle", "timeLastActiveAt", "_0",
+  ]
+
+  public let errorCase: Case
+  /// Allowlisted schema key (for example `"archivedAt"`), `"other"` for a non-allowlisted key, or nil when no coding
+  /// key was involved.
+  public let key: String?
+
+  public init(errorCase: Case, key: String? = nil) {
+    self.errorCase = errorCase
+    if let key {
+      self.key = Self.allowlistedKeys.contains(key) ? key : "other"
+    } else {
+      self.key = nil
+    }
+  }
+
+  public init(_ error: any Error) {
+    switch error {
+    case DecodingError.keyNotFound(let codingKey, _):
+      self.init(errorCase: .keyNotFound, key: codingKey.stringValue)
+    case DecodingError.valueNotFound(_, let context):
+      self.init(errorCase: .valueNotFound, key: context.codingPath.last?.stringValue)
+    case DecodingError.typeMismatch(_, let context):
+      self.init(errorCase: .typeMismatch, key: context.codingPath.last?.stringValue)
+    case DecodingError.dataCorrupted(let context):
+      self.init(errorCase: .dataCorrupted, key: context.codingPath.last?.stringValue)
+    default:
+      self.init(errorCase: .other, key: nil)
+    }
+  }
+
+  /// Label for `ArchiveCheckSummary`: `keyNotFound (archivedAt)` when a key is present, `dataCorrupted` otherwise.
+  public var label: String {
+    if let key { return "\(errorCase.rawValue) (\(key))" }
+    return errorCase.rawValue
+  }
+}
+
 /// A value that either decoded or failed; decoding this never throws.
 public struct ArcLossy<Value: Decodable & Sendable>: Decodable, Sendable {
   public let value: Value?
   /// Description of the decoding error when `value` is nil.
   public let failureReason: String?
+  /// Counts-only classification of the decoding error when `value` is nil (#100).
+  public let decodeFailure: ArcDecodeFailureKind?
 
   public init(from decoder: Decoder) throws {
     do {
       value = try Value(from: decoder)
       failureReason = nil
+      decodeFailure = nil
     } catch {
       value = nil
       failureReason = String(describing: error)
+      decodeFailure = ArcDecodeFailureKind(error)
     }
   }
 }
