@@ -57,6 +57,9 @@ public struct EngineHarness {
 ///    (`.faviconChanged(nil)`) before that load's `.loadingChanged(false)`.
 /// 7. `goBack` / `goForward` move through the tab's history and report the URL they land on with `.urlChanged`,
 ///    like a navigation; at either end of the history they do nothing.
+/// 8. `snapshot(of:)` carries `canGoBack` / `canGoForward`: false for a new tab, Back available once a second page
+///    is shown, Forward available after `goBack`. Every change is announced with `.historyChanged`, and the snapshot
+///    agrees with the last one. Its position relative to `.urlChanged` and `.loadingChanged` is not fixed.
 @MainActor
 public enum EngineContract {
   static func require(_ condition: Bool, _ message: @autoclosure () -> String) throws {
@@ -233,6 +236,52 @@ public enum EngineContract {
     engine.goForward(id)                                // nothing ahead of the last page
     try await Task.sleep(for: .milliseconds(50))
     try require(engine.snapshot(of: id)?.url == second, "goForward at the end must do nothing")
+  }
+
+  public static func historyAvailabilityIsReported(_ h: EngineHarness) async throws {
+    let engine = h.makeEngine()
+    let recorder = EventRecorder(engine)
+    let (first, second) = (try h.pageURL("AvailabilityFirst"), try h.pageURL("AvailabilitySecond"))
+    let id = engine.createTab(url: nil)
+    let fresh = try requireValue(engine.snapshot(of: id))
+    try require(!fresh.canGoBack && !fresh.canGoForward, "a new tab has no history: \(fresh)")
+    engine.navigate(id, to: first)
+    try await h.settle(engine, id)
+    try await expectHistory(engine, recorder, id, back: false, forward: false, "after the first page")
+    engine.navigate(id, to: second)
+    try await h.settle(engine, id)
+    try await expectHistory(engine, recorder, id, back: true, forward: false, "after the second page")
+    engine.goBack(id)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.url == first }
+    try await h.settle(engine, id)
+    try await expectHistory(engine, recorder, id, back: false, forward: true, "after goBack")
+    engine.goForward(id)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.url == second }
+    try await h.settle(engine, id)
+    try await expectHistory(engine, recorder, id, back: true, forward: false, "after goForward")
+    let announced = recorder.events(for: id).compactMap { event -> (Bool, Bool)? in
+      if case .historyChanged(_, let back, let forward) = event { return (back, forward) }
+      return nil
+    }
+    try require(announced.contains { $0 == (false, true) }, "Forward becoming available was not announced")
+  }
+
+  /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.
+  static func expectHistory(_ engine: any EngineClient, _ recorder: EventRecorder, _ id: TabID,
+                            back: Bool, forward: Bool, _ when: String) async throws {
+    do {
+      try await waitUntil(timeout: .seconds(10)) {
+        engine.snapshot(of: id).map { $0.canGoBack == back && $0.canGoForward == forward } ?? false
+      }
+    } catch {
+      throw ContractViolation(description: "\(when): snapshot \(String(describing: engine.snapshot(of: id))), "
+                                + "want back \(back) forward \(forward)")
+    }
+    let last = recorder.events(for: id).last { if case .historyChanged = $0 { return true }; return false }
+    if back || forward || last != nil {
+      try require(last == .historyChanged(id, canGoBack: back, canGoForward: forward),
+                  "\(when): last historyChanged \(String(describing: last)) disagrees with the snapshot")
+    }
   }
 
   static func requireValue<T>(_ value: T?, _ what: String = "value") throws -> T {

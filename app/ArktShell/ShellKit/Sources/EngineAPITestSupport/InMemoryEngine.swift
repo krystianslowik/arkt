@@ -66,6 +66,18 @@ public final class InMemoryEngine: EngineClient {
       snapshots[id]?.faviconData = nil
       hub.emit(.faviconChanged(id, nil))
     }
+    reportHistory(id)
+  }
+
+  /// Syncs `canGoBack` / `canGoForward` with the history and emits `.historyChanged` only on a change (rule 8).
+  private func reportHistory(_ id: TabID) {
+    guard let current = snapshots[id] else { return }
+    let back = !(history[id]?.back.isEmpty ?? true)
+    let forward = !(history[id]?.forward.isEmpty ?? true)
+    guard back != current.canGoBack || forward != current.canGoForward else { return }
+    snapshots[id]?.canGoBack = back
+    snapshots[id]?.canGoForward = forward
+    hub.emit(.historyChanged(id, canGoBack: back, canGoForward: forward))
   }
 
   public func reload(_ id: TabID) {

@@ -15,9 +15,15 @@ public struct TabSnapshot: Equatable, Sendable {
   /// Raw favicon bytes (PNG or ICO). Data, not NSImage, so snapshots stay Sendable.
   public var faviconData: Data?
   public var isLoading: Bool
+  /// The tab's history has an entry behind the current one (Toolbar Back; contract rule 8).
+  public var canGoBack: Bool
+  /// The tab's history has an entry ahead of the current one (Toolbar Forward; contract rule 8).
+  public var canGoForward: Bool
 
-  public init(id: TabID, url: URL? = nil, title: String = "", faviconData: Data? = nil, isLoading: Bool = false) {
+  public init(id: TabID, url: URL? = nil, title: String = "", faviconData: Data? = nil, isLoading: Bool = false,
+              canGoBack: Bool = false, canGoForward: Bool = false) {
     self.id = id; self.url = url; self.title = title; self.faviconData = faviconData; self.isLoading = isLoading
+    self.canGoBack = canGoBack; self.canGoForward = canGoForward
   }
 }
 
@@ -28,11 +34,13 @@ public enum EngineEvent: Equatable, Sendable {
   case titleChanged(TabID, String)
   case faviconChanged(TabID, Data?)
   case loadingChanged(TabID, isLoading: Bool)
+  /// Back or Forward availability changed; carries both, as in the snapshot (contract rule 8).
+  case historyChanged(TabID, canGoBack: Bool, canGoForward: Bool)
 
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id), .urlChanged(let id, _), .titleChanged(let id, _),
-         .faviconChanged(let id, _), .loadingChanged(let id, _):
+         .faviconChanged(let id, _), .loadingChanged(let id, _), .historyChanged(let id, _, _):
       return id
     }
   }

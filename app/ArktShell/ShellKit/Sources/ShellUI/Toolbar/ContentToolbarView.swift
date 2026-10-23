@@ -2,7 +2,8 @@ import AppKit
 
 /// The Toolbar at the top of the content card (Toggle Toolbar, Cmd-Shift-D; KB-018, BH-032): Back, Forward,
 /// Reload and the full URL. Shown and laid out by `ContentCardView`; actions are wired by the window controller.
-/// Back and Forward are always enabled for now; a press with no history does nothing (engine contract rule 7).
+/// Back and Forward are enabled only while the shown tab can move that way (`setHistory`, engine contract rule 8); a
+/// disabled button sends no action and VoiceOver reads it as dimmed.
 @MainActor
 public final class ContentToolbarView: NSView {
   public static let height: CGFloat = 40                 // TODO(measure)
@@ -38,6 +39,7 @@ public final class ContentToolbarView: NSView {
       button.autoresizingMask = []
       addSubview(button)
     }
+    setHistory(canGoBack: false, canGoForward: false)
     urlBar.autoresizingMask = []
     addSubview(urlBar)
     setAccessibilityElement(true)
@@ -57,6 +59,12 @@ public final class ContentToolbarView: NSView {
     [(backButton, "chevron.left", "Back", #selector(back(_:))),
      (forwardButton, "chevron.right", "Forward", #selector(forward(_:))),
      (reloadButton, "arrow.clockwise", "Reload", #selector(reload(_:)))]
+  }
+
+  /// Enables Back and Forward from the shown tab's `canGoBack` / `canGoForward`; both off when no tab is shown.
+  public func setHistory(canGoBack: Bool, canGoForward: Bool) {
+    backButton.isEnabled = canGoBack
+    forwardButton.isEnabled = canGoForward
   }
 
   @objc private func back(_ sender: Any?) { onBack?() }

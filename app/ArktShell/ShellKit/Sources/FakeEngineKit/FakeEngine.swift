@@ -73,6 +73,12 @@ public final class FakeEngine: EngineClient {
           if web.isLoading { self?.startLoad(id) } else { self?.finishLoad(id) }
         }
       },
+      webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
+        MainActor.assumeIsolated { self?.syncHistory(id) }
+      },
+      webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
+        MainActor.assumeIsolated { self?.syncHistory(id) }
+      },
     ]
     if let url { navigate(id, to: url) }
     return id
@@ -159,8 +165,19 @@ public final class FakeEngine: EngineClient {
     let title = documentTitle ?? entry.webView.title ?? ""
     update(id) { $0.url = url } event: { .urlChanged(id, url) }
     update(id) { $0.title = title } event: { .titleChanged(id, title) }
+    syncHistory(id)
     update(id) { $0.isLoading = false } event: { .loadingChanged(id, isLoading: false) }
     fetchFavicon(id)
+  }
+
+  /// Copies both history flags from WebKit, so one back-forward list change emits one `.historyChanged` whichever
+  /// KVO fires first (contract rule 8). Also run before a load ends, so the snapshot is current by then.
+  private func syncHistory(_ id: TabID) {
+    guard let web = entries[id]?.webView else { return }
+    let (back, forward) = (web.canGoBack, web.canGoForward)
+    update(id) { $0.canGoBack = back; $0.canGoForward = forward } event: {
+      .historyChanged(id, canGoBack: back, canGoForward: forward)
+    }
   }
 
   /// Applies a change and emits its event only if the snapshot actually changed.

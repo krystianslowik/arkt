@@ -18,6 +18,7 @@ struct InMemoryEngineContractTests {
   @Test func tabIDsKeepCreationOrder() async throws { try await EngineContract.tabIDsKeepCreationOrder(harness) }
   @Test func hostChangeClearsFavicon() async throws { try await EngineContract.hostChangeClearsFavicon(harness) }
   @Test func historyMovesBackAndForward() async throws { try await EngineContract.historyMovesBackAndForward(harness) }
+  @Test func historyAvailabilityIsReported() async throws { try await EngineContract.historyAvailabilityIsReported(harness) }
 }
 
 @MainActor
@@ -66,6 +67,25 @@ struct InMemoryEngineTests {
     #expect(engine.snapshot(of: id)?.url == b, "the forward entry survives")
     engine.goBack(id)
     #expect(engine.snapshot(of: id)?.url == a)
+  }
+
+  /// `.historyChanged` only when availability changes: a third page or a same-URL navigation emits none.
+  @Test func historyChangedOnlyWhenAvailabilityChanges() {
+    let engine = InMemoryEngine()
+    let (a, b, c) = (URL(string: "arkt-test://page/A")!, URL(string: "arkt-test://page/B")!,
+                     URL(string: "arkt-test://page/C")!)
+    let id = engine.createTab(url: a)
+    let recorder = EventRecorder(engine)
+    let history = { recorder.events(for: id).filter { if case .historyChanged = $0 { return true }; return false } }
+    engine.navigate(id, to: b)
+    #expect(history() == [.historyChanged(id, canGoBack: true, canGoForward: false)])
+    engine.navigate(id, to: c)
+    engine.navigate(id, to: c)
+    #expect(history().count == 1, "Back was already available")
+    engine.goBack(id)
+    engine.goBack(id)
+    #expect(history().last == .historyChanged(id, canGoBack: false, canGoForward: true))
+    #expect(engine.snapshot(of: id)?.canGoBack == false && engine.snapshot(of: id)?.canGoForward == true)
   }
 
   @Test func sameHostNavigationKeepsFavicon() {
