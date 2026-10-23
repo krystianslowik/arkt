@@ -255,7 +255,7 @@ before this task.
   the window (`app.windows.firstMatch` until `shell.window` lands with U4a, #167). `quit` activates the app, waits for
   `.runningForeground`, then types Cmd-Q and waits for `.notRunning`. A tear-down block attaches, on failure only, the
   window screenshot, the accessibility tree and the sandbox listing (`.keepAlways`), terminates the app if it still
-  runs and removes the sandbox.
+  runs and removes the sandbox. A test launches into one sandbox; a relaunch reuses it, a second sandbox throws.
 - `UITests/LaunchTests.swift`: `test_E_launchOnEmptyDataFolderShowsWindowAndQuitsCleanly`.
 
 ### Verification
@@ -268,6 +268,9 @@ before this task.
 | Import layering | the workflow's `Check import layering` step, run locally: `Import layering OK` |
 | Refusal probe | `TEST_RUNNER_ARKT_UITEST_APP` pointed at a scratch bundle that holds only a copy of the Debug Info.plist with `ArktEnvironmentOverrides = NO`: the test fails with "Fake.app does not declare ArktEnvironmentOverrides = YES; refusing to launch", nothing is launched |
 | Failure artifacts probe | a temporary `XCTFail` after launch (reverted, not committed): attachments `window`, `accessibility tree`, `sandbox listing`; then the app was terminated and the sandbox removed. A passing run adds no attachment |
+| `ArktShell` scheme unchanged | generated `ArktShell.xcscheme` from this branch and from `origin/main`'s `project.yml`: `diff` prints nothing |
+| ArktCore | `nice -n 10 swift test -j 4`: pass, 336 tests (84 + 97 + 59 + 96), no package change |
+| ShellKit pure | `nice -n 10 swift test -j 4 --skip ShellKitGUITests`: pass, 416 tests (176 + 33 + 15 + 4 + 22 + 166) on current `main`, no package change |
 | `git status` | only `project.yml` and `UITests/`; `ArktShell.xcodeproj` and `build/` stay ignored |
 
 Real data, read-only checks from the shell before and after all runs:
@@ -283,7 +286,7 @@ Real data, read-only checks from the shell before and after all runs:
 
 - State before the run: `DevToolsSecurity -status` "Developer mode is currently enabled."; `automationmodetool`
   "Automation Mode is disabled." and "This device DOES NOT REQUIRE user authentication to enable Automation Mode."
-  (`xcodebuild test` turns Automation Mode on for the session by itself).
+  After the runs `automationmodetool` still prints "Automation Mode is disabled.", so it is not left on between runs.
 - The first `xcodebuild test` passed without any prompt blocking it and without any manual step during the run. No
   Accessibility or Automation grant had to be added by hand for the run from the terminal.
 
@@ -315,3 +318,6 @@ override was needed.
 ### What remains
 
 - Nothing for U2. The CI job is U3; `shell.window` replaces `windows.firstMatch` once U4a (#167) lands.
+- `Sandbox.remove()` clears the suite with `removePersistentDomain`, but the launch test never writes a defaults key,
+  so a populated suite was not exercised. U1 saw `defaults delete` leave an empty plist; U8 (Toolbar toggle) is the
+  first test that shows whether an empty `dev.arkt.uitest.*.plist` stays behind.
