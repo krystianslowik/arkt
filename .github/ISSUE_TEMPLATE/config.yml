@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Roadmap
+    url: https://github.com/krystianslowik/arkt/issues/30
+    about: Order of work and what is in progress. Read it before opening a new issue.
+  - name: Contributing guide
+    url: https://github.com/krystianslowik/arkt/blob/main/CONTRIBUTING.md
+    about: Statuses, claiming work, branches, commits and review.
