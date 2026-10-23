@@ -8,7 +8,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | Task | Title | Status | Notes |
 |---|---|---|---|
 | W0 | Branch, baselines, results file, CDP helper, key-window log | DONE | see below |
-| W1 | Arkt-branded non-component build | TODO | |
+| W1 | Arkt-branded non-component build | IN PROGRESS | build running, see below |
 | W2 | Sign `Arkt.app`, install in /Applications, smoke | TODO | |
 | W3 | Inventory of non-`BrowserView` window seams, variant decision | TODO | |
 | W4 | Extensions menu lists every action (finding 1) | TODO | |
@@ -253,3 +253,28 @@ failed while the browser was running.
 
 Artifacts left for the next step: `$SPK` (796 MB: copied `ArktShell.app` with framework, 518 dylibs) and the
 `$PROF/embed-spike` profile; both are scratch and can be deleted.
+
+## W1
+
+Date 2026-10-23. Overlay at build start: `main` at `89c8a42` plus `engine/arkt/branding/BRANDING`; `$CR` branch
+`arkt` at `2bda3d5a86` (patches 0001, 0002).
+
+### Steps 1-3: branding file, args, gn gen
+
+- `engine/arkt/branding/BRANDING` as in the plan, except `MAC_TEAM_ID=` is left empty (as in Chromium's own
+  `chrome/app/theme/chromium/BRANDING`). Its only consumer in the app is `CHROMIUM_TEAM_ID` in the Info.plist
+  (`chrome/BUILD.gn:770`); the build is ad-hoc signed in W2, and no signing id belongs in the repository.
+- `$REL/args.gn` exactly as in the plan.
+- `gn gen out/Arkt`: `Done. Made 36369 targets from 5025 files`. The source-absolute path was accepted.
+- `gn args out/Arkt --list=branding_file_path --short`: `branding_file_path = "//arkt/branding/BRANDING"`.
+- `toolchain.ninja` names `Arkt.app/Contents/Resources/...` outputs.
+
+### Step 6: build
+
+Command: `cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1`.
+
+Before the start:
+
+- `df -h $CHROMIUM_ROOT`: 2.0 TiB available.
+- `df -h /`: 11 GiB available (of 460 GiB).
+- `sysctl vm.swapusage`: `total = 7168.00M  used = 5605.50M  free = 1562.50M`.

@@ -79,3 +79,47 @@ The dev engine (`FakeEngine`, WKWebView) is not Chrome and does not pretend to b
 appends `Version/<installed Safari version> Safari/605.1.15` through `applicationNameForUserAgent`, read from the
 installed Safari at launch, so test pages get the same markup Safari gets. Setting `customUserAgent` instead would
 replace WebKit's platform and engine tokens with a hand-written copy that drifts.
+
+## Release build (out/Arkt)
+
+A self-contained, Arkt-branded, non-component build in its own output directory (`$REL=$CR/out/Arkt`). It shares no
+objects with the component build in `out/Spike`. Branding comes from the GN arg `branding_file_path`, which points at
+`arkt/branding/BRANDING` (no patch): it renames the app (`Arkt.app`), the framework (`Arkt Framework`), the helpers
+(`Arkt Helper*.app`) and the bundle id (`com.arkt.Arkt`, a placeholder). Icons and UI strings stay Chromium's.
+
+`$REL/args.gn`:
+
+    is_debug = false
+    is_component_build = false
+    is_official_build = false     # official turns on PGO/ThinLTO and adds hours
+    chrome_pgo_phase = 0
+    symbol_level = 0
+    blink_symbol_level = 0
+    v8_symbol_level = 0
+    dcheck_always_on = false
+    target_cpu = "arm64"
+    use_siso = true
+    branding_file_path = "//arkt/branding/BRANDING"
+
+Generate and confirm the branding took (expect `branding_file_path = "//arkt/branding/BRANDING"`):
+
+    cd $CR && gn gen out/Arkt && gn args out/Arkt --list=branding_file_path --short
+
+Before the build, and every hour while it runs: the Chromium disk needs at least 40 GB free; the internal disk (it
+holds swap) needs at least 8 GiB free. Record the swap use each time. Below about 4 GiB free on `/`, stop the build by
+its recorded PID and do not delete files to make room. A full build compiles about 75k objects and ends in one large,
+memory-heavy link of `Arkt Framework`; while that link runs, keep the machine quiet (no other Chromium or Swift
+builds). Budget 5-7 h on a quiet machine, up to 14 h under load; the output directory is 10-15 GB.
+
+    df -h $CHROMIUM_ROOT | tail -1
+    df -h / | tail -1
+    sysctl vm.swapusage
+    cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1 &
+    echo $! > $CHROMIUM_ROOT/build-arkt.pid
+
+Check the result with `tail -3 $CHROMIUM_ROOT/build-arkt.log` (expect `The build has finished successfully.`) and
+`grep -c FAILED: $CHROMIUM_ROOT/build-arkt.log` (expect `0`). The build compiles whatever overlay and patches are in
+`$CR` at the time, so the branch providing `arkt/branding/BRANDING` must stay checked out until it finishes.
+
+`out/Arkt` must be re-signed after every rebuild, incremental ones included (plan W2): a rebuild replaces the signed
+binaries.
