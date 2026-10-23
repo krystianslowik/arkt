@@ -267,4 +267,48 @@ struct ArchiverTests {
     #expect(folder.title == "Docs")
     #expect(folder.url == nil)
   }
+
+  // MARK: Space removal
+
+  /// Decision on #86: a removed Space's pinned items and Today items go to the Archive; the Space and its nodes go.
+  @Test func removingASpaceArchivesPinnedThenTodayItems() throws {
+    var world = try Self.makeWorld()
+    let other = world.sidebar.addSpace(title: "Other")
+    let items = Archiver.removeSpace(world.work, from: &world.sidebar, at: Self.now)
+    #expect(items.map(\.id) == [world.folder] + world.today)
+    #expect(items.map(\.section) == [ArchivedSection.pinned, .today, .today])
+    #expect(Set(items.map(\.source)) == [.space(world.work)])
+    #expect(Set(items.map(\.reason)) == [.manual])
+    #expect(Set(items.map(\.archivedAt)) == [Self.now])
+    #expect(items[0].snapshot.allIDs == [world.folder, world.nested])
+    #expect(world.sidebar.spaceOrder == [other])
+    #expect(Set(world.sidebar.nodes.keys) == [world.favorite])
+  }
+
+  /// The source Space is gone, so a restore uses the default rules in the fallback Space: a folder to Pinned, a tab
+  /// to the top of Today.
+  @Test func itemsOfARemovedSpaceRestoreIntoTheFallbackSpace() throws {
+    var world = try Self.makeWorld()
+    let other = world.sidebar.addSpace(title: "Other")
+    let items = Archiver.removeSpace(world.work, from: &world.sidebar, at: Self.now)
+    let folder = try Archiver.restore(items[0], into: &world.sidebar, fallbackSpace: other)
+    let tab = try Archiver.restore(items[1], into: &world.sidebar, fallbackSpace: other)
+    #expect(folder.location == .pinned(other))
+    #expect(tab.location == .today(other))
+    #expect(world.sidebar.children(of: .folder(world.folder)) == [world.nested])
+  }
+
+  @Test func removingAnUnknownSpaceArchivesNothing() throws {
+    var world = try Self.makeWorld()
+    let before = world.sidebar
+    #expect(Archiver.removeSpace(SpaceID(), from: &world.sidebar, at: Self.now).isEmpty)
+    #expect(world.sidebar == before)
+  }
+
+  @Test func removingAnEmptySpaceArchivesNothing() throws {
+    var world = try Self.makeWorld()
+    let empty = world.sidebar.addSpace(title: "Empty")
+    #expect(Archiver.removeSpace(empty, from: &world.sidebar, at: Self.now).isEmpty)
+    #expect(world.sidebar.spaceOrder == [world.work])
+  }
 }

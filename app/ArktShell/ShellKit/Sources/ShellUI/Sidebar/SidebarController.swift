@@ -41,7 +41,7 @@ public final class SidebarController {
   /// Last active tab per Space, restored when the Space becomes current again (BH-036).
   private var lastActive: [SpaceID: NodeID] = [:]
   /// Decoded favicons by node; kept while the node exists in the source (its engine tab may close and reopen),
-  /// dropped when the node leaves it (`.structure` and `.spaces` changes, `deactivate(node:)`).
+  /// dropped when the node leaves it (`.structure` and `.spaceRemoved` changes, `deactivate(node:)`).
   private(set) var favicons: [NodeID: NSImage] = [:]
   /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page; pages the
   /// window creates without an activation (the other panes of a split) are added through `markLoaded(node:)`, and
@@ -156,8 +156,9 @@ public final class SidebarController {
     for id in order where pages[id] == nil { makePage(id) }
     for id in pages.keys where !order.contains(id) { pages[id] = nil }
     pagedSpaces = order
-    let index = currentSpace.flatMap { order.firstIndex(of: $0) } ?? 0
-    view.setPages(order.compactMap { pages[$0] }, index: index)
+    let currentIndex = currentSpace.flatMap { order.firstIndex(of: $0) }
+    view.setPages(order.compactMap { pages[$0] }, index: currentIndex ?? 0)
+    if let currentIndex { view.spaceDots.selectedIndex = currentIndex }   // the current Space moved or shifted
     refreshSpaceDetails(notify: notify)
   }
 
@@ -282,28 +283,44 @@ public final class SidebarController {
     case .node(let id):
       for page in pages.values { page.outlineController.reload(node: id) }
       view.favorites.reload(node: id)
-    case .spaces:
+    case .spaceRemoved:
       pruneRemovedNodes()                           // a removed Space's nodes emit no structure change
-      // Settle pages and the current Space first, then tell the window once, so `onSpacesChanged` never sees a
-      // nil current Space after an add or a removed one after a removal.
-      if spaces == pagedSpaces {
-        refreshSpaceDetails(notify: false)          // same list: a title, theme or other Space field changed
-      } else {
-        syncPages(notify: false)                    // creates/drops pages, then the same refresh
-      }
-      let currentIsShown = currentSpace.map { spaces.contains($0) } ?? false
-      if !currentIsShown {
-        if let first = spaces.first {
-          let replacesRemoved = currentSpace != nil
-          showSpace(first)
-          if replacesRemoved { activateRestoredTabLater(in: first) }
-        } else if currentSpace != nil {             // the last Space went away
-          currentSpace = nil
-          view.setCurrent(page: nil)
-        }
-      }
-      onSpacesChanged?(pagedSpaces)
+      applySpaceChange()
+    case .spaceAdded, .spaceMoved, .spaceChanged:
+      applySpaceChange()
     }
+  }
+
+  /// Settles pages and the current Space first, then tells the window once, so `onSpacesChanged` never sees a nil
+  /// current Space after an add or a removed one after a removal. One mutation may report several Space events;
+  /// the first brings the pages up to date and the rest only refresh details.
+  private func applySpaceChange() {
+    let before = pagedSpaces
+    if spaces == pagedSpaces {
+      refreshSpaceDetails(notify: false)            // same list: a title, theme or other Space field changed
+    } else {
+      syncPages(notify: false)                      // creates/drops/reorders pages, then the same refresh
+    }
+    let currentIsShown = currentSpace.map { spaces.contains($0) } ?? false
+    if !currentIsShown {
+      if let next = neighbour(of: currentSpace, in: before) ?? spaces.first {
+        let replacesRemoved = currentSpace != nil
+        showSpace(next)
+        if replacesRemoved { activateRestoredTabLater(in: next) }
+      } else if currentSpace != nil {               // the last Space went away
+        currentSpace = nil
+        view.setCurrent(page: nil)
+      }
+    }
+    onSpacesChanged?(pagedSpaces)
+  }
+
+  /// The Space to show after `removed` left `order`: the first one after it that is still shown, which slides into
+  /// its place, else the nearest one before it [I] (PARITY(NEEDS-RUNTIME-CHECK): which Space Arc shows).
+  private func neighbour(of removed: SpaceID?, in order: [SpaceID]) -> SpaceID? {
+    guard let removed, let index = order.firstIndex(of: removed) else { return nil }
+    let shown = Set(spaces)
+    return order[(index + 1)...].first { shown.contains($0) } ?? order[..<index].last { shown.contains($0) }
   }
 }
 

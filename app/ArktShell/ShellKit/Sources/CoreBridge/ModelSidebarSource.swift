@@ -198,6 +198,12 @@ public final class ModelSidebarSource: SidebarSource {
     mutate { sidebar in ids.compactMap { try? Archiver.archive($0, from: &sidebar, reason: reason, at: date) } }
   }
 
+  /// Removes Space `id` through `Archiver.removeSpace` (its pinned and Today items are archived) in one mutation, which
+  /// reports `.spaceRemoved` only. Returns the entries; an unknown id changes nothing. Asking first is the caller's job.
+  public func removeSpace(_ id: UUID, at date: Date) -> [ArchivedItem] {
+    mutate { Archiver.removeSpace(id, from: &$0, at: date) }
+  }
+
   /// Puts `item` back through `Archiver.restore` (its placement rules and fresh ids when an id is taken). Throws the
   /// model's `SidebarError` and leaves the value untouched on throw.
   public func restore(_ item: ArchivedItem, fallbackSpace: UUID) throws -> RestoredItem {

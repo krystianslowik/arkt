@@ -46,7 +46,7 @@ struct SidebarDiffTests {
     let shallowA = try old.addFolder(title: "A", in: .today(space))
     let shallowB = try old.addFolder(title: "B", in: .today(space))
     var new = old
-    _ = new.addSpace(title: "Second")
+    let second = new.addSpace(title: "Second")
     _ = try new.addTab(url: Self.url, title: "x", in: .folder(deep))
     _ = try new.addTab(url: Self.url, title: "y", in: .folder(shallowB))
     _ = try new.addTab(url: Self.url, title: "z", in: .folder(shallowA))
@@ -55,7 +55,7 @@ struct SidebarDiffTests {
     _ = try new.addTab(url: Self.url, title: "f", in: .favorites(profile: "default"))
     let shallow = [shallowA, shallowB].sorted { $0.uuidString < $1.uuidString }
     #expect(SidebarDiff.changes(from: old, to: new) == [
-      .spaces,
+      .spaceAdded(second),
       .structure(.favorites(profile: "default")), .structure(.pinned(space)), .structure(.today(space)),
       .structure(.folder(shallow[0])), .structure(.folder(shallow[1])),
       .structure(.folder(deep)),
@@ -100,15 +100,72 @@ struct SidebarDiffTests {
     let space = old.addSpace(title: "S")
     _ = try old.addTab(url: Self.url, title: "A", in: .pinned(space))
     _ = try old.addTab(url: Self.url, title: "B", in: .today(space))
-    #expect(SidebarDiff.changes(from: old, to: SidebarModel.Sidebar()) == [.spaces])
+    #expect(SidebarDiff.changes(from: old, to: SidebarModel.Sidebar()) == [.spaceRemoved(space)])
   }
 
-  @Test func spaceFieldChangeEmitsSpaces() throws {
+  @Test func addingASpaceEmitsSpaceAdded() throws {
     var old = SidebarModel.Sidebar()
     _ = old.addSpace(title: "S")
     var new = old
-    _ = new.addSpace(title: "T")
-    #expect(SidebarDiff.changes(from: old, to: new) == [.spaces])
+    let added = new.addSpace(title: "T")
+    #expect(SidebarDiff.changes(from: old, to: new) == [.spaceAdded(added)])
+  }
+
+  // MARK: Space events
+
+  private static func space(_ title: String, theme: SpaceTheme? = nil, id: UUID = UUID()) -> SidebarModel.Space {
+    SidebarModel.Space(id: id, title: title, theme: theme)
+  }
+
+  /// A sidebar holding `spaces` in that order.
+  private static func sidebar(_ spaces: [SidebarModel.Space]) throws -> SidebarModel.Sidebar {
+    var sidebar = SidebarModel.Sidebar()
+    for space in spaces { try sidebar.addSpace(space) }
+    return sidebar
+  }
+
+  @Test func titleProfileOrThemeChangeEmitsSpaceChanged() throws {
+    let (a, b) = (Self.space("A"), Self.space("B"))
+    let old = try Self.sidebar([a, b])
+    var renamed = a
+    renamed.title = "A2"
+    #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([renamed, b])) == [.spaceChanged(a.id)])
+    var rethemed = b
+    rethemed.theme = SpaceTheme(baseColors: [RGBA(red: 0, green: 0, blue: 0)], isDark: true)
+    #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([a, rethemed])) == [.spaceChanged(b.id)])
+    var reprofiled = a
+    reprofiled.profile = "Work"
+    #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([reprofiled, b])) == [.spaceChanged(a.id)])
+  }
+
+  /// Only the Space that left its place is reported, not every Space whose index shifted.
+  @Test func reorderEmitsSpaceMovedForTheMovedSpaceOnly() throws {
+    let (a, b, c, d) = (Self.space("A"), Self.space("B"), Self.space("C"), Self.space("D"))
+    let old = try Self.sidebar([a, b, c, d])
+    #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([b, c, d, a])) == [.spaceMoved(a.id)])
+    #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([a, d, b, c])) == [.spaceMoved(d.id)])
+    #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([d, a, c, b])).count == 2)
+  }
+
+  /// Removals and additions alone shift indexes but move nothing.
+  @Test func removalAndAdditionAloneEmitNoMove() throws {
+    let (a, b, c, d) = (Self.space("A"), Self.space("B"), Self.space("C"), Self.space("D"))
+    let old = try Self.sidebar([a, b, c])
+    #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([d, a, c])) == [.spaceRemoved(b.id), .spaceAdded(d.id)])
+  }
+
+  /// Space events come first: removed (old order), added, moved, changed (new order).
+  @Test func spaceEventsComeFirstRemovedAddedMovedChanged() throws {
+    let (a, b, c, d, e) = (Self.space("A"), Self.space("B"), Self.space("C"), Self.space("D"), Self.space("E"))
+    let f = Self.space("F")
+    let old = try Self.sidebar([a, b, c, d, f])
+    var renamed = c
+    renamed.title = "C2"
+    var new = try Self.sidebar([e, a, d, f, renamed])
+    _ = try new.addTab(url: Self.url, title: "u", in: .today(d.id))
+    #expect(SidebarDiff.changes(from: old, to: new) == [
+      .spaceRemoved(b.id), .spaceAdded(e.id), .spaceMoved(c.id), .spaceChanged(c.id), .structure(.today(d.id)),
+    ])
   }
 
   @Test func widthChangeEmitsNodeOfSplit() throws {

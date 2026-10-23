@@ -118,13 +118,42 @@ struct SidebarModelStubTests {
     #expect(s.spaceID(containing: favorite) == nil)
   }
 
-  @Test func addSpaceEmitsSpaces() {
+  @Test func addSpaceEmitsSpaceAdded() throws {
     let stub = StubSidebar()
     var changes: [SidebarChange] = []
     let observation = stub.observe { changes.append($0) }
     let source: any SidebarSource = stub              // through the protocol requirement
-    _ = try? source.addSpace(title: "New")
-    #expect(changes == [.spaces])
+    let space = try source.addSpace(title: "New")
+    #expect(changes == [.spaceAdded(space)])
+    _ = observation
+  }
+
+  @Test func spaceEditsEmitTheirSpaceEvent() {
+    let stub = StubSidebar()
+    let a = stub.addSpace(title: "A")
+    let b = stub.addSpace(title: "B")
+    var changes: [SidebarChange] = []
+    let observation = stub.observe { changes.append($0) }
+    stub.renameSpace(a, to: "A2")
+    stub.setTheme(SpaceThemeInfo(baseColors: [], isDark: true), of: a)
+    stub.moveSpace(b, to: 0)
+    stub.removeSpace(a)
+    #expect(changes == [.spaceChanged(a), .spaceChanged(a), .spaceMoved(b), .spaceRemoved(a)])
+    #expect(stub.spaceOrder == [b])
+    _ = observation
+  }
+
+  @Test func moveSpaceToItsOwnPlaceOrAnUnknownSpaceEmitsNothing() {
+    let stub = StubSidebar()
+    let a = stub.addSpace(title: "A")
+    let b = stub.addSpace(title: "B")
+    var changes: [SidebarChange] = []
+    let observation = stub.observe { changes.append($0) }
+    stub.moveSpace(a, to: 0)
+    stub.moveSpace(SpaceID(), to: 1)
+    stub.moveSpace(a, to: 9)                          // clamped to the end
+    #expect(stub.spaceOrder == [b, a])
+    #expect(changes == [.spaceMoved(a)])
     _ = observation
   }
 

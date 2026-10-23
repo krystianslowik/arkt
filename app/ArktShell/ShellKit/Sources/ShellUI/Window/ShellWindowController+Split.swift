@@ -194,7 +194,7 @@ extension ShellWindowController {
     switch change {
     case .node(let id):
       if id == splitState.split { scheduleSplitResync() }
-    case .structure, .spaces:
+    case .structure, .spaceAdded, .spaceRemoved, .spaceMoved, .spaceChanged:
       if splitState.split != nil || currentNode.map(isPane) == true { scheduleSplitResync() }
     }
   }

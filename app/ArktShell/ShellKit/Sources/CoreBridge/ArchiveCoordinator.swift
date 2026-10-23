@@ -108,11 +108,25 @@ public final class ArchiveCoordinator {
   @discardableResult
   public func archive(_ ids: [UUID], reason: ArchiveReason) -> [ArchivedItem] {
     let items = source.archive(ids, reason: reason, at: now())
-    guard !items.isEmpty else { return [] }
+    enqueue(items)
+    return items
+  }
+
+  /// Queues an add of freshly archived `items`; nothing for an empty list.
+  private func enqueue(_ items: [ArchivedItem]) {
+    guard !items.isEmpty else { return }
     restoredIDs.subtract(items.map(\.id))
     outbox.append(.add(items))
     startWriter(delayFirst: false)
     onPendingItemsChange?()
+  }
+
+  /// Removes Space `id` from the sidebar (decision on #86: its pinned and Today items are archived, reason `.manual`)
+  /// and queues the entries for the store like `archive`. Returns the entries; an unknown id changes nothing.
+  @discardableResult
+  public func removeSpace(_ id: UUID) -> [ArchivedItem] {
+    let items = source.removeSpace(id, at: now())
+    enqueue(items)
     return items
   }
 

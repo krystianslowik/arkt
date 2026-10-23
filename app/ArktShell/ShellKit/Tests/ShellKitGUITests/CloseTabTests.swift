@@ -231,6 +231,31 @@ final class CloseTabTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// Removing a Space (decision on #86: its items are archived) closes the engine tabs of its nodes, current or not;
+  /// a Favorite's engine tab stays.
+  func testRemovingASpaceClosesTheEngineTabsOfItsNodes() throws {
+    var world = try Self.makeWorld()
+    let other = world.sidebar.addSpace(title: "Other")
+    let kept = try world.sidebar.addTab(url: Self.url("o"), title: "O", in: .today(other))
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.favorite)
+    let favorite = try XCTUnwrap(harness.controller.currentTab)
+    harness.controller.activate(node: world.pinned)
+    let pinned = try XCTUnwrap(harness.controller.currentTab)
+    harness.controller.activate(node: world.today[0])
+    let today = try XCTUnwrap(harness.controller.currentTab)
+
+    let items = harness.source.removeSpace(world.space, at: Self.now)
+
+    XCTAssertEqual(items.count, 5, "the pinned tab, three Today tabs and the split")
+    XCTAssertFalse(harness.engine.tabIDs.contains(pinned))
+    XCTAssertFalse(harness.engine.tabIDs.contains(today))
+    XCTAssertTrue(harness.engine.tabIDs.contains(favorite))
+    XCTAssertEqual(harness.controller.currentSpace, other)
+    XCTAssertNotNil(harness.source.node(kept))
+    harness.controller.close()
+  }
+
   // MARK: Visibility
 
   /// Decision 10: the outgoing tab is reported when another becomes current and the current one when the window

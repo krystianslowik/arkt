@@ -32,7 +32,7 @@ struct SidebarSourceContractTests {
   }
 
   @Test(arguments: SourceKind.allCases)
-  func addSpaceAppendsAndEmitsSpaces(kind: SourceKind) throws {
+  func addSpaceAppendsAndEmitsSpaceAdded(kind: SourceKind) throws {
     let source = kind.make()
     var changes: [SidebarChange] = []
     let observation = source.observe { changes.append($0) }
@@ -40,7 +40,7 @@ struct SidebarSourceContractTests {
     #expect(source.spaceOrder == [space])
     #expect(source.space(space)?.title == "S")
     #expect(source.space(space)?.profile == "default")
-    #expect(changes == [.spaces])
+    #expect(changes == [.spaceAdded(space)])
     _ = observation
   }
 

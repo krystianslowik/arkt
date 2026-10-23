@@ -2,13 +2,13 @@ import Foundation
 import ShellUI
 import SidebarModel
 
-/// The `SidebarChange`s that turn one `Sidebar` value into another, in delivery order: `.spaces`, then changed
-/// sections, then changed containers by ascending depth, then nodes whose drawn presentation changed. Ties sort by
-/// case rank and UUID string, so the order is deterministic.
+/// The `SidebarChange`s that turn one `Sidebar` value into another, in delivery order: Space events (removed in the
+/// old order, then added, moved and changed in the new order), then changed sections, then changed containers by
+/// ascending depth, then nodes whose drawn presentation changed. Ties sort by case rank and UUID string, so the
+/// order is deterministic.
 enum SidebarDiff {
   static func changes(from old: SidebarModel.Sidebar, to new: SidebarModel.Sidebar) -> [SidebarChange] {
-    var result: [SidebarChange] = []
-    if old.spaceOrder != new.spaceOrder || old.spaces != new.spaces { result.append(.spaces) }
+    var result = spaceChanges(from: old, to: new)
 
     var sections: [SidebarModel.Location] = []
     var containers: [(depth: Int, location: SidebarModel.Location)] = []
@@ -18,7 +18,8 @@ enum SidebarDiff {
         guard new.nodes[container] != nil else { continue }  // removed with its parent: rows already gone
         containers.append((depth(of: container, in: new), location))
       } else {
-        // A section of a removed Space: `.spaces` already drops its page, so a structure change has no rows to hit.
+        // A section of a removed Space: `.spaceRemoved` already drops its page, so a structure change has no rows
+        // to hit.
         if let space = location.sectionSpace, new.spaces[space] == nil { continue }
         sections.append(location)
       }
@@ -38,6 +39,41 @@ enum SidebarDiff {
       if BridgeMapping.nodeInfo(before) != BridgeMapping.nodeInfo(node) { nodeChanges.append(id) }
     }
     result += nodeChanges.sorted { $0.uuidString < $1.uuidString }.map { .node($0) }
+    return result
+  }
+
+  /// `.spaceMoved` goes to the Spaces outside a longest run that kept its relative order, so a drag reports the one
+  /// dragged Space and an add or a removal alone (which only shifts indexes) reports none.
+  private static func spaceChanges(from old: SidebarModel.Sidebar, to new: SidebarModel.Sidebar) -> [SidebarChange] {
+    guard old.spaceOrder != new.spaceOrder || old.spaces != new.spaces else { return [] }
+    let removed = old.spaceOrder.filter { new.spaces[$0] == nil }
+    let added = new.spaceOrder.filter { old.spaces[$0] == nil }
+    let oldIndex = Dictionary(uniqueKeysWithValues: old.spaceOrder.enumerated().map { ($1, $0) })
+    let kept = new.spaceOrder.compactMap { id in oldIndex[id].map { (id: id, oldIndex: $0) } }
+    let stayed = longestIncreasingRun(kept.map(\.oldIndex))
+    let moved = kept.indices.filter { !stayed.contains($0) }.map { kept[$0].id }
+    let changed = new.spaceOrder.filter { id in old.spaces[id].map { $0 != new.spaces[id] } ?? false }
+    return removed.map { .spaceRemoved($0) } + added.map { .spaceAdded($0) } + moved.map { .spaceMoved($0) }
+      + changed.map { .spaceChanged($0) }
+  }
+
+  /// Positions in `values` of one longest strictly increasing subsequence. O(n^2), for Space counts.
+  private static func longestIncreasingRun(_ values: [Int]) -> Set<Int> {
+    guard !values.isEmpty else { return [] }
+    var length = [Int](repeating: 1, count: values.count)
+    var previous = [Int?](repeating: nil, count: values.count)
+    for i in values.indices {
+      for j in 0..<i where values[j] < values[i] && length[j] + 1 > length[i] {
+        length[i] = length[j] + 1
+        previous[i] = j
+      }
+    }
+    var result: Set<Int> = []
+    var current = length.indices.max { length[$0] < length[$1] }
+    while let index = current {
+      result.insert(index)
+      current = previous[index]
+    }
     return result
   }
 

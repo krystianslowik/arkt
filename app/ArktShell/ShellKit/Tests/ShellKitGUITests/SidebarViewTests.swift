@@ -581,7 +581,7 @@ final class SidebarReviewTests: XCTestCase {
     let favorite = sidebar.children(of: .favorites(profile: "default"))[0]
     let data = try faviconData()
     controller.setFavicons([tab: data, favorite: data])
-    sidebar.removeSpace(removed)                          // emits `.spaces` only
+    sidebar.removeSpace(removed)                          // emits `.spaceRemoved` only
     XCTAssertNil(controller.favicons[tab])
     XCTAssertNotNil(controller.favicons[favorite])
   }

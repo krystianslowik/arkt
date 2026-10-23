@@ -24,7 +24,7 @@ public final class SpacePageView: NSView {
     setFlavor(info?.theme.flavor ?? .light)
   }
 
-  /// Applies the Space's current title and flavor after a `.spaces` change; unchanged fields cost nothing.
+  /// Applies the Space's current title and flavor after a Space change; unchanged fields cost nothing.
   public func refresh(from info: SidebarSpaceInfo?) {
     let title = info?.title ?? ""
     if titleLabel.stringValue != title {
