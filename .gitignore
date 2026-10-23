@@ -14,3 +14,7 @@ xcuserdata/
 *.xcodeproj/
 app/ArktShell/App/Info.plist
 
+
+# Raw brand kit (sources, layouts, masters) stays out of the repo
+design/brand-kit/
+design/**/*-source.png
