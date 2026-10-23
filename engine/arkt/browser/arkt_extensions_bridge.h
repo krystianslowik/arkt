@@ -1,31 +1,37 @@
 #ifndef ARKT_BROWSER_ARKT_EXTENSIONS_BRIDGE_H_
 #define ARKT_BROWSER_ARKT_EXTENSIONS_BRIDGE_H_
 
-#include <string>
+#include <memory>
+
+#include "chrome/browser/ui/extensions/extension_popup_types.h"
+#include "extensions/common/extension_id.h"
+#include "ui/gfx/native_ui_types.h"
 
 @class NSView;
-class BrowserWindowInterface;
 
-namespace content {
-class WebContents;
+namespace extensions {
+class ExtensionViewHost;
 }
 
 namespace arkt {
 
-// Lists the profile's toolbar extension actions in the log once the toolbar
-// model is ready, then, if `popup_extension_id` is non-empty and installed,
-// runs that action (granting activeTab like a toolbar click) and shows its
-// popup in an NSPopover anchored to `anchor`.
-void StartExtensionsDemo(BrowserWindowInterface* browser,
-                         content::WebContents* tab,
-                         NSView* anchor,
-                         const std::string& popup_extension_id);
+// Hosts an extension popup in an NSPopover anchored to `anchor` instead of
+// Chrome's Views bubble. There is at most one popup at a time; showing a new
+// one closes the previous one. `on_loaded` (may be null) runs with the host
+// once the popup page has loaded and the popover is shown.
+void ShowPopover(std::unique_ptr<extensions::ExtensionViewHost> host,
+                 NSView* anchor,
+                 ShowPopupCallback on_loaded);
 
-// Runs the action and shows its popup now (used by the placeholder button).
-void ShowExtensionPopup(BrowserWindowInterface* browser,
-                        content::WebContents* tab,
-                        NSView* anchor,
-                        const std::string& extension_id);
+// Whether the current popup belongs to `extension_id`.
+bool IsShowingPopover(const extensions::ExtensionId& extension_id);
+
+// Closes the current popup if it belongs to `extension_id`.
+void HidePopover(const extensions::ExtensionId& extension_id);
+
+// The current popup's native view if it belongs to `extension_id`.
+gfx::NativeView GetPopoverNativeView(
+    const extensions::ExtensionId& extension_id);
 
 }  // namespace arkt
 

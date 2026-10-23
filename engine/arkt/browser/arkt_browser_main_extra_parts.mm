@@ -2,9 +2,11 @@
 
 #import <AppKit/AppKit.h>
 
+#include <memory>
 #include <string>
+#include <vector>
 
-#include "arkt/browser/arkt_extensions_bridge.h"
+#include "arkt/browser/arkt_extensions_menu.h"
 #include "arkt/browser/arkt_window_controller.h"
 #include "base/command_line.h"
 #include "base/functional/bind.h"
@@ -32,6 +34,13 @@ NSMutableArray* Controllers() {
   static base::NoDestructor<NSMutableArray*> controllers(
       [[NSMutableArray alloc] init]);
   return *controllers;
+}
+
+// One extensions menu per Arkt window, alive for the life of the process.
+std::vector<std::unique_ptr<ArktExtensionsMenu>>& ExtensionsMenus() {
+  static base::NoDestructor<std::vector<std::unique_ptr<ArktExtensionsMenu>>>
+      menus;
+  return *menus;
 }
 
 void MountActiveTab(int attempt) {
@@ -75,21 +84,23 @@ void MountActiveTab(int attempt) {
     [controller scheduleAnimationRuns:runs afterDelay:5.0];
   }
 
-  // Task 6: the placeholder button opens uBlock Origin Lite's popup;
-  // --arkt-extensions-demo=<id> lists actions and opens that popup without
-  // input, --arkt-extensions-demo=list only lists them.
-  const std::string kUBlockLiteId = "ddkjiahejlhfcafbddmgiahcphecmpfh";
-  NSButton* anchor = controller.extensionsButton;
+  // The sidebar Extensions button shows every toolbar action of the profile.
+  // --arkt-extensions-demo=<id> runs that action as a toolbar click without
+  // input (=list only logs the actions); --arkt-extensions-menu-dump logs the
+  // menu items and closes a shown menu after 3 s.
+  ExtensionsMenus().push_back(std::make_unique<ArktExtensionsMenu>(
+      browser, contents, controller.extensionsButton));
+  ArktExtensionsMenu* menu = ExtensionsMenus().back().get();
   controller.extensionsButtonAction = ^{
-    ShowExtensionPopup(browser, contents, anchor, kUBlockLiteId);
+    menu->Show();
   };
   const base::CommandLine* command_line =
       base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch("arkt-extensions-demo")) {
-    std::string popup_id =
-        command_line->GetSwitchValueASCII("arkt-extensions-demo");
-    StartExtensionsDemo(browser, contents, anchor,
-                        popup_id == "list" ? std::string() : popup_id);
+  menu->SetDump(command_line->HasSwitch("arkt-extensions-menu-dump"));
+  std::string demo_id =
+      command_line->GetSwitchValueASCII("arkt-extensions-demo");
+  if (!demo_id.empty() && demo_id != "list") {
+    menu->RunActionWhenAvailable(demo_id);
   }
   LOG(WARNING) << "ARKT: mounted active tab after " << attempt + 1
                << " attempt(s)";

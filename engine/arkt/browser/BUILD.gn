@@ -6,6 +6,8 @@ source_set("browser") {
     "arkt_browser_main_extra_parts.mm",
     "arkt_extensions_bridge.h",
     "arkt_extensions_bridge.mm",
+    "arkt_extensions_menu.h",
+    "arkt_extensions_menu.mm",
     "arkt_window_controller.h",
     "arkt_window_controller.mm",
   ]
@@ -14,6 +16,8 @@ source_set("browser") {
     "//chrome/browser/extensions",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/ui/browser_window",
+    "//chrome/browser/ui/extensions",
+    "//chrome/browser/ui/extensions:extension_popup_types",
     "//chrome/browser/ui/tabs:tab_strip",
     "//chrome/browser/ui/toolbar",
     "//components/sessions",
