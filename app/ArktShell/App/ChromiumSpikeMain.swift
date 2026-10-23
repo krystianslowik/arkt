@@ -34,6 +34,10 @@ func chromiumSpikeMain() -> Never {
         spikeFail("dlsym ChromeMain failed: \(String(cString: dlerror()))")
     }
     let chromeMain = unsafeBitCast(symbol, to: ChromeMainFunction.self)
+    // W3-0a probe (ChromiumSpikeProbe.swift): keep the class from dead stripping and
+    // schedule main-actor and main-queue work that only Chromium's run loop can drain.
+    _ = ArktShellEmbedderProbe.self
+    startMainActorProbe()
     let status = chromeMain(CommandLine.argc, CommandLine.unsafeArgv)
     // exit, not return, as the Chromium stub does.
     exit(status)
