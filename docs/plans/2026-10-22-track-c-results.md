@@ -815,3 +815,35 @@ checks remain.
 - Quit within the save window and the recovery toast: not run yet. The Release build ignores `ARKT_DATA_DIR` by design
   (environment overrides are honoured only in Debug and Profile builds), so this check, like the save one in the Track E
   results, must use a Debug build.
+
+## Space dock scrolls when the dots overflow (#193)
+
+With the measured 21.5 pt pitch (#186) only 5 dots fit between the archive and new-tab buttons at the default 190 pt
+sidebar (110 pt slot) and 4 at the 150 pt minimum (70 pt slot); more drew over the buttons and could not be clicked.
+Arc's dock is a scroll area (measurement doc, `bottomBarHeight` row), so the dock now scrolls.
+
+- `SpaceDockLayout` (pure geometry, Swift Testing): dots stay centered while they fit; otherwise they sit on a strip
+  with half a gap before the first dot and after the last, and the strip scrolls. `offsetRevealing` scrolls only as
+  far as needed to show a dot's whole hit box.
+- `SpaceDotsView` clips the dots to its bounds and moves one strip layer to scroll (frames set directly, actions
+  off). Trackpad and scroll wheel scroll it (a vertical wheel scrolls sideways; wheel lines move one dot); there is
+  no visible scroller. When the dots fit, scroll events go up the responder chain as before.
+- Edges fade (a gradient mask, 8.75 pt, half a gap) only on the sides where dots are hidden.
+- The current Space's dot is scrolled into view on every Space change, and during a swipe the dot nearest the
+  fingers follows. The swipe path only compares an offset and, when it changes, moves the strip and re-sets the
+  accessibility frames: no layout and no redraw.
+- Accessibility: every dot stays a child button (VoiceOver can still move to it and press it, which selects the
+  Space and scrolls the dot into view). Frames are clipped to the dock; a dot scrolled out reports a 1 pt sliver at
+  the edge it left by (an empty frame reads as the screen origin).
+- Width changes and Space count changes re-clamp the strip; removing Spaces until they fit centers them again.
+
+Not measured: Arc's exact overflow behavior (fade, scroll indicator, reveal animation). The reveal is immediate, not
+animated. Left for #77's interaction checklist.
+
+Checks (rebased on #194): `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 431 tests (423 + 8 in
+`SpaceDockLayoutTests`), XCTest 299 tests (293 + 6 in `SpaceDockOverflowTests`: 5, 7 and 12 Spaces at 150 and 190
+pt; no overlap with the buttons, current dot visible, accessibility frames inside the dock, clicks select the dot
+under the pointer, scroll wheel, swipe without relayout, back to centered), 0 failures apart from one pacing frame:
+`space-key` had 1 frame of 17 ms (load 5.5; the 3-Space fixture fits, so the dock does no scroll work there). The
+rerun of `testFramePacingDuringSwipeAndKeyboardSwitch` asserted `space-swipe` and `space-key` at 0 frames over 8.6 ms
+(load 4.98). Debug app build: `** BUILD SUCCEEDED **`.

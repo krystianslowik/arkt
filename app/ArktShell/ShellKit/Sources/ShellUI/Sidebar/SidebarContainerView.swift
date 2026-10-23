@@ -3,6 +3,11 @@ import AppKit
 /// Space indicator dots in the bottom bar. The fill follows the pager's continuous position, so the
 /// active dot hands over during a swipe (BH-040). Each dot is an accessibility button named after its
 /// Space; pressing it (or clicking) selects that Space.
+///
+/// When the dots do not fit between the archive and new-tab buttons (#193), they sit on a clipped strip that
+/// scrolls with the trackpad or scroll wheel (no visible scroller), fades at the edges with hidden dots, and
+/// follows the current Space (and the Space nearest the fingers during a swipe). Scrolling moves one layer and
+/// re-sets the accessibility frames; it never relayouts or redraws the dock.
 @MainActor
 public final class SpaceDotsView: NSView {
   /// Space titles, in order; one dot each.
@@ -19,16 +24,32 @@ public final class SpaceDotsView: NSView {
       position = CGFloat(selectedIndex)
       for (i, element) in elements.enumerated() { element.setAccessibilitySelected(i == selectedIndex) }
       if selectedIndex != oldValue { NSAccessibility.post(element: self, notification: .selectedChildrenChanged) }
+      reveal(selectedIndex)
     }
   }
   /// Continuous pager position (1.5 = halfway between dots 1 and 2).
-  public var position: CGFloat = 0 { didSet { if position != oldValue { applyColors() } } }
+  public var position: CGFloat = 0 {
+    didSet {
+      guard position != oldValue else { return }
+      applyColors()
+      reveal(Int(position.rounded()))
+    }
+  }
   public var flavor: ThemeFlavor = .light { didSet { if flavor != oldValue { applyColors(force: true) } } }
   public var onSelect: (@MainActor (Int) -> Void)?
+  /// How far the dot strip is scrolled (0 when the dots fit).
+  public private(set) var scrollOffset: CGFloat = 0
   private var dots: [CALayer] = []
   private var elements: [SpaceDotElement] = []
   /// Fill weight each dot was last painted with (a swipe repaints only the dots whose weight changes).
   private var paintedWeights: [Double] = []
+  /// Clips the strip to the dock; its mask fades the edges past which dots are hidden.
+  private let clipLayer = CALayer()
+  private let fadeMask = CAGradientLayer()
+  /// Holds the dots; scrolling moves only this layer.
+  private let stripLayer = CALayer()
+  /// Layout the strip was last placed for; a change re-reveals the current dot.
+  private var placedLayout: SpaceDockLayout?
 
   public override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -36,6 +57,11 @@ public final class SpaceDotsView: NSView {
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityLabel("Spaces")
+    clipLayer.masksToBounds = true
+    clipLayer.addSublayer(stripLayer)
+    fadeMask.startPoint = CGPoint(x: 0, y: 0.5)
+    fadeMask.endPoint = CGPoint(x: 1, y: 0.5)
+    clipLayer.mask = fadeMask
   }
 
   @available(*, unavailable)
@@ -45,14 +71,13 @@ public final class SpaceDotsView: NSView {
   public override var wantsUpdateLayer: Bool { true }
   public override var mouseDownCanMoveWindow: Bool { false }
 
-  private var pitch: CGFloat { SidebarMetrics.spaceDotSize + SidebarMetrics.spaceDotSpacing }
-  public var contentWidth: CGFloat { count == 0 ? 0 : CGFloat(count) * pitch - SidebarMetrics.spaceDotSpacing }
-  private var originX: CGFloat { ((bounds.width - contentWidth) / 2).rounded() }
+  private var dockLayout: SpaceDockLayout { SpaceDockLayout(count: count, width: bounds.width) }
+  public var contentWidth: CGFloat { dockLayout.contentWidth }
 
   private func rebuild() {
     dots.forEach { $0.removeFromSuperlayer() }
     dots = (0..<count).map { _ in CALayer() }
-    dots.forEach { layer?.addSublayer($0) }
+    dots.forEach { stripLayer.addSublayer($0) }
     paintedWeights = []
     elements = (0..<count).map { index in
       let element = SpaceDotElement { [weak self] in self?.onSelect?(index) }
@@ -64,24 +89,78 @@ public final class SpaceDotsView: NSView {
     needsDisplay = true
   }
 
-  /// Frame of dot `index` in this view (the full pitch, so the hit target is wider than the dot).
+  /// Frame of dot `index` in this view (the full pitch, so the hit target is wider than the dot). Dots scrolled
+  /// out of the dock have frames outside `bounds`.
   func dotFrame(_ index: Int) -> NSRect {
-    NSRect(x: originX + CGFloat(index) * pitch - SidebarMetrics.spaceDotSpacing / 2, y: 0,
-           width: pitch, height: bounds.height)
+    NSRect(x: dockLayout.hitMinX(index, offset: scrollOffset), y: 0, width: dockLayout.pitch, height: bounds.height)
   }
 
   public override func updateLayer() {
+    guard let layer else { return }
+    if clipLayer.superlayer !== layer { layer.addSublayer(clipLayer) }
+    let layout = dockLayout
     CATransaction.begin()
     CATransaction.setDisableActions(true)
+    clipLayer.frame = layer.bounds
+    fadeMask.frame = clipLayer.bounds
     let size = SidebarMetrics.spaceDotSize
     for (index, dot) in dots.enumerated() {
-      dot.frame = CGRect(x: originX + CGFloat(index) * pitch, y: ((bounds.height - size) / 2).rounded(),
+      dot.frame = CGRect(x: layout.stripDotMinX(index), y: ((bounds.height - size) / 2).rounded(),
                          width: size, height: size)
       dot.cornerRadius = size / 2
     }
-    for (index, element) in elements.enumerated() { element.setAccessibilityFrameInParentSpace(dotFrame(index)) }
+    if layout != placedLayout {
+      placedLayout = layout
+      scrollOffset = layout.offsetRevealing(Int(position.rounded()), from: scrollOffset)
+    }
+    placeStrip(layout)
     CATransaction.commit()
     applyColors(force: true)
+  }
+
+  /// Scrolls just enough to show dot `index`. Cheap enough for every swipe frame: no layout, no redraw.
+  private func reveal(_ index: Int) {
+    let layout = dockLayout
+    guard layout.width > 0, layout == placedLayout else { return }
+    setScrollOffset(layout.offsetRevealing(index, from: scrollOffset))
+  }
+
+  private func setScrollOffset(_ offset: CGFloat) {
+    let layout = dockLayout
+    let clamped = layout.clamp(offset)
+    guard clamped != scrollOffset else { return }
+    scrollOffset = clamped
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    placeStrip(layout)
+    CATransaction.commit()
+  }
+
+  /// Moves the strip to `scrollOffset`, updates the fades and clips each dot's accessibility frame to the dock.
+  private func placeStrip(_ layout: SpaceDockLayout) {
+    scrollOffset = layout.clamp(scrollOffset)
+    stripLayer.frame = CGRect(x: -scrollOffset, y: 0, width: layout.stripWidth, height: bounds.height)
+    let fades = layout.fades(offset: scrollOffset)
+    let edge = layout.width > 0 ? Double(min(layout.fadeWidth / layout.width, 0.5)) : 0
+    let opaque = CGColor(gray: 0, alpha: 1)
+    let clear = CGColor(gray: 0, alpha: 0)
+    fadeMask.colors = [fades.leading ? clear : opaque, opaque, opaque, fades.trailing ? clear : opaque]
+    fadeMask.locations = [0, NSNumber(value: edge), NSNumber(value: 1 - edge), 1]
+    for (index, element) in elements.enumerated() {
+      element.setAccessibilityFrameInParentSpace(visibleFrame(index))
+    }
+  }
+
+  /// `dotFrame(index)` clipped to the dock. A dot scrolled out gets a 1 pt sliver at the edge it left by: it stays
+  /// in the accessibility tree (pressing it selects its Space, which scrolls it into view), and an empty frame
+  /// would be reported as the screen origin.
+  private func visibleFrame(_ index: Int) -> NSRect {
+    let frame = dotFrame(index)
+    let visible = frame.intersection(bounds)
+    if !visible.isNull, visible.width >= 1 { return visible }
+    let sliver = min(1, bounds.width)
+    let x = frame.midX <= bounds.midX ? bounds.minX : bounds.maxX - sliver
+    return NSRect(x: x, y: 0, width: sliver, height: bounds.height)
   }
 
   /// Weight 1 at the dot under `position`, falling to 0 one dot away.
@@ -115,7 +194,20 @@ public final class SpaceDotsView: NSView {
 
   public override func mouseDown(with event: NSEvent) {
     let point = convert(event.locationInWindow, from: nil)
+    guard bounds.contains(point) else { return }
     if let index = (0..<count).first(where: { dotFrame($0).contains(point) }) { onSelect?(index) }
+  }
+
+  /// Scrolls the strip when the dots overflow: trackpad deltas as they come, wheel lines one dot each. A vertical
+  /// wheel scrolls sideways. When the dots fit, the event goes up the responder chain as before.
+  public override func scrollWheel(with event: NSEvent) {
+    let layout = dockLayout
+    guard layout.maxOffset > 0 else { super.scrollWheel(with: event); return }
+    let dx = event.scrollingDeltaX
+    let dy = event.scrollingDeltaY
+    var delta = abs(dx) >= abs(dy) ? dx : dy
+    if !event.hasPreciseScrollingDeltas { delta *= layout.pitch }
+    setScrollOffset(scrollOffset - delta)
   }
 }
 
