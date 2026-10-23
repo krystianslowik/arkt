@@ -127,9 +127,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     let cell = tableView.makeView(withIdentifier: ArchiveRowCellView.identifier, owner: self) as? ArchiveRowCellView
       ?? ArchiveRowCellView()
-    let item = rows[row]
-    cell.titleField.stringValue = item.title
-    cell.detailField.stringValue = "\(item.detail) - \(item.reason)"
+    cell.show(rows[row])
     return cell
   }
 
@@ -201,7 +199,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   }
 }
 
-/// Two lines: the title, then detail and reason.
+/// Two lines: the title, then detail and reason. Accessibility reads the row as one element with one label (#91).
 @MainActor
 final class ArchiveRowCellView: NSTableCellView {
   static let identifier = NSUserInterfaceItemIdentifier("ArchiveRowCell")
@@ -220,10 +218,24 @@ final class ArchiveRowCellView: NSTableCellView {
     addSubview(titleField)
     addSubview(detailField)
     textField = titleField
+    // AppKit exposes a text field through its cell, so both are hidden.
+    for field in [titleField, detailField] {
+      field.setAccessibilityElement(false)
+      field.cell?.setAccessibilityElement(false)
+    }
+    setAccessibilityElement(true)
+    setAccessibilityRole(.cell)
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  /// Title, then "detail - reason"; the accessibility label is title, place and date, reason.
+  func show(_ row: ArchiveRow) {
+    titleField.stringValue = row.title
+    detailField.stringValue = "\(row.detail) - \(row.reason)"
+    setAccessibilityLabel("\(row.title), \(row.detail), \(row.reason)")
+  }
 
   override func layout() {
     super.layout()
