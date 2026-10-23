@@ -58,6 +58,20 @@ std::vector<std::unique_ptr<ArktExtensionsMenu>>& ExtensionsMenus() {
   return *menus;
 }
 
+// --arkt-extensions-demo=<id> runs that action as a toolbar click without
+// input (=list only logs the actions); --arkt-extensions-menu-dump logs the
+// menu items and closes a shown menu after 3 s.
+void ApplyExtensionsMenuSwitches(ArktExtensionsMenu* menu) {
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  menu->SetDump(command_line->HasSwitch("arkt-extensions-menu-dump"));
+  std::string demo_id =
+      command_line->GetSwitchValueASCII("arkt-extensions-demo");
+  if (!demo_id.empty() && demo_id != "list") {
+    menu->RunActionWhenAvailable(demo_id);
+  }
+}
+
 void MountActiveTab(int attempt) {
   BrowserWindowInterface* browser =
       GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser();
@@ -100,23 +114,13 @@ void MountActiveTab(int attempt) {
   }
 
   // The sidebar Extensions button shows every toolbar action of the profile.
-  // --arkt-extensions-demo=<id> runs that action as a toolbar click without
-  // input (=list only logs the actions); --arkt-extensions-menu-dump logs the
-  // menu items and closes a shown menu after 3 s.
   ExtensionsMenus().push_back(std::make_unique<ArktExtensionsMenu>(
       browser, contents, controller.extensionsButton));
   ArktExtensionsMenu* menu = ExtensionsMenus().back().get();
   controller.extensionsButtonAction = ^{
     menu->Show();
   };
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
-  menu->SetDump(command_line->HasSwitch("arkt-extensions-menu-dump"));
-  std::string demo_id =
-      command_line->GetSwitchValueASCII("arkt-extensions-demo");
-  if (!demo_id.empty() && demo_id != "list") {
-    menu->RunActionWhenAvailable(demo_id);
-  }
+  ApplyExtensionsMenuSwitches(menu);
   LOG(WARNING) << "ARKT: mounted active tab after " << attempt + 1
                << " attempt(s)";
 }
@@ -127,8 +131,28 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
   if (browser->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
     return nullptr;
   }
-  return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(
-      new ArktBrowserWindow(browser, [[ArktPlaceholderWindowHost alloc] init]));
+  ArktPlaceholderWindowHost* host = [[ArktPlaceholderWindowHost alloc] init];
+  auto* window = new ArktBrowserWindow(browser, host);
+  // The Browser is still being constructed here; attach the sidebar
+  // Extensions menu once it exists. The menu follows the active tab.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](base::WeakPtr<ArktBrowserWindow> window,
+             ArktPlaceholderWindowHost* host) {
+            if (!window) {
+              return;
+            }
+            ExtensionsMenus().push_back(std::make_unique<ArktExtensionsMenu>(
+                window->browser(), nullptr, host.extensionsButton));
+            ArktExtensionsMenu* menu = ExtensionsMenus().back().get();
+            host.extensionsButtonAction = ^{
+              menu->Show();
+            };
+            ApplyExtensionsMenuSwitches(menu);
+          },
+          window->GetWeakPtr(), host));
+  return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(window);
 }
 
 // Logs `ARKT: browsers normal=<n> arkt=<n> views=<n>` on every browser add and

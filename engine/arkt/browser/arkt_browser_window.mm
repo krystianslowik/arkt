@@ -23,6 +23,7 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_active_state_manager/browser_active_state_manager.h"
 #include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
@@ -103,6 +104,9 @@ NSDictionary<NSString*, id>* TabEvent(NSString* kind,
 }
 
 @synthesize closeRequested = _closeRequested;
+@synthesize extensionsButtonAction = _extensionsButtonAction;
+@synthesize validateCommand = _validateCommand;
+@synthesize executeCommand = _executeCommand;
 
 - (instancetype)init {
   if ((self = [super init])) {
@@ -141,9 +145,10 @@ NSDictionary<NSString*, id>* TabEvent(NSString* kind,
     _card.postsFrameChangedNotifications = YES;
     [root addSubview:_card];
 
-    _extensionsButton = [NSButton buttonWithTitle:@"Extensions"
-                                           target:nil
-                                           action:nil];
+    _extensionsButton =
+        [NSButton buttonWithTitle:@"Extensions"
+                           target:self
+                           action:@selector(extensionsButtonClicked:)];
     [_extensionsButton sizeToFit];
     _extensionsButton.frameOrigin = NSMakePoint(
         16, NSHeight(bounds) - 44 - NSHeight(_extensionsButton.frame));
@@ -168,6 +173,35 @@ NSDictionary<NSString*, id>* TabEvent(NSString* kind,
 
 - (NSButton*)extensionsButton {
   return _extensionsButton;
+}
+
+// Main menu commands. The window delegate is in the key window's responder
+// chain, ahead of the app controller (which only handles window-less
+// commands).
+
+- (void)commandDispatch:(id)sender {
+  if (_executeCommand) {
+    _executeCommand([sender tag]);
+  }
+}
+
+- (void)commandDispatchUsingKeyModifiers:(id)sender {
+  [self commandDispatch:sender];
+}
+
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
+  SEL action = item.action;
+  if (action == @selector(commandDispatch:) ||
+      action == @selector(commandDispatchUsingKeyModifiers:)) {
+    return _validateCommand && _validateCommand(item.tag);
+  }
+  return [self respondsToSelector:action];
+}
+
+- (void)extensionsButtonClicked:(id)sender {
+  if (_extensionsButtonAction) {
+    _extensionsButtonAction();
+  }
 }
 
 - (void)tabListChanged:(NSArray<NSDictionary<NSString*, id>*>*)events {
@@ -568,6 +602,15 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
       weak->Close();
     }
   };
+  host_.validateCommand = ^BOOL(NSInteger command) {
+    return weak && chrome::IsCommandEnabled(weak->browser_,
+                                            static_cast<int>(command));
+  };
+  host_.executeCommand = ^(NSInteger command) {
+    if (weak) {
+      chrome::ExecuteCommand(weak->browser_, static_cast<int>(command));
+    }
+  };
   LOG(WARNING) << "ARKT: native window created";
 }
 
@@ -584,6 +627,8 @@ ArktBrowserWindow::~ArktBrowserWindow() {
     Unmount(mounted_);
   }
   host_.closeRequested = nil;
+  host_.validateCommand = nil;
+  host_.executeCommand = nil;
   [host_.window orderOut:nil];
 
   if (new_tab_footer_controller_) {

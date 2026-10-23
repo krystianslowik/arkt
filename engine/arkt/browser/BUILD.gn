@@ -31,6 +31,7 @@ source_set("browser") {
     "//chrome/browser/profiles:profile",
     "//chrome/browser/themes",
     "//chrome/browser/ui:browser_command_controller",
+    "//chrome/browser/ui:browser_commands",
     "//chrome/browser/ui:browser_window_header",
     "//chrome/browser/ui/browser_active_state_manager",
     "//chrome/browser/ui/browser_window",

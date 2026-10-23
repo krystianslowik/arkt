@@ -31,6 +31,11 @@ class NewTabFooterController;
 // Close Window menu item). The host must not close the window itself; the
 // engine closes the Browser and then releases the host.
 @property(nonatomic, copy) void (^closeRequested)(void);
+// Chrome's main menu sends browser commands (commandDispatch:, tag = command
+// id) down the key window's responder chain. The host answers them for its
+// window through these blocks, which the engine sets.
+@property(nonatomic, copy) BOOL (^validateCommand)(NSInteger command);
+@property(nonatomic, copy) void (^executeCommand)(NSInteger command);
 // Plain tab events, one dictionary per change, in order. Keys: "kind"
 // ("inserted", "removed", "moved", "activated"), "tabId", "index", and for
 // "moved" also "fromIndex".
@@ -41,6 +46,8 @@ class NewTabFooterController;
 // the Extensions button) and an inset, rounded card.
 @interface ArktPlaceholderWindowHost : NSObject <ArktWindowHost>
 @property(nonatomic, readonly) NSButton* extensionsButton;
+// Run when the Extensions button is clicked.
+@property(nonatomic, copy) void (^extensionsButtonAction)(void);
 @end
 
 namespace arkt {
@@ -69,6 +76,9 @@ class ArktBrowserWindow : public BrowserWindow,
   static ArktBrowserWindow* FromBrowser(const BrowserWindowInterface* browser);
 
   BrowserWindowInterface* browser() const { return browser_; }
+  base::WeakPtr<ArktBrowserWindow> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
   id<ArktWindowHost> host() const { return host_; }
 
   // ui::BaseWindow:
