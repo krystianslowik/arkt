@@ -15,6 +15,8 @@ public final class SidebarController {
 
   /// A tab became current (fires on every activation, including re-activating the current tab).
   public var onActivate: (@MainActor (NodeID) -> Void)?
+  /// A row's hover close (X) button or VoiceOver close action (GS-043); the window closes the node as Cmd-W does.
+  public var onClose: (@MainActor (NodeID) -> Void)?
   /// The "+" button in the bottom bar.
   public var onNewTab: (@MainActor () -> Void)?
   /// Continuous pager position on every strip move (drives the window theme crossfade).
@@ -152,6 +154,7 @@ public final class SidebarController {
   private func makePage(_ id: SpaceID) -> SpacePageView {
     let page = SpacePageView(source: source, spaceID: id)
     page.outlineController.onActivate = { [weak self] node in self?.activate(node: node) }
+    page.outlineController.onClose = { [weak self] node in self?.onClose?(node) }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
     page.outlineController.setRowStates(resolver)
     pages[id] = page

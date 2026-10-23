@@ -65,6 +65,7 @@ public final class SymbolImageCache {
   public func prewarm(scale: CGFloat) {
     for flavor in [ThemeFlavor.light, .dark] {
       for name in Self.sidebarSymbols { _ = SidebarGlyphs.symbol(name, flavor: flavor, scale: scale, cache: self) }
+      _ = SidebarGlyphs.close(flavor: flavor, scale: scale, cache: self)
       for name in Self.bottomBarSymbols {
         _ = symbol(name, box: SidebarMetrics.bottomBarIconSize, color: ShellTokens.sidebarForeground.resolve(flavor),
                    scale: scale)

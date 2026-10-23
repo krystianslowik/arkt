@@ -84,6 +84,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     window.contentView = root
     window.delegate = self
     sidebarController.onActivate = { [weak self] node in self?.show(node: node) }
+    sidebarController.onClose = { [weak self] node in self?.close(node: node) }       // hover X (GS-043)
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
     commandBar.onOpen = { [weak self] url, inNewTab in self?.open(url, inNewTab: inNewTab) }
     commandBar.onReload = { [weak self] in                                                // KB-004, BH-102
@@ -229,14 +230,30 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// NEEDS-RUNTIME-CHECK and not implemented).
   @objc public func closeTab(_ sender: Any?) {
     guard let node = currentNode else { return }
+    close(node: node)
+  }
+
+  /// Closes a tab, pane or split the way Cmd-W closes the current tab; the hover X (GS-043) and the rows' VoiceOver
+  /// action call it for any row. Today: archived (a split as one unit), and when it held the current tab the
+  /// nearest sibling becomes current. Pinned and Favorites: the pages close and the rows stay. Folders are ignored.
+  public func close(node: NodeID) {
+    let tabs: [NodeID]
+    switch sidebar.node(node) {
+    case .tab?: tabs = [node]
+    case .split?: tabs = sidebar.children(of: .split(node))
+    case .folder?, nil: return
+    }
     switch sidebar.section(containing: node) {
     case .today?:
-      let next = successor(of: node)          // resolved while the node is still in place
+      let holdsCurrent = currentNode.map(tabs.contains) ?? false
+      let next = holdsCurrent ? successor(of: node) : nil   // resolved while the node is still in place
       onArchive?([node])
       guard sidebar.node(node) == nil else { return }
       if let next, sidebar.node(next) != nil { activate(node: next) }
     case .pinned?, .favorites?:
-      if let tab = tabsByNode[node] { engine.closeTab(tab) }   // `.tabClosed` clears the card and the row state
+      for tab in tabs.compactMap({ tabsByNode[$0] }) {
+        engine.closeTab(tab)                  // `.tabClosed` clears the card and the row state
+      }
     default:
       return
     }

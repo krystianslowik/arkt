@@ -12,6 +12,12 @@ public enum SidebarMetrics {
   public static let faviconLeading: CGFloat = 10
   public static let titleLeading: CGFloat = 34
   public static let titleTrailing: CGFloat = 10          // TODO(measure)
+  // Hover close (X) button at the row's trailing edge (GS-043).
+  public static let closeButtonSize: CGFloat = 20        // TODO(measure): hit box
+  public static let closeButtonGlyphSize: CGFloat = 10   // TODO(measure)
+  public static let closeButtonTrailing: CGFloat = 7     // TODO(measure): cell trailing edge to hit box
+  public static let closeButtonTitleGap: CGFloat = 4     // TODO(measure): title end to hit box
+  public static let closeButtonFadeDuration: Double = 0.12  // TODO(measure): fade in and out with the hover
   public static let titleFontSize: CGFloat = 14          // measured, medium weight
   public static let spaceTitleFontSize: CGFloat = 12     // measured, secondary, left 16
   public static let spaceTitleLeading: CGFloat = 16      // measured

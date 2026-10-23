@@ -51,6 +51,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   /// A tab or split row was clicked (folders toggle in place).
   public var onActivate: (@MainActor (NodeID) -> Void)?
+  /// A row's hover close (X) button or its VoiceOver close action was used (GS-043); the window runs the same
+  /// close as Cmd-W.
+  public var onClose: (@MainActor (NodeID) -> Void)?
   /// Favicon for a tab, nil = letter placeholder.
   public var faviconProvider: (@MainActor (NodeID) -> NSImage?)?
 
@@ -153,7 +156,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
     let row = outlineView.makeView(withIdentifier: SidebarRowView.reuseIdentifier, owner: self) as? SidebarRowView
       ?? SidebarRowView(frame: .zero)
-    configure(row, for: item as? OutlineItem)
+    let item = item as? OutlineItem
+    configure(row, for: item)
+    row.setAccessibilityCustomActions(closeAccessibilityActions(for: item?.nodeID))
     return row
   }
 
@@ -168,7 +173,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let cell = outlineView.makeView(withIdentifier: SidebarTabCellView.reuseIdentifier, owner: self)
       as? SidebarTabCellView ?? SidebarTabCellView(frame: .zero)
     let (title, image) = presentation(of: id)
-    cell.configure(title: title, image: image, flavor: flavor)
+    cell.configure(title: title, image: image, flavor: flavor, closeAction: RowCloseAction.resolve(id, in: source))
+    cell.closeButton.target = self
+    cell.closeButton.action = #selector(closeClicked(_:))
     return cell
   }
 
@@ -257,7 +264,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       if let id = (self.outlineView.item(atRow: row) as? OutlineItem)?.nodeID,
          let cell = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarTabCellView {
         let (title, image) = self.presentation(of: id)
-        cell.configure(title: title, image: image, flavor: self.flavor)
+        cell.configure(title: title, image: image, flavor: self.flavor,
+                       closeAction: RowCloseAction.resolve(id, in: self.source))
       } else if let divider = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
                   as? SidebarDividerView {
         divider.flavor = self.flavor
@@ -354,5 +362,25 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       return
     }
     onActivate?(id)
+  }
+
+  // MARK: Close
+
+  /// The X of a row's cell. Opt-click unsplitting a split (BH-127) is gated behind an Arc flag and
+  /// NEEDS-RUNTIME-CHECK (RT-22), so it is not implemented: an Opt-click closes like a plain click.
+  @objc private func closeClicked(_ sender: NSButton) {
+    let row = outlineView.row(for: sender)
+    guard row >= 0, let id = (outlineView.item(atRow: row) as? OutlineItem)?.nodeID else { return }
+    onClose?(id)
+  }
+
+  /// VoiceOver's "Close" or "Archive" on a closable row; none for folders and the divider.
+  private func closeAccessibilityActions(for id: NodeID?) -> [NSAccessibilityCustomAction] {
+    guard let id, let action = RowCloseAction.resolve(id, in: source) else { return [] }
+    return [NSAccessibilityCustomAction(name: action.accessibilityName) { [weak self] in
+      guard let self, self.source.node(id) != nil else { return false }
+      self.onClose?(id)
+      return true
+    }]
   }
 }
