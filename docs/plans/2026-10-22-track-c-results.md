@@ -908,3 +908,23 @@ Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 424 tests, XCTes
 bound=17.42 load1=5.14 cores=10 asserted=yes`. Rebased on #198 and #204: Swift Testing 433 tests, XCTest 322 tests
 (317 + 5), 0 failures; `commandbar.showcpu.ms p95=0.31`, `commandbar.earliestframe p95=11.16 bound=17.73 load1=11.74
 asserted=no`. Debug app build: `** BUILD SUCCEEDED **`.
+
+## Delete Space: menu entry and confirmation (#206)
+
+- Spaces menu > Delete Space... (after a separator, no key) calls `ShellWindowController.deleteSpace(_:)`. It asks
+  through the injectable `confirmSpaceRemoval` (default: an alert sheet on the window, "Delete Space" marked
+  destructive, then "Cancel"), then hands the Space it asked about to `onRemoveSpace`, which `AppSession` wires to
+  `ArchiveCoordinator.removeSpace` (decision on #86: pinned and Today items go to the Archive). An answer for a Space
+  that is already gone does nothing; another Space becoming current while the sheet is open does not change which
+  Space is removed.
+- Every Space asks, empty and Today-only ones included: the Space itself (name, theme) cannot be restored from the
+  Archive. The text says where the items go, or "This cannot be undone." for an empty Space.
+- Last Space: removal is allowed and shows the empty state (decision on #86). The item is disabled with no current
+  Space or no `onRemoveSpace`.
+- [I] PARITY(NEEDS-RUNTIME-CHECK): the menu title and place and the confirmation wording; the parity spec has no
+  Delete Space flow. No Space context menu exists yet.
+
+Checks (`nice -n 10`, `-j 4`): ArktCore 342 tests (342 + 0), 0 failures. ShellKit `--skip ShellKitGUITests`: Swift
+Testing 453 tests (450 + 3 in `SpaceRemovalPromptTests`), 0 failures. ShellKit `--filter ShellKitGUITests`: XCTest
+349 tests (340 + 9: 8 in `DeleteSpaceTests`, 1 in `MainMenuKeyEquivalentTests`), 0 failures; pacing asserted,
+`space-swipe` and `space-key` 0 frames over 8.6 ms (load 4.93). Debug app build: `** BUILD SUCCEEDED **`.
