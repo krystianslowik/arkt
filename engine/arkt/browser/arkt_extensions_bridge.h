@@ -17,24 +17,32 @@ namespace arkt {
 
 // Hosts an extension popup in an NSPopover anchored to `anchor` instead of
 // Chrome's Views bubble. There is at most one popup at a time; showing a new
-// one closes the previous one. `on_loaded` (may be null) runs with the host
-// once the popup page has loaded and the popover is shown.
+// one closes the previous one. `owner` identifies who showed it (one Arkt
+// window's extensions menu); the queries below only see popups of their
+// owner, so one window never closes another window's popup. `on_loaded` (may
+// be null) runs with the host once the popup page has loaded and the popover
+// is shown.
 void ShowPopover(std::unique_ptr<extensions::ExtensionViewHost> host,
                  NSView* anchor,
+                 const void* owner,
                  ShowPopupCallback on_loaded);
 
-// Whether the current popup belongs to `extension_id`.
-bool IsShowingPopover(const extensions::ExtensionId& extension_id);
+// Whether the current popup belongs to `extension_id` and `owner`.
+bool IsShowingPopover(const extensions::ExtensionId& extension_id,
+                      const void* owner);
 
 // Whether any popup is showing (or loading).
 bool IsShowingAnyPopover();
 
-// Closes the current popup if it belongs to `extension_id`.
-void HidePopover(const extensions::ExtensionId& extension_id);
+// Closes the current popup if it belongs to `extension_id` and `owner`.
+void HidePopover(const extensions::ExtensionId& extension_id,
+                 const void* owner);
 
-// The current popup's native view if it belongs to `extension_id`.
+// The current popup's native view if it belongs to `extension_id` and
+// `owner`.
 gfx::NativeView GetPopoverNativeView(
-    const extensions::ExtensionId& extension_id);
+    const extensions::ExtensionId& extension_id,
+    const void* owner);
 
 }  // namespace arkt
 

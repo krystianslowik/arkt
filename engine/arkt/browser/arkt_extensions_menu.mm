@@ -76,17 +76,18 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
   void UnregisterCommand() override {}
 
   bool IsShowingPopup() const override {
-    return model_ && IsShowingPopover(model_->GetId());
+    return model_ && IsShowingPopover(model_->GetId(), menu_);
   }
 
   void HidePopup() override {
     if (model_) {
-      HidePopover(model_->GetId());
+      HidePopover(model_->GetId(), menu_);
     }
   }
 
   gfx::NativeView GetPopupNativeView() override {
-    return model_ ? GetPopoverNativeView(model_->GetId()) : gfx::NativeView();
+    return model_ ? GetPopoverNativeView(model_->GetId(), menu_)
+                  : gfx::NativeView();
   }
 
   void TriggerPopup(std::unique_ptr<extensions::ExtensionViewHost> host,
@@ -99,7 +100,7 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
     if (show_action == PopupShowAction::kShowAndInspect) {
       LOG(WARNING) << "ARKT: popup inspection not supported; showing only";
     }
-    ShowPopover(std::move(host), menu_->anchor(), std::move(callback));
+    ShowPopover(std::move(host), menu_->anchor(), menu_, std::move(callback));
   }
 
   void ShowContextMenuAsFallback() override {
@@ -200,11 +201,17 @@ void ArktExtensionsMenu::Show() {
                   inModes:@[ NSRunLoopCommonModes ]];
   }
   shown_menu_ = menu;
+  // Tracking runs a nested run loop in which Chromium keeps running tasks; a
+  // window close there destroys this menu (the window owns it).
+  base::WeakPtr<ArktExtensionsMenu> weak_this = weak_factory_.GetWeakPtr();
   [menu popUpMenuPositioningItem:nil
                       atLocation:NSMakePoint(0, NSMaxY(anchor.bounds) + 4)
                           inView:anchor];
-  shown_menu_ = nil;
   LOG(WARNING) << "ARKT: extensions menu closed";
+  if (!weak_this) {
+    return;
+  }
+  shown_menu_ = nil;
 }
 
 bool ArktExtensionsMenu::IsShowing() const {
@@ -393,6 +400,7 @@ void ArktExtensionsMenu::ExecuteAction(
 }
 
 void ArktExtensionsMenu::Shutdown() {
+  CloseIfOpen();
   for (auto& [id, view_model] : view_models_) {
     view_model->HidePopup();
   }

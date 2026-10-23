@@ -2,6 +2,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include <cstdint>
 #include <memory>
 #include <utility>
 
@@ -35,9 +36,11 @@ class PopoverExtensionView : public extensions::ExtensionView,
  public:
   PopoverExtensionView(std::unique_ptr<extensions::ExtensionViewHost> host,
                        NSView* anchor,
+                       const void* owner,
                        ShowPopupCallback on_loaded)
       : host_(std::move(host)),
         anchor_(anchor),
+        owner_(reinterpret_cast<uintptr_t>(owner)),
         on_loaded_(std::move(on_loaded)) {
     host_->set_view(this);
 
@@ -82,6 +85,9 @@ class PopoverExtensionView : public extensions::ExtensionView,
 
   const extensions::ExtensionId& extension_id() const {
     return host_->extension_id();
+  }
+  bool IsOwnedBy(const void* owner) const {
+    return owner_ == reinterpret_cast<uintptr_t>(owner);
   }
 
   // extensions::ExtensionView:
@@ -142,6 +148,8 @@ class PopoverExtensionView : public extensions::ExtensionView,
  private:
   std::unique_ptr<extensions::ExtensionViewHost> host_;
   NSView* __weak anchor_;
+  // The owner's address, compared only, never dereferenced.
+  const uintptr_t owner_;
   NSPopover* __strong popover_;
   ShowPopupCallback on_loaded_;
   base::ScopedObservation<extensions::ExtensionRegistry,
@@ -164,38 +172,46 @@ void ClosePopup(PopoverExtensionView* popup, const char* reason) {
   CurrentPopup().reset();
 }
 
-PopoverExtensionView* PopupFor(const extensions::ExtensionId& extension_id) {
+PopoverExtensionView* PopupFor(const extensions::ExtensionId& extension_id,
+                               const void* owner) {
   PopoverExtensionView* popup = CurrentPopup().get();
-  return popup && popup->extension_id() == extension_id ? popup : nullptr;
+  return popup && popup->extension_id() == extension_id &&
+                 popup->IsOwnedBy(owner)
+             ? popup
+             : nullptr;
 }
 
 }  // namespace
 
 void ShowPopover(std::unique_ptr<extensions::ExtensionViewHost> host,
                  NSView* anchor,
+                 const void* owner,
                  ShowPopupCallback on_loaded) {
   CurrentPopup().reset();
   CurrentPopup() = std::make_unique<PopoverExtensionView>(
-      std::move(host), anchor, std::move(on_loaded));
+      std::move(host), anchor, owner, std::move(on_loaded));
 }
 
-bool IsShowingPopover(const extensions::ExtensionId& extension_id) {
-  return PopupFor(extension_id) != nullptr;
+bool IsShowingPopover(const extensions::ExtensionId& extension_id,
+                      const void* owner) {
+  return PopupFor(extension_id, owner) != nullptr;
 }
 
 bool IsShowingAnyPopover() {
   return CurrentPopup() != nullptr;
 }
 
-void HidePopover(const extensions::ExtensionId& extension_id) {
-  if (PopupFor(extension_id)) {
+void HidePopover(const extensions::ExtensionId& extension_id,
+                 const void* owner) {
+  if (PopupFor(extension_id, owner)) {
     CurrentPopup().reset();
   }
 }
 
 gfx::NativeView GetPopoverNativeView(
-    const extensions::ExtensionId& extension_id) {
-  PopoverExtensionView* popup = PopupFor(extension_id);
+    const extensions::ExtensionId& extension_id,
+    const void* owner) {
+  PopoverExtensionView* popup = PopupFor(extension_id, owner);
   return popup ? popup->GetNativeView() : gfx::NativeView();
 }
 
