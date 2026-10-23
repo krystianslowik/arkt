@@ -235,7 +235,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     // Opt-Return's standard binding; handleKeyDown normally takes Opt-Return first. Only an actual Opt-Return opens
     // a new tab here; another key bound to this selector commits like Return.
     case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-      commit(inNewTab: Self.isReturn(NSApp.currentEvent, withExactly: [.option]) ? true : nil); return true
+      commit(forcing: Self.isReturn(NSApp.currentEvent, withExactly: [.option]) ? .newTab : nil); return true
     case #selector(NSResponder.moveDown(_:)): moveSelection(+1); return true
     case #selector(NSResponder.moveUp(_:)): moveSelection(-1); return true
     case #selector(NSResponder.scrollPageDown(_:)), #selector(NSResponder.pageDown(_:)): movePage(+1); return true
@@ -250,7 +250,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   private func handleKeyDown(_ event: NSEvent) -> Bool {
     guard isVisible, Self.isReturn(event, withExactly: [.command, .option]) else { return false }
     if let editor = barView.field.currentEditor() as? NSTextView, editor.hasMarkedText() { return false }
-    commit(inNewTab: true)
+    commit(forcing: .newTab)
     return true
   }
 
@@ -263,20 +263,20 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   /// Enter. Cmd-L + Enter without editing reloads (KB-004, BH-102). On an empty query Enter takes the first
   /// result, which is the first open tab, and closes the bar when there is none [I] (RT-08).
-  public func commit() { commit(inNewTab: nil) }
+  public func commit() { commit(forcing: nil) }
 
-  /// `inNewTab` nil: the mode decides (Cmd-T new tab, Cmd-L current tab, Ctrl-Shift-= new split pane). true:
+  /// `forced` nil: the mode decides (Cmd-T new tab, Cmd-L current tab, Ctrl-Shift-= new split pane). `.newTab`:
   /// Cmd-Enter / Opt-Enter, which open in a new tab and never reload.
-  private func commit(inNewTab: Bool?) {
+  private func commit(forcing forced: OpenTarget?) {
     let text = barView.field.stringValue
-    if inNewTab == nil, case .currentTab = mode, let prefill, text == prefill { hide(); onReload?(); return }
-    commit(row: max(barView.table.selectedRow, 0), inNewTab: inNewTab)
+    if forced == nil, case .currentTab = mode, let prefill, text == prefill { hide(); onReload?(); return }
+    commit(row: max(barView.table.selectedRow, 0), forcing: forced)
   }
 
-  private func commit(row: Int, inNewTab forced: Bool? = nil) {
+  private func commit(row: Int, forcing forced: OpenTarget? = nil) {
     guard row < results.count else { hide(); return }
     let kind = results[row].kind
-    let target = forced.map { $0 ? OpenTarget.newTab : .currentTab } ?? openTarget
+    let target = forced ?? openTarget
     hide()
     switch kind {
     case .open(let url), .search(let url): onOpen?(url, target)

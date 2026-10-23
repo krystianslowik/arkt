@@ -3,12 +3,16 @@ import Foundation
 /// Placeholder suggestion provider: URL, matching open tabs, search. Real providers (Chromium autocomplete,
 /// history, actions, Spaces) replace `make` later behind the same `Result` type.
 public enum CommandBarResults {
-  /// An open tab the bar can switch to; `node` is its sidebar node.
+  /// An open tab the bar can switch to; `node` is its sidebar node. `isSplitPane`: it is a pane of a split, so its
+  /// result says "Switch to Split View" (BH-104).
   public struct OpenTab: Sendable, Equatable {
     public let node: NodeID
     public let title: String
     public let url: URL
-    public init(node: NodeID, title: String, url: URL) { self.node = node; self.title = title; self.url = url }
+    public let isSplitPane: Bool
+    public init(node: NodeID, title: String, url: URL, isSplitPane: Bool = false) {
+      self.node = node; self.title = title; self.url = url; self.isSplitPane = isSplitPane
+    }
   }
 
   public enum Kind: Sendable, Equatable {
@@ -34,6 +38,8 @@ public enum CommandBarResults {
 
   public static let maxSwitchResults = 6
   public static let switchHint = "Switch to Tab"
+  /// The caption of an open tab that is a split pane (BH-104, [S] string).
+  public static let switchToSplitHint = "Switch to Split View"
 
   public static func make(query raw: String, openTabs: [OpenTab]) -> [Result] {
     let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -51,7 +57,7 @@ public enum CommandBarResults {
     }
     for tab in matching.prefix(maxSwitchResults) {
       results.append(Result(kind: .switchTo(tab.node), title: tab.title, subtitle: tab.url.host() ?? tab.url.absoluteString,
-                            trailingHint: switchHint))
+                            trailingHint: tab.isSplitPane ? switchToSplitHint : switchHint))
     }
 
     // #96: an explicit http(s) scheme makes the input a URL for certain (Cmd-L prefills one), so a search row
@@ -68,7 +74,7 @@ public enum CommandBarResults {
 
 extension CommandBarResults {
   /// Every open tab of a Space for "Switch to Tab": pinned, then Today, depth-first through folders.
-  /// A split contributes its first pane (activating it shows the split).
+  /// A split contributes its first pane, marked as a split pane (activating it shows the split).
   @MainActor
   public static func openTabs(in source: any SidebarSource, space: SpaceID) -> [OpenTab] {
     var tabs: [OpenTab] = []
@@ -81,7 +87,7 @@ extension CommandBarResults {
         for child in source.children(of: .folder(folder)) { visit(child, depth: depth + 1) }
       case .split:
         if let first = source.firstTab(at: id), case .tab(let node, let url, let title)? = source.node(first) {
-          tabs.append(OpenTab(node: node, title: title, url: url))
+          tabs.append(OpenTab(node: node, title: title, url: url, isSplitPane: true))
         }
       }
     }

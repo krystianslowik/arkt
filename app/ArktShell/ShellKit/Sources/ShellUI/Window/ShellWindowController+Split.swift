@@ -12,7 +12,8 @@ struct SplitWindowState {
   var focus: NodeID?
   /// Last focused pane per split (decision 7) [I]. Activating a split row focuses it.
   var activePane: [NodeID: NodeID] = [:]
-  /// Panes whose page was closed while their node stayed (Cmd-W or the X on a Pinned or Favorite pane): they show a
+  /// Panes whose page was closed while their node stayed (Cmd-W on a Pinned or Favorite pane, the X on a Pinned split
+  /// row, or the page closing itself): they show a
   /// placeholder until clicked or activated, and showing the split again does not reopen them (decision 6) [I]
   /// PARITY(NEEDS-RUNTIME-CHECK RT-36). Forgotten when every pane of the split is closed.
   var closedPanes: Set<NodeID> = []
@@ -44,6 +45,7 @@ extension ShellWindowController {
     container.onCommitFactors = { [weak self] factors in self?.commitSplitFactors(factors) }
     container.onFocusRequest = { [weak self] index in self?.focusPane(at: index) }
     sidebarController.preferredPane = { [weak self] split in self?.preferredPane(of: split) }
+    wireSplitRows()
     splitState.mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
       MainActor.assumeIsolated { self?.paneMouseDown(event) }
       return event                                              // the page still gets the click
@@ -210,7 +212,7 @@ extension ShellWindowController {
   /// pane after it, else before it; with none left the content area empties. Idempotent.
   private func resyncSplit() {
     splitState.resyncPending = false
-    splitState.closedPanes = splitState.closedPanes.filter { sidebar.node($0) != nil }
+    splitState.closedPanes = splitState.closedPanes.filter(isPane)            // gone, or no longer a pane
     splitState.activePane = splitState.activePane.filter { sidebar.node($0.key) != nil }
     if let focus = currentNode {
       if splitState.split != nil || isPane(focus) { show(node: focus) }
@@ -246,6 +248,17 @@ extension ShellWindowController {
     } else if let focus = currentNode {
       showSplit(split, focus: focus)
     }
+  }
+
+  /// A page closed in a split that is not on screen (the X on a Pinned split row, or the page closing itself).
+  /// A pane that stays in the source is remembered as closed, so showing its split later does not reopen it
+  /// (decision 6); when no pane of that split has a page any more, the split forgets its closed panes and opens
+  /// afresh, as for the shown split.
+  func hiddenPaneDidClose(_ node: NodeID) {
+    guard sidebar.node(node) != nil, let split = split(holding: node) else { return }
+    splitState.closedPanes.insert(node)
+    let panes = sidebar.children(of: .split(split))
+    if !panes.contains(where: { engineTab(of: $0) != nil }) { splitState.closedPanes.subtract(panes) }
   }
 
   private func isPane(_ node: NodeID) -> Bool {
@@ -291,10 +304,8 @@ extension ShellWindowController {
   /// Ctrl-Shift-- (KB-071, BH-122): the focused pane leaves the split with its page and lands right after it; it is
   /// never archived (CF-18). Focus goes to the pane next to it in the split, after it, else before it (decision 9).
   @objc public func closeSplitPane(_ sender: Any?) {
-    guard let pane = currentNode, let split = split(holding: pane) else { return }
-    let survivor = nearest(to: pane, in: sidebar.children(of: .split(split))) { $0 != pane }
-    do { try sidebar.separatePane(pane) } catch { onError?(.editSplit, error); return }
-    if let survivor { activate(node: survivor) }
+    guard let pane = currentNode else { return }
+    removeFromSplit(pane)
   }
 
   /// Separate Page from Split View (KB-075), unbound: like Ctrl-Shift--, but the separated page keeps focus and shows
@@ -313,10 +324,8 @@ extension ShellWindowController {
 
   /// Convert to Horizontal / Vertical Split View (BH-120): flips the shown split's orientation.
   @objc public func convertSplitOrientation(_ sender: Any?) {
-    guard let pane = currentNode, let split = split(holding: pane),
-          case .split(_, let layout)? = sidebar.node(split) else { return }
-    let flipped: SplitOrientation = layout.orientation == .horizontal ? .vertical : .horizontal
-    do { try sidebar.setSplitOrientation(split, flipped) } catch { onError?(.editSplit, error) }
+    guard let pane = currentNode, let split = split(holding: pane) else { return }
+    flipOrientation(of: split)
   }
 
   /// Ctrl-Shift-1 ... Ctrl-Shift-4 (KB-072, BH-128): the menu item's tag is the zero-based pane index. A number past
@@ -404,5 +413,61 @@ extension ShellWindowController {
   /// The split `node` is a pane of, if any.
   private func split(holding node: NodeID) -> NodeID? {
     if case .split(let split)? = sidebar.parent(of: node) { split } else { nil }
+  }
+}
+
+// MARK: - Sidebar split rows (S6)
+
+/// The sidebar's split row and pane row interactions: context menus, Opt-clicks and VoiceOver actions (BH-120,
+/// BH-121, BH-126, GS-032, GS-033). Like the menu actions above, each reads the split from the source.
+extension ShellWindowController {
+  func wireSplitRows() {
+    sidebarController.onSeparateSplit = { [weak self] split in self?.separateAllTabs(of: split) }
+    sidebarController.onRemovePane = { [weak self] pane in self?.removeFromSplit(pane) }
+    sidebarController.onConvertSplit = { [weak self] split in self?.flipOrientation(of: split) }
+    sidebarController.onDuplicateSplit = { [weak self] split in self?.duplicate(split: split) }
+    sidebarController.onDuplicateIntoSplit = { [weak self] tab in self?.duplicateIntoSplit(tab) }
+  }
+
+  /// Ctrl-Shift-- and Remove Tab from Split View (BH-121, BH-122): `pane` leaves its split with its page and lands
+  /// right after it, never archived (CF-18). When it was focused, focus goes to the pane next to it in the split,
+  /// after it, else before it (decision 9); otherwise focus stays where it is.
+  func removeFromSplit(_ pane: NodeID) {
+    guard let split = split(holding: pane) else { return }
+    let survivor = pane == currentNode ? nearest(to: pane, in: sidebar.children(of: .split(split))) { $0 != pane } : nil
+    do { try sidebar.separatePane(pane) } catch { onError?(.editSplit, error); return }
+    if let survivor { activate(node: survivor) }
+  }
+
+  /// Separate All Tabs (BH-121, GS-033): the panes take the split's place as plain tabs. A focused pane stays
+  /// focused, now shown alone (the re-show after the source change keeps the focused node).
+  func separateAllTabs(of split: NodeID) {
+    do { try sidebar.separateSplit(split) } catch { onError?(.editSplit, error) }
+  }
+
+  /// Convert to Vertical / Horizontal Split View (BH-120).
+  func flipOrientation(of split: NodeID) {
+    guard case .split(_, let layout)? = sidebar.node(split) else { return }
+    let flipped: SplitOrientation = layout.orientation == .horizontal ? .vertical : .horizontal
+    do { try sidebar.setSplitOrientation(split, flipped) } catch { onError?(.editSplit, error) }
+  }
+
+  /// Duplicate Split View (BH-126): a copy right after the split; focus does not move [I].
+  func duplicate(split: NodeID) {
+    do { try sidebar.duplicateSplit(split) } catch { onError?(.editSplit, error) }
+  }
+
+  /// Opt-click on the current plain tab (GS-032): a new tab with the same page becomes its pane on the right, side
+  /// by side, and gets focus. A pane or a tab that is not current is left alone.
+  func duplicateIntoSplit(_ tab: NodeID) {
+    guard tab == currentNode, split(holding: tab) == nil, case .tab(_, let url, let title)? = sidebar.node(tab) else {
+      return
+    }
+    do {
+      let added = try sidebar.addToSplit(.new(url: url, title: title), target: tab, at: 1, orientation: .horizontal)
+      activate(node: added.pane)
+    } catch {
+      onError?(.addPane, error)
+    }
   }
 }
