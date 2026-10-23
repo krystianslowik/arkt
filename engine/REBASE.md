@@ -182,8 +182,8 @@ profile, `--use-mock-keychain`, never `--user-agent`). The task names point at t
 on both paths.
 
 1. Version: `chrome://version` in `out/Spike` shows `$NEW`.
-2. Smoke matrix, W5b Step 1: all 17 scenarios pass (launch with `--arkt-native-window` until #21 makes the native
-   window the default). Fast path: scenarios 1-8.
+2. Smoke matrix, W5b Step 1: all 17 scenarios pass (the native window is the default since W9; no switch). Fast
+   path: scenarios 1-8.
 3. Tab list and visibility, W5c Step 3. (F)
 4. Web Store install on the native window, W7: uBlock Origin Lite installs, census `views=0`.
 5. Extension popup: the uBO Lite popup opens from the Extensions menu path (W4 Step 7).

@@ -18,7 +18,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W6 | Extension window identity, extension-created tabs and windows (finding 3) | DONE | no upstream patch; `ArktExtensionsContainer` makes `chrome.action.openPopup()` open our popover; every extension-created tab and window lands in an Arkt window (`views=0`), 1Password welcome page included; popup closes on `window.close()` and on unload; see "W6" below |
 | W7 | Web Store install on the native window | DONE | uBO Lite installed on the native window (`views=0`), actions 1 -> 2, popup through the menu; post-install dialog crash on close fixed in patch 0006; see "W7" below |
 | W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | DONE (user steps open) | patch 0003; see below |
-| W9 | Native window as default; try dropping patch 0002 | TODO | |
+| W9 | Native window as default; try dropping patch 0002 | DONE (0002 kept) | `ArktBrowserWindow` is the default, `--arkt-views-window` keeps the week-1 path; W5b matrix 17/17, W5c Step 3 and W6 Steps 3-4 pass with no switch; W7 not re-run (see below); dropping 0002 blanks a tab moved in from a Views popup window and the week-1 path, so it stays; patch set unchanged; see "W9" below |
 | W10 | Release bundle rebuild, re-sign, final smoke, housekeeping | TODO | |
 | WE | Embedding spike (lane C) | DONE: GO (framework copied into the app bundle) | see below; branch `spike/embedding` |
 
@@ -27,7 +27,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | # | Patch | Status | Upstream files | Hunks in hot files |
 |---|---|---|---|---|
 | 0001 | Register in-process browser hook | exists | 2 | 0 |
-| 0002 | Let a WebContents view draw again after leaving Views | exists; W9 tries to drop it | 4 | 0 |
+| 0002 | Let a WebContents view draw again after leaving Views | exists; kept in W9 (a tab moved from a Views popup window into an Arkt window, and the week-1 path, draw nothing without it) | 4 | 0 |
 | 0003 | Arkt keychain item name (W8) | exists | 1 (`keychain_password_mac.mm`) | 0 |
 | 0004 | `BrowserWindow` factory hook for Arkt (W5a) | exists | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
 | 0005 | Tolerate a non-`BrowserView` window in tab features (W5b) | exists | 1 (`sad_tab_controller.cc`) | 0 |
@@ -1434,3 +1434,111 @@ between stop and launch) left none. Same pattern as the W5b and W5c shutdown fla
 - `ToggleExtensionsMenu` and `CloseExtensionsMenuIfOpen` are wired but not exercised (no caller reached in this
   task). Extension context menus, pinning, keyboard commands and the install sheet stay with #121.
 
+
+## W9: Native window as the default; patch 0002 test
+
+Date 2026-10-24. Branch `engine/21-native-window-default`, issue #21. Variant P. `$CR` branch `arkt` at `baeb143765`
+before and after (0001-0006).
+
+### Default switch
+
+`arkt_browser_main_extra_parts.mm` registers the `ArktBrowserWindow` factory unless `--arkt-views-window` is passed;
+with that switch the week-1 path runs (Chromium's window, active tab mounted in an `ArktWindowController`). The old
+opt-in switch `--arkt-native-window` is no longer read; Chromium ignores it, so the week-3 Engine configuration that
+still appends it keeps working until W3-12 removes it. `engine/REBASE.md` (Verification, item 2) no longer asks for
+the switch. Patch 0004's description still says the hook is registered "when --arkt-native-window is set"; it is
+reworded at the next export that touches the patch set (re-exporting only for that would be a `.patches` change for
+a comment).
+
+Every run below: a fresh profile `$PROF/w9-<run>`, `--use-mock-keychain`, both probe extensions, CDP port 9371,
+`https://example.com`, **no window switch**, 20 s between a stop and the next launch, and a check before each launch
+that no other Arkt, `ArktShell`, `xctest` or Chromium GUI run was on the machine (a parallel `/Applications/Arkt.app`
+run was active several times; each launch waited for it to end). The window was moved with `chrome.windows.update`
+right after launch where the tabs probe answered in time; no unexplained navigations were seen. Builds:
+`nice -n 10 autoninja -C out/Spike -j 6 chrome` (build 1, switch only), `-j 6` without 0002 (build 2), `-j 4` with
+0002 restored (builds 3 and 4, the last after rebasing on `main`); each `The build has finished successfully.`,
+0 `FAILED:`. Swap rose from 6.1 GB to 9.0 GB used during build 2 (macOS added a swap file; `/` went from 13 to
+6.3 GiB free), so builds 3 and 4 ran at `-j 4`; nothing was deleted.
+
+### W5b matrix on the default path (build 1)
+
+Pass = alive 10 s after the driver, 0 `FATAL`/`Check failed`, no new crash dump (count only).
+
+| # | Scenario | Result | Dumps | UI |
+|---|---|---|---|---|
+| 1 | Startup, idle 30 s | pass; `native window factory registered`, census `normal=1 arkt=1 views=0`, `visible Example Domain` | 90 -> 90 | |
+| 2 | Navigate the tab | pass (`visible example.org`) | 90 -> 90 | |
+| 3 | Extension adds a background tab | pass (index 1; example.com `visible`) | 90 -> 91 once, rerun 92 -> 92 (see flakes) | |
+| 4 | Extension opens a popup (`--arkt-extensions-demo`) | pass | 91 -> 91 | shown: `TriggerPopup ... by_user=1`, `popup loaded`, `popup auto-resize 244x129` |
+| 5 | `chrome.windows.create` | pass (`normal`, census `normal=2 arkt=2 views=0`) | 91 -> 92 once, rerun 92 -> 92 | |
+| 6 | Close the last tab; second launch: close the active tab | pass (next tab mounted) | 92 -> 92 | |
+| 7 | Close every window, then quit | pass (census 0/0/0, `native window destroyed`, alive with no windows, gone after `kill -TERM`) | 92 -> 92 | |
+| 8 | Page `window.open` with a gesture | pass (`true`, one `normal` window with 2 tabs, `views=0`) | 92 -> 92 | |
+| 9 | Renderer crash (sad tab) | pass (browser alive; the one `Received signal 11` line is the renderer's intentional `chrome://crash`, as in W5b) | 92 -> 93 (the renderer's dump) | not shown |
+| 10 | `alert`, then (second launch) `confirm` | pass | 93 -> 93 | shown, unparented window `example.com says` |
+| 11 | Permission prompt | pass | 93 -> 93 | shown, window `example.com wants to: Show notifications` |
+| 12 | `requestFullscreen` / `exitFullscreen` | pass (`ok`, `fullscreenElement` true, `ok`; one `enter` and one `exit fullscreen` line) | 93 -> 93 | native fullscreen; no exit bubble |
+| 13 | Find (AX `Edit > Find > Find…`, after the frontmost and key-window checks) | pass; `Find…` enabled, `ARKT: stub FindBar::Show` | 93 -> 93 | find bar not shown |
+| 14 | A download | pass (`$PROF/downloads/arkt-w5b.txt`) | 93 -> 93 | download bubble not shown |
+| 15 | `<input type=file>` | pass | 93 -> 93 | open panel shown as a sheet (sheets 0 -> 1) |
+| 16 | `--auto-open-devtools-for-tabs` | pass | 93 -> 93 | DevTools undocked in its own Views window (`views=1`) |
+| 17 | `<datalist>` dropdown | pass | 93 -> 93 | shown (untitled popup window) |
+
+Flakes: the dumps in the first runs of rows 3 and 5 appeared across the stop (the count read after `kill`), with no
+`FATAL`/`Check failed`/`Received signal` line; reruns read the count before and after the stop and left it unchanged.
+Same pattern as W5b, W5c and W6.
+
+### W5c Step 3 and W6 on the default path (build 1)
+
+- W5c Step 3 (`--arkt-trace-visibility`): `probe.create()` -> example.com `visible`, about:blank `hidden`; activating
+  about:blank -> `hidden`/`visible`; back -> `visible`/`hidden`; AX `select row 2` / `select row 1` of the `Tabs`
+  table (after the frontmost and key-window checks) -> the same pairs; matching `ARKT: visibility` and `mounted` lines;
+  2 rows. Screenshots `$PROF/shots/w9-w5c-1.png` to `w9-w5c-5.png` (example.com rendered in the card when active).
+- W6 Step 3: session id `288581364` = `ARKT tabs.query windows=288581364` = `windows.getAll` `[[288581364,"normal",1]]`.
+- W6 Step 4, one launch: background `probe.create()` (example.com stays `visible`), foreground `tabs.create` (3 rows,
+  row 3 selected), welcome-style `popup.html` tab (`visible`), `chrome.action.openPopup()` (`ok`, `by_user=0`,
+  `popup loaded`), popup button `open` with a gesture (new active tab in the same window), `window.close()` in the
+  popup (`popup closed (window.close)`), `probe.window()` (second window `288581371`; census `normal=2 arkt=2 views=0`;
+  `windows.getAll` lists both ids, 4 and 1 tabs). `views=0` throughout. Screenshots `w9-w6-popup.png`,
+  `w9-w6-window1.png`, `w9-w6-window2.png`. One dump appeared across the final stop with a popover open (93 -> 94),
+  the W6 shutdown flake.
+- Fallback `--arkt-views-window`: no factory line, census `normal=1 arkt=0 views=1`, `mounted active tab after 1
+  attempt(s)`, `visible Example Domain`, page rendered (`w9-views-build1.png`).
+
+### W7 not re-run
+
+The Web Store run launched (consent page loaded, census `normal=1 arkt=1 views=0`) but the step that rejects the
+Google consent interstitial and presses "Add to Chrome" was not permitted in this session, so the run was stopped
+by its PID before any click (0 `FATAL`, dumps 94 -> 94). W9 changes only which window the factory hands out; the
+native-window code W7 verified is unchanged. Re-run W7 Steps 1-3 by hand (or in W10) with no switch.
+
+### Patch 0002 test
+
+Branch `arkt` with the 0002 commit dropped (`rebase --onto 6ebebf5619 d381048e29`, committer and author
+`Arkt contributors <noreply@arkt.invalid>`; `git diff baeb143765 arkt` = exactly 0002's four files), build 2, never
+exported:
+
+| Check | Result without 0002 |
+|---|---|
+| W5c Step 3 (CDP, AX rows) | pass; pages draw after every switch (`w9-n-w5c-0.png` to `-5.png`) |
+| W6 Step 4 (as above) | pass; the extension page draws (`w9-n-w6-welcome.png`), popover draws |
+| Tab moved from a Views popup window into the Arkt window (`chrome.windows.create({type:"popup"})`, then `chrome.tabs.move` + `update({active:true})`) | **fails**: census `views=1` -> `views=0`, the tab is mounted and `visibilityState` is `visible` (340x840), but the card stays empty, also after painting the page red (`w9-n-w6-moved-red.png`) |
+| `--arkt-views-window` | **fails**: `mounted active tab`, `visible`, card empty after painting the page red (`w9-n-views.png`) |
+
+The cause is the one 0002 fixes: a view that was ever hosted by Views has Cocoa display disabled
+(`RenderWidgetHostViewMac::SetParentUiLayer`), and popup windows stay Views windows (Decision 1, scope), so any tab
+that starts in one and moves to an Arkt window needs `EnableDisplay()`. CDP `visibilityState` cannot detect this;
+only the screenshot does.
+
+With 0002 restored (`checkout -B arkt baeb143765`, builds 3 and 4) the same move draws the red page
+(`w9-k-moved-red.png`), and on that final build rows 1-8 and the fallback pass again (no switch; dumps 94 -> 94).
+
+**Decision: 0002 stays.** It is still needed on the default path (tabs adopted from Views popup windows) and by the
+week-1 path. It can go only once no WebContents is ever hosted by Views before Arkt mounts it (popups, app and
+DevTools windows on Arkt windows too) and the week-1 path is deleted.
+
+### Patch budget after W9
+
+Unchanged: 6 patch files, 13 upstream files, 0 hot-file hunks. `wc -l < engine/patches/chromium/.patches` = 6 =
+`git -C $CR rev-list --count 156.0.8078.48..arkt`; `git -C $CR diff --stat 156.0.8078.48..arkt -- | tail -1`: 13 files
+changed, 57 insertions, 5 deletions; hot-file hunks 0. No `.patches` change.

@@ -33,14 +33,15 @@ namespace arkt {
 
 namespace {
 
-// Normal browser windows are ArktBrowserWindows (week-2 W5a). Without the
-// switch the week-1 path runs: Chromium's window, with its active tab mounted
-// in an ArktWindowController.
-constexpr char kNativeWindowSwitch[] = "arkt-native-window";
+// Normal browser windows are ArktBrowserWindows (week-2 W9). With this switch
+// the week-1 path runs instead: Chromium's window, with its active tab mounted
+// in an ArktWindowController. The former opt-in switch, --arkt-native-window,
+// is no longer read; Chromium ignores it.
+constexpr char kViewsWindowSwitch[] = "arkt-views-window";
 
 bool NativeWindowEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      kNativeWindowSwitch);
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kViewsWindowSwitch);
 }
 
 constexpr int kMaxAttempts = 40;
