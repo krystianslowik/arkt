@@ -16,7 +16,7 @@ Arkt is a native macOS browser that rebuilds Arc's experience 1:1 after The Brow
 | Parity | Shortcuts and behaviors 1:1 with Arc 1.168.0, per `docs/spec/arc-parity-spec.md` |
 | Extensions | Full Chrome extension support is mandatory (Web Store, password managers) |
 | Engine | Our own Chromium build compiled as a framework with our own ObjC/Swift API. Not WKWebView, not CEF |
-| Chromium pin | 156.0.8078.48 (Stable + Extended) through launch, then rebase per milestone |
+| Chromium pin | 156.0.8078.48 (Stable + Extended) through launch, then rebase per milestone; security rebases per the "Policy" list in `engine/REBASE.md` (#138) |
 | Build host | One Mac, Chromium source and output under `$CHROMIUM_ROOT` (see `engine/README.md`) |
 
 ## 1. Architecture
