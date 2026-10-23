@@ -847,3 +847,41 @@ under the pointer, scroll wheel, swipe without relayout, back to centered), 0 fa
 `space-key` had 1 frame of 17 ms (load 5.5; the 3-Space fixture fits, so the dock does no scroll work there). The
 rerun of `testFramePacingDuringSwipeAndKeyboardSwitch` asserted `space-swipe` and `space-key` at 0 frames over 8.6 ms
 (load 4.98). Debug app build: `** BUILD SUCCEEDED **`.
+
+## Space removal and Space-level change events (#86)
+
+Decision on #86 (maintainer, 2026-10-23): deleting a Space that has pinned tabs or folders asks for confirmation
+first, then moves its pinned items and Today items to the Archive (restorable).
+
+Model and archive:
+
+- `Sidebar.removeSpace(_:)` drops a Space with every node in its Pinned and Today sections; Favorites belong to the
+  profile and stay. An unknown id is a no-op, like `remove(_:)`.
+- `Archiver.removeSpace(_:from:at:)` archives the Space's top-level Pinned items, then its Today items (reason
+  `.manual`, source `.space(id)`, one entry per item), then removes the Space. A restore of such an entry uses the
+  default rules in the fallback Space (folders to Pinned, tabs and splits to the top of Today).
+- `ModelSidebarSource.removeSpace(_:at:)` does both in one mutation (one autosave, one Space event; the removed
+  Space's sections emit no structure change). `ArchiveCoordinator.removeSpace(_:)` queues the entries through the
+  same outbox as `archive`.
+
+Events (C6 review M10): `SidebarChange.spaces` is replaced by `.spaceAdded`, `.spaceRemoved`, `.spaceMoved` and
+`.spaceChanged` (title, profile or theme), each with the Space's id. `SidebarDiff` reports them first, removed in the
+old order, then added, moved and changed in the new order. `.spaceMoved` goes to the Spaces outside a longest run that
+kept its relative order, so a drag reports the dragged Space and an add or removal alone reports no move.
+`StubSidebar` gains `moveSpace(_:to:)`. The window's engine-tab cleanup now runs on `.structure` and `.spaceRemoved`
+only (no longer on renames and theme changes).
+
+Shell: when the current Space is removed, the Space after it becomes current, else the one before it [I]
+(PARITY(NEEDS-RUNTIME-CHECK): which Space Arc shows); before, it was always the first Space. The dots' selected index
+follows the current Space when Spaces move or an earlier one is removed. Removing the last Space shows the empty state
+(unchanged).
+
+Not in this change: the menu entry and the confirmation sheet (no Space context menu exists yet), and BH-158 (routes
+to a removed Space are deleted), which waits for link routing in #113.
+
+Checks: `nice -n 10 swift test -j 4` in ArktCore: 342 tests (336 + 6: 2 in `SidebarTests`, 4 in `ArchiverTests`), 0
+failures. ShellKit `--skip ShellKitGUITests`: Swift Testing 432 tests (423 + 9: 4 in `SidebarDiffTests`, 2 in
+`SidebarModelStubTests`, 1 in `ModelSidebarSourceTests`, 2 in `ArchiveCoordinatorTests`), 0 failures. ShellKit
+`--filter ShellKitGUITests`: XCTest 298 tests (293 + 5: 4 in `SpaceListChangeTests`, 1 in `CloseTabTests`), 0
+failures; pacing asserted, `space-swipe` and `space-key` 0 frames over 8.6 ms (load 7.81 on 10 cores). Debug app
+build: `** BUILD SUCCEEDED **`.

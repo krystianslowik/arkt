@@ -3250,4 +3250,5 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
 - M9: the flavor flip (sidebar appearance aqua / darkAqua) at the halfway point is a known hitch risk; precompute
   both flavors on the row layers if C7 pacing shows it.
 - M10: space-level change events in `SidebarSource` (add / remove / reorder / retheme a Space) so the pager and the
-  themes refresh without polling `spaceOrder`.
+  themes refresh without polling `spaceOrder`. Done in #86: `SidebarChange.spaces` became `.spaceAdded`,
+  `.spaceRemoved`, `.spaceMoved` and `.spaceChanged` (title, profile or theme), each carrying the Space's id.
