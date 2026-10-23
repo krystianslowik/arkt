@@ -1,0 +1,35 @@
+{
+  "brand": "arkt",
+  "website": "https://arkt.dev",
+  "repository": "https://github.com/krystianslowik/arkt",
+  "colors": {
+    "mustard": "#E9B520",
+    "mustardHighlight": "#F3CA3D",
+    "mustardShade": "#DCA319",
+    "foldShadow": "#A96E12",
+    "porcelain": "#FAF9F5",
+    "graphite": "#202321"
+  },
+  "spacing": [
+    8,
+    16,
+    24,
+    32,
+    48,
+    64,
+    96
+  ],
+  "sourceArtwork": {
+    "type": "raster",
+    "iconNativePixels": [
+      456,
+      456
+    ],
+    "wordmarkNativePixels": [
+      180,
+      76
+    ],
+    "pureVectorLogo": false
+  }
+}
+
