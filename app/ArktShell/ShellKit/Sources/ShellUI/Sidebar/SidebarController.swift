@@ -17,6 +17,12 @@ public final class SidebarController {
   public var onActivate: (@MainActor (NodeID) -> Void)?
   /// A row's hover close (X) button or VoiceOver close action (GS-043); the window closes the node as Cmd-W does.
   public var onClose: (@MainActor (NodeID) -> Void)?
+  /// Split row interactions of every Space page (S6), forwarded from `SidebarOutlineController`.
+  public var onSeparateSplit: (@MainActor (NodeID) -> Void)?
+  public var onRemovePane: (@MainActor (NodeID) -> Void)?
+  public var onConvertSplit: (@MainActor (NodeID) -> Void)?
+  public var onDuplicateSplit: (@MainActor (NodeID) -> Void)?
+  public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
   /// The "+" button in the bottom bar.
   public var onNewTab: (@MainActor () -> Void)?
   /// The pane to focus when a split row is activated (decision 7: the split's last focused pane). Nil, or a node
@@ -169,6 +175,11 @@ public final class SidebarController {
     let page = SpacePageView(source: source, spaceID: id)
     page.outlineController.onActivate = { [weak self] node in self?.activate(node: node) }
     page.outlineController.onClose = { [weak self] node in self?.onClose?(node) }
+    page.outlineController.onSeparateSplit = { [weak self] node in self?.onSeparateSplit?(node) }
+    page.outlineController.onRemovePane = { [weak self] node in self?.onRemovePane?(node) }
+    page.outlineController.onConvertSplit = { [weak self] node in self?.onConvertSplit?(node) }
+    page.outlineController.onDuplicateSplit = { [weak self] node in self?.onDuplicateSplit?(node) }
+    page.outlineController.onDuplicateIntoSplit = { [weak self] node in self?.onDuplicateIntoSplit?(node) }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
     page.outlineController.setRowStates(resolver)
     pages[id] = page

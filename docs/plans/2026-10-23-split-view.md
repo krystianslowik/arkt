@@ -796,6 +796,31 @@ a US keyboard layout.
 
 **Commit:** `Sidebar split rows: separate, remove pane, convert, duplicate, Opt-click shortcuts, command bar caption`
 
+**Notes from S6 (#56)** (S7 to S9 build on these):
+- **Pane row X (deviation).** The pane row's hover X keeps the Cmd-W close of user decision 4 (a Today pane is archived
+  alone, a Pinned or Favorite pane closes its page and keeps its row) instead of calling `separatePane` as the
+  Behavior list above says. "Remove Tab from Split View" (BH-121) is on the pane row's context menu and its VoiceOver
+  actions. BH-121's "X next to a pane in the sidebar" stays open for the maintainer to confirm in #56.
+- **Callbacks.** `SidebarOutlineController` has `onSeparateSplit`, `onRemovePane`, `onConvertSplit`,
+  `onDuplicateSplit` and `onDuplicateIntoSplit`; `SidebarController` forwards them and
+  `ShellWindowController.wireSplitRows()` maps them to the source. Remove Tab from Split View and Ctrl-Shift-- share
+  `removeFromSplit(_:)`: focus moves to the neighbor only when the removed pane was focused (decision 9).
+- **Opt-click.** `SidebarOutlineView.mouseDown` records the click's modifier flags; `handleClick(row:modifiers:)`
+  decides. Opt-click on a split row separates it without activating it; Opt-click on the current plain tab
+  duplicates it into a split; Opt-click on any other tab or on a pane activates it like a plain click [I].
+- **Menus.** `outlineView.menu` is filled in `menuNeedsUpdate` from `menu(forRow:)`: a split row gets Separate All
+  Tabs, Convert to Vertical / Horizontal Split View and Duplicate Split View ([I] title); a pane row gets Remove Tab
+  from Split View; other rows get no menu. Mute, Share and Archive Below stay deferred (BH-126).
+- **Closed panes off screen.** A page that closes in a split that is not shown (the X on a Pinned pane, or the page
+  closing itself) now records the pane in `SplitWindowState.closedPanes` (`hiddenPaneDidClose`), with the same "no
+  pane has a page, forget the set" rule. `resyncSplit` drops closed panes that are no longer panes.
+- **Command bar.** `OpenTab.isSplitPane` picks the caption "Switch to Split View" (BH-104); a split still contributes
+  only its first pane. `CommandBarController.commit` takes an explicit `OpenTarget?` (nil: the mode decides) instead
+  of mapping a `Bool` to `.currentTab`.
+- **Waiting in GUI tests (#190).** `waitUntil(_:timeout:_:)` (`ShellKitGUITests/StateWait.swift`) turns the run loop
+  until the asserted state holds and names that state on timeout. `SplitWindowTests` and `SplitSidebarTests` use it;
+  `ModelSidebarSource` emits synchronously, so `resyncPending` is already true when a source write returns.
+
 ---
 
 ### Task S7: Drag a sidebar tab onto the page to split

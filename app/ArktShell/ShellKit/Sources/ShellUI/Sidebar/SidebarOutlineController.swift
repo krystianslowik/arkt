@@ -41,7 +41,21 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     return NSRect(x: rowRect.minX + indent, y: full.minY, width: max(0, rowRect.width - indent), height: full.height)
   }
 
+  /// Modifier flags of the mouse-down that is being handled; the click action reads them (Opt-click, GS-032 and
+  /// GS-033) instead of `NSApp.currentEvent`, which is not always the click.
+  private(set) var clickModifiers: NSEvent.ModifierFlags = []
+
+  /// `reloadData()` calls so far (tests check that split edits never reload the whole outline).
+  private(set) var reloadDataCount = 0
+
+  public override func reloadData() {
+    reloadDataCount += 1
+    super.reloadData()
+  }
+
   public override func mouseDown(with event: NSEvent) {
+    clickModifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    defer { clickModifiers = [] }
     let row = self.row(at: convert(event.locationInWindow, from: nil))
     let rowView = row >= 0 ? self.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView : nil
     rowView?.isPressed = true
@@ -57,7 +71,8 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 /// Changes are applied as targeted diffs (`insertItems` / `removeItems` / `reloadItem`), never `reloadData()`
 /// after setup (design section 4).
 @MainActor
-public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate,
+  NSMenuDelegate {
   public let source: any SidebarSource
   public let spaceID: SpaceID
   public let outlineView: SidebarOutlineView
@@ -69,6 +84,16 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// A row's hover close (X) button or its VoiceOver close action was used (GS-043); the window runs the same
   /// close as Cmd-W.
   public var onClose: (@MainActor (NodeID) -> Void)?
+  /// Separate All Tabs on a split row: its context menu, or an Opt-click on it (BH-121, GS-033).
+  public var onSeparateSplit: (@MainActor (NodeID) -> Void)?
+  /// Remove Tab from Split View on a pane row's context menu (BH-121).
+  public var onRemovePane: (@MainActor (NodeID) -> Void)?
+  /// Convert to Vertical / Horizontal Split View on a split row's context menu (BH-120).
+  public var onConvertSplit: (@MainActor (NodeID) -> Void)?
+  /// Duplicate Split View on a split row's context menu (BH-126).
+  public var onDuplicateSplit: (@MainActor (NodeID) -> Void)?
+  /// Opt-click on the current plain tab: duplicate it into a split (GS-032).
+  public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
   /// Favicon for a tab, nil = letter placeholder.
   public var faviconProvider: (@MainActor (NodeID) -> NSImage?)?
 
@@ -104,6 +129,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.autoresizesOutlineColumn = false
     outlineView.target = self
     outlineView.action = #selector(rowClicked(_:))
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    menu.delegate = self
+    outlineView.menu = menu
     pinnedIDs = source.children(of: .pinned(spaceID))
     todayIDs = source.children(of: .today(spaceID))
     rebuildRootItems()
@@ -173,7 +202,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       ?? SidebarRowView(frame: .zero)
     let item = item as? OutlineItem
     configure(row, for: item)
-    row.setAccessibilityCustomActions(closeAccessibilityActions(for: item?.nodeID))
+    row.setAccessibilityCustomActions(accessibilityActions(for: item?.nodeID))
     return row
   }
 
@@ -370,13 +399,79 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   // MARK: Clicks
 
   @objc private func rowClicked(_ sender: Any?) {
-    let row = outlineView.clickedRow
+    handleClick(row: outlineView.clickedRow, modifiers: outlineView.clickModifiers)
+  }
+
+  /// A click on `row`. Folders toggle. Opt-click on a split row separates it (GS-033); Opt-click on the current tab
+  /// duplicates it into a split (GS-032). Arc gates both behind `newSplitSeparationMechanismsEnabled` and
+  /// `dragToCombineTabsIntoSplitEnabled` [S]; here they are always on [I]. An Opt-click on any other tab, or on a
+  /// pane, activates it like a plain click [I].
+  func handleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
     guard row >= 0, let item = outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }
-    if case .folder? = source.node(id) {
+    let option = modifiers.intersection([.command, .option, .control, .shift]) == .option
+    switch source.node(id) {
+    case .folder?:
       if outlineView.isItemExpanded(item) { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
+    case .split? where option:
+      onSeparateSplit?(id)
+    case .tab? where option && resolver.current == id && !isPane(id):
+      onDuplicateIntoSplit?(id)
+    case .tab?, .split?:
+      onActivate?(id)
+    case nil:
       return
     }
-    onActivate?(id)
+  }
+
+  private func isPane(_ id: NodeID) -> Bool {
+    if case .split? = source.parent(of: id) { true } else { false }
+  }
+
+  // MARK: Context menu
+
+  public func menuNeedsUpdate(_ menu: NSMenu) {
+    menu.removeAllItems()
+    for item in self.menu(forRow: outlineView.clickedRow)?.items ?? [] {
+      item.menu?.removeItem(item)
+      menu.addItem(item)
+    }
+  }
+
+  /// The context menu of `row`, nil for rows without one (plain tabs, folders, the divider). A split row: Separate
+  /// All Tabs, Convert to Vertical / Horizontal Split View and Duplicate Split View (BH-120, BH-121, BH-126); a pane
+  /// row: Remove Tab from Split View (BH-121, [S] string). Mute, Share and Archive Below are deferred (BH-126).
+  func menu(forRow row: Int) -> NSMenu? {
+    guard row >= 0, let id = (outlineView.item(atRow: row) as? OutlineItem)?.nodeID else { return nil }
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    switch source.node(id) {
+    case .split(_, let layout)?:
+      menu.addItem(menuItem("Separate All Tabs", #selector(separateSplitChosen(_:)), id))
+      menu.addItem(menuItem(SplitMenu.convertTitle(for: layout.orientation), #selector(convertSplitChosen(_:)), id))
+      menu.addItem(menuItem("Duplicate Split View", #selector(duplicateSplitChosen(_:)), id))   // [I] title
+    case .tab? where isPane(id):
+      menu.addItem(menuItem("Remove Tab from Split View", #selector(removePaneChosen(_:)), id))
+    default:
+      return nil
+    }
+    return menu
+  }
+
+  private func menuItem(_ title: String, _ action: Selector, _ id: NodeID) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    item.target = self
+    item.representedObject = id
+    return item
+  }
+
+  @objc private func separateSplitChosen(_ sender: NSMenuItem) { chosen(sender, onSeparateSplit) }
+  @objc private func convertSplitChosen(_ sender: NSMenuItem) { chosen(sender, onConvertSplit) }
+  @objc private func duplicateSplitChosen(_ sender: NSMenuItem) { chosen(sender, onDuplicateSplit) }
+  @objc private func removePaneChosen(_ sender: NSMenuItem) { chosen(sender, onRemovePane) }
+
+  private func chosen(_ item: NSMenuItem, _ handler: (@MainActor (NodeID) -> Void)?) {
+    guard let id = item.representedObject as? NodeID, source.node(id) != nil else { return }
+    handler?(id)
   }
 
   // MARK: Close
@@ -389,13 +484,30 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     onClose?(id)
   }
 
-  /// VoiceOver's "Close" or "Archive" on a closable row; none for folders and the divider.
-  private func closeAccessibilityActions(for id: NodeID?) -> [NSAccessibilityCustomAction] {
-    guard let id, let action = RowCloseAction.resolve(id, in: source) else { return [] }
-    return [NSAccessibilityCustomAction(name: action.accessibilityName) { [weak self] in
+  /// VoiceOver actions of a row: "Close" or "Archive" on a closable row, plus the split edits of its context menu
+  /// ("Separate All Tabs" on a split row, "Remove Tab from Split View" on a pane row); none for folders and the
+  /// divider.
+  func accessibilityActions(for id: NodeID?) -> [NSAccessibilityCustomAction] {
+    guard let id else { return [] }
+    var actions: [NSAccessibilityCustomAction] = []
+    if let action = RowCloseAction.resolve(id, in: source) {
+      actions.append(customAction(action.accessibilityName, id) { $0.onClose })
+    }
+    switch source.node(id) {
+    case .split?: actions.append(customAction("Separate All Tabs", id) { $0.onSeparateSplit })
+    case .tab? where isPane(id): actions.append(customAction("Remove Tab from Split View", id) { $0.onRemovePane })
+    default: break
+    }
+    return actions
+  }
+
+  private func customAction(_ name: String, _ id: NodeID,
+                            _ handler: @escaping @MainActor (SidebarOutlineController) -> (@MainActor (NodeID) -> Void)?)
+    -> NSAccessibilityCustomAction {
+    NSAccessibilityCustomAction(name: name) { [weak self] in
       guard let self, self.source.node(id) != nil else { return false }
-      self.onClose?(id)
+      handler(self)?(id)
       return true
-    }]
+    }
   }
 }

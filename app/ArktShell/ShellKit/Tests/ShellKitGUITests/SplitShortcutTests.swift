@@ -291,6 +291,31 @@ final class SplitShortcutTests: XCTestCase {
     harness.close()
   }
 
+  /// A pane shortcut pressed between a source change and its deferred re-show acts on the split as the source has it
+  /// (S5 review on #187): Ctrl-Shift-] right after Ctrl-Shift-- steps through the remaining panes, and the re-show
+  /// that runs afterwards keeps that focus.
+  func testPaneShortcutBeforeTheReShowActsOnTheSource() throws {
+    let world = try Self.makeWorld(panes: 3)
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.panes[1])
+
+    try harness.press(kVK_ANSI_Minus)
+    XCTAssertTrue(harness.controller.splitState.resyncPending, "the re-show is still queued")
+    XCTAssertEqual(harness.current, world.panes[2])
+    XCTAssertTrue(try harness.press(kVK_ANSI_RightBracket))
+    XCTAssertTrue(harness.controller.splitState.resyncPending, "the second press also ran before the re-show")
+
+    XCTAssertEqual(harness.current, world.panes[0], "next after the last remaining pane wraps to the first")
+    waitUntil("the queued re-show to run (splitState.resyncPending false)") {
+      !harness.controller.splitState.resyncPending
+    }
+    XCTAssertEqual(harness.current, world.panes[0])
+    XCTAssertEqual(harness.controller.currentTab, harness.tab(world.panes[0]))
+    XCTAssertEqual(harness.controller.rootView.split.paneCount, 2)
+    XCTAssertEqual(harness.controller.rootView.split.focusedIndex, 0)
+    harness.close()
+  }
+
   // MARK: Pane focus (KB-072, KB-073, BH-128)
 
   func testCtrlShiftNumberFocusesPaneN() throws {
