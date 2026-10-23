@@ -2,13 +2,21 @@
 
 #import <AppKit/AppKit.h>
 
+#include <cstdint>
 #include <memory>
 #include <utility>
 
+#include "base/functional/bind.h"
 #include "base/logging.h"
+#include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
+#include "base/scoped_observation.h"
+#include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/extensions/extension_view.h"
 #include "chrome/browser/extensions/extension_view_host.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_registry_observer.h"
+#include "extensions/common/extension.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -17,14 +25,22 @@ namespace arkt {
 
 namespace {
 
+class PopoverExtensionView;
+void ClosePopup(PopoverExtensionView* popup, const char* reason);
+
 // An extension popup hosted in an NSPopover instead of Chrome's Views bubble.
-class PopoverExtensionView : public extensions::ExtensionView {
+// It closes when the page calls window.close() or its extension unloads, as
+// Chrome's ExtensionPopup does.
+class PopoverExtensionView : public extensions::ExtensionView,
+                             public extensions::ExtensionRegistryObserver {
  public:
   PopoverExtensionView(std::unique_ptr<extensions::ExtensionViewHost> host,
                        NSView* anchor,
+                       const void* owner,
                        ShowPopupCallback on_loaded)
       : host_(std::move(host)),
         anchor_(anchor),
+        owner_(reinterpret_cast<uintptr_t>(owner)),
         on_loaded_(std::move(on_loaded)) {
     host_->set_view(this);
 
@@ -38,6 +54,23 @@ class PopoverExtensionView : public extensions::ExtensionView {
     popover_.behavior = NSPopoverBehaviorApplicationDefined;
     popover_.contentSize = NSMakeSize(extensions::kExtensionPopupMinSize.width(),
                                       extensions::kExtensionPopupMinSize.height());
+    // The host calls this from inside its own WebContents callbacks, so the
+    // close (which destroys the host) runs from a posted task.
+    host_->SetCloseHandler(base::BindOnce(
+        [](base::WeakPtr<PopoverExtensionView> popup,
+           extensions::ExtensionHost*) {
+          base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+              FROM_HERE, base::BindOnce(
+                             [](base::WeakPtr<PopoverExtensionView> popup) {
+                               if (popup) {
+                                 ClosePopup(popup.get(), "window.close");
+                               }
+                             },
+                             popup));
+        },
+        weak_factory_.GetWeakPtr()));
+    registry_observation_.Observe(
+        extensions::ExtensionRegistry::Get(host_->browser_context()));
     host_->CreateRendererSoon();
   }
 
@@ -52,6 +85,9 @@ class PopoverExtensionView : public extensions::ExtensionView {
 
   const extensions::ExtensionId& extension_id() const {
     return host_->extension_id();
+  }
+  bool IsOwnedBy(const void* owner) const {
+    return owner_ == reinterpret_cast<uintptr_t>(owner);
   }
 
   // extensions::ExtensionView:
@@ -71,6 +107,25 @@ class PopoverExtensionView : public extensions::ExtensionView {
           extensions::kExtensionPopupMinSize,
           extensions::kExtensionPopupMaxSize);
     }
+  }
+
+  // extensions::ExtensionRegistryObserver:
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const extensions::Extension* extension,
+                           extensions::UnloadedExtensionReason reason) override {
+    if (extension->id() != host_->extension_id()) {
+      return;
+    }
+    // Unload notifications are sent from inside the registry; close later.
+    registry_observation_.Reset();
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](base::WeakPtr<PopoverExtensionView> popup) {
+                         if (popup) {
+                           ClosePopup(popup.get(), "extension unloaded");
+                         }
+                       },
+                       weak_factory_.GetWeakPtr()));
   }
 
   bool HandleKeyboardEvent(
@@ -93,8 +148,14 @@ class PopoverExtensionView : public extensions::ExtensionView {
  private:
   std::unique_ptr<extensions::ExtensionViewHost> host_;
   NSView* __weak anchor_;
+  // The owner's address, compared only, never dereferenced.
+  const uintptr_t owner_;
   NSPopover* __strong popover_;
   ShowPopupCallback on_loaded_;
+  base::ScopedObservation<extensions::ExtensionRegistry,
+                          extensions::ExtensionRegistryObserver>
+      registry_observation_{this};
+  base::WeakPtrFactory<PopoverExtensionView> weak_factory_{this};
 };
 
 std::unique_ptr<PopoverExtensionView>& CurrentPopup() {
@@ -102,34 +163,55 @@ std::unique_ptr<PopoverExtensionView>& CurrentPopup() {
   return *popup;
 }
 
-PopoverExtensionView* PopupFor(const extensions::ExtensionId& extension_id) {
+void ClosePopup(PopoverExtensionView* popup, const char* reason) {
+  if (CurrentPopup().get() != popup) {
+    return;
+  }
+  LOG(WARNING) << "ARKT: popup closed (" << reason << ") "
+               << popup->extension_id();
+  CurrentPopup().reset();
+}
+
+PopoverExtensionView* PopupFor(const extensions::ExtensionId& extension_id,
+                               const void* owner) {
   PopoverExtensionView* popup = CurrentPopup().get();
-  return popup && popup->extension_id() == extension_id ? popup : nullptr;
+  return popup && popup->extension_id() == extension_id &&
+                 popup->IsOwnedBy(owner)
+             ? popup
+             : nullptr;
 }
 
 }  // namespace
 
 void ShowPopover(std::unique_ptr<extensions::ExtensionViewHost> host,
                  NSView* anchor,
+                 const void* owner,
                  ShowPopupCallback on_loaded) {
   CurrentPopup().reset();
   CurrentPopup() = std::make_unique<PopoverExtensionView>(
-      std::move(host), anchor, std::move(on_loaded));
+      std::move(host), anchor, owner, std::move(on_loaded));
 }
 
-bool IsShowingPopover(const extensions::ExtensionId& extension_id) {
-  return PopupFor(extension_id) != nullptr;
+bool IsShowingPopover(const extensions::ExtensionId& extension_id,
+                      const void* owner) {
+  return PopupFor(extension_id, owner) != nullptr;
 }
 
-void HidePopover(const extensions::ExtensionId& extension_id) {
-  if (PopupFor(extension_id)) {
+bool IsShowingAnyPopover() {
+  return CurrentPopup() != nullptr;
+}
+
+void HidePopover(const extensions::ExtensionId& extension_id,
+                 const void* owner) {
+  if (PopupFor(extension_id, owner)) {
     CurrentPopup().reset();
   }
 }
 
 gfx::NativeView GetPopoverNativeView(
-    const extensions::ExtensionId& extension_id) {
-  PopoverExtensionView* popup = PopupFor(extension_id);
+    const extensions::ExtensionId& extension_id,
+    const void* owner) {
+  PopoverExtensionView* popup = PopupFor(extension_id, owner);
   return popup ? popup->GetNativeView() : gfx::NativeView();
 }
 

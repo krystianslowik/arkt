@@ -53,8 +53,23 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   // Shows the menu at the anchor. Returns after the menu has closed.
   void Show();
 
+  // Whether the menu is open (between Show's start and its return).
+  bool IsShowing() const;
+  // Cancels an open menu; Show then returns.
+  void CloseIfOpen();
+
+  // The view model of `extension_id`'s action, or nullptr.
+  ExtensionActionViewModel* GetViewModel(
+      const extensions::ExtensionId& extension_id) const;
+  bool HasAnyActions() const;
+  // Closes the popup of any of this menu's actions.
+  void HideActivePopup();
+
   content::WebContents* active_web_contents() const;
   NSView* anchor() const;
+  base::WeakPtr<ArktExtensionsMenu> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
 
  private:
   // ToolbarActionsModel::Observer:
@@ -80,6 +95,8 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   base::WeakPtr<content::WebContents> tab_;
   NSView* __weak anchor_;
   ArktExtensionsMenuTarget* __strong target_;
+  // The menu while Show tracks it.
+  NSMenu* __strong shown_menu_;
   std::map<extensions::ExtensionId, std::unique_ptr<ExtensionActionViewModel>>
       view_models_;
   bool dump_ = false;

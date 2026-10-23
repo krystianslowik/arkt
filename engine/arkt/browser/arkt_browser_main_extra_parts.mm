@@ -8,6 +8,7 @@
 
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_browser_window_factory_hook.h"
+#include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
 #include "arkt/browser/arkt_window_controller.h"
@@ -52,7 +53,8 @@ NSMutableArray* Controllers() {
   return *controllers;
 }
 
-// One extensions menu per Arkt window, alive for the life of the process.
+// One extensions menu per week-1 Arkt window, alive for the life of the
+// process. Native windows own theirs (ArktExtensionsContainer).
 std::vector<std::unique_ptr<ArktExtensionsMenu>>& ExtensionsMenus() {
   static base::NoDestructor<std::vector<std::unique_ptr<ArktExtensionsMenu>>>
       menus;
@@ -135,7 +137,8 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
   ArktPlaceholderWindowHost* host = [[ArktPlaceholderWindowHost alloc] init];
   auto* window = new ArktBrowserWindow(browser, host);
   // The Browser is still being constructed here; attach the sidebar
-  // Extensions menu once it exists. The menu follows the active tab.
+  // Extensions menu once it exists. The window owns it through its
+  // ExtensionsContainer. The menu follows the active tab.
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(
@@ -144,11 +147,15 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
             if (!window) {
               return;
             }
-            ExtensionsMenus().push_back(std::make_unique<ArktExtensionsMenu>(
-                window->browser(), nullptr, host.extensionsButton));
-            ArktExtensionsMenu* menu = ExtensionsMenus().back().get();
+            window->extensions_container()->SetMenu(
+                std::make_unique<ArktExtensionsMenu>(
+                    window->browser(), nullptr, host.extensionsButton));
+            ArktExtensionsMenu* menu = window->extensions_container()->menu();
+            base::WeakPtr<ArktExtensionsMenu> weak_menu = menu->GetWeakPtr();
             host.extensionsButtonAction = ^{
-              menu->Show();
+              if (weak_menu) {
+                weak_menu->Show();
+              }
             };
             ApplyExtensionsMenuSwitches(menu);
           },

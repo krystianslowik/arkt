@@ -76,17 +76,18 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
   void UnregisterCommand() override {}
 
   bool IsShowingPopup() const override {
-    return model_ && IsShowingPopover(model_->GetId());
+    return model_ && IsShowingPopover(model_->GetId(), menu_);
   }
 
   void HidePopup() override {
     if (model_) {
-      HidePopover(model_->GetId());
+      HidePopover(model_->GetId(), menu_);
     }
   }
 
   gfx::NativeView GetPopupNativeView() override {
-    return model_ ? GetPopoverNativeView(model_->GetId()) : gfx::NativeView();
+    return model_ ? GetPopoverNativeView(model_->GetId(), menu_)
+                  : gfx::NativeView();
   }
 
   void TriggerPopup(std::unique_ptr<extensions::ExtensionViewHost> host,
@@ -99,15 +100,14 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
     if (show_action == PopupShowAction::kShowAndInspect) {
       LOG(WARNING) << "ARKT: popup inspection not supported; showing only";
     }
-    ShowPopover(std::move(host), menu_->anchor(), std::move(callback));
+    ShowPopover(std::move(host), menu_->anchor(), menu_, std::move(callback));
   }
 
   void ShowContextMenuAsFallback() override {
     LOG(WARNING) << "ARKT: action disabled on this tab; no context menu yet";
   }
 
-  // The menu has already closed when an item runs, so there is nothing to do.
-  void CloseExtensionsMenuIfOpen() override {}
+  void CloseExtensionsMenuIfOpen() override { menu_->CloseIfOpen(); }
 
   content::WebContents* GetActiveWebContents() const override {
     return menu_->active_web_contents();
@@ -200,10 +200,44 @@ void ArktExtensionsMenu::Show() {
                afterDelay:kDumpMenuCloseDelay
                   inModes:@[ NSRunLoopCommonModes ]];
   }
+  shown_menu_ = menu;
+  // Tracking runs a nested run loop in which Chromium keeps running tasks; a
+  // window close there destroys this menu (the window owns it).
+  base::WeakPtr<ArktExtensionsMenu> weak_this = weak_factory_.GetWeakPtr();
   [menu popUpMenuPositioningItem:nil
                       atLocation:NSMakePoint(0, NSMaxY(anchor.bounds) + 4)
                           inView:anchor];
   LOG(WARNING) << "ARKT: extensions menu closed";
+  if (!weak_this) {
+    return;
+  }
+  shown_menu_ = nil;
+}
+
+bool ArktExtensionsMenu::IsShowing() const {
+  return shown_menu_ != nil;
+}
+
+void ArktExtensionsMenu::CloseIfOpen() {
+  [shown_menu_ cancelTracking];
+}
+
+ExtensionActionViewModel* ArktExtensionsMenu::GetViewModel(
+    const extensions::ExtensionId& extension_id) const {
+  auto it = view_models_.find(extension_id);
+  return it != view_models_.end() ? it->second.get() : nullptr;
+}
+
+bool ArktExtensionsMenu::HasAnyActions() const {
+  return !view_models_.empty();
+}
+
+void ArktExtensionsMenu::HideActivePopup() {
+  for (auto& [id, view_model] : view_models_) {
+    if (view_model->IsShowingPopup()) {
+      view_model->HidePopup();
+    }
+  }
 }
 
 content::WebContents* ArktExtensionsMenu::active_web_contents() const {
@@ -366,6 +400,7 @@ void ArktExtensionsMenu::ExecuteAction(
 }
 
 void ArktExtensionsMenu::Shutdown() {
+  CloseIfOpen();
   for (auto& [id, view_model] : view_models_) {
     view_model->HidePopup();
   }

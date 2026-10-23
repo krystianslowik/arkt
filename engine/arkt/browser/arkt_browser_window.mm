@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "arkt/browser/arkt_browser_window_parts.h"
+#include "arkt/browser/arkt_extensions_container.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/containers/flat_set.h"
@@ -113,6 +114,14 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
             browser_->GetUnownedUserDataHost());
   }
 
+  // chrome.action.openPopup and other non-UI callers find the window's
+  // extension actions through ExtensionsContainer::From, as with Webium
+  // (webui_browser_window.cc:194).
+  extensions_container_ = std::make_unique<ArktExtensionsContainer>(browser_);
+  scoped_extensions_container_ =
+      std::make_unique<ui::ScopedUnownedUserData<ExtensionsContainer>>(
+          browser_->GetUnownedUserDataHost(), *extensions_container_);
+
   browser_->GetTabStripModel()->AddObserver(this);
 
   // `this` outlives the tokens: the destructor removes them first.
@@ -186,6 +195,8 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
     }
   };
   LOG(WARNING) << "ARKT: native window created";
+  LOG(WARNING) << "ARKT: native window session id "
+               << browser_->GetSessionID().id();
 }
 
 ArktBrowserWindow::~ArktBrowserWindow() {
@@ -210,6 +221,8 @@ ArktBrowserWindow::~ArktBrowserWindow() {
     new_tab_footer_controller_->TearDown();
     new_tab_footer_controller_.reset();
   }
+  scoped_extensions_container_.reset();
+  extensions_container_.reset();
   side_panel_ui_.reset();
   location_bar_.reset();
   modal_dialog_host_.reset();

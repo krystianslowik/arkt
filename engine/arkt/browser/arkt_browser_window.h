@@ -13,9 +13,12 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "components/sessions/core/session_id.h"
+#include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 #include "ui/color/color_provider_source.h"
 #include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
+
+class ExtensionsContainer;
 
 namespace new_tab_footer {
 class NewTabFooterController;
@@ -24,6 +27,7 @@ class NewTabFooterController;
 namespace arkt {
 
 class ArktExclusiveAccessContext;
+class ArktExtensionsContainer;
 class ArktModalDialogHost;
 class ArktSidePanelUI;
 class ArktStubLocationBar;
@@ -51,6 +55,10 @@ class ArktBrowserWindow : public BrowserWindow,
     return weak_factory_.GetWeakPtr();
   }
   id<ArktWindowHost> host() const { return host_; }
+  // Registered as the browser's ExtensionsContainer for the window's life.
+  ArktExtensionsContainer* extensions_container() const {
+    return extensions_container_.get();
+  }
 
   // ui::BaseWindow:
   bool IsActive() const override;
@@ -245,6 +253,9 @@ class ArktBrowserWindow : public BrowserWindow,
   std::unique_ptr<ArktSidePanelUI> side_panel_ui_;
   std::unique_ptr<new_tab_footer::NewTabFooterController>
       new_tab_footer_controller_;
+  std::unique_ptr<ArktExtensionsContainer> extensions_container_;
+  std::unique_ptr<ui::ScopedUnownedUserData<ExtensionsContainer>>
+      scoped_extensions_container_;
   // The window frame when native fullscreen began (GetRestoredBounds).
   gfx::Rect bounds_before_fullscreen_;
 

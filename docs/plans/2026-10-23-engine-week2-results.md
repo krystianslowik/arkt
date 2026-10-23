@@ -15,7 +15,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W5a | `ArktBrowserWindow` skeleton behind `--arkt-native-window` | DONE | patch 0004; startup, tabs and `chrome.windows` work; 3 crash seams hit (sad tab, NTP footer, closing the active tab, which also blocks window close and quit), see "W5a" below |
 | W5b | Seam fixes found by the smoke matrix (GATE) | DONE: gate passes | 17/17 scenarios pass; patches 0005-0006 (2 patch files, 3 upstream files, 0 hot-file hunks); close, quit, NTP, main-menu commands and the extension popup fixed on our side; see "W5b" below |
 | W5c | Arkt-owned tab list and visibility (finding 2) | DONE | no upstream patch; week-1 blackout repro passes (CDP `visibilityState`, `ARKT: visibility` lines, AX row selection); `arkt_browser_window.mm` split; affected W5b rows pass; see "W5c" below |
-| W6 | Extension window identity, extension-created tabs and windows (finding 3) | TODO | |
+| W6 | Extension window identity, extension-created tabs and windows (finding 3) | DONE | no upstream patch; `ArktExtensionsContainer` makes `chrome.action.openPopup()` open our popover; every extension-created tab and window lands in an Arkt window (`views=0`), 1Password welcome page included; popup closes on `window.close()` and on unload; see "W6" below |
 | W7 | Web Store install on the native window | DONE | uBO Lite installed on the native window (`views=0`), actions 1 -> 2, popup through the menu; post-install dialog crash on close fixed in patch 0006; see "W7" below |
 | W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | DONE (user steps open) | patch 0003; see below |
 | W9 | Native window as default; try dropping patch 0002 | TODO | |
@@ -1144,3 +1144,105 @@ Seam patches: 2 patch files (limit 8), 4 upstream files (limit 25), 0 hot-file h
   `ShowDialogCallback` (or attaching the widget to the Arkt window) is the week-3 fix.
 - The "pinned by default" IPH is skipped on Arkt windows.
 - The Web Store shows its "Switch to Chrome?" banner and dialog; it does not block the install.
+
+## W6: Extension window identity, extension-created tabs and windows
+
+Date 2026-10-23. Branch `engine/18-extension-windows`, issue #18. Variant P. No upstream change: the patch set is still
+0001-0006 (6 patch files, 13 upstream files, 0 hot-file hunks). Build: `nice -n 15 autoninja -C out/Spike chrome`,
+`The build has finished successfully.`, 0 `FAILED:` (after one compile fix). `gn check out/Spike '//arkt/browser:*'`:
+`Header dependency check OK`. Every run: a fresh profile of its own, CDP port 9363, the window moved to 0,60 540x860
+with `chrome.windows.update` right after launch (as in W5c, "Interference").
+
+### Implementation
+
+- `arkt_extensions_container.{h,mm}`: `ArktExtensionsContainer` (`ExtensionsContainer`) on top of the window's
+  `ArktExtensionsMenu`. `ArktBrowserWindow` creates it in its constructor and registers it with
+  `ui::ScopedUnownedUserData<ExtensionsContainer>` on the browser's `UnownedUserDataHost`, as Webium does; the
+  destructor drops it after `TearDownPreBrowserWindowDestruction()`. `ShowToolbarActionPopupForAPICall` follows
+  Chrome's toolbar (`ExtensionsToolbarDesktop::CanShowToolbarActionPopupForAPICall`): refused while any popover is
+  showing or when the window is not active, otherwise `TriggerPopupForAPI` (the popup opens through the existing
+  `TriggerPopup` delegate path, `by_user=0`). `ToggleExtensionsMenu` shows the menu from a posted task (the menu runs
+  a nested loop) or cancels an open one; `CloseExtensionsMenuIfOpen` cancels tracking (also from the action
+  delegate, which was a no-op).
+- The native window now owns its menu through the container (the factory's posted task hands it over), so a closed
+  native window no longer leaves its menu in the process-wide list (W5c follow-up). The week-1 path keeps that list.
+- `ArktBrowserWindow` logs `ARKT: native window session id <id>` at creation.
+- Popover (`arkt_extensions_bridge.mm`, the #18 comment from the W4 review): the popup sets the host's close handler,
+  so `window.close()` in the popup closes the popover (before, the host had no close handler); it also observes the
+  `ExtensionRegistry` and closes when its extension unloads. Both close from a posted task and log
+  `ARKT: popup closed (<reason>) <id>`.
+- `tabs-probe/sw.js` also logs `ARKT tabs.query windows=<ids>`.
+
+### Identity (Step 3)
+
+| Check | Result |
+|---|---|
+| `ARKT: native window session id` | `906131682` |
+| `ARKT tabs.query windows=` (tabs-probe) | `906131682` |
+| `chrome.windows.getAll({populate:true})` | `[[906131682,"normal",1]]`; table 1 row; census `normal=1 arkt=1 views=0` |
+
+### Extension-created tabs and windows (Step 4)
+
+One launch, actions in order; census and `windows.getAll` after each.
+
+| Action | Result |
+|---|---|
+| `probe.create()` (background) | window `906131682` index 1; 2 rows, row 1 still selected; example.com `visible`; `views=0` |
+| `chrome.tabs.create({url:"about:blank#fg", active:true})` | index 2, active; 3 rows, row 3 selected; `mounted`, `visibility <fg> visible`, others `hidden`; `views=0` |
+| Welcome-style page `chrome.tabs.create({url: chrome.runtime.getURL("popup.html")})` | index 3, active; 4 rows; the extension page mounted, `visibilityState` `"visible"`; `views=0` |
+| `chrome.action.openPopup()` from the action-probe worker (window frontmost and key, checked first) | `"ok"`; `ARKT: openPopup <id>`, `TriggerPopup ... by_user=0`, `popup loaded`; popover at the sidebar Extensions button (`$PROF/shots/w6-popup.png`) |
+| Popup button `open` (`cdp.mjs --user-gesture popup.html`, the welcome tab closed first so the popover is the only `popup.html` target; `chrome.tabs.getCurrent()` there is `undefined`) | new tab `about:blank#probe-open` in window `906131682`, mounted and active; 4 rows; `views=0`; the popover stayed open |
+| `window.close()` in the popup | `ARKT: popup closed (window.close)`; the `popup.html` target is gone |
+| `probe.window()` (`chrome.windows.create`) | a second Arkt window `906131689`; census `normal=2 arkt=2 views=0`; `windows.getAll` = `906131682` (4 tabs) and `906131689` (1 tab), matching the two logged session ids; each window has its own table |
+| `chrome.action.openPopup()` with the second window focused, then `chrome.runtime.reload()` of action-probe | popup shown, then closed on unload (the action left the toolbar model, so the menu hid it first; the registry observer is the fallback for a popover no menu owns) |
+
+0 `FATAL`/`Check failed`/`Received signal` lines; stopped by its PID; Crashpad dumps 87 -> 87. Window-only
+screenshots: `$PROF/shots/w6-popup.png`, `w6-window1.png`, `w6-window2.png`. The reloaded action probe did not come
+back in that run (`toolbar actions 1`); reloading a `--load-extension` extension is not part of this task and was not
+investigated.
+
+### Real extension (Step 5)
+
+A copy of `$PROF/1password-test` (the original is left untouched), `--arkt-native-window`, no input. From the
+1Password service worker over CDP: `chrome.tabs.create({url: chrome.runtime.getURL("app/app.html#/page/welcome")})`
+returned window `1230561966` (the logged session id) index 1; table 2 rows; `windows.getAll` one `normal` window with
+2 tabs; census `normal=1 arkt=1 views=0`. The page was not interacted with. 0 `FATAL`/`Check failed`; dumps 87 -> 87.
+
+### Regression rows
+
+| Run | Result |
+|---|---|
+| `--arkt-extensions-demo=<action-probe>` (W5b scenario 4, menu owned by the container now) | `run action ... source 1`, `TriggerPopup ... by_user=1`, `popup loaded` |
+| `chrome.windows.remove` of every window, then `kill -TERM` (scenario 7) | census `0/0/0`, `native window destroyed` (container and menu torn down with it), gone within 6 s, 0 `FATAL`/`Check failed`, dumps 87 -> 87 |
+
+### Review fix (#217)
+
+- **Use-after-free while the menu is open.** `NSMenu` tracking runs a nested run loop in which Chromium keeps running
+  tasks; now that the window owns its menu, a window close there destroyed the menu while `Show()` was still on the
+  stack. `Show()` takes a weak pointer before tracking and touches no member after it if the menu is gone, and
+  `Shutdown()` cancels an open menu first.
+- **Popups scoped to their window.** With one process-wide popover, hiding by extension id let one window's
+  `Shutdown()` close another window's popup of the same extension. The popover now records which menu showed it, and
+  `IsShowingPopover`/`HidePopover`/`GetPopoverNativeView` only match that owner.
+
+Verification on the rebuilt `out/Spike` (`The build has finished successfully.`, 0 `FAILED:`; one compile fix for the
+`raw_ptr` plugin, the owner is kept as an address), fresh profiles, port 9363:
+
+| Check | Result |
+|---|---|
+| Window A focused, window B created unfocused; `openPopup` in A; `chrome.windows.remove(B)` | census `normal=1 arkt=1`; A's popover still open (`popup.html` target present, `document.title` answers) |
+| Extensions menu opened by one AXPress on A's `Extensions` button (after the frontmost and key-window checks; the call blocks while the menu tracks), then `chrome.windows.remove(A)` over CDP while it is open | `extensions menu shown 2 items`, census `0/0/0`, `native window destroyed`, then `extensions menu closed`; process alive 10 s later; 0 `FATAL`/`Check failed`/`Received signal`; dumps 87 -> 87, also after the stop |
+| W6 rows again (fresh launch): identity, background and foreground `tabs.create`, welcome page, `openPopup`, `window.open` from the popup, `chrome.windows.create` | all as in Step 3 and 4 above (`views=0` throughout, `normal=2 arkt=2` and two matching session ids at the end); 0 `FATAL`/`Check failed` |
+
+Flake: two of the stops by PID with a popover open left one Crashpad dump each (87 -> 88 after the W6 rerun, 88 -> 89
+in one of three `openPopup` launches), with no `FATAL`/`Check failed`/`Received signal` line; the only marker read from
+the dumps is `--type=renderer`. Six more launches with the popup open (three native, three on the week-1 path, 20 s
+between stop and launch) left none. Same pattern as the W5b and W5c shutdown flakes; not fixed.
+
+### Known gaps (not fixed here)
+
+- The popover is still not closed when the active tab changes (Chrome's `ExtensionPopup` closes then) or when the
+  window loses focus; it stays until the next popup, a toggle, `window.close()` or unload.
+- `ToggleExtensionsMenu` and `CloseExtensionsMenuIfOpen` are wired but not exercised (no caller reached in this
+  task). Extension context menus, pinning, keyboard commands and the install sheet stay with #121.
+
