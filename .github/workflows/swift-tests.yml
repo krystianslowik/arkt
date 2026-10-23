@@ -8,10 +8,10 @@ on:
   push:
     branches: [main]
 
-# A new push to the same pull request or branch cancels the run it supersedes.
+# A new push to the same pull request cancels the run it supersedes; runs on main always finish.
 concurrency:
   group: swift-tests-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
