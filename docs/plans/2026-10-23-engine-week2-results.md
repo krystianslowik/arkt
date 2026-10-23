@@ -1047,7 +1047,7 @@ is counted above except the dump count.
 ## W7: Web Store install on the native window
 
 Date 2026-10-23. Branch `engine/19-web-store-install`, issue #19. Variant P. Every run: a fresh profile of its own,
-`--arkt-native-window`, `--load-extension=action-probe`, `--arkt-extensions-menu-dump`, CDP port 9351, the uBO Lite
+`--arkt-native-window`, `--load-extension=action-probe`, `--arkt-extensions-menu-dump` (not in the lldb run), CDP port 9351, the uBO Lite
 detail page as the start URL, and the window moved to 0,60 1000x860 with `chrome.windows.update` right after launch.
 The Google consent interstitial ("Before you continue") was rejected over CDP (`Reject all`, `--user-gesture`), and
 "Add to Chrome" was pressed with `cdp.mjs --user-gesture`, as in week-1 Task 6.
