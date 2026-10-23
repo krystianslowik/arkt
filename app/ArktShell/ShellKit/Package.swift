@@ -35,6 +35,7 @@ let package = Package(
     .testTarget(name: "MotionTests", dependencies: ["Motion"]),
     .testTarget(name: "ShellUITests", dependencies: ["ShellUI", "EngineAPITestSupport"]),
     .testTarget(name: "IsolationTests"),
+    .testTarget(name: "FakeEngineKitTests", dependencies: ["FakeEngineKit"]),
     .testTarget(
       name: "CoreBridgeTests",
       dependencies: [

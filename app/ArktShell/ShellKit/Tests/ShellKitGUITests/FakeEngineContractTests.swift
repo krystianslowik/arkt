@@ -45,6 +45,22 @@ final class FakeEngineContractTests: XCTestCase {
     XCTAssertFalse(recorder.events(for: id).contains { if case .faviconChanged(_, .some) = $0 { return true }; return false })
   }
 
+  /// FakeEngine only: pages see a Safari user agent. No network: a local page reports `navigator.userAgent`
+  /// as its title. Without the Safari tokens sites serve WKWebView their legacy pages.
+  func testPagesSeeSafariUserAgent() async throws {
+    let page = pages.appending(path: "user-agent.html")
+    try "<!doctype html><script>document.title = navigator.userAgent</script>"
+      .write(to: page, atomically: true, encoding: .utf8)
+    let engine = FakeEngine()
+    let id = engine.createTab(url: page)
+    try await harness.settle(engine, id)
+    let userAgent = try XCTUnwrap(engine.snapshot(of: id)?.title)
+    XCTAssertTrue(userAgent.hasPrefix("Mozilla/5.0 (Macintosh;"), userAgent)
+    XCTAssertTrue(userAgent.contains("AppleWebKit/"), userAgent)
+    XCTAssertTrue(userAgent.hasSuffix(" " + SafariUserAgent.applicationName()), userAgent)
+    XCTAssertFalse(userAgent.contains("Arkt"), userAgent)
+  }
+
   static let png = Data(base64Encoded:
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")!
 
