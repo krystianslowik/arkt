@@ -57,15 +57,39 @@ public struct SidebarSpaceInfo: Equatable, Sendable {
   }
 }
 
+/// Mirrors `SidebarModel.Orientation`, value for value. `.horizontal`: the panes sit side by side; `.vertical`: top
+/// to bottom (split view plan, decision 1). Turning it into an axis is the split layout's job.
+/// PARITY(NEEDS-RUNTIME-CHECK RT-31)
+public enum SplitOrientation: String, Hashable, Sendable {
+  case horizontal
+  case vertical
+}
+
+/// How a split lays out its panes (mirrors `SidebarModel.SplitItem`).
+public struct SplitLayoutInfo: Equatable, Sendable {
+  /// The most panes a split holds (CF-06; mirrors `Sidebar.maximumSplitPanes`).
+  public static let maximumPanes = 4
+
+  public var orientation: SplitOrientation
+  /// Pane i's share of the split's main axis, as stored. Not repaired here: an imported or restored split may carry
+  /// a count that does not match its panes, and the split layout normalizes before drawing (decision 2).
+  public var widthFactors: [Double]
+
+  public init(orientation: SplitOrientation, widthFactors: [Double]) {
+    self.orientation = orientation
+    self.widthFactors = widthFactors
+  }
+}
+
 /// Track B's `NodeKind` flattened to what the sidebar draws (TabItem / FolderItem / SplitItem).
 public enum SidebarNodeInfo: Equatable, Sendable {
   case tab(id: NodeID, url: URL, title: String)
   case folder(id: NodeID, title: String)
-  case split(id: NodeID)
+  case split(id: NodeID, layout: SplitLayoutInfo)
 
   public var id: NodeID {
     switch self {
-    case .tab(let id, _, _), .folder(let id, _), .split(let id): id
+    case .tab(let id, _, _), .folder(let id, _), .split(let id, _): id
     }
   }
 
@@ -74,9 +98,25 @@ public enum SidebarNodeInfo: Equatable, Sendable {
     switch self {
     case .tab: nil
     case .folder(let id, _): .folder(id)
-    case .split(let id): .split(id)
+    case .split(let id, _): .split(id)
     }
   }
+}
+
+/// Why a split write was refused. The shell cannot see the model's `SidebarError`; sources map to this.
+public enum SplitEditError: Error, Equatable, Sendable {
+  /// The split already holds `SplitLayoutInfo.maximumPanes` panes (BH-116: "Cannot Add New Pane").
+  case splitFull
+  /// The ids do not describe a valid split edit: not a split, not a pane, not a tab, a repeated id, bad factors.
+  case invalid
+}
+
+/// The tab that becomes a new pane in `SidebarSource.addToSplit`.
+public enum SplitPaneSource: Equatable, Sendable {
+  /// A tab already in the sidebar; it leaves its place (a pane of another split shrinks that split).
+  case existing(NodeID)
+  /// A new tab, created with the pane.
+  case new(url: URL, title: String)
 }
 
 /// What the shell needs from a sidebar store. Implemented by StubSidebar now and by an adapter over
@@ -94,6 +134,33 @@ public protocol SidebarSource: AnyObject {
   /// A new Space for this source's default profile, appended to `spaceOrder`. Emits `.spaces`.
   @discardableResult func addSpace(title: String) throws -> SpaceID
   func updateTab(_ id: NodeID, url: URL?, title: String?)
+
+  // Split writes (BH-115, BH-116, BH-120). Each applies as one step: observers get its changes once, and a throw
+  // leaves the source untouched. A full split throws `SplitEditError.splitFull`; ids that do not fit the edit throw `.invalid`.
+
+  /// Adds `pane` to a split. When `target` is a tab outside a split, a new split takes the target's place, holding the
+  /// target and the pane with `orientation` and equal shares; `index` 0 puts the pane first, anything else after the
+  /// target. When `target` is a split or one of its panes, the pane is inserted into that split at `index` (clamped)
+  /// and all shares become equal [I] (RT-35); `orientation` is ignored. Returns the split and the pane.
+  @discardableResult
+  func addToSplit(_ pane: SplitPaneSource, target: NodeID, at index: Int, orientation: SplitOrientation) throws
+    -> (split: NodeID, pane: NodeID)
+  /// Ctrl-Shift-- (BH-122): the pane leaves its split without closing and lands right after it; a split left with
+  /// one pane is replaced by that pane.
+  func separatePane(_ pane: NodeID) throws
+  /// Separate All Tabs (BH-121): the panes take the split's place, in order. Returns them.
+  @discardableResult func separateSplit(_ split: NodeID) throws -> [NodeID]
+  /// Expand Current Split (BH-124): `pane` takes the split's place and the other panes follow it.
+  func expandPane(_ pane: NodeID) throws
+  /// Reorders a pane inside its split; `index` is measured before the pane is removed. Factors follow their panes.
+  func movePane(_ pane: NodeID, to index: Int) throws
+  /// Divider commit: one finite, positive factor per pane, stored normalized to sum 1.
+  func setSplitWidthFactors(_ split: NodeID, _ factors: [Double]) throws
+  /// Convert to Horizontal / Vertical Split View (BH-120).
+  func setSplitOrientation(_ split: NodeID, _ orientation: SplitOrientation) throws
+  /// Duplicate split (BH-126): a copy with new ids, right after the original. Returns the copy.
+  @discardableResult func duplicateSplit(_ split: NodeID) throws -> NodeID
+
   /// Ordered, synchronous delivery of every change to every live observer.
   /// Delivery stops on `cancel()` or when the returned handle is released.
   func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation

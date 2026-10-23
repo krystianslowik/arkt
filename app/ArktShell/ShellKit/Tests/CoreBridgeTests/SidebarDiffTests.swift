@@ -110,4 +110,18 @@ struct SidebarDiffTests {
     _ = new.addSpace(title: "T")
     #expect(SidebarDiff.changes(from: old, to: new) == [.spaces])
   }
+
+  @Test func widthChangeEmitsNodeOfSplit() throws {
+    var old = SidebarModel.Sidebar()
+    let space = old.addSpace(title: "S")
+    let left = try old.addTab(url: Self.url, title: "L", in: .today(space))
+    let right = try old.addTab(url: Self.url, title: "R", in: .today(space))
+    let split = try old.createSplit(of: [left, right])
+    var resized = old
+    try resized.setSplitWidthFactors(split, [3, 1])
+    #expect(SidebarDiff.changes(from: old, to: resized) == [.node(split)])
+    var flipped = old
+    try flipped.setSplitOrientation(split, .vertical)
+    #expect(SidebarDiff.changes(from: old, to: flipped) == [.node(split)])
+  }
 }

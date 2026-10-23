@@ -29,7 +29,26 @@ enum BridgeMapping {
     switch node.kind {
     case .tab(let tab): .tab(id: node.id, url: tab.url, title: tab.customTitle ?? tab.title)
     case .folder(let folder): .folder(id: node.id, title: folder.title)
-    case .split: .split(id: node.id)
+    case .split(let split): .split(id: node.id, layout: layout(split))
+    }
+  }
+
+  /// Factors pass through as stored, drift included; the split layout repairs them (decision 2).
+  static func layout(_ split: SplitItem) -> SplitLayoutInfo {
+    SplitLayoutInfo(orientation: orientation(split.orientation), widthFactors: split.widthFactors)
+  }
+
+  static func orientation(_ orientation: SidebarModel.Orientation) -> SplitOrientation {
+    switch orientation {
+    case .horizontal: .horizontal
+    case .vertical: .vertical
+    }
+  }
+
+  static func orientation(_ orientation: SplitOrientation) -> SidebarModel.Orientation {
+    switch orientation {
+    case .horizontal: .horizontal
+    case .vertical: .vertical
     }
   }
 

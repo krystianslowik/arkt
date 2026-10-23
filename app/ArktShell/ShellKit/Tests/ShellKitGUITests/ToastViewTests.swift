@@ -128,6 +128,22 @@ private final class FailingSpaceSidebar: SidebarSource {
   }
   func addSpace(title: String) throws -> SpaceID { throw CocoaError(.featureUnsupported) }
   func updateTab(_ id: NodeID, url: URL?, title: String?) { base.updateTab(id, url: url, title: title) }
+  func addToSplit(_ pane: SplitPaneSource, target: NodeID, at index: Int, orientation: SplitOrientation) throws
+    -> (split: NodeID, pane: NodeID)
+  {
+    try base.addToSplit(pane, target: target, at: index, orientation: orientation)
+  }
+  func separatePane(_ pane: NodeID) throws { try base.separatePane(pane) }
+  func separateSplit(_ split: NodeID) throws -> [NodeID] { try base.separateSplit(split) }
+  func expandPane(_ pane: NodeID) throws { try base.expandPane(pane) }
+  func movePane(_ pane: NodeID, to index: Int) throws { try base.movePane(pane, to: index) }
+  func setSplitWidthFactors(_ split: NodeID, _ factors: [Double]) throws {
+    try base.setSplitWidthFactors(split, factors)
+  }
+  func setSplitOrientation(_ split: NodeID, _ orientation: SplitOrientation) throws {
+    try base.setSplitOrientation(split, orientation)
+  }
+  func duplicateSplit(_ split: NodeID) throws -> NodeID { try base.duplicateSplit(split) }
   func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation {
     base.observe(handler)
   }

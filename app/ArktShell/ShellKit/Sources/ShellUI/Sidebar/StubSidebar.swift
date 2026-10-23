@@ -92,10 +92,15 @@ public final class StubSidebar: SidebarSource {
     return id
   }
 
+  /// An empty split; add panes with `addTab(in: .split(id))`. Like the model's `insert`, that leaves `layout` as it
+  /// is, so the default fits a two-pane split.
   @discardableResult
-  public func addSplit(in location: SidebarLocation) -> NodeID {
+  public func addSplit(
+    in location: SidebarLocation,
+    layout: SplitLayoutInfo = SplitLayoutInfo(orientation: .horizontal, widthFactors: [0.5, 0.5])
+  ) -> NodeID {
     let id = NodeID()
-    insert(.split(id: id), id: id, in: location)
+    insert(.split(id: id, layout: layout), id: id, in: location)
     return id
   }
 
@@ -109,6 +114,258 @@ public final class StubSidebar: SidebarSource {
     nodes[id] = Node(info: info, parent: location)
     childOrder[location, default: []].append(id)
     hub.emit(.structure(location))
+  }
+}
+
+// MARK: - Split writes
+
+/// The same semantics as `ModelSidebarSource` over `Sidebar+Split`, with plain array operations. Every write runs in
+/// `edit`, which restores the previous state on throw and emits the changed locations and nodes once.
+extension StubSidebar {
+  @discardableResult
+  public func addToSplit(_ pane: SplitPaneSource, target: NodeID, at index: Int, orientation: SplitOrientation)
+    throws -> (split: NodeID, pane: NodeID)
+  {
+    try edit {
+      guard let targetNode = nodes[target] else { throw SplitEditError.invalid }
+      let existingSplit: NodeID?
+      switch (targetNode.info, targetNode.parent) {
+      case (.split, _): existingSplit = target
+      case (.tab, .split(let split)): existingSplit = split
+      case (.tab, _): existingSplit = nil
+      case (.folder, _): throw SplitEditError.invalid
+      }
+      let paneID: NodeID
+      switch pane {
+      case .existing(let id): paneID = id
+      case .new(let url, let title):
+        paneID = NodeID()
+        // Next to the split (or the target), never inside it: the cap is checked when it moves in.
+        let location = existingSplit.flatMap { nodes[$0]?.parent } ?? targetNode.parent
+        nodes[paneID] = Node(info: .tab(id: paneID, url: url, title: title), parent: location)
+        childOrder[location, default: []].append(paneID)
+      }
+      if let existingSplit {
+        try addPane(paneID, to: existingSplit, at: index)
+        return (existingSplit, paneID)
+      }
+      let split = try createSplit(of: [target, paneID], orientation: orientation)
+      if index <= 0 { try movePane(paneID, toIndex: 0) }
+      return (split, paneID)
+    }
+  }
+
+  public func separatePane(_ pane: NodeID) throws {
+    try edit {
+      let (split, index) = try paneContext(pane)
+      guard let splitParent = nodes[split]?.parent else { throw SplitEditError.invalid }
+      let position = children(of: splitParent).firstIndex(of: split) ?? 0
+      move(pane, to: splitParent, at: position + 1)
+      shrinkSplit(split, removedIndex: index)
+    }
+  }
+
+  @discardableResult
+  public func separateSplit(_ split: NodeID) throws -> [NodeID] {
+    try edit {
+      _ = try layout(of: split)
+      let panes = children(of: .split(split))
+      dissolve(split, order: panes)
+      return panes
+    }
+  }
+
+  public func expandPane(_ pane: NodeID) throws {
+    try edit {
+      let (split, _) = try paneContext(pane)
+      dissolve(split, order: [pane] + children(of: .split(split)).filter { $0 != pane })
+    }
+  }
+
+  public func movePane(_ pane: NodeID, to index: Int) throws {
+    try edit { try movePane(pane, toIndex: index) }
+  }
+
+  public func setSplitWidthFactors(_ split: NodeID, _ factors: [Double]) throws {
+    try edit {
+      var layout = try layout(of: split)
+      let total = factors.reduce(0, +)
+      guard factors.count == children(of: .split(split)).count, factors.allSatisfy({ $0.isFinite && $0 > 0 }),
+        total.isFinite
+      else { throw SplitEditError.invalid }
+      layout.widthFactors = factors.map { $0 / total }
+      setLayout(layout, of: split)
+    }
+  }
+
+  public func setSplitOrientation(_ split: NodeID, _ orientation: SplitOrientation) throws {
+    try edit {
+      var layout = try layout(of: split)
+      layout.orientation = orientation
+      setLayout(layout, of: split)
+    }
+  }
+
+  @discardableResult
+  public func duplicateSplit(_ split: NodeID) throws -> NodeID {
+    try edit {
+      let layout = try layout(of: split)
+      guard let parent = nodes[split]?.parent else { throw SplitEditError.invalid }
+      let copy = NodeID()
+      nodes[copy] = Node(info: .split(id: copy, layout: layout), parent: parent)
+      let position = children(of: parent).firstIndex(of: split) ?? 0
+      childOrder[parent, default: []].insert(copy, at: position + 1)
+      for pane in children(of: .split(split)) {
+        guard case .tab(_, let url, let title)? = nodes[pane]?.info else { continue }
+        let id = NodeID()
+        nodes[id] = Node(info: .tab(id: id, url: url, title: title), parent: .split(copy))
+        childOrder[.split(copy), default: []].append(id)
+      }
+      return copy
+    }
+  }
+
+  // MARK: Split helpers
+
+  /// Runs `body`; on throw restores the nodes and child lists, otherwise emits every changed child list (sections
+  /// first, then containers that still exist) and every node whose drawn fields changed.
+  private func edit<T>(_ body: () throws -> T) throws -> T {
+    let oldNodes = nodes
+    let oldOrder = childOrder
+    let result: T
+    do { result = try body() } catch {
+      nodes = oldNodes
+      childOrder = oldOrder
+      throw error
+    }
+    var sections: [SidebarChange] = []
+    var containers: [SidebarChange] = []
+    for location in Set(oldOrder.keys).union(childOrder.keys) where oldOrder[location] != childOrder[location] {
+      if let container = location.containerNode {
+        if nodes[container] != nil { containers.append(.structure(location)) }
+      } else {
+        sections.append(.structure(location))
+      }
+    }
+    let changedNodes = nodes.compactMap { id, node in
+      oldNodes[id].flatMap { $0.info != node.info ? SidebarChange.node(id) : nil }
+    }
+    for change in sections + containers + changedNodes { hub.emit(change) }
+    return result
+  }
+
+  private func layout(of split: NodeID) throws -> SplitLayoutInfo {
+    guard case .split(_, let layout)? = nodes[split]?.info else { throw SplitEditError.invalid }
+    return layout
+  }
+
+  private func setLayout(_ layout: SplitLayoutInfo, of split: NodeID) {
+    nodes[split]?.info = .split(id: split, layout: layout)
+  }
+
+  private static func equalShares(_ count: Int) -> [Double] {
+    Array(repeating: 1 / Double(count), count: count)
+  }
+
+  /// The split holding `pane` and the pane's index in it.
+  private func paneContext(_ pane: NodeID) throws -> (split: NodeID, index: Int) {
+    guard case .split(let split)? = nodes[pane]?.parent, case .split? = nodes[split]?.info,
+      let index = children(of: .split(split)).firstIndex(of: pane)
+    else { throw SplitEditError.invalid }
+    return (split, index)
+  }
+
+  /// `Sidebar.move`'s convention: `index` is measured before `id` leaves its place, and clamped.
+  private func move(_ id: NodeID, to location: SidebarLocation, at index: Int) {
+    guard let parent = nodes[id]?.parent else { return }
+    var target = index
+    if parent == location, let old = children(of: location).firstIndex(of: id), old < index { target -= 1 }
+    childOrder[parent]?.removeAll { $0 == id }
+    var siblings = childOrder[location] ?? []
+    siblings.insert(id, at: min(max(target, 0), siblings.count))
+    childOrder[location] = siblings
+    nodes[id]?.parent = location
+  }
+
+  /// A new split at `tabs[0]`'s place holding `tabs` in order with equal shares (`Sidebar.createSplit`, for a first
+  /// tab outside any split).
+  private func createSplit(of tabs: [NodeID], orientation: SplitOrientation) throws -> NodeID {
+    guard let first = tabs.first, let anchor = nodes[first]?.parent, Set(tabs).count == tabs.count,
+      tabs.allSatisfy({ if case .tab? = nodes[$0]?.info { true } else { false } })
+    else { throw SplitEditError.invalid }
+    let split = NodeID()
+    let layout = SplitLayoutInfo(orientation: orientation, widthFactors: Self.equalShares(tabs.count))
+    nodes[split] = Node(info: .split(id: split, layout: layout), parent: anchor)
+    let position = children(of: anchor).firstIndex(of: first) ?? 0
+    childOrder[anchor, default: []].insert(split, at: position)
+    for tab in tabs { takeTab(tab, into: split, at: children(of: .split(split)).count) }
+    return split
+  }
+
+  /// `Sidebar.addPane`: a tab that is not yet a pane of `split` moves in at `index`; all shares become equal.
+  private func addPane(_ tab: NodeID, to split: NodeID, at index: Int) throws {
+    var layout = try layout(of: split)
+    guard case .tab? = nodes[tab]?.info, nodes[tab]?.parent != .split(split) else { throw SplitEditError.invalid }
+    guard children(of: .split(split)).count < SplitLayoutInfo.maximumPanes else { throw SplitEditError.splitFull }
+    takeTab(tab, into: split, at: index)
+    layout.widthFactors = Self.equalShares(children(of: .split(split)).count)
+    setLayout(layout, of: split)
+  }
+
+  /// Moves `tab` into `split`; a tab leaving another split shrinks that split.
+  private func takeTab(_ tab: NodeID, into split: NodeID, at index: Int) {
+    var origin: (split: NodeID, index: Int?)?
+    if case .split(let other)? = nodes[tab]?.parent, other != split {
+      origin = (other, children(of: .split(other)).firstIndex(of: tab))
+    }
+    move(tab, to: .split(split), at: index)
+    if let origin { shrinkSplit(origin.split, removedIndex: origin.index) }
+  }
+
+  private func movePane(_ pane: NodeID, toIndex index: Int) throws {
+    let (split, oldIndex) = try paneContext(pane)
+    var layout = try layout(of: split)
+    move(pane, to: .split(split), at: index)
+    guard let newIndex = children(of: .split(split)).firstIndex(of: pane),
+      layout.widthFactors.indices.contains(oldIndex)
+    else { return }
+    let factor = layout.widthFactors.remove(at: oldIndex)
+    layout.widthFactors.insert(factor, at: min(newIndex, layout.widthFactors.count))
+    setLayout(layout, of: split)
+  }
+
+  /// `Sidebar.shrinkSplit`: a split left with no pane goes, one left with one pane is replaced by it, otherwise the
+  /// removed pane's share goes and the others are rescaled to the old total.
+  private func shrinkSplit(_ split: NodeID, removedIndex: Int?) {
+    guard var layout = try? layout(of: split), let parent = nodes[split]?.parent else { return }
+    let panes = children(of: .split(split))
+    if panes.count <= 1 {
+      if let survivor = panes.first {
+        move(survivor, to: parent, at: children(of: parent).firstIndex(of: split) ?? 0)
+      }
+      return removeSplit(split)
+    }
+    guard let removedIndex, layout.widthFactors.indices.contains(removedIndex) else { return }
+    let total = layout.widthFactors.reduce(0, +)
+    layout.widthFactors.remove(at: removedIndex)
+    let rest = layout.widthFactors.reduce(0, +)
+    if rest > 0 { layout.widthFactors = layout.widthFactors.map { $0 * total / rest } }
+    setLayout(layout, of: split)
+  }
+
+  /// The panes of `split` take its place in `order`; the split goes.
+  private func dissolve(_ split: NodeID, order: [NodeID]) {
+    guard let parent = nodes[split]?.parent else { return }
+    let position = children(of: parent).firstIndex(of: split) ?? 0
+    for (offset, pane) in order.enumerated() { move(pane, to: parent, at: position + offset) }
+    removeSplit(split)
+  }
+
+  /// Removes an emptied split node and its child list.
+  private func removeSplit(_ split: NodeID) {
+    guard let parent = nodes.removeValue(forKey: split)?.parent else { return }
+    childOrder[parent]?.removeAll { $0 == split }
+    childOrder[.split(split)] = nil
   }
 }
 
