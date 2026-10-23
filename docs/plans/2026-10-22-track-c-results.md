@@ -642,3 +642,31 @@ Cmd-Enter opens a background tab (Chromium's Mac convention), the shell needs a 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 368 tests (359 + 9), XCTest 208 tests (193 + 15,
 GUI included), 0 failures. `commandbar.showcpu.ms median=0.92 p95=1.18`; earliest-frame not asserted (load 33.6 on
 10 cores). Debug app build: `** BUILD SUCCEEDED **`.
+
+## Row hover X: resync guard and fade polish (#87)
+
+Hover resync guard: tracking areas are `.activeAlways`, so hover shows in background windows too, and the old guard
+(active app and key window only) left a stale X after scrolling a window that was not key. The resync now runs in any
+visible window and keeps the existing covered check: when another window is frontmost under the pointer (the presented
+command bar panel, another app's window), the rows and tiles under it drop their hover. A window that is not visible
+is left alone.
+
+One lookup per host: rows and tiles no longer query the window server from `updateTrackingAreas`. They ask their host
+(`SidebarOutlineView`, `FavoritesGridView`, both `HoverResyncHost`), which coalesces every request of a scroll or a
+reload into one `NSWindow.windowNumber(at:)` call on the next main-queue turn and syncs all realized rows or visible
+tiles from it (`HoverResyncScheduler` in `HoverResync.swift`). The pointer and window-server reads sit behind
+`HoverPointerLookup`, which the GUI tests replace, so they exercise `resyncHoverWithPointer()` without depending on
+key-window state.
+
+Fade: rows and tiles share `HoverCloseButton`. Every show or hide bumps a generation; a fade's completion hides the
+button only while it is the latest, so a fade-out that replaces a running fade-in no longer hides the X early (the
+replaced fade's completion runs at once). An interrupted fade starts from the opacity on screen and lasts the remaining
+share of `closeButtonFadeDuration` (`HoverCloseFade.duration`). With Reduce Motion the X appears and hides at once.
+
+`SidebarController.loadedNodes` is pruned with the favicon cache on `.structure` and `.spaces` changes, so nodes that
+leave the source drop out even without a window reporting the closed page. `deactivate(node:)` on the current or
+previous Favorite no longer reloads its tile before the row-state refresh, which configures every visible tile once.
+
+Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 388 tests (384 + 4, new in `HoverCloseFadeTests`),
+XCTest 235 tests (224 + 11, GUI included; 6 new in `RowCloseButtonTests`, 5 new in `FavoriteTileCloseTests`),
+0 failures. Debug app build: `** BUILD SUCCEEDED **`.
