@@ -88,6 +88,14 @@ final class ToastView: NSView {
     return NSSize(width: min(width, min(maxWidth, Self.maxWidth)), height: Self.height)
   }
 
+  /// The frame in a host's (unflipped) `bounds`: centered, `bottomInset` above the bottom edge, at most `maxWidth`
+  /// wide. The single content card and the split container both place the toast this way.
+  func frame(centeredIn bounds: CGRect) -> NSRect {
+    let size = preferredSize(maxWidth: max(0, bounds.width - 2 * Self.bottomInset))
+    return NSRect(x: ((bounds.width - size.width) / 2).rounded(), y: Self.bottomInset,
+                  width: size.width, height: size.height)
+  }
+
   override func layout() {
     super.layout()
     let padding = Self.horizontalPadding

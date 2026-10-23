@@ -19,6 +19,9 @@ public final class SidebarController {
   public var onClose: (@MainActor (NodeID) -> Void)?
   /// The "+" button in the bottom bar.
   public var onNewTab: (@MainActor () -> Void)?
+  /// The pane to focus when a split row is activated (decision 7: the split's last focused pane). Nil, or a node
+  /// that is not a pane of that split: its first pane.
+  public var preferredPane: (@MainActor (NodeID) -> NodeID?)?
   /// Continuous pager position on every strip move (drives the window theme crossfade).
   public var onSpacePosition: (@MainActor (CGFloat) -> Void)?
   /// The profile's Space list changed (themes need refreshing).
@@ -33,10 +36,15 @@ public final class SidebarController {
   /// Decoded favicons by node; kept while the node exists in the source (its engine tab may close and reopen),
   /// dropped when the node leaves it (`.structure` and `.spaces` changes, `deactivate(node:)`).
   private(set) var favicons: [NodeID: NSImage] = [:]
-  /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page, and the
-  /// window calls `deactivate(node:)` when the page closes; nodes that leave the source are dropped like favicons.
-  /// Decides whether a Favorite tile shows its X (#82).
+  /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page; pages the
+  /// window creates without an activation (the other panes of a split) are added through `markLoaded(node:)`, and
+  /// the window calls `deactivate(node:)` when any page closes; nodes that leave the source are dropped like
+  /// favicons. Decides whether a Favorite tile shows its X (#82).
   private(set) var loadedNodes: Set<NodeID> = []
+  /// Tabs the window shows besides the current one (the other panes of a shown split), drawn as `.contentVisible`.
+  public var visible: Set<NodeID> = [] {
+    didSet { if visible != oldValue { applyRowStates() } }
+  }
   private var observation: SidebarObservation?
   private let buttonTarget = ButtonTarget()
 
@@ -65,7 +73,7 @@ public final class SidebarController {
   public var currentPage: SpacePageView? { currentSpace.flatMap { pages[$0] } }
 
   public var resolver: TabRowState.Resolver {
-    TabRowState.Resolver(current: current, visible: current.map { [$0] } ?? [], previous: previous)
+    TabRowState.Resolver(current: current, visible: visible.union(current.map { [$0] } ?? []), previous: previous)
   }
 
   public func rowState(for id: NodeID) -> TabRowState { resolver.state(for: id) }
@@ -169,11 +177,11 @@ public final class SidebarController {
 
   // MARK: Activation
 
-  /// Makes `node` current. A split activates its first pane; folders and unknown nodes are ignored.
-  /// Activating a tab in another Space of this profile switches to that Space.
+  /// Makes `node` current. A split activates its `preferredPane`, else its first pane; folders and unknown nodes
+  /// are ignored. Activating a tab in another Space of this profile switches to that Space.
   public func activate(node: NodeID) {
     if case .folder? = source.node(node) { return }       // folders expand in place, they never activate
-    guard let tab = source.firstTab(at: node) else { return }
+    guard let tab = paneToFocus(in: node) ?? source.firstTab(at: node) else { return }
     let space = source.spaceID(containing: tab)
     if let space, space != currentSpace { showSpace(space) }
     if let space { lastActive[space] = tab }
@@ -181,13 +189,16 @@ public final class SidebarController {
     if tab != current {
       previous = current
       current = tab
-      let states = resolver
-      for page in pages.values { page.outlineController.setRowStates(states) }
-      view.favorites.setRowStates(states)       // refreshes the visible tiles, a newly loaded one included
+      applyRowStates()                          // the favorites refresh their visible tiles, a newly loaded one too
     } else if loadedNow {
       view.favorites.reload(node: tab)
     }
     onActivate?(tab)
+  }
+
+  /// The window created `node`'s page without activating it (a background pane of a shown split, #156 review).
+  public func markLoaded(node: NodeID) {
+    if loadedNodes.insert(node).inserted { view.favorites.reload(node: node) }
   }
 
   /// Forgets a node that no longer has a tab (engine tab closed): its loaded state, any current/previous role, and
@@ -201,6 +212,17 @@ public final class SidebarController {
     }
     if node == current { current = nil }
     if node == previous { previous = nil }
+    applyRowStates()
+  }
+
+  /// `preferredPane` for a split node, when it names one of that split's panes.
+  private func paneToFocus(in node: NodeID) -> NodeID? {
+    guard case .split? = source.node(node), let pane = preferredPane?(node),
+          source.parent(of: pane) == .split(node) else { return nil }
+    return pane
+  }
+
+  private func applyRowStates() {
     let states = resolver
     for page in pages.values { page.outlineController.setRowStates(states) }
     view.favorites.setRowStates(states)       // refreshes the visible tiles, this one's X included

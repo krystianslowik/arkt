@@ -1,8 +1,8 @@
 import AppKit
 
 /// Window content view. Owns (back to front) the theme background, the sidebar container, the content card, the
-/// split container (shown instead of the card for a split) and the sidebar resize handle. Frames come from
-/// `ShellLayout` and are set directly (no Auto Layout).
+/// split container (shown instead of the card for a split, `showsSplit`) and the sidebar resize handle. Frames come
+/// from `ShellLayout` and are set directly (no Auto Layout).
 @MainActor
 public final class ShellRootView: NSView {
   public let metrics: ShellMetrics
@@ -11,7 +11,7 @@ public final class ShellRootView: NSView {
   /// The sidebar column (C3): traffic-light strip, favorites, Space page, bottom bar.
   public let sidebarContainer: SidebarContainerView
   public let card: ContentCardView
-  /// The pane cards of a shown split, laid out at the card's frame. Hidden until a split is shown (S4).
+  /// The pane cards of a shown split, laid out at the card's frame. Hidden until a split is shown (`showsSplit`).
   public let split: SplitContainerView
   public let resizeHandle: SidebarResizeHandle
 
@@ -20,6 +20,18 @@ public final class ShellRootView: NSView {
   }
   public var sidebarVisible = true {
     didSet { if sidebarVisible != oldValue { needsLayout = true } }
+  }
+  /// The split container replaces the single card (S4). The toast moves along, so notices stay on screen.
+  public var showsSplit = false {
+    didSet {
+      guard showsSplit != oldValue else { return }
+      card.isHidden = showsSplit
+      split.isHidden = !showsSplit
+      let toast = card.toastView ?? split.toastView
+      card.toastView = nil
+      split.toastView = nil
+      if showsSplit { split.toastView = toast } else { card.toastView = toast }
+    }
   }
 
   public init(metrics: ShellMetrics = .standard, sidebar: SidebarContainerView? = nil) {

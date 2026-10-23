@@ -115,7 +115,7 @@ public final class InMemoryEngine: EngineClient {
   public func contentView(for id: TabID) -> NSView? {
     guard snapshots[id] != nil else { return nil }
     if let view = views[id] { return view }
-    let view = NSView()
+    let view = InMemoryPageView()
     view.identifier = NSUserInterfaceItemIdentifier("in-memory-tab-\(id)")
     views[id] = view
     return view
@@ -124,4 +124,11 @@ public final class InMemoryEngine: EngineClient {
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
     hub.add(handler)
   }
+}
+
+/// The page view of an in-memory tab. It accepts first responder like a real engine's page, so focus tests can
+/// check where the window put it.
+@MainActor
+final class InMemoryPageView: NSView {
+  override var acceptsFirstResponder: Bool { true }
 }
