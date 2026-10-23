@@ -162,8 +162,8 @@ checksums were unchanged. Temp folders and suites were removed afterwards.
 
 ## U4a: Accessibility identifiers: window, empty state, Toolbar and toasts (#167)
 
-Base: `origin/main` at `5db2b4e`, branch `chore/167-ui-tests-u4a`. Same machine as U0 (`nice -n 10`, `-j 4` /
-`-jobs 4`, no Chromium build running).
+Base: `origin/main` at `5db2b4e`, rebased before review onto `ba0c281` (#191), branch `chore/167-ui-tests-u4a`.
+Same machine as U0 (`nice -n 10`, `-j 4` / `-jobs 4`, no Chromium build running).
 
 ### What was done
 
@@ -202,10 +202,10 @@ Base: `origin/main` at `5db2b4e`, branch `chore/167-ui-tests-u4a`. Same machine 
 
 | Check | Command | Result |
 |---|---|---|
-| ShellKit GUI | `cd $KIT && nice -n 10 swift test -j 4 --filter ShellKitGUITests` | pass, 288 XCTest tests (baseline 280 at `5db2b4e` + 8), 0 failures, 46.8 s |
-| ShellKit pure | `cd $KIT && nice -n 10 swift test -j 4 --skip ShellKitGUITests` | pass, 416 tests (baseline 416 at `5db2b4e` + 0) |
+| ShellKit GUI | `cd $KIT && nice -n 10 swift test -j 4 --filter ShellKitGUITests` | pass, 288 XCTest tests (baseline 280 at `5db2b4e` + 8), 0 failures, 46.8 s; after the rebase onto #191, 293 (280 + 5 from #191 + 8), 0 failures |
+| ShellKit pure | `cd $KIT && nice -n 10 swift test -j 4 --skip ShellKitGUITests` | pass, 416 tests (baseline 416 at `5db2b4e` + 0); after the rebase onto #191, 423 (416 + 7 from #191) |
 | ArktCore | `cd $CORE && nice -n 10 swift test -j 4` | pass, 336 tests (+ 0) |
-| App build (Debug) | App command, `-jobs 4` | `** BUILD SUCCEEDED **`, 0 compiler warnings, 32.8 s |
+| App build (Debug) | App command, `-jobs 4` | `** BUILD SUCCEEDED **`, 0 compiler warnings, 32.8 s; again after the rebase |
 | Import layering | the workflow's `Check import layering` step, run locally | `Import layering OK` |
 | `AXID.swift` stands alone | `xcrun swiftc -typecheck $KIT/Sources/ShellUI/Accessibility/AXID.swift` | no output, exit 0 |
 
