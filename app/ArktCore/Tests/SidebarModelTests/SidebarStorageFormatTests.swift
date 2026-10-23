@@ -54,6 +54,19 @@ struct SidebarStorageFormatTests {
     #expect(try Self.roundTrip(sidebar) == sidebar)
   }
 
+  @Test func splitBuiltByOperationsRoundTrips() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "S")
+    let tabs = try (0..<3).map {
+      try sidebar.addTab(url: URL(string: "https://example.com/\($0)")!, title: "T\($0)", in: .today(space))
+    }
+    let split = try sidebar.createSplit(of: [tabs[1], tabs[0]], orientation: .vertical)
+    try sidebar.addPane(tabs[2], to: split)
+    try sidebar.setSplitWidthFactors(split, [1, 2, 1])
+    #expect(sidebar.children(of: .split(split)) == [tabs[1], tabs[0], tabs[2]])
+    #expect(try Self.roundTrip(sidebar) == sidebar)
+  }
+
   @Test func emptySidebarRoundTrips() throws {
     #expect(try Self.roundTrip(Sidebar()) == Sidebar())
   }

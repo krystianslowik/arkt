@@ -132,6 +132,11 @@ public enum SidebarError: Error, Hashable, Sendable {
   /// `addFolder`/`addTab`/`addSplit` it is the new node's id, for `move` the moved node, for `insert` the first node
   /// of the snapshot that would land too deep.
   case nestingTooDeep(NodeID)
+  /// The split already holds `Sidebar.maximumSplitPanes` panes (BH-116, CF-06). Carries the split's id.
+  case splitFull(NodeID)
+  /// A split operation got input it cannot apply: a wrong pane count, a node that is not a tab (or not a split, or
+  /// not a pane), a repeated id, or bad width factors. Carries the offending node, or the split for bad factors.
+  case invalidSplit(NodeID)
 }
 
 /// Arkt's sidebar: spaces plus a forest of tab, folder and split nodes, as a value type.
@@ -140,6 +145,10 @@ public struct Sidebar: Hashable, Sendable {
   /// depth 2, and so on; tabs inside a split count too. Every mutation enforces it, so any sidebar the model holds can
   /// be stored and loaded again, and recursion over a tree is bounded.
   public static let maximumNestingDepth = 32
+
+  /// The most panes a split holds (CF-06). The split operations and `move` into a split enforce it; `insert` does
+  /// not, so stored and imported trees with more panes still load.
+  public static let maximumSplitPanes = 4
 
   public private(set) var spaces: [SpaceID: Space] = [:]
   public private(set) var spaceOrder: [SpaceID] = []
@@ -203,10 +212,16 @@ public struct Sidebar: Hashable, Sendable {
   /// gives `[y, x, z]` and moving `x` to 3 gives `[y, z, x]`. Out-of-range indexes are clamped.
   ///
   /// Throws `SidebarError.unknownNode` for an unknown `id`, `.invalidDestination` when `location` cannot hold the
-  /// node, and `.cycle` when `location` is the node itself or inside its subtree. The sidebar is unchanged on throw.
+  /// node, `.cycle` when `location` is the node itself or inside its subtree, and `.splitFull` when `location` is a
+  /// split that already holds `maximumSplitPanes` other panes. The sidebar is unchanged on throw.
   public mutating func move(_ id: NodeID, to location: Location, at index: Int) throws {
     guard let node = nodes[id] else { throw SidebarError.unknownNode(id) }
     try validate(location, accepting: node.kind)
+    if case .split(let split) = location, node.parent != location,
+      children(of: location).count >= Self.maximumSplitPanes
+    {
+      throw SidebarError.splitFull(split)
+    }
     if isInSubtree(location, of: id) { throw SidebarError.cycle }
     if depth(ofChildIn: location) + height(of: id) - 1 > Self.maximumNestingDepth {
       throw SidebarError.nestingTooDeep(id)
@@ -235,11 +250,19 @@ public struct Sidebar: Hashable, Sendable {
   /// tab (same id) at the split's position, and a split left with none is removed. For a node that is not a pane this
   /// is `remove(_:)`; an unknown `id` is a no-op.
   public mutating func removePane(_ id: NodeID) {
-    guard case .split(let splitID)? = nodes[id]?.parent, case .split(var split)? = nodes[splitID]?.kind,
-      let splitParent = nodes[splitID]?.parent
+    guard case .split(let splitID)? = nodes[id]?.parent, case .split? = nodes[splitID]?.kind,
+      nodes[splitID]?.parent != nil
     else { return remove(id) }
     let index = children(of: .split(splitID)).firstIndex(of: id)
     remove(id)
+    shrinkSplit(splitID, removedIndex: index)
+  }
+
+  /// Shrinks `splitID` after one of its panes left it (removed or moved out); `removedIndex` is where that pane was.
+  /// A split left with no pane is removed; one left with one pane is replaced by that tab (same id) at the split's
+  /// position; otherwise the removed pane's width factor goes and the others are rescaled to the old total.
+  mutating func shrinkSplit(_ splitID: NodeID, removedIndex: Int?) {
+    guard case .split(var split)? = nodes[splitID]?.kind, let splitParent = nodes[splitID]?.parent else { return }
     let panes = children(of: .split(splitID))
     guard let survivor = panes.first else { return remove(splitID) }
     if panes.count == 1 {
@@ -248,13 +271,20 @@ public struct Sidebar: Hashable, Sendable {
       guard (try? move(survivor, to: splitParent, at: position)) != nil else { return }
       return remove(splitID)
     }
-    if let index, split.widthFactors.indices.contains(index) {
+    if let removedIndex, split.widthFactors.indices.contains(removedIndex) {
       let total = split.widthFactors.reduce(0, +)
-      split.widthFactors.remove(at: index)
+      split.widthFactors.remove(at: removedIndex)
       let rest = split.widthFactors.reduce(0, +)
       if rest > 0 { split.widthFactors = split.widthFactors.map { $0 * total / rest } }
       nodes[splitID]?.kind = .split(split)
     }
+  }
+
+  /// Replaces the payload of split `id`; a no-op when `id` is not a split. For the split operations in
+  /// `Sidebar+Split.swift`, which cannot write `nodes` from another file.
+  mutating func setSplitItem(_ id: NodeID, _ item: SplitItem) {
+    guard case .split? = nodes[id]?.kind else { return }
+    nodes[id]?.kind = .split(item)
   }
 
   /// Changes a tab's own fields; nil leaves a field as it is. Throws `.unknownNode` when `id` is not a tab (unknown
@@ -334,7 +364,7 @@ public struct Sidebar: Hashable, Sendable {
     if !isValid { throw SidebarError.invalidDestination(location) }
   }
 
-  private mutating func insert(_ kind: NodeKind, in location: Location, createdAt: Date) throws -> NodeID {
+  mutating func insert(_ kind: NodeKind, in location: Location, createdAt: Date) throws -> NodeID {
     try validate(location, accepting: kind)
     let node = Node(kind: kind, parent: location, createdAt: createdAt)
     guard depth(ofChildIn: location) <= Self.maximumNestingDepth else { throw SidebarError.nestingTooDeep(node.id) }
