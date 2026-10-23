@@ -4,6 +4,7 @@ import XCTest
 /// Waits on accessibility state, never on time (plan, Rules: "No sleeps"). Every wait is an
 /// `XCTNSPredicateExpectation` evaluated by `XCTWaiter`, and fails the test with the element's description when it
 /// times out.
+@MainActor
 enum Waits {
   /// The default timeout in seconds before scaling.
   static let defaultTimeout: TimeInterval = 10
@@ -27,9 +28,9 @@ enum Waits {
     timeout: TimeInterval? = nil,
     file: StaticString = #filePath,
     line: UInt = #line,
-    _ condition: @escaping () -> Bool
+    _ condition: @escaping @MainActor () -> Bool
   ) -> Bool {
-    let predicate = NSPredicate { _, _ in condition() }
+    let predicate = NSPredicate { _, _ in MainActor.assumeIsolated { condition() } }
     let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
     let limit = scaled(timeout)
     let result = XCTWaiter().wait(for: [expectation], timeout: limit)
@@ -43,6 +44,7 @@ enum Waits {
 
 // MARK: - Helpers for test cases
 
+@MainActor
 extension XCTestCase {
   @discardableResult
   func waitFor(

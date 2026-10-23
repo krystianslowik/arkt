@@ -540,6 +540,10 @@ Base: `origin/main` at `c5f9db8`, branch `chore/199-harden-u2-harness`.
   out-of-process `AXUIElement` traversal.
 - `LaunchTests.test_E_sandboxGuardAndExtraEnvRestrictions` covers the `Sandbox.checkSafe` prefix rules and
   `mergedEnvironment` / `launch(_:extraEnv:)` rejections.
+- `Waits.swift` (`Waits` and the `XCTestCase` wait helpers) is `@MainActor`-isolated so `XCUIElement` property reads
+  compile with zero Swift 6 concurrency warnings on Xcode 26.6+, and `.github/workflows/swift-tests.yml` and
+  `CONTRIBUTING.md` pass `-collect-test-diagnostics never` on `xcodebuild ... test` so Xcode never records whole-screen
+  videos (plan decision 7).
 
 ### Verification
 
