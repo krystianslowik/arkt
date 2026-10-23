@@ -12,11 +12,14 @@ public struct ArchiveImportReport: Hashable, Sendable {
   public var fromLittleArc = 0
   public var fromUnknown = 0
   public var skipped: [SkippedItem] = []
+  /// Counts-only `DecodingError` classifications for `decodeFailed` entries (#100).
+  public var decodeFailures: [ArcDecodeFailureKind] = []
   public var warnings: [ImportWarning] = []
 
   public init(
     entries: Int = 0, imported: Int = 0, manual: Int = 0, auto: Int = 0, fromSpace: Int = 0, fromLittleArc: Int = 0,
-    fromUnknown: Int = 0, skipped: [SkippedItem] = [], warnings: [ImportWarning] = []
+    fromUnknown: Int = 0, skipped: [SkippedItem] = [], decodeFailures: [ArcDecodeFailureKind] = [],
+    warnings: [ImportWarning] = []
   ) {
     self.entries = entries
     self.imported = imported
@@ -26,6 +29,7 @@ public struct ArchiveImportReport: Hashable, Sendable {
     self.fromLittleArc = fromLittleArc
     self.fromUnknown = fromUnknown
     self.skipped = skipped
+    self.decodeFailures = decodeFailures
     self.warnings = warnings
   }
 }
@@ -62,6 +66,7 @@ public enum ArcArchiveImporter {
       let id = pair.key
       guard let entry = pair.value.value else {
         report.skipped.append(SkippedItem(itemID: id, reason: .decodeFailed(pair.value.failureReason ?? "unknown")))
+        report.decodeFailures.append(pair.value.decodeFailure ?? ArcDecodeFailureKind(errorCase: .other))
         continue
       }
       let snapshot: NodeSnapshot
@@ -70,6 +75,7 @@ public enum ArcArchiveImporter {
         snapshot = made
       } catch {
         report.skipped.append(SkippedItem(itemID: id, reason: .decodeFailed(String(describing: error))))
+        report.decodeFailures.append(ArcDecodeFailureKind(error))
         continue
       }
 

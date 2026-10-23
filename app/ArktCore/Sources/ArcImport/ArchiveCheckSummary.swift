@@ -8,7 +8,13 @@ public enum ArchiveCheckSummary {
       "archive sources: space \(report.fromSpace), little arc \(report.fromLittleArc), unknown \(report.fromUnknown)",
       "archive skipped: \(report.skipped.count)",
     ]
-    out += ImportCheckSummary.grouped(report.skipped.map { ImportCheckSummary.caseName($0.reason) })
+    let breakdown = Dictionary(report.decodeFailures.map { ($0.label, 1) }, uniquingKeysWith: +)
+      .sorted { $0.key < $1.key }
+      .map { "    \($0.key): \($0.value)" }
+    for line in ImportCheckSummary.grouped(report.skipped.map { ImportCheckSummary.caseName($0.reason) }) {
+      out.append(line)
+      if line.hasPrefix("  decodeFailed:") { out += breakdown }
+    }
     out.append("archive warnings: \(report.warnings.count)")
     out += ImportCheckSummary.grouped(report.warnings.map { ImportCheckSummary.caseName($0) })
     return out

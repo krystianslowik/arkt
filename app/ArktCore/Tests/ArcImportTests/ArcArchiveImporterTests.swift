@@ -54,7 +54,8 @@ struct ArcArchiveImporterTests {
     #expect(result.items.count == 7)
     #expect(result.report == ArchiveImportReport(
       entries: 10, imported: 7, manual: 5, auto: 2, fromSpace: 4, fromLittleArc: 1, fromUnknown: 2,
-      skipped: result.report.skipped, warnings: result.report.warnings))
+      skipped: result.report.skipped, decodeFailures: [.init(errorCase: .keyNotFound, key: "archivedAt")],
+      warnings: result.report.warnings))
     #expect(result.report.skipped.count == 3)
     #expect(result.report.warnings.count == 2)
   }

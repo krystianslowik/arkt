@@ -31,7 +31,9 @@ public struct SettingsStore: Sendable {
 
   public init(database: ArktDatabase) { self.database = database }
 
-  /// The stored group, or its default when missing or unreadable.
+  /// The stored group, or its default when missing or unreadable (#100: an unreadable stored group is not quarantined;
+  /// `load` returns `Group.defaultValue` and the next `save` or read-modify-write helper overwrites the row with valid
+  /// JSON).
   @concurrent
   public func load<Group: SettingsGroup>(_ type: Group.Type) async throws -> Group {
     dispatchPrecondition(condition: .notOnQueue(.main))

@@ -129,4 +129,16 @@ struct ImportCheckSummaryTests {
     ]
     for warning in warnings { #expect(ImportCheckSummary.caseName(warning) == Self.expectedName(warning)) }
   }
+
+  /// #100: `ImportCheckSummary.caseName` relies on `String(describing:)` formatting enum values as
+  /// `caseName(payload)`, which holds only while the summarized enums do not conform to custom string protocols.
+  @Test func summarizedEnumsDoNotCustomizeStringDescriptions() {
+    let types: [Any.Type] = [SkipReason.self, ImportWarning.self]
+    for type in types {
+      #expect(!(type is any CustomStringConvertible.Type))
+      #expect(!(type is any CustomDebugStringConvertible.Type))
+      #expect(!(type is any LosslessStringConvertible.Type))
+      #expect(!(type is any TextOutputStreamable.Type))
+    }
+  }
 }

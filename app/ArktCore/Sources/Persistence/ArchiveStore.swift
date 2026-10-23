@@ -6,6 +6,9 @@ import SidebarModel
 /// The `archived_item` table. Snapshots are stored as canonical D1 `NodeSnapshot` JSON; title, URL, reason, source
 /// and section are columns. Every method is `@concurrent`: encoding and decoding run on the global executor even when
 /// called from the main actor, and SQL runs on GRDB's queue.
+///
+/// Retention (Track D open question 9, #100): archived items are kept until the user restores them (`remove`) or
+/// clears the archive (`removeAll`, BH-087); no automatic time- or count-based pruning is performed.
 public struct ArchiveStore: Sendable {
   let database: ArktDatabase
 
