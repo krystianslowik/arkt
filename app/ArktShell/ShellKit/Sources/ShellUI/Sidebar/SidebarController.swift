@@ -24,6 +24,9 @@ public final class SidebarController {
   public var onConvertSplit: (@MainActor (NodeID) -> Void)?
   public var onDuplicateSplit: (@MainActor (NodeID) -> Void)?
   public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
+  /// A tab row's drag of every Space page started and ended (S7), forwarded from `SidebarOutlineController`.
+  public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
+  public var onNodeDragEnded: (@MainActor () -> Void)?
   /// The "+" button in the bottom bar.
   public var onNewTab: (@MainActor () -> Void)?
   /// The pane to focus when a split row is activated (decision 7: the split's last focused pane). Nil, or a node
@@ -182,6 +185,8 @@ public final class SidebarController {
     page.outlineController.onConvertSplit = { [weak self] node in self?.onConvertSplit?(node) }
     page.outlineController.onDuplicateSplit = { [weak self] node in self?.onDuplicateSplit?(node) }
     page.outlineController.onDuplicateIntoSplit = { [weak self] node in self?.onDuplicateIntoSplit?(node) }
+    page.outlineController.onNodeDragBegan = { [weak self] node in self?.onNodeDragBegan?(node) }
+    page.outlineController.onNodeDragEnded = { [weak self] in self?.onNodeDragEnded?() }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
     page.outlineController.setRowStates(resolver)
     pages[id] = page

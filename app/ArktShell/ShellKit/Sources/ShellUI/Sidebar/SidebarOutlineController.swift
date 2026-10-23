@@ -1,5 +1,10 @@
 import AppKit
 
+extension NSPasteboard.PasteboardType {
+  /// A sidebar node dragged inside the app: the node's UUID string. Only tab rows write it (S7).
+  static let sidebarNode = NSPasteboard.PasteboardType("dev.arkt.sidebar-node")
+}
+
 /// NSOutlineView compares items by identity, so every node is represented by one cached instance.
 @MainActor
 public final class OutlineItem: NSObject {
@@ -94,6 +99,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public var onDuplicateSplit: (@MainActor (NodeID) -> Void)?
   /// Opt-click on the current plain tab: duplicate it into a split (GS-032).
   public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
+  /// A tab row started a drag (S7, GS-011); the window shows its drop overlay above the page.
+  public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
+  /// The drag that `onNodeDragBegan` reported ended, dropped or not.
+  public var onNodeDragEnded: (@MainActor () -> Void)?
   /// Favicon for a tab, nil = letter placeholder.
   public var faviconProvider: (@MainActor (NodeID) -> NSImage?)?
 
@@ -129,6 +138,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.autoresizesOutlineColumn = false
     outlineView.target = self
     outlineView.action = #selector(rowClicked(_:))
+    outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
+    outlineView.setDraggingSourceOperationMask([], forLocal: false)   // tabs stay inside the app
     let menu = NSMenu()
     menu.autoenablesItems = false
     menu.delegate = self
@@ -190,6 +201,37 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     guard let id = (item as? OutlineItem)?.nodeID else { return false }
     return source.node(id)?.childLocation != nil
   }
+
+  // MARK: Drag source (S7)
+
+  /// Tab rows (plain tabs, tabs in folders, panes) write their node id under the private `.sidebarNode` type; folders,
+  /// splits and the divider are not dragged.
+  public func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any)
+    -> (any NSPasteboardWriting)? {
+    guard let id = (item as? OutlineItem)?.nodeID, isTab(id) else { return nil }
+    let pasteboardItem = NSPasteboardItem()
+    pasteboardItem.setString(id.uuidString, forType: .sidebarNode)
+    return pasteboardItem
+  }
+
+  public func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
+                          willBeginAt screenPoint: NSPoint, forItems draggedItems: [Any]) {
+    draggingSessionWillBegin(items: draggedItems)
+  }
+
+  public func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
+                          endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+    draggingSessionEnded()
+  }
+
+  /// Rows cannot be selected, so a drag carries one row: the first tab among `items`.
+  func draggingSessionWillBegin(items: [Any]) {
+    let ids = items.compactMap { ($0 as? OutlineItem)?.nodeID }
+    guard let id = ids.first(where: isTab) else { return }
+    onNodeDragBegan?(id)
+  }
+
+  func draggingSessionEnded() { onNodeDragEnded?() }
 
   // MARK: Delegate
 
@@ -421,6 +463,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     case nil:
       return
     }
+  }
+
+  private func isTab(_ id: NodeID) -> Bool {
+    if case .tab? = source.node(id) { true } else { false }
   }
 
   private func isPane(_ id: NodeID) -> Bool {
