@@ -509,3 +509,37 @@ build Profile. Release check, must print `0`:
 ```zsh
 cd app/ArktShell && strings build/Build/Products/Release/ArktShell.app/Contents/MacOS/ArktShell | grep -c ArktSmoke
 ```
+
+## Text contrast of secondaryText and sidebarForeground (#72)
+
+`ShellTokensContrastTests` (ShellUITests) composites each token over every shipped Space theme surface and
+measures it with `Contrast` from #66. Surfaces: the bridge default, the empty-theme white fallback and the
+`StubSidebar.sample()` Spaces, each gradient sampled at 33 points per stop pair (a component-wise blend can be
+darker than both ends), plus the fills a token sits on at its call sites. Compositing is source-over in Display P3
+components; the result is converted to sRGB before `Contrast.ratio`. The grain layer is ignored (soft light,
+mean-preserving). Arc-imported themes are user data and not covered.
+
+Targets per token, from the call sites:
+
+- `secondaryText` is text (Space title, URL bar label, toolbar buttons): 4.5:1 over the theme, the URL bar fills
+  (`sidebarItemBackground`, `sidebarItemHovered`) and the opaque `toolbarSurface`.
+- `sidebarForeground` is icon-only (idle page dots, bottom-bar symbols, hover close X; row titles use
+  `primaryText`): 3:1 over the theme and every row fill the hovered row can have.
+
+Worst case, before and after:
+
+| Token | Mode | Before | After | Worst surface |
+|---|---|---|---|---|
+| `secondaryText` | light | 0.50: 3.16:1 | 0.64: 4.55:1 | hovered URL bar over the pink stop `#F29BBB` |
+| `secondaryText` | dark | 0.50: 2.91:1 | 0.76: 4.53:1 | hovered URL bar over the Dev stop `#2D4468` |
+| `sidebarForeground` | light | 0.30: 1.92:1 | 0.48: 3.00:1 | close X on a hovered row over `#F29BBB` |
+| `sidebarForeground` | dark | 0.45: 2.45:1 | 0.57: 3.00:1 | close X on `tabCurrent` over `#2D4468` |
+
+One step lower (0.63, 0.75, 0.47, 0.56) fails each case, so these are the smallest passing values at 0.01. The
+order primary > secondary > sidebar foreground holds in both modes and is asserted. Arc parity: both tokens are
+now darker (light) and brighter (dark) than Arc's levels.
+
+Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over `#2D4468`, below 4.5.
+
+Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 334 tests (327 plus 7 new), XCTest 181 tests
+(GUI included), 0 failures. Debug app build: `** BUILD SUCCEEDED **`.

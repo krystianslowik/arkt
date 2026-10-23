@@ -22,11 +22,17 @@ public struct TokenPair: Sendable, Equatable {
 public enum ShellTokens {
   public static let cardBorder = TokenPair(light: .black(0.10), dark: .white(0.20))       // FloatingScrimBorder
   public static let cardShadow = TokenPair(light: .black(0.20), dark: .black(0))           // Shadow
-  public static let sidebarForeground = TokenPair(light: .black(0.30), dark: .white(0.45))
+  /// Icon-only (idle page dots, bottom-bar symbols, the hover close X): WCAG non-text 3:1 over every shipped
+  /// Space theme and row fill. Raised from Arc's 0.30 / 0.45 (#72); worst cases are the close X on a hovered row
+  /// over the sample pink stop (light) and on `tabCurrent` over the Dev theme's light stop (dark).
+  public static let sidebarForeground = TokenPair(light: .black(0.48), dark: .white(0.57))
   public static let sidebarItemBackground = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.05), dark: .p3(hex: 0xFAFBFF, alpha: 0.10))
   public static let sidebarItemHovered = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.10), dark: .p3(hex: 0xFAFBFF, alpha: 0.15))
   public static let primaryText = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.90), dark: .white(0.80))
-  public static let secondaryText = TokenPair(light: .black(0.50), dark: .white(0.50))
+  /// Text (Space title, URL bar label, toolbar buttons): WCAG AA 4.5:1 over every shipped Space theme, the URL bar
+  /// fills and the toolbar strip. Raised from Arc's 0.50 / 0.50 (#72); the worst case is the hovered URL bar
+  /// (`sidebarItemHovered`) over the sample pink stop (light) and the Dev theme's light stop (dark).
+  public static let secondaryText = TokenPair(light: .black(0.64), dark: .white(0.76))
   // Tab cell states (C3 tests these levels).
   public static let tabCurrent = TokenPair(light: .white(0.85), dark: .p3(hex: 0xFAFBFF, alpha: 0.20))
   public static let tabContentVisible = TokenPair(light: .white(0.70), dark: .p3(hex: 0xFAFBFF, alpha: 0.15))
