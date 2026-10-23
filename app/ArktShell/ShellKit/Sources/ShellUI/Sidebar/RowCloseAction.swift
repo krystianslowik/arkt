@@ -2,9 +2,10 @@ import Foundation
 
 /// What a sidebar row's (or a Favorite tile's) hover close button does (GS-043), which decides its tooltip and its
 /// VoiceOver action name.
-/// The action itself is the window's: the same close as Cmd-W (`ShellWindowController.close(node:)`).
+/// The action itself is the window's: the same close as Cmd-W (`ShellWindowController.close(node:)`), except on a
+/// pane row, where the X takes the pane out of its split (BH-121).
 public enum RowCloseAction: Equatable, Sendable {
-  /// A Today tab or a Today split pane: archived (BH-071; a pane alone, user decision 4).
+  /// A Today tab: archived (BH-071).
   case archiveTab
   /// A whole Today split: archived as one unit.
   case archiveSplit
@@ -12,15 +13,20 @@ public enum RowCloseAction: Equatable, Sendable {
   case closeKeepPinned
   /// A Favorite: its page closes and the tile stays (BH-048 [I]). The grid shows the X only on a loaded tile (#82).
   case closeFavorite
+  /// A pane of a split, in any section: it leaves the split as its own tab with its page, right after the split
+  /// (BH-121, maintainer decision on #56, 2026-10-23). Cmd-W on a pane still closes it (user decision 4).
+  case removeFromSplit
 
-  /// The action for the row of `id`, by its top-level section and kind. Nil for folders (they only expand and
-  /// collapse) and unknown nodes.
+  /// The action for the row of `id`: `.removeFromSplit` for a pane, otherwise by its top-level section and kind. Nil
+  /// for folders (they only expand and collapse) and unknown nodes.
   @MainActor
   public static func resolve(_ id: NodeID, in source: any SidebarSource) -> RowCloseAction? {
     guard let node = source.node(id) else { return nil }
     let isSplit: Bool
     switch node {
-    case .tab: isSplit = false
+    case .tab:
+      if case .split? = source.parent(of: id) { return .removeFromSplit }
+      isSplit = false
     case .split: isSplit = true
     case .folder: return nil
     }
@@ -39,6 +45,7 @@ public enum RowCloseAction: Equatable, Sendable {
     case .archiveSplit: "Archive this split"
     case .closeKeepPinned: "Close and Keep Pinned"
     case .closeFavorite: "Close this tab"
+    case .removeFromSplit: "Remove Tab from Split View"     // [S] string (BH-121)
     }
   }
 
@@ -47,6 +54,7 @@ public enum RowCloseAction: Equatable, Sendable {
     switch self {
     case .archiveTab, .archiveSplit: "Archive"
     case .closeKeepPinned, .closeFavorite: "Close"
+    case .removeFromSplit: "Remove Tab from Split View"
     }
   }
 }

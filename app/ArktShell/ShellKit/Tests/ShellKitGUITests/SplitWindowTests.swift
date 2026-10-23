@@ -392,7 +392,7 @@ final class SplitWindowTests: XCTestCase {
     let harness = Harness(world.0)
     harness.controller.activate(node: world.panes[0])
 
-    harness.controller.close(node: world.panes[1])                // the pane row's hover X
+    harness.controller.close(node: world.panes[1])                // the Cmd-W close of a single pane
 
     XCTAssertNil(harness.tab(world.panes[1]))
     XCTAssertEqual(harness.source.children(of: .split(world.split)), world.panes, "the pane row stays")

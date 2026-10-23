@@ -12,7 +12,8 @@ struct SplitWindowState {
   var focus: NodeID?
   /// Last focused pane per split (decision 7) [I]. Activating a split row focuses it.
   var activePane: [NodeID: NodeID] = [:]
-  /// Panes whose page was closed while their node stayed (Cmd-W or the X on a Pinned or Favorite pane): they show a
+  /// Panes whose page was closed while their node stayed (Cmd-W on a Pinned or Favorite pane, the X on a Pinned split
+  /// row, or the page closing itself): they show a
   /// placeholder until clicked or activated, and showing the split again does not reopen them (decision 6) [I]
   /// PARITY(NEEDS-RUNTIME-CHECK RT-36). Forgotten when every pane of the split is closed.
   var closedPanes: Set<NodeID> = []
@@ -249,7 +250,7 @@ extension ShellWindowController {
     }
   }
 
-  /// A page closed in a split that is not on screen (the X on a pane of another split, or the page closing itself).
+  /// A page closed in a split that is not on screen (the X on a Pinned split row, or the page closing itself).
   /// A pane that stays in the source is remembered as closed, so showing its split later does not reopen it
   /// (decision 6); when no pane of that split has a page any more, the split forgets its closed panes and opens
   /// afresh, as for the shown split.

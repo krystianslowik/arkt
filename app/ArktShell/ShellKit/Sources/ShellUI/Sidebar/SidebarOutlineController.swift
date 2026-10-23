@@ -82,11 +82,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// A tab or split row was clicked (folders toggle in place).
   public var onActivate: (@MainActor (NodeID) -> Void)?
   /// A row's hover close (X) button or its VoiceOver close action was used (GS-043); the window runs the same
-  /// close as Cmd-W.
+  /// close as Cmd-W. A pane row's X goes to `onRemovePane` instead (BH-121).
   public var onClose: (@MainActor (NodeID) -> Void)?
   /// Separate All Tabs on a split row: its context menu, or an Opt-click on it (BH-121, GS-033).
   public var onSeparateSplit: (@MainActor (NodeID) -> Void)?
-  /// Remove Tab from Split View on a pane row's context menu (BH-121).
+  /// Remove Tab from Split View: a pane row's X, its context menu or its VoiceOver action (BH-121).
   public var onRemovePane: (@MainActor (NodeID) -> Void)?
   /// Convert to Vertical / Horizontal Split View on a split row's context menu (BH-120).
   public var onConvertSplit: (@MainActor (NodeID) -> Void)?
@@ -476,27 +476,30 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   // MARK: Close
 
-  /// The X of a row's cell. Opt-click unsplitting a split (BH-127) is gated behind an Arc flag and
-  /// NEEDS-RUNTIME-CHECK (RT-22), so it is not implemented: an Opt-click closes like a plain click.
+  /// The X of a row's cell: on a pane row it removes the pane from its split (BH-121); on any other row it runs the
+  /// window's close, as Cmd-W does. Opt-click unsplitting a split (BH-127) is gated behind an Arc flag and
+  /// NEEDS-RUNTIME-CHECK (RT-22), so it is not implemented: an Opt-click acts like a plain click.
   @objc private func closeClicked(_ sender: NSButton) {
     let row = outlineView.row(for: sender)
     guard row >= 0, let id = (outlineView.item(atRow: row) as? OutlineItem)?.nodeID else { return }
-    onClose?(id)
+    closeAction(for: id)?(id)
   }
 
-  /// VoiceOver actions of a row: "Close" or "Archive" on a closable row, plus the split edits of its context menu
-  /// ("Separate All Tabs" on a split row, "Remove Tab from Split View" on a pane row); none for folders and the
-  /// divider.
+  /// Where a row's X (and its VoiceOver equivalent) goes: `onRemovePane` on a pane row, else `onClose`.
+  private func closeAction(for id: NodeID) -> (@MainActor (NodeID) -> Void)? {
+    RowCloseAction.resolve(id, in: source) == .removeFromSplit ? onRemovePane : onClose
+  }
+
+  /// VoiceOver actions of a row: the X's action ("Close", "Archive", or "Remove Tab from Split View" on a pane row),
+  /// plus "Separate All Tabs" on a split row; none for folders and the divider.
   func accessibilityActions(for id: NodeID?) -> [NSAccessibilityCustomAction] {
     guard let id else { return [] }
     var actions: [NSAccessibilityCustomAction] = []
     if let action = RowCloseAction.resolve(id, in: source) {
-      actions.append(customAction(action.accessibilityName, id) { $0.onClose })
+      actions.append(customAction(action.accessibilityName, id) { $0.closeAction(for: id) })
     }
-    switch source.node(id) {
-    case .split?: actions.append(customAction("Separate All Tabs", id) { $0.onSeparateSplit })
-    case .tab? where isPane(id): actions.append(customAction("Remove Tab from Split View", id) { $0.onRemovePane })
-    default: break
+    if case .split? = source.node(id) {
+      actions.append(customAction("Separate All Tabs", id) { $0.onSeparateSplit })
     }
     return actions
   }

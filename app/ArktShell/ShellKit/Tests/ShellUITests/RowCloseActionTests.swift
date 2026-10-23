@@ -30,14 +30,17 @@ struct RowCloseActionTests {
     #expect(RowCloseAction.resolve(today, in: sidebar) == .archiveTab)
   }
 
-  /// User decision 4: a pane closes just itself, so it reads like a tab of its section.
-  @Test func splitPanesActLikeTabsOfTheirSection() {
+  /// BH-121 (maintainer decision on #56): the X on a pane takes it out of its split, in every section; Cmd-W still
+  /// closes the pane alone (user decision 4).
+  @Test func splitPanesAreRemovedFromTheirSplit() {
     let todaySplit = sidebar.addSplit(in: .today(space))
     let todayPane = sidebar.addTab(url: url, title: "L", in: .split(todaySplit))
     let pinnedSplit = sidebar.addSplit(in: .pinned(space))
     let pinnedPane = sidebar.addTab(url: url, title: "R", in: .split(pinnedSplit))
-    #expect(RowCloseAction.resolve(todayPane, in: sidebar) == .archiveTab)
-    #expect(RowCloseAction.resolve(pinnedPane, in: sidebar) == .closeKeepPinned)
+    #expect(RowCloseAction.resolve(todayPane, in: sidebar) == .removeFromSplit)
+    #expect(RowCloseAction.resolve(pinnedPane, in: sidebar) == .removeFromSplit)
+    #expect(RowCloseAction.removeFromSplit.tooltip == "Remove Tab from Split View")
+    #expect(RowCloseAction.removeFromSplit.accessibilityName == "Remove Tab from Split View")
   }
 
   @Test func splitRowsArchiveOrCloseTheWholeSplit() {

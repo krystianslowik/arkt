@@ -16,6 +16,7 @@ public final class SidebarController {
   /// A tab became current (fires on every activation, including re-activating the current tab).
   public var onActivate: (@MainActor (NodeID) -> Void)?
   /// A row's hover close (X) button or VoiceOver close action (GS-043); the window closes the node as Cmd-W does.
+  /// A pane row's X goes to `onRemovePane` instead (BH-121).
   public var onClose: (@MainActor (NodeID) -> Void)?
   /// Split row interactions of every Space page (S6), forwarded from `SidebarOutlineController`.
   public var onSeparateSplit: (@MainActor (NodeID) -> Void)?

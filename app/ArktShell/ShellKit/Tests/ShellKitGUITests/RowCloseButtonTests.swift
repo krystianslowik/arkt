@@ -354,14 +354,15 @@ final class RowCloseButtonTests: XCTestCase {
 
   // MARK: Tooltips
 
-  /// GS-043 [S]: "Archive this tab" on Today, "Close and Keep Pinned" on pinned; panes read like tabs (decision 4).
+  /// GS-043 [S]: "Archive this tab" on Today, "Close and Keep Pinned" on pinned; a pane's X removes it from its split
+  /// (BH-121 [S]).
   func testTooltipsPerKind() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     XCTAssertEqual(try harness.cell(world.today[0]).closeButton.toolTip, "Archive this tab")
     XCTAssertEqual(try harness.cell(world.pinned).closeButton.toolTip, "Close and Keep Pinned")
     XCTAssertEqual(try harness.cell(world.split).closeButton.toolTip, "Archive this split")
-    XCTAssertEqual(try harness.cell(world.panes[0]).closeButton.toolTip, "Archive this tab")
+    XCTAssertEqual(try harness.cell(world.panes[0]).closeButton.toolTip, "Remove Tab from Split View")
     XCTAssertEqual(try harness.cell(world.today[0]).closeButton.accessibilityLabel(), "Archive this tab")
     harness.controller.close()
   }
@@ -447,16 +448,18 @@ final class RowCloseButtonTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// User decision 4: the X on a pane archives only that pane.
-  func testClosingAPaneArchivesOnlyThatPane() throws {
+  /// BH-121 (maintainer decision on #56): the X on a pane removes it from its split as its own tab, right after the
+  /// split, and archives nothing; a split left with one pane becomes that tab.
+  func testTheXOnAPaneRemovesItFromTheSplit() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     harness.controller.activate(node: world.today[0])
 
     try harness.clickClose(world.panes[0])
 
-    XCTAssertEqual(harness.archived, [[world.panes[0]]])
-    XCTAssertNotNil(harness.source.node(world.panes[1]))
+    XCTAssertEqual(harness.archived, [])
+    XCTAssertNil(harness.source.node(world.split), "the split held one pane and collapsed")
+    XCTAssertEqual(harness.source.children(of: .today(world.space)), world.today + [world.panes[1], world.panes[0]])
     XCTAssertEqual(harness.controller.sidebarController.current, world.today[0])
     harness.controller.close()
   }

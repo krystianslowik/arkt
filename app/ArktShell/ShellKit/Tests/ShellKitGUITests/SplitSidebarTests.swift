@@ -307,7 +307,7 @@ final class SplitSidebarTests: XCTestCase {
 
     XCTAssertEqual(outline.accessibilityActions(for: world.split).map(\.name), ["Archive", "Separate All Tabs"])
     let paneActions = outline.accessibilityActions(for: world.panes[1])
-    XCTAssertEqual(paneActions.map(\.name), ["Archive", "Remove Tab from Split View"])
+    XCTAssertEqual(paneActions.map(\.name), ["Remove Tab from Split View"], "the pane's X action, not an archive")
     XCTAssertEqual(outline.accessibilityActions(for: world.today[0]).map(\.name), ["Archive"])
 
     XCTAssertTrue(try XCTUnwrap(paneActions.last?.handler)())
@@ -315,6 +315,34 @@ final class SplitSidebarTests: XCTestCase {
     XCTAssertEqual(harness.children(.today(world.space)),
                    [world.today[0], world.panes[0], world.panes[1], world.today[1]])
     XCTAssertEqual(harness.archived, [])
+    harness.controller.close()
+  }
+
+  // MARK: Pane row X (BH-121, maintainer decision on #56)
+
+  /// The X on a Pinned pane row takes the pane out of the split with its page; nothing closes, nothing is archived.
+  func testTheXOnAPinnedPaneRowSeparatesItAndKeepsItsPage() throws {
+    let world = try Self.makePinnedSplitWorld()
+    let harness = Harness(world.0)
+    harness.controller.activate(node: world.panes[0])
+    let tabs = harness.engine.tabIDs
+    let outline = try harness.outline()
+    let cell = try XCTUnwrap(outline.outlineView.view(atColumn: 0, row: try harness.row(world.panes[1]),
+                                                      makeIfNecessary: true) as? SidebarTabCellView)
+    XCTAssertEqual(cell.closeAction, .removeFromSplit)
+    XCTAssertEqual(cell.closeButton.toolTip, "Remove Tab from Split View")
+
+    cell.closeButton.performClick(nil)
+
+    XCTAssertNil(harness.source.node(world.split), "a split left with one pane becomes that tab")
+    guard case .pinned(let space)? = harness.source.parent(of: world.panes[0]) else { return XCTFail("not pinned") }
+    XCTAssertEqual(harness.children(.pinned(space)), world.panes)
+    XCTAssertEqual(harness.engine.tabIDs, tabs, "the separated pane keeps its page")
+    XCTAssertEqual(harness.archived, [])
+    XCTAssertEqual(harness.current, world.panes[0])
+    waitUntil("the card to show pane 0's page alone") {
+      harness.split.isHidden && harness.controller.rootView.card.contentView === harness.page(world.panes[0])
+    }
     harness.controller.close()
   }
 
@@ -330,8 +358,8 @@ final class SplitSidebarTests: XCTestCase {
     return (sidebar, split, panes, other)
   }
 
-  /// The X on a Pinned pane while a plain tab is shown closes its page; showing the split again keeps it closed (a
-  /// placeholder, no engine tab) instead of reopening it.
+  /// A single Pinned pane closed while a plain tab is shown (the window's `close(node:)`, the Cmd-W path; the pane
+  /// row's X now separates instead) stays closed when the split shows again: a placeholder, no engine tab.
   func testPinnedPaneClosedWhileItsSplitIsOffScreenStaysClosed() throws {
     let world = try Self.makePinnedSplitWorld()
     let harness = Harness(world.0)
@@ -340,7 +368,7 @@ final class SplitSidebarTests: XCTestCase {
     harness.controller.activate(node: world.other)
     XCTAssertTrue(harness.split.isHidden)
 
-    harness.controller.sidebarController.onClose?(world.panes[1])          // the pane row's hover X
+    harness.controller.close(node: world.panes[1])
     XCTAssertNil(harness.tab(world.panes[1]))
 
     harness.controller.activate(node: world.panes[0])
