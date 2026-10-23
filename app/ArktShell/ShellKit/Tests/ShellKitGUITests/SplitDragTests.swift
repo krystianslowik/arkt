@@ -14,7 +14,7 @@ import XCTest
 final class SplitDragTests: XCTestCase {
   private static let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
-  /// A Space with Pinned `[folder(f0)]` and Today `[t0, t1, t2, split(s0 ... sN-1)]`.
+  /// A Space with Pinned `[folder(f0)]`, Today `[t0, t1, t2, split(s0 ... sN-1)]` and Favorites `[fav0, favFolder]`.
   private struct World {
     var sidebar = SidebarModel.Sidebar()
     var space: UUID
@@ -23,6 +23,8 @@ final class SplitDragTests: XCTestCase {
     var today: [UUID]
     var split: UUID
     var panes: [UUID]
+    var favoriteTab: UUID
+    var favoriteFolder: UUID
   }
 
   @MainActor
@@ -43,6 +45,7 @@ final class SplitDragTests: XCTestCase {
     var split: SplitContainerView { root.split }
     var current: UUID? { controller.sidebarController.current }
     var overlay: SplitDropOverlayView? { controller.splitState.dropOverlay }
+    var favorites: FavoritesGridView { controller.sidebarController.view.favorites }
 
     func outline() throws -> SidebarOutlineController {
       try XCTUnwrap(controller.sidebarController.currentPage?.outlineController)
@@ -54,6 +57,13 @@ final class SplitDragTests: XCTestCase {
       return outline.outlineView(outline.outlineView, pasteboardWriterForItem: outline.item(for: node))
     }
 
+    /// What the Favorites grid writes to the pasteboard for `node`'s tile (nil: the tile cannot be dragged).
+    func favoriteWriter(_ node: UUID) throws -> NSPasteboardWriting? {
+      let index = try XCTUnwrap(favorites.nodeIDs.firstIndex(of: node))
+      return favorites.collectionView(favorites.collectionView,
+                                      pasteboardWriterForItemAt: IndexPath(item: index, section: 0))
+    }
+
     /// Starts a sidebar drag of `node` the way the outline's dragging session does, and returns the overlay.
     func beginDrag(_ node: UUID) throws -> SplitDropOverlayView {
       let outline = try outline()
@@ -62,6 +72,15 @@ final class SplitDragTests: XCTestCase {
     }
 
     func endDrag() throws { try outline().draggingSessionEnded() }
+
+    /// Starts a Favorites tile drag of `node` the way the grid's dragging session does, and returns the overlay.
+    func beginFavoriteDrag(_ node: UUID) throws -> SplitDropOverlayView {
+      let index = try XCTUnwrap(favorites.nodeIDs.firstIndex(of: node))
+      favorites.draggingSessionWillBegin(indexPaths: [IndexPath(item: index, section: 0)])
+      return try XCTUnwrap(overlay, "no drop overlay during a Favorites drag")
+    }
+
+    func endFavoriteDrag() { favorites.draggingSessionEnded() }
 
     /// A point in `overlay` at fractions of its width and height (unflipped: 1 is the top).
     func point(_ overlay: SplitDropOverlayView, _ x: CGFloat, _ y: CGFloat) -> CGPoint {
@@ -96,13 +115,16 @@ final class SplitDragTests: XCTestCase {
     let factors = Array(repeating: 1 / Double(count), count: count)
     let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: factors, in: .today(space))
     let panes = try (0..<count).map { try sidebar.addTab(url: url("s\($0)"), title: "S\($0)", in: .split(split)) }
+    let favoriteTab = try sidebar.addTab(url: url("fav0"), title: "Fav0", in: .favorites(profile: "default"))
+    let favoriteFolder = try sidebar.addFolder(title: "FavF", in: .favorites(profile: "default"))
     return World(sidebar: sidebar, space: space, folder: folder, folderTab: folderTab, today: today, split: split,
-                 panes: panes)
+                 panes: panes, favoriteTab: favoriteTab, favoriteFolder: favoriteFolder)
   }
 
   // MARK: Drag source
 
-  /// Only tab rows (plain tabs, tabs in folders, panes) write the private node type, with the node's id.
+  /// Only tab rows (plain tabs, tabs in folders, panes) and tab Favorites tiles write the private node type, with the
+  /// node's id.
   func testPasteboardWriterOnlyForTabs() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
@@ -118,6 +140,57 @@ final class SplitDragTests: XCTestCase {
     let divider = try XCTUnwrap(outline.outlineView.item(atRow: outline.dividerRow))
     XCTAssertNil(outline.outlineView(outline.outlineView, pasteboardWriterForItem: divider),
                  "the divider is not a drag source")
+
+    let favItem = try XCTUnwrap(try harness.favoriteWriter(world.favoriteTab) as? NSPasteboardItem,
+                                "a Favorite tab tile is a drag source")
+    XCTAssertEqual(favItem.types, [.sidebarNode])
+    XCTAssertEqual(favItem.string(forType: .sidebarNode), world.favoriteTab.uuidString)
+    XCTAssertNil(try harness.favoriteWriter(world.favoriteFolder), "a Favorite folder tile is not a drag source")
+    harness.controller.close()
+  }
+
+  /// Dropping a Favorite tab tile onto a plain tab moves the Favorite out of Favorites and into the new split (BH-115,
+  /// RT-32); clicking a tile activates it while dragging does not.
+  func testDropFavoriteOnPlainTabMovesItIntoSplitAndClickVsDrag() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[1])
+
+    // Click on the Favorite tile activates it.
+    let tile = try XCTUnwrap(harness.favorites.tile(for: world.favoriteTab))
+    let inWindow = tile.convert(NSPoint(x: tile.bounds.midX, y: tile.bounds.midY), to: nil)
+    let windowNumber = harness.controller.window?.windowNumber ?? 0
+    let down = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseDown, location: inWindow, modifierFlags: [], timestamp: 0,
+      windowNumber: windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+    let up = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseUp, location: inWindow, modifierFlags: [], timestamp: 0,
+      windowNumber: windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
+    NSApp.postEvent(up, atStart: false)
+    harness.favorites.collectionView.mouseDown(with: down)
+    XCTAssertEqual(harness.current, world.favoriteTab, "clicking a Favorite tile activates it")
+
+    // Switch back to today[1]; starting a drag on the Favorite tile must not activate it.
+    harness.controller.activate(node: world.today[1])
+    XCTAssertEqual(harness.current, world.today[1])
+    let overlay = try harness.beginFavoriteDrag(world.favoriteTab)
+    harness.favorites.collectionView(harness.favorites.collectionView,
+                                     didSelectItemsAt: [IndexPath(item: 0, section: 0)])
+    XCTAssertEqual(harness.current, world.today[1], "a drag does not activate the tile")
+    XCTAssertTrue(harness.root.subviews.contains { $0 === overlay }, "Favorites drag shows the drop overlay")
+
+    XCTAssertTrue(overlay.drop(node: world.favoriteTab, at: harness.point(overlay, 0.9, 0.5)))
+    harness.endFavoriteDrag()
+    XCTAssertFalse(harness.root.subviews.contains { $0 is SplitDropOverlayView }, "overlay leaves when drag ends")
+
+    let split = try XCTUnwrap(harness.split(holding: world.today[1]), "the current tab is now a pane")
+    XCTAssertEqual(harness.children(.favorites(profile: "default")), [world.favoriteFolder],
+                   "the Favorite was moved out of Favorites, not copied")
+    XCTAssertEqual(harness.children(.today(world.space)), [world.today[0], split, world.today[2], world.split])
+    XCTAssertEqual(harness.children(.split(split)), [world.today[1], world.favoriteTab])
+    waitUntil("the new split shown with the dropped Favorite focused") {
+      harness.root.showsSplit && harness.split.paneCount == 2 && harness.current == world.favoriteTab
+    }
     harness.controller.close()
   }
 

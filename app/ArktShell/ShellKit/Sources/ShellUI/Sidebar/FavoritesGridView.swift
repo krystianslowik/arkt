@@ -154,13 +154,29 @@ public final class FavoriteTileItem: NSCollectionViewItem {
   }
 }
 
+@MainActor
+final class FavoritesCollectionView: NSCollectionView {
+  var onMouseDownBegan: (@MainActor () -> Void)?
+  var onMouseDownEnded: (@MainActor (IndexPath?, NSPoint) -> Void)?
+
+  override var mouseDownCanMoveWindow: Bool { false }
+
+  override func mouseDown(with event: NSEvent) {
+    let downIndexPath = indexPathForItem(at: convert(event.locationInWindow, from: nil))
+    onMouseDownBegan?()
+    super.mouseDown(with: event)
+    let endEvent = NSApp.currentEvent ?? event
+    onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
+  }
+}
+
 /// Favorites grid: an NSCollectionView with a flow layout (3 columns, 9 pt gaps). Not inside a scrolling clip;
 /// its height is `FavoritesLayout.height(itemCount:)`. Shared by every Space of the same profile (BH-045).
 @MainActor
 public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSCollectionViewDelegate, HoverResyncHost {
   public let source: any SidebarSource
   public let profile: String
-  public let collectionView = NSCollectionView(frame: .zero)
+  public let collectionView: NSCollectionView = FavoritesCollectionView(frame: .zero)
   public private(set) var nodeIDs: [NodeID]
   public var flavor: ThemeFlavor = .light { didSet { if flavor != oldValue { refreshVisibleTiles() } } }
   public private(set) var resolver: TabRowState.Resolver = .empty
@@ -171,6 +187,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   public var onClose: (@MainActor (NodeID) -> Void)?
   /// Whether the Favorite's page is loaded in this window; only a loaded tile shows the X and the close action.
   public var pageLoadedProvider: (@MainActor (NodeID) -> Bool)?
+  /// A Favorite tab tile started or ended a drag (#214, S7); the window shows and hides its drop overlay.
+  public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
+  public var onNodeDragEnded: (@MainActor () -> Void)?
+
+  private var isTrackingMouse = false
+  private var didDragInMouseDown = false
+  private var isDragging = false
 
   private let flowLayout = NSCollectionViewFlowLayout()
   private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
@@ -199,6 +222,17 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     collectionView.isSelectable = true
     collectionView.allowsMultipleSelection = false
     collectionView.backgroundColors = [.clear]
+    collectionView.setDraggingSourceOperationMask(.move, forLocal: true)
+    collectionView.setDraggingSourceOperationMask([], forLocal: false)
+    if let favoritesCollectionView = collectionView as? FavoritesCollectionView {
+      favoritesCollectionView.onMouseDownBegan = { [weak self] in
+        self?.isTrackingMouse = true
+        self?.didDragInMouseDown = false
+      }
+      favoritesCollectionView.onMouseDownEnded = { [weak self] downIndexPath, point in
+        self?.mouseDownEnded(downIndexPath: downIndexPath, at: point)
+      }
+    }
     collectionView.dataSource = self
     collectionView.delegate = self
     collectionView.autoresizingMask = []
@@ -287,12 +321,67 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     }]
   }
 
+  // MARK: Drag source (#214)
+
+  /// Only tab tiles (not folders) write their node id under the private `.sidebarNode` type.
+  public func collectionView(_ collectionView: NSCollectionView,
+                             pasteboardWriterForItemAt indexPath: IndexPath) -> (any NSPasteboardWriting)? {
+    guard let id = nodeID(at: indexPath), isTab(id) else { return nil }
+    let pasteboardItem = NSPasteboardItem()
+    pasteboardItem.setString(id.uuidString, forType: .sidebarNode)
+    return pasteboardItem
+  }
+
+  public func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession,
+                             willBeginAt screenPoint: NSPoint, forItemsAt indexPaths: Set<IndexPath>) {
+    draggingSessionWillBegin(indexPaths: indexPaths)
+  }
+
+  public func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession,
+                             endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) {
+    draggingSessionEnded()
+  }
+
+  func draggingSessionWillBegin(indexPaths: Set<IndexPath>) {
+    didDragInMouseDown = true
+    isDragging = true
+    collectionView.deselectItems(at: collectionView.selectionIndexPaths)
+    guard let id = indexPaths.sorted().compactMap({ nodeID(at: $0) }).first(where: isTab) else { return }
+    onNodeDragBegan?(id)
+  }
+
+  func draggingSessionEnded() {
+    isDragging = false
+    collectionView.deselectItems(at: collectionView.selectionIndexPaths)
+    onNodeDragEnded?()
+  }
+
+  private func nodeID(at indexPath: IndexPath) -> NodeID? {
+    nodeIDs.indices.contains(indexPath.item) ? nodeIDs[indexPath.item] : nil
+  }
+
+  private func isTab(_ id: NodeID) -> Bool {
+    if case .tab? = source.node(id) { true } else { false }
+  }
+
   // MARK: Delegate
 
   public func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+    // During mouseDown tracking, keep the selection until mouseUp or drag start so NSCollectionView can initiate a
+    // drag, and so starting a drag does not activate the tile on mouseDown.
+    guard !isTrackingMouse, !isDragging else { return }
     collectionView.deselectItems(at: indexPaths)      // `current` is ours, not the collection view's selection
-    guard let index = indexPaths.first?.item, nodeIDs.indices.contains(index) else { return }
-    onActivate?(nodeIDs[index])
+    if let indexPath = indexPaths.first, let id = nodeID(at: indexPath) { onActivate?(id) }
+  }
+
+  private func mouseDownEnded(downIndexPath: IndexPath?, at point: NSPoint) {
+    isTrackingMouse = false
+    collectionView.deselectItems(at: collectionView.selectionIndexPaths)
+    guard !didDragInMouseDown, !isDragging,
+          let indexPath = downIndexPath,
+          collectionView.indexPathForItem(at: point) == indexPath,
+          let id = nodeID(at: indexPath) else { return }
+    onActivate?(id)
   }
 
   // MARK: State and changes
