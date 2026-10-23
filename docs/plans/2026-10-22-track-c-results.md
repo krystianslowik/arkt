@@ -97,14 +97,14 @@ Screenshots and AX dumps: `c7-*.png` and `c7-ax-*.txt` in a local scratch direct
 - `VelocityTracker` clamps a negative span (out-of-order timestamps) to 0 and returns 0 for a non-positive
   duration; tests for both lead-in and out-of-order timestamps added.
 
-## Phase 2: idle-machine pacing (2026-10-23, 09:11-09:32)
+## Phase 2: idle-machine pacing (2026-10-23)
 
 Conditions: Chromium build finished (`pgrep -x siso` empty), 1-minute load 3.5-6.2 on 10 cores, built-in
 120 Hz panel (`screenMaxFPS` 120), Low Power Mode off, display held awake with `caffeinate -u -t 900`. Builds
-and tests at normal priority with `-jobs 4` / `-j 4`. From 09:17 a Debug `ArktShell -ArktSmoke YES` process
-(pid <pid>) was left running, and a second one (pid <pid>, `-ArktSmokeRepeat 20`) from 09:25. Correction:
+and tests at normal priority with `-jobs 4` / `-j 4`. Meanwhile a Debug `ArktShell -ArktSmoke YES` process
+(pid <pid>) was left running, and a second one (pid <pid>, `-ArktSmokeRepeat 20`) later. Correction:
 both were started by this run. `xcrun xctrace record --launch -- <path inside the Release bundle>` resolved
-the bundle id through LaunchServices and launched the stale 01:18 Debug build, which has no smoke runner
+the bundle id through LaunchServices and launched a stale Debug build, which has no smoke runner
 and never exited. Both were killed (one by the coordinator, one here), the stale Debug product was
 deleted, and the profiling recipe uses `--attach` only. The runs from before they started show the same
 pattern as the later runs.
@@ -232,10 +232,10 @@ Proposed fix (not implemented, for review):
   `setFrameOrigin` cost, so these are not needed now. M9 (flavor flip): not exercised. The smoke only
   switches between Personal and Work, which are both light.
 
-## Fixes and after-fix numbers (2026-10-23, 09:35-11:30)
+## Fixes and after-fix numbers (2026-10-23)
 
-Commits: `b0bee1b` "Cache SF Symbol bitmaps; push only changed row states" (also adds the smoke watchdog and
-the hitch log's `lateMs` / `prevLateMs` / `frameMs`), and `56b77ce` "Keep the command bar ordered in and show
+Commits: "Cache SF Symbol bitmaps; push only changed row states" (also adds the smoke watchdog and
+the hitch log's `lateMs` / `prevLateMs` / `frameMs`), and "Keep the command bar ordered in and show
 by alpha".
 
 ### What changed
@@ -285,7 +285,7 @@ Tests added: `SymbolImageCacheTests` (7), `ResolverDiffTests`, `testActivationRe
   a concurrent `xctrace --all-processes` at about 100% (GUI runs).
 - The GUI runs compiled sources that contained another track's temporary, log-only diagnostics in
   `CommandBarController` / `SmokeRunner` (uncommitted, not part of either fix). The smoke runs used the
-  10:33 Release build of `56b77ce`.
+  Release build of the second fix commit.
 
 ### Swipe and keyboard pacing (gate: 0 intervals over 8.6 ms)
 
@@ -330,7 +330,7 @@ listed. A click where the hidden bar sits reached the web content (click-through
 never listed by accessibility. While the hidden panel was ordered in, an early build without the key
 hand-back left an invisible key window after reactivation; the deferred hand-back fixes it (unit test).
 
-Later keystroke runs were stopped: the spike Chromium app came to the front at about 10:30, and System
+Later keystroke runs were stopped: the spike Chromium app came to the front at one point, and System
 Events keystrokes stopped reaching the shell. Some of them (Cmd-T, `x`, Esc, Cmd-L) may have reached
 Chromium. Not verified interactively since then: deactivating while the bar is open, then reactivating
 and pressing Cmd-T (covered by `testShowOrdersThePanelBackInAfterItWasOrderedOut`).
@@ -342,12 +342,12 @@ and pressing Cmd-T (covered by `testShowOrdersThePanelBackInAfterItWasOrderedOut
   missed app commit with compositor activity, on a machine without the Chromium spike or Java running.
 - Manual trackpad pass (plan step 4, 10 real two-finger swipes): still for the user.
 
-## C7 phase 3: post-fix measurement (2026-10-23, 11:14-12:01)
+## C7 phase 3: post-fix measurement (2026-10-23)
 
 Release build (`xcodebuild -target ArktShell -configuration Release -jobs 4` under `nice -n 10`), smoke
 `-ArktSmoke YES -ArktSmokeRepeat 25` (100 interactions per run), 120 Hz built-in panel, no `caffeinate`.
 `pgrep -x siso` was empty for every run. Another track's ShellKit GUI tests (`xctest`, track-e worktree) ran
-at times, and system daemons (fileproviderd, suggestd) pushed load1 to 13-17 for a few minutes around 11:41.
+at times, and system daemons (fileproviderd, suggestd) pushed load1 to 13-17 for a few minutes.
 Every ArktShell process this phase started exited or was killed by PID (one stray from an
 `xctrace --launch` attempt, pid <pid>, was killed).
 
@@ -355,13 +355,13 @@ Every ArktShell process this phase started exited or was killed by PID (one stra
 
 | Gate | Result |
 |---|---|
-| 0 intervals over 8.6 ms in 100 interactions (smoke) | Machine-dependent; not a stable PASS. 11:15-11:47: 0 hitches in 700 interactions over the 7 counted runs (3 on `56b77ce`, 4 with the fix below). One diagnostic run had 2 swipe-back hitches at load1 10.34, which the smoke marks NOT-MEASURABLE. 11:51-12:01, with suggestd at about 90% CPU and WindowServer at 15-50%: 1, 5, 1, 0 hitches on the committed build, and 3, 3 on an A/B build without the new KB-003 check (see below). Over those 6 runs, 4 of 6 failed the gate |
-| Command bar warm p95 <= 18 ms (smoke) | FAIL on `56b77ce` as committed (24.41 / 24.53 / 24.90). With the fix below, the representative runs (2-4 of the first set, then the 3 runs of the committed build) gave 14.96 / 17.64 / 18.16 / 17.38 / 17.13 / 15.91: 5 of 6 under the literal 18 ms, and 6 of 6 under the smoke's earliest-frame bound. Run 1 of the first set (15.65) is excluded as optimistic, see below |
+| 0 intervals over 8.6 ms in 100 interactions (smoke) | Machine-dependent; not a stable PASS. First runs: 0 hitches in 700 interactions over the 7 counted runs (3 on the second fix commit, 4 with the fix below). One diagnostic run had 2 swipe-back hitches at load1 10.34, which the smoke marks NOT-MEASURABLE. Later runs, with suggestd at about 90% CPU and WindowServer at 15-50%: 1, 5, 1, 0 hitches on the committed build, and 3, 3 on an A/B build without the new KB-003 check (see below). Over those 6 runs, 4 of 6 failed the gate |
+| Command bar warm p95 <= 18 ms (smoke) | FAIL on the second fix commit as committed (24.41 / 24.53 / 24.90). With the fix below, the representative runs (2-4 of the first set, then the 3 runs of the committed build) gave 14.96 / 17.64 / 18.16 / 17.38 / 17.13 / 15.91: 5 of 6 under the literal 18 ms, and 6 of 6 under the smoke's earliest-frame bound. Run 1 of the first set (15.65) is excluded as optimistic, see below |
 | GUI tests `testFramePacingDuringSwipeAndKeyboardSwitch`, `testAppearsUnder16ms` | PASS 3 of 3, asserted=yes; earliest frame p95 10.95 / 10.44 / 10.71 ms (bounds 17.4-17.6); swipe `over8.6=0 maxMs=8.33` |
 | Full `swift test -j 4` (ShellKit) | PASS: 88 XCTest tests (86 plus 2 new), 0 failures; all Swift Testing suites pass |
-| KB-003 (resign key hides the bar) after `56b77ce` | PASS. Covered by the existing delegate-level unit tests and by a new in-process smoke check that uses a real key change |
+| KB-003 (resign key hides the bar) after the second fix commit | PASS. Covered by the existing delegate-level unit tests and by a new in-process smoke check that uses a real key change |
 
-### Smoke runs on `56b77ce` (before the fix in this phase)
+### Smoke runs on the second fix commit (before the fix in this phase)
 
 | Run | load1 (smoke / uptime) | bar warm p95 | bound | warm shows (ms) | hitches |
 |---|---|---|---|---|---|
@@ -405,12 +405,12 @@ would open a window in which keystrokes land in the shell window (KB-003 / focus
 
 ### Smoke runs after the fix (first set, before the KB-003 smoke check was added)
 
-| Run | time | load1 smoke / before / after | other xctest | bar warm p95 | bound | commit delay ms | hitches | verdict |
-|---|---|---|---|---|---|---|---|---|
-| 1 | 11:42 | 8.65 / 8.45 / 6.46 | 1 | 15.65 | 17.61 | 0.2-0.5 | 0 / 100 (7717 frames) | PASS |
-| 2 | 11:44 | 6.43 / 6.46 / 5.52 | 0 | 14.96 | 18.89 | 1.6-3.1 | 0 / 100 (7724) | PASS |
-| 3 | 11:45 | 5.52 / 5.52 / 6.15 | 0 | 17.64 | 19.77 | 1.5-3.3 | 0 / 100 (7713) | PASS |
-| 4 | 11:46 | 6.21 / 6.15 / 6.29 | 0 | 18.16 | 18.65 | 1.5-2.9 | 0 / 100 (7704) | PASS (literal 18 ms: miss by 0.16) |
+| Run | load1 smoke / before / after | other xctest | bar warm p95 | bound | commit delay ms | hitches | verdict |
+|---|---|---|---|---|---|---|---|
+| 1 | 8.65 / 8.45 / 6.46 | 1 | 15.65 | 17.61 | 0.2-0.5 | 0 / 100 (7717 frames) | PASS |
+| 2 | 6.43 / 6.46 / 5.52 | 0 | 14.96 | 18.89 | 1.6-3.1 | 0 / 100 (7724) | PASS |
+| 3 | 5.52 / 5.52 / 6.15 | 0 | 17.64 | 19.77 | 1.5-3.3 | 0 / 100 (7713) | PASS |
+| 4 | 6.21 / 6.15 / 6.29 | 0 | 18.16 | 18.65 | 1.5-2.9 | 0 / 100 (7704) | PASS (literal 18 ms: miss by 0.16) |
 
 Run 1's `show()` wall was 0.2-0.5 ms with no `makeKey` cost, which suggests the app was not active while
 another test process was running. Treat that run's bar number as optimistic. Runs 2-4 (`show()`
@@ -418,25 +418,25 @@ wall 1.3-3.0 ms) are representative: p95 14.96 / 17.64 / 18.16. Earlier runs of 
 (diagnostic logging only) at load1 13-15: p95 17.50 / 14.49 / 15.49 / 17.07.
 Design section 5: 0 of 30858 frames over one 120 Hz interval across the 4 final runs.
 
-### Runs of the committed source (`11ea590` content: fix plus KB-003 check), then an A/B
+### Runs of the committed source (fix plus KB-003 check), then an A/B
 
 The first-set runs above predate the KB-003 smoke check. The check runs after the bar measurement, and the
 ShellUI code is identical. The committed source was measured afterwards:
 
-| Run | time | load1 smoke / uptime | other xctest | bar warm p95 | bound | hitch interactions | detail |
-|---|---|---|---|---|---|---|---|
-| C1 | 11:51 | 6.73 / 6.79 | 0 | 17.38 | 19.43 | 5 / 100 | swipe-back 17.61, 16.80; key-next x3 `19.2 + 14.1` pairs |
-| C2 | 11:53 | 5.75 / 5.75 | 0 | 17.13 | 20.89 | 1 / 100 | swipe-back 16.75 |
-| C3 | 11:54 | 5.01 / 5.01 | 0 | 15.91 | 19.72 | 0 / 100 | PASS |
-| A1 (no KB-003 check) | 11:56 | 5.70 / 5.70 | 1 | - | - | 3 / 100 | 16.63, 16.88, 20.82 |
-| B1 (committed) | 11:57 | 14.28 / 5.95 | 0 | - | - | 6 / 100 | NOT-MEASURABLE; swipe-back 17.2-18.3 x5 |
-| A2 (no KB-003 check) | 11:58 | 8.33 / 8.33 | 0 | - | - | 3 / 100 | 17.46, 18.65, 18.71 |
-| B2 (committed) | 11:59 | 6.18 / 6.18 | 4 | - | - | 1 / 100 | 20.81 |
+| Run | load1 smoke / uptime | other xctest | bar warm p95 | bound | hitch interactions | detail |
+|---|---|---|---|---|---|---|
+| C1 | 6.73 / 6.79 | 0 | 17.38 | 19.43 | 5 / 100 | swipe-back 17.61, 16.80; key-next x3 `19.2 + 14.1` pairs |
+| C2 | 5.75 / 5.75 | 0 | 17.13 | 20.89 | 1 / 100 | swipe-back 16.75 |
+| C3 | 5.01 / 5.01 | 0 | 15.91 | 19.72 | 0 / 100 | PASS |
+| A1 (no KB-003 check) | 5.70 / 5.70 | 1 | - | - | 3 / 100 | 16.63, 16.88, 20.82 |
+| B1 (committed) | 14.28 / 5.95 | 0 | - | - | 6 / 100 | NOT-MEASURABLE; swipe-back 17.2-18.3 x5 |
+| A2 (no KB-003 check) | 8.33 / 8.33 | 0 | - | - | 3 / 100 | 17.46, 18.65, 18.71 |
+| B2 (committed) | 6.18 / 6.18 | 4 | - | - | 1 / 100 | 20.81 |
 
 The A build has the same fix and no KB-003 check. It hitches at the same rate, so the check does not cause
 the hitches. These hitches look like the residual described above: the callback is on time
 (`lateMs` 0.01-0.07), but the previous callback ran 7.4-7.7 ms late. So the main thread or the run loop was
-held for most of one frame just before the vsync. In this window the machine was busier than at 11:42-11:47
+held for most of one frame just before the vsync. In this window the machine was busier than during the first set
 (suggestd about 90% CPU, WindowServer 15-50%, an Arc renderer about 38%). The same binary content gave 0
 in 400 in that earlier window. No profile was taken of these, so the source of the 7.5 ms hold is open.
 
@@ -453,36 +453,36 @@ in 400 in that earlier window. No profile was taken of these, so the source of t
 
 - Swipe and keyboard pacing still produces the occasional single late frame (16.6-20.8 ms) on a busy
   machine, with the previous display-link callback about 7.5 ms late. Next step: a Time Profiler attach
-  (`--attach`, Hitch signposts) during a run on a machine as loaded as the 11:51-12:01 window, to name what
+  (`--attach`, Hitch signposts) during a run on a machine as loaded as during the later runs, to name what
   holds the main run loop.
 - The bar's residual tail is window-server latency in `makeKey` while other GUI processes are active.
   Re-measure on a machine where no other GUI tests are running before treating it as a product issue.
 - Manual trackpad pass (plan step 4): still for the user.
 
-## Pre-merge fixes (2026-10-23, 12:05-12:20)
+## Pre-merge fixes (2026-10-23)
 
 From the pre-merge review, one commit each:
 
-- `0f83117` Command bar on another Space. The panel stays ordered in for good, so it stayed on the Space it
+- Command bar on another Space. The panel stays ordered in for good, so it stayed on the Space it
   was prewarmed on. `show()` now orders it out and back in when `!panel.isVisible || !panel.isOnActiveSpace`
   (before key status changes); on the active Space the fast path is unchanged (no ordering). Not used:
   `.moveToActiveSpace`. It does not conflict with `.fullScreenAuxiliary` (different exclusivity groups in
   `NSWindow.h`), but it only acts when a window is ordered front or activated, which the warm show
   deliberately avoids, so it would not fix this alone. Tests use an `isOnActiveSpace` seam on the panel and
   ordering counters.
-- `e9f7a26` Backing scale changes. `SidebarOutlineController.refreshRealizedCells()` (factored out of
+- Backing scale changes. `SidebarOutlineController.refreshRealizedCells()` (factored out of
   `setFlavor`) runs from `SpacePageView.viewDidChangeBackingProperties`; `FavoritesGridView` refreshes its
   visible tiles there too. The command bar takes the icon scale from the parent window (the panel reports the
   old display's scale until its frame moves) and reloads on a show when that scale changed, even with
   unchanged results. Prewarm uses the shell window's scale (window created first) and runs again from
   `windowDidChangeBackingProperties`.
-- `dad275a` Symbol bitmaps render into a Display P3 `CGContext` (was device RGB); sRGB tokens convert exactly,
+- Symbol bitmaps render into a Display P3 `CGContext` (was device RGB); sRGB tokens convert exactly,
   cache keys unchanged. Note for tests: `NSBitmapImageRep.colorAt` tags CGImage-backed pixels as calibrated
   RGB, so the test reads raw samples and tags them with the rep's color space.
-- `56c0762` `SmokeWatchdog` is `@MainActor` with a plain static timer and an explicit `@Sendable` handler
+- `SmokeWatchdog` is `@MainActor` with a plain static timer and an explicit `@Sendable` handler
   (no `nonisolated(unsafe)`). Checked at run time: Release app with `-ArktSmokeTimeout 3` printed the
   TIMEOUT line and exited 3. `SidebarContainerView.swift` `nonisolated(unsafe)` left alone (fixed on track-e).
-- `5709f76` Pacing test warm-up: `testFramePacingDuringSwipeAndKeyboardSwitch` waits for 10 consecutive
+- Pacing test warm-up: `testFramePacingDuringSwipeAndKeyboardSwitch` waits for 10 consecutive
   display-link intervals within 8.6 ms (2 s cap, never fails on warm-up) before the scripted swipe. The gate
   on measured frames is unchanged. 5 runs: 5/5 pass, warm-up reached 10 of 10 each time, both interactions
   `over8.6=0 maxMs=8.33 leadInMs=8.33`, load1 5.22-5.46 on 10 cores, `asserted=yes` every run.
@@ -496,3 +496,16 @@ Needs a manual check (tests cannot switch Spaces or displays):
   first: the bar should appear over the shell window on the current Space.
 - Move the shell window between a 1x and a 2x display: sidebar glyphs, favorite letter tiles, bottom-bar
   buttons and command bar icons should be sharp on both.
+
+## Note (2026-10-23, track-e): pacing runs now use the Profile configuration
+
+Since Track E the smoke runner is compiled into Debug and the new `Profile` configuration only (Release
+settings plus `ARKT_SMOKE_BUILD`); the Release binary has no smoke runner. Pacing and `-ArktSmoke YES` runs
+above that say "Release binary" now use `-configuration Profile`, product
+`build/Build/Products/Profile/ArktShell.app` (the scheme's profile action also uses it). The configuration lives in
+`project.yml`, so an existing checkout needs `cd app/ArktShell && xcodegen generate` after pulling before it can
+build Profile. Release check, must print `0`:
+
+```zsh
+cd app/ArktShell && strings build/Build/Products/Release/ArktShell.app/Contents/MacOS/ArktShell | grep -c ArktSmoke
+```

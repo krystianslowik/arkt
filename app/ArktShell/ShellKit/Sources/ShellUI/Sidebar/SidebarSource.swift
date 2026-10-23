@@ -89,17 +89,23 @@ public protocol SidebarSource: AnyObject {
   func node(_ id: NodeID) -> SidebarNodeInfo?
   /// The location that holds `id` (Track B: `Node.parent`).
   func parent(of id: NodeID) -> SidebarLocation?
-  @discardableResult func addTab(url: URL, title: String, in location: SidebarLocation) -> NodeID
+  /// Throws when the model refuses the location (unknown Space, too deep). `StubSidebar` never throws.
+  @discardableResult func addTab(url: URL, title: String, in location: SidebarLocation) throws -> NodeID
+  /// A new Space for this source's default profile, appended to `spaceOrder`. Emits `.spaces`.
+  @discardableResult func addSpace(title: String) throws -> SpaceID
   func updateTab(_ id: NodeID, url: URL?, title: String?)
   /// Ordered, synchronous delivery of every change to every live observer.
   /// Delivery stops on `cancel()` or when the returned handle is released.
   func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation
 }
 
-/// What changed: a location's child list (insert / remove / reorder), or one node's own fields (title, url).
+/// What changed: a location's child list (insert / remove / reorder), one node's own fields (title, url), or the
+/// Space list.
 public enum SidebarChange: Hashable, Sendable {
   case structure(SidebarLocation)
   case node(NodeID)
+  /// `spaceOrder` or any Space's title, profile or theme changed.
+  case spaces
 }
 
 /// Handle returned by `SidebarSource.observe`; keep it alive for as long as you want changes.
@@ -135,6 +141,16 @@ public final class SidebarChangeHub {
 }
 
 extension SidebarSource {
+  /// The top-level section (`.favorites`, `.pinned`, `.today`) holding `id`, through folders and splits.
+  public func section(containing id: NodeID) -> SidebarLocation? {
+    var location = parent(of: id)
+    for _ in 0..<64 {                       // depth guard against a malformed source
+      guard let current = location, let container = current.containerNode else { return location }
+      location = parent(of: container)
+    }
+    return nil
+  }
+
   /// The Space whose pinned or Today section holds `id`, walking up through folders and splits.
   /// Nil for favorites (they belong to a profile, not a Space) and unknown nodes.
   public func spaceID(containing id: NodeID) -> SpaceID? {

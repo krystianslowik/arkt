@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import SidebarModel
+import os
 
 /// After `.created` or `.recreatedEmpty`, do not seed a default Space (or anything else) into the sidebar before the
 /// user acts: backups are skipped only while the sidebar and the archive are empty, so a seeded sidebar would start
@@ -26,11 +27,13 @@ public struct LaunchState: Sendable {
 }
 
 public enum ArktLaunch {
+  static let log = Logger(subsystem: "dev.arkt.core", category: "launch")
   static let stagingName = ".Arkt.sqlite.restoring"
 
   /// Opens and loads the database, falling back to the newest usable backup. Never deletes user data: a corrupt live
-  /// file is renamed aside, and backups are only ever copied. `@concurrent`: all disk work runs off the main thread,
-  /// so the main actor only awaits.
+  /// file is renamed aside, usable backups are only ever copied, and a backup found unusable is moved unchanged into
+  /// `Backups/Unusable/`, out of the rotation, so later backups do not prune it. `@concurrent`: all disk work runs off
+  /// the main thread, so the main actor only awaits.
   ///
   /// Only corruption (SQLITE_CORRUPT, SQLITE_NOTADB, failed quick_check, checksum mismatch, undecodable sidebar)
   /// quarantines the live file. Anything else (busy, locked, I/O, disk full, permissions) and
@@ -78,7 +81,15 @@ public enum ArktLaunch {
         removeCopy(live, journal: journal)
         throw error
       }
-      removeCopy(live, journal: journal)  // only our copy; the backup file is untouched
+      removeCopy(live, journal: journal)  // only our copy; the backup file itself is unchanged
+      // Out of the rotation: later routine backups would otherwise prune it, and a newer build's backup may hold the
+      // user's newest real data. Best effort: on failure the backup stays in rotation, as before; throwing would block
+      // every launch. Logged with the error type only (no paths).
+      do {
+        try Backups.setAside(backup)
+      } catch {
+        log.notice("unusable backup not set aside \(String(describing: type(of: error)), privacy: .public)")
+      }
     }
 
     let database = try ArktDatabase.open(at: live)

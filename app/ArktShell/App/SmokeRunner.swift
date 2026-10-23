@@ -1,12 +1,13 @@
+#if DEBUG || ARKT_SMOKE_BUILD
 import AppKit
 import EngineAPI
 @_spi(Smoke) import ShellUI
 
-/// Scripted smoke (launch argument `-ArktSmoke YES`): command bar latency, example.com through the
-/// command bar, two scripted swipes and a keyboard round trip, all through the same code paths as user
-/// input. Prints one `ARKT_SMOKE {json}` line and exits: 0 functional pass and pacing PASS, 1 functional
-/// pass with pacing FAIL or NOT-MEASURABLE (60 Hz screen or a loaded machine), 2 functional failure,
-/// 3 the watchdog's time budget ran out (`SmokeWatchdog`).
+/// Scripted smoke (launch argument `-ArktSmoke YES`, Debug and Profile builds only): command bar latency,
+/// example.com through the command bar, two scripted swipes and a keyboard round trip, all through the same code
+/// paths as user input. Pacing runs use the optimized Profile build. Prints one `ARKT_SMOKE {json}` line and
+/// exits: 0 functional pass and pacing PASS, 1 functional pass with pacing FAIL or NOT-MEASURABLE (60 Hz screen or
+/// a loaded machine), 2 functional failure, 3 the watchdog's time budget ran out (`SmokeWatchdog`).
 @MainActor
 final class SmokeRunner {
   struct Report: Encodable {
@@ -104,9 +105,9 @@ final class SmokeRunner {
     var interactions: [Report.Interaction] = []
     let pager = controller.pager
     // -ArktSmokePause N: seconds between interactions (diagnostics; 0 = back to back).
-    let pause = UserDefaults.standard.double(forKey: "ArktSmokePause")
+    let pause = SmokeArguments.double("ArktSmokePause") ?? 0
     // -ArktSmokeRepeat N: run the swipe and keyboard round trips N times (default 1).
-    let rounds = max(UserDefaults.standard.integer(forKey: "ArktSmokeRepeat"), 1)
+    let rounds = SmokeArguments.rounds
     for _ in 0..<rounds {
       for (label, direction, expected) in [("swipe-next", -1.0, 1), ("swipe-back", 1.0, 0)] {
         if pause > 0 { try? await Task.sleep(for: .seconds(pause)) }
@@ -236,6 +237,27 @@ private final class SmokeFrameScript: NSObject {
   }
 }
 
+/// Smoke options, read from the command line only (`-ArktSmoke YES -ArktSmokeRepeat 3`): a default persisted in
+/// any other domain must never turn a normal launch into a smoke run.
+enum SmokeArguments {
+  /// The value after `-<key>`, or nil when the option is absent or has no value.
+  static func value(_ key: String, in arguments: [String] = ProcessInfo.processInfo.arguments) -> String? {
+    guard let index = arguments.firstIndex(of: "-" + key), arguments.indices.contains(index + 1) else { return nil }
+    return arguments[index + 1]
+  }
+
+  /// `-ArktSmoke YES` (also `1` or `true`, any case).
+  static var isEnabled: Bool {
+    guard let value = value("ArktSmoke") else { return false }
+    return ["yes", "1", "true"].contains(value.lowercased())
+  }
+
+  static func double(_ key: String) -> Double? { value(key).flatMap(Double.init) }
+
+  /// `-ArktSmokeRepeat N`, at least 1.
+  static var rounds: Int { max(value("ArktSmokeRepeat").flatMap(Int.init) ?? 1, 1) }
+}
+
 /// Hard budget for a smoke run: a timer off the main thread ends the process even when the main thread
 /// hangs. Budget: `-ArktSmokeTimeout S`, else 60 s plus 8 s per `-ArktSmokeRepeat` round. Exit code 3.
 /// Main-actor state (the timer is set once, from app launch); the handler is `@Sendable` and runs on a global
@@ -245,10 +267,8 @@ enum SmokeWatchdog {
   private static var timer: DispatchSourceTimer?
 
   static func start() {
-    let defaults = UserDefaults.standard
-    let rounds = max(defaults.integer(forKey: "ArktSmokeRepeat"), 1)
-    let override = defaults.double(forKey: "ArktSmokeTimeout")
-    let budget = override > 0 ? override : 60 + 8 * Double(rounds)
+    let override = SmokeArguments.double("ArktSmokeTimeout") ?? 0
+    let budget = override > 0 ? override : 60 + 8 * Double(SmokeArguments.rounds)
     let source = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
     source.schedule(deadline: .now() + budget)
     source.setEventHandler { @Sendable in
@@ -262,3 +282,4 @@ enum SmokeWatchdog {
     timer = source
   }
 }
+#endif

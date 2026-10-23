@@ -28,7 +28,8 @@ public final class SidebarController {
   private var pagedFlavors: [ThemeFlavor] = []
   /// Last active tab per Space, restored when the Space becomes current again (BH-036).
   private var lastActive: [SpaceID: NodeID] = [:]
-  /// Decoded favicons by node; pruned when the node's tab goes away (`deactivate(node:)`).
+  /// Decoded favicons by node; kept while the node exists in the source (its engine tab may close and reopen),
+  /// dropped when the node leaves it (`.structure` and `.spaces` changes, `deactivate(node:)`).
   private(set) var favicons: [NodeID: NSImage] = [:]
   private var observation: SidebarObservation?
   private let buttonTarget = ButtonTarget()
@@ -124,18 +125,27 @@ public final class SidebarController {
     }
   }
 
-  /// Creates pages for new Spaces and hands the ordered list to the pager when it changed.
-  private func syncPages() {
+  /// Creates pages for new Spaces and hands the ordered list to the pager when it changed, then refreshes Space
+  /// details (which fires `onSpacesChanged` unless `notify` is false).
+  private func syncPages(notify: Bool = true) {
     let order = spaces
     guard order != pagedSpaces else { return }
     for id in order where pages[id] == nil { makePage(id) }
     for id in pages.keys where !order.contains(id) { pages[id] = nil }
     pagedSpaces = order
-    pagedFlavors = order.map { source.space($0)?.theme.flavor ?? .light }
     let index = currentSpace.flatMap { order.firstIndex(of: $0) } ?? 0
     view.setPages(order.compactMap { pages[$0] }, index: index)
-    view.spaceDots.titles = order.map { source.space($0)?.title ?? "" }
-    onSpacesChanged?(order)
+    refreshSpaceDetails(notify: notify)
+  }
+
+  /// Re-reads every paged Space: live pages (title, flavor), dot titles, cached flavors and the current chrome,
+  /// then tells the window once (themes) unless `notify` is false. Called after any Space list or Space field change.
+  private func refreshSpaceDetails(notify: Bool = true) {
+    for id in pagedSpaces { pages[id]?.refresh(from: source.space(id)) }
+    pagedFlavors = pagedSpaces.map { source.space($0)?.theme.flavor ?? .light }
+    view.spaceDots.titles = pagedSpaces.map { source.space($0)?.title ?? "" }
+    if let id = currentSpace, let info = source.space(id) { view.setFlavor(info.theme.flavor) }
+    if notify { onSpacesChanged?(pagedSpaces) }
   }
 
   @discardableResult
@@ -168,9 +178,10 @@ public final class SidebarController {
     onActivate?(tab)
   }
 
-  /// Forgets a node that no longer has a tab (engine tab closed): its favicon and any current/previous role.
+  /// Forgets a node that no longer has a tab (engine tab closed): any current/previous role, and its favicon only
+  /// when the node itself is gone from the source.
   public func deactivate(node: NodeID) {
-    favicons[node] = nil
+    if source.node(node) == nil { favicons[node] = nil }
     guard node == current || node == previous else { return }
     if node == current { current = nil }
     if node == previous { previous = nil }
@@ -188,9 +199,29 @@ public final class SidebarController {
     view.favorites.reload(node: node)
   }
 
+  /// Caches a batch of favicons (for example the ones loaded after launch), then refreshes each affected row or tile
+  /// once. Ids the source does not know are ignored.
+  public func setFavicons(_ batch: [NodeID: Data]) {
+    var changed: [NodeID] = []
+    for (node, data) in batch where source.node(node) != nil {
+      favicons[node] = NSImage(data: data)
+      changed.append(node)
+    }
+    for node in changed {
+      for page in pages.values { page.outlineController.reload(node: node) }
+      view.favorites.reload(node: node)
+    }
+  }
+
+  /// Drops cached favicons of nodes that left the source. O(cached favicons), on structure and Space changes only.
+  private func pruneFavicons() {
+    for node in favicons.keys where source.node(node) == nil { favicons[node] = nil }
+  }
+
   private func apply(_ change: SidebarChange) {
     switch change {
     case .structure(let location):
+      pruneFavicons()
       if case .favorites = location {
         if view.favorites.apply(structure: location) { view.needsLayout = true }
       } else {
@@ -199,6 +230,40 @@ public final class SidebarController {
     case .node(let id):
       for page in pages.values { page.outlineController.reload(node: id) }
       view.favorites.reload(node: id)
+    case .spaces:
+      pruneFavicons()                               // a removed Space's nodes emit no structure change
+      // Settle pages and the current Space first, then tell the window once, so `onSpacesChanged` never sees a
+      // nil current Space after an add or a removed one after a removal.
+      if spaces == pagedSpaces {
+        refreshSpaceDetails(notify: false)          // same list: a title, theme or other Space field changed
+      } else {
+        syncPages(notify: false)                    // creates/drops pages, then the same refresh
+      }
+      let currentIsShown = currentSpace.map { spaces.contains($0) } ?? false
+      if !currentIsShown {
+        if let first = spaces.first {
+          let replacesRemoved = currentSpace != nil
+          showSpace(first)
+          if replacesRemoved { activateRestoredTabLater(in: first) }
+        } else if currentSpace != nil {             // the last Space went away
+          currentSpace = nil
+          view.setCurrent(page: nil)
+        }
+      }
+      onSpacesChanged?(pagedSpaces)
+    }
+  }
+}
+
+extension SidebarController {
+  /// After the current Space was removed and `space` took its place, shows its tab the way a settled swipe does.
+  /// Deferred one main-queue turn: activating fills the card, which writes titles back to the source, and a
+  /// source must not be mutated while it is still delivering the change that removed the Space.
+  private func activateRestoredTabLater(in space: SpaceID) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.currentSpace == space else { return }
+      if let current = self.current, self.source.spaceID(containing: current) == space { return }
+      if let tab = self.tabToRestore(in: space) { self.activate(node: tab) }
     }
   }
 }

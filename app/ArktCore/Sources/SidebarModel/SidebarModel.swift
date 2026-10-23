@@ -230,6 +230,16 @@ public struct Sidebar: Hashable, Sendable {
     removeSubtree(id)
   }
 
+  /// Changes a tab's own fields; nil leaves a field as it is. Throws `.unknownNode` when `id` is not a tab (unknown
+  /// ids and folders or splits alike); the sidebar is unchanged on throw. Never moves the node.
+  public mutating func updateTab(_ id: NodeID, url: URL? = nil, title: String? = nil, lastActiveAt: Date? = nil) throws {
+    guard case .tab(var tab)? = nodes[id]?.kind else { throw SidebarError.unknownNode(id) }
+    if let url { tab.url = url }
+    if let title { tab.title = title }
+    if let lastActiveAt { tab.lastActiveAt = lastActiveAt }
+    nodes[id]?.kind = .tab(tab)
+  }
+
   /// The subtree rooted at `id`, in child order, or nil for an unknown id.
   public func snapshot(of id: NodeID) -> NodeSnapshot? {
     guard let node = nodes[id] else { return nil }

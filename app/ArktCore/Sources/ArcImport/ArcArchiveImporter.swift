@@ -1,5 +1,4 @@
 import Archive
-import CryptoKit
 import Foundation
 import SidebarModel
 
@@ -124,7 +123,7 @@ public enum ArcArchiveImporter {
     _ entry: ArcArchivedItem, id: String, report: inout ArchiveImportReport
   ) throws -> NodeSnapshot? {
     let item = entry.sidebarItem
-    let nodeID = nodeID(forArcID: id)
+    let nodeID = StableID.uuid(forArcID: id)
     let createdAt = item.createdAt ?? entry.archivedAt
     switch item.data.caseName {
     case "tab":
@@ -149,16 +148,5 @@ public enum ArcArchiveImporter {
       report.skipped.append(SkippedItem(itemID: id, reason: .unsupportedKind(item.data.caseName)))
       return nil
     }
-  }
-
-  /// Arc's UUID when the key is one; otherwise a UUID derived from the key's SHA-256, so it is stable across imports.
-  static func nodeID(forArcID id: String) -> NodeID {
-    if let uuid = UUID(uuidString: id) { return uuid }
-    var bytes = Array(SHA256.hash(data: Data(id.utf8)).prefix(16))
-    bytes[6] = (bytes[6] & 0x0F) | 0x80  // version 8: custom
-    bytes[8] = (bytes[8] & 0x3F) | 0x80  // RFC 4122 variant
-    return UUID(uuid: (
-      bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-      bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
   }
 }

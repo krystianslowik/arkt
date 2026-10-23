@@ -24,6 +24,17 @@ public final class SpacePageView: NSView {
     setFlavor(info?.theme.flavor ?? .light)
   }
 
+  /// Applies the Space's current title and flavor after a `.spaces` change; unchanged fields cost nothing.
+  public func refresh(from info: SidebarSpaceInfo?) {
+    let title = info?.title ?? ""
+    if titleLabel.stringValue != title {
+      titleLabel.stringValue = title
+      needsLayout = true
+    }
+    let flavor = info?.theme.flavor ?? .light
+    if flavor != self.flavor { setFlavor(flavor) }
+  }
+
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 

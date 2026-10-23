@@ -4,6 +4,11 @@ options:
   deploymentTarget:
     macOS: "15.0"
   createIntermediateGroups: true
+configs:
+  Debug: debug
+  Release: release
+  # Release settings plus the scripted smoke (`-ArktSmoke YES`): optimized pacing runs. Never shipped.
+  Profile: release
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -14,9 +19,14 @@ settings:
     ENABLE_HARDENED_RUNTIME: NO
     ENABLE_APP_SANDBOX: NO
     DEAD_CODE_STRIPPING: YES
+  configs:
+    Profile:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_SMOKE_BUILD"
 packages:
   ShellKit:
     path: ShellKit
+  ArktCore:
+    path: ../ArktCore
 targets:
   ArktShell:
     type: application
@@ -46,6 +56,16 @@ targets:
         product: FakeEngineKit
       - package: ShellKit
         product: EngineAPI
+      - package: ShellKit
+        product: CoreBridge
+      - package: ArktCore
+        product: Persistence      # composition root only: the one GRDB link
+      - package: ArktCore
+        product: SidebarModel
+      - package: ArktCore
+        product: Archive
+      - package: ArktCore
+        product: ArcImport
 schemes:
   ArktShell:
     build:
@@ -53,3 +73,5 @@ schemes:
         ArktShell: all
     run:
       config: Debug
+    profile:
+      config: Profile

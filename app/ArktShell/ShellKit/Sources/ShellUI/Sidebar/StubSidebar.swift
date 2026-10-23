@@ -31,7 +31,51 @@ public final class StubSidebar: SidebarSource {
     let id = SpaceID()
     spaces[id] = SidebarSpaceInfo(id: id, title: title, profile: profile, theme: theme)
     spaceOrder.append(id)
+    hub.emit(.spaces)
     return id
+  }
+
+  /// A Space with an empty light theme in the default profile (the `SidebarSource` requirement).
+  @discardableResult
+  public func addSpace(title: String) -> SpaceID {
+    addSpace(title: title, theme: SpaceThemeInfo(baseColors: [], isDark: false))
+  }
+
+  /// Renames a Space. Emits `.spaces`.
+  public func renameSpace(_ id: SpaceID, to title: String) {
+    guard spaces[id] != nil else { return }
+    spaces[id]?.title = title
+    hub.emit(.spaces)
+  }
+
+  /// Replaces a Space's theme. Emits `.spaces`.
+  public func setTheme(_ theme: SpaceThemeInfo, of id: SpaceID) {
+    guard spaces[id] != nil else { return }
+    spaces[id]?.theme = theme
+    hub.emit(.spaces)
+  }
+
+  /// Removes a Space and every node under its pinned and Today sections. Emits only `.spaces`: the Space's pages
+  /// go away with it, so no structure change is needed.
+  public func removeSpace(_ id: SpaceID) {
+    guard spaces.removeValue(forKey: id) != nil else { return }
+    spaceOrder.removeAll { $0 == id }
+    for section in [SidebarLocation.pinned(id), .today(id)] { removeSubtrees(at: section) }
+    hub.emit(.spaces)
+  }
+
+  private func removeSubtrees(at location: SidebarLocation) {
+    for child in childOrder.removeValue(forKey: location) ?? [] {
+      if let inner = nodes.removeValue(forKey: child)?.info.childLocation { removeSubtrees(at: inner) }
+    }
+  }
+
+  /// Removes a node and its subtree. Emits `.structure` for the location it was in.
+  public func removeNode(_ id: NodeID) {
+    guard let node = nodes.removeValue(forKey: id) else { return }
+    if let inner = node.info.childLocation { removeSubtrees(at: inner) }
+    childOrder[node.parent]?.removeAll { $0 == id }
+    hub.emit(.structure(node.parent))
   }
 
   @discardableResult

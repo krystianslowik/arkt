@@ -1,4 +1,5 @@
 import Archive
+import ArcImport
 import Foundation
 import GRDB
 import Testing
@@ -117,5 +118,82 @@ struct SettingsStoreTests {
         == ["v1-sidebar", "v2-archive"])
       try backup.close()
     }
+  }
+
+  @Test func resetAutoArchiveStartOverwritesAndKeepsOtherFields() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    let first = Date(timeIntervalSinceReferenceDate: 800_000_000)
+    _ = try await store.resolveAutoArchiveStart(now: first)
+    try await store.save(ArchiveState(autoArchiveStartedAt: first, educationBannerDismissed: true), at: first)
+    let later = first.addingTimeInterval(3600)
+    try await store.resetAutoArchiveStart(to: later)
+    let state = try await store.load(ArchiveState.self)
+    #expect(state.autoArchiveStartedAt == later)
+    #expect(state.educationBannerDismissed)
+    #expect(try await store.resolveAutoArchiveStart(now: later.addingTimeInterval(60)) == later)
+  }
+
+  @Test func resetAutoArchiveStartWithNothingStoredSetsIt() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    try await store.resetAutoArchiveStart(to: Self.date)
+    #expect(try await store.load(ArchiveState.self).autoArchiveStartedAt == Self.date)
+  }
+
+  @Test func loadArchiveSettingsReadsTheStoredGroup() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    #expect(try await store.loadArchiveSettings() == ArchiveSettings())
+    var settings = ArchiveSettings()
+    settings.setTabThreshold(.sevenDays, forProfile: "default", scope: .thisProfile)
+    try await store.save(settings, at: Self.date)
+    #expect(try await store.loadArchiveSettings() == settings)
+  }
+
+  @Test func storesConformToTheArchiveProtocols() throws {
+    let database = try ArktDatabase.inMemory()
+    let _: any ArchiveStoring = ArchiveStore(database: database)
+    let _: any ArchiveStateStoring = SettingsStore(database: database)
+  }
+
+  // MARK: Arc import record
+
+  @Test func arcImportRecordIsEmptyUntilSomethingIsRecorded() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    let record = try await store.loadArcImportRecord()
+    #expect(record == ArcImportRecord())
+    #expect(record.isEmpty)
+  }
+
+  @Test func recordArcImportAddsToWhatIsStored() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    try await store.recordArcImport(ArcImportRecord(spaceIDs: ["s1"], favoriteItemIDs: ["f1"]), at: Self.date)
+    try await store.recordArcImport(ArcImportRecord(spaceIDs: ["s2"], favoriteItemIDs: ["f1", "f2"]), at: Self.date)
+    let record = try await store.loadArcImportRecord()
+    #expect(record == ArcImportRecord(spaceIDs: ["s1", "s2"], favoriteItemIDs: ["f1", "f2"]))
+    #expect(!record.isEmpty)
+  }
+
+  @Test func arcImportRecordIsStoredSortedAndSurvivesReopen() async throws {
+    try await withTemporaryDirectory { directory in
+      let url = directory.appendingPathComponent("Arkt.sqlite")
+      let recorded = ArcImportRecord(spaceIDs: ["b", "a", "c"], favoriteItemIDs: ["z", "y"])
+      do {
+        let database = try ArktDatabase.open(at: url)
+        try await SettingsStore(database: database).recordArcImport(recorded, at: Self.date)
+        let key = ArcImportRecord.storageKey
+        let raw = try await database.writer.read { db in
+          try Data.fetchOne(db, sql: "SELECT value FROM setting WHERE key = ?", arguments: [key])
+        }
+        #expect(raw.map { String(decoding: $0, as: UTF8.self) }
+          == #"{"favoriteItemIDs":["y","z"],"spaceIDs":["a","b","c"]}"#)
+        try database.close()
+      }
+      let reopened = try ArktDatabase.open(at: url)
+      defer { try? reopened.close() }
+      #expect(try await SettingsStore(database: reopened).loadArcImportRecord() == recorded)
+    }
+  }
+
+  @Test func settingsStoreIsAnArcImportRecordStore() throws {
+    let _: any ArcImportRecordStoring = SettingsStore(database: try ArktDatabase.inMemory())
   }
 }

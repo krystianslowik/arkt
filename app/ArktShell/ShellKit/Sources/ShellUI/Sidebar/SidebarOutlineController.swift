@@ -322,11 +322,25 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       }
     }
     outlineView.endUpdates()
+    // Forget removed nodes the source no longer has, so a node restored later with the same id is read fresh.
+    for change in difference.removals {
+      if case .remove(let offset, _, _) = change, let id = old[offset].nodeID, source.node(id) == nil {
+        forget(id)
+      }
+    }
     for change in difference.insertions {
       if case .insert(let offset, _, _) = change, let id = new[offset].nodeID,
          source.node(id)?.childLocation != nil {
         outlineView.expandItem(new[offset])
       }
+    }
+  }
+
+  /// Drops the cached item and child list of `id` and of its cached descendants that left the source.
+  private func forget(_ id: NodeID) {
+    items[id] = nil
+    for child in containerChildren.removeValue(forKey: id) ?? [] where source.node(child) == nil {
+      forget(child)
     }
   }
 

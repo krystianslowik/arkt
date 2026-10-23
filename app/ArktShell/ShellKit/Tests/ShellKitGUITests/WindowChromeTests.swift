@@ -14,7 +14,7 @@ final class WindowChromeTests: XCTestCase {
   }
 
   func testTrafficLightsSitInSidebar() throws {
-    let controller = ShellWindowController(engine: InMemoryEngine())
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let window = try XCTUnwrap(controller.window as? ShellWindow)
     window.setContentSize(NSSize(width: 1200, height: 800))
     window.contentView?.layoutSubtreeIfNeeded()
@@ -25,7 +25,7 @@ final class WindowChromeTests: XCTestCase {
   }
 
   func testTrafficLightsStayPutAfterResize() throws {
-    let controller = ShellWindowController(engine: InMemoryEngine())
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let window = try XCTUnwrap(controller.window as? ShellWindow)
     window.setContentSize(NSSize(width: 900, height: 600))
     window.contentView?.layoutSubtreeIfNeeded()
@@ -35,14 +35,15 @@ final class WindowChromeTests: XCTestCase {
   }
 
   func testWindowIsTitlelessFullSizeContent() throws {
-    let window = try XCTUnwrap(ShellWindowController(engine: InMemoryEngine()).window)
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+    let window = try XCTUnwrap(controller.window)
     XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
     XCTAssertTrue(window.titlebarAppearsTransparent)
     XCTAssertEqual(window.titleVisibility, .hidden)
   }
 
   func testCardHasHairlineAndRadius() throws {
-    let controller = ShellWindowController(engine: InMemoryEngine())
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let root = try XCTUnwrap(controller.window?.contentView as? ShellRootView)
     root.layoutSubtreeIfNeeded()
     let clip = try XCTUnwrap(root.card.clipView.layer)
@@ -55,7 +56,7 @@ final class WindowChromeTests: XCTestCase {
 
   func testCardHostsTheEngineContentView() throws {
     let engine = InMemoryEngine()
-    let controller = ShellWindowController(engine: engine)
+    let controller = ShellWindowController(engine: engine, sidebar: StubSidebar.sample())
     let root = try XCTUnwrap(controller.window?.contentView as? ShellRootView)
     let tab = try XCTUnwrap(engine.tabIDs.first)
     let page = try XCTUnwrap(engine.contentView(for: tab))
@@ -65,7 +66,7 @@ final class WindowChromeTests: XCTestCase {
   }
 
   func testResizeHandleClampsSidebarWidth() throws {
-    let controller = ShellWindowController(engine: InMemoryEngine())
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let root = try XCTUnwrap(controller.window?.contentView as? ShellRootView)
     root.resizeHandle.onWidthChange?(1000)
     root.layoutSubtreeIfNeeded()
@@ -77,7 +78,7 @@ final class WindowChromeTests: XCTestCase {
   }
 
   func testTitlebarContainerIsNarrowedToSidebar() throws {
-    let controller = ShellWindowController(engine: InMemoryEngine())
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let window = try XCTUnwrap(controller.window as? ShellWindow)
     window.contentView?.layoutSubtreeIfNeeded()
     let container = try XCTUnwrap(window.standardWindowButton(.closeButton)?.superview?.superview)
@@ -86,7 +87,7 @@ final class WindowChromeTests: XCTestCase {
   }
 
   func testClickNearWindowTopInsideCardReachesCard() throws {
-    let controller = ShellWindowController(engine: InMemoryEngine())
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let window = try XCTUnwrap(controller.window as? ShellWindow)
     let root = try XCTUnwrap(window.contentView as? ShellRootView)
     root.layoutSubtreeIfNeeded()
@@ -97,7 +98,7 @@ final class WindowChromeTests: XCTestCase {
   }
 
   func testDarkAppearanceUsesDarkCardTokens() throws {
-    let controller = ShellWindowController(engine: InMemoryEngine())
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let window = try XCTUnwrap(controller.window)
     window.appearance = NSAppearance(named: .darkAqua)
     let root = try XCTUnwrap(window.contentView as? ShellRootView)

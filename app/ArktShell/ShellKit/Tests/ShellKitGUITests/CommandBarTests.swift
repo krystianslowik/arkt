@@ -13,7 +13,7 @@ final class CommandBarTests: XCTestCase {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
     NSApp.activate()
-    shell = ShellWindowController(engine: InMemoryEngine())
+    shell = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let window = try XCTUnwrap(shell.window)
     window.setFrame(NSRect(x: 100, y: 100, width: 1400, height: 900), display: true)
     shell.showWindow(nil)

@@ -117,4 +117,22 @@ struct SidebarModelStubTests {
     let favorite = s.children(of: .favorites(profile: "default"))[0]
     #expect(s.spaceID(containing: favorite) == nil)
   }
+
+  @Test func addSpaceEmitsSpaces() {
+    let stub = StubSidebar()
+    var changes: [SidebarChange] = []
+    let observation = stub.observe { changes.append($0) }
+    let source: any SidebarSource = stub              // through the protocol requirement
+    _ = try? source.addSpace(title: "New")
+    #expect(changes == [.spaces])
+    _ = observation
+  }
+
+  @Test func sectionContainingWalksThroughFolders() {
+    let stub = StubSidebar()
+    let space = stub.addSpace(title: "S", theme: SpaceThemeInfo(baseColors: [], isDark: false))
+    let folder = stub.addFolder(title: "F", in: .pinned(space))
+    let tab = stub.addTab(url: URL(string: "https://a.example")!, title: "A", in: .folder(folder))
+    #expect(stub.section(containing: tab) == .pinned(space))
+  }
 }

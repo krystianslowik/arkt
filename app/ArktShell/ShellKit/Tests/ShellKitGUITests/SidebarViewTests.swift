@@ -396,6 +396,24 @@ private final class EagerEngine: EngineClient {
 }
 
 extension MountedSidebarTests {
+  // E4b: every favicon the window learns from the engine reaches `onFaviconChanged` (the app persists it), both the
+  // one caught up from the snapshot inside createTab and later `.faviconChanged` events.
+  func testFaviconChangesReachTheHook() throws {
+    let sidebar = StubSidebar.sample()
+    let engine = EagerEngine()
+    let controller = ShellWindowController(engine: engine, sidebar: sidebar)
+    var seen: [(NodeID, Data?)] = []
+    controller.onFaviconChanged = { seen.append(($0, $1)) }
+    let node = sidebar.children(of: .today(sidebar.spaceOrder[0]))[1]
+    controller.activate(node: node)
+    XCTAssertEqual(seen.map(\.0), [node])
+    XCTAssertEqual(seen.last?.1, Data([0x89, 0x50]))
+    let tab = try XCTUnwrap(controller.currentTab)
+    engine.inner.finishLoad(tab, title: "Loaded Early", favicon: Data([0x89, 0x51]))
+    XCTAssertEqual(seen.map(\.0), [node, node])
+    XCTAssertEqual(seen.last?.1, Data([0x89, 0x51]))
+  }
+
   func testStateEmittedInsideCreateTabReachesTheSidebar() throws {
     let sidebar = StubSidebar.sample()
     let controller = ShellWindowController(engine: EagerEngine(), sidebar: sidebar)
@@ -524,21 +542,61 @@ final class SidebarReviewTests: XCTestCase {
     XCTAssertFalse(divider.isAccessibilityElement())
   }
 
-  func testFaviconCacheIsPrunedOnDeactivate() throws {
-    let sidebar = StubSidebar.sample()
-    let controller = makeSidebar(sidebar)
-    let today = sidebar.children(of: .today(sidebar.spaceOrder[0]))
+  private func faviconData() throws -> Data {
     let image = NSImage(size: NSSize(width: 4, height: 4), flipped: false) { rect in
       NSColor.red.setFill(); rect.fill(); return true
     }
-    let data = try XCTUnwrap(image.tiffRepresentation)
+    return try XCTUnwrap(image.tiffRepresentation)
+  }
+
+  // E4b: the favicon stays while the node exists (engine tab closed or not); it goes with the node.
+  func testFaviconIsKeptWhileTheNodeExistsAndDroppedWithIt() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let today = sidebar.children(of: .today(sidebar.spaceOrder[0]))
+    let data = try faviconData()
     controller.setFavicon(data, for: today[0])
     controller.setFavicon(data, for: today[2])
     controller.activate(node: today[0])
     controller.deactivate(node: today[0])
-    controller.deactivate(node: today[2])                 // never current: still pruned
-    XCTAssertNil(controller.favicons[today[0]])
-    XCTAssertNil(controller.favicons[today[2]])
+    controller.deactivate(node: today[2])                 // never current
+    XCTAssertNotNil(controller.favicons[today[0]], "engine tab closed, node still in the sidebar")
+    XCTAssertNotNil(controller.favicons[today[2]])
+    sidebar.removeNode(today[0])
+    XCTAssertNil(controller.favicons[today[0]], "node removed from the source")
+    XCTAssertNotNil(controller.favicons[today[2]])
+  }
+
+  func testFaviconsOfARemovedSpaceAreDropped() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let removed = sidebar.spaceOrder[1]
+    let tab = sidebar.children(of: .today(removed))[0]
+    let favorite = sidebar.children(of: .favorites(profile: "default"))[0]
+    let data = try faviconData()
+    controller.setFavicons([tab: data, favorite: data])
+    sidebar.removeSpace(removed)                          // emits `.spaces` only
+    XCTAssertNil(controller.favicons[tab])
+    XCTAssertNotNil(controller.favicons[favorite])
+  }
+
+  func testSetFaviconsDecodesABatchAndShowsIt() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let today = sidebar.children(of: .today(sidebar.spaceOrder[0]))
+    let outline = try XCTUnwrap(controller.view.currentOutline)
+    let row = try XCTUnwrap(controller.currentPage?.outlineController.row(for: today[0]))
+    func cell() throws -> SidebarTabCellView {
+      try XCTUnwrap(outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarTabCellView)
+    }
+    let placeholder = try cell().faviconView.image
+    let data = try faviconData()
+    controller.setFavicons([today[0]: data, today[1]: data, NodeID(): data])
+    XCTAssertNotNil(controller.favicons[today[0]])
+    XCTAssertNotNil(controller.favicons[today[1]])
+    XCTAssertEqual(controller.favicons.count, 2, "ids that are not in the source are ignored")
+    let shown = try XCTUnwrap(try cell().faviconView.image)
+    XCTAssertFalse(shown === placeholder)
   }
 
   func testControllerAndAnotherObserverBothReceiveChanges() throws {
