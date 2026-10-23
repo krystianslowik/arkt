@@ -35,4 +35,19 @@ enum AppEnvironment {
     return FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent("Library/Application Support/Arc", isDirectory: true)
   }
+
+  #if DEBUG
+  /// The end-to-end data smoke phase (E6, Debug builds only), from `ARKT_SMOKE`. Separate from the scripted UI smoke
+  /// (`-ArktSmoke YES`), which never opens the database.
+  static var smokePhase: SmokePhase? {
+    ProcessInfo.processInfo.environment["ARKT_SMOKE"].flatMap(SmokePhase.init(rawValue:))
+  }
+
+  enum SmokePhase: String {
+    /// Imports from `arcDirectory` without the summary sheet, prints the counts and quits.
+    case `import`
+    /// Prints the counts and quits.
+    case verify
+  }
+  #endif
 }
