@@ -31,7 +31,7 @@ public final class StubSidebar: SidebarSource {
     let id = SpaceID()
     spaces[id] = SidebarSpaceInfo(id: id, title: title, profile: profile, theme: theme)
     spaceOrder.append(id)
-    hub.emit(.spaces)
+    hub.emit(.spaceAdded(id))
     return id
   }
 
@@ -41,27 +41,38 @@ public final class StubSidebar: SidebarSource {
     addSpace(title: title, theme: SpaceThemeInfo(baseColors: [], isDark: false))
   }
 
-  /// Renames a Space. Emits `.spaces`.
+  /// Renames a Space. Emits `.spaceChanged`.
   public func renameSpace(_ id: SpaceID, to title: String) {
     guard spaces[id] != nil else { return }
     spaces[id]?.title = title
-    hub.emit(.spaces)
+    hub.emit(.spaceChanged(id))
   }
 
-  /// Replaces a Space's theme. Emits `.spaces`.
+  /// Replaces a Space's theme. Emits `.spaceChanged`.
   public func setTheme(_ theme: SpaceThemeInfo, of id: SpaceID) {
     guard spaces[id] != nil else { return }
     spaces[id]?.theme = theme
-    hub.emit(.spaces)
+    hub.emit(.spaceChanged(id))
   }
 
-  /// Removes a Space and every node under its pinned and Today sections. Emits only `.spaces`: the Space's pages
-  /// go away with it, so no structure change is needed.
+  /// Moves a Space so that it lands at `index`, measured before it is removed (the `Sidebar.move` convention);
+  /// clamped. Emits `.spaceMoved` when the order changed.
+  public func moveSpace(_ id: SpaceID, to index: Int) {
+    guard let old = spaceOrder.firstIndex(of: id) else { return }
+    let before = spaceOrder
+    spaceOrder.remove(at: old)
+    let target = old < index ? index - 1 : index
+    spaceOrder.insert(id, at: min(max(target, 0), spaceOrder.count))
+    if spaceOrder != before { hub.emit(.spaceMoved(id)) }
+  }
+
+  /// Removes a Space and every node under its pinned and Today sections. Emits only `.spaceRemoved`: the Space's
+  /// pages go away with it, so no structure change is needed.
   public func removeSpace(_ id: SpaceID) {
     guard spaces.removeValue(forKey: id) != nil else { return }
     spaceOrder.removeAll { $0 == id }
     for section in [SidebarLocation.pinned(id), .today(id)] { removeSubtrees(at: section) }
-    hub.emit(.spaces)
+    hub.emit(.spaceRemoved(id))
   }
 
   private func removeSubtrees(at location: SidebarLocation) {

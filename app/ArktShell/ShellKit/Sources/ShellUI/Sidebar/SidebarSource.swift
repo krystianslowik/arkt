@@ -131,7 +131,7 @@ public protocol SidebarSource: AnyObject {
   func parent(of id: NodeID) -> SidebarLocation?
   /// Throws when the model refuses the location (unknown Space, too deep). `StubSidebar` never throws.
   @discardableResult func addTab(url: URL, title: String, in location: SidebarLocation) throws -> NodeID
-  /// A new Space for this source's default profile, appended to `spaceOrder`. Emits `.spaces`.
+  /// A new Space for this source's default profile, appended to `spaceOrder`. Emits `.spaceAdded`.
   @discardableResult func addSpace(title: String) throws -> SpaceID
   func updateTab(_ id: NodeID, url: URL?, title: String?)
 
@@ -166,13 +166,19 @@ public protocol SidebarSource: AnyObject {
   func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation
 }
 
-/// What changed: a location's child list (insert / remove / reorder), one node's own fields (title, url), or the
-/// Space list.
+/// What changed: a location's child list (insert / remove / reorder), one node's own fields (title, url), or one
+/// Space (C6 review M10). A mutation that touches Spaces reports them first: removed, added, moved, changed.
 public enum SidebarChange: Hashable, Sendable {
   case structure(SidebarLocation)
   case node(NodeID)
-  /// `spaceOrder` or any Space's title, profile or theme changed.
-  case spaces
+  /// A Space joined `spaceOrder`.
+  case spaceAdded(SpaceID)
+  /// A Space left `spaceOrder`. Its nodes went with it and get no `.structure` change of their own.
+  case spaceRemoved(SpaceID)
+  /// A Space changed its place in `spaceOrder` relative to the others (not just shifted by an add or a removal).
+  case spaceMoved(SpaceID)
+  /// A Space's title, profile or theme changed.
+  case spaceChanged(SpaceID)
 }
 
 /// Handle returned by `SidebarSource.observe`; keep it alive for as long as you want changes.

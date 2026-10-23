@@ -2,7 +2,8 @@ import AppKit
 import XCTest
 @testable import ShellUI
 
-/// A Space added after launch reaches the pager through `.spaces` (first-run: the window starts with no Space).
+/// Space events reach the pager: a Space added after launch (first run: the window starts with no Space), renamed,
+/// rethemed, moved or removed.
 @MainActor
 final class SpaceListChangeTests: XCTestCase {
   override func setUp() async throws {
@@ -92,6 +93,63 @@ final class SpaceListChangeTests: XCTestCase {
     XCTAssertEqual(controller.currentSpace, first)
     XCTAssertEqual(changed, [[first]])
     XCTAssertEqual(currentAtCall, [first])
+  }
+
+  /// The Space that slides into the removed one's place becomes current [I].
+  func testRemovingTheCurrentSpaceShowsTheNextSpace() throws {
+    let stub = StubSidebar()
+    let spaces = ["A", "B", "C"].map { stub.addSpace(title: $0) }
+    let controller = SidebarController(source: stub)
+    controller.showSpace(spaces[1])
+    var currentAtCall: [SpaceID?] = []
+    controller.onSpacesChanged = { [unowned controller] _ in currentAtCall.append(controller.currentSpace) }
+
+    stub.removeSpace(spaces[1])
+    XCTAssertEqual(controller.currentSpace, spaces[2])
+    XCTAssertEqual(controller.view.spaceDots.selectedIndex, 1)
+    XCTAssertEqual(controller.view.spaceDots.titles, ["A", "C"])
+    XCTAssertEqual(currentAtCall, [spaces[2]])
+  }
+
+  /// With no Space after it, the one before the removed Space becomes current.
+  func testRemovingTheCurrentLastSpaceShowsThePreviousSpace() throws {
+    let stub = StubSidebar()
+    let spaces = ["A", "B", "C"].map { stub.addSpace(title: $0) }
+    let controller = SidebarController(source: stub)
+    controller.showSpace(spaces[2])
+
+    stub.removeSpace(spaces[2])
+    XCTAssertEqual(controller.currentSpace, spaces[1])
+    XCTAssertEqual(controller.view.spaceDots.selectedIndex, 1)
+  }
+
+  func testRemovingAnotherSpaceKeepsTheCurrentSpace() throws {
+    let stub = StubSidebar()
+    let spaces = ["A", "B", "C"].map { stub.addSpace(title: $0) }
+    let controller = SidebarController(source: stub)
+    controller.showSpace(spaces[2])
+
+    stub.removeSpace(spaces[0])
+    XCTAssertEqual(controller.currentSpace, spaces[2])
+    XCTAssertEqual(controller.view.spaceDots.selectedIndex, 1)
+    XCTAssertEqual(controller.currentPage?.outlineController.spaceID, spaces[2])
+  }
+
+  func testMovingASpaceReordersPagesAndDotsAndKeepsTheCurrentSpace() throws {
+    let stub = StubSidebar()
+    let spaces = ["A", "B", "C"].map { stub.addSpace(title: $0) }
+    let controller = SidebarController(source: stub)
+    controller.showSpace(spaces[0])
+    var changed: [[SpaceID]] = []
+    controller.onSpacesChanged = { changed.append($0) }
+
+    stub.moveSpace(spaces[0], to: 3)
+    XCTAssertEqual(controller.spaces, [spaces[1], spaces[2], spaces[0]])
+    XCTAssertEqual(controller.view.spaceDots.titles, ["B", "C", "A"])
+    XCTAssertEqual(controller.currentSpace, spaces[0])
+    XCTAssertEqual(controller.view.spaceDots.selectedIndex, 2)
+    XCTAssertEqual(controller.currentPage?.outlineController.spaceID, spaces[0])
+    XCTAssertEqual(changed, [[spaces[1], spaces[2], spaces[0]]])
   }
 
   func testRemovingTheCurrentSpaceActivatesTheRestoredTabOfTheNewCurrentSpace() throws {
