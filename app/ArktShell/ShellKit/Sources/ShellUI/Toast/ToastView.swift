@@ -47,6 +47,8 @@ final class ToastView: NSView {
     // a reachable child for VoiceOver.
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
+    setAccessibilityIdentifier(AXID.Toast.root)
+    actionButton.setAccessibilityIdentifierWithCell(AXID.Toast.action)
     applyColors()
   }
 
@@ -68,6 +70,7 @@ final class ToastView: NSView {
     actionButton.isHidden = toast.actionTitle == nil
     applyColors()
     setAccessibilityLabel(toast.text)
+    setAccessibilityValue(toast.isPersistent ? AXID.Toast.persistent : AXID.Toast.timed)
     let wasShowing = isShowingToast
     isShowingToast = true
     isHidden = false
