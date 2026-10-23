@@ -372,3 +372,75 @@ are left for a follow-up because U3 does not change the harness.
 
 - Promotion to a required check (U16): 10 consecutive green runs on `main` and a local 20-iteration run.
 - The `Waits.swift` concurrency warnings under Xcode 26.6.
+
+## U5: Loopback fixture server and source checks (#170)
+
+Base: `origin/main` at `77d4a94`, rebased onto `fdda316` (#203, U3), branch `chore/170-ui-tests-u5`. No Chromium
+build running; `nice -n 10`, `-jobs 4`.
+
+### What was done
+
+- `UITests/Harness/FixtureServer.swift`: HTTP/1.1 on `127.0.0.1` only (`requiredInterfaceType = .loopback` and a
+  required local endpoint `127.0.0.1:0`), ephemeral port, one request per connection. `/p/<name>` serves
+  `<title>Fixture <name></title>` with a link to `/p/<name>-next`; `/favicon.ico` answers 404; any other path serves a
+  generic page titled `Fixture <path>`. The request log (paths only) sits behind a `Mutex`. `base` is
+  `http://127.0.0.1:<port>`. The start waits on `stateUpdateHandler` through one `CheckedThrowingContinuation`
+  (resumed once: the handler is cleared on the first final state); a deadline on the server's queue cancels a
+  listener that is not ready after 5 s, and `.waiting` counts as a failure. No sleep.
+- `ArktUITestCase.fixtureServer()`: starts the test's server on first use, caches it on the test case instance and
+  stops it in a tear-down block.
+- `UITests/LoopbackPageTests.swift`: `test_E_loopbackPageLoadsInTheEngine`. Cmd-T on an empty profile (the shell
+  creates the first Space), type `<base>/p/alpha` into `commandBar.field`, Return, then wait for the sidebar row's
+  title `Fixture alpha` and check the server log has `/p/alpha`.
+- `Check UI test sources`, an inline zsh step of the `ui-tests` job in `.github/workflows/swift-tests.yml` (no
+  script): fails on `sleep(`, `usleep(`, `Thread.sleep`, `Task.sleep`, and on any
+  `http(s)://` under `app/ArktShell/UITests` other than `http://127.0.0.1` (followed by `:`, `/` or the end) and
+  `https://example.com` in `Harness/ArcFixture.swift` only.
+- `project.yml` (own commit): the `ArktShellUITests` target gets an entitlements file,
+  `ArktShellUITests.entitlements`, with `com.apple.security.network.server`. It sits next to `project.yml`, not in
+  `UITests/`, so it is not a target source and its plist DOCTYPE URL stays out of the source check.
+- `.github/workflows/swift-tests.yml` (own commit): `Check UI test sources` runs right after checkout in the
+  `ui-tests` job, before Xcode is set up.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `Check UI test sources` step on the branch | `UI test sources OK`, exit 0 |
+| Temporary `sleep(1)` in `LoopbackPageTests.swift` (reverted) | lists `./LoopbackPageTests.swift:25:    sleep(1)`, exit 1 |
+| Temporary `Task.sleep`, `Thread.sleep`, `usleep` line (reverted) | listed, exit 1 |
+| Temporary `https://www.example.org/x`, `http://127.0.0.1.evil.test/`, `https://example.com/a` outside `ArcFixture.swift` (reverted) | all three listed, exit 1 |
+| Server alone (scratch build of `FixtureServer.swift` with a `main.swift`, not committed) | `lsof` shows one `TCP 127.0.0.1:<port> (LISTEN)`, IPv4 only; `/p/alpha` 200 with the title and link, `/favicon.ico` 404, `/some/x?y=1` 200 titled after the path; 50 concurrent requests all logged |
+| Same, inside an ad-hoc signed sandboxed app bundle | with `network.client` only: `POSIXErrorCode(rawValue: 1): Operation not permitted`; with `network.server` added: serves as above |
+| `build-for-testing` (Xcode 27.1) | `** TEST BUILD SUCCEEDED **`; runner entitlements now include `network.server`; no new warnings (the `Waits.swift` warnings from U3 remain) |
+| Local UI run (once, Xcode 27.1, before the entitlement) | `LaunchTests` passed; `test_E_loopbackPageLoadsInTheEngine` failed at the server start: `bind(127.0.0.1:0)` EPERM, the runner is sandboxed with `network.client` only |
+| CI `UI tests (informative)`, head `2ffcf33` (Xcode 26.6) | `Check UI test sources`: `UI test sources OK`; `** TEST SUCCEEDED **`, `Executed 2 tests, with 0 failures` (LaunchTests 9.3 s, LoopbackPageTests 10.0 s) |
+| `Swift tests` gate on the same run | `success` |
+
+The local UI run was not repeated after the entitlement fix (one GUI run per change on a shared machine); CI ran
+both tests green with the fix.
+
+### App Transport Security
+
+No exception needed. The Debug `Info.plist` has no `NSAppTransportSecurity` key, and the page at
+`http://127.0.0.1:<port>/p/alpha` loaded in the FakeEngine (WKWebView) on CI: IP literals are exempt from ATS, as the
+plan expected.
+
+### Deviations from the plan
+
+- The server starts on first use (`fixtureServer()`) instead of in `setUp`: tests that open no page start no
+  listener, and an `async` start does not fit the nonisolated `setUpWithError` of the main-actor test case. One
+  server per test case instance, stopped in tear-down, as planned.
+- The probe test finds the row as the title text inside the sidebar outline (`app.outlines` static text with value
+  or label `Fixture alpha`), because `sidebar.row.today` lands with U4b (#168). U4b switches it to the identifier.
+- New `project.yml` entitlements for the UI test runner (`network.server`); the plan did not foresee that the
+  runner is sandboxed.
+- The fallback page is titled `Fixture <path>` (the plan says "titled after the path").
+
+### What remains
+
+- U4b (#168): replace the outline text query in `LoopbackPageTests` with `sidebar.row.today`.
+- The local failed run attached Xcode's automatic screen recording (`lifetime deleteOnSuccess`, so kept on failure)
+  of the whole screen, which decision 7 rules out; the scheme should turn it off. Left for the harness follow-up
+  (#199). The same run also spent about 150 s between the recorded failure and tear-down, likely that recording.
+- #93 removes the duplication between `FixtureServer` and `ShellKitGUITests/LoopbackServer.swift`.
