@@ -212,6 +212,12 @@ class ArktBrowserWindow : public BrowserWindow,
   // left native fullscreen.
   void OnFullscreenChanged();
 
+  // While held, Show(), ShowInactive() and Activate() only record that the
+  // window should be shown; ReleaseHeldShow() shows it then. Used for a window
+  // Chromium creates before the embedder is ready (week-3 plan, Decision 2).
+  void HoldShow();
+  void ReleaseHeldShow();
+
  protected:
   // BrowserWindow:
   void DeleteBrowserWindow() override;
@@ -258,6 +264,8 @@ class ArktBrowserWindow : public BrowserWindow,
       scoped_extensions_container_;
   // The window frame when native fullscreen began (GetRestoredBounds).
   gfx::Rect bounds_before_fullscreen_;
+  bool show_held_ = false;
+  bool show_pending_ = false;
 
   base::WeakPtrFactory<ArktBrowserWindow> weak_factory_{this};
 };

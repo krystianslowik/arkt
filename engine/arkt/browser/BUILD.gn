@@ -24,11 +24,34 @@ source_set("extension_dialog_hook") {
 }
 
 # In-process browser hook, registered from
-# chrome/browser/chrome_browser_main.cc (patch 0001).
+# chrome/browser/chrome_browser_main.cc (patch 0001). Kept apart from the
+# window code so the hook can depend on the embedder seam (//arkt/api), which
+# itself uses the window code.
 source_set("browser") {
   sources = [
     "arkt_browser_main_extra_parts.h",
     "arkt_browser_main_extra_parts.mm",
+  ]
+  deps = [
+    ":window",
+    ":window_factory_hook",
+    "//arkt/api:embedder",
+    "//base",
+    "//chrome/browser/profiles:profile",
+    "//chrome/browser/ui:browser_window_header",
+    "//chrome/browser/ui/browser_window",
+    "//chrome/browser/ui/tabs:tab_strip",
+    "//content/public/browser",
+    "//ui/base",
+    "//ui/gfx",
+  ]
+  public_deps = [ "//chrome/browser:main_extra_parts" ]
+  frameworks = [ "AppKit.framework" ]
+}
+
+# Arkt's native browser window and its parts (week 2).
+source_set("window") {
+  sources = [
     "arkt_browser_window.h",
     "arkt_browser_window.mm",
     "arkt_browser_window_parts.h",
@@ -100,7 +123,7 @@ source_set("browser") {
     "//ui/strings",
     "//url",
   ]
-  public_deps = [ "//chrome/browser:main_extra_parts" ]
+  public_deps = [ "//arkt/api" ]
   frameworks = [
     "AppKit.framework",
     "QuartzCore.framework",
