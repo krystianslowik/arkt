@@ -604,7 +604,7 @@ Base: `origin/main` at `01e68c3`, branch `chore/172-ui-tests-u7`.
   test launches into one sandbox only.
 - Deviation: the closed command bar is "root absent or value `closed`", since a hidden panel can leave the
   accessibility tree.
-- Not covered: a second Space cannot be created from the UI until #106, so `Space 2` is not asserted.
+- Not covered: `Space 2` (New Space from the Spaces menu, #106) is not asserted yet.
 
 ### Tests
 
@@ -612,7 +612,7 @@ Base: `origin/main` at `01e68c3`, branch `chore/172-ui-tests-u7`.
 |---|---|---|
 | `test_E_firstRunShowsEmptyStateWithoutImport` | none | 12.2 s |
 | `test_E_newSpaceCreatesFirstSpace` | none | 6.6 s |
-| `test_E_newSpaceTitleFollowsDecision106` (strict expected failure until #106) | none | 5.0 s |
+| `test_E_newSpaceTitleFollowsDecision106` (asserts normally since #106 landed) | none | 5.0 s |
 | `test_KB001_BH100_cmdTOpensURLInNewTodayTab` | KB-001, BH-100 | 77.5 s (two #269 waits) |
 | `test_KB002_BH101_cmdLEditedEnterNavigatesCurrentTab` | KB-002, BH-101 | 79.9 s (two #269 waits) |
 | `test_KB004_BH102_cmdLUneditedEnterReloads` | KB-004, BH-102 | 48.6 s (one #269 wait) |
