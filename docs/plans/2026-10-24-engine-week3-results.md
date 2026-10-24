@@ -14,7 +14,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-4 | Host mode for ShellUI windows | DONE | embedder hosts own Arkt windows, `createBrowserWithHost:`, request kinds from the call site, self-test embedder; all acceptance rows pass on `Chromium.app`; see "W3-4" below |
 | W3-5 | Tab facade | DONE (W3-5a #256, W3-5b) | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state. W3-5b: history and duplicate, extension actions for embedder windows, the test API; page context menu still blocked. See "W3-5a" and "W3-5b" below; review follow-ups in "#258" |
 | W3-6 | `ChromiumEngineKit` over the facade | DONE | `ChromiumEngine: EngineClient, EngineExtensions` and the typed `ArktShellEmbedder` in `ChromiumEngineKit`; contract rules 1-16 pass against a scripted facade with every driver (24 checks x 2 event orders, none not applicable); ShellKit 509 + 28; see "W3-6" below |
-| W3-7 | The shell as engine host, composition root (Swift lane) | TODO | |
+| W3-7 | The shell as engine host, composition root (Swift lane) | A, B DONE; C, D TODO | `ShellEngineHost`, engine window on the first tab, `createTab(url:in:)`, commands, close button, per-window routing, close reasons, held closes, Extensions control, #241; see "W3-7 A and B" below |
 | W3-8 | Main menu inventory and owner decision | DONE (steps 1-3; step 4 after W3-9) | Arkt owns the menu; conditions: a hidden `IDC_BOOKMARKS_MENU` placeholder (without it the first window crashes, measured), no `IDC_FILE_MENU` / `IDC_TAB_MENU` tags, Quit `IDC_EXIT` + `terminate:`; reserved keys in `ShellWindow`; no engine change; see "W3-8" below |
 | W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | TODO | |
 | W3-10 | Infobars, or a recorded gap | TODO | |
@@ -306,6 +306,107 @@ Also logged in every run: after the swap `NSApp.servicesMenu` and `NSApp.helpMen
 Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome`, incremental (the self-test embedder and the framework link),
 `The build has finished successfully.`; `/` had 6.3 GiB free and swap 8.6 GB used before and after. No `Chromium`
 process left afterwards.
+
+## W3-7 A and B: the Arkt window as the engine's window host
+
+Date 2026-10-24. Branch `engine/33-w3-7-shell-host` off `main` at `0710668`, Swift lane (assigned by the maintainer
+on 2026-10-24). Swift only: no engine worktree, `$CR` not touched; no `EngineAPI`, `Package.swift` or `App/Engine/`
+change. Parts C (start and quit, after W3-3's gate) and D (menu, after W3-8) are not in it.
+
+### Part A: hosting
+
+- **`ShellEngineHost`** (`ShellUI/Window/ShellEngineHost.swift`) is the `EngineWindowHosting` of a
+  `ShellWindowController` (`controller.engineHost`): `window` is the `ShellWindow`, `cardView` the content card. A
+  separate object rather than a conformance on the controller, because `NSWindowController.window` is optional and the
+  protocol's is not. It holds the controller weakly. `ChromiumEngine` (W3-6) receives `controller.engineHost`.
+- **Engine window on the first tab** (decision 4). `openEngineTab` calls `createWindow(host:)` once, then
+  `createTab(url:in:)` for every tab, so no ShellUI call uses the window-less form; the `CreateTabLintTests` allowance is
+  removed. A window that never showed a tab has no engine window and closes as before.
+- **Commands.** `ShellWindow` implements `commandDispatch:` and `commandDispatchUsingKeyModifiers:` (sender tag =
+  `EngineCommand` id; the second maps Cmd, Cmd-Shift and Shift to `newBackgroundTab`, `newForegroundTab`, `newWindow`
+  as `ui::DispositionFromEventFlags` does) and validates them in `validateUserInterfaceItem`. The shell claims
+  `.newTab` (command bar) and `.closeTab` (archive or close the current tab; enabled with a current tab); every other
+  command goes to the engine's `forward`, and is disabled while the window has no engine window. The rest of the W3-8
+  table joins with part D.
+- **Close button.** `windowShouldClose` reports the shown tabs hidden (decision 10, the `lastActiveAt` stamp, as
+  `prepareForTermination` does before quit), calls `onCloseRequested` and answers false; the window closes when its
+  `.windowClosed` arrives. A held prompt keeps the window, a cancelled one keeps it and its rows. A tab the engine opens
+  while the window's close is held is closed without a row.
+- **Extensions control** (`ShellUI/Sidebar/ExtensionsButton.swift`): a bottom-bar button left of New Tab, present only
+  when `engine is EngineExtensions` (not for FakeEngine). It lists the window's `extensionActions(in:)` in a native
+  menu (icon, name, enabled state), is disabled with none, refreshes on `.extensionActionsChanged`, and runs an action
+  with itself as anchor. No animation of its own.
+
+### Part B: tabs
+
+- **Per-window routing.** A window observes its engine window only (`observe(window:)`, `observeWindows` filtered by
+  id) from the moment the window exists; the global observer is gone.
+- **Engine tabs** (`origin == .engine`, unmapped) become Today tabs in the window's current Space (a placeholder
+  `about:blank` until the first `.urlChanged`), and are shown when the engine makes them active. A tab the sidebar
+  refuses is closed with `.skipUnloadHandlers`, so no live tab is left without a row.
+- **Activation.** `currentTab` drives `activateTab` (the focused pane in a split too); an engine activation of another
+  tab selects its row. After the engine's active tab closes, the engine's own pick is not followed (the shell picks
+  the successor, as before) and is answered with the shell's tab (`expectsEngineReactivation`). In-process engines
+  report their pick after the shell's own activation, Chromium one task later, and no engine reports a pick that is
+  already the active tab, so the expectation also lapses after 1 s (`reactivationGrace`, [I]); an engine activation
+  inside that second (an extension's `chrome.tabs.update` right after a close) is answered with the shell's tab.
+- **Close reasons** (Decision 12). `.windowClosing` and `.appTerminating` only unload: no sidebar write, nothing else
+  shown or created (a closing window never gets a new tab); the stamps happen before the closes (close button,
+  `prepareForTermination`), so the tests compare the stored sidebar byte for byte with the app's `markInactive` wiring.
+  A window the engine closes on its own (`chrome.windows.remove`) stamps nothing. `.page` and `.extension` archive a
+  Today row once and leave a Pinned or Favorite row unloaded (maintainer question: Decision 12 can be read as removing
+  those rows too). `.client` is what the shell asked.
+- **Held closes** (Decision 11). Cmd-W and the row X close the pages first with `.honourUnloadHandlers` and archive a
+  Today node only after its last page reported `.tabClosed` (`pendingArchives`, registered before the first close
+  since an unheld close reports synchronously); a split row archives once all its panes closed. While held the row is
+  dimmed (`SidebarController.closingNodes`, opacity 0.45, no X, accessibility value "Closing", no animation) and its
+  page stays mounted; `.closeCancelled` keeps the tab and drops the archive; another Cmd-W while held does nothing.
+  Rows removed by anything else (auto-archive, Delete Space, an import merge) close their pages with
+  `.skipUnloadHandlers`: no prompt can belong to a row that is gone. A row removed while its prompt is up: a
+  cancelled prompt then closes the page the same way, an accepted one archives nothing more. Clicking another row
+  while a prompt is up shows that row's page; the held page, its prompt and the dimmed row stay until the user comes
+  back (accepted; the prompt is tab-modal on the held page).
+- **Auto-archive** skips `nodesHoldingClose` (tabs with `wouldHoldClose` or `isClosing`, and their split) through
+  `AutoArchiveTimer.exempt`, re-read every pass; CoreBridge is unchanged.
+- **Engine-initiated windows.** `ShellWindowController(..., opensFirstTab: false)` builds a window without calling the
+  engine (for a host provider) and `adopt(engineWindow:)` attaches it once its `.windowOpened` arrived, turning the
+  engine's tabs in it into Today tabs. The engine does not tell a host its id, so the provider's owner pairs hosts with
+  `.windowOpened` in order; that pairing is part C's composition root (the test pairs them itself).
+- **#241.** `applicationShouldTerminateAfterLastWindowClosed` is false; a Dock click with the browser window closed or
+  minimized brings it back (`AppSession.reopenWindow`, a new controller when the old one closed, wired like the first,
+  its favicons reloaded). The import summary and the restore and import toasts build the window again first when it
+  was closed, so they are never shown in a closed window.
+
+### Verification
+
+`nice -n 10`, `-j 4`, scratch and derived data under `/Volumes/SSD_2/arkt-chromium/arkt-shell-dd/w3-7`.
+
+- Rebased on `main` at `01e68c3` (W3-6 #267, #270). ShellKit `swift test --skip ShellKitGUITests`: 536, all pass
+  (537 on `main` minus the removed known-issue lint test).
+- ShellKit `--filter ShellKitGUITests`: 413 (383 + 30 new in `EngineHostingTests.swift`: 10 hosting, 17 routing, 3
+  Extensions), 6 skipped, 0 failures. Before the rebase one full run failed
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` (2 frames over 8.6 ms, 1-minute load 23.7 with another
+  lane building); alone it then passed 6 of 7 here, and `main` at `0710668`, run interleaved under the same load,
+  hitched the same way once in 7 (`space-key`, 9@20.97 ms). Load, not this change.
+- ArktCore `swift test`: 349, all pass.
+- Debug app (`xcodegen generate`, `xcodebuild -configuration Debug`): `BUILD SUCCEEDED`. Not launched.
+- Checked to fail: dropping the reactivation guard fails `testTheEnginesPickAfterAClosedTabIsNotFollowed`, never
+  letting it lapse fails `testAnEngineActivationIsFollowedAfterAgreeingSuccessors`; archiving before the close fails
+  the held and cancelled Cmd-W tests; not closing a cancelled tab whose row is gone, and giving engine tabs a row while
+  the window close is held, fail their tests.
+- Reviewed in a separate pass; its two high findings (the reactivation expectation that could stay set, a live tab
+  left after a cancelled prompt whose row was removed) and three medium ones are fixed above with tests.
+
+### What part C and W3-9 need
+
+- Part C: the composition root's `windowHostProvider` builds `ShellWindowController(..., opensFirstTab: false)`,
+  returns `engineHost`, and pairs pending controllers with `.windowOpened` in order (calling `adopt(engineWindow:)`),
+  skipping ids of windows the shell created itself; `AppSession.reopenWindow` then becomes the composition root's job
+  (with the Chromium engine a Dock reopen arrives as a `.reopen` request instead of `applicationShouldHandleReopen`).
+- W3-9: `ChromiumEngine` delivers `.activeTabChanged` one task later; the reactivation guard expects at most one
+  engine pick within `reactivationGrace` after the active tab closes; W3-9 checks that on the real engine. Engine-initiated
+  held closes (a page or extension close that holds) show no closing state, as no event announces them.
+- The Favorites grid shows no closing state for a held Favorite (the page stays, the tile is unchanged).
 
 ## W3-6: ChromiumEngineKit over the facade
 
