@@ -31,7 +31,11 @@ public final class SpacePagerView: NSView {
   @_spi(Smoke) public var onSettleForTesting: (@MainActor (Int) -> Void)?
 
   let strip = NSView(frame: .zero)
-  private let driver = SpringDriver()
+  /// Tests: force the Reduce Motion path (the settle jumps to its end) whatever the system setting.
+  var reduceMotionForTesting = false
+  private lazy var driver = SpringDriver(reduceMotion: { [weak self] in
+    (self?.reduceMotionForTesting ?? false) || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+  })
   let pacer = FramePacer()
   private var pacerSession = 0
   private(set) var offset: CGFloat = 0
@@ -156,7 +160,9 @@ public final class SpacePagerView: NSView {
       visible = shown ?? around
       shownWhileMoving = visible
     } else {
-      let current = min(max(index, 0), last)
+      // `targetIndex`, not `index`: with Reduce Motion the spring presents its final value before its completion
+      // sets `index`, and showing the old page for that one call would hide and show the destination again.
+      let current = min(max(targetIndex, 0), last)
       visible = current...current
       shownWhileMoving = nil
     }

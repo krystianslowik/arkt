@@ -111,6 +111,16 @@ final class SpaceSwipeHitchTests: XCTestCase {
   /// the settle swings around the destination: each show or hide updates every row's tracking areas, and those ask
   /// the window server where the pointer is (a blocking round trip on the main thread).
   func testAnInteractionShowsAndHidesEachPageOnce() async throws {
+    try await checkShowsAndHidesEachPageOnce()
+  }
+
+  /// Reduce Motion: the settle presents its final value at once, before its completion runs.
+  func testAnInteractionShowsAndHidesEachPageOnceWithReduceMotion() async throws {
+    controller.pager.reduceMotionForTesting = true
+    try await checkShowsAndHidesEachPageOnce()
+  }
+
+  private func checkShowsAndHidesEachPageOnce() async throws {
     let pager = controller.pager
     for (label, run) in [("swipe-next", { await self.swipe(delta: -9) }), ("swipe-back", { await self.swipe(delta: 9) }),
                          ("key-next", { await self.keyboardSwitch(next: true) }),
@@ -147,6 +157,10 @@ final class SpaceSwipeHitchTests: XCTestCase {
   /// took 10-15 ms of CPU and about 1 in 20 passes of a swipe-back went over 8.3 ms; after it the maximum was
   /// under 5 ms.
   func testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU() async throws {
+    // CPU time does not depend on load, but it does on the hardware: a virtualized runner below 120 Hz (CI) is not
+    // the machine this budget is for, and its display link ticks too rarely to drive the scripted frames.
+    let fps = controller.window?.screen?.maximumFramesPerSecond ?? 0
+    if fps < 120 { throw XCTSkip("NOT-MEASURABLE (screen \(fps) Hz)") }
     let rounds = Int(ProcessInfo.processInfo.environment["ARKT_SWIPE_ROUNDS"] ?? "") ?? 6
     var hitches: [HitchDetail] = []
     var all: [String: [Pass]] = [:]
@@ -183,10 +197,6 @@ final class SpaceSwipeHitchTests: XCTestCase {
     var load = [0.0]
     _ = getloadavg(&load, 1)
     print(String(format: "spaceswipe.summary rounds=%d hitches=%d load1=%.2f", rounds, hitches.count, load[0]))
-    // CPU time does not depend on load, but it does on the hardware: a virtualized runner below 120 Hz is not the
-    // machine this budget is for (same rule as the pacing tests).
-    let fps = controller.window?.screen?.maximumFramesPerSecond ?? 0
-    if fps < 120 { throw XCTSkip("NOT-MEASURABLE (screen \(fps) Hz); worst pass \(worst * 1000) ms CPU") }
     XCTAssertLessThan(worst, FrameStats().designBudget, "a Space switch pass took a whole 120 Hz frame of main-thread CPU")
   }
 }

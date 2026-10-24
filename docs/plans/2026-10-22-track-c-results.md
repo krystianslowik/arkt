@@ -1136,7 +1136,10 @@ transaction was not the cause; the view frame move was.
   frozen strip is hit-testable where it shows.
 - While the strip moves, the set of shown pages only grows; it shrinks to the current page at rest. Before, a settle
   that overshot its page hid and showed the neighbour on each swing (3 changes of one page in one swipe), and each
-  change rebuilt that page's tracking areas and queued another window-server query.
+  change rebuilt that page's tracking areas and queued another window-server query. At rest the shown page is
+  `targetIndex`: with Reduce Motion the spring presents its final value before its completion sets `index`, and
+  showing `index` for that one call hid and showed the destination again (the CI GUI job failed with `3 > 2`; forcing
+  Reduce Motion reproduces exactly that locally; `testAnInteractionShowsAndHidesEachPageOnceWithReduceMotion` covers it).
 
 ### Before and after
 
@@ -1159,9 +1162,9 @@ hitches in 60 swipes, max 3.8 ms, p95 0.56 ms). Keyboard switches after the fix:
 0 hitches. With all six legs (15 rounds, load1 9-16), before/after: Debug 15 / 2 pacer hitches, `-O` 1 / 0; the
 light/dark legs keep their flip pass (below), every other leg's maximum went from 5.9-13.9 ms to 1.8-3.2 ms. Main-thread samples inside the window-server query during a swipe loop: 25% before, 0.3% after.
 
-`testFramePacingDuringSwipeAndKeyboardSwitch` (wall clock, asserts only below load 10), after the fix, 7 runs at load1
-5.6-8.3: `space-swipe` `over8.6=0 maxMs=8.33` 7 of 7. `space-key` failed 3 times (`9@17.00`, `9@20.36`, `9@21.21`)
-and `space-swipe-flavor` once (`64@20.58`). The probe names both:
+`testFramePacingDuringSwipeAndKeyboardSwitch` (wall clock, asserts only below load 10), after the fix, 8 runs at load1
+5.5-8.3: `space-swipe` `over8.6=0 maxMs=8.33` 8 of 8. `space-key` failed 3 times (`9@17.00`, `9@20.36`, `9@21.21`)
+and `space-swipe-flavor` twice (`64@20.58`, `9@30.30`). The probe names both:
 - Frame 9 of the Work -> Dev switch is the halfway light -> dark chrome flip (`SidebarContainerView.setFlavor`, then a
   commit that relayouts and redisplays the chrome): 4 ms CPU optimized, 10-29 ms in Debug
   (`hitch label=space-key frame=9 ... cpuMs=29.30 offCpuMs=1.04`). App work, but in the sidebar chrome, not the pager;
@@ -1177,8 +1180,8 @@ and `space-swipe-flavor` once (`64@20.58`). The probe names both:
 
 - `SpaceSwipeHitchTests` (GUI): `testSwipeMovesTheStripLayerNotItsFrame` (frame unchanged while tracking, translation
   matches the offset, no implicit animation, frame synced and translation cleared at rest),
-  `testFrozenSettleSyncsTheStripFrame`, `testAnInteractionShowsAndHidesEachPageOnce` (fails before the fix: a page
-  changed 3 times in one swipe), and `testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU` (every pass of swipes and
+  `testFrozenSettleSyncsTheStripFrame`, `testAnInteractionShowsAndHidesEachPageOnce` and its Reduce Motion variant (both fail
+  before the fix: a page changed 3 times in one swipe), and `testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU` (every pass of swipes and
   keyboard switches both ways under 8.34 ms of main-thread CPU; it fails before the fix with 13.7-14.8 ms; the two
   legs that cross the light/dark flip are reported, not gated, until #275; skipped as NOT-MEASURABLE on screens below
   120 Hz, as CI's virtual display is).
