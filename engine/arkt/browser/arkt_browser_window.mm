@@ -10,6 +10,7 @@
 #include "arkt/browser/arkt_extensions_bridge.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
+#include "arkt/browser/arkt_permission_prompt.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/apple/foundation_util.h"
@@ -1051,6 +1052,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
         CHECK_GE(inserted.index, 0);
         CHECK_LE(static_cast<size_t>(inserted.index), entries_.size());
         entries_.insert(entries_.begin() + inserted.index, TabEntry());
+        arkt::UseArktPermissionPrompts(inserted.contents);
         [events addObject:EntryEvent(ArktTabEventKindInserted,
                                      inserted.contents, inserted.index, -1)];
       }
@@ -1092,6 +1094,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
       CHECK_GE(replace->index, 0);
       CHECK_LT(static_cast<size_t>(replace->index), entries_.size());
       tab_modal_dialog_hosts_.erase(replace->old_contents);
+      arkt::UseArktPermissionPrompts(replace->new_contents);
       [events
           addObject:EntryEvent(ArktTabEventKindUpdated, replace->new_contents,
                                replace->index, TabId(replace->old_contents))];

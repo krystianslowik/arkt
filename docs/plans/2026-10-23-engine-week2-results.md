@@ -1854,3 +1854,126 @@ windows closed: census 0/0/0, process alive, gone after `kill`), 8 (`window.open
 - Pinned-by-default hint in ShellUI (decision); pinned, group and split tab events.
 - beforeunload as a sheet would need a patch (Chromium keeps it app-modal on purpose).
 
+
+## #260: permission prompts on Arkt windows and the #250 leftovers
+
+Date 2026-10-24. Branch `engine/260-prompts-dialogs`. Overlay only: no patch changed, `.patches` unchanged (7 files),
+`$CR` branch `arkt` at `8910b992e4` before and after (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 17
+files changed, 76 insertions, 5 deletions). Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome`, `The build has
+finished successfully.`, 0 `FAILED:`; `gn check out/Spike '//arkt/*'`: `Header dependency check OK` (new
+dependencies `//components/permissions`, `//components/content_settings/core/common`, `//components/strings`,
+`//chrome/browser/ui:url_identity`). `/` had 7.2 GiB free and swap 8.6 GB used of 10 GB before each build and run.
+Every run: fresh profile `w260-*`, CDP ports 9501-9508, `--use-mock-keychain`, one GUI run at a time, stopped by its
+PID; fixture page from a loopback server on `127.0.0.1` and `localhost` (port 8601). No real camera, microphone or
+location was granted; Allow was pressed for notifications on the loopback page only.
+
+### What the "no prompt" was
+
+On the build before this change (`w260-ltr`), a notification request with a gesture does create Chrome's Views
+bubble (`PermissionPromptBubble`), as W5b row 11 recorded. It is a separate, unparented window at the window's
+top-left plus `kNoToolbarLeftOffset` (40 pt), and it is ordered **behind** the Arkt window (the on-screen window list,
+front to back, has the Arkt window first, then `http://127.0.0.1:8601 wants to` inside its bounds), so nothing is
+visible and the page waits for an answer it cannot get. Geolocation asked without a gesture is a quiet request in
+156 (console: "suppressed and shown as a quiet prompt because it was requested without a user gesture"); Chrome's
+no-location-bar path turns it into the same hidden bubble.
+
+### RTL anchor (patch 0006), runtime check
+
+Same build, `--force-ui-direction=rtl` (`w260-rtl`), notification request: the bubble is at x 1240, width 320, in a
+window at x 200, width 1400: its right edge is the window's right edge minus 40 pt, the top at the window's top. That
+is `GetPageInfoAnchorRect`'s RTL branch (top-right minus `kNoToolbarLeftOffset`); left-to-right it is at x 240. The
+check passes. With the native prompt below, permission prompts on Arkt windows no longer use that anchor; it stays in
+0006 for the requests that still take Chrome's bubble (permission element, pointer and keyboard lock) and for page
+info.
+
+### What changed
+
+- **Native permission prompt** (`arkt_permission_prompt.{h,mm}`). `ArktBrowserWindow` gives every tab inserted
+  into it (and every replacement contents) Arkt's prompt factory through
+  `PermissionRequestManager::set_view_factory_for_testing`, the manager's only view-factory setter (no patch). The
+  factory decides per request: a tab that is not in an Arkt window gets Chrome's prompt
+  (`PermissionPrompt::Create`); so do the permission element's secondary UI (`<permission>`) and pointer and
+  keyboard lock. Everything else gets `ArktPermissionPrompt`, loud or quiet: quiet requests (no gesture, abusive
+  sites) are shown like loud ones, as Chrome does when there is no location bar for the quiet chip
+  (`CreateQuietPrompt` in fullscreen); a request that may only be shown quietly
+  (`ShouldDropCurrentRequestIfCannotShowQuietly`) gets no prompt, and the manager resolves it as ignored, as
+  Chrome does in fullscreen.
+- **Semantics match `PermissionPromptBubbleBaseView`.** Title `IDS_PERMISSIONS_BUBBLE_PROMPT` with the origin from
+  `UrlIdentity` (cryptographic scheme omitted, extension names, "this file"), one row per visible request
+  (`GetMessageTextFragment`; camera hidden when pan-tilt-zoom is asked too). Requests that support temporary grants
+  (location, camera, microphone) get Chrome's three answers in its order and with its labels: "Allow while visiting
+  the site" (`Accept`), "Allow this time" (`AcceptThisTime`), "Never allow" (`Deny`); the others get Allow
+  (`Accept`) and Block (`Deny`). Escape, and the window closing under the prompt, dismiss (`Dismiss`), as closing
+  Chrome's bubble does (the page sees `default` / `NotAllowedError`, the setting stays `prompt`). The allow buttons
+  stay disabled for 0.5 s after the prompt appears (Chrome's input protection). Tab switching is
+  `kDestroyPromptButKeepRequestPending`: the prompt closes when another tab becomes active and comes back with the
+  request on return. Destroying the prompt never answers; every answer goes through a weak delegate pointer, and
+  nothing is touched after it (the manager deletes the prompt inside the call).
+- **Presentation** (`ArktDialogSheet`, new panel mode `beginPanelOnView:rightToLeft:`). The same content model,
+  colors and buttons as the #244 sheets, shown as a non-modal child window of the Arkt window (Chrome's prompt does
+  not block the window; a sheet would block the tab list the tab-switch semantics rely on). Anchored at the top-leading
+  corner of the tab's view, 12 pt in (the card on the placeholder host, the tab's container in host mode, the same
+  view tab-modal dialogs use), top-trailing in right-to-left UI; it follows window resizes and the view's frame.
+  320 pt wide (Chrome's bubble width), 10 pt corners, a 1 px divider-color outline, the window shadow. All answers
+  are drawn with equal weight and Return presses nothing, as Chrome's tonal buttons do not steer toward Allow;
+  keyboard focus starts on Block / Never allow, so Space never grants. It takes key focus only when the Arkt window
+  is key. Motion: a 140 ms opacity fade in (custom ease-out), no scale or slide, no exit animation (the exit is often
+  Escape). New content options for this: `secondaryTitle`, `width`, `stackedButtons`, `neutralPrimary`,
+  `escapeDismisses`; the sheets of #244 are unchanged (their content leaves the options at their defaults).
+- **VoiceOver.** The panel is an `AXWindow` with subrole `AXDialog`, named by the title; its children are the title,
+  the request rows and the buttons (the bullets and the divider are hidden).
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Notification, gesture (`w260-p1`) | `permission prompt shown requests=1 one_time=0 ... child=1`; window list: the prompt `http://127.0.0.1:8601 wants to` in front of the Arkt window, at the card's top-left + 12 pt; AX `AXDialog` |
+| Escape (frontmost and focused window checked first) | `answer 3` (dismiss), `prompt closed`; page `notif:default`, state `prompt` |
+| Geolocation, no gesture (quiet request, `w260-p2`) | `one_time=1 quiet=1`; AX: title, `Know your location`, `Allow while visiting the site`, `Allow this time`, `Never allow`; AXPress `Never allow`: `geo:err1`, state `denied` |
+| Camera, gesture | `Use your cameras`, same three buttons; AXPress `Never allow`: `cam:NotAllowedError`, state `denied` |
+| Microphone, gesture | `Use your microphones`; Escape: `mic:NotAllowedError`, state `prompt` |
+| Notification, Allow (loopback page only) | AXPress `Allow`: `notif:granted`, state `granted` |
+| Input protection | `localhost` origin, AXPress `Allow` right after the request: nothing answered (`results` empty) |
+| Tab switch | `window.open` with a gesture: `prompt closed`, request still pending; the new tab closed: `prompt shown` again for the same request; AXPress `Block`: `notif:denied` |
+| Window closed with a prompt up | geolocation prompt up, the Arkt window's close button: `prompt closed`, `tab event removed`, census `0/0/0`, `native window destroyed`, process alive |
+| RTL and light (`w260-rtl2`, `--force-ui-direction=rtl --arkt-appearance=light`) | `frame 1258,... rtl=1` in a window at x 200, width 1400: top-right of the card, 12 pt in; the content mirrored (title and rows trailing, Block / Allow order mirrored) |
+| Host mode (`w260-host`, `--no-startup-window --arkt-facade-selftest`) | `native window created (embedder host ArktSelfTestWindowHost)`; prompt at y 431 in a window at y 387: the container below the self-test's 32 pt title bar plus 12 pt; AXPress `Block`: `notif:denied` |
+| #244 sheet after the `ArktDialogSheet` change (`w260-sheet`, `dialog-probe`) | `chrome.permissions.request`: `install sheet shown type=4 permissions=3`, an `AXSheet` with the title, `It could:`, three permissions, `Deny`, `Allow`; Escape: `granted=false` |
+| Stability | 0 `FATAL`/`Check failed`/`Received signal` in every run; Crashpad dumps 98 -> 98 |
+
+Window-only screenshots of the test window kept locally under `$PROF/w260-shots`.
+
+Regression rows (`w260-reg`, port 9507, `--arkt-trace-visibility`, `tabs-probe`, `action-probe`): W5b 1 (alive after
+30 s, census `normal=1 arkt=1 views=0`), 2 (navigate: `visible`), 3 (`probe.create()`: index 1, `tab list rows 2`,
+the page still `visible`), 5 (`probe.window()`: `normal`, census `normal=2 arkt=2 views=0`), 6 (`tab event removed`),
+7 (every window removed: census 0/0/0, two `native window destroyed`, process alive 10 s later, gone after `kill`),
+8 (`window.open` with a gesture: `true`, a new row), 13 (Edit > Find > Find... after the frontmost check: `stub
+FindBar::Show`); W5c Step 3 (`tabs.update` to the background tab: `hidden`, back: `visible`); W6
+(`chrome.action.openPopup()` frontmost: `"ok"`, `TriggerPopup ... by_user=0`, `popup loaded`; second window in row 5).
+
+### Decisions
+
+- **beforeunload ("Leave site?") stays app-modal.** Chromium shows it through
+  `TabModalDialogManager::RunBeforeUnloadDialog` as an app-modal window on purpose; a per-tab sheet needs a patch in
+  that path. Not done; recorded in #265. The menu rules of #250 already disable the window's commands
+  while it is up.
+- **Pinned-by-default hint: none for now.** Chrome's hint is a feature-promo bubble on its toolbar
+  (`ExtensionsToolbarDesktop::ShowPinnedByDefaultIPH`); Arkt has no toolbar and no pinned extension actions yet
+  (#121 owns pinning). Patch 0006 keeps skipping it. When ShellUI shows pinned actions it can draw its own hint from
+  the extension's pinned state; that is recorded in #265, not built.
+- **Pinned, group and split tab events: not added.** Arkt's sidebar keeps its own pinned tabs and folders, and nothing
+  in ShellUI consumes Chromium's pinned state, tab groups or split tabs. They need new event kinds in the facade header
+  (`TabStripModelObserver::OnTabPinnedStateChanged`, `OnTabGroupChanged`, `OnSplitTabChanged`); added when the shell
+  starts mirroring a Chromium-side change (for example `chrome.tabs.update({pinned})` from an extension). Recorded in
+  #265.
+
+### Left open (#265)
+
+- The view-factory seam is `set_view_factory_for_testing`; a named hook would need a patch. It is set on tab insert,
+  so a contents that gets a permission request before it is in an Arkt window keeps Chrome's prompt for it.
+- The permission element's secondary UI and pointer/keyboard lock still use Chrome's Views prompts (unparented on
+  Arkt windows); pointer and keyboard lock are off by default (`kKeyboardLockPrompt`).
+- No quiet indicator (Chrome's quiet chip lives in the omnibox): quiet requests show the full prompt.
+- Per-site settings and macOS TCC handling stay with #133; a ShellUI presenter for the prompt can take the same plain
+  content later (Decision 10).
+- PARITY(NEEDS-RUNTIME-CHECK): where Arc anchors its permission prompt and whether its buttons have a default.

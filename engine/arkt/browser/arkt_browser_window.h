@@ -69,6 +69,12 @@ class ArktBrowserWindow : public BrowserWindow,
   ArktExtensionsContainer* extensions_container() const {
     return extensions_container_.get();
   }
+  // Where a permission prompt for `contents` anchors (issue #260): the
+  // tab's container in host mode, the card otherwise, as for tab-modal
+  // dialogs.
+  NSView* PromptAnchorViewFor(content::WebContents* contents) const {
+    return DialogHostViewFor(contents);
+  }
 
   // ui::BaseWindow:
   bool IsActive() const override;
