@@ -370,14 +370,15 @@ request #238, so the new rules start at 11.
 | # | Patch | Status | Upstream files | Hunks in hot files |
 |---|---|---|---|---|
 | 0001-0006 | week 2 (hook, draw, keychain, factory hook, tab features, dialogs) | exist | 13 | 0 |
+| 0007 | extension dialogs as native sheets (#244, pull request #252) | exists | 4 | 0 |
 | - | Handshake (Decision 1) | ObjC runtime lookup, no patch | 0 | 0 |
 | - | Framework name (Decision 7) | no patch unless open decision 1 changes | 0 (1-2) | 0 |
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
 | - | Quit seams (Decision 13) | existing observers, callback list and `KeepAliveOrigin`, no patch | 0 | 0 |
 | - | Facade, host mode, infobars, menu routing, reserved keys | overlay only | 0 | 0 |
 
-Projection after week 3: 6 patch files, 13 upstream files, 0 hot-file hunks; at worst 7 patch files if the framework
-is renamed by patch. Not this week (recorded so it is not mistaken for scope): the link-target status pill (#114) needs
+Projection after week 3: 7 patch files, 17 upstream files, 0 hot-file hunks (0007 landed with #244 after this plan was
+written); at worst 8 patch files if the framework is renamed by patch. Not this week (recorded so it is not mistaken for scope): the link-target status pill (#114) needs
 a seam for `BrowserWebContentsDelegate::UpdateTargetURL`, whose status bubbles must stay empty (W5a). `$RES` keeps the
 table current with the week-2 commands.
 
@@ -448,7 +449,7 @@ Time-box: 3 h (including one fresh-copy launch).
 **Steps:**
 1. `git worktree add ../arkt-wt/engine-week3 -b engine/33-chromium-engine origin/main`; repoint `$CR/arkt` (week-2 W0
    Step 1, never while a build runs); `readlink $CR/arkt` equals `$REPO/engine/arkt`.
-2. `git -C $CR rev-list --count 156.0.8078.48..arkt` equals `wc -l < $REPO/engine/patches/chromium/.patches` (6); hot-file
+2. `git -C $CR rev-list --count 156.0.8078.48..arkt` equals `wc -l < $REPO/engine/patches/chromium/.patches` (7); hot-file
    hunks 0 (week-2 command).
 3. Class lookup: the hook logs `ARKT: embedder class <found|absent>` for `NSClassFromString(@"ArktShellEmbedderProbe")`
    and whether it responds to a selector. Incremental `out/Spike` build; launch the W3-0a app (expect `found`) and
