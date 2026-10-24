@@ -198,19 +198,26 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
      search and rewrites the titles and actions of the Cmd-W and Shift-Cmd-W items in the submenu tagged
      `IDC_FILE_MENU`; `MenuCommandForKeyEvent` (`global_keyboard_shortcuts_mac.mm:46-67`) derives `IDC_EXIT` and the
      reserved commands from menu tags and actions, and `confirmQuitIfNeeded` depends on it. Arkt's menus therefore never
-     use the `IDC_FILE_MENU` or `IDC_TAB_MENU` tags (unless W3-8 proves the rewrite harmless), and Quit keeps Chromium's
-     `IDC_EXIT` tag and `terminate:` action.
+     use the `IDC_FILE_MENU`, `IDC_TAB_MENU` or `IDC_HISTORY_MENU` tags (W3-8 measured the rewrite: with the File tag,
+     Archive Tab becomes Chromium's Close Tab and Cmd-W stops resolving), and Quit keeps Chromium's `IDC_EXIT` tag and
+     `terminate:` action.
+   - Arkt's menu carries a hidden top-level item tagged `IDC_BOOKMARKS_MENU` (57333) with an empty submenu:
+     `-[AppController setLastProfile:]`, run when the first Arkt window becomes main, builds a `BookmarkMenuBridge` from
+     that item and `CHECK`s it (`bookmark_menu_bridge.mm:62`); without it the browser crashes (W3-8, run A).
    - Chromium page commands (zoom, print, save as, find, developer tools, view source, history, downloads) are Arkt items
      that send `commandDispatch:` with their `EngineCommand` id (the `IDC_*` value), which the ShellUI host forwards to
      `chrome::ExecuteCommandWithDisposition` (week-2 W5b/W5c).
    - App-level Arkt items (Import from Arc, Show Archive, Settings) target an explicit object owned by the composition
      root, never a nil target: under the Engine configuration the application delegate is `AppController`, so items
      that relied on `AppDelegate` in the responder chain would stay disabled.
-   - Reserved keys: `ArktBrowserWindow::PreHandleKeyboardEvent` (today it reserves nothing, `arkt_browser_window.mm:735`)
-     reserves Cmd-T, Cmd-W, Cmd-L, Cmd-Q, Cmd-N and Cmd-Shift-W, so a focused page cannot swallow them; W3-8 finalizes
-     the set.
-   If W3-8 finds a non-tolerated `AppController` dependency, the fallback is Chromium's menu with Arkt edits; that is a
-   change confined to `App/Engine/` and `MainMenu.swift`.
+   - Reserved keys (W3-8): Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-Opt-Right and Cmd-Opt-Left, so a
+     focused page cannot swallow them. They are reserved in `ShellWindow.performKeyEquivalent(with:)` before `super`
+     (where Chromium's own window-level dispatcher reserves on macOS), not in `ArktBrowserWindow::PreHandleKeyboardEvent`,
+     which runs inside `RenderWidgetHostImpl`'s forwarding of the same event, where an archive or window close would
+     destroy the `WebContents` under it; `PreHandleKeyboardEvent` keeps returning `NOT_HANDLED`.
+   W3-8 found one non-tolerated dependency (the bookmarks `CHECK`) and the placeholder satisfies it, so Arkt keeps the
+   menu. Were another to appear, the fallback is Chromium's menu with Arkt edits; that is a change confined to
+   `App/Engine/` and `MainMenu.swift`.
 10. **Extension surfaces stay engine-drawn this week.** The action list comes from `ToolbarActionsModel` through the
     facade as plain values (id, name, 16 pt icon PNG, enabled); running an action passes the shell's anchor `NSView`,
     and the popup is the existing `PopoverExtensionView` anchored to it. Extension-created windows follow Decision 2.
@@ -766,9 +773,37 @@ readiness and quit seams; part D (menu) waits for W3-8 step 3.
   then `chrome::AttemptExit()` through the facade), `prepareForTermination()` from `engineWillBeginTerminating`,
   `flush()` from `engineWillTerminate:`. `presentLaunchFailure` no longer calls `NSApp.terminate` directly; it calls a
   quit closure the composition root supplies.
-- **D. Menu.** Per W3-8: app-level items target the composition root's object; no `IDC_FILE_MENU`/`IDC_TAB_MENU` tags;
-  Quit keeps `IDC_EXIT` and `terminate:`; installed on `NSApplicationDidFinishLaunchingNotification` in the engine
-  build.
+- **D. Menu.** Per W3-8 (`$RES`, "W3-8", step 3 table). Both builds use the same `MainMenu`; only the install point
+  differs.
+  1. Targets: Import from Arc, Show Archive and Settings target an object the composition root owns (it answers
+     `validateMenuItem` from the session), never `AppDelegate` through a nil target. About, Hide, Hide Others, Show All
+     and Bring All to Front target `NSApp`. Quit: `terminate:` to `NSApp`, tag `IDC_EXIT` (34031), in the first
+     top-level menu. Never a nil-target `showPreferences:`, `orderFrontStandardAboutPanel:` to the delegate,
+     `commandDispatch:` app item or `toggleConfirmToQuit:` (AppController answers those with Chromium's behaviour).
+  2. Tags: no top-level `IDC_FILE_MENU` (57326), `IDC_TAB_MENU` (57323) or `IDC_HISTORY_MENU` (57324); add a hidden
+     top-level item tagged `IDC_BOOKMARKS_MENU` (57333) with an empty submenu, and a test that the built menu has it and
+     none of the three (a constant table in the test, values from `$RES` W3-0 Step 5 and W3-8).
+  3. Page commands: Reload, Force Reload, Stop, Back, Forward, Find, Find Next, Find Previous, Actual Size, Zoom In,
+     Zoom Out, Save Page As (Shift-Cmd-S), Print, View Source, Developer Tools, Inspect Elements, JavaScript Console,
+     History, Downloads, as `commandDispatch:` items with a nil target and `tag` = the `EngineCommand` raw value (the
+     six without a constant, `EngineCommand(rawValue:)` with the values in `$RES` until a joint pull request names
+     them). `ShellWindow` forwards `commandDispatch:` / `validateUserInterfaceItem:` to its host (part A). In the
+     FakeEngine build the host executes what FakeEngine supports and disables the rest.
+  4. Shell items: add New Window (Cmd-N; the host claims `IDC_NEW_WINDOW` 34000), Close Window (Shift-Cmd-W,
+     `performClose:` on `ShellWindow`, which calls `onCloseRequested`), Enter Full Screen (`toggleFullScreen:`),
+     Minimize / Zoom (`performMiniaturize:` / `performZoom:`, check they work on the borderless `ShellWindow`), Jump to
+     Selection (`centerSelectionInVisibleArea:`). Keep the existing items and keys; Cmd-Left / Cmd-Right are not menu
+     keys.
+  5. Set `NSApp.servicesMenu` (an App menu Services submenu), `NSApp.windowsMenu` (as today) and `NSApp.helpMenu` (a
+     Help menu) every time the menu is installed; Chromium's values point into its own menu after the swap.
+  6. Reserved keys: `ShellWindow.performKeyEquivalent(with:)` first checks a `ReservedKeys` value (key code plus
+     device-independent modifiers: Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-Opt-Right, Cmd-Opt-Left) and,
+     on a match, returns `NSApp.mainMenu?.performKeyEquivalent(with:)` when that is true; otherwise `super`. Unit tests
+     for the matcher (layout-independent key codes, extra modifiers do not match) and a ShellKitGUITests case that a
+     focused first responder which swallows key equivalents does not get Cmd-W.
+  7. Install: FakeEngine build as today (`AppDelegate`); Engine build from `ArktShellEmbedder` (engine lane,
+     `App/Engine/`), which observes `NSApplicationDidFinishLaunchingNotification` and installs the menu one turn later
+     (`RunLoop.main.perform`), after AppController's own handler. Never from `engineDidStart`.
 
 **Acceptance criteria:** ShellUI tests cover: an engine-created tab appears as a Today tab only in its own window and is
 selected when active; an `.extension` close removes the row once; a `.windowClosing` or `.appTerminating` close leaves
@@ -819,6 +854,9 @@ yes/no" and the Arkt mapping; the decision, tags and reserved keys are in `$RES`
 rows of the two lists; every "reaches" cell cites a log line or an observed effect from W3-9.
 
 **Commit:** `$RES`; "Record the main menu inventory and owner".
+
+**Result (steps 1-3):** `$RES`, "W3-8". Arkt owns the menu; no engine change is needed; the reserved keys live in
+`ShellWindow` (Decision 9); a test-only `--arkt-menu-probe` in the self-test embedder measures the conditions.
 
 Time-box: 6 h (inventory) plus 1 h after W3-9.
 
