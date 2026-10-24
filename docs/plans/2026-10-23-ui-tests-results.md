@@ -663,3 +663,30 @@ beside the existing 14 tests. The context menu item "Show Toolbar" shares its ti
 test clicks the hittable match.
 
 Known issues used: #269 (outline rows).
+
+## U13: Import from Arc (#178)
+
+Base: `origin/main` at `46f3729`, branch `chore/178-arc-import-ui`.
+
+### What was done
+
+- `UITests/ArcImportTests.swift`: the plan's 5 tests. Every test checks the Arc copy it launched against (the rendered copy's SHA-256, or an empty directory when Import must stay disabled).
+- Deviation: out-of-process clients see no `archive.row` children and no `archive.footer` (the footer stays `hidden`). The count text is the `archive.table` accessibility value `rows N`. That matches the plan's "assert the count text, not the titles". A polling loop of `archive.row` wedges XCTest, so these tests never query rows, cells, or the footer.
+- `ArchiveWindowController` sets `rows N` when a page is applied. Legacy AX attributes are read through `MainActor.assumeIsolated` and one `nonisolated(unsafe)` local, the same shape as the command-bar exposure. No `@unchecked Sendable`. Row views are not tiled inside an out-of-process accessibility callback.
+- Favorite tiles use that legacy attribute path, so `favorites.tile` is visible out of process. Space-dot queries are unchanged.
+
+### Tests
+
+| Test | Parity | Result | Duration |
+|---|---|---|---|
+| `test_E_importFromEmptyState` | none (E4c / E6) | pass | 16.752 s |
+| `test_E_importFromFileMenu` | none | pass | 15.650 s |
+| `test_E_reimportIsIdempotent` | none | pass | 26.519 s |
+| `test_E_importMenuDisabledWithoutArcData` | none | pass | 8.573 s |
+| `test_BH045_BH034_importedSpacesShareFavorites` | BH-045, BH-034 | pass | 12.010 s |
+
+### Verification
+
+Local `xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build -jobs 2`: `build-for-testing`, then `test-without-building` with `-only-testing:ArktShellUITests/ArcImportTests`, `-parallel-testing-enabled NO`, `-collect-test-diagnostics never`. `** TEST EXECUTE SUCCEEDED **`. 5 tests, 0 failures, 79.504 s, on macOS 27.0 (arm64). Result bundle: `app/ArktShell/build/ui-u13-1792879044.xcresult`.
+
+Known issues used: none.
