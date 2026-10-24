@@ -119,14 +119,19 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
   raw_ptr<ExtensionActionViewModel> model_ = nullptr;
 };
 
-NSImage* MenuIcon(ExtensionActionViewModel* view_model,
-                  content::WebContents* web_contents) {
+gfx::ImageSkia ActionIcon(ExtensionActionViewModel* view_model,
+                          content::WebContents* web_contents) {
   ui::ImageModel icon = view_model->GetIcon(
       web_contents, gfx::Size(kMenuIconSize, kMenuIconSize));
   if (icon.IsEmpty()) {
-    return nil;
+    return gfx::ImageSkia();
   }
-  gfx::ImageSkia image = icon.Rasterize(&web_contents->GetColorProvider());
+  return icon.Rasterize(&web_contents->GetColorProvider());
+}
+
+NSImage* MenuIcon(ExtensionActionViewModel* view_model,
+                  content::WebContents* web_contents) {
+  gfx::ImageSkia image = ActionIcon(view_model, web_contents);
   if (image.isNull()) {
     return nil;
   }
@@ -214,6 +219,60 @@ void ArktExtensionsMenu::Show() {
   shown_menu_ = nil;
 }
 
+ArktExtensionsMenu::ActionInfo::ActionInfo() = default;
+ArktExtensionsMenu::ActionInfo::ActionInfo(const ActionInfo&) = default;
+ArktExtensionsMenu::ActionInfo::~ActionInfo() = default;
+
+std::vector<ArktExtensionsMenu::ActionInfo> ArktExtensionsMenu::GetActions()
+    const {
+  std::vector<ActionInfo> actions;
+  if (!model_ || !model_->actions_initialized()) {
+    return actions;
+  }
+  content::WebContents* web_contents = active_web_contents();
+  for (const auto& id : model_->action_ids()) {
+    auto it = view_models_.find(id);
+    if (it == view_models_.end()) {
+      continue;
+    }
+    ExtensionActionViewModel* view_model = it->second.get();
+    ActionInfo info;
+    info.id = id;
+    info.name = view_model->GetActionName();
+    if (web_contents) {
+      info.icon = ActionIcon(view_model, web_contents);
+      info.enabled = view_model->IsEnabled(web_contents);
+    }
+    actions.push_back(std::move(info));
+  }
+  return actions;
+}
+
+void ArktExtensionsMenu::SetAnchor(NSView* anchor) {
+  anchor_ = anchor;
+}
+
+bool ArktExtensionsMenu::RunAction(
+    const extensions::ExtensionId& extension_id) {
+  if (!view_models_.contains(extension_id)) {
+    LOG(WARNING) << "ARKT: no extension action " << extension_id;
+    return false;
+  }
+  ExecuteAction(extension_id,
+                ToolbarActionViewModel::InvocationSource::kToolbarButton);
+  return true;
+}
+
+void ArktExtensionsMenu::SetOnChanged(base::RepeatingClosure on_changed) {
+  on_changed_ = std::move(on_changed);
+}
+
+void ArktExtensionsMenu::NotifyChanged() {
+  if (on_changed_) {
+    on_changed_.Run();
+  }
+}
+
 bool ArktExtensionsMenu::IsShowing() const {
   return shown_menu_ != nil;
 }
@@ -259,6 +318,7 @@ void ArktExtensionsMenu::OnToolbarActionAdded(
   SyncViewModels();
   LogActions();
   DumpMenu();
+  NotifyChanged();
   MaybeRunPendingAction();
 }
 
@@ -267,17 +327,20 @@ void ArktExtensionsMenu::OnToolbarActionRemoved(
   SyncViewModels();
   LogActions();
   DumpMenu();
+  NotifyChanged();
 }
 
 void ArktExtensionsMenu::OnToolbarActionUpdated(
     const ToolbarActionsModel::ActionId& id) {
   DumpMenu();
+  NotifyChanged();
 }
 
 void ArktExtensionsMenu::OnToolbarModelInitialized() {
   SyncViewModels();
   LogActions();
   DumpMenu();
+  NotifyChanged();
   MaybeRunPendingAction();
 }
 
@@ -405,6 +468,7 @@ void ArktExtensionsMenu::Shutdown() {
     view_model->HidePopup();
   }
   view_models_.clear();
+  on_changed_.Reset();
   observation_.Reset();
   model_ = nullptr;
   browser_ = nullptr;

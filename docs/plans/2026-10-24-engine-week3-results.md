@@ -12,7 +12,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-2 | Facade header and its Swift module | DONE (#246) | see "W3-2" below |
 | W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | DONE | **GATE PASS** with recorded deviations (readiness queue for Chromium-created windows, quit-start seam, CDP keep-alive); see "W3-3" below |
 | W3-4 | Host mode for ShellUI windows | DONE | embedder hosts own Arkt windows, `createBrowserWithHost:`, request kinds from the call site, self-test embedder; all acceptance rows pass on `Chromium.app`; see "W3-4" below |
-| W3-5 | Tab facade | W3-5a DONE, W3-5b TODO | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state; see "W3-5a" below. W3-5b (history, duplicate, extension actions, test API, context menu re-measure) follows |
+| W3-5 | Tab facade | DONE (W3-5a #256, W3-5b) | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state. W3-5b: history and duplicate, extension actions for embedder windows, the test API; page context menu still blocked. See "W3-5a" and "W3-5b" below |
 | W3-6 | `ChromiumEngineKit` over the facade | TODO | |
 | W3-7 | The shell as engine host, composition root (Swift lane) | TODO | |
 | W3-8 | Main menu inventory and owner decision | TODO | |
@@ -35,6 +35,114 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-5b: History, duplicate, extension actions and the test API
+
+Date 2026-10-24. Branch `engine/33-w3-5b-history-extensions` off `main` at `ee5d7fb` (#256 merged). `$CR` branch `arkt`
+at `e4a2ca5cca` (0001-0007) before and after: no patch. Overlay only; the facade header, `app/` and `project.yml` are
+unchanged. `/` had 8.5 GiB free and swap 8.7 GB used of 10 GB before each build.
+
+### What landed
+
+- **History** (contract rule 9). `backEntries` / `forwardEntries`: the `NavigationController` entries before and after
+  the last committed one, nearest first, with `GetURL()` and `GetTitleForDisplay()`. `goToHistory(offset:)` was already
+  in place (`GoToOffset` behind `CanGoToOffset`; 0 and out of range are no-ops).
+- **Duplicate** (rule 10). `chrome::DuplicateTabAt` (`WebContents::Clone`, so the copy has the source's entries and
+  loads the current one), inserted next to the source, active (`ADD_ACTIVE`), reported as `TabCreated` with origin
+  `client`; nil for a closed, pending or non-duplicable tab. Inside a nested loop it is deferred like `createTab`
+  (pending handle, calls queue behind the insert). `ADD_INHERIT_OPENER` makes the active tab its opener.
+- **Inserts that do not happen** (#256 review). `createTab` and `duplicate` share one insert path: a window gone before
+  a deferred insert, or an insert that added nothing to a live window, gives the handle a terminal `TabClosed`
+  (`client` if the client had asked to close it meanwhile, else `windowClosing` or `page`) and drops its queued calls.
+- **Extension actions** (Decision 10). Each embedder host's window gets an `ArktExtensionsMenu` as its
+  `ExtensionsContainer` menu (attached from a posted task after `WindowOpened`, or on the first call), so
+  `chrome.action.openPopup` also works there. `extensionActions(in:)` returns id, name, the 16 pt icon as a 2x PNG and
+  the enabled state for the active tab, in `ToolbarActionsModel` order (the placeholder's sidebar menu is listed as is).
+  `ExtensionActionsChanged` is recorded on every model change (added, removed, updated, initialized), at most once per
+  window per batch, and once after the menu is attached. `runExtensionAction(_:in:anchor:)` sets the shell's view as
+  the anchor and runs the action as a toolbar click (`ExecuteUserAction`); the popup is the existing
+  `PopoverExtensionView` (NSPopover) anchored to that view. `ArktExtensionsMenu` gains `GetActions`, `SetAnchor`,
+  `RunAction` and `SetOnChanged`; the sidebar menu is unchanged.
+- **Test API** (Task W3-5 step 5), enabled only by `--arkt-engine-test-api` (`testAPIEnabled`); without it both calls
+  log and answer an error or NO. `evaluateScript(_:in:userGesture:completion:)` runs in the page's main world through
+  `RenderFrameHost::ExecuteJavaScriptForTests` or `ExecuteJavaScriptWithUserGestureForTests` and converts the result
+  to Foundation values (`NSNumber`, `NSString`, `NSArray`, `NSDictionary`; null and undefined become nil or `NSNull`).
+  **Deviation from "Runtime.evaluate semantics":** the public API passes `resolve_promises=false`, so a promise
+  answers an empty dictionary instead of its value, and a thrown exception answers nil without an error. The W3-9
+  harness drivers need neither (`holdClose`, `retitle` and `window.open` are synchronous). `answerDialog(in:accept:)`
+  closes the tab's pending JavaScript dialog (alert, confirm, prompt, beforeunload) through
+  `TabModalDialogManager::HandleJavaScriptDialog`, with an empty prompt override (a prompt is answered with an empty
+  string; a dialog still pending has no view to read input from).
+- **Self-test commands** `history`, `goto <offset>`, `duplicate`, `actions`, `run <action id>` (anchored to a view above
+  the card), `eval`, `hold`, `answer <session id> accept|cancel`; `@<session id>` as the last word targets another tab
+  (a page restored from the back-forward cache shows its old title again, which repeated a command in a first try).
+- **LOW items from the #256 review**: new contents without a favicon clear the old one at `TabReplaced`; a held
+  maximize, minimize, restore or fullscreen is kept until the window is shown instead of being applied to a window
+  nobody asked to show.
+
+### #256 review follow-ups
+
+- (a) A page close while an unrelated `tabs.remove` is in flight reports `extension`. **Not scoped to the tab:** the
+  keepalive records only the function name, and the patch-free sources that carry the arguments do not fit:
+  `extensions::activity_monitor` has one global function pointer that `ActivityLog::SetActivityHandlers` expects to own
+  (`DCHECK(!current || current == &LogApiFunction)`), and the function object itself is not reachable. A tab-exact
+  signal needs a patch (for example a hook in `TabsRemoveFunction::RemoveTab`). Recorded as a known gap with the other
+  Decision 12 gaps (W3-5a); the maintainer decides between the gap and a patch.
+- (b) Done (above).
+
+### Acceptance (self-test embedder, `Chromium.app`)
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| History entries nearest first; `goToHistory` across entries; 0 and out of range are no-ops | PASS | run 6 |
+| Duplicate: URL, title, back and forward stacks; listed after the original; origin client; independent | PASS | run 6 |
+| Action list equals `--arkt-extensions-menu-dump`'s items | PASS | run 5 |
+| Running action-probe logs `popup loaded` anchored to the self-test view | PASS | run 5 |
+| `ExtensionActionsChanged` for an embedder window | PASS | run 5 |
+| Test API: values, user gesture, holdClose, answerDialog cancel and accept | PASS (promise and exception deviations) | run 5 |
+| Page context menu re-measured for real | still blocked | run 6 |
+
+**Run 5** (`--arkt-facade-selftest --arkt-engine-test-api --arkt-extensions-menu-dump`, `action-probe` and
+`tabs-probe`, profile `$PROF/w3-5-run5`, port 9464). The menu dump (`menu item 0 Arkt action probe enabled=1`, `menu
+item 1 Arkt tabs probe enabled=0`) and the facade list (`facade actions menu attached`, then `ExtensionActionsChanged`,
+`actions count=2`: action-probe `enabled=1 icon=631 bytes`, tabs-probe `enabled=0 icon=625 bytes`) agree in order,
+names and state. `run <action-probe>`: `facade runExtensionAction`, `run action ... source 1`, `TriggerPopup ...
+by_user=1`, `popup loaded chrome-extension://<id>/popup.html`, `popup auto-resize 244x129`; the popover's anchor is the
+self-test's view (the menu's anchor was set from the call, logged pointer). `eval`: `testAPIEnabled=yes`; an object
+literal came back as an `NSDictionary` (`sum = 3`, `list = (1, two, <null>)`, `ok = 1`, the title);
+`navigator.userActivation.isActive` `0` without and `1` with the gesture; `Promise.resolve(7)` an empty dictionary; a
+`ReferenceError` nil, no error. Held close driven by the test API: `hold` (a `beforeunload` handler set with a user
+gesture, `hasBeenActive` true), `close honour` -> `held`; `answer <tab> cancel` from another tab -> `answerDialog
+accept=no answered=yes`, `closeCancelled ... isClosing=no`; `close honour` again, `answer <tab> accept` -> `tab closed
+... reason client after 2214 ms`. 0 `FATAL`/`Check failed`.
+
+**Run 6** (profile `$PROF/w3-5-run6`, port 9465; commands from a control tab with `@<session id>`). A tab at
+`a.html?h1`, then `b.html?h2` and `a.html?h3` (CDP `Page.navigate`):
+
+```
+history  url=a.html?h3 back=[b.html?h2|Page B, a.html?h1|Page A] forward=[]
+goto -2  -> urlChanged a.html?h1; history back=[] forward=[b.html?h2|Page B, a.html?h3|Page A]
+goto 2   -> urlChanged a.html?h3
+goto -1  -> urlChanged b.html?h2; history back=[a.html?h1] forward=[a.html?h3]
+goto 0, goto 5, goto -9 -> no event; history unchanged
+duplicate -> copy origin=client, history back=[a.html?h1] forward=[a.html?h3], tabCreated active=yes url=b.html?h2
+```
+
+`chrome.tabs.query`: original at index 1, the copy at 2. `goto -1` on the copy moved only the copy (`a.html?h1`; the
+original stayed on `b.html?h2`). 0 `FATAL`/`Check failed`.
+
+Page context menu: AX `AXShowMenu` on the page's web area (after the frontmost check) opened no menu (`count of menus`
+0). `RenderViewContextMenuMacCocoa::Show` still returns without a top-level `views::Widget`
+(`render_view_context_menu_mac_cocoa.mm:78-83`), so the case cannot be measured for real until Arkt windows show page
+context menus; the W3-3 model (an `NSMenu` tracked from a Chromium task that allows application tasks) stands.
+
+All processes were stopped by PID; the fixture server was stopped.
+
+### Remaining after W3-5
+
+Decision 12 gaps (W3-5a, plus follow-up (a) above); tab-modal dialog positioning on the container; audible state (no
+header event); a page's `NEW_WINDOW` window reports `reopen`; initial show state for windows shown at once; the test
+API's promise and exception semantics; the page context menu (needs context menus on Arkt windows).
 
 ## W3-5a: Tab facade, correctness part
 

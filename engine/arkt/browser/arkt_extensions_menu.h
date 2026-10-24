@@ -7,12 +7,14 @@
 #include <vector>
 
 #include "base/callback_list.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "extensions/common/extension_id.h"
+#include "ui/gfx/image/image_skia.h"
 
 @class ArktExtensionsMenuTarget;
 @class NSMenu;
@@ -53,6 +55,29 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   // Shows the menu at the anchor. Returns after the menu has closed.
   void Show();
 
+  // One toolbar action as plain values, for the engine facade (week-3 plan,
+  // Decision 10): the shell draws the list, the popup stays engine-drawn.
+  struct ActionInfo {
+    ActionInfo();
+    ActionInfo(const ActionInfo&);
+    ~ActionInfo();
+    extensions::ExtensionId id;
+    std::u16string name;
+    // The 16 pt icon for the active tab; may be null.
+    gfx::ImageSkia icon;
+    bool enabled = false;
+  };
+  // Every action of the model, in model order.
+  std::vector<ActionInfo> GetActions() const;
+  // Popups (and the menu) attach to `anchor` from now on.
+  void SetAnchor(NSView* anchor);
+  // Runs `extension_id`'s action as a toolbar click. False when there is no
+  // such action.
+  bool RunAction(const extensions::ExtensionId& extension_id);
+  // Called after every action list or action change (added, removed,
+  // updated, model initialized).
+  void SetOnChanged(base::RepeatingClosure on_changed);
+
   // Whether the menu is open (between Show's start and its return).
   bool IsShowing() const;
   // Cancels an open menu; Show then returns.
@@ -86,6 +111,7 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   NSMenu* BuildMenu();
   void DumpMenu();
   void MaybeRunPendingAction();
+  void NotifyChanged();
   void ExecuteAction(const extensions::ExtensionId& extension_id,
                      ToolbarActionViewModel::InvocationSource source);
   void Shutdown();
@@ -102,6 +128,7 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   bool dump_ = false;
   std::vector<std::string> last_dump_;
   extensions::ExtensionId pending_action_id_;
+  base::RepeatingClosure on_changed_;
   base::ScopedObservation<ToolbarActionsModel, ToolbarActionsModel::Observer>
       observation_{this};
   base::CallbackListSubscription browser_did_close_;

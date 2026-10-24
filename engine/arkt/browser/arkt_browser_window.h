@@ -267,6 +267,8 @@ class ArktBrowserWindow : public BrowserWindow,
   // window out.
   void BindHost();
   void UnbindHost();
+  // Applies a window state recorded while the show was held, once shown.
+  void ApplyPendingState();
   void Mount(content::WebContents* contents);
   void Unmount(content::WebContents* contents);
   void OnCardResized();
