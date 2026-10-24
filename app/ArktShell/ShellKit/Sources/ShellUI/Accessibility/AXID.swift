@@ -52,6 +52,8 @@ public enum AXID {
     /// Value: the displayed host of the shown tab.
     public static let urlBar = "sidebar.urlBar"
     public static let newTab = "sidebar.newTab"
+    /// Shown only for an engine that runs extensions. Enabled: the window has extension actions.
+    public static let extensions = "sidebar.extensions"
     public static let spaceDots = "sidebar.spaceDots"
     /// Label: Space title. Selected: current Space.
     public static let spaceDot = "sidebar.spaceDot"

@@ -19,7 +19,10 @@ final class AppSession {
   let database: ArktDatabase
   let source: ModelSidebarSource
   let autosaver: SidebarAutosaver
-  let window: ShellWindowController
+  /// The browser window. Replaced by a new one when the user reopens the app after closing it (#241); a closed
+  /// controller is never shown again.
+  private(set) var window: ShellWindowController
+  private let engine: any EngineClient
   /// One instance for every window, so Show / Hide Toolbar reaches all of them.
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
   let archiveStore: ArchiveStore
@@ -53,6 +56,7 @@ final class AppSession {
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
+    self.engine = engine
     self.window = ShellWindowController(engine: engine, sidebar: source,
                                         toolbarSetting: toolbarSetting)
     let archiveStore = ArchiveStore(database: state.database)
@@ -79,10 +83,7 @@ final class AppSession {
 
   func start(outcome: OpenOutcome) {
     startFavicons(prune: outcome == .opened)          // before the window can create engine tabs
-    window.onImportFromArc = { [weak self] in self?.importFromArc() }
-    window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
-    window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
-    window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
+    wire(window)
     window.window?.center()
     window.showWindow(nil)
     refreshArcImportAvailability()
@@ -109,11 +110,53 @@ final class AppSession {
     #endif
   }
 
+  /// The app's hooks on a browser window: the first one at launch, and each window a reopen builds (#241).
+  private func wire(_ window: ShellWindowController) {
+    window.onImportFromArc = { [weak self] in self?.importFromArc() }
+    window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
+    window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
+    window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
+    window.onFaviconChanged = { [weak faviconWriter] id, data in faviconWriter?.record(data, for: id) }
+    window.isArcImportAvailable = isArcImportAvailable
+  }
+
+  /// Dock reopen with no browser window (#241: closing the last window keeps the app running): fronts the window,
+  /// or builds a new one when it was closed. Its stored favicons load again off the main actor.
+  func reopenWindow() {
+    guard window.isClosed else {
+      window.showWindow(nil)
+      return
+    }
+    let reopened = ShellWindowController(engine: engine, sidebar: source, toolbarSetting: toolbarSetting)
+    window = reopened
+    wire(reopened)
+    reopened.window?.center()
+    reopened.showWindow(nil)
+    guard let writer = faviconWriter else { return }
+    let load = writer.loadStored(Set(source.sidebar.nodes.keys))
+    Task { [weak reopened] in
+      let loaded = await load.value
+      reopened?.sidebarController.setFavicons(loaded)
+    }
+  }
+
+  /// The browser window for app-level feedback (the import summary, restore and import toasts): built again first
+  /// when the user closed it (#241), so the feedback is never shown in a closed window.
+  private func shownWindow() -> ShellWindowController {
+    if window.isClosed { reopenWindow() }
+    return window
+  }
+
   /// E5d: the visible tab is exempt (BH-076 media-playing tabs join once the engine reports audio state), each
   /// pass that archived something shows the BH-085 toast, and an Arc import that adds a Space restarts the clock for
   /// the running timer before the merged tabs appear (plan decision 7).
   private func startAutoArchive() {
-    autoArchive.exempt = { [weak self] in self?.window.sidebarController.resolver.visible ?? [] }
+    // A tab whose close a leave-site prompt would hold is skipped too, and retried on the next pass (week-3
+    // Decision 11).
+    autoArchive.exempt = { [weak self] in
+      guard let window = self?.window else { return [] }
+      return window.sidebarController.resolver.visible.union(window.nodesHoldingClose)
+    }
     autoArchive.onArchived = { [weak self] archived in
       self?.window.toasts.show(Toast(text: ToastText.autoArchived(archived.count)))
     }
@@ -166,7 +209,6 @@ final class AppSession {
     let writer = FaviconWriter(store: store, after: pruning)
     faviconWriter = writer
     let launchLoad = writer.loadStored(ids)
-    window.onFaviconChanged = { [weak writer] id, data in writer?.record(data, for: id) }
     Task { [weak self] in
       let loaded = await launchLoad.value
       self?.window.sidebarController.setFavicons(loaded)
@@ -187,7 +229,7 @@ final class AppSession {
     // The source Space wins; when it is gone the item lands in the Space on screen (BH-157 routing comes later).
     model.currentSpaceProvider = { [weak self] in self?.window.currentSpace }
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
-    model.onRestoreFailed = { [weak self] text in self?.window.toasts.show(Toast(text: text)) }
+    model.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text)) }
     let controller = ArchiveWindowController(dataSource: model)
     archiveWindow = controller
     controller.show()
@@ -197,7 +239,7 @@ final class AppSession {
   /// back from the favicon folder (the sidebar dropped them when the item left); ids the engine reports meanwhile
   /// keep the newer one (#91).
   private func didRestore(_ restored: RestoredItem, toast text: String) {
-    window.toasts.show(Toast(text: text, actionTitle: "View")) { [weak self] in
+    shownWindow().toasts.show(Toast(text: text, actionTitle: "View")) { [weak self] in
       guard let self else { return }
       self.window.showWindow(nil)
       self.window.activate(node: restored.nodeID)
@@ -266,7 +308,7 @@ final class AppSession {
     } catch {
       let (errorType, code) = (String(describing: type(of: error)), (error as NSError).code)
       Self.log.error("arc import failed \(errorType, privacy: .public) \(code, privacy: .public)")
-      window.toasts.show(Toast(text: "Couldn't import from Arc."))
+      shownWindow().toasts.show(Toast(text: "Couldn't import from Arc."))
       return nil
     }
   }
@@ -277,7 +319,7 @@ final class AppSession {
     alert.messageText = "Imported from Arc"
     alert.informativeText = summary.lines.joined(separator: "\n")
     alert.addButton(withTitle: "OK")
-    if let sheetWindow = window.window {
+    if let sheetWindow = shownWindow().window {
       alert.beginSheetModal(for: sheetWindow)
     } else {
       alert.runModal()

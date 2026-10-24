@@ -117,6 +117,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public var onNodeDragEnded: (@MainActor () -> Void)?
   /// Favicon for a tab, nil = letter placeholder.
   public var faviconProvider: (@MainActor (NodeID) -> NSImage?)?
+  /// True while the row's page close is held behind a leave-site prompt (week-3 Decision 11).
+  public var closingProvider: (@MainActor (NodeID) -> Bool)?
 
   private let divider = OutlineItem(.divider)
   private var items: [NodeID: OutlineItem] = [:]
@@ -272,11 +274,18 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
     let cell = outlineView.makeView(withIdentifier: SidebarTabCellView.reuseIdentifier, owner: self)
       as? SidebarTabCellView ?? SidebarTabCellView(frame: .zero)
-    let (title, image) = presentation(of: id)
-    cell.configure(title: title, image: image, flavor: flavor, closeAction: RowCloseAction.resolve(id, in: source))
+    configure(cell, for: id)
     cell.closeButton.target = self
     cell.closeButton.action = #selector(closeClicked(_:))
     return cell
+  }
+
+  /// A row held closing has no X: a second close would do nothing (Decision 11).
+  private func configure(_ cell: SidebarTabCellView, for id: NodeID) {
+    let (title, image) = presentation(of: id)
+    let closing = closingProvider?(id) ?? false
+    cell.configure(title: title, image: image, flavor: flavor,
+                   closeAction: closing ? nil : RowCloseAction.resolve(id, in: source), isClosing: closing)
   }
 
   public func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { false }
@@ -380,9 +389,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       self.configure(rowView, for: self.outlineView.item(atRow: row) as? OutlineItem)
       if let id = (self.outlineView.item(atRow: row) as? OutlineItem)?.nodeID,
          let cell = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarTabCellView {
-        let (title, image) = self.presentation(of: id)
-        cell.configure(title: title, image: image, flavor: self.flavor,
-                       closeAction: RowCloseAction.resolve(id, in: self.source))
+        self.configure(cell, for: id)
       } else if let divider = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
                   as? SidebarDividerView {
         divider.flavor = self.flavor

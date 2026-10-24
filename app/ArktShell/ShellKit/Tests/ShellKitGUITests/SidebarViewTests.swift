@@ -454,13 +454,15 @@ final class MountedSidebarTests: XCTestCase {
 private final class EagerEngine: EngineClient {
   let inner = InMemoryEngine()
   var tabIDs: [TabID] { inner.tabIDs }
-  func createTab(url: URL?) -> TabID {
-    let id = inner.createTab(url: url)
+  func createTab(url: URL?) -> TabID { finishEarly(inner.createTab(url: url), url: url) }
+  func createTab(url: URL?, in window: EngineWindowID) -> TabID {
+    finishEarly(inner.createTab(url: url, in: window), url: url)
+  }
+  private func finishEarly(_ id: TabID, url: URL?) -> TabID {
     if let url { inner.navigate(id, to: url.appendingPathComponent("redirected")) }
     inner.finishLoad(id, title: "Loaded Early", favicon: Data([0x89, 0x50]))
     return id
   }
-  func createTab(url: URL?, in window: EngineWindowID) -> TabID { inner.createTab(url: url, in: window) }
   func closeTab(_ id: TabID) { inner.closeTab(id) }
   func closeTab(_ id: TabID, mode: CloseMode) { inner.closeTab(id, mode: mode) }
   func navigate(_ id: TabID, to url: URL) { inner.navigate(id, to: url) }
