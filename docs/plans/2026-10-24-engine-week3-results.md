@@ -49,7 +49,7 @@ build and run. Every run: fresh profile `w3-10-*`, CDP ports 9521-9531, `--use-m
 stopped by its PID; pages from a loopback server on `127.0.0.1:8611`. Window-only screenshots of the test window kept
 locally under `$PROF/w3-10-shots`. The runs below were made on `main` at `01e68c3`; after the rebase onto `7e5d409`
 (whose engine change is the self-test embedder) the build was redone and the host-mode row run again (`w3-10-host2`,
-same results).
+same results). The `w3-10-ax` run is on the final build.
 
 ### Where infobars went before
 
@@ -72,7 +72,7 @@ line is `ARKT: infobar <InfoBarIdentifier> shown ...`.
 |---|---|---|---|
 | Unsupported command-line flag (`BAD_FLAGS` 43) | startup with a flag of `kBadFlags` (`--no-sandbox`, `--disable-web-security`, ...) | confirm, no buttons | drawn |
 | Automation (`AUTOMATION` 73) | startup with `--enable-automation`, every tab of every window | confirm (global) | drawn |
-| Google API keys missing (`GOOGLE_API_KEYS` 45) | startup, no keys built in | confirm, link | drawn |
+| Google API keys missing (`GOOGLE_API_KEYS` 45) | startup when `google_apis::HasAPIKeyConfigured()` is false (not seen at startup on this build) | confirm, link | drawn |
 | Obsolete system (`OBSOLETE_SYSTEM` 46) | startup on an old macOS | confirm, link | drawn |
 | Session restore (`SESSION_RESTORE` 128) | startup (`kSessionRestoreInfobar`, on by default) unless `--no-first-run`/`--no-default-browser-check` | confirm, link, template | drawn |
 | Default browser (`DEFAULT_BROWSER` 44), PDF viewer (`PDF` 123) | startup after first run | confirm (global) | drawn |
@@ -138,7 +138,13 @@ line is `ARKT: infobar <InfoBarIdentifier> shown ...`.
 | Right-to-left (`w3-10-rtl`, `--force-ui-direction=rtl --no-sandbox`) | `Close` at the leading (left) edge at x 401 in a row at x 390, the message right-aligned |
 | Host mode (`w3-10-host`, `--no-startup-window --arkt-facade-selftest`) | two infobars on the self-test's tab container: rows at y 419 (container top, under the 32 pt title bar), page `innerHeight` 600 -> 520; the other tab: no rows, 600; back: rows again; `Close`: 560 |
 | Window and tab closed with infobars up (`w3-10-final`) | `tab event removed`, `native window destroyed`, census `0/0/0`, process alive, 0 `FATAL` |
+| Message roles (`w3-10-ax`, after the last change) | session restore (a plain substitution and a separate link): `AXStaticText` then `AXLink` `Settings.`; "Did you mean" (an inline link): `AXTextArea` with an `AXLink` child |
+| Permission panel (#260) after the `ArktDialogSheet` header change (`w3-10-ax`) | notification request with a gesture: `permission prompt shown ... child=1`; AXPress `Block`: `denied` |
 | Stability | 0 `FATAL`/`Check failed`/`Received signal` in every run |
+
+The automation row reads "Chrome is being controlled by automated test software": that is Chromium's own string
+(`IDS_CONTROLLED_BY_AUTOMATION`), not Arkt text. `Mount` now adds the contents view below the card's other subviews
+(it was added on top) so the bar stays above it; the placeholder card has no other subviews over the page.
 
 Note on the inline-link row: the alternate-URL infobar triggered from the internals page points at
 `https://google.com/`, and pressing its link navigated the test tab there once before it was sent back to the loopback

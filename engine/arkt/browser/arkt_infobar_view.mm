@@ -187,7 +187,13 @@ NSString* const kLinkScheme = @"arkt-infobar-link";
     _message = [[ArktInfobarMessageView alloc]
         initWithFrame:NSMakeRect(0, 0, 100, kArktInfobarRowHeight)];
     _message.editable = NO;
-    _message.selectable = content.messageLinkRanges.count > 0;
+    // Only a message with a real inline link is selectable (links need it);
+    // plain substitutions keep it static text that never takes focus.
+    BOOL has_links = NO;
+    for (NSValue* value in content.messageLinkRanges) {
+      has_links |= value.rangeValue.location != NSNotFound;
+    }
+    _message.selectable = has_links;
     _message.drawsBackground = NO;
     _message.richText = YES;
     _message.textContainerInset = NSZeroSize;
@@ -231,7 +237,7 @@ NSString* const kLinkScheme = @"arkt-infobar-link";
     // The full message when it is truncated. Read as text, not as an
     // editable text area; inline links stay links.
     _message.toolTip = content.message;
-    if (content.messageLinkRanges.count == 0) {
+    if (!has_links) {
       _message.accessibilityRole = NSAccessibilityStaticTextRole;
     }
     [self addSubview:_message];
