@@ -74,13 +74,17 @@ targets:
     configFiles:
       Engine: Engine.xcconfig
     # Engine only (the script exits at once in every other configuration). Runs after the Info.plist is processed
-    # and before Xcode signs the app. Copies the engine framework into Contents/Frameworks when it changed (an APFS
+    # (its input) and before Xcode signs the app. Copies the engine framework into Contents/Frameworks when it changed (an APFS
     # clone when on the same volume) and writes ArktEngineFrameworkName and ArktEngineFrameworkVersion from the
     # framework's own Info.plist and Versions/Current, plus CrProductDirName (Decision 8). The framework is in no
     # embed phase, so Xcode never re-signs it.
     postBuildScripts:
       - name: Embed the engine framework (Engine only)
         basedOnDependencyAnalysis: false
+        # Orders the phase after Info.plist processing in incremental builds too (without it, Xcode ran the
+        # phase first and then rewrote the Info.plist, dropping the keys).
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
         shell: /bin/zsh
         script: |
           [[ $CONFIGURATION == Engine ]] || exit 0

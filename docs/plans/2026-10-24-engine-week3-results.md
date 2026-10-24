@@ -225,6 +225,18 @@ code it exercises is unchanged; W3-0 ran it).
 | grep -c "ARKT engine"` prints `0` in both (the Engine binary has 3), no engine symbol (`ArktShellEmbedder`,
 `engineMain`, `ChromeMain`) and no `Contents/Frameworks`; the embed script phase runs and exits at once.
 
+Copy only on change: an incremental `Engine` rebuild prints `Engine framework unchanged: Chromium Framework.framework
+156.0.8078.48`; the framework binary keeps its inode (4723531) and CDHash. The first incremental rebuild also showed
+that without a declared input Xcode ran the script phase before `ProcessInfoPlistFile` and then rewrote the
+Info.plist, dropping the three keys (the app then stops with `Info.plist has no ArktEngineFrameworkName`); the phase
+now lists `$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)` as its input, and two further incremental rebuilds order it
+`ProcessInfoPlistFile` -> script -> `CodeSign` with the keys present and `codesign -v` passing.
+
+**Run 5** (`--arkt-embedder-fail`, URL argument, `--arkt-debug-reopen-before-ready`; profile `$PROF/w3-3-run5`):
+`embedderFailed (dropping 2 queued request(s))` 2 s after start, the held reopen window's `Browser` closed (`browsers
+normal=0`, `native window destroyed`), no window shown, 0 `FATAL`/`Check failed`. The process stays: the stand-in has
+no launch-failure alert and no quit path yet (W3-7 part C); stopped by its PID.
+
 Swift: `swift test --skip ShellKitGUITests` in ShellKit: 481 tests (baseline + 0), all pass, including
 `EngineABIIsolationTests` (no app file imports `ArktEngineABI`, `project.yml` does not name it).
 
@@ -234,7 +246,10 @@ Swift: `swift test --skip ShellKitGUITests` in ShellKit: 481 tests (baseline + 0
   the call site instead of resolution at replay, `respondsToSelector:` guards for `activateTab` / `tabListChanged:`
   (#246 follow-up), and the held-window path switched to the embedder host at replay.
 - W3-5: close reasons `page` / `extension` / `windowClosing`, `.skipUnloadHandlers`, stable containers, state events,
-  history, duplicate, extension actions, the test API. The facade file from this task is its starting point.
+  history, duplicate, extension actions, the test API. The facade file from this task is its starting point. Known
+  gap: `closeWithMode:` on a handle whose deferred insert has not run yet, called outside a nested loop, finds no tab
+  and answers `closed` while the insert still lands later; closes of pending handles must queue behind the insert.
+- The stand-in's `engineWillBeginTerminating (<n> visible window(s))` counts `NSApp.windows`, not shell windows.
 - W3-6/W3-9: move the typed `ArktShellEmbedder` into `ChromiumEngineKit` and delete `FacadeStandIn.swift`; the hook
   already accepts either (selector check).
 - W3-9: an engine launch with `--remote-debugging-port` (implied by `--no-startup-window`) never exits on Quit, because
