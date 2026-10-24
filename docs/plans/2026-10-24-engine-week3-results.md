@@ -15,7 +15,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-5 | Tab facade | DONE (W3-5a #256, W3-5b) | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state. W3-5b: history and duplicate, extension actions for embedder windows, the test API; page context menu still blocked. See "W3-5a" and "W3-5b" below; review follow-ups in "#258" |
 | W3-6 | `ChromiumEngineKit` over the facade | DONE | `ChromiumEngine: EngineClient, EngineExtensions` and the typed `ArktShellEmbedder` in `ChromiumEngineKit`; contract rules 1-16 pass against a scripted facade with every driver (24 checks x 2 event orders, none not applicable); ShellKit 509 + 28; see "W3-6" below |
 | W3-7 | The shell as engine host, composition root (Swift lane) | TODO | |
-| W3-8 | Main menu inventory and owner decision | TODO | |
+| W3-8 | Main menu inventory and owner decision | DONE (steps 1-3; step 4 after W3-9) | Arkt owns the menu; conditions: a hidden `IDC_BOOKMARKS_MENU` placeholder (without it the first window crashes, measured), no `IDC_FILE_MENU` / `IDC_TAB_MENU` tags, Quit `IDC_EXIT` + `terminate:`; reserved keys in `ShellWindow`; no engine change; see "W3-8" below |
 | W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | TODO | |
 | W3-10 | Infobars, or a recorded gap | TODO | |
 | W3-11 | Self-contained bundle with the release framework | TODO | |
@@ -36,6 +36,276 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-8: main menu inventory and owner
+
+Date 2026-10-24. Branch `engine/33-w3-8-menu` off `main` at `5673197`, rebased onto `a182151` (#267). Steps 1-3 of the
+plan; step 4 (each forwarded command reaching the Arkt `Browser`) waits for W3-9. `$CR` (branch `arkt` at `8910b992e4`,
+0001-0007) was read only. One overlay change, test-only: `--arkt-menu-probe` in the self-test embedder (below), built in
+`out/Spike` and run on `Chromium.app`. No patch; no change to `MainMenu.swift` or ShellUI (W3-7 holds them; their steps
+are in the plan, W3-7 part D).
+
+**Decision (step 3): Arkt owns the main menu** (maintainer decision 3 stands). Every Chromium dependency on the menu
+is either tolerant of a missing item or satisfied by an item Arkt can carry without a patch. Two of them are not
+tolerant, so they are conditions on Arkt's menu, not optional polish:
+
+1. **A hidden item tagged `IDC_BOOKMARKS_MENU` (57333) with an empty submenu.** Without it the first Arkt window
+   that becomes main crashes the browser: `windowDidBecomeMain:` (`app_controller_mac.mm:1164`) calls
+   `setLastProfile:`, which builds a `BookmarkMenuBridge` from `[[NSApp.mainMenu itemWithTag:IDC_BOOKMARKS_MENU]
+   submenu]` (`:2274`, `:2300-2311`) and its constructor `CHECK`s the menu (`bookmark_menu_bridge.mm:62`). With
+   `--no-startup-window` the first `setLastProfile:` comes after Arkt's menu is installed, and with
+   `kDestroyProfileOnBrowserClose` (on by default on macOS, `browser_features.cc:75-77`) the bridge is rebuilt after
+   the last window of a profile closes, so this is the normal path, not an edge case. Measured: run A crashed with
+   `Check failed: menu_root_` (`BookmarkMenuBridge::BookmarkMenuBridge` <- `-[AppController setLastProfile:]` <-
+   `-[AppController windowDidBecomeMain:]` <- `_NXShowKeyAndMain`) the moment its window became main; runs B and C,
+   with the placeholder, did not, and the bridge took the placeholder over (`submenu replaced=yes delegate=set`, still
+   `hidden=yes`).
+2. **No `IDC_FILE_MENU` (57326) tag on Arkt's File menu, and no `IDC_TAB_MENU` (57323) tag anywhere.** With the File
+   tag, AppController's pre-search block rewrites the items that own Cmd-W and Shift-Cmd-W before every key-equivalent
+   search (`app_controller_mac.mm:812-817`, `:2419-2461`; an item qualifies when its tag is 0, `IDC_CLOSE_WINDOW` or
+   `IDC_CLOSE_TAB`, `:838-893`). Measured in run C: "Archive Tab" became "Close Tab" (`tag=34015
+   action=commandDispatch:`), "Close Window" became `tag=34012 action=performClose:`, and the same search then found no
+   item for Cmd-W or Shift-Cmd-W at all. Without the tag (runs A and B) both items stayed as built and resolved to
+   Arkt's actions.
+
+Also kept: Quit has tag `IDC_EXIT` (34031) and action `terminate:` with target `NSApp`, in the first top-level menu
+(the confirm-to-quit panel looks for it there, `confirm_quit_panel_controller.mm:420-431`); run B quit through it (AX
+menu click): `quit started`, `engineWillBeginTerminating`, `tabClosed ... reason=appTerminating`, `windowClosed`,
+`engineWillTerminate`, the same seams as Chromium's own menu (W3-3).
+
+Install point: on `NSApplicationDidFinishLaunchingNotification`, deferred one turn so `AppController`'s own
+`-applicationDidFinishLaunching:` (which sets the File menu delegate, `:1309`) has run first. Run A logged
+`file delegate is app delegate=yes` on Chromium's menu at that point. Installing earlier is not unsafe with the tag
+rules above, but it is not needed and later is what was measured.
+
+### Step 1: Chromium's main menu (`chrome::BuildMainMenu`, `main_menu_builder.mm:614-641`)
+
+Built in `ChromeBrowserMainPartsMac::PostCreateMainMessageLoop` (`chrome_browser_main_mac.mm:145-166`) before the hook
+runs, then `-[AppController mainMenuCreated]`. Shortcuts come from `AcceleratorsCocoa` (`accelerators_cocoa.mm:33-119`)
+unless an item sets its own (`key_equivalent`). Arc column: same key and action, other action on the same key (Arkt
+follows Arc), or none; KB numbers from `docs/spec/arc-parity-spec.md` section 1.
+
+| Menu (tag) | Item | Id / tag, action | Key | Arc |
+|---|---|---|---|---|
+| App (`IDC_CHROME_MENU`) | About | tag `IDC_ABOUT`, `orderFrontStandardAboutPanel:` to AppController | - | none |
+| | Settings | tag `IDC_OPTIONS`, `showPreferences:` to AppController | Cmd-, | same (KB-066) |
+| | Settings (PWA only, removed) | `IDC_WEB_APP_SETTINGS` | Cmd-, | none |
+| | Clear Browsing Data | `IDC_CLEAR_BROWSING_DATA` | Shift-Cmd-Delete | none |
+| | Import Bookmarks and Settings | `IDC_IMPORT_SETTINGS` | - | none (Arkt: Import from Arc) |
+| | Services | submenu, `NSApp.servicesMenu` | - | same |
+| | Hide / Hide Others / Show All | tag `IDC_HIDE_APP` `hide:`; `hideOtherApplications:`; `unhideAllApplications:` | Cmd-H / Opt-Cmd-H / - | same (KB-069) |
+| | Warn Before Quitting | `toggleConfirmToQuit:` to AppController | - | none |
+| | Quit | tag `IDC_EXIT`, `terminate:` to NSApp | Cmd-Q | same (KB-069) |
+| File (`IDC_FILE_MENU`) | New Tab | `IDC_NEW_TAB` | Cmd-T | other: command bar (KB-001) |
+| | New Window | `IDC_NEW_WINDOW` | Cmd-N | other: same Spaces (KB-005) |
+| | New Incognito Window | `IDC_NEW_INCOGNITO_WINDOW` | Shift-Cmd-N | same key (KB-007), out of scope (#115) |
+| | New Isolated Window (policy, hidden) | `IDC_NEW_ISOLATED_WINDOW` | (takes Shift-Cmd-N under policy) | none |
+| | Reopen Closed Tab | `IDC_RESTORE_TAB` | Shift-Cmd-T | same key (KB-010) |
+| | Open File | `IDC_OPEN_FILE` | Cmd-O | other: Peek/Little Arc open in Space (KB-076) |
+| | Open Location | `IDC_FOCUS_LOCATION` | Cmd-L | other: command bar (KB-002) |
+| | Close Window | tag `IDC_CLOSE_WINDOW`, `performClose:` | Shift-Cmd-W (Cmd-W without tabs) | same (KB-009) |
+| | Close All (alternate) | `closeAll:` | Opt-Shift-Cmd-W | none |
+| | Close Tab | `IDC_CLOSE_TAB` | Cmd-W | other: Archive Tab (KB-008) |
+| | Save Page As | `IDC_SAVE_PAGE` | Cmd-S | other: Cmd-S sidebar (KB-017); Arc saves on Shift-Cmd-S (KB-060) |
+| | Share | submenu (ShareMenuController) | - | none |
+| | Print / Print Using System Dialog (alternate) | `IDC_PRINT` / `IDC_BASIC_PRINT` | Cmd-P / Opt-Cmd-P | same (KB-060) / none |
+| Edit (`IDC_EDIT_MENU`) | Undo / Redo | tags `IDC_CONTENT_CONTEXT_UNDO` / `_REDO`, `undo:` / `redo:` | Cmd-Z / Shift-Cmd-Z | same keys; Arc's Cmd-Z also undoes sidebar actions (KB-011) |
+| | Cut / Copy / Paste | tags `IDC_CONTENT_CONTEXT_CUT` / `_COPY` / `_PASTE` | Cmd-X / C / V | same |
+| | Paste and Match Style (+ alternate) | tag `IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE`, `pasteAndMatchStyle:` | Shift-Cmd-V (alternate Opt-Shift-Cmd-V) | Arc Cmd-Opt-V pastes a URL as a tab (KB-016) |
+| | Delete / Select All | tags `IDC_CONTENT_CONTEXT_DELETE` / `_SELECTALL` | - / Cmd-A | same |
+| | Find (`IDC_FIND_MENU`): Search the Web | `IDC_FOCUS_SEARCH` | Opt-Cmd-F | other: Find and Replace (KB-058) |
+| | Find / Find Next / Find Previous | `IDC_FIND` / `IDC_FIND_NEXT` / `IDC_FIND_PREVIOUS` | Cmd-F / Cmd-G / Shift-Cmd-G | same (KB-058, KB-059) |
+| | Use Selection for Find / Jump to Selection | `copyToFindPboard:` / `centerSelectionInVisibleArea:` | Cmd-E / Cmd-J | other: Cmd-E cycles extensions (KB-047) / same (KB-058) |
+| | Spelling and Grammar (`IDC_SPELLCHECK_MENU`) | `showGuessPanel:`, `checkSpelling:`, two toggles | Cmd-: / Cmd-; | none recorded |
+| | Substitutions, Transformations, Speech | 4 + 3 + 2 AppKit selectors, no tags | - | none recorded |
+| View (`IDC_VIEW_MENU`) | Always Show Bookmarks Bar | `IDC_SHOW_BOOKMARK_BAR` | Shift-Cmd-B | none |
+| | Always Show Toolbar in Full Screen | `IDC_TOGGLE_FULLSCREEN_TOOLBAR` | Shift-Cmd-F | none |
+| | Full URLs, Lens shortcut, AI mode button, search tools | `IDC_SHOW_FULL_URLS`, `IDC_SHOW_GOOGLE_LENS_SHORTCUT`, `IDC_SHOW_AI_MODE_OMNIBOX_BUTTON`, `IDC_SHOW_SEARCH_TOOLS` | - | none |
+| | Vertical tabs / collapse | `IDC_TOGGLE_VERTICAL_TABS` / `IDC_TOGGLE_VERTICAL_TABS_COLLAPSE` | - / Shift-Cmd-L | other: Library (KB-065) |
+| | Customize Touch Bar | tag `IDC_CUSTOMIZE_TOUCH_BAR` | - | none |
+| | Stop / Reload / Force Reload (alternate) | `IDC_STOP` / `IDC_RELOAD` / `IDC_RELOAD_BYPASSING_CACHE` | Cmd-. / Cmd-R / Shift-Cmd-R | same (KB-054, KB-056) |
+| | Enter Full Screen (+ alternate) | tag `IDC_FULLSCREEN`, `toggleFullScreen:` | Fn-Ctrl-Cmd-F (alternate Ctrl-Cmd-F) | same (KB-051) |
+| | Actual Size / Zoom In / Zoom Out | `IDC_ZOOM_NORMAL` / `IDC_ZOOM_PLUS` / `IDC_ZOOM_MINUS` | Cmd-0 / Shift-Cmd-= / Cmd-- | same (KB-057) |
+| | Cast | `IDC_ROUTE_MEDIA` | - | same, unbound (KB-043) |
+| | Developer (`IDC_DEVELOPER_MENU`): View Source, Developer Tools, Inspect Elements, JavaScript Console | `IDC_VIEW_SOURCE`, `IDC_DEV_TOOLS`, `IDC_DEV_TOOLS_INSPECT`, `IDC_DEV_TOOLS_CONSOLE` | Opt-Cmd-U / I / C / J | same (KB-049, KB-050) |
+| | Allow JavaScript from Apple Events | `IDC_TOGGLE_JAVASCRIPT_APPLE_EVENTS` | - | none |
+| History (`IDC_HISTORY_MENU`) | Home | `IDC_HOME` | Shift-Cmd-H | none |
+| | Back / Forward | `IDC_BACK` / `IDC_FORWARD` | Cmd-[ / Cmd-] | same; Arc also Cmd-Left / Cmd-Right (KB-031, KB-032) |
+| | Recently Closed, Recently Visited | headers and separators tagged `HistoryMenuBridge::k*` (not `IDC_`); rows added by HistoryMenuBridge | - | none |
+| | Show Full History | `IDC_SHOW_HISTORY` | Cmd-Y | same (KB-065) |
+| Bookmarks (`IDC_BOOKMARKS_MENU`, as `AppMenuModel::kBookmarksMenuPlaceholder`) | Bookmark Manager | `IDC_SHOW_BOOKMARK_MANAGER` | Opt-Cmd-B | none |
+| | two separators | tag `IDC_BOOKMARK_THIS_TAB` | - | - |
+| | Bookmark This Tab / Bookmark All Tabs | `IDC_BOOKMARK_THIS_TAB` / `IDC_BOOKMARK_ALL_TABS` | Cmd-D / Shift-Cmd-D | other: pin (KB-012) / toolbar (KB-018) |
+| Profiles (`IDC_PROFILE_MAIN_MENU`) | (filled by ProfileMenuController) | - | - | none |
+| Tab (`IDC_TAB_MENU`) | New Tab to Right (+ hidden "below") | `IDC_NEW_TAB_TO_RIGHT` x2 | - | none |
+| | Select Next / Previous Tab | `IDC_CYCLE_TO_NEXT_TAB` / `IDC_CYCLE_TO_PREV_TAB` | Ctrl-Tab / Ctrl-Shift-Tab | other: MRU switcher (KB-022, KB-023) |
+| | Duplicate (+ target alternate) | `IDC_DUPLICATE_TAB` / `IDC_DUPLICATE_TARGET_TAB` | - | same, unbound (KB-042) |
+| | Mute, Pin, Group (each + target alternate) | `IDC_WINDOW_MUTE_SITE` / `IDC_MUTE_TARGET_SITE`, `IDC_WINDOW_PIN_TAB` / `IDC_PIN_TARGET_TAB`, `IDC_WINDOW_GROUP_TAB` / `IDC_GROUP_TARGET_TAB` | - | Arc pins on Cmd-D (KB-012) |
+| | Close Other Tabs, Close Tabs to Right (+ hidden "below") | `IDC_WINDOW_CLOSE_OTHER_TABS`, `IDC_WINDOW_CLOSE_TABS_TO_RIGHT` x2 | - | none |
+| | Move Tab to New Window | `IDC_MOVE_TAB_TO_NEW_WINDOW` | - | none |
+| | Add Tab to New Split | `IDC_NEW_SPLIT_TAB` | Opt-Cmd-N | other: Little Arc (KB-044) |
+| | Search Tabs | `IDC_TAB_SEARCH` | Shift-Cmd-A | none |
+| Window (`IDC_WINDOW_MENU`) | Minimize / Zoom | tags `IDC_MINIMIZE_WINDOW` `performMiniaturize:` / `IDC_MAXIMIZE_WINDOW` `performZoom:` | Cmd-M / - | same (KB-069) |
+| | Show as Tab, Name Window | `IDC_SHOW_AS_TAB`, `IDC_NAME_WINDOW` | - | none |
+| | Downloads / Extensions / Task Manager | `IDC_SHOW_DOWNLOADS` / `IDC_MANAGE_EXTENSIONS` / `IDC_TASK_MANAGER_MAIN_MENU` | Shift-Cmd-J / - / - | same (KB-065) / none / none |
+| | Bring All to Front | tag `IDC_ALL_WINDOWS_FRONT`, `arrangeInFront:` | - | same |
+| | (submenu is `NSApp.windowsMenu`) | | | |
+| Help (no tag; `NSApp.helpMenu`) | Report an Issue, Report Unsafe Site (Google Chrome branding only), Help | `IDC_FEEDBACK`, `IDC_REPORT_UNSAFE_SITE`, `IDC_HELP_PAGE_VIA_MENU` | Opt-Shift-Cmd-I / - / Shift-Cmd-/ | none |
+
+Count check: `git -C $CR grep -c 'IDC_' -- chrome/browser/ui/cocoa/main_menu_builder.mm` prints 102 = 71
+`.command_id(IDC_...)` + 31 `.tag(IDC_...)`. The 31 tags are 11 submenu holders (`CHROME`, `FILE`, `EDIT`,
+`FIND_MENU`, `SPELLCHECK_MENU`, `VIEW`, `DEVELOPER_MENU`, `HISTORY`, `PROFILE_MAIN_MENU`, `WINDOW`, `TAB`), 2 separators
+(`IDC_BOOKMARK_THIS_TAB`) and 18 items; the Bookmarks holder's tag is `IDC_BOOKMARKS_MENU` through
+`kBookmarksMenuPlaceholder` (`app_menu_model.h:251`) and is not in the count. The table names all 89 tagged or
+commanded items (71 + 18), grouped where the row says so.
+
+### Step 2: everything that reads, rewrites or validates the menu
+
+`git -C $CR grep -n 'mainMenu' -- chrome/browser/app_controller_mac.mm chrome/browser/ui/cocoa` prints 38 lines: 22 in
+product code (rows L1-L9 and M1-M4 below, plus `main_menu_builder.mm:640/646/651`, which build it, and the
+`_mainMenuItem` ivar uses in `profile_menu_controller.mm:99/105/107/232/305`, row M4), 16 in tests
+(`accelerators_cocoa_browsertest.mm` 4, `browser_window_mac_browsertest.mm` 7, `main_menu_builder_unittest.mm` 4,
+`tab_group_menu_bridge_browsertest.mm` 1). Readers outside those paths are listed too (K rows).
+
+**Lookups** (what Chromium finds in `NSApp.mainMenu`, and what happens when Arkt's menu does not have it):
+
+| # | Where | Looks up | Without the item | Arkt |
+|---|---|---|---|---|
+| L1 | `-[AppController fileMenu]` `app_controller_mac.mm:834-836`, used by `cmdWMenuItem` / `shiftCmdWMenuItem` `:838-893`, `menuNeedsUpdate:` `:1109-1112`, `initShareMenu` `:1976-1985`, File delegate `:1309` | top-level item tagged `IDC_FILE_MENU` | nil: the Cmd-W shuffle returns early, the delegate and Share menu land on nil (all ObjC nil sends) | tolerant; Arkt must not use the tag (condition 2) |
+| L2 | `-[AppController setLastProfile:]` `:2240-2271` | `IDC_FILE_MENU`, then `IDC_NEW_INCOGNITO_WINDOW` / `IDC_NEW_ISOLATED_WINDOW` in it | skipped (`if (fileMenuItem && ...)`) | tolerant |
+| L3 | `-[AppController setLastProfile:]` `:2274-2318` | top-level `IDC_BOOKMARKS_MENU` | **`CHECK` in `BookmarkMenuBridge`** (`bookmark_menu_bridge.mm:62`) on the first window that becomes main and after a profile reload | **not tolerant**: hidden placeholder (condition 1); measured, runs A-C |
+| L4 | `-[AppController windowDidBecomeMain:]` `:1137-1141`, `onVerticalTabStripModeChanged:` `:1173-1176` | `IDC_TAB_MENU` | `TabMenuBridge` with a nil item (every use is a nil send or a guarded return; the `CHECK_EQ(matchingItems.count, 2u)` at `:1190` is behind the nil-submenu return) | tolerant; Arkt must not use the tag (it would fill Arkt's menu with Chromium's tab list) |
+| L5 | `-[AppController initProfileMenu]` `:1960-1974` | `IDC_PROFILE_MAIN_MENU` | runs at `mainMenuCreated`, before Arkt's menu exists: it binds to Chromium's (detached) Profiles item | tolerant; Dock menu profiles still come from it (D1) |
+| L6 | `HistoryMenuBridge::HistoryMenu()` `history_menu_bridge.mm:264-268`, on every rebuild | `IDC_HISTORY_MENU` | nil: rebuilds run on a nil menu | tolerant; Arkt does not use the tag (it would get Chromium's history rows) |
+| L7 | `TabGroupMenuBridge::TabGroupsMenu()` `tab_group_menu_bridge.mm:90-94` | `kSavedTabGroupsMenuPlaceholder` | nil | tolerant |
+| L8 | `+[ConfirmQuitPanelController quitMenuItem]` `confirm_quit_panel_controller.mm:420-431` | item tagged `IDC_EXIT` in the first top-level submenu, for the hold-to-quit text | falls back to Cmd-Q | tolerant; Arkt keeps the tag (the panel only runs with the "Warn Before Quitting" pref, off by default) |
+| L9 | `IsCommandTriggeredFromMacMenu` `browser_native_widget_mac.mm:124-135` (`IDC_VIEW_MENU`, `IDC_TAB_MENU`) | parent and command items | false | Views windows only (DevTools, popups); tolerant |
+| K1 | `MenuCommandForKeyEvent` `global_keyboard_shortcuts_mac.mm:46-67` (via `cr_menuItemForKeyEquivalentEvent:`) | the item for a key: `commandDispatch:` with tag > 0 gives the tag; `performClose:` gives `IDC_CLOSE_WINDOW`; `terminate:` gives `IDC_EXIT` | `NO_COMMAND` | used by `confirmQuitIfNeeded` (`app_controller_mac.mm:1009-1047`, needs Cmd-Q -> `terminate:`), `ChromeCommandDispatcherDelegate` (`chrome_command_dispatcher_delegate.mm:98`, `:153`) and `BrowserNativeWidgetMac::PreHandleKeyboardEvent` (`:865-884`), the last two in Views windows only. Run A-C: Cmd-Q -> `command=34031` |
+| K2 | `-[RenderWidgetHostViewCocoa keyEvent:wasKeyEquivalent:]` `render_widget_host_view_cocoa.mm:1594-1606` | any item for the key (Function-key system shortcuts go to the menu first) | event goes to the page | tolerant |
+| K3 | `ArktBrowserWindow::HandleKeyboardEvent` `arkt_browser_window.mm:1315-1332` (overlay) | `[NSApp.mainMenu performKeyEquivalent:]` for a Cmd key the page did not handle | not handled | this is how Arkt's non-reserved items get page keys |
+| K4 | `PopupWindowMac` `popup_window_mac.mm:70-88` | observes `NSMenuDidBeginTrackingNotification` on the menu current at popup creation | an HTML `<select>` popup opened before the swap keeps the old menu | harmless: Arkt swaps once, at launch |
+| K5 | `+[NSMenu flashMenuForChromeCommand:]` `nsmenu_additions.mm:86-109`, `MenuItemWithTag` `:36-59` (recursive) | an item whose tag is the command | NO, no flash | Views windows only |
+| K6 | menu bar height (`browser_frame_view_mac.mm:554`, `immersive_mode_controller_cocoa.mm:200`), `ScopedMenuBarLock` (`scoped_menu_bar_lock.mm:16-22`) | the bar itself | - | not item lookups |
+
+**Mutations** (what Chromium changes, and what it would do to Arkt's menu):
+
+| # | Where | Mutates | Effect on Arkt's menu |
+|---|---|---|---|
+| M1 | pre-search block, installed in `-[AppController init]` `:812-817`, run by `cr_menuItemForKeyEquivalentEvent:` (`nsmenu_additions.mm:72-82`) before every K1/K2 search; `updateMenuItemKeyEquivalents` `:2419-2461` (also from `menuNeedsUpdate:` on the File menu) | titles, tags, actions and `hidden` of the Cmd-W and Shift-Cmd-W items in the `IDC_FILE_MENU` submenu (tag 0 counts as Chromium's), then `[fileMenu update]` | none without the tag (runs A, B); with it, Archive Tab is replaced by Chromium's Close Tab and both keys stop resolving (run C) |
+| M2 | `-[AppController setLastProfile:]` `:2253-2271` | moves Shift-Cmd-N between the Incognito and Isolated items of `IDC_FILE_MENU` | none (no tag) |
+| M3 | `-[AppController setLastProfile:]` `:2283-2318` | replaces the `IDC_BOOKMARKS_MENU` item's submenu with the bridge's copy, restores `hidden` | swaps the placeholder's empty submenu for the bridge's (runs B, C: `submenu replaced=yes`, `hidden=yes`) |
+| M4 | ProfileMenuController (`profile_menu_controller.mm:99-107`, `:232`, `:305`), ShareMenuController (`initShareMenu` `:1976-1985`), TabMenuBridge, HistoryMenuBridge, TabGroupMenuBridge | their own submenus, found by L1/L4-L7 | none: bound to Chromium's detached menu or to nil |
+| M5 | `BuildAppMenu` `main_menu_builder.mm:108`, `BuildWindowMenu` `:503`, `BuildHelpMenu` `:608` | `NSApp.servicesMenu`, `NSApp.windowsMenu`, `NSApp.helpMenu` | they still point into Chromium's menu after the swap (run A-C: `servicesMenu in main menu=no helpMenu in main menu=no`); Arkt sets all three |
+| M6 | `-[BrowserCrApplication _customizeFileMenuIfNeeded]` `chrome_browser_application_mac.mm:226-251` | stops AppKit adding Close All / Quit and Keep Windows alternates | applies to Arkt's menu too: Arkt adds any alternates it wants itself |
+| M7 | `-[AppController validateUserInterfaceItem:]` `:1584-1671` and `commandDispatch:` / `commandDispatchUsingKeyModifiers:` `:1673-1850` | validates and runs `commandDispatch:`, `terminate:`, `showPreferences:`, `orderFrontStandardAboutPanel:`, `toggleConfirmToQuit:` items that reach the end of the responder chain (it is `NSApp.delegate`) | a nil-target `commandDispatch:` item with no Arkt window key (the Archive window, a sheet, no window) is validated from `_menuState` and run by Chromium: `IDC_NEW_TAB` / `IDC_NEW_WINDOW` / `IDC_SHOW_HISTORY` etc. then create or activate a `Browser` (an engine-initiated window through the host provider). Arkt items that are app-level therefore target the composition root's object; page-command items keep nil targets (the key `ShellWindow` must answer them) and the host's `validate` disables them when no Arkt window is key |
+
+**Dock menu** (D1): `-[AppController applicationDockMenu:]` `:2144-2198` builds its own menu on every Dock click
+(profiles from ProfileMenuController, New Window `IDC_NEW_WINDOW`, New Incognito / Isolated Window), all
+`commandFromDock:` to AppController, which creates a `Browser` (`CreateBrowser`, `:1755`), so an Arkt window arrives
+through the host provider as an engine-initiated request. Arkt's menu cannot change it without a patch (AppController
+must stay `NSApp.delegate`, `:796-803`). Accepted this week: New Window works through the provider; New Incognito
+Window is the incognito gap of #115 (the provider receives an off-the-record request). W3-9 records what the provider
+gets for both.
+
+**Key path in Arkt windows** (why reserved keys need work): an Arkt `ShellWindow` is a plain `NSWindow`, not a
+`CommandDispatchingWindow`, so Chromium's reservation in `-[ChromeCommandDispatcherDelegate prePerformKeyEquivalent:]`
+(`IsReservedCommandOrKey`, `browser_command_controller.cc`: close tab, close window, new tab, new window, new
+incognito/isolated window, restore tab, select next/previous tab, cycle tabs, exit) never runs there. AppKit offers a
+Cmd key to the key window first; the focused `RenderWidgetHostViewCocoa` takes every key equivalent
+(`performKeyEquivalent:` `:1354-1405`) and sends it to the page; only an unhandled key comes back through
+`ArktBrowserWindow::HandleKeyboardEvent` to the menu (K3). Today a page can therefore swallow Cmd-T, Cmd-W and Cmd-Q.
+Chromium's shortcuts that are not menu items (`GetShortcutsNotPresentInMainMenu`, Cmd-1...9, Cmd-Opt-Arrows,
+Ctrl-PageUp/Down; `GetDelayedShortcutsNotPresentInMainMenu`, Cmd-Left / Cmd-Right back and forward) are run only by
+the Views command dispatcher and do nothing in Arkt windows.
+
+### Step 3: Arkt's commands and how each reaches the engine
+
+Current `App/MainMenu.swift` (and ShellUI's `SplitMenu`), and the items the Engine configuration adds. "Shell" means
+the shell implements it and the engine is called only through `EngineClient` as the shell's behaviour needs; "page
+command" means a `commandDispatch:` item, nil target, `tag` = the `EngineCommand` raw value, which the key
+`ShellWindow` forwards to its host and the host passes to `forward.execute(command, .currentTab)` (validation through
+`forward.validate`) unless it claims it.
+
+| Arkt item | Key | Today | Engine configuration | `EngineCommand` / disposition | Reserved |
+|---|---|---|---|---|---|
+| Quit Arkt Shell | Cmd-Q | `terminate:`, nil target | `terminate:` to `NSApp`, tag `IDC_EXIT` | none (`BrowserCrApplication` -> quit seams; run B) | yes |
+| New Tab | Cmd-T | `ShellWindowController.newTab:` | shell (command bar); the host also claims `.newTab` | `.newTab` claimed | yes |
+| Open Command Bar | Cmd-L | `openLocation:` | shell | none | yes |
+| Archive Tab | Cmd-W | `closeTab:` | shell archive, then `closeTab(_:mode: .honourUnloadHandlers)` (decision 6); the host claims `.closeTab` | `.closeTab` claimed | yes |
+| Import from Arc... | - | `AppDelegate.importFromArc:`, nil target | composition root's menu target | none | no |
+| Undo, Redo, Cut, Copy, Paste, Select All | Cmd-Z, Shift-Cmd-Z, X, C, V, A | AppKit selectors, nil target | unchanged: the responder chain reaches the page's `RenderWidgetHostViewCocoa` or the shell's text views | none | no |
+| Show / Hide Toolbar | Shift-Cmd-D | `toggleToolbar:` | shell | none | no |
+| Split View items (`SplitMenu`, 13) | Ctrl-Shift-=, -, ], [, 1-4 | `ShellWindowController` split actions | shell; panes use `createTab(url:in:)` and `activateTab` | none | no |
+| Next / Previous Space | Cmd-Opt-Right / Left | `nextSpace:` / `previousSpace:` | shell | none (Chromium binds these keys to select next/previous tab, reserved there) | yes |
+| Space 1-9 | Ctrl-1...9 | `goToSpace:` (submenu tags 0-8, harmless: not top level, far below `IDC_` values) | shell | none | no |
+| Delete Space... | - | `deleteSpace:` | shell | none | no |
+| Show Archive | - | `AppDelegate.showArchive:`, nil target | composition root's menu target | none | no |
+| *add* New Window | Cmd-N | - | shell (`ShellWindowController` first, then `createWindow(host:)`, decision 4); the host claims `IDC_NEW_WINDOW` (34000) | claimed | yes |
+| *add* Close Window | Shift-Cmd-W | - | shell: `performClose:` on `ShellWindow` -> `onCloseRequested` | none (`performClose:`) | yes |
+| *add* Reload / Force Reload / Stop | Cmd-R / Shift-Cmd-R / Cmd-. | - | page command | `.reload`; 33007 and 33006 (no constant yet) | no |
+| *add* Back / Forward | Cmd-[ / Cmd-] | - | page command (Cmd-Left / Cmd-Right are not menu keys: a menu item would steal them from text fields; gap below) | `.back`, `.forward` | no |
+| *add* Find / Find Next / Find Previous | Cmd-F / Cmd-G / Shift-Cmd-G | - | page command (find bar is #134; until then Chromium's) | `.find`; 37001, 37002 (no constants yet) | no |
+| *add* Jump to Selection | Cmd-J | - | `centerSelectionInVisibleArea:`, nil target (the page view) | none | no |
+| *add* Actual Size / Zoom In / Zoom Out | Cmd-0 / Cmd-+ / Cmd-- | - | page command | `.zoomReset`, `.zoomIn`, `.zoomOut` | no |
+| *add* Save Page As / Print | Shift-Cmd-S (Arc) / Cmd-P | - | page command | `.savePage`, `.print` | no |
+| *add* View Source / Developer Tools / Inspect Elements / JavaScript Console | Opt-Cmd-U / I / C / J | - | page command | `.viewSource`, `.devTools`; 40023, 40005 (no constants yet) | no |
+| *add* History / Downloads | Cmd-Y / Shift-Cmd-J | - | page command | `.history`, `.downloads` | no |
+| *add* Enter Full Screen | Ctrl-Cmd-F | - | `toggleFullScreen:`, nil target (window) | none | no |
+| *add* Minimize / Zoom / Bring All to Front | Cmd-M / - / - | - | `performMiniaturize:` / `performZoom:` nil target; `arrangeInFront:` to `NSApp` | none | no |
+| *add* About / Settings / Hide / Hide Others / Show All / Services | - / Cmd-, / Cmd-H / Opt-Cmd-H / - / - | - | About and Hide items to `NSApp`; Settings to the composition root's target (never a nil-target `showPreferences:`, which AppController answers with Chromium's settings) | none | no |
+| *add* hidden Bookmarks placeholder | - | - | tag `IDC_BOOKMARKS_MENU`, empty submenu, `hidden` | none | - |
+| *dropped* | | | Chromium's New Incognito Window (#115), Reopen Closed Tab (until Arkt has one), Open File, Clear Browsing Data, Import Settings, Bookmarks items, Tab menu, Profiles menu, Cast, Search the Web, Use Selection for Find (Cmd-E is Arc's), Warn Before Quitting, Task Manager, Extensions page (the sidebar Extensions control is Decision 10) | | |
+
+**Reserved keys** (Arkt handles them before the page sees them): Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q,
+Cmd-Opt-Right, Cmd-Opt-Left. They are the Arkt items whose keys Chromium reserves for the same purpose (new tab, close
+tab, close window, new window, exit, select next/previous tab), plus Cmd-L, which Chromium does not reserve but Arkt
+must (Arkt has no in-window location field to fall back on; Arc's behaviour is a runtime check). When Arkt adds
+Reopen (Shift-Cmd-T), the tab switcher (Ctrl-Tab, Ctrl-Shift-Tab) or Incognito (Shift-Cmd-N), they join the set;
+nothing else is reserved, so pages keep Cmd-S, Cmd-D, Cmd-Z and the rest, as in Chrome.
+
+Where: **`ShellWindow.performKeyEquivalent(with:)`, before `super`**, not
+`ArktBrowserWindow::PreHandleKeyboardEvent` as Decision 9 proposed. That is where Chromium reserves on macOS (the
+window's command dispatcher runs before the first responder). `PreHandleKeyboardEvent` runs inside
+`RenderWidgetHostImpl::ForwardKeyboardEventWithCommands` for that very event (`render_widget_host_impl.cc:1912-1923`)
+with `RenderWidgetHostViewCocoa -keyEvent:` still on the stack, and an Archive or Close Window from there would destroy
+the `WebContents` under both; the window-level check also covers the FakeEngine build. Not matched: a page holding
+the Keyboard Lock API in full screen (Chromium lets such a page have reserved keys, `isKeyLocked:`); recorded, not
+handled this week. So the engine needs no change for reserved keys, and `PreHandleKeyboardEvent` keeps returning
+`NOT_HANDLED`.
+
+**Engine-side changes needed for Arkt's menu: none.** The menu works in the Engine configuration with the conditions
+above, all on the shell side. Gaps recorded for later (not menu blockers): Cmd-Left / Cmd-Right as Back / Forward
+(KB-031, KB-032) after the page declines them would need `ArktBrowserWindow::HandleKeyboardEvent` to run
+`DelayedWebContentsCommandForKeyEvent`'s commands (overlay only, needs a key-input check); the six `EngineCommand`
+constants named "no constant yet" above go into `EngineAPI` by a pull request both lanes approve (W3-1 froze it), and
+until then W3-7 uses `EngineCommand(rawValue:)` with the values listed.
+
+### The probe (`--arkt-menu-probe`)
+
+Self-test embedder only (`arkt_selftest_embedder.{h,mm}`, active with `--arkt-facade-selftest`, never in the app).
+With the switch, the embedder waits for `NSApplicationDidFinishLaunchingNotification`, defers one turn, replaces the
+main menu with an Arkt-shaped one (App menu with Quit tagged `IDC_EXIT`, `terminate:` to `NSApp`; File with Archive
+Tab Cmd-W, Close Window Shift-Cmd-W and New Tab Cmd-T, all targeting the embedder with tag 0; Window), and becomes
+ready. Options: `filetag` tags File `IDC_FILE_MENU`, `bookmarks` adds the hidden placeholder. The page command
+`menu-check` resolves Cmd-W, Shift-Cmd-W, Cmd-Q and Cmd-T with `cr_menuItemForKeyEquivalentEvent:` (so AppController's
+pre-search block runs) and logs each item, the command `MenuCommandForKeyEvent` would derive, and the menu state.
+
+All runs: `out/Spike` `Chromium.app`, `--no-startup-window --arkt-facade-selftest`, fresh profiles
+`$PROF/w3-8-{a,b,c}`, ports 9511-9513, one at a time, stopped by PID; `menu-check` through CDP (page title); the only
+input was activating the app (run A, B) and one AX click on Quit (run B), after the frontmost check.
+
+| Run | Options | Result |
+|---|---|---|
+| A | none | menu installed after launch (Chromium's File delegate was AppController); `menu-check`: Cmd-W -> "Archive Tab" `tag=0 action=menuProbeArchive:`, Shift-Cmd-W -> "Close Window", Cmd-Q -> "Quit Arkt Probe" `command=34031`, Cmd-T -> "New Tab"; File items unchanged after the search. On activation, `FATAL ... bookmark_menu_bridge.mm:62] Check failed: menu_root_.` from `windowDidBecomeMain:` -> `setLastProfile:` |
+| B | `bookmarks` | activation: no crash; placeholder `hidden=yes submenu replaced=yes delegate=set`; `menu-check` as run A; AX Quit: `quit started`, `engineWillBeginTerminating`, `tabClosed ... reason=appTerminating`, `windowClosed`, `engineWillTerminate` (the process then stays up with the CDP port and `--no-startup-window`, Chromium's `REMOTE_DEBUGGING` keep-alive, as in W3-3; stopped by PID) |
+| C | `filetag,bookmarks` | `menu-check`: Cmd-W and Shift-Cmd-W resolve to no item; File now "Close Tab" `key=w tag=34015 action=commandDispatch:` and "Close Window" `key=W tag=34012 action=performClose:` |
+
+Also logged in every run: after the swap `NSApp.servicesMenu` and `NSApp.helpMenu` are not in the main menu,
+`windowsMenu` is (the probe set it).
+
+Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome`, incremental (the self-test embedder and the framework link),
+`The build has finished successfully.`; `/` had 6.3 GiB free and swap 8.6 GB used before and after. No `Chromium`
+process left afterwards.
 
 ## W3-6: ChromiumEngineKit over the facade
 

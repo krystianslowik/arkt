@@ -2,6 +2,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#import "ui/base/cocoa/nsmenu_additions.h"
 #include "ui/base/window_open_disposition.h"
 
 namespace {
@@ -64,6 +66,40 @@ const char* ReasonName(ArktCloseReason reason) {
       return "appTerminating";
   }
   return "unknown";
+}
+
+std::string SelectorName(SEL action) {
+  return action ? base::SysNSStringToUTF8(NSStringFromSelector(action))
+                : std::string("none");
+}
+
+// The command Chromium's MenuCommandForKeyEvent derives from a main menu item
+// (global_keyboard_shortcuts_mac.mm:46-67), restated here because //arkt does
+// not depend on //chrome/browser.
+int CommandForMenuItem(NSMenuItem* item) {
+  if (!item) {
+    return -1;
+  }
+  if (item.action == NSSelectorFromString(@"commandDispatch:") &&
+      item.tag > 0) {
+    return static_cast<int>(item.tag);
+  }
+  if (item.action == @selector(performClose:)) {
+    return IDC_CLOSE_WINDOW;
+  }
+  if (item.action == @selector(terminate:)) {
+    return IDC_EXIT;
+  }
+  return -1;
+}
+
+bool MenuIsIn(NSMenu* menu, NSMenu* root) {
+  for (NSMenu* m = menu; m; m = m.supermenu) {
+    if (m == root) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace
@@ -160,6 +196,7 @@ const char* ReasonName(ArktCloseReason reason) {
 @end
 
 @interface ArktSelfTestEmbedder : NSObject <ArktEngineEmbedder>
+- (void)installProbeMenu;
 @end
 
 @implementation ArktSelfTestEmbedder {
@@ -168,6 +205,11 @@ const char* ReasonName(ArktCloseReason reason) {
   NSInteger _windowCount;
   // When each tab's close was asked for (session id), for held durations.
   std::map<int32_t, NSDate*> _closeStarts;
+  // --arkt-menu-probe (W3-8).
+  id _launchObserver;
+  NSMenu* _probeFileMenu;
+  NSMenuItem* _probeBookmarksItem;
+  NSMenu* _probeBookmarksSubmenu;
 }
 
 + (id<ArktEngineEmbedder>)sharedEmbedder {
@@ -209,7 +251,20 @@ const char* ReasonName(ArktCloseReason reason) {
           arkt::kFacadeSelfTestSwitch);
   LOG(WARNING) << "ARKT selftest engineDidStart mode="
                << (mode.empty() ? "ready" : mode);
-  if (mode == "fail") {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          arkt::kMenuProbeSwitch)) {
+    // Arkt's menu goes in after launch (Decision 9): after AppController's
+    // -applicationDidFinishLaunching: has set its File menu delegate.
+    _launchObserver = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSApplicationDidFinishLaunchingNotification
+                    object:nil
+                     queue:nil
+                usingBlock:^(NSNotification* note) {
+                  [weakSelf performSelector:@selector(installProbeMenu)
+                                 withObject:nil
+                                 afterDelay:0];
+                }];
+  } else if (mode == "fail") {
     [self performSelector:@selector(fail) withObject:nil afterDelay:kDelayedStart];
   } else {
     [self performSelector:@selector(ready)
@@ -235,6 +290,173 @@ const char* ReasonName(ArktCloseReason reason) {
       URLWithString:base::SysUTF8ToNSString(url.empty() ? kDefaultURL : url)];
   id<ArktTabHandle> tab = [browser createTabWithURL:first active:YES];
   LOG(WARNING) << "ARKT selftest createTab tab=" << tab.sessionId;
+}
+
+// --arkt-menu-probe: replaces Chromium's main menu with an Arkt-shaped one,
+// then becomes ready (the first window is created with the new menu up).
+- (void)installProbeMenu {
+  [NSNotificationCenter.defaultCenter removeObserver:_launchObserver];
+  _launchObserver = nil;
+  const std::string options =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          arkt::kMenuProbeSwitch);
+  const std::vector<std::string> list = base::SplitString(
+      options, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  auto has = [&list](const char* option) {
+    return std::find(list.begin(), list.end(), option) != list.end();
+  };
+  NSMenu* old = NSApp.mainMenu;
+  NSMenu* oldFile = [old itemWithTag:IDC_FILE_MENU].submenu;
+  LOG(WARNING) << "ARKT menuprobe chromium menu items=" << old.numberOfItems
+               << " file delegate is app delegate="
+               << (oldFile && (id)oldFile.delegate == (id)NSApp.delegate
+                       ? "yes"
+                       : "no");
+
+  NSMenu* main = [[NSMenu alloc] initWithTitle:@""];
+  NSMenuItem* app = [[NSMenuItem alloc] initWithTitle:@"Arkt"
+                                               action:nil
+                                        keyEquivalent:@""];
+  app.submenu = [[NSMenu alloc] initWithTitle:@"Arkt"];
+  NSMenuItem* quit = [[NSMenuItem alloc] initWithTitle:@"Quit Arkt Probe"
+                                                action:@selector(terminate:)
+                                         keyEquivalent:@"q"];
+  quit.target = NSApp;
+  quit.tag = IDC_EXIT;
+  [app.submenu addItem:quit];
+  [main addItem:app];
+
+  NSMenuItem* file = [[NSMenuItem alloc] initWithTitle:@"File"
+                                                action:nil
+                                         keyEquivalent:@""];
+  if (has("filetag")) {
+    file.tag = IDC_FILE_MENU;
+  }
+  _probeFileMenu = [[NSMenu alloc] initWithTitle:@"File"];
+  NSMenuItem* archive =
+      [[NSMenuItem alloc] initWithTitle:@"Archive Tab"
+                                 action:@selector(menuProbeArchive:)
+                          keyEquivalent:@"w"];
+  archive.target = self;
+  [_probeFileMenu addItem:archive];
+  NSMenuItem* closeWindow =
+      [[NSMenuItem alloc] initWithTitle:@"Close Window"
+                                 action:@selector(menuProbeCloseWindow:)
+                          keyEquivalent:@"W"];
+  closeWindow.target = self;
+  [_probeFileMenu addItem:closeWindow];
+  NSMenuItem* newTab =
+      [[NSMenuItem alloc] initWithTitle:@"New Tab"
+                                 action:@selector(menuProbeNewTab:)
+                          keyEquivalent:@"t"];
+  newTab.target = self;
+  [_probeFileMenu addItem:newTab];
+  file.submenu = _probeFileMenu;
+  [main addItem:file];
+
+  if (has("bookmarks")) {
+    _probeBookmarksItem = [[NSMenuItem alloc] initWithTitle:@"Bookmarks"
+                                                     action:nil
+                                              keyEquivalent:@""];
+    _probeBookmarksItem.tag = IDC_BOOKMARKS_MENU;
+    _probeBookmarksSubmenu = [[NSMenu alloc] initWithTitle:@"Bookmarks"];
+    _probeBookmarksItem.submenu = _probeBookmarksSubmenu;
+    _probeBookmarksItem.hidden = YES;
+    [main addItem:_probeBookmarksItem];
+  }
+
+  NSMenuItem* window = [[NSMenuItem alloc] initWithTitle:@"Window"
+                                                  action:nil
+                                           keyEquivalent:@""];
+  window.submenu = [[NSMenu alloc] initWithTitle:@"Window"];
+  [main addItem:window];
+
+  NSApp.mainMenu = main;
+  NSApp.windowsMenu = window.submenu;
+  LOG(WARNING) << "ARKT menuprobe installed options="
+               << (options.empty() ? "none" : options)
+               << " items=" << main.numberOfItems;
+  [self logProbeMenuState];
+  [self ready];
+}
+
+- (void)menuProbeArchive:(id)sender {
+  LOG(WARNING) << "ARKT menuprobe action Archive Tab";
+}
+
+- (void)menuProbeCloseWindow:(id)sender {
+  LOG(WARNING) << "ARKT menuprobe action Close Window";
+}
+
+- (void)menuProbeNewTab:(id)sender {
+  LOG(WARNING) << "ARKT menuprobe action New Tab";
+}
+
+- (void)logProbeMenuState {
+  for (NSMenuItem* item in _probeFileMenu.itemArray) {
+    LOG(WARNING) << "ARKT menuprobe file item \""
+                 << base::SysNSStringToUTF8(item.title) << "\" key=\""
+                 << base::SysNSStringToUTF8(item.keyEquivalent)
+                 << "\" tag=" << item.tag
+                 << " action=" << SelectorName(item.action)
+                 << " hidden=" << (item.hidden ? "yes" : "no");
+  }
+  NSMenu* main = NSApp.mainMenu;
+  LOG(WARNING) << "ARKT menuprobe file delegate="
+               << (_probeFileMenu.delegate ? "set" : "nil")
+               << " servicesMenu in main menu="
+               << (MenuIsIn(NSApp.servicesMenu, main) ? "yes" : "no")
+               << " helpMenu in main menu="
+               << (MenuIsIn(NSApp.helpMenu, main) ? "yes" : "no")
+               << " windowsMenu in main menu="
+               << (MenuIsIn(NSApp.windowsMenu, main) ? "yes" : "no");
+  if (_probeBookmarksItem) {
+    LOG(WARNING) << "ARKT menuprobe bookmarks placeholder hidden="
+                 << (_probeBookmarksItem.hidden ? "yes" : "no")
+                 << " submenu replaced="
+                 << (_probeBookmarksItem.submenu != _probeBookmarksSubmenu
+                         ? "yes"
+                         : "no")
+                 << " delegate="
+                 << (_probeBookmarksItem.submenu.delegate ? "set" : "nil");
+  }
+}
+
+// menu-check: Chromium's key-equivalent search (with AppController's
+// pre-search block) for four keys, as MenuCommandForKeyEvent runs it.
+- (void)menuCheckIn:(NSWindow*)window {
+  struct Key {
+    const char* name;
+    NSString* characters;
+    NSEventModifierFlags flags;
+    unsigned short keyCode;  // kVK_ANSI_W 13, kVK_ANSI_Q 12, kVK_ANSI_T 17.
+  };
+  const Key keys[] = {
+      {"cmd-w", @"w", NSEventModifierFlagCommand, 13},
+      {"shift-cmd-w", @"W",
+       NSEventModifierFlagCommand | NSEventModifierFlagShift, 13},
+      {"cmd-q", @"q", NSEventModifierFlagCommand, 12},
+      {"cmd-t", @"t", NSEventModifierFlagCommand, 17},
+  };
+  for (const Key& key : keys) {
+    NSEvent* event = [NSEvent keyEventWithType:NSEventTypeKeyDown
+                                      location:NSZeroPoint
+                                 modifierFlags:key.flags
+                                     timestamp:0
+                                  windowNumber:window.windowNumber
+                                       context:nil
+                                    characters:key.characters
+                   charactersIgnoringModifiers:key.characters
+                                     isARepeat:NO
+                                       keyCode:key.keyCode];
+    NSMenuItem* item = [NSApp.mainMenu cr_menuItemForKeyEquivalentEvent:event];
+    LOG(WARNING) << "ARKT menuprobe key " << key.name << " item=\""
+                 << (item ? base::SysNSStringToUTF8(item.title) : "none")
+                 << "\" tag=" << (item ? item.tag : 0)
+                 << " action=" << SelectorName(item.action)
+                 << " command=" << CommandForMenuItem(item);
+  }
+  [self logProbeMenuState];
 }
 
 - (void)fail {
@@ -658,6 +880,8 @@ const char* ReasonName(ArktCloseReason reason) {
     }
   } else if (command == "actions") {
     [self logActionsOf:tab.browser];
+  } else if (command == "menu-check") {
+    [self menuCheckIn:tab.browser.host.window];
   } else if (command == "run") {
     ArktSelfTestWindowHost* host = [self hostOf:tab.browser];
     LOG(WARNING) << "ARKT selftest run action " << argument << " anchor="
