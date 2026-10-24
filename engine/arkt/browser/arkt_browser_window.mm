@@ -10,6 +10,8 @@
 #include "arkt/browser/arkt_extensions_bridge.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
+#import "arkt/browser/arkt_infobar_view.h"
+#include "arkt/browser/arkt_infobars.h"
 #include "arkt/browser/arkt_permission_prompt.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
 #import "arkt/browser/arkt_tab_container_view.h"
@@ -317,6 +319,7 @@ ArktBrowserWindow::~ArktBrowserWindow() {
   side_panel_ui_.reset();
   location_bar_.reset();
   tab_modal_dialog_hosts_.clear();
+  infobar_presenters_.clear();
   modal_dialog_host_.reset();
   exclusive_access_context_.reset();
   LiveWindows().erase(this);
@@ -547,11 +550,11 @@ void ArktBrowserWindow::Mount(content::WebContents* contents) {
   }
   NSView* card = host_.cardView;
   NSView* view = contents->GetNativeView().GetNativeNSView();
-  view.frame = card.bounds;
-  view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   view.hidden = NO;
-  [card addSubview:view];
+  [card addSubview:view positioned:NSWindowBelow relativeTo:nil];
   mounted_ = contents;
+  // Fills the card, below the tab's infobars if it has any.
+  LayoutInfobars(contents);
   if (host_.window.isKeyWindow) {
     contents->Focus();
   }
@@ -566,6 +569,60 @@ void ArktBrowserWindow::Unmount(content::WebContents* contents) {
   // (WebContentsViewCocoa updateWebContentsVisibility).
   [contents->GetNativeView().GetNativeNSView() removeFromSuperview];
   mounted_ = nullptr;
+  auto it = infobar_presenters_.find(contents);
+  if (it != infobar_presenters_.end() && !host_mode_) {
+    [it->second->stack() removeFromSuperview];
+  }
+}
+
+void ArktBrowserWindow::AddInfobarPresenter(content::WebContents* contents) {
+  if (!contents || infobar_presenters_.count(contents)) {
+    return;
+  }
+  base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
+  infobar_presenters_[contents] = std::make_unique<ArktInfobarPresenter>(
+      contents,
+      base::BindRepeating(
+          [](base::WeakPtr<ArktBrowserWindow> window)
+              -> const ui::ColorProvider* {
+            return window ? window->GetColorProvider() : nullptr;
+          },
+          weak),
+      base::BindRepeating(
+          [](base::WeakPtr<ArktBrowserWindow> window,
+             content::WebContents* contents) {
+            if (window) {
+              window->LayoutInfobars(contents);
+            }
+          },
+          weak, base::Unretained(contents)));
+  LayoutInfobars(contents);
+}
+
+void ArktBrowserWindow::LayoutInfobars(content::WebContents* contents) {
+  auto it = infobar_presenters_.find(contents);
+  ArktInfobarStackView* stack =
+      it != infobar_presenters_.end() ? it->second->stack() : nil;
+  NSView* view = contents->GetNativeView().GetNativeNSView();
+  NSView* holder = view.superview;
+  if ([holder isKindOfClass:[ArktTabContainerView class]]) {
+    // Host mode: the facade's stable container lays out its contents view
+    // below the bar.
+    [static_cast<ArktTabContainerView*>(holder) setTopBarView:stack];
+  } else if (!host_mode_ && contents == mounted_ && holder == host_.cardView) {
+    ArktLayoutBelowTopBar(host_.cardView, view, stack);
+  } else {
+    [stack removeFromSuperview];
+  }
+  // Dialogs anchored to the tab follow the contents view's new size.
+  OnCardResized();
+}
+
+void ArktBrowserWindow::OnTabContentsViewAdopted(
+    content::WebContents* contents) {
+  if (contents && infobar_presenters_.count(contents)) {
+    LayoutInfobars(contents);
+  }
 }
 
 void ArktBrowserWindow::OnCardResized() {
@@ -958,7 +1015,15 @@ bool ArktBrowserWindow::IsVisibleOnScreen() const {
 }
 
 gfx::Size ArktBrowserWindow::GetContentsSize() const {
-  NSRect bounds = DialogHostViewFor(nullptr).bounds;
+  NSView* host = DialogHostViewFor(nullptr);
+  NSRect bounds = host.bounds;
+  // The page's own size: the host view less the tab's infobars.
+  content::WebContents* active =
+      browser_->GetTabStripModel()->GetActiveWebContents();
+  NSView* page = active ? active->GetNativeView().GetNativeNSView() : nil;
+  if (page.superview == host) {
+    bounds = page.frame;
+  }
   return gfx::Size(static_cast<int>(NSWidth(bounds)),
                    static_cast<int>(NSHeight(bounds)));
 }
@@ -1017,6 +1082,7 @@ void ArktBrowserWindow::OnTabDetached(content::WebContents* contents,
                                       bool was_active) {
   Unmount(contents);
   tab_modal_dialog_hosts_.erase(contents);
+  infobar_presenters_.erase(contents);
 }
 
 ArktTabEvent* ArktBrowserWindow::EntryEvent(ArktTabEventKind kind,
@@ -1053,6 +1119,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
         CHECK_LE(static_cast<size_t>(inserted.index), entries_.size());
         entries_.insert(entries_.begin() + inserted.index, TabEntry());
         arkt::UseArktPermissionPrompts(inserted.contents);
+        AddInfobarPresenter(inserted.contents);
         [events addObject:EntryEvent(ArktTabEventKindInserted,
                                      inserted.contents, inserted.index, -1)];
       }
@@ -1063,6 +1130,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
         CHECK_LT(static_cast<size_t>(removed.index), entries_.size());
         entries_.erase(entries_.begin() + removed.index);
         tab_modal_dialog_hosts_.erase(removed.contents);
+        infobar_presenters_.erase(removed.contents);
         [events
             addObject:[[ArktTabEvent alloc] initWithKind:ArktTabEventKindRemoved
                                                    tabId:TabId(removed.contents)
@@ -1094,7 +1162,9 @@ void ArktBrowserWindow::OnTabStripModelChanged(
       CHECK_GE(replace->index, 0);
       CHECK_LT(static_cast<size_t>(replace->index), entries_.size());
       tab_modal_dialog_hosts_.erase(replace->old_contents);
+      infobar_presenters_.erase(replace->old_contents);
       arkt::UseArktPermissionPrompts(replace->new_contents);
+      AddInfobarPresenter(replace->new_contents);
       [events
           addObject:EntryEvent(ArktTabEventKindUpdated, replace->new_contents,
                                replace->index, TabId(replace->old_contents))];

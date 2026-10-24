@@ -129,6 +129,24 @@ NSTextField* Label(NSString* text,
 
 }  // namespace
 
+namespace arkt {
+NSColor* SheetSurfaceColor() {
+  return SurfaceColor();
+}
+NSColor* SheetPrimaryTextColor() {
+  return PrimaryTextColor();
+}
+NSColor* SheetSecondaryTextColor() {
+  return SecondaryTextColor();
+}
+NSColor* SheetDividerColor() {
+  return DividerColor();
+}
+NSColor* SheetAccentTextColor() {
+  return AccentTextColor();
+}
+}  // namespace arkt
+
 @implementation ArktDialogSheetParagraph
 @synthesize text = _text;
 @synthesize linkRange = _linkRange;
@@ -166,12 +184,6 @@ NSTextField* Label(NSString* text,
 @synthesize stackedButtons = _stackedButtons;
 @synthesize neutralPrimary = _neutralPrimary;
 @synthesize escapeDismisses = _escapeDismisses;
-@end
-
-// A filled, rounded push button in Arkt's colors. The title stays the
-// button's title, so VoiceOver reads it as usual.
-@interface ArktSheetButton : NSButton
-@property(nonatomic) BOOL accent;
 @end
 
 @implementation ArktSheetButton {
@@ -273,10 +285,6 @@ NSTextField* Label(NSString* text,
 - (NSRect)focusRingMaskBounds {
   return self.bounds;
 }
-@end
-
-// A borderless text button in the accent text color, read as a link.
-@interface ArktSheetLinkButton : NSButton
 @end
 
 @implementation ArktSheetLinkButton

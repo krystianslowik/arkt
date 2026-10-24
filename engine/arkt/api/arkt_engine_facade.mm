@@ -1193,6 +1193,8 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   if (view && view.superview != _container) {
     [_container showContentsView:view];
   }
+  // The tab's infobars sit at the top of the container (Task W3-10).
+  window->OnTabContentsViewAdopted(contents);
 }
 
 - (void)seedState {

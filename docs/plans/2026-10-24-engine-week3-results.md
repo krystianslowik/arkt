@@ -17,7 +17,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-7 | The shell as engine host, composition root (Swift lane) | A, B DONE; C, D TODO | `ShellEngineHost`, engine window on the first tab, `createTab(url:in:)`, commands, close button, per-window routing, close reasons, held closes, Extensions control, #241; see "W3-7 A and B" below |
 | W3-8 | Main menu inventory and owner decision | DONE (steps 1-3; step 4 after W3-9) | Arkt owns the menu; conditions: a hidden `IDC_BOOKMARKS_MENU` placeholder (without it the first window crashes, measured), no `IDC_FILE_MENU` / `IDC_TAB_MENU` tags, Quit `IDC_EXIT` + `terminate:`; reserved keys in `ShellWindow`; no engine change; see "W3-8" below |
 | W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | TODO | |
-| W3-10 | Infobars, or a recorded gap | TODO | |
+| W3-10 | Infobars, or a recorded gap | DONE | native rows on the tab container for every confirm infobar (every confirm type on Mac, triggered from `chrome://infobar-internals`), `--no-sandbox` acceptance passes; tab sharing and sign-in QR (own Views) recorded in #122; no patch; see "W3-10" below |
 | W3-11 | Self-contained bundle with the release framework | TODO | |
 | W3-12 | Results, patch budget, issue updates, housekeeping | TODO | |
 
@@ -31,11 +31,146 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | - | Framework name (Decision 7) | no patch unless open decision 1 changes | 0 (1-2) | 0 |
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
 | - | Quit seams (Decision 13) | existing observers, callback list and `KeepAliveOrigin`, no patch | 0 | 0 |
-| - | Facade, host mode, infobars, menu routing, reserved keys | overlay only | 0 | 0 |
+| - | Facade, host mode, infobars (W3-10: `ContentInfoBarManager` observer, no patch), menu routing, reserved keys | overlay only | 0 | 0 |
 | - | Web identity (#9): stock reduced UA, `Chromium` + GREASE brands | upstream default, no patch, no overlay code | 0 | 0 |
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-10: infobars on Arkt windows
+
+Date 2026-10-24. Branch `engine/33-w3-10-infobars` off `main` at `7e5d409`. Overlay only: no patch changed,
+`.patches` unchanged (7 files), `$CR` branch `arkt` at `8910b992e4` before and after (`git -C $CR diff --stat
+156.0.8078.48..arkt | tail -1`: 17 files changed, 76 insertions, 5 deletions). New dependencies of
+`//arkt/browser:window`: `//components/infobars/content`, `//components/infobars/core`, `//chrome/browser/ui:ui_features`;
+`gn check out/Spike '//arkt/*'`: `Header dependency check OK`. Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome`,
+`The build has finished successfully.`, 0 `FAILED:`. `/` had 6.1 GiB free and swap 8.6 GB used of 10 GB before each
+build and run. Every run: fresh profile `w3-10-*`, CDP ports 9521-9531, `--use-mock-keychain`, one GUI run at a time,
+stopped by its PID; pages from a loopback server on `127.0.0.1:8611`. Window-only screenshots of the test window kept
+locally under `$PROF/w3-10-shots`. The runs below were made on `main` at `01e68c3`; after the rebase onto `7e5d409`
+(whose engine change is the self-test embedder) the build was redone and the host-mode row run again (`w3-10-host2`,
+same results).
+
+### Where infobars went before
+
+Chromium adds every infobar to the tab's `infobars::ContentInfoBarManager` (directly, through
+`GlobalConfirmInfoBar` for the browser-wide ones, or through `BrowserInfoBarManager::Show`/`ShowGlobally` when
+`kCentralizedInfoBarFramework` is on; it is off by default and lands in the same per-tab manager). Only `BrowserView`'s
+`InfoBarContainerView` shows them. On the build before this change (`w3-10-base`, `--no-sandbox --enable-automation`)
+the Arkt window showed nothing: no bar in the window, no other window in the on-screen window list for the process,
+no `FATAL`. The infobar objects (Views `ConfirmInfoBar`s that never get a widget) sat in the manager, and their
+delegates never ran. Note: `--enable-automation` returns from `AddInfoBarsIfNecessary` before the bad-flags prompt, so
+the two flags were run separately below.
+
+### Inventory (Chromium 156, macOS desktop)
+
+`chrome://infobar-internals` (enabled through `internal_only_uis_enabled` in a throwaway profile's Local State) can
+show every desktop infobar type on demand; all 20 Mac types were triggered on an Arkt window (`w3-10-auto`). The log
+line is `ARKT: infobar <InfoBarIdentifier> shown ...`.
+
+| Infobar (identifier) | When on Arkt windows | Delegate | Result |
+|---|---|---|---|
+| Unsupported command-line flag (`BAD_FLAGS` 43) | startup with a flag of `kBadFlags` (`--no-sandbox`, `--disable-web-security`, ...) | confirm, no buttons | drawn |
+| Automation (`AUTOMATION` 73) | startup with `--enable-automation`, every tab of every window | confirm (global) | drawn |
+| Google API keys missing (`GOOGLE_API_KEYS` 45) | startup, no keys built in | confirm, link | drawn |
+| Obsolete system (`OBSOLETE_SYSTEM` 46) | startup on an old macOS | confirm, link | drawn |
+| Session restore (`SESSION_RESTORE` 128) | startup (`kSessionRestoreInfobar`, on by default) unless `--no-first-run`/`--no-default-browser-check` | confirm, link, template | drawn |
+| Default browser (`DEFAULT_BROWSER` 44), PDF viewer (`PDF` 123) | startup after first run | confirm (global) | drawn |
+| OSCrypt availability | startup, encryption unavailable | confirm | drawn (same path; not triggerable from the page) |
+| DevTools "started debugging" (`EXTENSION_DEV_TOOLS` 13, `DEV_TOOLS` 12), shared process (120) | `chrome.debugger.attach`, DevTools | confirm (global) | drawn |
+| Collected cookies / page info reload (`COLLECTED_COOKIES` 40) | site settings changed | confirm | drawn |
+| Alternate URL ("Did you mean", `ALTERNATE_NAV` 42) | omnibox intranet guesses (no omnibox in Arkt: not reached in practice) | confirm, inline link | drawn |
+| Link capturing (119), theme installed (`THEME_INSTALLED` 15), installation error (41), incognito connectability (14), web auth flow (113), known interception (96), local test policies (115, not closeable) | as in Chrome | confirm | drawn |
+| Tab sharing (`TAB_SHARING` 93) | `getDisplayMedia` tab capture | own Views (`TabSharingInfoBar`) | not drawn: gap |
+| Sign-in QR code | sign-in promo | own Views | not drawn: gap |
+| Keystone promotion | branded builds with the updater only | confirm | not built in `Chromium.app` |
+| Translate | desktop uses the bubble (`ShowTranslateBubble`), not an infobar | - | not an Arkt-window case |
+| Session crashed "Restore pages?" | `SessionCrashedBubble`, a Views bubble, not an infobar | - | #122 (bubble) |
+
+### What changed
+
+- **Presenter** (`arkt_infobars.{h,mm}`, `ArktInfobarPresenter`). `ArktBrowserWindow` makes one per tab when the tab
+  enters the window (insert or contents replacement) and drops it when the tab leaves; it observes the tab's
+  `ContentInfoBarManager` (`InfoBarManager::Observer`: added, removed, replaced, manager destroyed) and picks up
+  infobars that were there before the tab arrived. Each `ConfirmInfoBarDelegate` infobar gets a native row; the rows
+  keep the manager's order. Actions run the delegate exactly as `ConfirmInfoBar` and `InfoBarView` do: OK
+  `Accept()`, Cancel `Cancel()`, the link `LinkClicked(disposition)`, an inline link
+  `InlineSubstitutionLinkClicked(index, disposition)`, each followed by `RemoveSelf()` when the delegate returns
+  true; close runs `InfoBarDismissed()` then `RemoveSelf()`. Every action first checks that the row is still drawn and
+  the infobar still has its owner. The disposition comes from the click's modifiers
+  (`ui::WindowOpenDispositionFromNSEvent`). Infobars without a confirm delegate are logged (`not drawn (not a confirm
+  infobar)`).
+- **Content** as `ConfirmInfoBar` builds it: the message template with its substitutions and link ranges when
+  `kInfoBarInlineLinks` is on (default), else `GetMessageText`; the icon (`GetIcon` rasterized with the window's color
+  provider, 20 pt); the link before the buttons or at the trailing edge (`ShouldShowLinkBeforeButton`); OK and Cancel
+  with their labels, enabled state and tooltips, OK (or the only button) prominent unless `GetButtonStyle` says
+  otherwise; the close button only when `IsCloseable`.
+- **Rows** (`arkt_infobar_view.{h,mm}`, plain AppKit values). 40 pt high as Chrome's, one line, truncated at the end
+  with the full message as tooltip; surface, text, divider and accent-link colors and the filled buttons from
+  `ArktDialogSheet` (its color functions, `ArktSheetButton` and `ArktSheetLinkButton` are now in its header). A 1 px
+  divider under each row. Mirrored in right-to-left UI. Motion: a 140 ms opacity fade on a row that appears while the
+  bar is on screen (custom ease-out, as the permission panel), no height animation (it would resize the page every
+  frame), no exit animation.
+- **Placement.** The rows sit above the page and push it down, as Chrome's infobar container does. Host mode:
+  `ArktTabContainerView` takes a top bar (`setTopBarView:`), keeps it when the contents view is swapped and lays the
+  contents view out below it; the facade tells the window when it put a contents view in its container
+  (`OnTabContentsViewAdopted`), so a bar added before that is placed then. Placeholder host: the card gets the same
+  layout for the mounted tab (`ArktLayoutBelowTopBar`). Window resizes follow through autoresizing. Each tab's bar is
+  its own, so a tab switch shows the new tab's infobars. `GetContentsSize` now reports the page's size (the host view
+  less the bar).
+- **VoiceOver.** Each row is an `AXGroup` named by its message, with the message (`AXStaticText`, or a text area with
+  `AXLink` children when it has inline links), the link (`AXLink`), the buttons and `Close` (`IDS_ACCNAME_CLOSE`), in
+  reading order; the icon is hidden.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Acceptance: `--no-sandbox` (`w3-10-flags`, placeholder) | `infobar 43 shown buttons=0 link=0 closeable=1 ... message="You are using an unsupported command-line flag: --no-sandbox. Stability and security will suffer."`; screenshot: the bar above the page, the page's top edge right under it; AX `AXGroup` with the message and `Close`; AXPress `Close`: `infobar 43 close`, `removed rows=0`, `innerHeight` 840 -> 880, the bar gone |
+| `--enable-automation` (`w3-10-auto`) | `infobar 73 shown` on the first tab and again on a tab created later (global) |
+| All 20 types (`w3-10-auto`, `chrome://infobar-internals`) | 19 rows on the tab, 0 `FATAL`: two triggers add nothing new because the manager keeps one of each (`EqualsDelegate`): automation was already up, and "Page info" asks for the same reload infobar (40) as "Collected cookies" |
+| OK button | AXPress `Reload` (infobar 40): `infobar 40 ok`, the page reloads and the manager removes the expiring infobars |
+| Cancel button | AXPress `Deny` (infobar 12): `infobar 12 cancel`, the global debugging infobars removed from every tab |
+| Link | AXPress `Learn more` (infobar 96): `infobar 96 link`, a new foreground tab with `chrome://connection-monitoring-detected/` |
+| Inline link | AXPress the `AXLink` inside the "Did you mean" message (42): `infobar 42 message-link`, removed, the tab navigated (to the delegate's target, see the note below) |
+| Tab switch | the other tab shows only its own rows (AX tree), `innerHeight` 720 with four rows, 880 with none |
+| Light and dark | `--arkt-appearance=light` (`w3-10-light2`) and the system's dark mode: screenshots |
+| Right-to-left (`w3-10-rtl`, `--force-ui-direction=rtl --no-sandbox`) | `Close` at the leading (left) edge at x 401 in a row at x 390, the message right-aligned |
+| Host mode (`w3-10-host`, `--no-startup-window --arkt-facade-selftest`) | two infobars on the self-test's tab container: rows at y 419 (container top, under the 32 pt title bar), page `innerHeight` 600 -> 520; the other tab: no rows, 600; back: rows again; `Close`: 560 |
+| Window and tab closed with infobars up (`w3-10-final`) | `tab event removed`, `native window destroyed`, census `0/0/0`, process alive, 0 `FATAL` |
+| Stability | 0 `FATAL`/`Check failed`/`Received signal` in every run |
+
+Note on the inline-link row: the alternate-URL infobar triggered from the internals page points at
+`https://google.com/`, and pressing its link navigated the test tab there once before it was sent back to the loopback
+page. The other link rows used Chromium's own pages.
+
+Regression rows (`w3-10-reg`, port 9528, `--arkt-trace-visibility --no-sandbox`, `tabs-probe`, `action-probe`; row 5
+on `w3-10-reg3`, port 9530): W5b 1 (alive after 30 s, census `normal=1 arkt=1 views=0`, the bad-flags row up), 2
+(navigate to `b.html`: `visible`), 8 (`window.open` with a gesture: `true`, `tab list rows 2`), 3 (`probe.create()`:
+index 2, `tab list rows 3`, the page still `visible`), 5 (`probe.window()`: `normal`, census `normal=2 arkt=2 views=0`),
+6 (`tab event removed`), 7 (every window removed: census `0/0/0`, `native window destroyed`, process alive 10 s later,
+gone after `kill`), 13 (Edit > Find > Find... after the frontmost check: `stub FindBar::Show`); W5c Step 3
+(`tabs.update` to the other tab: `hidden`, back: `visible`); W6 (`chrome.action.openPopup()`: `"ok"`, `TriggerPopup
+... by_user=0`, `popup loaded`). 0 `FATAL`/`Check failed`.
+
+### Deviations from the plan
+
+- The plan's split (the facade exposes a plain infobar list, ShellUI draws `InfobarView.swift`, a ShellUI test against
+  `InMemoryEngine`) is not done: the facade header is frozen this week and W3-7's shell side is in progress, so the
+  bar is engine-drawn on the tab's container, as Decision 10 keeps the other engine surfaces. The row content is
+  plain AppKit values (`ArktInfobarContent`), so a ShellUI presenter can take it later through a header change both
+  lanes approve.
+
+### Left open (#122)
+
+- Infobars with their own Views are not drawn: tab sharing (`TAB_SHARING_INFOBAR_DELEGATE`, 93, during
+  `getDisplayMedia` tab capture) and the sign-in QR code infobar; they are logged.
+- Tab-modal dialogs and the permission panel still anchor to the top of the tab's container (or card), so they sit
+  over the infobar rows instead of below them; anchoring them to the page needs `DialogHostViewFor` to change, which
+  the #250/#260 rows depend on.
+- Infobars stay visible in HTML fullscreen (Chrome hides them when the manager says so, `ShouldHideInFullscreen`).
+- No open/close height animation (by choice, above); Chrome animates the container height.
+- The session-crashed "Restore pages?" prompt is a Views bubble, not an infobar: it stays in #122 with the bubbles.
 
 ## W3-8: main menu inventory and owner
 
