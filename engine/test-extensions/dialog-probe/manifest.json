@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Arkt dialog probe",
+  "version": "1.0",
+  "description": "Opens the extension permission and uninstall prompts for engine tests.",
+  "optional_permissions": ["bookmarks", "history"],
+  "optional_host_permissions": ["https://example.com/*"]
+}

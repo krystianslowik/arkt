@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Sat, 24 Oct 2026 03:05:23 +0200
+Subject: [PATCH] Arkt: let Arkt show extension dialogs as native sheets
+
+ShowExtensionInstallDialogImpl and ShowDialog(gfx::NativeWindow, ...) (when
+there is no Views extensions container) ask
+arkt::GetExtensionDialogHooks() (//arkt/browser:extension_dialog_hook, a
+light target) first. //arkt/browser registers the hooks when Arkt windows are
+on; they take the install, re-enable and permission-increase prompts and the
+ui::DialogModel extension dialogs (post-install, uninstall) of Arkt windows
+and return false for everything else, so Chromium's dialogs are unchanged
+otherwise.
+---
+ chrome/browser/ui/extensions/BUILD.gn                     | 1 +
+ .../browser/ui/extensions/extension_dialog_utils_views.cc | 7 +++++++
+ chrome/browser/ui/views/extensions/BUILD.gn               | 1 +
+ .../ui/views/extensions/extension_install_dialog_view.cc  | 8 ++++++++
+ 4 files changed, 17 insertions(+)
+
+diff --git a/chrome/browser/ui/extensions/BUILD.gn b/chrome/browser/ui/extensions/BUILD.gn
+index 7d3f03ae3d..dc24165890 100644
+--- a/chrome/browser/ui/extensions/BUILD.gn
++++ b/chrome/browser/ui/extensions/BUILD.gn
+@@ -260,6 +260,7 @@ source_set("impl") {
+       "extension_side_panel_coordinator_views.cc",
+     ]
+     deps += [
++      "//arkt/browser:extension_dialog_hook",
+       "//chrome/browser/ui/views/extensions:extension_view_utils",
+       "//chrome/browser/ui/views/extensions:extension_view_views",
+       "//chrome/browser/ui/views/extensions:extensions_container_views",
+diff --git a/chrome/browser/ui/extensions/extension_dialog_utils_views.cc b/chrome/browser/ui/extensions/extension_dialog_utils_views.cc
+index 12c3bc947d..6915ecb03c 100644
+--- a/chrome/browser/ui/extensions/extension_dialog_utils_views.cc
++++ b/chrome/browser/ui/extensions/extension_dialog_utils_views.cc
+@@ -2,6 +2,7 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include "arkt/browser/arkt_extension_dialog_hook.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/extensions/extension_dialog_utils.h"
+ #include "chrome/browser/ui/views/extensions/extension_view_utils.h"
+@@ -56,6 +57,12 @@ void ShowDialog(gfx::NativeWindow parent,
+   if (container && container->IsVisible()) {
+     ShowDialog(container, extension_ids, std::move(dialog_model));
+   } else {
++    // Arkt windows have no Views container: Arkt shows the dialog as a
++    // native sheet; the hook returns false for other windows.
++    if (auto fn = arkt::GetExtensionDialogHooks().show_modal_dialog;
++        fn && fn(parent, dialog_model)) {
++      return;
++    }
+     // If the container is not available, show a modal dialog.
+     ShowModalDialog(parent, std::move(dialog_model));
+   }
+diff --git a/chrome/browser/ui/views/extensions/BUILD.gn b/chrome/browser/ui/views/extensions/BUILD.gn
+index 25a796c035..be3d44b26f 100644
+--- a/chrome/browser/ui/views/extensions/BUILD.gn
++++ b/chrome/browser/ui/views/extensions/BUILD.gn
+@@ -751,6 +751,7 @@ source_set("extension_install_dialog_view_impl") {
+   ]
+   deps = [
+     ":extensions_views_utils",
++    "//arkt/browser:extension_dialog_hook",
+     "//base",
+     "//chrome/app:generated_resources",
+     "//chrome/app/theme:theme_resources",
+diff --git a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc b/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
+index 83ce5b59c1..83e7fbe139 100644
+--- a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
++++ b/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
+@@ -8,6 +8,7 @@
+ #include <string>
+ #include <utility>
+ 
++#include "arkt/browser/arkt_extension_dialog_hook.h"
+ #include "base/functional/bind.h"
+ #include "base/i18n/message_formatter.h"
+ #include "base/memory/raw_ptr.h"
+@@ -88,6 +89,13 @@ void ShowExtensionInstallDialogImpl(
+     std::unique_ptr<InstallPromptData> prompt) {
+   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+ 
++  // Arkt shows the prompt as a native sheet on its own windows; the hook
++  // returns false for every prompt it does not take.
++  if (auto fn = arkt::GetExtensionDialogHooks().show_install_dialog;
++      fn && fn(show_params, done_callback, prompt)) {
++    return;
++  }
++
+   // If the dialog has to be parented to WebContents, force activate the
+   // contents. See crbug.com/40059470.
+   content::WebContents* web_contents = show_params->GetParentWebContents();

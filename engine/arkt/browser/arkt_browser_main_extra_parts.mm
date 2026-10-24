@@ -8,6 +8,7 @@
 
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_browser_window_factory_hook.h"
+#include "arkt/browser/arkt_extension_dialogs.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
@@ -226,11 +227,24 @@ void ArktBrowserMainExtraParts::PreProfileInit() {
   if (NativeWindowEnabled()) {
     SetCreateBrowserWindowOverride(&CreateArktBrowserWindow);
     LOG(WARNING) << "ARKT: native window factory registered";
+    RegisterExtensionDialogSheets();
   }
 }
 
 void ArktBrowserMainExtraParts::PreBrowserStart() {
   Census().Start();
+  // --arkt-appearance=light|dark pins the app's appearance for test runs
+  // (light and dark checks of native surfaces without touching the system
+  // setting). Without it the app follows the system.
+  std::string appearance =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          "arkt-appearance");
+  if (appearance == "light" || appearance == "dark") {
+    NSApp.appearance = [NSAppearance
+        appearanceNamed:appearance == "dark" ? NSAppearanceNameDarkAqua
+                                             : NSAppearanceNameAqua];
+    LOG(WARNING) << "ARKT: appearance " << appearance;
+  }
 }
 
 void ArktBrowserMainExtraParts::PostBrowserStart() {

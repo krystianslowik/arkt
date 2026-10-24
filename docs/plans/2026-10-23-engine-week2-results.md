@@ -32,8 +32,9 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | 0004 | `BrowserWindow` factory hook for Arkt (W5a) | exists | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
 | 0005 | Tolerate a non-`BrowserView` window in tab features (W5b) | exists | 1 (`sad_tab_controller.cc`) | 0 |
 | 0006 | Tolerate a non-`BrowserView` window in dialogs (W5b, W7) | exists | 3 (`bubble_anchor_util_views.cc`, `exclusive_access_permission_prompt.cc`, `extension_install_ui_desktop.cc`) | 0 |
+| 0007 | Extension dialogs as native sheets on Arkt windows (#244) | exists | 4 (`extension_install_dialog_view.cc`, `extension_dialog_utils_views.cc`, their two `BUILD.gn`) | 0 |
 
-Current totals: 6 patch files, 13 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 13 files changed, 57 insertions, 5 deletions). Seam patches (W5b, W7): 2 patch files, 4 upstream files, 0 hot-file hunks, no header.
+Current totals (after #244): 7 patch files, 17 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 17 files changed, 74 insertions, 5 deletions). Seam patches (W5b, W7, #244): 3 patch files, 8 upstream files, 0 hot-file hunks, no header. Week 2 ended at 6 patch files and 13 upstream files.
 
 ## W0
 
@@ -1716,3 +1717,64 @@ FindBar::Show`); W5c Step 3 (CDP `visibilityState` swaps with `tabs.update`, AX 
 tab and the `visibility` lines); W6 (`openPopup` ok, `chrome.windows.create` second Arkt window, popover closed).
 
 Deferred to a follow-up issue: tab-modal attachment, the patch 0006 RTL anchor and the post-install dialog anchor.
+
+## #244: extension dialogs as native sheets
+
+Date 2026-10-24. Branch `engine/244-native-install-sheet`. Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome`,
+`The build has finished successfully.`, 0 `FAILED:`. Every run: fresh profile `w244-*`, CDP ports 9421-9424,
+`--use-mock-keychain`, one GUI run at a time, stopped by its PID.
+
+### What changed
+
+- Patch 0007 adds one hook call in `ShowExtensionInstallDialogImpl` (install, re-enable and permission-increase
+  prompts) and one in `ShowDialog(gfx::NativeWindow, ...)` when there is no Views extensions container
+  (post-install, uninstall and the other `ui::DialogModel` extension dialogs). The hooks live in
+  `//arkt/browser:extension_dialog_hook`, a light target like the window factory hook; they return false for
+  anything that is not an Arkt window, so Chromium's dialogs are unchanged elsewhere (and with `--arkt-views-window`,
+  where the hooks are not registered).
+- `ArktDialogSheet` (`arkt_dialog_sheet.{h,mm}`) is a plain AppKit sheet attached with `beginSheet:` (no modal loop)
+  and fed plain values, so a ShellUI presenter can take the same content later (week-3 Decision 10 keeps extension
+  surfaces engine-drawn this week). Colors mirror `ShellTokens` / `BrandTokens` (surface porcelain / graphite,
+  primary and secondary text, mustard fill with graphite text for the primary button); system font, 15 pt semibold
+  title, 13 pt body; the icon is shown at up to 32 pt, never scaled up or cropped; long permission lists scroll.
+- `arkt_extension_dialogs.mm` keeps what `ExtensionInstallDialogView` does: prompt observers before the done callback,
+  the callback exactly once (cancel when the sheet goes away unanswered, the parent window closes, the extension is
+  uninstalled or the profile shuts down), the 500 ms delay before the install button is enabled, the withheld
+  permissions checkbox, and the Web Store link. The request (justification) and parent-permission variants stay with
+  Chrome's dialog. The `ui::DialogModel` host runs the accept, cancel and close actions, checkboxes and paragraph
+  links, and runs the destroying callback synchronously on `Close()` (the uninstall dialog relies on it). Custom
+  Views fields (the sign-in promo footnote) are not shown. The desktop post-install dialog has no buttons; the sheet
+  adds OK.
+- Keys: Escape cancels. Return presses the default button Chrome gives the dialog: Cancel for the install prompts
+  (so Return never installs), Remove for the uninstall dialog, OK for the post-install sheet.
+  PARITY(NEEDS-RUNTIME-CHECK): Arc's Return key on these prompts.
+- `--arkt-appearance=light|dark` pins `NSApp.appearance` for test runs, so light and dark can be checked without
+  changing the system setting.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Web Store install (uBO Lite, `w244-cws`) | "Add to Chrome" with `cdp.mjs --user-gesture` (consent page rejected first): `install sheet shown type=0 permissions=1`; AX: `AXSheet` of the Arkt window, described `Add "uBlock Origin Lite"?`, children title, `It can:`, the permission, `Cancel`, `Add extension`; no separate dialog window in the window list. AXPress `Add extension`: `install sheet accepted`, `toolbar actions 0` -> `1`, Web Store button `Remove from Chrome` |
+| Post-install dialog | A sheet on the Arkt window (`dialog sheet shown`), centred on the window, not at (-224,39); AX: title `uBlock Origin Lite has been added to Chromium`, the manage text, `OK`. Escape: `dialog sheet closed`, alive 10 s later (the patch 0006 hint path runs on close) |
+| uBO popup through the menu | AXPress `Extensions`, Down, Return: `popup loaded .../popup.html` |
+| Permission increase (`dialog-probe`, `chrome.permissions.request`) | `install sheet shown type=4 permissions=3`; `Allow` disabled right after showing, enabled after the delay; Escape and Return both give `granted=false`; AXPress `Allow` gives `granted=true` |
+| Uninstall (`chrome.management.uninstallSelf({showConfirmDialog:true})`) | `dialog sheet shown ExtensionUninstallDialog`, AX title, `Cancel`, `Remove`; Escape gives `uninstall canceled by user` |
+| Parent window closed with the sheet up | `chrome.windows.remove` of the window: `install sheet canceled`, census `0/0/0`, no window left, process alive |
+| Light and dark | `--arkt-appearance=light` and the system's dark mode: window-only screenshots kept locally under the profiles' `shots/` |
+| VoiceOver tree | Sheet described by its title; title, headings, permissions and buttons are elements; icon, bullets and the divider are hidden |
+| Stability | 0 `FATAL`/`Check failed`/`Received signal` lines in every run |
+
+Regression rows (`w244-reg`, port 9424): W5b 1 (census `normal=1 arkt=1 views=0`), 2 (example.org `visible`), 3
+(`probe.create()`: `tab list rows 2`, example.org `visible`), 5 (`probe.window()`: `normal=2 arkt=2 views=0`), 6
+(`tab event removed`), 7 (all windows closed: census 0/0/0, process alive, gone after `kill`), 8 (`window.open` with a
+gesture: `tab list rows 3`), 13 (AX Edit > Find > Find...: `stub FindBar::Show`); W5c Step 3 (`tabs.update` swaps
+`visibilityState` both ways); W6 (`openPopup` `ok`, popup loaded, second window, popup closed on the tab change).
+
+### Left open
+
+- Tab-modal attachment, the RTL anchor, the container toggle caller and the "pinned by default" hint stay in #250
+  (the hint is still skipped without a `BrowserView`).
+- The request (justification) and parent-permission install prompts still use Chrome's Views dialog.
+- Arc parity of the Return key (PARITY(NEEDS-RUNTIME-CHECK) above); the Web Store "Switch to Chrome" banner is #9.
+
