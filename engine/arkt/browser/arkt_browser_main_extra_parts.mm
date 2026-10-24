@@ -216,6 +216,29 @@ BrowserCensus& Census() {
   return *census;
 }
 
+// Week-3 handshake check (W3-0): the embedding app's Swift class is reached
+// through the Objective-C runtime only, never by symbol (the framework hides
+// every symbol but ChromeMain, and the app is not linked against it). Logs
+// `ARKT: embedder class <name> <found|absent>`; for a found class, whether its
+// instances respond to the handshake selector. The W3-0a probe class stands in
+// for the embedder until W3-3 creates the facade.
+void LogEmbedderClass() {
+  for (NSString* name in @[ @"ArktShellEmbedderProbe", @"ArktShellEmbedder" ]) {
+    Class embedder = NSClassFromString(name);
+    if (!embedder) {
+      LOG(WARNING) << "ARKT: embedder class " << name.UTF8String << " absent";
+      continue;
+    }
+    BOOL nsobject =
+        [embedder instancesRespondToSelector:NSSelectorFromString(@"init")];
+    BOOL handshake = [embedder
+        instancesRespondToSelector:NSSelectorFromString(@"engineDidStart:")];
+    LOG(WARNING) << "ARKT: embedder class " << name.UTF8String
+                 << " found (responds to init " << (nsobject ? "yes" : "no")
+                 << ", engineDidStart: " << (handshake ? "yes" : "no") << ")";
+  }
+}
+
 }  // namespace
 
 ArktBrowserMainExtraParts::ArktBrowserMainExtraParts() = default;
@@ -249,6 +272,7 @@ void ArktBrowserMainExtraParts::PreBrowserStart() {
 
 void ArktBrowserMainExtraParts::PostBrowserStart() {
   LOG(WARNING) << "ARKT: in-process hook alive";
+  LogEmbedderClass();
   if (NativeWindowEnabled()) {
     return;
   }

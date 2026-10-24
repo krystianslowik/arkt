@@ -366,6 +366,9 @@ class ModelSheet final : public ui::DialogModelHost,
     LOG(WARNING) << "ARKT: dialog sheet shown "
                  << model_->internal_name(DialogModelHost::GetPassKey());
     [sheet_ beginOnWindow:parent];
+    // The content carries titles only; apply the model's initial enabled
+    // state of OK and Cancel (a model may start with OK disabled).
+    OnDialogButtonChanged();
   }
 
   // ui::DialogModelHost:
@@ -484,9 +487,6 @@ class ModelSheet final : public ui::DialogModelHost,
       content.defaultButton =
           ok || dismiss_only_ ? ArktDialogSheetDefaultPrimary
                               : ArktDialogSheetDefaultNone;
-    }
-    if (ok && !ok->is_enabled()) {
-      content.primaryEnableDelay = 0;
     }
     return content;
   }

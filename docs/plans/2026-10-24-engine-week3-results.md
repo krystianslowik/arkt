@@ -2,7 +2,191 @@
 
 Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. Variables as in the plan's Rules
 (`$CHROMIUM_ROOT`, `$CR`, `$OUT` = `$CR/out/Spike`, `$PROF` = `$CHROMIUM_ROOT/profiles`, `$EMB` =
-`$CHROMIUM_ROOT/embed-week3`). W3-0 adds the header, task table and baselines above this section.
+`$CHROMIUM_ROOT/embed-week3`).
+
+| Task | What | Status | Result |
+|---|---|---|---|
+| W3-0a | Main-actor probe on the `Spike` configuration | DONE (#229) | GO; nested loops opened from a main-actor job starve the main actor (below) |
+| W3-0 | Engine worktree, baselines, class lookup, command ids | DONE | lookup `found` in the app, `absent` in `Chromium.app`; 7 patch files, 17 upstream files, 0 hot-file hunks; W5c Step 3 and W6 Step 3 pass; command-id table; Swift baselines ShellKit 481, ArktCore 349; see "W3-0" below |
+| W3-1 | `EngineAPI` additions, harness drivers, contract rules 11-16 (Swift lane) | TODO | |
+| W3-2 | Facade header and its Swift module | DONE (#246) | see "W3-2" below |
+| W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | TODO | |
+| W3-4 | Host mode for ShellUI windows | TODO | |
+| W3-5 | Tab facade | TODO | |
+| W3-6 | `ChromiumEngineKit` over the facade | TODO | |
+| W3-7 | The shell as engine host, composition root (Swift lane) | TODO | |
+| W3-8 | Main menu inventory and owner decision | TODO | |
+| W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | TODO | |
+| W3-10 | Infobars, or a recorded gap | TODO | |
+| W3-11 | Self-contained bundle with the release framework | TODO | |
+| W3-12 | Results, patch budget, issue updates, housekeeping | TODO | |
+
+## Patch budget
+
+| # | Patch | Status | Upstream files | Hunks in hot files |
+|---|---|---|---|---|
+| 0001-0006 | week 2 (hook, draw, keychain, factory hook, tab features, dialogs) | exist | 13 | 0 |
+| 0007 | extension dialogs as native sheets (#244, pull request #252) | exists | 4 | 0 |
+| - | Handshake (Decision 1) | ObjC runtime lookup, no patch (W3-0: lookup works) | 0 | 0 |
+| - | Framework name (Decision 7) | no patch unless open decision 1 changes | 0 (1-2) | 0 |
+| - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
+| - | Quit seams (Decision 13) | existing observers, callback list and `KeepAliveOrigin`, no patch | 0 | 0 |
+| - | Facade, host mode, infobars, menu routing, reserved keys | overlay only | 0 | 0 |
+
+Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
+if the framework is renamed by patch.
+
+## W3-0: engine baselines and embedder class lookup
+
+Date 2026-10-24. Branch `engine/33-w3-0-baselines` off `main` at `1d15a49`. `$CR` branch `arkt` at `e4a2ca5cca`
+(0001-0007) before and after; no patch change, no export.
+
+Deviations from the plan's steps:
+- Step 1: the engine lane keeps the existing worktree `arkt-wt/engine` (the one week 2 and #244 used) instead of a new
+  `arkt-wt/engine-week3`, on a branch per task (`engine/33-w3-0-baselines`) rather than one long
+  `engine/33-chromium-engine`. `$REPO` in the plan means this worktree. `readlink $CR/arkt` already printed
+  `$REPO/engine/arkt`, so it was not repointed.
+- Step 4: #21 has landed (W9, pull request #247): the native window is the default and `--arkt-native-window` is no
+  longer read, so the checks ran with no window switch.
+
+### Step 2: patch counts
+
+```
+$ git -C $CR rev-list --count 156.0.8078.48..arkt --
+7
+$ wc -l < $REPO/engine/patches/chromium/.patches
+7
+$ git -C $CR diff 156.0.8078.48..arkt -- chrome/browser/ui/browser_window/internal/browser_window_features.cc chrome/browser/ui/tabs/tab_features.cc | grep -c '^@@'
+0
+$ git -C $CR diff --stat 156.0.8078.48..arkt -- | tail -1
+ 17 files changed, 74 insertions(+), 5 deletions(-)
+```
+
+`$CR` needs `--` after `arkt` in `rev-list` and `log`: the checkout has an `arkt` path (the overlay symlink), so a bare
+`arkt` is ambiguous.
+
+### Step 3: embedder class lookup
+
+`ArktBrowserMainExtraParts::PostBrowserStart` logs, right after `in-process hook alive`, one line per name for
+`NSClassFromString(@"ArktShellEmbedderProbe")` (the W3-0a class) and `NSClassFromString(@"ArktShellEmbedder")` (the
+W3-3 class, absent everywhere today): `ARKT: embedder class <name> absent`, or `found (responds to init <yes|no>,
+engineDidStart: <yes|no>)` from `instancesRespondToSelector:` (selectors by name, as the facade header is not in a
+`BUILD.gn` target yet). W3-3 replaces the probe name with the handshake itself.
+
+Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome` (swap 8.8 GB used of 10 GB, `/` 10 GiB free before and after),
+`The build has finished successfully.`, 0 `FAILED:`, 34 s; the string is in `libchrome_dll.dylib`.
+
+`Chromium.app` (`$OUT`, profile `$PROF/w3-0-chromium`, port 9431):
+
+```
+ARKT: in-process hook alive
+ARKT: embedder class ArktShellEmbedderProbe absent
+ARKT: embedder class ArktShellEmbedder absent
+```
+
+W3-0a app (`$EMB/ArktShell.app`, the `Spike` configuration binary from #229, unchanged; its framework replaced with a
+`cp -c -Rp` of the new `Chromium Framework.framework` and the 518 dylibs re-cloned next to it; profile
+`$PROF/w3-0-app`, port 9432). Launched 03:36:12; the first launch after the copy spent about 100 s in `dlopen` as
+expected:
+
+```
+$ nm -m $EMB/ArktShell.app/Contents/MacOS/ArktShell | grep -F 'OBJC_CLASS_$_ArktShellEmbedderProbe'
+000000010043c918 (__DATA,__objc_data) external _OBJC_CLASS_$_ArktShellEmbedderProbe
+[03:37:52.996] ARKT: in-process hook alive
+[03:37:52.996] ARKT: embedder class ArktShellEmbedderProbe found (responds to init yes, engineDidStart: no)
+[03:37:52.996] ARKT: embedder class ArktShellEmbedder absent
+[03:37:53.076] ARKT probe: main queue drained
+[03:37:53.608] ARKT probe: main actor resumed
+```
+
+Alive 30 s later, 0 `FATAL`/`Check failed`, stopped by its PID. **Decision 1 holds:** a Swift class in the main
+executable is reached from `//arkt` through the runtime, with no exported symbol on either side, and it is absent in
+the GN-built app. The header frozen in W3-2 stands. (`engineDidStart: no` is expected: the probe class implements
+nothing.)
+
+### Step 4: W5c Step 3 and W6 Step 3 on the default path
+
+Same `Chromium.app` run: `--arkt-trace-visibility`, `action-probe`, `tabs-probe` and `dialog-probe`,
+`https://example.com`, `PROBE_SW=ceojeochoeiibbkbcnnidcahamphllac/sw.js`. Census `normal=1 arkt=1 views=0`.
+
+- W6 Step 3: `ARKT: native window session id 1814676206` = `ARKT tabs.query windows=1814676206` = `windows.getAll`
+  `[[1814676206,"normal",1]]`. Pass.
+- W5c Step 3: `probe.create()` -> example.com `"visible"` (`tab list rows 2`); activate about:blank -> `"hidden"`;
+  back -> `"visible"`; matching `ARKT: visibility` and `native window mounted tab` lines. AX, after the frontmost and
+  key-window checks: `select row 2` -> example.com `hidden`, about:blank `visible`; `select row 1` -> `visible` /
+  `hidden`. Pass. The AX path of the week-2 plan needs adapting: the `Tabs` table is
+  `table 1 of (first scroll area of window 1 whose description is "Tabs")`; its index among the window's scroll areas
+  changes with the mounted page. Window-only screenshots `$PROF/shots/w3-0-w5c-row1.png`, `-row2.png` (kept locally).
+- 0 `FATAL`/`Check failed`/`Received signal` in the run.
+
+### ModelSheet initial button state (#252 review)
+
+`ModelSheet::BuildContent` passed only button titles; its "disabled OK" branch set `primaryEnableDelay = 0`, which is
+already the default, so a `ui::DialogModel` that starts with OK or Cancel disabled showed them enabled.
+`ModelSheet::Show` now calls `OnDialogButtonChanged()` after `beginOnWindow:`, which applies the model's enabled state
+(it keeps the content's fallback titles: `setPrimaryTitle:enabled:` ignores an empty title), and the no-op branch is
+gone. No extension dialog shipped in 156 starts with a disabled button, so only the regression could be run: the
+uninstall sheet (`dialog-probe` page, `uninstall()` with a gesture) shows `dialog sheet shown
+ExtensionUninstallDialog`; AX buttons `Cancel`, `Remove`, both enabled; AXPress `Cancel` gives `uninstall canceled by
+user` and `dialog sheet closed`.
+
+### Step 5: command ids
+
+W3-1 has not started (no pull request), so the table checks the plan's proposed `EngineCommand` and
+`EngineDisposition` names; repeat it when W3-1 fixes the names, and on every rebase. Commands from
+`git -C $CR grep -n -E '#define (IDC_...) ' arkt -- chrome/app/chrome_command_ids.h`; the Mac main menu
+(`main_menu_builder.mm`) uses the same ids for its items (`IDC_DEV_TOOLS` for Developer Tools, not
+`IDC_DEV_TOOLS_TOGGLE`).
+
+| `EngineCommand` | Chromium | Value | Line |
+|---|---|---|---|
+| `back` | `IDC_BACK` | 33000 | 42 |
+| `forward` | `IDC_FORWARD` | 33001 | 43 |
+| `reload` | `IDC_RELOAD` | 33002 | 44 |
+| `closeWindow` | `IDC_CLOSE_WINDOW` | 34012 | 55 |
+| `newTab` | `IDC_NEW_TAB` | 34014 | 56 |
+| `closeTab` | `IDC_CLOSE_TAB` | 34015 | 57 |
+| `exit` | `IDC_EXIT` | 34031 | 75 |
+| `viewSource` | `IDC_VIEW_SOURCE` | 35002 | 137 |
+| `print` | `IDC_PRINT` | 35003 | 138 |
+| `savePage` | `IDC_SAVE_PAGE` | 35004 | 139 |
+| `find` | `IDC_FIND` | 37000 | 185 |
+| `zoomIn` | `IDC_ZOOM_PLUS` | 38001 | 204 |
+| `zoomReset` | `IDC_ZOOM_NORMAL` | 38002 | 205 |
+| `zoomOut` | `IDC_ZOOM_MINUS` | 38003 | 206 |
+| `devTools` | `IDC_DEV_TOOLS` | 40004 | 222 |
+| `history` | `IDC_SHOW_HISTORY` | 40010 | 228 |
+| `downloads` | `IDC_SHOW_DOWNLOADS` | 40012 | 230 |
+| (tag Arkt menus must not use, Decision 9) | `IDC_FILE_MENU` | 57326 | 612 |
+| (tag Arkt menus must not use, Decision 9) | `IDC_TAB_MENU` | 57323 | 615 |
+
+`EngineDisposition` against `ui/base/window_open_disposition.h` (`enum class WindowOpenDisposition`, no explicit
+values, so the value is the declaration index: `UNKNOWN` 0, `CURRENT_TAB` 1, `SINGLETON_TAB` 2, ...):
+
+| `EngineDisposition` | Chromium | Value | Line |
+|---|---|---|---|
+| `currentTab` | `CURRENT_TAB` | 1 | 10 |
+| `newForegroundTab` | `NEW_FOREGROUND_TAB` | 3 | 13 |
+| `newBackgroundTab` | `NEW_BACKGROUND_TAB` | 4 | 14 |
+| `newWindow` | `NEW_WINDOW` | 6 | 16 |
+
+### Step 6: Swift baselines (`main` at `1d15a49`)
+
+`nice -n 10`, scratch paths on the Chromium disk, after the Chromium build and GUI runs had finished.
+
+- ShellKit, `swift test --skip ShellKitGUITests`: **481** tests (208 + 33 + 23 + 4 + 24 + 177 + 12 across the test
+  products), all pass. Matches W3-2's 481.
+- ArktCore, `swift test`: **349** tests (88 + 100 + 63 + 98), all pass.
+
+Later tasks record "baseline + N" against these.
+
+### Plan fixes in this pull request
+
+- Patch budget: a row for 0007 (#244), and the projection is now 7 patch files, 17 upstream files, 0 hot-file hunks,
+  at worst 8 with a framework rename (it said 6 and 7).
+- W3-0 Step 2's expected count is 7 (it said 6).
+
+No leftover processes: both runs were stopped by PID; no `Chromium` or `ArktShell` process afterwards.
 
 ## W3-0a: main-actor probe on the `Spike` configuration
 
