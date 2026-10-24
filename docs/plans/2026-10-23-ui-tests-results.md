@@ -783,3 +783,50 @@ not), #283 (open; its `CommandBarView.swift` bridge was not copied).
   52 s, Cmd-Return 108 s, Opt-Return 106 s (each including the one 30 s #269 row wait), Switch to Tab 215 s (it
   failed there on the sidebar URL bar, fixed since). Most of the remaining time is launch plus typing three loopback
   addresses into the command bar; #269 removes the 30 s row wait.
+
+## U12: Space switching (#177)
+
+Base: `origin/main` at `46f3729`, branch `chore/177-space-switching`. Same machine as U0 (macOS 27.0, 26A428). Capacity
+`nice -n 20`, `-jobs 2`. No Chromium build. Another UI test run held the GUI lock for part of the session.
+
+### What was done
+
+- `UITests/SpaceSwitchTests.swift`: the four key and dot tests, seeded from the Arc fixture (Alpha, then Beta), plus
+  the swipe probe.
+- The probe called `sidebar.page.scroll(byDeltaX: -400, deltaY: 0)` and waited 2 s for dot 2. It failed: the page was
+  still Alpha and the Alpha dot was still selected. The synthesized scroll's `gesturePhase` was 0 and its horizontal
+  delta was -400. `SpacePagerView.scrollWheel` ignores an event whose phase is empty, so the Space did not move.
+  The test is now `XCTSkip("GS-001: XCUITest scroll has no gesture phases; manual check in #26")`.
+- `UITests/parity-deferred.txt` (new): GS-001 and BH-040, both manual in #26. No Debug-only scripted swipe path.
+  `SpacePagerView.swift` was not edited.
+- Deviation: `test_BH036_switchingBackRestoresLastActiveTab` skips with `#269` when the Today row is not in the
+  accessibility tree, instead of `waitForOutlineRows`. On this machine the expected-failure path returned and then
+  left the app's event loop unmonitorable (the test still "passed" after 193 s, and after 435 s on a repeat). The
+  skip finishes in the row timeout. The restore assertion itself did not run here; it runs when the row is exposed.
+- Cmd-Opt arrows also check that a further arrow at either end stays put. Wrap is #98 and is not asserted.
+
+### Tests
+
+| Test | Parity | Result |
+|---|---|---|
+| `test_KB035_BH041_ctrlNumberGoesToSpace` | KB-035, BH-041 | passed (76.5 s; the seed launch waited about 60 s to become idle, then the keys took about 8 s) |
+| `test_KB033_KB034_cmdOptArrowsMoveBetweenSpaces` | KB-033, KB-034 | passed (16.2 s) |
+| `test_BH035_spaceDotClickSelectsSpace` | BH-035 | passed (11.1 s) |
+| `test_BH036_switchingBackRestoresLastActiveTab` | BH-036 | skipped, #269 (17.1 s) |
+| `test_GS001_twoFingerSwipeMovesSpace` | GS-001, BH-040 | skipped, #26 (0.2 s) |
+
+### Verification
+
+```zsh
+cd app/ArktShell && xcodegen generate
+nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests \
+  -derivedDataPath build -jobs 2 \
+  -resultBundlePath build/ui-1792870504.xcresult \
+  -collect-test-diagnostics never -parallel-testing-enabled NO \
+  -only-testing:ArktShellUITests/SpaceSwitchTests test
+```
+
+`** TEST SUCCEEDED **`. Executed 5 tests, with 2 tests skipped and 0 failures (0 unexpected) in 121.1 s.
+`Check UI test sources` on `app/ArktShell/UITests`: `UI test sources OK`.
+
+Known issues used: #269 (outline rows), #26 (swipe phase).
