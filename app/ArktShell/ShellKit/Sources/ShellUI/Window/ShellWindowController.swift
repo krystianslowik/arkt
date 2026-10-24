@@ -27,10 +27,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var isArcImportAvailable = false { didSet { emptyState.showsImport = isArcImportAvailable } }
   /// "Import from Arc" in the empty state.
   public var onImportFromArc: (@MainActor () -> Void)?
-  /// "New Space" in the empty state. Default: creates a Space named `newSpaceTitle`.
+  /// "New Space" in the empty state. Default: `newSpace(_:)` ("Space N" after the current Space, title open).
   public var onNewSpace: (@MainActor () -> Void)?
-  /// Name of a Space created by "New Space" or by Cmd-T with no Space.
-  public static let newSpaceTitle = "Space"               // [I] product wording, see open questions
+  /// Base of the "Space N" name given to a Space created by New Space or by Cmd-T with no Space (decision on #106).
+  public static let newSpaceTitle = "Space"
   public var isShowingEmptyState: Bool { sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
