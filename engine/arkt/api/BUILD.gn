@@ -28,6 +28,7 @@ source_set("embedder") {
   deps = [
     "//arkt/browser:window",
     "//base",
+    "//chrome/app:command_ids",
     "//chrome/browser/lifetime",
     "//chrome/browser/lifetime:termination_notification",
     "//chrome/browser/profiles:profile",
@@ -36,14 +37,19 @@ source_set("embedder") {
     "//chrome/browser/ui:browser_commands",
     "//chrome/browser/ui/browser_window",
     "//chrome/browser/ui/browser_window:create_browser_window",
+    "//chrome/browser/ui:unload_controller",
     "//chrome/browser/ui/tabs:tab_strip",
     "//chrome/common:constants",
+    "//components/favicon/content",
+    "//components/favicon/core",
     "//components/keep_alive_registry",
     "//components/sessions",
     "//components/tabs:public",
     "//content/public/browser",
+    "//skia",
     "//ui/base",
     "//ui/gfx",
+    "//ui/gfx/codec",
     "//url",
   ]
   frameworks = [

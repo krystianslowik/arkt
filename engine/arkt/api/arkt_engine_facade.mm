@@ -4,18 +4,26 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "arkt/api/arkt_embedder.h"
 #include "arkt/browser/arkt_browser_window.h"
+#include "arkt/browser/arkt_extension_calls.h"
+#import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/no_destructor.h"
 #include "base/scoped_observation.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_list/tab_removed_reason.h"
 // //chrome/browser/ui reaches //arkt through //chrome/browser, so this
 // target cannot depend on it; the symbol is in the same framework.
@@ -23,17 +31,28 @@
 #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+#include "chrome/browser/ui/tabs/tab_close_types_data.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "chrome/browser/ui/unload_controller.h"
+#include "components/favicon/content/content_favicon_driver.h"
+#include "components/favicon/core/favicon_driver.h"
+#include "components/favicon/core/favicon_driver_observer.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/page_transition_types.h"
+#include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/native_ui_types.h"
 #include "url/gurl.h"
 
@@ -57,6 +76,78 @@ GURL ToGURL(NSURL* url) {
   return url ? GURL(base::SysNSStringToUTF8(url.absoluteString))
              : GURL("about:blank");
 }
+
+// Every facade entry point runs on the browser UI thread, which on macOS is
+// the main thread (Decision 3).
+void CheckFacadeEntry() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+}
+
+// The favicon as PNG, at 2x when the image has that representation (the
+// 16 pt icon of a Retina sidebar), else at 1x; nil for an empty image.
+NSData* FaviconPNG(const gfx::Image& image) {
+  if (image.IsEmpty()) {
+    return nil;
+  }
+  const gfx::ImageSkia* skia = image.ToImageSkia();
+  if (skia && !skia->isNull()) {
+    const gfx::ImageSkiaRep& rep = skia->GetRepresentation(2.0f);
+    if (!rep.is_null()) {
+      std::optional<std::vector<uint8_t>> png =
+          gfx::PNGCodec::EncodeBGRASkBitmap(rep.GetBitmap(),
+                                            /*discard_transparency=*/false);
+      if (png) {
+        return [NSData dataWithBytes:png->data() length:png->size()];
+      }
+    }
+  }
+  scoped_refptr<base::RefCountedMemory> bytes = image.As1xPNGBytes();
+  if (!bytes || bytes->size() == 0) {
+    return nil;
+  }
+  return [NSData dataWithBytes:bytes->data() length:bytes->size()];
+}
+
+const char* ReasonName(ArktCloseReason reason) {
+  switch (reason) {
+    case ArktCloseReasonNone:
+      return "none";
+    case ArktCloseReasonClient:
+      return "client";
+    case ArktCloseReasonPage:
+      return "page";
+    case ArktCloseReasonExtension:
+      return "extension";
+    case ArktCloseReasonWindowClosing:
+      return "windowClosing";
+    case ArktCloseReasonAppTerminating:
+      return "appTerminating";
+  }
+  return "unknown";
+}
+
+// .skipUnloadHandlers (Decision 11): while set, UnloadController answers
+// that no unload listener needs to run before closing, so TabStripModel
+// detaches and deletes the tab at once without dispatching beforeunload. The
+// flag is browser-wide, so it is set only around the one close.
+class ScopedSkipUnloadHandlers {
+ public:
+  explicit ScopedSkipUnloadHandlers(UnloadController* controller)
+      : controller_(controller),
+        previous_(controller->force_skip_warning_user_on_close()) {
+    controller_->set_force_skip_warning_user_on_close(true);
+  }
+  ScopedSkipUnloadHandlers(const ScopedSkipUnloadHandlers&) = delete;
+  ScopedSkipUnloadHandlers& operator=(const ScopedSkipUnloadHandlers&) =
+      delete;
+  ~ScopedSkipUnloadHandlers() {
+    controller_->set_force_skip_warning_user_on_close(previous_);
+  }
+
+ private:
+  const raw_ptr<UnloadController> controller_;
+  const bool previous_;
+};
 
 const char* KindName(ArktEngineEventKind kind) {
   switch (kind) {
@@ -139,15 +230,28 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize block = _block;
 @end
 
+
 // -----------------------------------------------------------------------------
 // Tab handle
 
 @interface ArktFacadeTab : NSObject <ArktTabHandle>
 - (instancetype)initWithOrigin:(ArktTabOrigin)origin;
+// Binds the handle to `tab` in `browser` (insertion, a move between windows,
+// a contents replacement). The handle observes the tab's current contents.
 - (void)bindTab:(tabs::TabInterface*)tab browser:(ArktFacadeBrowser*)browser;
 - (void)unbind;
 - (tabs::TabInterface*)tabInterface;
 - (content::WebContents*)contents;
+// The per-tab state as last reported: seeded without events when the tab is
+// announced, then every change is recorded (Task W3-5 step 2).
+- (void)seedState;
+- (void)reportState;
+- (void)setOpenerHandle:(ArktFacadeTab*)opener;
+// A client createTab whose insert was deferred (Decision 3): calls that
+// change the tab queue behind the insert until -insertFinished: runs them.
+- (void)markPending;
+// The deferred insert ran (`inserted`) or was dropped (its window is gone).
+- (void)insertFinished:(BOOL)inserted;
 // The contents' beforeunload outcome (WebContentsObserver::BeforeUnloadFired).
 - (void)beforeUnloadFired:(BOOL)proceed;
 @property(nonatomic) BOOL closingByClient;
@@ -243,17 +347,35 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
         FROM_HERE, base::BindOnce(&Facade::Deliver, base::Unretained(this)));
   }
 
+  // Records an event from inside a Chromium notification (a WebContents or
+  // favicon observer): a facade call made from there CHECKs.
+  void RecordFromNotification(ArktFacadeEvent* event) {
+    ++in_notification_;
+    Record(event);
+    --in_notification_;
+  }
+
   // A held close (of the tab, or of its window or the application) was
   // cancelled: the tab stays (Decision 11). Called from a WebContents
   // notification.
   void RecordCloseCancelled(ArktFacadeTab* tab) {
-    ++in_notification_;
     ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
     event.kind = ArktEngineEventKindCloseCancelled;
     event.tab = tab;
     event.browser = tab.browser;
+    RecordFromNotification(event);
+  }
+
+  // A client createTab whose deferred insert was dropped (its window closed
+  // first). ChromiumEngine announced the tab when createTab returned
+  // (Decision 4), so it gets its terminal TabClosed.
+  void RecordDroppedInsert(ArktFacadeTab* tab, ArktFacadeBrowser* browser) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindTabClosed;
+    event.tab = tab;
+    event.browser = browser;
+    event.closeReason = ArktCloseReasonWindowClosing;
     Record(event);
-    --in_notification_;
   }
 
   // BrowserCollectionObserver:
@@ -289,21 +411,28 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     ++in_notification_;
     ArktFacadeBrowser* browser = HandleForModel(model);
     if (browser) {
-      if (change.type() == TabStripModelChange::kInserted) {
-        for (const auto& inserted : change.GetInsert()->contents) {
-          Inserted(inserted.tab, browser, model);
-        }
-      } else if (change.type() == TabStripModelChange::kRemoved) {
-        for (const auto& removed : change.GetRemove()->contents) {
-          Removed(removed.tab, removed.remove_reason, model);
-        }
-      } else if (change.type() == TabStripModelChange::kReplaced) {
-        // Same tab, new contents: the handle observes the new one. The
-        // TabReplaced event is Task W3-5.
-        const TabStripModelChange::Replace* replace = change.GetReplace();
-        if (ArktFacadeTab* tab = HandleForTab(replace->tab)) {
-          [tab bindTab:replace->tab browser:browser];
-        }
+      switch (change.type()) {
+        case TabStripModelChange::kInserted:
+          for (const auto& inserted : change.GetInsert()->contents) {
+            Inserted(inserted.tab, browser, model);
+          }
+          break;
+        case TabStripModelChange::kRemoved:
+          for (const auto& removed : change.GetRemove()->contents) {
+            Removed(removed.tab, removed.remove_reason, browser, model);
+          }
+          break;
+        case TabStripModelChange::kMoved:
+          // An index move inside the window.
+          if (ArktFacadeTab* tab = HandleForTab(change.GetMove()->tab)) {
+            RecordTabMoved(tab, browser);
+          }
+          break;
+        case TabStripModelChange::kReplaced:
+          Replaced(change.GetReplace(), browser);
+          break;
+        case TabStripModelChange::kSelectionOnly:
+          break;
       }
       if (selection.active_tab_changed() && selection.new_tab) {
         ArktFacadeTab* tab = HandleForTab(selection.new_tab);
@@ -350,31 +479,72 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
                 ArktFacadeBrowser* browser,
                 TabStripModel* model) {
     ArktFacadeTab* handle = HandleForTab(tab);
-    ArktEngineEventKind kind = ArktEngineEventKindTabMoved;
-    if (!handle) {
-      kind = ArktEngineEventKindTabCreated;
-      if (binding_) {
-        handle = binding_;
-        binding_ = nil;
-      } else {
-        handle = [[ArktFacadeTab alloc] initWithOrigin:ArktTabOriginEngine];
-      }
-      tab_handles_[tab] = handle;
+    if (handle) {
+      // Moved here from another window (DetachTabAtForInsertion): same
+      // handle, same container (Decision 5).
+      [handle bindTab:tab browser:browser];
+      RecordTabMoved(handle, browser);
+      return;
     }
+    if (binding_) {
+      handle = binding_;
+      binding_ = nil;
+    } else {
+      handle = [[ArktFacadeTab alloc] initWithOrigin:ArktTabOriginEngine];
+    }
+    tab_handles_[tab] = handle;
     [handle bindTab:tab browser:browser];
+    int index = model->GetIndexOfTab(tab);
+    if (index != TabStripModel::kNoTab) {
+      [handle setOpenerHandle:HandleForTab(model->GetOpenerOfTabAt(index))];
+    }
+    [handle seedState];
     ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
-    event.kind = kind;
+    event.kind = ArktEngineEventKindTabCreated;
     event.tab = handle;
     event.browser = browser;
     event.url = handle.url;
     event.title = handle.title;
+    event.opener = handle.opener;
     event.origin = handle.origin;
     event.isActive = model->GetActiveTab() == tab;
+    Record(event);
+    // Loading and history the tab already had when it was inserted (a tab
+    // that started its navigation before insertion), right after TabCreated.
+    [handle reportState];
+  }
+
+  void Replaced(const TabStripModelChange::Replace* replace,
+                ArktFacadeBrowser* browser) {
+    ArktFacadeTab* tab = HandleForTab(replace->tab);
+    if (!tab) {
+      return;
+    }
+    // Same tab, new contents (a discard, a prerender activation): the handle
+    // and its container stay, the new contents view fills the container.
+    [tab bindTab:replace->tab browser:browser];
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindTabReplaced;
+    event.tab = tab;
+    event.browser = browser;
+    event.url = tab.url;
+    event.title = tab.title;
+    Record(event);
+    [tab reportState];
+  }
+
+  void RecordTabMoved(ArktFacadeTab* tab, ArktFacadeBrowser* browser) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindTabMoved;
+    event.tab = tab;
+    event.browser = browser;
+    event.isActive = tab.isActive;
     Record(event);
   }
 
   void Removed(tabs::TabInterface* tab,
                TabRemovedReason reason,
+               ArktFacadeBrowser* browser,
                TabStripModel* model) {
     if (!TabRemoveReasonUtils::WillDeleteTab(reason)) {
       // Moving to another window: the handle stays and TabMoved follows.
@@ -388,18 +558,43 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     event.kind = ArktEngineEventKindTabClosed;
     event.tab = handle;
     event.browser = handle.browser;
-    // Decision 12. A window close (the host's close button, closeBrowser,
-    // Close Window, chrome.windows.remove) closes every tab at once
-    // (TabStripModel::CloseAllTabs). Page and extension closes of single
-    // tabs are told apart in W3-5; until then they report
-    // ArktCloseReasonNone.
-    event.closeReason = handle.closingByClient ? ArktCloseReasonClient
-                        : terminating_ ? ArktCloseReasonAppTerminating
-                        : model->closing_all() ? ArktCloseReasonWindowClosing
-                                               : ArktCloseReasonNone;
+    event.closeReason = CloseReasonFor(handle, browser, model);
+    LOG(WARNING) << "ARKT: facade tab closed session id " << handle.sessionId
+                 << " reason " << ReasonName(event.closeReason);
     Record(event);
     [handle unbind];
     tab_handles_.erase(tab);
+  }
+
+  // Decision 12. The facade marks the tabs it closes (client) and every tab
+  // once quitting starts (appTerminating). A window close closes every tab
+  // at once (TabStripModel::CloseAllTabs): windowClosing, or extension when
+  // chrome.windows.remove asked for it. A single tab the facade did not
+  // close: extension while an extension's chrome.tabs.remove call is in
+  // flight, else page. In 156 chrome.tabs.remove and window.close() both end
+  // in WebContentsDelegate::CloseContents, so that call alone does not tell
+  // them apart (arkt_extension_calls.h). Other engine-side closes of a
+  // single tab (Chromium's own Close Tab command) also report page.
+  ArktCloseReason CloseReasonFor(ArktFacadeTab* handle,
+                                 ArktFacadeBrowser* browser,
+                                 TabStripModel* model) {
+    if (handle.closingByClient) {
+      return ArktCloseReasonClient;
+    }
+    if (terminating_) {
+      return ArktCloseReasonAppTerminating;
+    }
+    BrowserWindowInterface* interface = browser.browserInterface;
+    if (model->closing_all()) {
+      ArktBrowserWindow* window =
+          interface ? ArktBrowserWindow::FromBrowser(interface) : nullptr;
+      return window && window->IsClosedByExtension()
+                 ? ArktCloseReasonExtension
+                 : ArktCloseReasonWindowClosing;
+    }
+    return IsExtensionApiCallInFlight(model->profile(), "tabs.remove")
+               ? ArktCloseReasonExtension
+               : ArktCloseReasonPage;
   }
 
   void Deliver() {
@@ -439,7 +634,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
 // Runs `work` now, or, inside a nested run loop, from a posted task (Decision
 // 3). Returns true when the work was deferred.
 bool RunOrDefer(const char* call, base::OnceClosure work) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  CheckFacadeEntry();
   g_facade->CheckNotInNotification(call);
   if (!IsInNestedLoop()) {
     std::move(work).Run();
@@ -456,27 +651,221 @@ void LogNotYet(const char* call, const char* task) {
   LOG(WARNING) << "ARKT: facade " << call << " not available before " << task;
 }
 
-}  // namespace
-}  // namespace arkt
-
-namespace arkt {
-namespace {
-
-// Tells the handle how a beforeunload ended, so a cancelled held close is
-// reported (CloseCancelled) and the handle stops reporting isClosing.
-class TabCloseObserver : public content::WebContentsObserver {
+// Records a tab's state changes as facade events, in Chromium's order
+// (Task W3-5 step 2). Each kind is recorded only when its value changed
+// since the last report. Every callback is a Chromium notification.
+class TabObserver : public content::WebContentsObserver,
+                    public favicon::FaviconDriverObserver {
  public:
-  explicit TabCloseObserver(ArktFacadeTab* handle) : handle_(handle) {}
+  explicit TabObserver(ArktFacadeTab* handle) : handle_(handle) {}
+  TabObserver(const TabObserver&) = delete;
+  TabObserver& operator=(const TabObserver&) = delete;
+  ~TabObserver() override = default;
 
-  void SetContents(content::WebContents* contents) { Observe(contents); }
+  // Observes `contents` (a new tab, or the new contents after a
+  // replacement). The reported values stay, so the next report records what
+  // differs on the new contents.
+  void SetContents(content::WebContents* contents) {
+    if (web_contents() == contents) {
+      return;
+    }
+    Observe(contents);
+    favicon_observation_.Reset();
+    if (auto* driver =
+            favicon::ContentFaviconDriver::FromWebContents(contents)) {
+      favicon_observation_.Observe(driver);
+    }
+  }
+
+  // The values TabCreated carries, taken without recording events. Loading
+  // and history start from false, so a tab inserted while loading or with
+  // history reports it right after TabCreated.
+  void Seed() {
+    content::WebContents* contents = web_contents();
+    if (!contents) {
+      return;
+    }
+    url_ = contents->GetVisibleURL();
+    title_ = contents->GetTitle();
+    loading_ = false;
+    can_go_back_ = false;
+    can_go_forward_ = false;
+    host_ = std::string(contents->GetLastCommittedURL().host());
+    favicon_ = nil;
+  }
+
+  void ReportAll() {
+    content::WebContents* contents = web_contents();
+    if (!contents) {
+      return;
+    }
+    ReportURL();
+    ReportTitle();
+    ReportLoading(contents->IsLoading());
+    ReportHistory();
+    if (favicon::FaviconDriver* driver = favicon_observation_.GetSource()) {
+      if (driver->FaviconIsValid()) {
+        ReportFavicon(FaviconPNG(driver->GetFavicon()));
+      }
+    }
+  }
+
+  NSData* favicon() const { return favicon_; }
 
   // content::WebContentsObserver:
+  void DidStartNavigation(content::NavigationHandle* navigation) override {
+    if (navigation->IsInPrimaryMainFrame()) {
+      // The pending URL (rule 2: URL before loading starts).
+      ReportURL();
+    }
+  }
+
+  void DidFinishNavigation(content::NavigationHandle* navigation) override {
+    if (!navigation->IsInPrimaryMainFrame()) {
+      return;
+    }
+    if (navigation->HasCommitted() && !navigation->IsSameDocument()) {
+      std::string host(navigation->GetURL().host());
+      if (host != host_) {
+        // Committed to another host: the old favicon no longer applies
+        // (contract rule 6, cleared before the load ends).
+        host_ = host;
+        ReportFavicon(nil);
+      }
+    }
+    // A failed or redirected navigation can leave another visible URL.
+    ReportURL();
+  }
+
+  void DidStartLoading() override {
+    // A browser-initiated navigation starts loading before
+    // DidStartNavigation; its pending URL is already the visible URL, so it
+    // is reported first (contract rule 2: URL, then loading).
+    ReportURL();
+    ReportLoading(true);
+  }
+
+  void DidStopLoading() override {
+    ReportURL();
+    ReportTitle();
+    ReportLoading(false);
+  }
+
+  void TitleWasSet(content::NavigationEntry* entry) override { ReportTitle(); }
+
+  void NavigationEntryCommitted(
+      const content::LoadCommittedDetails& details) override {
+    ReportHistory();
+  }
+
+  void NavigationListPruned(const content::PrunedDetails& details) override {
+    ReportHistory();
+  }
+
+  void NavigationEntriesDeleted() override { ReportHistory(); }
+
   void BeforeUnloadFired(bool proceed) override {
     [handle_ beforeUnloadFired:proceed];
   }
 
+  // favicon::FaviconDriverObserver:
+  void OnFaviconUpdated(favicon::FaviconDriver* driver,
+                        NotificationIconType type,
+                        const GURL& icon_url,
+                        bool icon_url_changed,
+                        const gfx::Image& image) override {
+    if (type != NON_TOUCH_16_DIP) {
+      return;
+    }
+    // An empty icon URL means the page removed its favicon.
+    ReportFavicon(icon_url.is_empty() ? nil : FaviconPNG(image));
+  }
+
  private:
+  ArktFacadeEvent* NewEvent(ArktEngineEventKind kind) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = kind;
+    return event;
+  }
+
+  void Emit(ArktFacadeEvent* event) {
+    ArktFacadeTab* handle = handle_;
+    if (!handle || !g_facade) {
+      return;
+    }
+    event.tab = handle;
+    event.browser = handle.browser;
+    g_facade->RecordFromNotification(event);
+  }
+
+  void ReportURL() {
+    GURL url = web_contents()->GetVisibleURL();
+    if (url == url_) {
+      return;
+    }
+    url_ = url;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindURLChanged);
+    event.url = ToNSURL(url);
+    Emit(event);
+  }
+
+  void ReportTitle() {
+    std::u16string title = web_contents()->GetTitle();
+    if (title == title_) {
+      return;
+    }
+    title_ = title;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindTitleChanged);
+    event.title = base::SysUTF16ToNSString(title);
+    Emit(event);
+  }
+
+  void ReportLoading(bool loading) {
+    if (loading == loading_) {
+      return;
+    }
+    loading_ = loading;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindLoadingChanged);
+    event.isLoading = loading;
+    Emit(event);
+  }
+
+  void ReportHistory() {
+    content::NavigationController& controller = web_contents()->GetController();
+    bool back = controller.CanGoBack();
+    bool forward = controller.CanGoForward();
+    if (back == can_go_back_ && forward == can_go_forward_) {
+      return;
+    }
+    can_go_back_ = back;
+    can_go_forward_ = forward;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindHistoryChanged);
+    event.canGoBack = back;
+    event.canGoForward = forward;
+    Emit(event);
+  }
+
+  void ReportFavicon(NSData* png) {
+    if (png == favicon_ || [png isEqualToData:favicon_]) {
+      return;
+    }
+    favicon_ = png;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindFaviconChanged);
+    event.faviconPNG = png;
+    Emit(event);
+  }
+
   ArktFacadeTab* __weak handle_;
+  GURL url_;
+  std::u16string title_;
+  bool loading_ = false;
+  bool can_go_back_ = false;
+  bool can_go_forward_ = false;
+  std::string host_;
+  NSData* __strong favicon_ = nil;
+  base::ScopedObservation<favicon::FaviconDriver,
+                          favicon::FaviconDriverObserver>
+      favicon_observation_{this};
 };
 
 }  // namespace
@@ -486,10 +875,17 @@ class TabCloseObserver : public content::WebContentsObserver {
 
 @implementation ArktFacadeTab {
   raw_ptr<tabs::TabInterface> _tab;
-  std::unique_ptr<arkt::TabCloseObserver> _closeObserver;
+  std::unique_ptr<arkt::TabObserver> _observer;
   ArktFacadeBrowser* __weak _browser;
-  NSView* _emptyContainer;
+  ArktFacadeTab* __weak _opener;
+  // The stable container (Decision 6), for the handle's whole life.
+  ArktTabContainerView* _container;
+  // The last session id the tab had; kept after the tab has closed.
+  int32_t _sessionId;
   ArktTabOrigin _origin;
+  BOOL _pending;
+  // Calls made while the insert is pending, run in order after it.
+  std::vector<base::OnceClosure> _queued;
 }
 
 @synthesize closingByClient = _closingByClient;
@@ -498,6 +894,8 @@ class TabCloseObserver : public content::WebContentsObserver {
 - (instancetype)initWithOrigin:(ArktTabOrigin)origin {
   if ((self = [super init])) {
     _origin = origin;
+    _sessionId = -1;
+    _container = [[ArktTabContainerView alloc] initWithFrame:NSZeroRect];
   }
   return self;
 }
@@ -505,33 +903,123 @@ class TabCloseObserver : public content::WebContentsObserver {
 - (void)bindTab:(tabs::TabInterface*)tab browser:(ArktFacadeBrowser*)browser {
   _tab = tab;
   _browser = browser;
-  if (!_closeObserver) {
-    _closeObserver = std::make_unique<arkt::TabCloseObserver>(self);
+  if (!_observer) {
+    _observer = std::make_unique<arkt::TabObserver>(self);
   }
-  _closeObserver->SetContents(tab->GetContents());
+  content::WebContents* contents = tab->GetContents();
+  _sessionId = sessions::SessionTabHelper::IdForTab(contents).id();
+  _observer->SetContents(contents);
+  [self adoptContentsView];
 }
 
 - (void)unbind {
   _tab = nullptr;
   _browser = nil;
   _closing = NO;
-  _closeObserver.reset();
+  _observer.reset();
+  [_container showContentsView:nil];
+}
+
+// In an embedder host's window the container holds the current contents
+// view. The placeholder host mounts contents views in its card itself
+// (week 2), so there the container stays empty; a window that moves from the
+// placeholder to the embedder's host at replay rebinds its tabs
+// (AdoptHeldBrowser), which fills the containers.
+- (void)adoptContentsView {
+  content::WebContents* contents = self.contents;
+  ArktFacadeBrowser* browser = _browser;
+  arkt::ArktBrowserWindow* window =
+      contents && browser
+          ? arkt::ArktBrowserWindow::FromBrowser(browser.browserInterface)
+          : nullptr;
+  if (!window || !window->host_mode()) {
+    return;
+  }
+  NSView* view = contents->GetNativeView().GetNativeNSView();
+  if (view && view.superview != _container) {
+    [_container showContentsView:view];
+  }
+}
+
+- (void)seedState {
+  if (_observer) {
+    _observer->Seed();
+  }
+}
+
+- (void)reportState {
+  if (_observer) {
+    _observer->ReportAll();
+  }
+}
+
+- (void)setOpenerHandle:(ArktFacadeTab*)opener {
+  _opener = opener;
+}
+
+- (void)markPending {
+  _pending = YES;
+}
+
+- (void)insertFinished:(BOOL)inserted {
+  _pending = NO;
+  std::vector<base::OnceClosure> queued;
+  queued.swap(_queued);
+  if (!inserted || !_tab) {
+    LOG(WARNING) << "ARKT: facade deferred insert dropped, " << queued.size()
+                 << " queued call(s) dropped";
+    _closing = NO;
+    return;
+  }
+  if (!queued.empty()) {
+    LOG(WARNING) << "ARKT: facade running " << queued.size()
+                 << " call(s) queued behind the insert of session id "
+                 << _sessionId;
+  }
+  for (base::OnceClosure& work : queued) {
+    std::move(work).Run();
+  }
+}
+
+// Runs a call that changes the tab: queued behind a pending insert, else now
+// or deferred (Decision 3). Returns YES when it did not run now.
+- (BOOL)runOrQueue:(const char*)call work:(base::OnceClosure)work {
+  arkt::CheckFacadeEntry();
+  arkt::g_facade->CheckNotInNotification(call);
+  if (_pending) {
+    LOG(WARNING) << "ARKT: facade " << call << " queued behind the insert";
+    _queued.push_back(std::move(work));
+    return YES;
+  }
+  return arkt::RunOrDefer(call, std::move(work));
 }
 
 - (void)beforeUnloadFired:(BOOL)proceed {
-  if (proceed || !_tab) {
+  content::WebContents* contents = self.contents;
+  if (proceed || !contents) {
     return;
   }
-  // A navigation's beforeunload can be cancelled too; only a close counts.
+  // A navigation's beforeunload can be cancelled too; only a close counts:
+  // this client's close, its window's close, or a close the engine started
+  // (chrome.tabs.remove, window.close()) that unload processing held, which
+  // TabStripModel marks with TabCloseTypesData (CloseWebContentses).
   arkt::ArktBrowserWindow* window =
       _browser ? arkt::ArktBrowserWindow::FromBrowser(_browser.browserInterface)
                : nullptr;
-  if (!_closing && !(window && window->IsAttemptingToClose())) {
+  const bool engine_close_held =
+      TabCloseTypesData::FromWebContents(contents) != nullptr;
+  if (!_closing && !(window && window->IsAttemptingToClose()) &&
+      !engine_close_held) {
     return;
+  }
+  if (engine_close_held) {
+    // Chromium leaves the marker after a cancel; a later close would read
+    // its stale close types, and isClosing would stay true.
+    contents->RemoveUserData(TabCloseTypesData::UserDataKey());
   }
   _closing = NO;
   _closingByClient = NO;
-  LOG(WARNING) << "ARKT: facade close cancelled session id " << self.sessionId;
+  LOG(WARNING) << "ARKT: facade close cancelled session id " << _sessionId;
   arkt::g_facade->RecordCloseCancelled(self);
 }
 
@@ -544,132 +1032,158 @@ class TabCloseObserver : public content::WebContentsObserver {
 }
 
 - (NSView*)containerView {
-  // The stable per-tab container is Task W3-5 (Decision 6); until then the
-  // current contents view, or an empty view before insertion.
-  if (content::WebContents* contents = self.contents) {
-    return contents->GetNativeView().GetNativeNSView();
-  }
-  if (!_emptyContainer) {
-    _emptyContainer = [[NSView alloc] initWithFrame:NSZeroRect];
-  }
-  return _emptyContainer;
+  arkt::CheckFacadeEntry();
+  [self adoptContentsView];
+  return _container;
 }
 
 - (int32_t)sessionId {
-  content::WebContents* contents = self.contents;
-  return contents ? sessions::SessionTabHelper::IdForTab(contents).id() : -1;
+  arkt::CheckFacadeEntry();
+  if (content::WebContents* contents = self.contents) {
+    _sessionId = sessions::SessionTabHelper::IdForTab(contents).id();
+  }
+  return _sessionId;
 }
 
 - (id<ArktBrowserHandle>)browser {
+  arkt::CheckFacadeEntry();
   return _browser;
 }
 
 - (NSURL*)url {
+  arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
   return contents ? arkt::ToNSURL(contents->GetVisibleURL()) : nil;
 }
 
 - (NSString*)title {
+  arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
   return contents ? base::SysUTF16ToNSString(contents->GetTitle()) : @"";
 }
 
 - (NSData*)faviconPNG {
-  return nil;
+  arkt::CheckFacadeEntry();
+  return _observer ? _observer->favicon() : nil;
 }
 
 - (BOOL)isLoading {
+  arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
   return contents && contents->IsLoading();
 }
 
 - (BOOL)canGoBack {
+  arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
   return contents && contents->GetController().CanGoBack();
 }
 
 - (BOOL)canGoForward {
+  arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
   return contents && contents->GetController().CanGoForward();
 }
 
 - (NSArray<id<ArktHistoryEntry>>*)backEntries {
+  arkt::CheckFacadeEntry();
+  arkt::LogNotYet("backEntries", "W3-5b");
   return @[];
 }
 
 - (NSArray<id<ArktHistoryEntry>>*)forwardEntries {
+  arkt::CheckFacadeEntry();
+  arkt::LogNotYet("forwardEntries", "W3-5b");
   return @[];
 }
 
 - (id<ArktTabHandle>)opener {
-  return nil;
+  arkt::CheckFacadeEntry();
+  return _opener;
 }
 
 - (ArktTabOrigin)origin {
+  arkt::CheckFacadeEntry();
   return _origin;
 }
 
 - (BOOL)isActive {
+  arkt::CheckFacadeEntry();
   return _tab && _browser &&
          _browser.browserInterface->GetTabStripModel()->GetActiveTab() == _tab;
 }
 
 - (BOOL)isClosing {
-  return _closing;
+  arkt::CheckFacadeEntry();
+  content::WebContents* contents = self.contents;
+  return _closing ||
+         (contents && TabCloseTypesData::FromWebContents(contents) != nullptr);
 }
 
 - (BOOL)wouldHoldClose {
+  arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
-  return contents && contents->NeedToFireBeforeUnloadOrUnloadEvents();
+  if (!contents) {
+    return NO;
+  }
+  // TabStripModel::ShouldRunUnloadListenerBeforeClosing: unload-time
+  // handlers in any frame, or the browser's own reasons (attached DevTools,
+  // a custom confirmation; UnloadController::ShouldRunUnloadEventsHelper).
+  if (contents->NeedToFireBeforeUnloadOrUnloadEvents()) {
+    return YES;
+  }
+  BrowserWindowInterface* browser =
+      _browser ? _browser.browserInterface : nullptr;
+  UnloadController* unload =
+      browser ? UnloadController::From(browser) : nullptr;
+  return unload && unload->ShouldRunUnloadListenerBeforeClosing(contents);
 }
 
 - (void)navigateToURL:(NSURL*)url {
   GURL target = arkt::ToGURL(url);
-  arkt::RunOrDefer("navigate", base::BindOnce(
-                                   [](ArktFacadeTab* that, GURL target) {
-                                     content::WebContents* contents =
-                                         that.contents;
-                                     if (!contents) {
-                                       return;
-                                     }
-                                     content::NavigationController::
-                                         LoadURLParams params(target);
-                                     params.transition_type =
-                                         ui::PAGE_TRANSITION_TYPED;
-                                     contents->GetController()
-                                         .LoadURLWithParams(params);
-                                   },
-                                   self, target));
+  [self runOrQueue:"navigate"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, GURL target) {
+                         content::WebContents* contents = that.contents;
+                         if (!contents) {
+                           return;
+                         }
+                         content::NavigationController::LoadURLParams params(
+                             target);
+                         params.transition_type = ui::PAGE_TRANSITION_TYPED;
+                         contents->GetController().LoadURLWithParams(params);
+                       },
+                       self, target)];
 }
 
 - (void)reload {
-  arkt::RunOrDefer("reload", base::BindOnce(
-                                 [](ArktFacadeTab* that) {
-                                   if (content::WebContents* contents =
-                                           that.contents) {
-                                     contents->GetController().Reload(
-                                         content::ReloadType::NORMAL, true);
-                                   }
-                                 },
-                                 self));
+  [self runOrQueue:"reload"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         if (content::WebContents* contents = that.contents) {
+                           contents->GetController().Reload(
+                               content::ReloadType::NORMAL, true);
+                         }
+                       },
+                       self)];
 }
 
 - (void)goBack {
-  arkt::RunOrDefer("goBack", base::BindOnce(
-                                 [](ArktFacadeTab* that) {
-                                   content::WebContents* contents =
-                                       that.contents;
-                                   if (contents &&
-                                       contents->GetController().CanGoBack()) {
-                                     contents->GetController().GoBack();
-                                   }
-                                 },
-                                 self));
+  [self runOrQueue:"goBack"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         content::WebContents* contents = that.contents;
+                         if (contents &&
+                             contents->GetController().CanGoBack()) {
+                           contents->GetController().GoBack();
+                         }
+                       },
+                       self)];
 }
 
 - (void)goForward {
-  arkt::RunOrDefer(
-      "goForward", base::BindOnce(
+  [self runOrQueue:"goForward"
+              work:base::BindOnce(
                        [](ArktFacadeTab* that) {
                          content::WebContents* contents = that.contents;
                          if (contents &&
@@ -677,68 +1191,73 @@ class TabCloseObserver : public content::WebContentsObserver {
                            contents->GetController().GoForward();
                          }
                        },
-                       self));
+                       self)];
 }
 
 - (void)goToHistoryOffset:(NSInteger)offset {
-  arkt::RunOrDefer(
-      "goToHistoryOffset",
-      base::BindOnce(
-          [](ArktFacadeTab* that, int offset) {
-            content::WebContents* contents = that.contents;
-            if (offset != 0 && contents &&
-                contents->GetController().CanGoToOffset(offset)) {
-              contents->GetController().GoToOffset(offset);
-            }
-          },
-          self, static_cast<int>(offset)));
+  [self runOrQueue:"goToHistoryOffset"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, int offset) {
+                         content::WebContents* contents = that.contents;
+                         if (offset != 0 && contents &&
+                             contents->GetController().CanGoToOffset(offset)) {
+                           contents->GetController().GoToOffset(offset);
+                         }
+                       },
+                       self, static_cast<int>(offset))];
 }
 
 - (void)activate {
-  arkt::RunOrDefer(
-      "activate", base::BindOnce(
-                      [](ArktFacadeTab* that) {
-                        ArktFacadeTab* tab = that;
-                        if (!tab.tabInterface || !tab.browser) {
-                          return;
-                        }
-                        TabStripModel* model =
-                            static_cast<ArktFacadeBrowser*>(tab.browser)
-                                .browserInterface->GetTabStripModel();
-                        int index = model->GetIndexOfTab(tab.tabInterface);
-                        if (index != TabStripModel::kNoTab) {
-                          model->ActivateTabAt(index);
-                        }
-                      },
-                      self));
+  [self runOrQueue:"activate"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         ArktFacadeTab* tab = that;
+                         if (!tab.tabInterface || !tab.browser) {
+                           return;
+                         }
+                         TabStripModel* model =
+                             static_cast<ArktFacadeBrowser*>(tab.browser)
+                                 .browserInterface->GetTabStripModel();
+                         int index = model->GetIndexOfTab(tab.tabInterface);
+                         if (index != TabStripModel::kNoTab) {
+                           model->ActivateTabAt(index);
+                         }
+                       },
+                       self)];
 }
 
 - (ArktCloseResult)closeWithMode:(ArktCloseMode)mode {
-  if (mode == ArktCloseModeSkipUnloadHandlers) {
-    // The close that skips beforeunload is chosen and verified in W3-5
-    // (Decision 11); until then it honours unload handlers.
-    arkt::LogNotYet("close(mode: skipUnloadHandlers)", "W3-5");
-  }
   self.closingByClient = YES;
-  bool deferred = arkt::RunOrDefer(
-      "close", base::BindOnce(
-                   [](ArktFacadeTab* that) {
-                     ArktFacadeTab* tab = that;
-                     if (!tab.tabInterface || !tab.browser) {
-                       return;
-                     }
-                     TabStripModel* model =
-                         static_cast<ArktFacadeBrowser*>(tab.browser)
-                             .browserInterface->GetTabStripModel();
-                     int index = model->GetIndexOfTab(tab.tabInterface);
-                     if (index != TabStripModel::kNoTab) {
-                       model->CloseWebContentsAt(
-                           index, TabCloseTypes::CLOSE_USER_GESTURE);
-                     }
-                   },
-                   self));
-  // Still bound after the close ran: unload processing holds it.
-  if (deferred || _tab) {
+  BOOL not_now = [self
+      runOrQueue:"close"
+            work:base::BindOnce(
+                     [](ArktFacadeTab* that, ArktCloseMode mode) {
+                       ArktFacadeTab* tab = that;
+                       if (!tab.tabInterface || !tab.browser) {
+                         return;
+                       }
+                       BrowserWindowInterface* browser =
+                           static_cast<ArktFacadeBrowser*>(tab.browser)
+                               .browserInterface;
+                       TabStripModel* model = browser->GetTabStripModel();
+                       int index = model->GetIndexOfTab(tab.tabInterface);
+                       if (index == TabStripModel::kNoTab) {
+                         return;
+                       }
+                       if (mode == ArktCloseModeSkipUnloadHandlers) {
+                         arkt::ScopedSkipUnloadHandlers skip(
+                             UnloadController::From(browser));
+                         model->CloseWebContentsAt(
+                             index, TabCloseTypes::CLOSE_USER_GESTURE);
+                       } else {
+                         model->CloseWebContentsAt(
+                             index, TabCloseTypes::CLOSE_USER_GESTURE);
+                       }
+                     },
+                     self, mode)];
+  // Still bound after the close ran: unload processing holds it. Queued or
+  // deferred: the tab closes, or holds, when the call runs.
+  if (not_now || _tab) {
     _closing = YES;
     return ArktCloseResultHeld;
   }
@@ -746,13 +1265,15 @@ class TabCloseObserver : public content::WebContentsObserver {
 }
 
 - (void)focus {
+  arkt::CheckFacadeEntry();
   if (content::WebContents* contents = self.contents) {
     contents->Focus();
   }
 }
 
 - (id<ArktTabHandle>)duplicate {
-  arkt::LogNotYet("duplicate", "W3-5");
+  arkt::CheckFacadeEntry();
+  arkt::LogNotYet("duplicate", "W3-5b");
   return nil;
 }
 
@@ -785,10 +1306,12 @@ class TabCloseObserver : public content::WebContentsObserver {
 }
 
 - (int32_t)windowId {
+  arkt::CheckFacadeEntry();
   return _windowId;
 }
 
 - (id<ArktWindowHost>)host {
+  arkt::CheckFacadeEntry();
   if (arkt::ArktBrowserWindow* window =
           _browser ? arkt::ArktBrowserWindow::FromBrowser(_browser) : nullptr) {
     _host = window->host();
@@ -797,6 +1320,7 @@ class TabCloseObserver : public content::WebContentsObserver {
 }
 
 - (NSArray<id<ArktTabHandle>>*)tabs {
+  arkt::CheckFacadeEntry();
   NSMutableArray<id<ArktTabHandle>>* tabs = [NSMutableArray array];
   if (!_browser) {
     return tabs;
@@ -812,6 +1336,7 @@ class TabCloseObserver : public content::WebContentsObserver {
 }
 
 - (id<ArktTabHandle>)activeTab {
+  arkt::CheckFacadeEntry();
   return _browser ? arkt::g_facade->HandleForTab(
                         _browser->GetTabStripModel()->GetActiveTab())
                   : nil;
@@ -819,10 +1344,11 @@ class TabCloseObserver : public content::WebContentsObserver {
 
 - (id<ArktTabHandle>)createTabWithURL:(NSURL*)url active:(BOOL)active {
   // The handle exists at once; the tab is inserted now or, inside a nested
-  // run loop, when the posted task runs (Decision 3).
+  // run loop, when the posted task runs (Decision 3). Calls on a handle whose
+  // insert is pending queue behind it (W3-3 review).
   ArktFacadeTab* handle =
       [[ArktFacadeTab alloc] initWithOrigin:ArktTabOriginClient];
-  arkt::RunOrDefer(
+  bool deferred = arkt::RunOrDefer(
       "createTab",
       base::BindOnce(
           [](ArktFacadeBrowser* that, ArktFacadeTab* handle, GURL url,
@@ -830,6 +1356,8 @@ class TabCloseObserver : public content::WebContentsObserver {
             BrowserWindowInterface* browser = that.browserInterface;
             if (!browser) {
               LOG(WARNING) << "ARKT: facade createTab dropped: window gone";
+              arkt::g_facade->RecordDroppedInsert(handle, that);
+              [handle insertFinished:NO];
               return;
             }
             arkt::g_facade->SetBinding(handle);
@@ -837,8 +1365,12 @@ class TabCloseObserver : public content::WebContentsObserver {
             arkt::g_facade->SetBinding(nil);
             LOG(WARNING) << "ARKT: facade createTab inserted session id "
                          << handle.sessionId;
+            [handle insertFinished:handle.tabInterface != nullptr];
           },
           self, handle, arkt::ToGURL(url), static_cast<bool>(active)));
+  if (deferred) {
+    [handle markPending];
+  }
   return handle;
 }
 
@@ -868,24 +1400,27 @@ class TabCloseObserver : public content::WebContentsObserver {
 @implementation ArktFacadeEngine
 
 - (void)embedderReady {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  arkt::CheckFacadeEntry();
   arkt::g_facade->CheckNotInNotification("embedderReady");
   arkt::g_facade->delegate()->OnEmbedderReady();
 }
 
 - (void)embedderFailed {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  arkt::CheckFacadeEntry();
   arkt::g_facade->CheckNotInNotification("embedderFailed");
   arkt::g_facade->delegate()->OnEmbedderFailed();
 }
 
 - (NSArray<id<ArktBrowserHandle>>*)browsers {
+  arkt::CheckFacadeEntry();
   return arkt::g_facade->browsers();
 }
 
 - (id<ArktBrowserHandle>)createBrowserWithHost:(id<ArktWindowHost>)host {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  arkt::CheckFacadeEntry();
   arkt::g_facade->CheckNotInNotification("createBrowser");
+  // Created at once even inside a nested run loop: a deferred creation could
+  // not return the handle (W3-4 deviation, kept in W3-5).
   BrowserWindowInterface* browser =
       arkt::g_facade->delegate()->CreateBrowserForHost(host);
   // Adopted from OnBrowserCreated, inside Browser construction.
@@ -898,26 +1433,31 @@ class TabCloseObserver : public content::WebContentsObserver {
 
 - (NSArray<id<ArktExtensionAction>>*)extensionActionsForBrowser:
     (id<ArktBrowserHandle>)browser {
-  arkt::LogNotYet("extensionActions(in:)", "W3-5");
+  arkt::CheckFacadeEntry();
+  arkt::LogNotYet("extensionActions(in:)", "W3-5b");
   return @[];
 }
 
 - (void)runExtensionAction:(NSString*)actionId
                  inBrowser:(id<ArktBrowserHandle>)browser
                     anchor:(NSView*)anchor {
-  arkt::LogNotYet("runExtensionAction", "W3-5");
+  arkt::CheckFacadeEntry();
+  arkt::LogNotYet("runExtensionAction", "W3-5b");
 }
 
 - (id<NSObject>)addEventSink:
     (void (^)(NSArray<id<ArktEngineEvent>>* events))sink {
+  arkt::CheckFacadeEntry();
   return arkt::g_facade->AddSink(sink);
 }
 
 - (void)removeEventSink:(id<NSObject>)token {
+  arkt::CheckFacadeEntry();
   arkt::g_facade->RemoveSink(token);
 }
 
 - (BOOL)testAPIEnabled {
+  arkt::CheckFacadeEntry();
   return NO;
 }
 
@@ -926,7 +1466,8 @@ class TabCloseObserver : public content::WebContentsObserver {
            userGesture:(BOOL)userGesture
             completion:(void (^)(id _Nullable result,
                                  NSError* _Nullable error))completion {
-  arkt::LogNotYet("evaluateScript", "W3-5");
+  arkt::CheckFacadeEntry();
+  arkt::LogNotYet("evaluateScript", "W3-5b");
   completion(nil, [NSError errorWithDomain:@"ArktEngine"
                                       code:1
                                   userInfo:@{
@@ -936,7 +1477,8 @@ class TabCloseObserver : public content::WebContentsObserver {
 }
 
 - (BOOL)answerDialogInTab:(id<ArktTabHandle>)tab accept:(BOOL)accept {
-  arkt::LogNotYet("answerDialog", "W3-5");
+  arkt::CheckFacadeEntry();
+  arkt::LogNotYet("answerDialog", "W3-5b");
   return NO;
 }
 

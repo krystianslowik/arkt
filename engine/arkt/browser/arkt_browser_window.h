@@ -225,15 +225,25 @@ class ArktBrowserWindow : public BrowserWindow,
   // While held, Show(), ShowInactive() and Activate() only record that the
   // window should be shown; ReleaseHeldShow() shows it then. Used for a window
   // Chromium creates before the embedder is ready (week-3 plan, Decision 2).
-  // Minimize, Maximize, Restore and entering fullscreen are ignored while
-  // held, so the window cannot become visible through them either.
+  // Minimize, Maximize, Restore and entering fullscreen are recorded while
+  // held (the last one wins) and applied after the show, so the window cannot
+  // become visible through them before; bounds set while held are applied to
+  // the window again at release, after a host replacement (#255 review).
   void HoldShow();
   void ReleaseHeldShow();
   bool IsShowHeld() const { return show_held_; }
+  // Entering fullscreen while the show is held (ArktExclusiveAccessContext).
+  void DeferFullscreenWhileHeld();
 
   // True while the Browser is trying to close (unload processing of its tabs
   // runs or ran), until it closes or the close is cancelled.
   bool IsAttemptingToClose() const;
+
+  // True when the current window close was asked for by chrome.windows.remove
+  // (an extension's windows.remove call was in flight when Close() started
+  // it). The facade reports the window's tabs with ArktCloseReasonExtension
+  // instead of ArktCloseReasonWindowClosing (week-3 plan, Decision 12).
+  bool IsClosedByExtension() const { return closed_by_extension_; }
 
  protected:
   // BrowserWindow:
@@ -248,6 +258,9 @@ class ArktBrowserWindow : public BrowserWindow,
   };
 
   enum class PendingShow { kNone, kShow, kShowInactive };
+  // A window state asked for while the show is held.
+  enum class PendingState { kNone, kMaximized, kMinimized, kRestored,
+                            kFullscreen };
 
   // Sets the engine's blocks on `host_` and observes its window and card;
   // UnbindHost undoes both, unmounts the placeholder's tab and orders the
@@ -258,8 +271,9 @@ class ArktBrowserWindow : public BrowserWindow,
   void Unmount(content::WebContents* contents);
   void OnCardResized();
   // The view a tab-modal dialog of `contents` and the contents size follow:
-  // in host mode the tab's view when the embedder has mounted it in this
-  // window, else the host's card (Decision 6). nullptr means the active tab.
+  // in host mode the tab's container (ArktTabContainerView) when the embedder
+  // has mounted it in this window, else the host's card (Decision 6).
+  // nullptr means the active tab.
   NSView* DialogHostViewFor(content::WebContents* contents) const;
   // Builds an event for the tab at `index` that carries its title and URL, and
   // stores them in `entries_[index]`.
@@ -299,6 +313,10 @@ class ArktBrowserWindow : public BrowserWindow,
   gfx::Rect bounds_before_fullscreen_;
   bool show_held_ = false;
   PendingShow show_pending_ = PendingShow::kNone;
+  PendingState state_pending_ = PendingState::kNone;
+  // Bounds set while the show is held, applied again at release.
+  gfx::Rect bounds_pending_;
+  bool closed_by_extension_ = false;
 
   base::WeakPtrFactory<ArktBrowserWindow> weak_factory_{this};
 };

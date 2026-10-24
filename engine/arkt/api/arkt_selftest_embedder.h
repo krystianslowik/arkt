@@ -18,6 +18,14 @@ namespace arkt {
 // readiness queue, with --arkt-debug-reopen-before-ready); "fail",
 // embedderFailed after 5 s. --arkt-facade-selftest-url=<url> sets the first
 // tab of the shell-initiated window (a data: page otherwise).
+//
+// Task W3-5: a page whose title becomes "arkt-selftest <command> [argument]"
+// (set over CDP) runs a facade call on its tab and logs the outcome: close
+// honour|skip, close-other <session id>, state, navigate <url>, reload
+// [<session id>], activate <session id>, devtools (Chromium's Developer
+// Tools command through the host), and pending (a createTab deferred inside
+// an NSMenu, then navigate, activate and close on its handle before the
+// insert has run). Words starting with '#' are ignored.
 inline constexpr char kFacadeSelfTestSwitch[] = "arkt-facade-selftest";
 
 // The self-test embedder, or nil when the switch is absent.

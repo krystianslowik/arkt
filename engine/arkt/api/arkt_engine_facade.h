@@ -27,14 +27,14 @@ class FacadeDelegate {
 // then on and delivers its events in batches from posted tasks, never from
 // inside a Chromium notification (Decision 3).
 //
-// Scope so far (Tasks W3-3 and W3-4): browsers, shell-created browsers
-// (createBrowserWithHost:), tab lists, tab creation, activation, navigation
-// and closes with the nesting guard, and the TabCreated, TabClosed (reasons
-// client, windowClosing, appTerminating), ActiveTabChanged, CloseCancelled,
-// WindowOpened and WindowClosed events. Per-tab state events, stable tab
-// containers, history, duplication, the remaining close reasons, extension
-// actions and the test API are Task W3-5; until then those calls are logged
-// and answer with empty values.
+// Scope so far (Tasks W3-3, W3-4 and W3-5a): browsers, shell-created
+// browsers (createBrowserWithHost:), tab lists, tab creation, activation,
+// navigation and closes with the nesting guard (calls on a handle whose
+// deferred insert is pending queue behind it), both close modes, stable tab
+// containers, and every event kind except ExtensionActionsChanged, with all
+// close reasons. History entries, duplication, extension actions and the
+// test API are Task W3-5b; until then those calls are logged and answer with
+// empty values.
 id<ArktEngine> CreateEngineFacade(FacadeDelegate* delegate);
 
 // The facade's handle for `browser`, or nil if it is not an Arkt browser
