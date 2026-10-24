@@ -460,7 +460,9 @@ private final class EagerEngine: EngineClient {
     inner.finishLoad(id, title: "Loaded Early", favicon: Data([0x89, 0x50]))
     return id
   }
+  func createTab(url: URL?, in window: EngineWindowID) -> TabID { inner.createTab(url: url, in: window) }
   func closeTab(_ id: TabID) { inner.closeTab(id) }
+  func closeTab(_ id: TabID, mode: CloseMode) { inner.closeTab(id, mode: mode) }
   func navigate(_ id: TabID, to url: URL) { inner.navigate(id, to: url) }
   func reload(_ id: TabID) { inner.reload(id) }
   func goBack(_ id: TabID) { inner.goBack(id) }
@@ -471,6 +473,17 @@ private final class EagerEngine: EngineClient {
   func snapshot(of id: TabID) -> TabSnapshot? { inner.snapshot(of: id) }
   func contentView(for id: TabID) -> NSView? { inner.contentView(for: id) }
   func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation { inner.observe(handler) }
+  var windowIDs: [EngineWindowID] { inner.windowIDs }
+  func createWindow(host: any EngineWindowHosting) -> EngineWindowID { inner.createWindow(host: host) }
+  func closeWindow(_ id: EngineWindowID) { inner.closeWindow(id) }
+  func activateTab(_ id: TabID) { inner.activateTab(id) }
+  func activeTab(in window: EngineWindowID) -> TabID? { inner.activeTab(in: window) }
+  func observeWindows(_ handler: @escaping @MainActor (EngineWindowEvent) -> Void) -> EngineObservation {
+    inner.observeWindows(handler)
+  }
+  func observe(window: EngineWindowID, _ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
+    inner.observe(window: window, handler)
+  }
 }
 
 extension MountedSidebarTests {

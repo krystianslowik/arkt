@@ -8,7 +8,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 |---|---|---|---|
 | W3-0a | Main-actor probe on the `Spike` configuration | DONE (#229) | GO; nested loops opened from a main-actor job starve the main actor (below) |
 | W3-0 | Engine worktree, baselines, class lookup, command ids | DONE | lookup `found` in the app, `absent` in `Chromium.app`; 7 patch files, 17 upstream files, 0 hot-file hunks; W5c Step 3 and W6 Step 3 pass; command-id table; Swift baselines ShellKit 481, ArktCore 349; see "W3-0" below |
-| W3-1 | `EngineAPI` additions, harness drivers, contract rules 11-16 (Swift lane) | TODO | |
+| W3-1 | `EngineAPI` additions, harness drivers, contract rules 11-16 (engine lane, by decision) | DONE | windows, activation, origin, close modes and reasons, hosting, commands, extensions, per-window routing; rules 11-16 pass on `InMemoryEngine`, FakeEngine passes 11, 12, 15 and skips 13, 14, 16; ShellKit 481 + 28; see "W3-1" below |
 | W3-2 | Facade header and its Swift module | DONE (#246) | see "W3-2" below |
 | W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | DONE | **GATE PASS** with recorded deviations (readiness queue for Chromium-created windows, quit-start seam, CDP keep-alive); see "W3-3" below |
 | W3-4 | Host mode for ShellUI windows | DONE | embedder hosts own Arkt windows, `createBrowserWithHost:`, request kinds from the call site, self-test embedder; all acceptance rows pass on `Chromium.app`; see "W3-4" below |
@@ -36,6 +36,100 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-1: EngineAPI additions and contract rules 11-16
+
+Date 2026-10-24. Branch `engine/33-w3-1-engineapi` off `main`. Taken by the engine lane (maintainer decision on #33,
+2026-10-24). Swift only: no Chromium build, no engine worktree, `$CR` not touched; the facade header is unchanged.
+
+### API (names settled here; W3-6 maps them onto the frozen header)
+
+| Area | `EngineAPI` | Header counterpart |
+|---|---|---|
+| Windows | `EngineWindowID`; `windowIDs`; `createWindow(host:) -> EngineWindowID` (synchronous); `closeWindow(_:)` | `ArktEngine.browsers`, `createBrowser(host:)`, `ArktBrowserHandle.close` |
+| Window events | `observeWindows(_:)` with `EngineWindowEvent` `.windowOpened`, `.windowClosed`, `.extensionActionsChanged` | `WindowOpened`, `WindowClosed`, `ExtensionActionsChanged` |
+| Per-window routing | `observe(window:_:)`: events of tabs in that window at emit time, `.tabCreated` and `.tabClosed` included | `ArktEngineEvent.browser` |
+| Tabs | `createTab(url:in:)`; `createTab(url:)` lands in the most recently active window (rule 15), or has no window when the engine has none (in-process engines only) | `createTab(url:active:)` |
+| Closes | `closeTab(_:mode:)` with `CloseMode` `.honourUnloadHandlers` (what `closeTab(_:)` does) and `.skipUnloadHandlers`; a second close while held does nothing | `close(mode:)`, `ArktCloseResult` |
+| Close reasons | `.tabClosed(TabID, reason: CloseReason)`: `.client`, `.page`, `.extension`, `.windowClosing`, `.appTerminating` | `ArktCloseReason` |
+| Activation | `activateTab(_:)`, `activeTab(in:)`, `.activeTabChanged(TabID)`; the first tab of a window is active, later client tabs leave it alone, closing the active tab activates its right neighbour (else the left) | `activate`, `ActiveTabChanged` |
+| Held closes | `.closeCancelled(TabID)`; `TabSnapshot.isClosing`, `.wouldHoldClose` | `CloseCancelled`, `isClosing`, `wouldHoldClose` |
+| Snapshot | `window`, `opener`, `origin` (`TabOrigin` `.client`, `.engine`), `isActive`, `isClosing`, `wouldHoldClose`, all defaulted | `ArktTabHandle` properties |
+| Hosting | `EngineWindowHosting` (`window`, `cardView`, `claim(_:) -> CommandClaim?`, `perform(_:disposition:) -> Bool`, `forward: EngineCommandForwarding?`, `onCloseRequested`); every member is required, as `createBrowser(host:)` CHECK-fails on a host missing one | `ArktWindowHost` (`closeRequested`, `validateCommand`, `executeCommand`) |
+| Requests | `EngineWindowRequest` (`kind` `.extension`, `.page`, `.reopen`, `.startupURL`; `openerWindow`, `bounds: CGRect?`, `profile: EngineProfileID`, `initialURL`); `EngineWindowHostProvider`. `.page` is unused this week: a page's new window reports `.reopen` (W3-4) | `ArktWindowRequest` |
+| Commands | `EngineCommand` and `EngineDisposition`, `RawRepresentable` over `Int` with the values of "W3-0", Step 5 (names unchanged, so that table is the check; `InMemoryEngineWindowTests.commandConstantsMatchChromiumIDs` pins the values) | `IDC_*`, `WindowOpenDisposition` |
+| Extensions | `EngineExtensions` (separate protocol): `extensionActions(in:) -> [ExtensionAction]` (`id`, `name`, `iconPNG`, `isEnabled`), `runExtensionAction(_:in:anchor:)`. `InMemoryEngine` adopts it, FakeEngine does not | `extensionActions(in:)`, `runExtensionAction(_:in:anchor:)` |
+
+`EngineEventHub` keeps one non-reentrant FIFO for tab and window events (a window's `.windowClosed` follows its tabs'
+`.tabClosed`, nothing follows `.windowClosed`), and routes per window by `assign(_:to:)`, which an engine calls before a
+tab's `.tabCreated` and on a move. The window is read when the event is emitted, so a filtered observer still gets the
+`.tabClosed` of a tab whose snapshot is gone.
+
+### Contract rules 11-16 and drivers
+
+`EngineHarness` gains `makeWindowHost` (default `StubWindowHost`, whose window is built only on first use) and the
+optional drivers `engineCreateTab`, `engineCloseTab`, `engineActivate`, `holdClose`, `answerDialog`. A rule whose driver
+is nil throws `ContractNotApplicable`; the FakeEngine XCTest runner turns it into a skip, so it is never reported as
+passed. Rules 11-16 wait for events and snapshot values (the Chromium engine delivers most events one task later).
+
+| Rule | Checks | InMemoryEngine | FakeEngine |
+|---|---|---|---|
+| 11 | `windowIsListedAndAnnounced`, `closeWindowClosesItsTabsThenReportsWindowClosed`, `hostCloseRequestClosesTheWindow` | pass | pass |
+| 12 | `activationIsOneTabPerWindow` | pass | pass |
+| 13 | `engineCreatedTabIsAnnounced` | pass | skipped (no driver) |
+| 14 | `engineCloseIsTerminal` | pass | skipped (no driver) |
+| 15 | `windowlessCreateTabLandsInMostRecentlyActiveWindow` | pass | pass |
+| 16 | `heldCloseKeepsTheTabUntilAnswered`, `skipUnloadHandlersNeverHolds`, `cancelledWindowCloseKeepsTheWindow` | pass | skipped (no driver) |
+
+Checked to fail: an `InMemoryEngine` that never reactivates after closing the active tab, puts window-less tabs in the
+first window, or closes a window without holding fails rules 12, 15 and 16 respectively. "Most recently active window"
+is the last window that got `createWindow`, `createTab(url:in:)` or an activation (client or engine).
+
+`InMemoryEngine` test drivers for W3-7: `engineCreateTab(url:in:opener:active:)`, `engineCloseTab(_:reason:)`,
+`engineActivate`, `holdClose`, `answerDialog(_:accept:)`, `openEngineWindow(_:)` with `windowHostProvider`,
+`setExtensionActions(_:in:)`, `host(of:)`, and the records `executedCommands` (commands forwarded by a host) and
+`ranExtensionActions`. A cancelled window close reports `.closeCancelled` for every held tab of that window;
+`wouldHoldClose` stays true after a cancel (the handler stays registered).
+
+### Non-additive changes
+
+- `.tabClosed(TabID)` became `.tabClosed(TabID, reason:)`, and `EngineEvent` gained `.activeTabChanged` and
+  `.closeCancelled`. Call sites: `EngineEvent.tabID`, `EngineEventHub`, the contract's rule 4 checks, and in ShellUI
+  only `ShellWindowController.handle(_:)` (`.tabClosed(let tab, _)`; its `default:` covers the new cases). No
+  behaviour change: routing by reason, `observe(window:)` and activation are W3-7. CoreBridge and App had no match.
+- `EngineClient` gained requirements (windows, `createTab(url:in:)`, `closeTab(_:mode:)`, activation, both observe
+  forms), so the `EagerEngine` test double in `ShellKitGUITests/SidebarViewTests.swift` forwards them.
+- `EventRecorder` records window events too (`log`, `windowEvents`); `events` is unchanged for callers.
+
+### Lint test
+
+`ShellUITests/CreateTabLintTests` fails on any ShellUI call to the window-less `createTab(url:)`. The one existing call
+(`ShellWindowController.openEngineTab`, which W3-7 moves) is held as a known issue (`withKnownIssue`), so the test
+turns red once W3-7 removes it and the allowance can be dropped.
+
+### Verification
+
+`nice -n 10`, `-j 4`, scratch and derived data on the Chromium disk.
+
+- ShellKit `swift test --skip ShellKitGUITests`: baseline 481 (`main` at `3b8df3a`), now **509** (481 + 28: EngineAPITests
+  24 to 48, ShellUITests 208 to 212 with 1 known issue), all pass.
+- ShellKit `--filter ShellKitGUITests`: 383 tests, 5 skipped (FakeEngine rules 13, 14, 16), 1 failure,
+  `SidebarReviewTests.testAccessibility` (`SidebarViewTests.swift`, the divider's `isAccessibilityElement`), which fails
+  the same way on `main` at `3b8df3a` on this machine; not touched here. The FakeEngine contract suite: 27 tests, 5
+  skipped, 0 failures.
+- ArktCore `swift test`: 349, all pass (unchanged).
+- Debug app (`xcodegen generate`, `xcodebuild -configuration Debug`): `BUILD SUCCEEDED`; `NSPrincipalClass` is
+  `NSApplication`; `strings` on the binary counts 0 `ARKT engine`.
+
+### What W3-6 and W3-7 can start
+
+- W3-6: `ChromiumEngine: EngineClient, EngineExtensions` over the facade, run against the scripted facade with all five
+  drivers (the scripted facade answers `holdClose` and `answerDialog` like the test API). It emits through
+  `EngineEventHub` and calls `assign(_:to:)` from each tab handle's `browser`.
+- W3-7 parts A and B: `ShellWindowController` as `EngineWindowHosting`, `createTab(url:in:)` at `openEngineTab` (then
+  drop the lint allowance), `observe(window:)`, closes by reason, held closes and `.closeCancelled`, auto-archive on
+  `wouldHoldClose`, all against `InMemoryEngine`'s drivers; the Extensions control against `InMemoryEngine` as an
+  `EngineExtensions`.
 
 ## #9: Web identity (user agent and client hints)
 
