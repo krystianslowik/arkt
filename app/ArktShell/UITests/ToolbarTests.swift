@@ -39,7 +39,7 @@ final class ToolbarTests: ArktUITestCase {
     XCTAssertTrue(waitFor(sidebarURLBar))
     sidebarURLBar.rightClick()
     // The View menu in the menu bar has an item with the same title; only the context menu's item can be hit.
-    let items = app.menuItems.matching(identifier: "Show Toolbar")
+    let items = app.menuItems.matching(NSPredicate(format: "title == %@ OR identifier == %@", "Show Toolbar", "Show Toolbar"))
     var item: XCUIElement?
     XCTAssertTrue(Waits.until("a hittable Show Toolbar menu item") {
       item = items.allElementsBoundByIndex.first { $0.exists && $0.isHittable }
