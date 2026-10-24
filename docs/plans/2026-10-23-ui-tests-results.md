@@ -867,3 +867,65 @@ Known issues used: #269 (outline rows), #26 (swipe phase).
 - One expected failure, scoped to one assertion: the order check of `test_KB001_BH100_cmdTOpensURLInNewTodayTab`.
   Cmd-T appends to Today; the plan above expects the top and the spec leaves it open (BH-079, CF-27). Tracked in
   #293.
+
+## U14: Quit, relaunch, recovery (#179)
+
+Base: `origin/main` at `46f3729`, branch `chore/179-quit-relaunch`. Local run on 2026-10-24
+(macOS 27.0, Xcode 27.1, Apple M2 Pro). `ARKT_UITEST_TIMEOUT_SCALE` was unset.
+
+### What was done
+
+- `UITests/PersistenceTests.swift`: the plan's 5 tests. No production files changed. Quit flush, the 60 s
+  debounce override, the default debounce, both recovery toasts, and a persistent toast surviving Cmd-T then Esc
+  were already in the app.
+- The debounce test sets `ARKT_AUTOSAVE_DELAY_MS=60000` on the first launch and clears it before the relaunch,
+  so only the termination flush can save.
+- The one fixed wait is the inverted expectation in `test_E_toastStaysUntilDismissed` (2 s, unscaled), commented
+  there as the absence assertion.
+
+### Tests
+
+| Test | Run time |
+|---|---|
+| `test_E_quitInsideAutosaveDebounceKeepsChange` | 37.781 s |
+| `test_E_quitAtDefaultDebounceKeepsChange` | 25.544 s |
+| `test_E_corruptDatabaseWithoutBackupShowsRecreatedToast` | 30.568 s |
+| `test_E_corruptDatabaseWithBackupShowsRestoredToast` | 48.624 s |
+| `test_E_toastStaysUntilDismissed` | 33.972 s |
+
+### Verification
+
+`Check UI test sources` on `app/ArktShell/UITests`: `UI test sources OK`, exit 0.
+
+```
+cd app/ArktShell
+nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests \
+  -derivedDataPath build -resultBundlePath build/ui-1792873897.xcresult \
+  -collect-test-diagnostics never -parallel-testing-enabled NO -jobs 2 \
+  -only-testing:ArktShellUITests/PersistenceTests test
+```
+
+Exit 0. `** TEST SUCCEEDED **`. Executed 5 tests, with 0 failures (0 unexpected) in 176.488 (176.492) seconds.
+Only `PersistenceTests` ran. CoreSimulator "out of date" (1171.7.0 vs 1174.9.2) was logged and did not fail the run.
+
+On this run the Today row predicate completed for every `Fixture alpha` check. The URL-bar fallback below did not run.
+
+### Deviations from the plan
+
+- Row checks do not go through `waitForOutlineRows`. Recording that expected failure symbolicates in-process on
+  this machine and the suite does not finish. The row is still probed for 10 s times the scale with a predicate
+  that does not fail the test. On a miss, the sidebar URL bar containing `127.0.0.1` is the assertion. When the
+  row is present, its label is the assertion and the URL bar is not consulted. That is weaker than the plan's
+  title assertion while #269 is open, and it drops the expected-failure annotation the other suites record.
+- The backup wait requires a finished `Arkt-*.sqlite`, not the `.tmp` written first.
+- Test 1 waits for `.notRunning` within 5 s times the scale through a local `quit` that activates this app, then
+  sends Cmd-Q. The other tests use the harness `quit` (10 s). Test 2 calls that immediately after Enter. `quit`
+  still activates and waits for foreground before the key, so the key stays on this app.
+- `toast.action` is matched by identifier on any element, and "Show Files" is accepted as `label` or `title`.
+  Out of process the button exposes those words as its title. It is never clicked.
+- The first launch of an `xcodebuild` run can raise a notification permission dialog. The runner clicks Don't
+  Allow during `typeText`, which closes the command bar. Before Return, the tests dismiss that dialog when its
+  button title contains "Don" and reopen the command bar if it closed. That step is before Enter, so test 2
+  still has nothing between Enter and Cmd-Q.
+
+Known issues used: #269 (outline rows). The informative `ui-tests` job has not run on this commit yet.
