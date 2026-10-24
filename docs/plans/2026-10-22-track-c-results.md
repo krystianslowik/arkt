@@ -1083,3 +1083,110 @@ Checks: ArktCore 348 tests, 0 failures. ShellKit `--skip ShellKitGUITests`: Swif
   `testWarmShowWithEmptyFieldPrewarmsEditorAndSkipsRedundantSelectionNotification`):
   `commandbar.showcpu.ms median=0.15 p95=0.17`, `commandbar.showwall.ms median=0.18 p95=0.47`,
   `commandbar.earliestframe p95=6.55 bound=9.30 load1=6.75 cores=12 asserted=yes`.
+
+## Space swipe: single late frame under load (#24) (2026-10-24)
+
+Evidence without Instruments: a run loop probe in the pacer, a GUI test that measures main-thread CPU per run loop
+pass, and `sample` (1 ms) on the test process. Machine: 120 Hz built-in panel, 10 cores, load1 6-17 during the work
+(another agent's GUI tests, WindowServer at 60-66% CPU), so most wall-clock pacing runs were NOT-MEASURABLE and the
+load-independent number (thread CPU time per pass) leads.
+
+### Probe
+
+`MainThreadBusyProbe` (ShellUI/Perf) records every main run loop pass (wake-up to sleep, after Core Animation's commit
+observer) with wall and thread CPU time while a pacer session runs. Each `hitch` log line now also carries the longest
+pass around the missed vsync: `busyMs` (wall), `cpuMs`, `offCpuMs` (wall the thread was not running: preempted or
+blocked), `passes`, `passesCpuMs`; `FramePacer.hitchDetails` keeps them for tests. CPU near wall time is app work; a
+large `offCpuMs` with little CPU is the thread waiting (scheduler, or a blocking call).
+
+### Root cause
+
+`SpacePagerView.apply(offset:)` moved the strip view with `setFrameOrigin` on every frame. For AppKit that is a view
+geometry change of the whole strip subtree, every frame:
+
+- `NSViewHierarchyInvalidateVisibleRect` over every descendant, a window layout pass
+  (`_layoutSubtreeWithOldSize`, `_findAnySubviewNeedingAutoLayoutEngine`), and redisplay of image views and text fields
+  (`_NSSimpleImageView updateLayer`, `NSStringDrawingEngine`) inside the commit. Main-thread CPU per pass: median about
+  3 ms, single passes 10-15 ms (Debug and optimized alike).
+- Tracking areas of every row in the strip were rebuilt (`updateTrackingAreasWithInvalidCursorRects`), and each row's
+  `updateTrackingAreas` asks its host for a hover resync, which on the next main-queue turn calls
+  `NSWindow.windowNumber(at:belowWindowWithWindowNumber:)`, a synchronous window-server query. In the `sample` of a
+  scripted swipe loop, 1843 of 7348 main-thread samples (25% of the wall time) were inside that query. Its latency
+  depends on the window server, not on the app: 600 calls at load1 13 gave median 0.22 ms, p99 10.9 ms, max 26 ms,
+  with 0.05 ms of CPU each (141 over 2 ms, 10 over 8 ms).
+
+The second point is the "late frame with an idle main thread" of C7 phase 3: the previous display-link callback ran
+about 7.5 ms late while the thread used almost no CPU, and it got worse with WindowServer activity. It is not
+scheduler contention outside the app; the app waited on a window-server reply it asked for on every frame. The
+first point is the CPU half (passes over one refresh even on an idle machine).
+
+A/B with the same test (`-Xswiftc -O`, 30 rounds): taking the explicit `CATransaction` out of `apply` but keeping
+`setFrameOrigin` made it worse (swipe-back 91 of 2230 passes over 8.3 ms CPU, max 14.3 ms), so the explicit
+transaction was not the cause; the view frame move was.
+
+### Fix
+
+- The strip moves on its layer: during tracking and the settle, `apply` sets a pixel-aligned translation
+  (`setAffineTransform`) relative to the strip view's frame; the frame itself does not change. The frame catches up
+  and the translation is cleared in the same implicit transaction when the strip rests: settle completion,
+  `jump(to:)`, `stopInteraction()`, a touch-down freeze (`gestureMayBegin`) and `layout()`. No explicit
+  `CATransaction` in `apply` or `layout()` (backing layers do not animate implicitly; the test checks
+  `animationKeys()` is nil). The spring, rubber band, velocity hand-over and freeze logic are unchanged.
+  While the strip moves, hit testing and hover use the rest frame; a touch-down freeze syncs the frame first, so a
+  frozen strip is hit-testable where it shows.
+- While the strip moves, the set of shown pages only grows; it shrinks to the current page at rest. Before, a settle
+  that overshot its page hid and showed the neighbour on each swing (3 changes of one page in one swipe), and each
+  change rebuilt that page's tracking areas and queued another window-server query.
+
+### Before and after
+
+`SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU`, main-thread CPU per run loop pass,
+20 rounds of scripted swipes (20 frames of 9 pt, the smoke's medium swipe) between Personal and Work:
+
+| Build | Code | load1 | label | passes | median ms | p95 ms | max ms | passes over 8.3 ms | hitches (pacer) |
+|---|---|---|---|---|---|---|---|---|---|
+| Debug | before | 8.0 | swipe-next | 1588 | 3.06 | 5.24 | 7.36 | 0 | 13 in 40 swipes |
+| Debug | before | 8.0 | swipe-back | 1620 | 2.65 | 7.82 | 13.70 | 76 | |
+| Debug | after | 6.2 | swipe-next | 1475 | 0.45 | 1.02 | 3.90 | 0 | 0 in 40 swipes |
+| Debug | after | 6.2 | swipe-back | 1460 | 0.44 | 0.89 | 3.59 | 0 | |
+| -O | before | 6.6 | swipe-next | 1612 | 3.16 | 5.17 | 8.35 | 1 | 16 in 40 swipes |
+| -O | before | 6.6 | swipe-back | 1592 | 3.01 | 9.30 | 14.79 | 104 | |
+| -O | after | 6.1 | swipe-next | 1475 | 0.39 | 0.67 | 4.02 | 0 | 0 in 40 swipes |
+| -O | after | 6.1 | swipe-back | 1460 | 0.37 | 0.67 | 4.58 | 0 | |
+
+An earlier 30-round `-O` pair at load1 12-14 gave the same picture (before: 4 hitches, max 10.2 ms; after: 0
+hitches in 60 swipes, max 3.8 ms, p95 0.56 ms). Keyboard switches after the fix: median 0.3-0.4 ms, max 2.4-4.4 ms,
+0 hitches. Main-thread samples inside the window-server query during a swipe loop: 25% before, 0.3% after.
+
+`testFramePacingDuringSwipeAndKeyboardSwitch` (wall clock, asserts only below load 10), after the fix, 4 runs at load1
+6.0-8.3: `space-swipe` `over8.6=0 maxMs=8.33` 4 of 4. `space-key` failed twice (`9@17.00`, `9@20.36`) and
+`space-swipe-flavor` once (`64@20.58`). The probe names both:
+- Frame 9 of the Work -> Dev switch is the halfway light -> dark chrome flip (`SidebarContainerView.setFlavor`, then a
+  commit that relayouts and redisplays the chrome): 4 ms CPU optimized, 10-29 ms in Debug
+  (`hitch label=space-key frame=9 ... cpuMs=29.30 offCpuMs=1.04`). App work, but in the sidebar chrome, not the pager;
+  the smoke's Personal and Work are both light and never flip. Follow-up #275.
+- `64@20.58` was `cpuMs=0.29 offCpuMs=20.23`: the thread did nothing for 20 ms. The remaining window-server queries
+  (one hover resync when a page is shown or hidden at the start and end of a switch) are the likely waiter; follow-up
+  #278 defers them while the pager moves.
+
+### Tests added
+
+- `SpaceSwipeHitchTests` (GUI): `testSwipeMovesTheStripLayerNotItsFrame` (frame unchanged while tracking, translation
+  matches the offset, no implicit animation, frame synced and translation cleared at rest),
+  `testFrozenSettleSyncsTheStripFrame`, `testAnInteractionShowsAndHidesEachPageOnce` (fails before the fix: a page
+  changed 3 times in one swipe), and `testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU` (every pass of swipes and
+  keyboard switches both ways under 8.34 ms of main-thread CPU; it fails before the fix with 13.7-14.8 ms; the two
+  legs that cross the light/dark flip are reported, not gated, until #275; skipped as NOT-MEASURABLE on screens below
+  120 Hz, as CI's virtual display is).
+- `SpacePagerTests.testTouchDownFreezesASettleAndVerticalResumesIt`: only the timing (the settle already finished
+  before the test looked) may skip as NOT-MEASURABLE; `frozenTarget == 1` after the touch-down is a hard assertion
+  again (review finding from #270).
+
+### Still open
+
+- Smoke `-ArktSmokeRepeat 25` in 3 of 3 idle runs (acceptance criterion of #24) needs a Profile build of the app and an
+  idle machine; not run here (no app launches in this task). The smoke swipes Personal <-> Work, which no longer
+  rebuilds tracking areas per frame.
+- The WindowServer-side trace of the acceptance criteria was not taken: the cause is in the app (a per-frame
+  window-server query and per-frame view geometry), shown by the probe, `sample` and the A/B above.
+- #275 (light/dark chrome flip pass), #278 (hover resync query during a switch).

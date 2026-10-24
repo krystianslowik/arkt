@@ -7,7 +7,9 @@ import QuartzCore
 /// interval as a `leadin` line: it is excluded from the gate, see `FrameStats`), with how late this and the
 /// previous callback ran after their vsync and the link's current frame duration (a display rate change
 /// shows as frameMs other than 8.33); `end()` logs one `pacing`
-/// summary line (subsystem dev.arkt.shell, category perf).
+/// summary line (subsystem dev.arkt.shell, category perf). While a session runs, a `MainThreadBusyProbe` records the
+/// main run loop's passes, so each hitch line also says what held the main thread across the missed vsync
+/// (`busyMs` wall versus `cpuMs` and `offCpuMs`) and `hitchDetails` keeps it for tests and the smoke.
 @MainActor
 public final class FramePacer: NSObject {
   private var link: CADisplayLink?
@@ -17,6 +19,9 @@ public final class FramePacer: NSObject {
   private var label = ""
   private var session = 0
   public private(set) var stats = FrameStats()
+  /// Every hitch of the current (or last) session, with the main-thread passes behind it.
+  public private(set) var hitchDetails: [HitchDetail] = []
+  private let probe = MainThreadBusyProbe()
 
   public var isRunning: Bool { link != nil }
 
@@ -27,12 +32,14 @@ public final class FramePacer: NSObject {
     session += 1
     self.label = label
     stats = FrameStats()
+    hitchDetails = []
     last = nil
     lastLate = 0
     let link = view.displayLink(target: self, selector: #selector(tick(_:)))
     link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
     link.add(to: .main, forMode: .common)
     self.link = link
+    probe.start()
     return session
   }
 
@@ -48,6 +55,7 @@ public final class FramePacer: NSObject {
     guard let link else { return nil }
     link.invalidate()
     self.link = nil
+    probe.stop()
     let fps = NSScreen.main?.maximumFramesPerSecond ?? 0
     let s = stats
     ShellSignposts.logger.notice("""
@@ -71,11 +79,27 @@ public final class FramePacer: NSObject {
         "leadin label=\(self.label, privacy: .public) ms=\(interval * 1000, format: .fixed(precision: 2))")
     } else if interval > stats.hitchThreshold {
       ShellSignposts.signposter.emitEvent("Hitch")      // findable in an Instruments trace
+      let detail = hitchDetail(interval: interval, from: last, to: link.timestamp, late: late)
+      hitchDetails.append(detail)
+      let busy = detail.longest
       ShellSignposts.logger.notice("""
-        hitch label=\(self.label, privacy: .public) ms=\(interval * 1000, format: .fixed(precision: 2)) \
+        hitch label=\(self.label, privacy: .public) frame=\(detail.frame) ms=\(interval * 1000, format: .fixed(precision: 2)) \
         lateMs=\(late * 1000, format: .fixed(precision: 2)) prevLateMs=\(self.lastLate * 1000, format: .fixed(precision: 2)) \
-        frameMs=\((link.targetTimestamp - link.timestamp) * 1000, format: .fixed(precision: 2))
+        frameMs=\((link.targetTimestamp - link.timestamp) * 1000, format: .fixed(precision: 2)) \
+        busyMs=\((busy?.wall ?? 0) * 1000, format: .fixed(precision: 2)) cpuMs=\((busy?.cpu ?? 0) * 1000, format: .fixed(precision: 2)) \
+        offCpuMs=\((busy?.offCPU ?? 0) * 1000, format: .fixed(precision: 2)) \
+        passes=\(detail.passes) passesCpuMs=\(detail.cpu * 1000, format: .fixed(precision: 2))
         """)
     }
+  }
+
+  /// The main run loop passes from one refresh before the previous vsync up to this one: the previous callback's late
+  /// start (`prevLateMs`) and the missed commit both fall in that window.
+  private func hitchDetail(interval: CFTimeInterval, from start: CFTimeInterval, to end: CFTimeInterval,
+                           late: CFTimeInterval) -> HitchDetail {
+    let passes = probe.spans(overlapping: start - stats.designBudget, end)
+    return HitchDetail(label: label, frame: stats.frameCount - 1, interval: interval, late: late,
+                       previousLate: lastLate, longest: passes.max { $0.wall < $1.wall },
+                       passes: passes.count, cpu: passes.reduce(0) { $0 + $1.cpu })
   }
 }
