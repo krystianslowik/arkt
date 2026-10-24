@@ -234,6 +234,10 @@ class ArktBrowserWindow : public BrowserWindow,
   bool IsShowHeld() const { return show_held_; }
   // Entering fullscreen while the show is held (ArktExclusiveAccessContext).
   void DeferFullscreenWhileHeld();
+  // A state kept after a held release with no show (it waits for the show)
+  // is dropped by a later direct Maximize, Minimize, Restore or fullscreen
+  // entry: the newer request wins (#258).
+  void DropKeptState();
 
   // True while the Browser is trying to close (unload processing of its tabs
   // runs or ran), until it closes or the close is cancelled.
@@ -272,6 +276,12 @@ class ArktBrowserWindow : public BrowserWindow,
   void Mount(content::WebContents* contents);
   void Unmount(content::WebContents* contents);
   void OnCardResized();
+  // The host window may have become visible or moved to the active Space:
+  // tab-modal dialogs that could not attach then attach now (#261 review).
+  void OnWindowPlacementChanged();
+  // Shows the active tab's dialog that Chromium did not show because the
+  // window was hidden when it was raised.
+  void ShowDialogsHeldWhileHidden();
   // The view a tab-modal dialog of `contents` and the contents size follow:
   // in host mode the tab's container (ArktTabContainerView) when the embedder
   // has mounted it in this window, else the host's card (Decision 6).
@@ -291,6 +301,8 @@ class ArktBrowserWindow : public BrowserWindow,
   bool host_mode_ = false;
   // NSNotificationCenter observer tokens for the host window and card.
   NSMutableArray* __strong notification_tokens_;
+  // NSWorkspace notification center token (active Space changes).
+  id __strong space_token_;
   // The WebContents whose view is mounted in the card, if any.
   raw_ptr<content::WebContents> mounted_ = nullptr;
   // The tab list as the host knows it. Kept apart from any host view: the

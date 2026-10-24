@@ -16,6 +16,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/extensions/extension_action_delegate.h"
 #include "chrome/browser/ui/extensions/extension_action_view_model.h"
@@ -98,7 +100,8 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
                     ShowPopupCallback callback) override {
     LOG(WARNING) << "ARKT: TriggerPopup " << host->extension_id()
                  << " by_user=" << by_user << " url="
-                 << host->initial_url().spec();
+                 << host->initial_url().spec()
+                 << " anchor=" << (__bridge void*)menu_->anchor();
     if (show_action == PopupShowAction::kShowAndInspect) {
       LOG(WARNING) << "ARKT: popup inspection not supported; showing only";
     }
@@ -165,6 +168,13 @@ ArktExtensionsMenu::ArktExtensionsMenu(BrowserWindowInterface* browser,
       },
       weak_this));
 
+  if (ThemeService* theme =
+          ThemeServiceFactory::GetForProfile(browser_->GetProfile())) {
+    theme_observation_.Observe(theme);
+  }
+  if (ui::NativeTheme* native = ui::NativeTheme::GetInstanceForNativeUi()) {
+    native_theme_observation_.Observe(native);
+  }
   model_ = ToolbarActionsModel::Get(browser_->GetProfile());
   if (!model_) {
     LOG(ERROR) << "ARKT: no toolbar actions model for this profile";
@@ -193,7 +203,8 @@ void ArktExtensionsMenu::RunActionWhenAvailable(
 
 void ArktExtensionsMenu::Show() {
   NSView* anchor = anchor_;
-  if (!anchor) {
+  // Already tracking: a second Show from inside the menu's loop would nest.
+  if (!anchor || shown_menu_) {
     return;
   }
   NSMenu* menu = BuildMenu();
@@ -242,12 +253,39 @@ std::vector<ArktExtensionsMenu::ActionInfo> ArktExtensionsMenu::GetActions()
     info.id = id;
     info.name = view_model->GetActionName();
     if (web_contents) {
-      info.icon = ActionIcon(view_model, web_contents);
+      info.icon = CachedIcon(id, view_model, web_contents);
       info.enabled = view_model->IsEnabled(web_contents);
     }
     actions.push_back(std::move(info));
   }
   return actions;
+}
+
+ArktExtensionsMenu::IconCacheEntry::IconCacheEntry() = default;
+ArktExtensionsMenu::IconCacheEntry::IconCacheEntry(const IconCacheEntry&) =
+    default;
+ArktExtensionsMenu::IconCacheEntry::~IconCacheEntry() = default;
+
+gfx::ImageSkia ArktExtensionsMenu::CachedIcon(
+    const extensions::ExtensionId& id,
+    ExtensionActionViewModel* view_model,
+    content::WebContents* web_contents) const {
+  auto it = icon_cache_.find(id);
+  if (it != icon_cache_.end() &&
+      it->second.web_contents.get() == web_contents) {
+    return it->second.icon;
+  }
+  IconCacheEntry entry;
+  entry.web_contents = web_contents->GetWeakPtr();
+  entry.icon = ActionIcon(view_model, web_contents);
+  icon_cache_[id] = entry;
+  return entry.icon;
+}
+
+void ArktExtensionsMenu::OnActionIconUpdated(
+    const extensions::ExtensionId& id) {
+  icon_cache_.erase(id);
+  NotifyChanged();
 }
 
 void ArktExtensionsMenu::SetAnchor(NSView* anchor) {
@@ -326,6 +364,7 @@ NSView* ArktExtensionsMenu::anchor() const {
 
 void ArktExtensionsMenu::OnToolbarActionAdded(
     const ToolbarActionsModel::ActionId& id) {
+  icon_cache_.clear();
   SyncViewModels();
   LogActions();
   DumpMenu();
@@ -335,6 +374,7 @@ void ArktExtensionsMenu::OnToolbarActionAdded(
 
 void ArktExtensionsMenu::OnToolbarActionRemoved(
     const ToolbarActionsModel::ActionId& id) {
+  icon_cache_.clear();
   SyncViewModels();
   LogActions();
   DumpMenu();
@@ -343,16 +383,35 @@ void ArktExtensionsMenu::OnToolbarActionRemoved(
 
 void ArktExtensionsMenu::OnToolbarActionUpdated(
     const ToolbarActionsModel::ActionId& id) {
+  // Icon, badge or enabled state, for one tab or all of them.
+  icon_cache_.erase(id);
   DumpMenu();
   NotifyChanged();
 }
 
 void ArktExtensionsMenu::OnToolbarModelInitialized() {
+  icon_cache_.clear();
   SyncViewModels();
   LogActions();
   DumpMenu();
   NotifyChanged();
   MaybeRunPendingAction();
+}
+
+void ArktExtensionsMenu::OnThemeChanged() {
+  OnColorsChanged();
+}
+
+void ArktExtensionsMenu::OnNativeThemeUpdated(ui::NativeTheme* observed_theme) {
+  OnColorsChanged();
+}
+
+void ArktExtensionsMenu::OnColorsChanged() {
+  if (icon_cache_.empty()) {
+    return;
+  }
+  icon_cache_.clear();
+  NotifyChanged();
 }
 
 void ArktExtensionsMenu::OnToolbarActionsModelShutdown() {
@@ -371,12 +430,19 @@ void ArktExtensionsMenu::SyncViewModels() {
     }
     // A view model must not be destroyed while its popup is showing.
     it->second->HidePopup();
+    icon_subscriptions_.erase(it->first);
     it = view_models_.erase(it);
   }
   for (const auto& id : ids) {
     if (!view_models_.contains(id)) {
       view_models_[id] = ExtensionActionViewModel::Create(
           id, browser_, std::make_unique<ArktExtensionActionDelegate>(this));
+      // The icon loads after the view model exists; the list shows the new
+      // one once it has (Chrome's toolbar button repaints).
+      icon_subscriptions_[id] =
+          view_models_[id]->RegisterIconUpdateObserver(base::BindRepeating(
+              &ArktExtensionsMenu::OnActionIconUpdated,
+              weak_factory_.GetWeakPtr(), id));
     }
   }
 }
@@ -478,9 +544,13 @@ void ArktExtensionsMenu::Shutdown() {
   for (auto& [id, view_model] : view_models_) {
     view_model->HidePopup();
   }
+  icon_subscriptions_.clear();
   view_models_.clear();
+  icon_cache_.clear();
   on_changed_.Reset();
   observation_.Reset();
+  theme_observation_.Reset();
+  native_theme_observation_.Reset();
   model_ = nullptr;
   browser_ = nullptr;
   browser_did_close_ = {};

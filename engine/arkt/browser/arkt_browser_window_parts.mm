@@ -18,9 +18,11 @@
 #include "chrome/browser/ui/fullscreen/browser_window_fullscreen_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/range/range.h"
+#include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "url/origin.h"
 
@@ -61,6 +63,7 @@ void ArktExclusiveAccessContext::EnterFullscreen(
     window_->DeferFullscreenWhileHeld();
     return;
   }
+  window_->DropKeptState();
   LOG(WARNING) << "ARKT: enter fullscreen";
   [window_->host().window toggleFullScreen:nil];
 }
@@ -128,6 +131,10 @@ ArktModalDialogHost::ArktModalDialogHost(NSView* (^view)(void))
     : view_([view copy]) {}
 
 ArktModalDialogHost::~ArktModalDialogHost() {
+  if (frame_token_) {
+    [NSNotificationCenter.defaultCenter removeObserver:frame_token_];
+    frame_token_ = nil;
+  }
   // Chromium closes the dialogs that observe this host synchronously.
   for (auto& observer : observers_) {
     observer.OnHostDestroying();
@@ -140,19 +147,45 @@ ArktModalDialogHost::~ArktModalDialogHost() {
   dialogs_.clear();
 }
 
+NSView* ArktModalDialogHost::HostView() {
+  NSView* view = view_();
+  NSView* observed = observed_view_;
+  if (view == observed && (view || !frame_token_)) {
+    return view;
+  }
+  if (frame_token_) {
+    [NSNotificationCenter.defaultCenter removeObserver:frame_token_];
+    frame_token_ = nil;
+  }
+  observed_view_ = view;
+  if (view) {
+    // `this` outlives the token: the destructor removes it.
+    frame_token_ = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSViewFrameDidChangeNotification
+                    object:view
+                     queue:nil
+                usingBlock:^(NSNotification*) {
+                  if (!dialogs_.empty()) {
+                    NotifyPositionRequiresUpdate();
+                  }
+                }];
+  }
+  return view;
+}
+
 gfx::NativeView ArktModalDialogHost::GetHostView() const {
   return gfx::NativeView(view_());
 }
 
 gfx::Point ArktModalDialogHost::GetDialogPosition(const gfx::Size& size) {
-  NSView* view = view_();
+  NSView* view = HostView();
   return gfx::Point(
       std::max(0, (static_cast<int>(NSWidth(view.bounds)) - size.width()) / 2),
       0);
 }
 
 gfx::Size ArktModalDialogHost::GetMaximumDialogSize() {
-  NSView* view = view_();
+  NSView* view = HostView();
   return gfx::Size(static_cast<int>(NSWidth(view.bounds)),
                    static_cast<int>(NSHeight(view.bounds)));
 }
@@ -182,6 +215,12 @@ void ArktModalDialogHost::NotifyPositionRequiresUpdate() {
   }
 }
 
+bool ArktModalDialogHost::HasVisibleDialog() const {
+  return std::any_of(
+      dialogs_.begin(), dialogs_.end(),
+      [](views::Widget* widget) { return widget->IsVisible(); });
+}
+
 void ArktModalDialogHost::OnWidgetVisibilityChanged(views::Widget* widget,
                                                     bool visible) {
   if (visible) {
@@ -207,16 +246,20 @@ void ArktModalDialogHost::OnWidgetDestroying(views::Widget* widget) {
 }
 
 void ArktModalDialogHost::ClaimNewDialogs() {
-  NSView* view = view_();
+  NSView* view = HostView();
   if (!view.window) {
     return;
   }
   for (NSWindow* window in NSApp.windows) {
     views::Widget* widget =
         views::Widget::GetWidgetForNativeWindow(gfx::NativeWindow(window));
-    // A tab-modal dialog of an Arkt tab: child-modal, no parent widget (a
+    // A tab-modal dialog of an Arkt tab: a constrained-window widget
+    // (CreateWebModalDialogViews marks it), child-modal, no parent widget (a
     // Views browser window's dialogs have one), not shown yet.
-    if (!widget || widget->parent() || !widget->widget_delegate() ||
+    if (!widget ||
+        widget->GetNativeWindowProperty(views::kWidgetIdentifierKey) !=
+            constrained_window::kConstrainedWindowWidgetIdentifier ||
+        widget->parent() || !widget->widget_delegate() ||
         widget->widget_delegate()->GetModalType() !=
             ui::mojom::ModalType::kChild ||
         window.isVisible || ClaimedDialogs().contains(widget)) {
@@ -233,7 +276,7 @@ void ArktModalDialogHost::ClaimNewDialogs() {
 
 void ArktModalDialogHost::Attach(views::Widget* widget) {
   NSWindow* dialog = widget->GetNativeWindow().GetNativeNSWindow();
-  NSView* view = view_();
+  NSView* view = HostView();
   NSWindow* parent = view.window;
   // Adding a child to a window that is hidden or on another Space would
   // switch Spaces (as NativeWidgetNSWindowBridge::OrderChildren).

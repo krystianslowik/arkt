@@ -46,10 +46,12 @@
 #include "components/search/ntp_features.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/eye_dropper.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/mojom/window_show_state.mojom.h"
 #include "ui/base/window_open_disposition.h"
@@ -362,7 +364,8 @@ void ArktBrowserWindow::BindHost() {
                                   }]];
   }
   // Dialog positions follow the card, and in host mode the tab views the
-  // embedder lays out inside the window.
+  // embedder lays out inside the window. Each dialog host also observes the
+  // frame of the view it is on (the tab's container, #261 review).
   [notification_tokens_
       addObject:[center addObserverForName:NSViewFrameDidChangeNotification
                                     object:host_.cardView
@@ -370,6 +373,28 @@ void ArktBrowserWindow::BindHost() {
                                 usingBlock:^(NSNotification*) {
                                   OnCardResized();
                                 }]];
+  // A dialog cannot attach to a hidden window or one on another Space; it
+  // attaches when the window is ordered in, deminiaturized or its Space
+  // becomes active (#261 review).
+  for (NSNotificationName name in @[
+         NSWindowDidChangeOcclusionStateNotification,
+         NSWindowDidDeminiaturizeNotification
+       ]) {
+    [notification_tokens_
+        addObject:[center addObserverForName:name
+                                      object:window
+                                       queue:nil
+                                  usingBlock:^(NSNotification*) {
+                                    OnWindowPlacementChanged();
+                                  }]];
+  }
+  space_token_ = [NSWorkspace.sharedWorkspace.notificationCenter
+      addObserverForName:NSWorkspaceActiveSpaceDidChangeNotification
+                  object:nil
+                   queue:nil
+              usingBlock:^(NSNotification*) {
+                OnWindowPlacementChanged();
+              }];
   if (host_mode_) {
     [notification_tokens_
         addObject:[center addObserverForName:NSWindowDidResizeNotification
@@ -427,6 +452,11 @@ void ArktBrowserWindow::UnbindHost() {
     [NSNotificationCenter.defaultCenter removeObserver:token];
   }
   [notification_tokens_ removeAllObjects];
+  if (space_token_) {
+    [NSWorkspace.sharedWorkspace.notificationCenter
+        removeObserver:space_token_];
+    space_token_ = nil;
+  }
   if (mounted_) {
     Unmount(mounted_);
   }
@@ -538,10 +568,63 @@ void ArktBrowserWindow::Unmount(content::WebContents* contents) {
 }
 
 void ArktBrowserWindow::OnCardResized() {
-  modal_dialog_host_->NotifyPositionRequiresUpdate();
+  if (modal_dialog_host_) {
+    modal_dialog_host_->NotifyPositionRequiresUpdate();
+  }
   for (auto& [contents, host] : tab_modal_dialog_hosts_) {
     host->NotifyPositionRequiresUpdate();
   }
+}
+
+void ArktBrowserWindow::OnWindowPlacementChanged() {
+  NSWindow* window = host_.window;
+  if (window.visible && window.onActiveSpace) {
+    ShowDialogsHeldWhileHidden();
+    OnCardResized();
+  }
+  if (trace_visibility_) {
+    LOG(WARNING) << "ARKT: native window placement changed visible="
+                 << window.visible << " onActiveSpace=" << window.onActiveSpace
+                 << " occlusion="
+                 << static_cast<unsigned long>(window.occlusionState);
+    TraceVisibility();
+  }
+}
+
+void ArktBrowserWindow::ShowDialogsHeldWhileHidden() {
+  content::WebContents* active =
+      browser_->GetTabStripModel()->GetActiveWebContents();
+  auto* manager =
+      active ? web_modal::WebContentsModalDialogManager::FromWebContents(active)
+             : nullptr;
+  if (!manager || !manager->IsDialogActive()) {
+    return;
+  }
+  auto it = tab_modal_dialog_hosts_.find(active);
+  ArktModalDialogHost* host = it != tab_modal_dialog_hosts_.end()
+                                  ? it->second.get()
+                                  : modal_dialog_host_.get();
+  const content::Visibility visibility = active->GetVisibility();
+  // The manager shows only its front dialog; a second one stays hidden
+  // behind it. So replay only when none is visible, never when the front
+  // dialog is up (that would hide and re-show it on every occlusion or Space
+  // change, #262 review).
+  if (!host || !host->HasDialogs() || host->HasVisibleDialog() ||
+      visibility == content::Visibility::HIDDEN) {
+    return;
+  }
+  // A dialog raised while the host window was ordered out is not shown
+  // (the manager's delegate asks whether the view's window is visible), and
+  // ordering the window out and in leaves the contents' visibility VISIBLE,
+  // so the manager never gets the transition that shows it. Replay one
+  // through its WebContentsObserver interface (no patch; #261 review). The
+  // replay runs whatever OnVisibilityChanged does; today that is only the
+  // dialog show and hide. Recheck when Chromium adds side effects there.
+  LOG(WARNING) << "ARKT: tab-modal dialog held while the window was hidden, "
+                  "shown now";
+  content::WebContentsObserver* observer = manager;
+  observer->OnVisibilityChanged(content::Visibility::HIDDEN);
+  observer->OnVisibilityChanged(visibility);
 }
 
 void ArktBrowserWindow::OnFullscreenChanged() {
@@ -676,6 +759,13 @@ void ArktBrowserWindow::ApplyPendingState() {
   }
 }
 
+void ArktBrowserWindow::DropKeptState() {
+  if (state_pending_ != PendingState::kNone) {
+    LOG(WARNING) << "ARKT: native window kept state dropped (direct request)";
+    state_pending_ = PendingState::kNone;
+  }
+}
+
 void ArktBrowserWindow::DeferFullscreenWhileHeld() {
   CHECK(show_held_);
   state_pending_ = PendingState::kFullscreen;
@@ -695,11 +785,14 @@ void ArktBrowserWindow::Show() {
   if (window.isVisible) {
     [window makeKeyAndOrderFront:nil];
     ApplyPendingState();
+    OnWindowPlacementChanged();
     return;
   }
   [NSApp activateIgnoringOtherApps:YES];
   [window makeKeyAndOrderFront:nil];
   ApplyPendingState();
+  // Dialogs raised while the window was hidden (#261 review).
+  OnWindowPlacementChanged();
   if (mounted_) {
     mounted_->Focus();
   }
@@ -726,6 +819,7 @@ void ArktBrowserWindow::ShowInactive() {
   }
   [host_.window orderFront:nil];
   ApplyPendingState();
+  OnWindowPlacementChanged();
   LOG(WARNING) << "ARKT: window number " << host_.window.windowNumber
                << " (shown inactive)";
 }
@@ -788,6 +882,7 @@ void ArktBrowserWindow::Maximize() {
     LOG(WARNING) << "ARKT: native window maximize deferred (show held)";
     return;
   }
+  DropKeptState();
   if (!host_.window.isZoomed) {
     [host_.window zoom:nil];
   }
@@ -799,6 +894,7 @@ void ArktBrowserWindow::Minimize() {
     LOG(WARNING) << "ARKT: native window minimize deferred (show held)";
     return;
   }
+  DropKeptState();
   [host_.window miniaturize:nil];
 }
 
@@ -808,6 +904,7 @@ void ArktBrowserWindow::Restore() {
     LOG(WARNING) << "ARKT: native window restore deferred (show held)";
     return;
   }
+  DropKeptState();
   NSWindow* window = host_.window;
   if (window.isMiniaturized) {
     [window deminiaturize:nil];

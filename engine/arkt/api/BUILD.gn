@@ -50,6 +50,7 @@ source_set("embedder") {
     "//extensions/common",
     "//content/public/browser",
     "//content/public/common",
+    "//mojo/public/cpp/bindings",
     "//skia",
     "//ui/base",
     "//ui/gfx",

@@ -2,6 +2,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <optional>
@@ -55,6 +56,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/isolated_world_ids.h"
+#include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -107,6 +109,30 @@ NSData* ImageSkiaPNG(const gfx::ImageSkia& image) {
   std::optional<std::vector<uint8_t>> png = gfx::PNGCodec::EncodeBGRASkBitmap(
       rep.GetBitmap(), /*discard_transparency=*/false);
   return png ? [NSData dataWithBytes:png->data() length:png->size()] : nil;
+}
+
+// An action icon encoded once: an icon backed by the same image as last time
+// (the menu caches its rasterized icons, #258) reuses the encoding.
+struct EncodedActionIcon {
+  gfx::ImageSkia icon;
+  NSData* __strong png = nil;
+};
+using ActionIconCache = std::map<std::string, EncodedActionIcon>;
+
+NSData* ActionIconPNG(ActionIconCache& cache,
+                      const std::string& action_id,
+                      const gfx::ImageSkia& icon) {
+  if (icon.isNull()) {
+    cache.erase(action_id);
+    return nil;
+  }
+  auto it = cache.find(action_id);
+  if (it != cache.end() && it->second.icon.BackedBySameObjectAs(icon)) {
+    return it->second.png;
+  }
+  NSData* png = ImageSkiaPNG(icon);
+  cache[action_id] = EncodedActionIcon{icon, png};
+  return png;
 }
 
 // The favicon as PNG, at 2x when the image has that representation, else at
@@ -342,7 +368,8 @@ const char* KindName(ArktEngineEventKind kind) {
 - (void)setOpenerHandle:(ArktFacadeTab*)opener;
 // A client createTab whose insert was deferred (Decision 3): calls that
 // change the tab queue behind the insert until -insertFinished: runs them.
-- (void)markPending;
+// `browser` is the window the tab is to be inserted in.
+- (void)markPendingIn:(ArktFacadeBrowser*)browser;
 // The deferred insert ran (`inserted`) or was dropped (its window is gone).
 - (void)insertFinished:(BOOL)inserted;
 // The contents' beforeunload outcome (WebContentsObserver::BeforeUnloadFired).
@@ -358,6 +385,9 @@ const char* KindName(ArktEngineEventKind kind) {
 - (instancetype)initWithBrowser:(BrowserWindowInterface*)browser;
 - (BrowserWindowInterface*)browserInterface;
 - (void)unbind;
+// The window's encoded action icons, keyed by action id (one cache per
+// window: windows with different active tabs have different icons).
+- (arkt::ActionIconCache&)actionIconCache;
 @end
 
 namespace arkt {
@@ -412,6 +442,13 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
 
   // The next inserted tab is bound to `handle` (a client createTab).
   void SetBinding(ArktFacadeTab* handle) { binding_ = handle; }
+  // Ends a binding. True when a tab was inserted for it (Inserted took it),
+  // even if that tab has closed again since.
+  bool EndBinding() {
+    const bool inserted = binding_ == nil;
+    binding_ = nil;
+    return inserted;
+  }
 
   void SetTerminating(bool terminating) { terminating_ = terminating; }
 
@@ -560,6 +597,14 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
           event.browser = browser;
           event.isActive = YES;
           Record(event);
+        }
+        // Action icons and enabled states are for the active tab, so the
+        // list changes with it (#258 decision).
+        ArktBrowserWindow* window =
+            ArktBrowserWindow::FromBrowser(browser.browserInterface);
+        if (window && window->host_mode() &&
+            window->extensions_container()->menu()) {
+          RecordActionsChanged(browser);
         }
       }
     }
@@ -1012,15 +1057,17 @@ void InsertClientTab(
   }
   g_facade->SetBinding(handle);
   std::move(insert).Run(browser);
-  g_facade->SetBinding(nil);
-  if (!handle.tabInterface) {
+  if (!g_facade->EndBinding()) {
     g_facade->RecordDroppedInsert(handle, browser_handle,
                                   /*window_gone=*/false);
     [handle insertFinished:NO];
     return;
   }
+  // Inserted. A tab closed again within the same call already got its
+  // TabClosed from the removal (#258); it is not a dropped insert.
   LOG(WARNING) << "ARKT: facade client tab inserted session id "
-               << handle.sessionId;
+               << handle.sessionId
+               << (handle.tabInterface ? "" : " (closed again at once)");
   [handle insertFinished:YES];
 }
 
@@ -1089,6 +1136,8 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   int32_t _sessionId;
   ArktTabOrigin _origin;
   BOOL _pending;
+  // The window a pending insert is for (a pending handle has no _browser).
+  ArktFacadeBrowser* __weak _pendingBrowser;
   // Calls made while the insert is pending, run in order after it.
   std::vector<base::OnceClosure> _queued;
 }
@@ -1162,8 +1211,9 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   _opener = opener;
 }
 
-- (void)markPending {
+- (void)markPendingIn:(ArktFacadeBrowser*)browser {
   _pending = YES;
+  _pendingBrowser = browser;
 }
 
 - (void)insertFinished:(BOOL)inserted {
@@ -1171,8 +1221,10 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   std::vector<base::OnceClosure> queued;
   queued.swap(_queued);
   if (!inserted || !_tab) {
-    LOG(WARNING) << "ARKT: facade deferred insert dropped, " << queued.size()
-                 << " queued call(s) dropped";
+    LOG(WARNING) << "ARKT: facade "
+                 << (inserted ? "tab closed at its insert"
+                              : "deferred insert dropped")
+                 << ", " << queued.size() << " queued call(s) dropped";
     _closing = NO;
     return;
   }
@@ -1290,8 +1342,11 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   return contents && contents->GetController().CanGoForward();
 }
 
-// Entries from the last committed one outwards, `step` -1 (back) or +1
-// (forward), nearest first (contract rule 9).
+// Entries from the current one outwards, `step` -1 (back) or +1 (forward),
+// nearest first (contract rule 9). Entry i is goToHistory(offset: step * (i +
+// 1)): counted from the pending entry when a history navigation is pending,
+// as GoToOffset does (GetIndexForOffset), and an entry without a valid URL
+// keeps its place (as about:blank) instead of shifting the later ones (#258).
 - (NSArray<id<ArktHistoryEntry>>*)historyEntriesInDirection:(int)step {
   content::WebContents* contents = self.contents;
   NSMutableArray<id<ArktHistoryEntry>>* entries = [NSMutableArray array];
@@ -1299,7 +1354,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
     return entries;
   }
   content::NavigationController& controller = contents->GetController();
-  int current = controller.GetLastCommittedEntryIndex();
+  int current = controller.GetCurrentEntryIndex();
   if (current < 0) {
     return entries;
   }
@@ -1307,12 +1362,10 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
        i += step) {
     content::NavigationEntry* entry = controller.GetEntryAtIndex(i);
     NSURL* url = entry ? arkt::ToNSURL(entry->GetURL()) : nil;
-    if (!url) {
-      continue;
-    }
     ArktFacadeHistoryEntry* item = [[ArktFacadeHistoryEntry alloc] init];
-    item.url = url;
-    item.title = base::SysUTF16ToNSString(entry->GetTitleForDisplay());
+    item.url = url ?: [NSURL URLWithString:@"about:blank"];
+    item.title =
+        entry ? base::SysUTF16ToNSString(entry->GetTitleForDisplay()) : @"";
     [entries addObject:item];
   }
   return entries;
@@ -1505,46 +1558,68 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 - (id<ArktTabHandle>)duplicate {
   arkt::CheckFacadeEntry();
   arkt::g_facade->CheckNotInNotification("duplicate");
-  ArktFacadeBrowser* browser = _browser;
-  BrowserWindowInterface* interface =
-      browser ? browser.browserInterface : nullptr;
-  if (_pending || !_tab || !interface) {
-    return nil;
-  }
-  int index = interface->GetTabStripModel()->GetIndexOfTab(_tab);
-  if (index == TabStripModel::kNoTab ||
-      !chrome::CanDuplicateTabAt(interface, index)) {
-    return nil;
+  ArktFacadeBrowser* browser = _pending ? _pendingBrowser : _browser;
+  if (!_pending) {
+    BrowserWindowInterface* interface =
+        browser ? browser.browserInterface : nullptr;
+    if (!_tab || !interface) {
+      return nil;
+    }
+    int index = interface->GetTabStripModel()->GetIndexOfTab(_tab);
+    if (index == TabStripModel::kNoTab ||
+        !chrome::CanDuplicateTabAt(interface, index)) {
+      return nil;
+    }
   }
   // The copy (navigation entries, the current one loading) is inserted next
   // to this tab and reported with TabCreated, origin client, like createTab:
-  // now, or from a posted task inside a nested run loop.
+  // now, from a posted task inside a nested run loop, or right after this
+  // tab's own pending insert.
   ArktFacadeTab* handle =
       [[ArktFacadeTab alloc] initWithOrigin:ArktTabOriginClient];
-  bool deferred = arkt::RunOrDefer(
-      "duplicate",
-      base::BindOnce(
-          [](ArktFacadeBrowser* that, ArktFacadeTab* source,
-             ArktFacadeTab* handle) {
-            arkt::InsertClientTab(
-                that, handle, base::BindOnce(
-                                  [](ArktFacadeTab* source,
-                                     BrowserWindowInterface* browser) {
-                                    int index =
-                                        source.tabInterface
-                                            ? browser->GetTabStripModel()
-                                                  ->GetIndexOfTab(
-                                                      source.tabInterface)
-                                            : TabStripModel::kNoTab;
-                                    if (index != TabStripModel::kNoTab) {
-                                      chrome::DuplicateTabAt(browser, index);
-                                    }
-                                  },
-                                  source));
-          },
-          browser, self, handle));
-  if (deferred) {
-    [handle markPending];
+  base::OnceClosure work = base::BindOnce(
+      [](ArktFacadeBrowser* original, ArktFacadeTab* source,
+         ArktFacadeTab* handle) {
+        // The window the source is in when the insert runs: it may have
+        // moved since the call (#258).
+        ArktFacadeBrowser* target =
+            static_cast<ArktFacadeBrowser*>(source.browser) ?: original;
+        arkt::InsertClientTab(
+            target, handle,
+            base::BindOnce(
+                [](ArktFacadeTab* source, BrowserWindowInterface* browser) {
+                  int index = source.tabInterface
+                                  ? browser->GetTabStripModel()->GetIndexOfTab(
+                                        source.tabInterface)
+                                  : TabStripModel::kNoTab;
+                  if (index != TabStripModel::kNoTab &&
+                      chrome::CanDuplicateTabAt(browser, index)) {
+                    chrome::DuplicateTabAt(browser, index);
+                  }
+                },
+                source));
+      },
+      browser, self, handle);
+  if (_pending) {
+    // The source is not inserted yet: the duplicate queues behind it like
+    // every other call (#258). If the source's insert is dropped, so is the
+    // copy's, with its own terminal TabClosed.
+    [handle markPendingIn:browser];
+    LOG(WARNING) << "ARKT: facade duplicate queued behind the insert";
+    _queued.push_back(mojo::WrapCallbackWithDropHandler(
+        std::move(work), base::BindOnce(
+                             [](ArktFacadeBrowser* original,
+                                ArktFacadeTab* handle) {
+                               arkt::g_facade->RecordDroppedInsert(
+                                   handle, original,
+                                   /*window_gone=*/!original.browserInterface);
+                               [handle insertFinished:NO];
+                             },
+                             browser, handle)));
+    return handle;
+  }
+  if (arkt::RunOrDefer("duplicate", std::move(work))) {
+    [handle markPendingIn:browser];
   }
   return handle;
 }
@@ -1560,6 +1635,11 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   // at replay, and the handle keeps answering after the window is gone.
   id<ArktWindowHost> __weak _host;
   int32_t _windowId;
+  arkt::ActionIconCache _actionIcons;
+}
+
+- (arkt::ActionIconCache&)actionIconCache {
+  return _actionIcons;
 }
 
 - (instancetype)initWithBrowser:(BrowserWindowInterface*)browser {
@@ -1576,6 +1656,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 
 - (void)unbind {
   _browser = nullptr;
+  _actionIcons.clear();
 }
 
 - (int32_t)windowId {
@@ -1636,7 +1717,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
           },
           self, handle, arkt::ToGURL(url), static_cast<bool>(active)));
   if (deferred) {
-    [handle markPending];
+    [handle markPendingIn:self];
   }
   return handle;
 }
@@ -1712,12 +1793,22 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   if (!menu) {
     return actions;
   }
-  for (const auto& info : menu->GetActions()) {
+  arkt::ActionIconCache& icons =
+      static_cast<ArktFacadeBrowser*>(browser).actionIconCache;
+  const std::vector<arkt::ArktExtensionsMenu::ActionInfo> infos =
+      menu->GetActions();
+  // Actions no longer listed (uninstalled, removed) drop their encodings.
+  std::erase_if(icons, [&infos](const auto& entry) {
+    return std::none_of(infos.begin(), infos.end(), [&entry](const auto& info) {
+      return info.id == entry.first;
+    });
+  });
+  for (const auto& info : infos) {
     ArktFacadeExtensionAction* action =
         [[ArktFacadeExtensionAction alloc] init];
     action.actionId = base::SysUTF8ToNSString(info.id);
     action.name = base::SysUTF16ToNSString(info.name);
-    action.iconPNG = arkt::ImageSkiaPNG(info.icon);
+    action.iconPNG = arkt::ActionIconPNG(icons, info.id, info.icon);
     action.isEnabled = info.enabled;
     [actions addObject:action];
   }
@@ -1743,10 +1834,19 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
               LOG(WARNING) << "ARKT: facade runExtensionAction: no window";
               return;
             }
-            // The popup anchors to the shell's view (Decision 10).
+            // The popup anchors to the shell's view (Decision 10). The
+            // popover takes the anchor while the action runs, so the
+            // window's own anchor is restored after it: a later popup the
+            // engine opens (chrome.action.openPopup) does not land on a view
+            // the shell passed for one call (#258).
+            NSView* previous = menu->anchor();
             menu->SetAnchor(anchor);
             LOG(WARNING) << "ARKT: facade runExtensionAction " << action_id;
             menu->RunAction(action_id);
+            menu->SetAnchor(previous);
+            LOG(WARNING) << "ARKT: facade runExtensionAction anchor restored "
+                         << (__bridge void*)previous << " (call anchor "
+                         << (__bridge void*)anchor << ")";
           },
           static_cast<ArktFacadeBrowser*>(browser),
           base::SysNSStringToUTF8(actionId), anchor));
@@ -1795,11 +1895,28 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
     completion(nil, arkt::TestAPIError(@"The tab has no live page"));
     return;
   }
-  auto done = base::BindOnce(
-      [](void (^completion)(id, NSError*), base::Value result) {
-        completion(arkt::ToFoundation(result), nil);
-      },
-      completion);
+  // The reply comes over the frame's mojo connection; if the renderer goes
+  // away first the callback is dropped unrun (#258). The drop runs while
+  // the frame is being torn down, so the error completion is posted.
+  auto done = mojo::WrapCallbackWithDropHandler(
+      base::BindOnce(
+          [](void (^completion)(id, NSError*), base::Value result) {
+            completion(arkt::ToFoundation(result), nil);
+          },
+          completion),
+      base::BindOnce(
+          [](void (^completion)(id, NSError*)) {
+            LOG(WARNING) << "ARKT: facade evaluateScript: the page went away "
+                            "before it answered";
+            NSError* error = arkt::TestAPIError(
+                @"The page went away before the script answered");
+            base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+                FROM_HERE, base::BindOnce(
+                               [](void (^completion)(id, NSError*),
+                                  NSError* error) { completion(nil, error); },
+                               completion, error));
+          },
+          completion));
   std::u16string source = base::SysNSStringToUTF16(script);
   if (userGesture) {
     frame->ExecuteJavaScriptWithUserGestureForTests(

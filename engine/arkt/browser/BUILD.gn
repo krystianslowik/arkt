@@ -108,6 +108,7 @@ source_set("window") {
     "//chrome/browser/ui/views:bubble_anchor_util_views",
     "//chrome/browser/ui/views/new_tab_footer",
     "//components/bookmarks/common",
+    "//components/constrained_window",
     "//components/input",
     "//components/javascript_dialogs",
     "//components/prefs",
