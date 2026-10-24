@@ -1,61 +1,106 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="design/brand/social/readme-header-dark.png">
-  <img src="design/brand/social/readme-header-light.png" alt="Arkt: A native macOS browser" width="800">
-</picture>
+<a href="https://arkt.dev">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="design/brand/social/readme-header-dark.png">
+    <img src="design/brand/social/readme-header-light.png" alt="arkt: A native macOS browser." width="800">
+  </picture>
+</a>
 
-# Arkt
+# arkt
 
-Arkt is a native macOS browser that rebuilds the Arc experience: the sidebar with Spaces, pinned and Today tabs,
-Favorites, the command bar, Split View, Little Arc style windows, auto-archive and Peek, plus an importer for your
-existing Arc data. The Browser Company sunsets Arc on 2026-12-22; Arkt aims to be a faithful, fast home for Arc users
-after that date.
+**Keep the way you browse.**
 
-Arkt is built on its own Chromium framework: the window, sidebar and every hot path are native AppKit at 120 Hz. It is not a CEF wrapper and
-not a WKWebView shell, so full Chrome extension support (Web Store, password managers) is part of the design.
+Arkt is a native macOS browser built around a familiar sidebar: Spaces, pinned tabs and Today, with a path to bring
+your Arc data across.
 
-**Status: pre-alpha.** Nothing here is ready for daily use yet.
+[Official website: arkt.dev](https://arkt.dev) ·
+[Join the waitlist](https://arkt.dev/#get) ·
+[Contributing](CONTRIBUTING.md) ·
+[Buy me a coffee](https://buymeacoffee.com/krystianslowik)
 
-## Repository layout
+## Status
+
+**Pre-alpha. Not ready for daily use.** [Join the waitlist](https://arkt.dev/#get) to hear when Arkt is ready for you.
+
+The default Debug build is a development shell using `FakeEngine`, backed by WKWebView. A separate `Engine`
+configuration connects the shell to Arkt's Chromium framework; that integration is still in progress. The Debug
+shell is useful for UI development, but does not demonstrate Chromium or Chrome extension support.
+
+[See the interface on arkt.dev](https://arkt.dev/#parity).
+
+## What we're building
+
+The goal is to preserve the habits you already have in Arc:
+
+- Spaces, Favorites and pinned folders keep the sidebar organized; Today tabs archive themselves.
+- Split View, Peek and small companion windows let you follow a link without losing your place.
+- A command bar opens tabs, links and searches; an importer brings your existing Arc structure across.
+- An AppKit shell surrounds Arkt's Chromium framework, with Chrome extensions as part of the design.
+
+This is the product direction, not a list of release-ready features. The [roadmap](https://github.com/krystianslowik/arkt/issues/30)
+and [implementation plans](docs/plans) track the work.
+
+## Build the development shell
+
+The app targets **macOS 15+**. Building it requires Xcode with **Swift 6.2+** and
+[XcodeGen](https://github.com/yonaskolb/XcodeGen), on a macOS version supported by your Xcode release.
+The [CI configuration](.github/workflows/swift-tests.yml) pins Xcode 26.6 and XcodeGen 2.46.0.
+
+From the repository root, generate, build and open the Debug app:
+
+```zsh
+(
+  cd app/ArktShell &&
+  xcodegen generate &&
+  xcodebuild -project ArktShell.xcodeproj -scheme ArktShell -configuration Debug -derivedDataPath build build &&
+  open build/Build/Products/Debug/ArktShell.app
+)
+```
+
+This opens the native Arkt Shell window using the WKWebView-backed development engine. A Chromium checkout is not
+needed for this build. The generated `.xcodeproj` is not committed.
+
+To run the core and non-GUI shell tests, also from the repository root:
+
+```zsh
+(cd app/ArktCore && swift test)
+(cd app/ArktShell/ShellKit && swift test --skip ShellKitGUITests)
+```
+
+GUI tests require a logged-in session. See [Contributing](CONTRIBUTING.md#before-opening-a-pull-request) for the full
+checks. While a Chromium build is running, use `nice -n 20` and two jobs for Swift builds and tests, as described in
+the [capacity rules](CONTRIBUTING.md#7-code-rules).
+
+For the Chromium toolchain, framework setup and engine build, follow the [engine guide](engine/README.md).
+
+## Contributing
+
+Start with an unassigned [ready issue](https://github.com/krystianslowik/arkt/issues?q=is%3Aissue%20is%3Aopen%20label%3Astatus%3Aready)
+and read the [contribution guide](CONTRIBUTING.md) before claiming it. The [roadmap](https://github.com/krystianslowik/arkt/issues/30)
+sets the order of work. Bug reports and documentation improvements are welcome too.
+
+## Support development
+
+If you'd like to help cover development time and build machines, [buy me a coffee](https://buymeacoffee.com/krystianslowik).
+You can also help by testing, reporting bugs or contributing a change.
+
+## Architecture and documentation
 
 | Path | What it is |
 |---|---|
-| `app/ArktCore` | SwiftPM package: sidebar model, Arc import, persistence (GRDB), archive and auto-archive policy |
-| `app/ArktShell` | The native app shell: XcodeGen project (`project.yml`) plus the `ShellKit` package (window chrome, sidebar, command bar, motion, theme) |
-| `engine/` | The Chromium side: our overlay sources (`engine/arkt`, linked into the checkout as `//arkt`), the upstream patch set (`engine/patches/chromium`) and the patch workflow |
-| `docs/plans` | Design, implementation plans and results |
-| `docs/spec` | The Arc 1.168 parity spec (shortcuts, behaviors, settings) |
+| [app/ArktCore](app/ArktCore) | Sidebar model, Arc import, persistence, archive and auto-archive policy |
+| [app/ArktShell](app/ArktShell) | AppKit app shell, XcodeGen project and `ShellKit` UI package |
+| [engine](engine/README.md) | Chromium overlay, upstream patches and engine build workflow |
+| [docs/spec](docs/spec) | Arc behavior and compatibility specification |
+| [docs/plans](docs/plans) | Design, implementation plans and results |
+| [design/brand](design/brand/README.md) | Brand guide, original artwork and social graphics |
 
-## Building the shell
+## Independence
 
-Requirements: macOS 15 or later, Xcode with Swift 6, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
-
-```zsh
-# Core model and import
-cd app/ArktCore && swift test
-
-# Shell UI package (GUI tests need a logged-in session; skip them in headless runs)
-cd app/ArktShell/ShellKit && swift test --skip ShellKitGUITests
-
-# The app (the .xcodeproj is generated, never committed)
-cd app/ArktShell && xcodegen generate
-xcodebuild -project ArktShell.xcodeproj -scheme ArktShell -configuration Debug -derivedDataPath build build
-```
-
-The shell currently runs against a test engine (`FakeEngine`, WKWebView-backed) so the UI can be developed without a
-Chromium build.
-
-## Building the engine
-
-The engine is a Chromium checkout pinned to 156.0.8078.48 with our overlay linked in and our patches applied on a
-local branch. It needs a full Chromium toolchain (depot_tools) and a lot of disk and time. The steps (define
-`$CHROMIUM_ROOT`, link the overlay, apply and export patches) are in [engine/README.md](engine/README.md).
-
-## Clean room
-
-Arkt is an independent implementation. Arc's behavior is matched from its documentation, its observable UI and its
-on-disk data formats (for import). No Arc code or assets are copied. Arkt is not affiliated with, endorsed by or connected to The Browser
-Company. "Arc" is a trademark of its owner and is used here only to describe compatibility.
+Arkt is an independent implementation. Arc's behavior is matched from its documentation, observable UI and on-disk
+data formats for import. No Arc code or assets are copied. Arkt is not affiliated with, endorsed by or connected to
+The Browser Company. Arc is a trademark of its owner and is named here to describe compatibility.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Chromium is licensed separately under its own terms.
+The source code is licensed under [MIT](LICENSE). Chromium is licensed separately under its own terms. See the
+[brand usage policy](design/brand/README.md#license) for the Arkt name, mark and wordmark.
