@@ -39,6 +39,10 @@ public final class SidebarController {
 
   private var pages: [SpaceID: SpacePageView] = [:]
   private var pagedSpaces: [SpaceID] = []
+  /// Theme last shown per Space. A change of the current Space's theme asks the window to crossfade; the first
+  /// time a Space is seen does not.
+  private var shownThemes: [SpaceID: SpaceThemeInfo] = [:]
+  private var themeCrossfadePending = false
   /// Flavor per paged Space, cached so a swipe frame does no source lookups.
   private var pagedFlavors: [ThemeFlavor] = []
   /// Last active tab per Space, restored when the Space becomes current again (BH-036).
@@ -81,6 +85,13 @@ public final class SidebarController {
 
   /// Spaces of this window's profile, in sidebar order.
   public var spaces: [SpaceID] { source.spaceOrder.filter { source.space($0)?.profile == profile } }
+
+  /// True once, after the current Space's theme changed. The window consumes it in `refreshThemes`.
+  public func consumeThemeCrossfade() -> Bool {
+    let pending = themeCrossfadePending
+    themeCrossfadePending = false
+    return pending
+  }
 
   public var currentPage: SpacePageView? { currentSpace.flatMap { pages[$0] } }
 
@@ -174,8 +185,24 @@ public final class SidebarController {
     for id in pagedSpaces { pages[id]?.refresh(from: source.space(id)) }
     pagedFlavors = pagedSpaces.map { source.space($0)?.theme.flavor ?? .light }
     view.spaceDots.titles = pagedSpaces.map { source.space($0)?.title ?? "" }
+    view.spaceDots.icons = pagedSpaces.map { source.space($0)?.icon?.symbol }
     if let id = currentSpace, let info = source.space(id) { view.setFlavor(info.theme.flavor) }
+    noteCurrentTheme()
     if notify { onSpacesChanged?(pagedSpaces) }
+  }
+
+  /// Sets `themeCrossfadePending` only when the current Space's theme value changed, matched by id so a reorder
+  /// (the pager jumps before this runs) does not look like a theme edit.
+  private func noteCurrentTheme() {
+    var next: [SpaceID: SpaceThemeInfo] = [:]
+    next.reserveCapacity(pagedSpaces.count)
+    for id in pagedSpaces {
+      if let theme = source.space(id)?.theme { next[id] = theme }
+    }
+    if let current = currentSpace, let before = shownThemes[current], let after = next[current], before != after {
+      themeCrossfadePending = true
+    }
+    shownThemes = next
   }
 
   @discardableResult

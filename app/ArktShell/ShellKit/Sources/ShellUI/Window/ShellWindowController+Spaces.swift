@@ -73,7 +73,7 @@ extension ShellWindowController {
     page(of: space)?.beginRename()
   }
 
-  /// Spaces > Move Space Left / Right (BH-039 by menu [I]; the header drag is deferred): the current Space swaps
+  /// Spaces > Move Space Left / Right (BH-039 by menu [I]; dragging the header calls the same `moveSpace`): the current Space swaps
   /// places with its neighbour in this window's profile and stays current. Ctrl-1 ... Ctrl-9 follow the new order.
   @objc public func moveSpaceLeft(_ sender: Any?) { moveCurrentSpace(by: -1) }
   @objc public func moveSpaceRight(_ sender: Any?) { moveCurrentSpace(by: 1) }

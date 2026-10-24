@@ -5,10 +5,10 @@ import SidebarModel
 import XCTest
 @testable import ShellUI
 
-/// New Space, rename and reorder (#106): New Space is named "Space N" (decision on #106), lands right after the
-/// current Space (BH-037), becomes current with its title open for editing; the title renames in place (BH-038) and
-/// the Spaces menu reorders (BH-039, the header drag is deferred). Every write goes through the source, so the app's
-/// autosave (`onDidChange`) persists it.
+/// New Space, rename and reorder (#106, #279): New Space is named "Space N" (decision on #106), lands right after the
+/// current Space (BH-037), becomes current with its title open for editing; the title renames in place (BH-038), the
+/// header "..." menu sets the icon and the theme, and dragging the header reorders (BH-039). Every write goes through
+/// the source, so the app's autosave (`onDidChange`) persists it.
 @MainActor
 final class SpaceEditingTests: XCTestCase {
   @MainActor
@@ -46,6 +46,12 @@ final class SpaceEditingTests: XCTestCase {
 
   private static func item(_ action: Selector) -> NSMenuItem {
     NSMenuItem(title: "", action: action, keyEquivalent: "")
+  }
+
+  private static func mouse(_ type: NSEvent.EventType, at point: NSPoint, window: NSWindow?) throws -> NSEvent {
+    try XCTUnwrap(NSEvent.mouseEvent(
+      with: type, location: point, modifierFlags: [], timestamp: 0, windowNumber: window?.windowNumber ?? 0,
+      context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
   }
 
   // MARK: - New Space
@@ -193,7 +199,30 @@ final class SpaceEditingTests: XCTestCase {
       windowNumber: harness.controller.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1,
       pressure: 1))
     page.mouseDown(with: event)
+    XCTAssertFalse(page.isRenaming, "the title opens on mouse up, once the press is too short to be a drag")
+    let up = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseUp, location: event.locationInWindow, modifierFlags: [], timestamp: 0,
+      windowNumber: event.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    page.mouseUp(with: up)
     XCTAssertTrue(page.isRenaming)
+    XCTAssertEqual(page.titleLabel.toolTip, "Drag to Reorder Space")
+    harness.controller.close()
+  }
+
+  func testAClickBesideTheTitleDoesNotOpenIt() throws {
+    let harness = Harness(["A"])
+    let page = try XCTUnwrap(harness.currentPage)
+    harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    let point = NSPoint(x: page.bounds.width - 8, y: SidebarMetrics.spaceTitleHeight / 2)
+    XCTAssertFalse(page.titleLabel.frame.contains(point))
+    XCTAssertFalse(page.editButton.frame.contains(point))
+    XCTAssertFalse(page.optionsButton.frame.contains(point))
+    let down = try Self.mouse(.leftMouseDown, at: page.convert(point, to: nil), window: harness.controller.window)
+    page.mouseDown(with: down)
+    let up = try Self.mouse(.leftMouseUp, at: down.locationInWindow, window: harness.controller.window)
+    page.mouseUp(with: up)
+    XCTAssertFalse(page.isRenaming)
+    XCTAssertEqual(harness.saves, 0)
     harness.controller.close()
   }
 
@@ -207,10 +236,75 @@ final class SpaceEditingTests: XCTestCase {
 
     page.setHeaderHovered(true)
     XCTAssertFalse(page.editButton.isHidden)
+    XCTAssertFalse(page.optionsButton.isHidden)
+    XCTAssertEqual(page.optionsButton.accessibilityLabel(), "Space Options")
     XCTAssertGreaterThanOrEqual(page.editButton.frame.minX, page.titleLabel.frame.maxX, "after the title")
+    XCTAssertGreaterThanOrEqual(page.optionsButton.frame.minX, page.editButton.frame.maxX, "after the edit button")
     page.editButton.performClick(nil)
     XCTAssertTrue(page.isRenaming)
     XCTAssertTrue(page.editButton.isHidden, "the open field needs no edit button")
+    harness.controller.close()
+  }
+
+  // MARK: - Icon, theme, header drag
+
+  func testHeaderMenuSetsTheIconAndThemeAndLeavesProfileDisabled() throws {
+    let harness = Harness(["A"])
+    let background = harness.controller.themeBackground
+    background.crossfadeDuration = 0
+    background.reducesMotion = { false }
+    let page = try XCTUnwrap(harness.currentPage)
+    let menu = page.makeOptionsMenu()
+    let profile = try XCTUnwrap(menu.item(withTitle: "Profile"))
+    XCTAssertFalse(profile.isEnabled)
+    XCTAssertNil(profile.action)
+    XCTAssertEqual(menu.item(withTitle: "Theme")?.submenu?.items.map(\.title), ["Paper", "Dusk"])
+
+    let dusk = try XCTUnwrap(menu.item(withTitle: "Theme")?.submenu?.item(withTitle: "Dusk"))
+    page.pickTheme(dusk)
+    XCTAssertEqual(harness.source.space(harness.ids[0])?.theme, SpaceThemeCatalog.dusk)
+    XCTAssertEqual(harness.saves, 1)
+    XCTAssertNil(background.crossfadeAnimationForTesting)
+    let painted = background.baseColorsForTesting.flatMap { $0.components ?? [] }
+    let expected = SpaceThemeCatalog.dusk.baseColors.flatMap { $0.cgColor.components ?? [] }
+    XCTAssertEqual(painted.count, expected.count)
+    for (got, want) in zip(painted, expected) {
+      XCTAssertEqual(got, want, accuracy: 0.001)
+    }
+
+    let star = try XCTUnwrap(menu.item(withTitle: "Icon")?.submenu?.item(withTitle: "Star"))
+    page.pickIcon(star)
+    let dots = harness.controller.sidebarController.view.spaceDots
+    XCTAssertEqual(dots.icons, ["star"])
+    XCTAssertEqual(harness.source.sidebar.spaces[harness.ids[0]]?.icon?.symbol, "star")
+    XCTAssertEqual(harness.saves, 2)
+    harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    dots.updateLayer()
+    let mark = try XCTUnwrap(dots.markForTesting(0))
+    XCTAssertTrue(mark.hasContents)
+    XCTAssertEqual(mark.width, SidebarMetrics.spaceIconSize)
+    harness.controller.close()
+  }
+
+  func testHeaderDragReordersAndCtrlNFollowsTheNewOrder() throws {
+    let harness = Harness(["A", "B", "C"])
+    let page = try XCTUnwrap(harness.page(harness.ids[0]))
+    harness.controller.sidebarController.showSpace(harness.ids[0])
+    harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    let start = page.convert(NSPoint(x: page.titleLabel.frame.midX, y: page.titleLabel.frame.midY), to: nil)
+    let down = try Self.mouse(.leftMouseDown, at: start, window: harness.controller.window)
+    page.mouseDown(with: down)
+    let moved = NSPoint(x: start.x + SidebarMetrics.spaceDotSize + SidebarMetrics.spaceDotSpacing, y: start.y)
+    let up = try Self.mouse(.leftMouseUp, at: moved, window: harness.controller.window)
+    page.mouseUp(with: up)
+
+    XCTAssertEqual(harness.titles, ["B", "A", "C"])
+    XCTAssertEqual(harness.controller.currentSpace, harness.ids[0])
+    XCTAssertEqual(harness.saves, 1, "the new order is persisted through the autosave hook")
+    harness.controller.sidebarController.goToSpace(at: 0)
+    waitUntil("the first Space is the one the drag moved in front") {
+      harness.controller.currentSpace == harness.ids[1]
+    }
     harness.controller.close()
   }
 

@@ -195,9 +195,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   private func refreshThemes() {
     // One theme per paged Space, so theme index == page index even if a Space lookup fails.
-    rootView.themeBackground.themes = sidebarController.spaces.map {
+    // Crossfade only when the current Space's theme changed; a reorder snaps (the pager already jumped).
+    let crossfade = sidebarController.consumeThemeCrossfade()
+    rootView.themeBackground.replaceThemes(sidebarController.spaces.map {
       sidebar.space($0)?.theme ?? SpaceThemeInfo(baseColors: [.white(1)], isDark: false)
-    }
+    }, crossfade: crossfade)
     refreshToastFlavor()
   }
 
