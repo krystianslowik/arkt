@@ -94,9 +94,8 @@ NSColor* AccentTextColor() {
   return Dynamic(Srgb(0x8A5A0E), Srgb(0xE9B520));
 }
 
-constexpr CGFloat kSheetWidth = 420;
+constexpr CGFloat kDefaultWidth = 420;
 constexpr CGFloat kInset = 20;
-constexpr CGFloat kContentWidth = kSheetWidth - 2 * kInset;
 constexpr CGFloat kIconSize = 32;
 constexpr CGFloat kIconGap = 12;
 constexpr CGFloat kListMaxHeight = 260;
@@ -104,6 +103,13 @@ constexpr CGFloat kButtonHeight = 28;
 constexpr CGFloat kButtonRadius = 7;
 constexpr CGFloat kButtonPadding = 14;
 constexpr CGFloat kButtonMinWidth = 80;
+// Panel presentation (permission prompts): corner radius, and the inset from
+// the anchor view's top-leading corner.
+constexpr CGFloat kPanelRadius = 10;
+constexpr CGFloat kPanelInset = 12;
+// Fade-in only: a prompt is occasional and points at the page, so a short
+// opacity change is enough; the exit is immediate (often keyboard-initiated).
+constexpr NSTimeInterval kPanelFadeIn = 0.14;
 
 NSTextField* Label(NSString* text,
                    NSFont* font,
@@ -155,6 +161,11 @@ NSTextField* Label(NSString* text,
 @synthesize cancelTitle = _cancelTitle;
 @synthesize defaultButton = _defaultButton;
 @synthesize primaryEnableDelay = _primaryEnableDelay;
+@synthesize secondaryTitle = _secondaryTitle;
+@synthesize width = _width;
+@synthesize stackedButtons = _stackedButtons;
+@synthesize neutralPrimary = _neutralPrimary;
+@synthesize escapeDismisses = _escapeDismisses;
 @end
 
 // A filled, rounded push button in Arkt's colors. The title stays the
@@ -310,6 +321,18 @@ NSTextField* Label(NSString* text,
     self.onEscape();
   }
 }
+
+// A borderless window does not turn Escape into -cancelOperation: on its
+// own the way a sheet does.
+- (void)keyDown:(NSEvent*)event {
+  if (event.keyCode == 53 /* kVK_Escape */ &&
+      !(event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask &
+        ~NSEventModifierFlagFunction)) {
+    [self cancelOperation:nil];
+    return;
+  }
+  [super keyDown:event];
+}
 @end
 
 @interface ArktDialogSheet () <NSTextViewDelegate>
@@ -319,7 +342,17 @@ NSTextField* Label(NSString* text,
   ArktDialogSheetContent* _content;
   ArktSheetWindow* _window;
   ArktSheetButton* _primary;
+  ArktSheetButton* _secondary;
   ArktSheetButton* _cancel;
+  NSBox* _surface;
+  CGFloat _width;
+  CGFloat _contentWidth;
+  // Panel presentation.
+  BOOL _panel;
+  BOOL _rightToLeft;
+  __weak NSView* _anchor;
+  NSMutableArray* _panelTokens;
+  NSSize _fittingSize;
   NSButton* _checkbox;
   __weak NSWindow* _parent;
   BOOL _answered;
@@ -328,6 +361,7 @@ NSTextField* Label(NSString* text,
 }
 
 @synthesize onPrimary = _onPrimary;
+@synthesize onSecondary = _onSecondary;
 @synthesize onCancel = _onCancel;
 @synthesize onDismiss = _onDismiss;
 @synthesize onLink = _onLink;
@@ -336,6 +370,8 @@ NSTextField* Label(NSString* text,
 - (instancetype)initWithContent:(ArktDialogSheetContent*)content {
   if ((self = [super init])) {
     _content = content;
+    _width = content.width > 0 ? content.width : kDefaultWidth;
+    _contentWidth = _width - 2 * kInset;
     [self buildWindow];
   }
   return self;
@@ -344,6 +380,9 @@ NSTextField* Label(NSString* text,
 - (void)dealloc {
   if (_parentCloseObserver) {
     [NSNotificationCenter.defaultCenter removeObserver:_parentCloseObserver];
+  }
+  for (id token in _panelTokens) {
+    [NSNotificationCenter.defaultCenter removeObserver:token];
   }
 }
 
@@ -363,7 +402,7 @@ NSTextField* Label(NSString* text,
   text.alignment = NSLayoutAttributeLeading;
   text.spacing = 3;
   CGFloat text_width =
-      kContentWidth - (_content.icon ? kIconSize + kIconGap : 0);
+      _contentWidth - (_content.icon ? kIconSize + kIconGap : 0);
   NSTextField* title =
       Label(_content.title,
             [NSFont systemFontOfSize:15 weight:NSFontWeightSemibold],
@@ -408,7 +447,7 @@ NSTextField* Label(NSString* text,
       paragraph.secondary ? SecondaryTextColor() : PrimaryTextColor();
   if (paragraph.linkRange.location == NSNotFound ||
       NSMaxRange(paragraph.linkRange) > paragraph.text.length) {
-    return Label(paragraph.text, font, color, kContentWidth);
+    return Label(paragraph.text, font, color, _contentWidth);
   }
 
   // A text view, so the link inside the sentence is a real, focusable link.
@@ -423,7 +462,7 @@ NSTextField* Label(NSString* text,
                                                 (long)index]
                range:paragraph.linkRange];
   NSTextView* view =
-      [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, kContentWidth, 10)];
+      [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, _contentWidth, 10)];
   view.editable = NO;
   view.selectable = YES;
   view.drawsBackground = NO;
@@ -441,7 +480,7 @@ NSTextField* Label(NSString* text,
           .size.height);
   view.translatesAutoresizingMaskIntoConstraints = NO;
   [NSLayoutConstraint activateConstraints:@[
-    [view.widthAnchor constraintEqualToConstant:kContentWidth],
+    [view.widthAnchor constraintEqualToConstant:_contentWidth],
     [view.heightAnchor constraintEqualToConstant:height],
   ]];
   return view;
@@ -483,10 +522,10 @@ NSTextField* Label(NSString* text,
     body.alignment = NSLayoutAttributeLeading;
     body.spacing = 2;
     [body addArrangedSubview:Label(item.text, font, PrimaryTextColor(),
-                                   kContentWidth - kBulletWidth - 4)];
+                                   _contentWidth - kBulletWidth - 4)];
     for (NSString* detail in item.details) {
       [body addArrangedSubview:Label(detail, detail_font, SecondaryTextColor(),
-                                     kContentWidth - kBulletWidth - 4)];
+                                     _contentWidth - kBulletWidth - 4)];
     }
     NSStackView* row = [NSStackView stackViewWithViews:@[ bullet, body ]];
     row.orientation = NSUserInterfaceLayoutOrientationHorizontal;
@@ -514,7 +553,7 @@ NSTextField* Label(NSString* text,
   [document addSubview:list];
   scroll.documentView = document;
   [NSLayoutConstraint activateConstraints:@[
-    [scroll.widthAnchor constraintEqualToConstant:kContentWidth],
+    [scroll.widthAnchor constraintEqualToConstant:_contentWidth],
     [scroll.heightAnchor constraintEqualToConstant:kListMaxHeight],
     [document.leadingAnchor
         constraintEqualToAnchor:scroll.contentView.leadingAnchor],
@@ -550,13 +589,44 @@ NSTextField* Label(NSString* text,
                                               accent:NO];
     _cancel.target = self;
     _cancel.action = @selector(cancelPressed:);
-    [footer addView:_cancel inGravity:NSStackViewGravityTrailing];
+  }
+  if (_content.secondaryTitle.length) {
+    _secondary = [[ArktSheetButton alloc] initWithTitle:_content.secondaryTitle
+                                                 accent:NO];
+    _secondary.target = self;
+    _secondary.action = @selector(secondaryPressed:);
   }
   if (primary_title.length) {
-    _primary = [[ArktSheetButton alloc] initWithTitle:primary_title accent:YES];
+    _primary =
+        [[ArktSheetButton alloc] initWithTitle:primary_title
+                                        accent:!_content.neutralPrimary];
     _primary.target = self;
     _primary.action = @selector(primaryPressed:);
-    [footer addView:_primary inGravity:NSStackViewGravityTrailing];
+  }
+
+  if (_content.stackedButtons) {
+    // Full-width rows, primary first, as Chrome's permission prompt orders
+    // them (allow while visiting, allow this time, block).
+    footer.orientation = NSUserInterfaceLayoutOrientationVertical;
+    footer.alignment = NSLayoutAttributeCenterX;
+    footer.spacing = 6;
+    for (ArktSheetButton* button in @[ _primary ?: NSNull.null,
+                                       _secondary ?: NSNull.null,
+                                       _cancel ?: NSNull.null ]) {
+      if ([button isKindOfClass:[ArktSheetButton class]]) {
+        [footer addArrangedSubview:button];
+        [button.widthAnchor constraintEqualToConstant:_contentWidth].active =
+            YES;
+      }
+    }
+  } else {
+    for (ArktSheetButton* button in @[ _cancel ?: NSNull.null,
+                                       _secondary ?: NSNull.null,
+                                       _primary ?: NSNull.null ]) {
+      if ([button isKindOfClass:[ArktSheetButton class]]) {
+        [footer addView:button inGravity:NSStackViewGravityTrailing];
+      }
+    }
   }
 
   // Return presses the default button only; Escape goes through
@@ -568,7 +638,7 @@ NSTextField* Label(NSString* text,
     _cancel.keyEquivalent = @"\r";
   }
   [NSLayoutConstraint activateConstraints:@[
-    [footer.widthAnchor constraintEqualToConstant:kContentWidth],
+    [footer.widthAnchor constraintEqualToConstant:_contentWidth],
   ]];
   return footer;
 }
@@ -597,7 +667,7 @@ NSTextField* Label(NSString* text,
     divider.accessibilityElement = NO;
     [NSLayoutConstraint activateConstraints:@[
       [divider.heightAnchor constraintEqualToConstant:1],
-      [divider.widthAnchor constraintEqualToConstant:kContentWidth],
+      [divider.widthAnchor constraintEqualToConstant:_contentWidth],
     ]];
     [stack addArrangedSubview:divider];
     if (_content.listHeading.length) {
@@ -605,7 +675,7 @@ NSTextField* Label(NSString* text,
                                       [NSFont systemFontOfSize:13
                                                         weight:
                                                             NSFontWeightMedium],
-                                      PrimaryTextColor(), kContentWidth)];
+                                      PrimaryTextColor(), _contentWidth)];
       [stack setCustomSpacing:8 afterView:stack.arrangedSubviews.lastObject];
     }
     [stack addArrangedSubview:[self listView]];
@@ -626,20 +696,33 @@ NSTextField* Label(NSString* text,
   [stack setCustomSpacing:20 afterView:stack.arrangedSubviews[
                                            stack.arrangedSubviews.count - 2]];
 
-  NSView* content = [[NSView alloc] initWithFrame:NSZeroRect];
-  [content addSubview:stack];
+  // The surface is a box so the panel presentation can round and outline it;
+  // as a sheet it is a flat fill like the window behind it.
+  _surface = [[NSBox alloc] initWithFrame:NSZeroRect];
+  _surface.boxType = NSBoxCustom;
+  _surface.titlePosition = NSNoTitle;
+  _surface.contentViewMargins = NSZeroSize;
+  _surface.borderWidth = 0;
+  _surface.cornerRadius = 0;
+  _surface.fillColor = SurfaceColor();
+  _surface.borderColor = DividerColor();
+  NSView* content = _surface;
+  NSView* inner = [[NSView alloc] initWithFrame:NSZeroRect];
+  _surface.contentView = inner;
+  [inner addSubview:stack];
   [NSLayoutConstraint activateConstraints:@[
-    [stack.leadingAnchor constraintEqualToAnchor:content.leadingAnchor],
-    [stack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor],
-    [stack.topAnchor constraintEqualToAnchor:content.topAnchor],
-    [stack.bottomAnchor constraintEqualToAnchor:content.bottomAnchor],
-    [stack.widthAnchor constraintEqualToConstant:kSheetWidth],
+    [stack.leadingAnchor constraintEqualToAnchor:inner.leadingAnchor],
+    [stack.trailingAnchor constraintEqualToAnchor:inner.trailingAnchor],
+    [stack.topAnchor constraintEqualToAnchor:inner.topAnchor],
+    [stack.bottomAnchor constraintEqualToAnchor:inner.bottomAnchor],
+    [stack.widthAnchor constraintEqualToConstant:_width],
   ]];
   [content layoutSubtreeIfNeeded];
   NSSize size = stack.fittingSize;
+  _fittingSize = NSMakeSize(_width, size.height);
 
   _window = [[ArktSheetWindow alloc]
-      initWithContentRect:NSMakeRect(0, 0, kSheetWidth, size.height)
+      initWithContentRect:NSMakeRect(0, 0, _width, size.height)
                 styleMask:NSWindowStyleMaskTitled
                   backing:NSBackingStoreBuffered
                     defer:YES];
@@ -692,6 +775,103 @@ NSTextField* Label(NSString* text,
   [parent beginSheet:_window completionHandler:nil];
 }
 
+- (void)beginPanelOnView:(NSView*)anchor rightToLeft:(BOOL)rightToLeft {
+  NSWindow* parent = anchor.window;
+  if (_closed || !parent || _parent) {
+    return;
+  }
+  _panel = YES;
+  _rightToLeft = rightToLeft;
+  _anchor = anchor;
+  _parent = parent;
+  _window.appearance = parent.appearance;
+  _window.styleMask = NSWindowStyleMaskBorderless;
+  _window.opaque = NO;
+  _window.backgroundColor = NSColor.clearColor;
+  _window.hasShadow = YES;
+  [_window setContentSize:_fittingSize];
+  _surface.cornerRadius = kPanelRadius;
+  _surface.borderWidth = 1;
+  // Read as a dialog, named by its title, as the Views bubble is.
+  _window.accessibilitySubrole = NSAccessibilityDialogSubrole;
+
+  __weak ArktDialogSheet* weak_self = self;
+  NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
+  _parentCloseObserver =
+      [center addObserverForName:NSWindowWillCloseNotification
+                          object:parent
+                           queue:nil
+                      usingBlock:^(NSNotification* note) {
+                        [weak_self parentWillClose];
+                      }];
+  _panelTokens = [[NSMutableArray alloc] init];
+  void (^place)(NSNotification*) = ^(NSNotification* note) {
+    [weak_self placePanel];
+  };
+  [_panelTokens addObject:[center addObserverForName:NSWindowDidResizeNotification
+                                              object:parent
+                                               queue:nil
+                                          usingBlock:place]];
+  anchor.postsFrameChangedNotifications = YES;
+  [_panelTokens
+      addObject:[center addObserverForName:NSViewFrameDidChangeNotification
+                                    object:anchor
+                                     queue:nil
+                                usingBlock:place]];
+
+  // Input protection, as Chrome's bubble: the allow answers are not
+  // pressable for a moment after the prompt appears.
+  if (_content.primaryEnableDelay > 0) {
+    _primary.enabled = NO;
+    _secondary.enabled = NO;
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW,
+                      (int64_t)(_content.primaryEnableDelay * NSEC_PER_SEC)),
+        dispatch_get_main_queue(), ^{
+          ArktDialogSheet* strong_self = weak_self;
+          if (strong_self && !strong_self->_closed) {
+            strong_self->_primary.enabled = YES;
+            strong_self->_secondary.enabled = YES;
+          }
+        });
+  }
+
+  [self placePanel];
+  BOOL take_focus = parent.isKeyWindow;
+  _window.alphaValue = 0;
+  [parent addChildWindow:_window ordered:NSWindowAbove];
+  if (take_focus) {
+    [_window makeKeyAndOrderFront:nil];
+  } else {
+    [_window orderFront:nil];
+  }
+  [NSAnimationContext
+      runAnimationGroup:^(NSAnimationContext* context) {
+        context.duration = kPanelFadeIn;
+        context.timingFunction =
+            [CAMediaTimingFunction functionWithControlPoints:0.23:1:0.32:1];
+        weak_self.window.animator.alphaValue = 1;
+      }
+      completionHandler:nil];
+}
+
+// Top-leading corner of the anchor view (top-trailing in right-to-left UI),
+// inset a little, kept inside the view horizontally.
+- (void)placePanel {
+  NSView* anchor = _anchor;
+  if (_closed || !_panel || !anchor.window) {
+    return;
+  }
+  NSRect in_window = [anchor convertRect:anchor.bounds toView:nil];
+  NSRect rect = [anchor.window convertRectToScreen:in_window];
+  NSSize size = _window.frame.size;
+  CGFloat x = _rightToLeft ? NSMaxX(rect) - kPanelInset - size.width
+                           : NSMinX(rect) + kPanelInset;
+  x = MAX(NSMinX(rect), MIN(x, NSMaxX(rect) - size.width));
+  CGFloat y = NSMaxY(rect) - kPanelInset - size.height;
+  [_window setFrameOrigin:NSMakePoint(round(x), round(y))];
+}
+
 - (void)close {
   if (_closed) {
     return;
@@ -701,8 +881,14 @@ NSTextField* Label(NSString* text,
     [NSNotificationCenter.defaultCenter removeObserver:_parentCloseObserver];
     _parentCloseObserver = nil;
   }
+  for (id token in _panelTokens) {
+    [NSNotificationCenter.defaultCenter removeObserver:token];
+  }
+  _panelTokens = nil;
   NSWindow* parent = _parent;
-  if (_window.sheetParent) {
+  if (_panel) {
+    [parent removeChildWindow:_window];
+  } else if (_window.sheetParent) {
     [_window.sheetParent endSheet:_window];
   } else if (parent) {
     // Still queued behind another sheet: drop it from the queue.
@@ -756,6 +942,15 @@ NSTextField* Label(NSString* text,
   }
 }
 
+- (void)secondaryPressed:(id)sender {
+  if (!_secondary.enabled || ![self takeAnswer]) {
+    return;
+  }
+  if (self.onSecondary) {
+    self.onSecondary();
+  }
+}
+
 - (void)cancelPressed:(id)sender {
   if (![self takeAnswer]) {
     return;
@@ -766,7 +961,7 @@ NSTextField* Label(NSString* text,
 }
 
 - (void)escapePressed {
-  if (_cancel) {
+  if (_cancel && !_content.escapeDismisses) {
     [self cancelPressed:nil];
     return;
   }
