@@ -1,0 +1,25 @@
+KB-031	Back (Cmd-[ and Cmd-Left) is not bound	#119
+KB-032	Forward (Cmd-] and Cmd-Right) is not bound	#119
+KB-070	Add Split View pane is not in the UI suite yet	#55
+KB-071	Close the focused split pane is not in the UI suite yet	#55
+KB-072	Focus split pane N is not in the UI suite yet	#55
+KB-073	Focus the next or previous split pane is not in the UI suite yet	#55
+KB-074	Edit the focused pane URL is not in the UI suite yet	#54
+KB-075	Expand Current Split is not in the UI suite yet	#55
+BH-040	Space icon animation during a swipe is manual with GS-001	#26
+BH-069	Second Cmd-W on an already-closed pinned tab is not implemented	#85
+BH-087	Archive search UI is not implemented	#111
+BH-115	A split as one sidebar item is not in the UI suite yet	#54
+BH-116	The full-split toast is not in the UI suite yet	#55
+BH-117	Creating a split is not in the UI suite yet	#57
+BH-120	Split orientation is not in the UI suite yet	#56
+BH-121	Separate All Tabs is not in the UI suite yet	#56
+BH-122	Removing the focused pane without closing it is not in the UI suite yet	#58
+BH-123	Cmd-W on the focused pane is not in the UI suite yet	#58
+BH-125	Per-pane URLs and focused Cmd-L are not in the UI suite yet	#54
+BH-128	Split pane focus keys are not in the UI suite yet	#55
+GS-001	Two-finger Space swipe is manual; XCUITest scroll has no gesture phases	#26
+GS-010	Dragging a tab onto another tab to split is not in the UI suite yet	#57
+GS-011	Dragging a tab onto the page to split is not in the UI suite yet	#57
+GS-032	Opt-click the current tab to split is not in the UI suite yet	#56
+GS-033	Opt-click a split row to separate it is not in the UI suite yet	#56
