@@ -1156,7 +1156,8 @@ transaction was not the cause; the view frame move was.
 
 An earlier 30-round `-O` pair at load1 12-14 gave the same picture (before: 4 hitches, max 10.2 ms; after: 0
 hitches in 60 swipes, max 3.8 ms, p95 0.56 ms). Keyboard switches after the fix: median 0.3-0.4 ms, max 2.4-4.4 ms,
-0 hitches. Main-thread samples inside the window-server query during a swipe loop: 25% before, 0.3% after.
+0 hitches. With all six legs (15 rounds, load1 9-16), before/after: Debug 15 / 2 pacer hitches, `-O` 1 / 0; the
+light/dark legs keep their flip pass (below), every other leg's maximum went from 5.9-13.9 ms to 1.8-3.2 ms. Main-thread samples inside the window-server query during a swipe loop: 25% before, 0.3% after.
 
 `testFramePacingDuringSwipeAndKeyboardSwitch` (wall clock, asserts only below load 10), after the fix, 4 runs at load1
 6.0-8.3: `space-swipe` `over8.6=0 maxMs=8.33` 4 of 4. `space-key` failed twice (`9@17.00`, `9@20.36`) and
@@ -1164,7 +1165,10 @@ hitches in 60 swipes, max 3.8 ms, p95 0.56 ms). Keyboard switches after the fix:
 - Frame 9 of the Work -> Dev switch is the halfway light -> dark chrome flip (`SidebarContainerView.setFlavor`, then a
   commit that relayouts and redisplays the chrome): 4 ms CPU optimized, 10-29 ms in Debug
   (`hitch label=space-key frame=9 ... cpuMs=29.30 offCpuMs=1.04`). App work, but in the sidebar chrome, not the pager;
-  the smoke's Personal and Work are both light and never flip. Follow-up #275.
+  the smoke's Personal and Work are both light and never flip. Follow-up #275. Not a regression of this change: a
+  diagnostic loop of 40 Work <-> Dev keyboard switches per run (`-O`) gave a flip-pass median of 9.0 / 9.9 / 10.1 ms
+  before the fix (3 runs; 2 earlier runs 4.0 / 4.6) and 4.2-9.9 ms after it (9 runs). The value is bimodal per
+  process run, so single runs do not compare; the largest other pass per switch went from 4.3-4.8 ms to 0.6 ms.
 - `64@20.58` was `cpuMs=0.29 offCpuMs=20.23`: the thread did nothing for 20 ms. The remaining window-server queries
   (one hover resync when a page is shown or hidden at the start and end of a switch) are the likely waiter; follow-up
   #278 defers them while the pager moves.
