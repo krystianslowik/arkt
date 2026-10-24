@@ -42,6 +42,8 @@ void ArktExtensionsContainer::CloseExtensionsMenuIfOpen() {
                  << menu_->IsShowing() << ")";
     menu_->CloseIfOpen();
   }
+  // A Show posted by a toggle and not run yet is cancelled too.
+  show_posted_ = false;
 }
 
 bool ArktExtensionsContainer::ShowToolbarActionPopupForAPICall(
@@ -73,11 +75,22 @@ void ArktExtensionsContainer::ToggleExtensionsMenu() {
     menu_->CloseIfOpen();
     return;
   }
+  if (show_posted_) {
+    // Toggled again before the posted Show ran: the menu stays closed.
+    show_posted_ = false;
+    LOG(WARNING) << "ARKT: extensions container posted menu show cancelled";
+    return;
+  }
   // Showing the menu runs a nested event loop; never from inside the caller.
+  show_posted_ = true;
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(
                      [](base::WeakPtr<ArktExtensionsContainer> container) {
-                       if (container && container->menu_) {
+                       if (!container || !container->show_posted_) {
+                         return;
+                       }
+                       container->show_posted_ = false;
+                       if (container->menu_) {
                          container->menu_->Show();
                        }
                      },

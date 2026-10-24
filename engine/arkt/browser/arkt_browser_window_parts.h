@@ -92,6 +92,9 @@ class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost,
   void RemoveObserver(web_modal::ModalDialogHostObserver* observer) override;
   void NotifyPositionRequiresUpdate() override;
 
+  // A claimed dialog is not shown (Chromium has not shown it yet, or hid it).
+  bool HasUnshownDialog() const;
+
   // views::WidgetObserver:
   void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
   void OnWidgetBoundsChanged(views::Widget* widget,
@@ -101,12 +104,18 @@ class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost,
  private:
   // Starts tracking tab-modal dialog widgets that no host has claimed yet.
   void ClaimNewDialogs();
+  // The current host view. Its frame is observed while it is the host view,
+  // so a dialog follows the view when the embedder lays it out anew without
+  // a window resize (the tab's container in host mode, #261 review).
+  NSView* HostView();
   // Makes `widget` a child window of the host view's window, top-centred on
   // the view. A no-op while the view is not in a visible window.
   void Attach(views::Widget* widget);
   void Detach(views::Widget* widget);
 
   NSView* (^view_)(void);
+  NSView* __weak observed_view_ = nil;
+  id __strong frame_token_ = nil;
   base::ObserverList<web_modal::ModalDialogHostObserver> observers_;
   // Claimed dialog widgets, observed until they are destroyed.
   std::vector<raw_ptr<views::Widget>> dialogs_;

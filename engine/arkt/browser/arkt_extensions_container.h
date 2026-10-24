@@ -45,6 +45,9 @@ class ArktExtensionsContainer final : public ExtensionsContainer {
  private:
   const raw_ptr<BrowserWindowInterface> browser_;
   std::unique_ptr<ArktExtensionsMenu> menu_;
+  // A toggle posted the menu's Show and it has not run yet; a second toggle
+  // cancels it (#261 review).
+  bool show_posted_ = false;
   base::WeakPtrFactory<ArktExtensionsContainer> weak_factory_{this};
 };
 

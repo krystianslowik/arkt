@@ -403,7 +403,8 @@ const char* ReasonName(ArktCloseReason reason) {
                  << " enabled=" << (action.isEnabled ? "1" : "0") << " icon="
                  << (action.iconPNG
                          ? base::NumberToString(action.iconPNG.length) + " bytes"
-                         : std::string("none"));
+                         : std::string("none"))
+                 << " png=" << (__bridge void*)action.iconPNG;
   }
 }
 
@@ -478,7 +479,8 @@ const char* ReasonName(ArktCloseReason reason) {
 // navigate, activate and close on its handle after the loop has ended but
 // before the deferred insert has run. They queue behind the insert; the close
 // answers held, and the tab ends with TabClosed(client).
-- (void)runPendingCheckIn:(id<ArktBrowserHandle>)browser {
+- (void)runPendingCheckIn:(id<ArktBrowserHandle>)browser
+                  variant:(const std::string&)variant {
   ArktSelfTestWindowHost* host = [self hostOf:browser];
   if (!host) {
     return;
@@ -508,6 +510,22 @@ const char* ReasonName(ArktCloseReason reason) {
   }
   [pending navigateToURL:[NSURL URLWithString:base::SysUTF8ToNSString(
                                                   kPendingURL)]];
+  if (variant == "dup" || variant == "dup-close") {
+    // #258: a duplicate of the pending tab queues behind its insert; with
+    // dup-close the source's queued close runs first, so the copy's insert
+    // is dropped with its own TabClosed.
+    if (variant == "dup-close") {
+      ArktCloseResult closed =
+          [pending closeWithMode:ArktCloseModeSkipUnloadHandlers];
+      LOG(WARNING) << "ARKT selftest pending close result="
+                   << (closed == ArktCloseResultHeld ? "held" : "closed");
+    }
+    id<ArktTabHandle> copy = [pending duplicate];
+    LOG(WARNING) << "ARKT selftest pending duplicate copy="
+                 << (copy ? "handle" : "nil") << " session id "
+                 << (copy ? copy.sessionId : -2);
+    return;
+  }
   [pending activate];
   ArktCloseResult result =
       [pending closeWithMode:ArktCloseModeHonourUnloadHandlers];
@@ -578,7 +596,7 @@ const char* ReasonName(ArktCloseReason reason) {
       [[self tabWithSessionId:sessionId] activate];
     }
   } else if (command == "pending") {
-    [self runPendingCheckIn:tab.browser];
+    [self runPendingCheckIn:tab.browser variant:argument];
   } else if (command == "history") {
     [self logHistoryOf:tab];
   } else if (command == "goto") {
@@ -586,6 +604,49 @@ const char* ReasonName(ArktCloseReason reason) {
     if (base::StringToInt(argument, &offset)) {
       [tab goToHistoryOffset:offset];
     }
+  } else if (command == "goto-history") {
+    // #258: goToHistory, then the lists at once, while the history entry is
+    // still pending; entry i is offset -(i + 1) / i + 1 from there.
+    int offset = 0;
+    if (base::StringToInt(argument, &offset)) {
+      [tab goToHistoryOffset:offset];
+      [self logHistoryOf:tab];
+    }
+  } else if (command == "eval-hang") {
+    // #258: a script that keeps the renderer busy for 20 s; the tab is
+    // closed or its renderer killed meanwhile, and the completion must still
+    // come (with an error).
+    [self evaluate:@"(() => { const end = Date.now() + 20000; "
+                   @"while (Date.now() < end) {} return 'done'; })()"
+             inTab:tab
+       userGesture:NO
+             label:"hang"];
+  } else if (command == "layout") {
+    // #261 review: moves the tab's container down by `argument` points
+    // inside the card, without a window resize.
+    int inset = 0;
+    NSView* container = tab.containerView;
+    NSView* card = container.superview;
+    if (card && base::StringToInt(argument, &inset)) {
+      NSRect frame = card.bounds;
+      frame.size.height -= inset;
+      container.frame = frame;
+      LOG(WARNING) << "ARKT selftest layout tab=" << tab.sessionId
+                   << " container frame "
+                   << base::SysNSStringToUTF8(NSStringFromRect(frame));
+    }
+  } else if (command == "hide" || command == "show") {
+    // #261 review: orders the tab's host window out or in (the embedder,
+    // not Chromium, hides it).
+    NSWindow* window = tab.browser.host.window;
+    if (command == "hide") {
+      [window orderOut:nil];
+    } else {
+      [window orderFront:nil];
+    }
+    LOG(WARNING) << "ARKT selftest " << command << " window "
+                 << window.windowNumber
+                 << " visible=" << (window.visible ? "yes" : "no");
   } else if (command == "duplicate") {
     id<ArktTabHandle> copy = [tab duplicate];
     LOG(WARNING) << "ARKT selftest duplicate of tab=" << tab.sessionId

@@ -12,7 +12,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-2 | Facade header and its Swift module | DONE (#246) | see "W3-2" below |
 | W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | DONE | **GATE PASS** with recorded deviations (readiness queue for Chromium-created windows, quit-start seam, CDP keep-alive); see "W3-3" below |
 | W3-4 | Host mode for ShellUI windows | DONE | embedder hosts own Arkt windows, `createBrowserWithHost:`, request kinds from the call site, self-test embedder; all acceptance rows pass on `Chromium.app`; see "W3-4" below |
-| W3-5 | Tab facade | DONE (W3-5a #256, W3-5b) | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state. W3-5b: history and duplicate, extension actions for embedder windows, the test API; page context menu still blocked. See "W3-5a" and "W3-5b" below |
+| W3-5 | Tab facade | DONE (W3-5a #256, W3-5b) | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state. W3-5b: history and duplicate, extension actions for embedder windows, the test API; page context menu still blocked. See "W3-5a" and "W3-5b" below; review follow-ups in "#258" |
 | W3-6 | `ChromiumEngineKit` over the facade | TODO | |
 | W3-7 | The shell as engine host, composition root (Swift lane) | TODO | |
 | W3-8 | Main menu inventory and owner decision | TODO | |
@@ -98,6 +98,130 @@ thing from sending the Chromium identity the engine really has. Sites that test 
 nothing is recorded in the repository and Arc itself is not inspected (clean room); the question goes to the
 maintainer on #9.
 
+## #258: facade follow-ups from the W3-5 reviews
+
+Date 2026-10-24. Branch `engine/258-facade-followups` off `main` at `3b8df3a`. `$CR` branch `arkt` at `8910b992e4`
+(0001-0007) before and after: no patch. Overlay only; the facade header, `app/` and `project.yml` are unchanged. New
+dependencies `//mojo/public/cpp/bindings` (`//arkt/api:embedder`) and `//components/constrained_window`
+(`//arkt/browser:window`); `gn check out/Spike '//arkt/*'`: `Header dependency check OK`. Build: `nice -n 10 autoninja
+-C out/Spike -j 4 chrome`, `The build has finished successfully.`, 0 `FAILED:`. `/` had 7.9 GiB free and swap 8.7 GB
+used of 10 GB before each build and run. Runs: fresh profiles `w258-run1`, `-run2`, `-run3`, `-reg`, CDP ports
+9491-9494, `--use-mock-keychain`, one GUI run at a time, each stopped by its PID; fixture pages from a loopback server
+on `127.0.0.1` and `localhost` (port 8491). The pull requests #256, #257 and #261 carry no inline review comments; the
+items below are the #258 acceptance criteria and the four #261 review items added to #258.
+
+### What changed
+
+- **`evaluateScript` always completes.** The reply callback is wrapped with `mojo::WrapCallbackWithDropHandler`: when
+  the frame's connection drops the callback unrun (renderer gone, tab closed), the completion is posted with an error
+  `The page went away before the script answered` (posted, because the drop runs while the frame is torn down).
+- **Kept state dropped by a direct request.** A state kept after a held release with no show (`held state kept until
+  shown`) is cleared by a later direct `Maximize`, `Minimize`, `Restore` or fullscreen entry (`DropKeptState`), so a
+  later `Show()` no longer applies the older one.
+- **History positions.** `backEntries` / `forwardEntries` count from `GetCurrentEntryIndex()` (the pending entry while
+  a history navigation is pending), as `GoToOffset` does (`GetIndexForOffset`), and an entry without a valid URL keeps
+  its place as `about:blank` (the header's `url` is non-null), so entry *i* is offset `±(i + 1)`.
+- **Duplicate.** A deferred duplicate inserts into the window the source is in when the insert runs (it may have moved
+  since the call). A duplicate of a pending tab returns a pending handle and queues behind the source's insert like the
+  other calls (W3-5b answered nil); if the source's insert is dropped, or the source is closed by an earlier queued
+  call, the copy gets its own terminal `TabClosed` (drop handler on the queued call). Pending handles remember the
+  window they are for.
+- **Inserted flag.** `InsertClientTab` decides "inserted" by whether the facade's insert binding was taken (`EndBinding`),
+  not by the handle still having a tab: a tab inserted and closed within the same call gets only the `TabClosed` of its
+  removal.
+- **Shell anchor.** `runExtensionAction` restores the window's own anchor after the action ran (the popover takes the
+  anchor synchronously in `TriggerPopup`), so a later `chrome.action.openPopup` does not anchor to a view the shell
+  passed for one call.
+- **Icon cache.** `ArktExtensionsMenu` caches each action's rasterized icon per tab (`WebContents` weak pointer),
+  dropped on `OnToolbarActionUpdated(id)`, on added, removed, initialized and shutdown, and when the action's icon
+  finishes loading (`RegisterIconUpdateObserver`, which also reports `ExtensionActionsChanged`). The facade reuses the
+  PNG for an icon backed by the same image.
+- **Decision: `ExtensionActionsChanged` fires on active-tab change** in embedder windows that have an actions menu.
+  The list's icons and enabled states are for the active tab, so a shell that does not re-list on a tab switch would
+  show the previous tab's state. Deduplicated per window per batch as before.
+- **Dialogs follow the container** (#261 review, medium). Each `ArktModalDialogHost` observes
+  `NSViewFrameDidChangeNotification` of the view it currently resolves (the tab's container in host mode, the card
+  otherwise) and repositions its dialogs when the embedder lays the container out anew without a window resize.
+- **Claim filter** (#261 review, low). `ClaimNewDialogs` claims only constrained-window widgets
+  (`kWidgetIdentifierKey == kConstrainedWindowWidgetIdentifier`).
+- **Hidden parent** (#261 review, low). A dialog raised while its window is ordered out or on another Space attaches
+  when the window becomes visible: `Show()`, `ShowInactive()`, `NSWindowDidChangeOcclusionStateNotification`,
+  `NSWindowDidDeminiaturizeNotification` and `NSWorkspaceActiveSpaceDidChangeNotification` retry the attachment.
+  Measured on the way: Chromium does not show such a dialog at all (the manager's delegate checks that the view's
+  window is visible), and ordering the window out and in leaves the contents' visibility `visible`, so the manager
+  never gets the transition that would show it. The window now replays that transition for the active tab's
+  manager (through its `WebContentsObserver` interface, no patch) when the host has a claimed dialog that is not
+  shown.
+- **Double toggle** (#261 review, low). A second `ToggleExtensionsMenu` before the posted `Show` ran cancels it;
+  `CloseExtensionsMenuIfOpen` cancels a posted show too, and `Show` returns at once while the menu is already tracking.
+- **Self-test commands** `goto-history <offset>`, `eval-hang`, `layout <inset>`, `hide`, `show`, `pending dup`,
+  `pending dup-close`; `actions` logs the PNG object; `--arkt-trace-visibility` also logs window placement changes.
+
+### Acceptance
+
+| Item | Result | Evidence |
+|---|---|---|
+| `evaluateScript` completes when the page goes away first | PASS | run 1: `eval-hang` (20 s busy loop), tab closed after 2 s: `facade evaluateScript: the page went away before it answered`, `eval hang ... result=nil error=The page went away before the script answered` |
+| Kept state cleared by a direct Maximize/Minimize/Restore | by inspection | no scripted path releases a held window without a show; `DropKeptState` in the non-held branches |
+| History positions match `goToHistory` offsets | PASS | run 1, below |
+| Duplicate of a pending source | PASS | run 1, `pending dup` and `pending dup-close` |
+| Deferred duplicate after the source moved windows | by inspection | the facade has no move call to place a move between a deferred call and its task; the insert resolves `source.browser` when it runs |
+| One `TabClosed` for a tab inserted and closed in one call | by inspection | not reproducible without a patch; `EndBinding` |
+| Shell anchor cleared after `runExtensionAction` | PASS | run 3: `TriggerPopup ... anchor=<call anchor>`, `anchor restored <window anchor> (call anchor <call anchor>)`, `popup loaded` |
+| Action icons cached | PASS | run 1: repeated `actions` answer the same PNG objects; a tab switch gives new ones, repeated again the same |
+| `ExtensionActionsChanged` on active-tab change | PASS (decision: yes) | run 1: `activate` -> batch `ActiveTabChanged,ExtensionActionsChanged`, both directions |
+| Dialog follows a container frame change | PASS | run 1, below |
+| Claim only constrained-window widgets | PASS | runs 1, 3: alerts still claimed and attached |
+| Dialog raised while the window is hidden | PASS (after the replay fix) | runs 2, 3, below |
+| Two toggles before the posted Show | by inspection | two AX presses are two events, the posted task runs between them; the single-toggle open and close still pass (regression launch) |
+
+**Run 1** (`--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, `tabs-probe`, `action-probe`, port
+9491; commands from a control tab on `localhost` with `@<session id>`).
+
+- History: after `a.html`, `b.html`, `a.html?h3`, `history` -> `back=[b.html|Page B, a.html|Page A] forward=[]`;
+  `goto-history -1` (lists read right after the call, the entry still pending, `url` still `a.html?h3`) -> `back=[a.html]
+  forward=[a.html?h3]`; from `b.html`, `goto-history 1` -> `back=[b.html, a.html] forward=[]` while `url` is still
+  `b.html`. Before #258 the lists counted from the last committed entry.
+- `pending dup`: `duplicate queued behind the insert`, `pending duplicate copy=handle session id -1`; after the menu:
+  `running 2 call(s) queued behind the insert`, `client tab inserted` for the copy, batch `TabCreated,...,TabCreated,
+  ActiveTabChanged,...`, the copy `origin=client active=yes`. `pending dup-close`: navigate, close and duplicate queued;
+  `running 3 call(s)`, the source `tabClosed reason=client`, the copy `insert dropped (nothing inserted), TabClosed reason
+  page` (`tab=-1`: never inserted).
+- Actions: `actions` twice -> the same `png=` objects; `activate` another tab -> `ExtensionActionsChanged`, new objects
+  (per-tab key); `actions` again -> the same objects as after the switch.
+- Container: an `alert` on a `127.0.0.1` tab: `claimed`, `attached ... frame 346,606 448x144 host view 120,150
+  900x600`. `layout 80` (the container 80 pt shorter, no window resize): `attached ... frame 346,526 448x144 host view
+  120,150 900x520`; Quartz window list: the dialog's top moved from y 419 to 499, the host window unchanged.
+- 0 `FATAL`/`Check failed`.
+
+**Run 2** (as run 1 plus `--arkt-trace-visibility`, port 9492): `hide` (the self-test orders its window out), then an
+`alert`: `claimed` but never shown (the dialog window not on screen); `show`: `placement changed visible=1
+onActiveSpace=1`, `visibility <tab> visible` before, while and after hidden: no transition, so the dialog stayed
+unshown. This is what the replay fix addresses.
+
+**Run 3** (the fix, port 9493): `hide`, `alert`, `show`: `tab-modal dialog held while the window was hidden, shown now`,
+`attached window ... frame 346,606 448x144 host view 120,150 900x600`. `answer <tab> accept` -> `answered=yes`,
+`detached`. `run <action-probe>` (anchor log above). `eval`: values, gestures, promise and exception as in W3-5b. One
+`Check failed: url_.IsValid()` in `worker_global_scope.cc:190`, the extension renderer's known CHECK when a worker
+target is evaluated over CDP before it has started (W3-4, run 2); the browser process logged none.
+
+### Regression rows
+
+One launch without the self-test switch (`w258-reg`, port 9494, `--arkt-trace-visibility`, `tabs-probe`,
+`action-probe`, a fixture page): W5b 1 (alive after 30 s, census `normal=1 arkt=1 views=0`), 2 (navigate to `b.html`,
+`visible`), 3 (`chrome.tabs.create` in the background: index 1, `b.html` still `visible`), 5 (`chrome.windows.create`:
+`normal`, census `normal=2 arkt=2 views=0`), 6 (`chrome.tabs.remove`: `tab event removed`, `tab list rows 2`), 7 (every
+window removed: census 0/0/0, two `native window destroyed`, process alive, gone after `kill`), 8 (`window.open` with a
+gesture: `true`, `tab list rows 3`), 13 (AX Edit > Find > Find... after the frontmost check: `stub FindBar::Show`); W5c
+Step 3 (`tabs.update` to the background tab: `b.html` `hidden`, back: `visible`); W6 (`chrome.action.openPopup()`
+with the window frontmost: `"ok"`, `TriggerPopup ... by_user=0`, `popup loaded`; second window in row 5). Placeholder
+Extensions button through AX twice: `toggle menu (showing=0)`, `menu shown 2 items`, `toggle menu (showing=1)`, `menu
+closed`. 0 `FATAL`/`Check failed`.
+
+### Patch budget
+
+Unchanged: 7 patch files, 17 upstream files, 0 hot-file hunks.
+
 ## W3-5b: History, duplicate, extension actions and the test API
 
 Date 2026-10-24. Branch `engine/33-w3-5b-history-extensions` off `main` at `ee5d7fb` (#256 merged). `$CR` branch `arkt`
@@ -111,7 +235,7 @@ unchanged. `/` had 8.5 GiB free and swap 8.7 GB used of 10 GB before each build.
   in place (`GoToOffset` behind `CanGoToOffset`; 0 and out of range are no-ops).
 - **Duplicate** (rule 10). `chrome::DuplicateTabAt` (`WebContents::Clone`, so the copy has the source's entries and
   loads the current one), inserted next to the source, active (`ADD_ACTIVE`), reported as `TabCreated` with origin
-  `client`; nil for a closed, pending or non-duplicable tab. Inside a nested loop it is deferred like `createTab`
+  `client`; nil for a closed or non-duplicable tab (a pending tab's duplicate queues behind its insert since #258). Inside a nested loop it is deferred like `createTab`
   (pending handle, calls queue behind the insert). `ADD_INHERIT_OPENER` makes the active tab its opener.
 - **Inserts that do not happen** (#256 review). `createTab` and `duplicate` share one insert path: a window gone before
   a deferred insert, or an insert that added nothing to a live window, gives the handle a terminal `TabClosed`

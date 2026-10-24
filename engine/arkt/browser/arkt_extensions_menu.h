@@ -63,7 +63,9 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
     ~ActionInfo();
     extensions::ExtensionId id;
     std::u16string name;
-    // The 16 pt icon for the active tab; may be null.
+    // The 16 pt icon for the active tab; may be null. Cached per action and
+    // tab until the action or its icon changes, so the same image (same
+    // backing) comes back from repeated calls.
     gfx::ImageSkia icon;
     bool enabled = false;
   };
@@ -75,7 +77,7 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   // such action.
   bool RunAction(const extensions::ExtensionId& extension_id);
   // Called after every action list or action change (added, removed,
-  // updated, model initialized).
+  // updated, model initialized, an action icon loaded).
   void SetOnChanged(base::RepeatingClosure on_changed);
 
   // Whether the menu is open (between Show's start and its return).
@@ -116,6 +118,12 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   void DumpMenu();
   void MaybeRunPendingAction();
   void NotifyChanged();
+  // The rasterized icon of `id` for `web_contents`, from the cache when it
+  // is still valid.
+  gfx::ImageSkia CachedIcon(const extensions::ExtensionId& id,
+                            ExtensionActionViewModel* view_model,
+                            content::WebContents* web_contents) const;
+  void OnActionIconUpdated(const extensions::ExtensionId& id);
   void ExecuteAction(const extensions::ExtensionId& extension_id,
                      ToolbarActionViewModel::InvocationSource source);
   void Shutdown();
@@ -129,6 +137,18 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   NSMenu* __strong shown_menu_;
   std::map<extensions::ExtensionId, std::unique_ptr<ExtensionActionViewModel>>
       view_models_;
+  // One per view model: its icon finished loading (ExtensionActionIconFactory).
+  std::map<extensions::ExtensionId, base::CallbackListSubscription>
+      icon_subscriptions_;
+  // Rasterized icons by action, for the tab they were made for (#258).
+  struct IconCacheEntry {
+    IconCacheEntry();
+    IconCacheEntry(const IconCacheEntry&);
+    ~IconCacheEntry();
+    base::WeakPtr<content::WebContents> web_contents;
+    gfx::ImageSkia icon;
+  };
+  mutable std::map<extensions::ExtensionId, IconCacheEntry> icon_cache_;
   bool dump_ = false;
   std::vector<std::string> last_dump_;
   extensions::ExtensionId pending_action_id_;
