@@ -62,8 +62,8 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
 | `$RES` | `$REPO/docs/plans/2026-10-24-engine-week3-results.md` (created by W3-0a, pull request #229) |
 
 - **Two lanes, one owner each.** The engine lane owns `engine/`, the `Engine` configuration in `project.yml`,
-  `app/ArktShell/App/Engine/` and the `ChromiumEngineKit` target (until W3-9, open decision 5). The Swift lane owns
-  `EngineAPI`, `EngineAPITestSupport`, `FakeEngineKit`, `ShellUI`, `CoreBridge` and the rest of `app/ArktShell/App`. A
+  `app/ArktShell/App/Engine/` and the `ChromiumEngineKit` target (until W3-9, decision 5). The Swift lane owns
+  `EngineAPI`, `EngineAPITestSupport`, `FakeEngineKit`, `ShellUI`, `CoreBridge` and the rest of `app/ArktShell/App`; the engine lane takes W3-1's changes to the first three. A
   change to the other lane's files goes through that lane's review. The interface between them is the table in
   "Interface boundary"; it changes only by a pull request both lanes approve.
 - **Engine worktree.** Only the engine lane uses `$REPO` and builds `out/Spike`. It starts after #18 (pull request
@@ -126,7 +126,7 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
      alert, then quits through `chrome::AttemptExit()` (not `NSApp.terminate`).
    - *Shell-initiated* windows (launch, Cmd-N): Swift builds its `ShellWindowController`, then asks for a `Browser` in
      that window (`createWindow(host:)`); the facade creates it synchronously with the host already chosen. Whether the
-     first window gets its `Browser` at once or on its first tab is open decision 4 (default: on the first tab; a local
+     first window gets its `Browser` at once or on its first tab is decision 4 (on the first tab; a local
      change in `ShellWindowController`).
    - *Engine-initiated* windows after readiness: the factory override asks the embedder for a host synchronously
      (`-hostForEngineWindowRequest:`). The Swift provider may only build the window and return its host; it must not
@@ -176,7 +176,7 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
    `activateTab`, so extension `active` flags stay true. The placeholder host keeps auto-mounting. Tab-modal dialogs use
    the tab's container as their `WebContentsModalDialogHost` view. The host's `cardView` is only the fallback for that
    dialog host and for `GetContentsSize` when no tab is mounted; it is never a mount point the engine fills.
-7. **Framework name: keep `Arkt Framework.framework`** (open decision 1, default). #33 asks for a name distinct from the
+7. **Framework name: keep `Arkt Framework.framework`** (decision 1). #33 asks for a name distinct from the
    `app/ArktCore` package; the name the branding file already produces (`PRODUCT_FULLNAME=Arkt`, `chrome/BUILD.gn:489`,
    `chrome_constants.cc:83`) is distinct and costs no patch. The Swift stub reads name and version from Info.plist keys
    written by the copy phase, so a rename touches only the branding file (or one patch) and nothing in Swift.
@@ -186,9 +186,9 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
    - The `Engine` configuration (development) uses `Arkt Dev Engine`, so test runs never create or write inside the
      shell's real `Arkt` folder (and never create `Arkt` before `DatabaseLocation` applies its permissions). Its crash
      dumps are counted under `~/Library/Application Support/Arkt Dev Engine/Crashpad`.
-   - The product value is open decision 2 (default `Arkt/Engine`), applied with #128 in a release configuration; it is
+   - The product value is decision 2 (`Arkt/Engine`), applied with #128 in a release configuration; it is
      one Info.plist key.
-9. **Main menu owner: Arkt** (open decision 3, default). Arc's defaults collide with Chromium's on about ten shortcuts
+9. **Main menu owner: Arkt** (decision 3). Arc's defaults collide with Chromium's on about ten shortcuts
    (Cmd-T, Cmd-W, Cmd-S, Cmd-D, Cmd-L, Cmd-Shift-D, Cmd-Y, Cmd-Opt-Left/Right; `docs/spec/arc-parity-spec.md` section 1),
    and Arkt has menus Chromium lacks (Spaces, Archive).
    - The shell installs its own `MainMenu` on `NSApplicationDidFinishLaunchingNotification` (after `AppController` has
@@ -215,14 +215,14 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
     facade as plain values (id, name, 16 pt icon PNG, enabled); running an action passes the shell's anchor `NSView`,
     and the popup is the existing `PopoverExtensionView` anchored to it. Extension-created windows follow Decision 2.
     Context menus, pinning, keyboard commands and the native install sheet stay in #121.
-11. **Held closes and archiving** (open decision 6, default below). `CloseWebContentsAt` runs unload processing whatever
+11. **Held closes and archiving** (decision 6). `CloseWebContentsAt` runs unload processing whatever
     the close type (`tab_strip_model.cc:4129-4191`). `RunUnloadEventsHelper` (`unload_controller.cc:328-399`) holds the
     close whenever `NeedToFireBeforeUnloadOrUnloadEvents()` is true, which covers `beforeunload` **or unload-time**
     handlers in any frame (`web_contents_impl.cc:3356-3376`), and also whenever DevTools is attached. So `held` is common,
     not an edge case, and a hold does not always show a dialog.
     - The facade's `close(mode:)` takes `.honourUnloadHandlers` (Chrome's behaviour) or `.skipUnloadHandlers` (closes
       without firing `beforeunload`; unload handlers still run without blocking), and answers `closed` or `held`.
-    - Default policy: **Cmd-W honours** leave-site prompts; **auto-archive skips** a tab that would hold
+    - Policy: **Cmd-W honours** leave-site prompts; **auto-archive skips** a tab that would hold
       (`wouldHoldClose` on the snapshot) and retries on its next pass.
     - The shell archives only after `.tabClosed`. While a close is held the row stays and the tab's container stays
       mounted (the dialog is tab-modal on that container), the row shows a "closing" state, and on a cancelled close
@@ -234,6 +234,8 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
     closes, and marks every tab once quitting starts (Decision 13); a close it did not start is `.page` when the tab's
     `WebContentsDelegate::CloseContents` ran, otherwise `.extension`. The shell removes a sidebar row only for `.page`
     and `.extension`; `.windowClosing` and `.appTerminating` only unload (the stored sidebar is unchanged).
+    The attribution gap (popups, options and persistent pages, and Close Tab, report `page`; an unrelated in-flight
+    `tabs.remove` can be misattributed) is accepted without a patch.
 13. **Quit and process lifetime.** `-[BrowserCrApplication terminate:]` goes to `tryToTerminateApplication`;
     `-applicationShouldTerminate:` is not supported (`chrome_browser_application_mac.mm:289-321`). Quit closes every
     `Browser` first (`CloseAllBrowsersAndQuit`, `application_lifetime_desktop.cc:335-358`), and `NotifyAppTerminating`
@@ -253,7 +255,8 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
       and W3-9 records it.
     - **Last window.** The engine build keeps running with no windows (`AppController`'s keep-alive,
       `app_controller_mac.mm:824`, and macOS convention). The FakeEngine build quits on its last window today
-      (`AppDelegate.swift:115`); aligning it is a one-line follow-up for the maintainer to confirm, not part of this week.
+      (`AppDelegate.swift:115`); the maintainer decided (#241) to keep the app running when the last window closes, so FakeEngine is aligned to the engine build
+      (a one-line follow-up, not part of this week).
     W3-0a and W3-3 verify the seams fire in this order; W3-9 tests Cmd-Q, Dock Quit and logout.
 
 ## Interface boundary (Swift lane vs engine lane)
@@ -263,8 +266,8 @@ early task so both lanes can work in parallel.
 
 | Artifact | Owner | Consumer | Frozen in |
 |---|---|---|---|
-| `EngineAPI` additions (below), harness drivers and contract rules 11-16 | Swift lane | engine lane (`ChromiumEngine`) | W3-1 |
-| `InMemoryEngine` and `FakeEngine` implementing the additions | Swift lane | ShellUI tests, the FakeEngine app | W3-1 |
+| `EngineAPI` additions (below), harness drivers and contract rules 11-16 | engine lane | engine lane (`ChromiumEngine`) | W3-1 |
+| `InMemoryEngine` and `FakeEngine` implementing the additions | engine lane | ShellUI tests, the FakeEngine app | W3-1 |
 | `engine/arkt/api/arkt_engine.h`: protocols `ArktEngineEmbedder`, `ArktEngine`, `ArktBrowserHandle`, `ArktTabHandle`, `ArktWindowHost`, `ArktWindowRequest`, `ArktEngineEvent`; enums; no classes, no C++, no Chromium includes | engine lane | `ChromiumEngineKit` only (isolation test) | W3-2, after W3-0's class lookup |
 | `ChromiumEngineKit` (`ChromiumEngine: EngineClient, EngineExtensions`) | engine lane until W3-9 | composition root only | W3-6 |
 | `AppComposition`: `start(engine:windowHostProvider:) async throws`, `prepareForTermination()`, `flush() async`, the app-menu target object | Swift lane | `ArktShellEmbedder` (engine lane) | W3-7 (start and quit part after W3-3) |
@@ -373,7 +376,7 @@ request #238, so the new rules start at 11.
 | 0001-0006 | week 2 (hook, draw, keychain, factory hook, tab features, dialogs) | exist | 13 | 0 |
 | 0007 | extension dialogs as native sheets (#244, pull request #252) | exists | 4 | 0 |
 | - | Handshake (Decision 1) | ObjC runtime lookup, no patch | 0 | 0 |
-| - | Framework name (Decision 7) | no patch unless open decision 1 changes | 0 (1-2) | 0 |
+| - | Framework name (Decision 7) | no patch unless decision 1 is reopened | 0 (1-2) | 0 |
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
 | - | Quit seams (Decision 13) | existing observers, callback list and `KeepAliveOrigin`, no patch | 0 | 0 |
 | - | Facade, host mode, infobars, menu routing, reserved keys | overlay only | 0 | 0 |
@@ -474,7 +477,7 @@ Time-box: 2 h.
 
 ---
 
-### Task W3-1: `EngineAPI` additions, harness drivers and contract rules 11-16 (Swift lane)
+### Task W3-1: `EngineAPI` additions, harness drivers and contract rules 11-16 (engine lane)
 
 No Chromium. Can start at once. The `EngineCommand` values come from the engine lane in this pull request.
 
@@ -491,8 +494,7 @@ No Chromium. Can start at once. The `EngineCommand` values come from the engine 
 
 **Steps:** write rules 11-16 and the harness drivers first (failing against `InMemoryEngine`), then implement in
 `InMemoryEngine` and `FakeEngine`. Shapes as in "Interface boundary"; this pull request is where both lanes agree on
-names. Decision 11's default (open decision 6) is part of the freeze: if the maintainer answers differently before
-the merge, only the `CloseMode` default used by the shell changes.
+names. Decision 11 (decision 6) is part of the freeze; the maintainer's answer is final.
 
 **Acceptance criteria:** rules 1-16 pass for `InMemoryEngine`; FakeEngine passes 1-12 and 15 and reports 13, 14 and 16
 as not applicable (no drivers); `EngineEventHub` tests cover the window stream and `observe(window:)`; the existing
@@ -559,6 +561,9 @@ Time-box: 5 h.
 ### Task W3-3: Engine configuration, readiness and quit seams, re-entrancy gate (engine lane; GATE)
 
 **Depends on:** W3-0a, W3-0, W3-2.
+
+**Decided (maintainer, 2026-10-24):** windows requested before readiness are created hidden, without a patch; the CDP
+port blocks Quit, so quit tests run without it; the stand-in embedder moves into `ChromiumEngineKit` in W3-6.
 
 **Files:**
 - Modify: `app/ArktShell/project.yml` (configuration `Engine` replaces `Spike`: Swift flag `ARKT_CHROMIUM_ENGINE`,
@@ -958,8 +963,8 @@ Time-box: 2 h.
 
 | Lane | Sequence | Needs the engine worktree |
 |---|---|---|
-| Swift (second developer) | W3-1 -> W3-7 A, B -> (after W3-3 gate) W3-7 C -> (after W3-8 step 3) W3-7 D -> W3-9 (shell side) -> W3-10 (drawing) | no |
-| Engine, no worktree | W3-0a (now) -> W3-2 draft -> (after W3-0 lookup) W3-2 freeze -> W3-6 | no |
+| Swift (second developer) | W3-7 A, B -> (after W3-3 gate) W3-7 C -> (after W3-8 step 3) W3-7 D -> W3-9 (shell side) -> W3-10 (drawing) | no |
+| Engine, no worktree | W3-1, W3-0a (now) -> W3-2 draft -> (after W3-0 lookup) W3-2 freeze -> W3-6 | no |
 | Engine, Chromium part | W3-0 (after #18) -> W3-3 (gate) -> W3-4 -> W3-5 -> W3-9 (runs) -> W3-10 -> W3-11 -> W3-12 | yes |
 | Read-only | W3-8 steps 1-3 (reads `$CR`, never builds) | no |
 
@@ -981,7 +986,7 @@ Time-box: 2 h.
 | #9 (UA and client hints) | No code dependency; W3-9 and W3-11 repeat the identity checks on the embedded app. |
 | #11, #12 (release build, signing) | Gate W3-11 only. |
 | #22 (W10 rebuild) | Independent; W3 overlay changes enter the next `out/Arkt` build. Do not run the W10 framework link while W3 builds run (week-2 Capacity). |
-| #128 (bundle id, data folder) | W3-3 sets the development `CrProductDirName`; #128 applies the product value (open decision 2), the final bundle id (`dev.arkt.Arkt`) to the app, and aligns the branding file's id (Risk 9). |
+| #128 (bundle id, data folder) | W3-3 sets the development `CrProductDirName`; #128 applies the product value (decision 2), the final bundle id (`dev.arkt.Arkt`) to the app, and aligns the branding file's id (Risk 9). |
 | #207 (W5b/W5c leftovers) | Menu parity items move into W3-8; tab-modal attachment now attaches to the tab container's window (W3-4). |
 | #116 (session restore) | Out of scope; Decision 12's close reasons keep quit from touching the stored sidebar, which #116 builds on. |
 | #121, #122 | Stay out of scope except infobars (W3-10); W3-9 records new gaps there. |
@@ -995,11 +1000,11 @@ Time-box: 2 h.
 - Link-target status pill (#114, needs a seam), crash reporting (#129), notarization (#125).
 - Aligning the FakeEngine build's last-window behaviour with the engine build (Decision 13).
 
-## Open decisions (for the maintainer)
+## Decisions (maintainer, 2026-10-24)
 
-Each has a default the plan uses; a different answer is a local change, named in the last column.
+All six are decided as the plan's defaults (#33); a different answer later is a local change, named in the last column.
 
-| # | Decision | Default | Where a different answer lands |
+| # | Question | Decision | Where a different answer lands |
 |---|---|---|---|
 | 1 | Framework name | keep `Arkt Framework.framework` (no patch) | branding file or one patch; Swift reads the name from Info.plist (Decision 7) |
 | 2 | Product engine data folder | `Arkt/Engine` inside the shell's `Arkt` folder; development uses `Arkt Dev Engine` | one Info.plist key, applied with #128 (Decision 8) |
