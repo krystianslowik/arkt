@@ -1759,7 +1759,7 @@ Date 2026-10-24. Branch `engine/244-native-install-sheet`. Build: `nice -n 10 au
 | Post-install dialog | A sheet on the Arkt window (`dialog sheet shown`), centred on the window, not at (-224,39); AX: title `uBlock Origin Lite has been added to Chromium`, the manage text, `OK`. Escape: `dialog sheet closed`, alive 10 s later (the patch 0006 hint path runs on close) |
 | uBO popup through the menu | AXPress `Extensions`, Down, Return: `popup loaded .../popup.html` |
 | Permission increase (`dialog-probe`, `chrome.permissions.request`) | `install sheet shown type=4 permissions=3`; `Allow` disabled right after showing, enabled after the delay; Escape and Return both give `granted=false`; AXPress `Allow` gives `granted=true` |
-| Uninstall (`chrome.management.uninstallSelf({showConfirmDialog:true})`) | `dialog sheet shown ExtensionUninstallDialog`, AX title, `Cancel`, `Remove`; Escape gives `uninstall canceled by user` |
+| Uninstall (`chrome.management.uninstallSelf({showConfirmDialog:true})`) | `dialog sheet shown ExtensionUninstallDialog`, AX title, `Cancel`, `Remove`; Escape gives `uninstall canceled by user`; on a fresh run Return (Remove) uninstalls: `toolbar actions 1` -> `0`, `dialog sheet closed`, alive 10 s later |
 | Parent window closed with the sheet up | `chrome.windows.remove` of the window: `install sheet canceled`, census `0/0/0`, no window left, process alive |
 | Light and dark | `--arkt-appearance=light` and the system's dark mode: window-only screenshots kept locally under the profiles' `shots/` |
 | VoiceOver tree | Sheet described by its title; title, headings, permissions and buttons are elements; icon, bullets and the divider are hidden |
