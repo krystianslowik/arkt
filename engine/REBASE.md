@@ -199,8 +199,8 @@ on both paths.
 8. Embedding: the Swift app loads the new framework and renders a page (week-2 Task WE, or the shipping embedding
    once it lands). (F)
 9. 120 Hz: the week-1 Task 5 frame-interval check in the AppKit window. (F)
-10. 1Password: popup connects to the desktop app (W2 "Needs the user"); maintainer step; required once #23 records
-    a GO, "n/a, #23 open" before that.
+10. 1Password: popup connects to the desktop app (W2 "Needs the user"); maintainer step; required once #23 can be
+    re-tested with a Developer ID signature (#125, planned at beta).
 11. Housekeeping: no engine process left (`ps -axo pid,command | grep -E "out/Spike|out/Arkt|/Applications/Arkt.app" | grep -v grep`), patch counts match.
 
 A failed check blocks the merge. Fix it on the rebase branch, or roll back (section 9).
