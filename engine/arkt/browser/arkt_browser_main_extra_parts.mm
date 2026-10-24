@@ -137,20 +137,33 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
   if (browser->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
     return nullptr;
   }
-  ArktPlaceholderWindowHost* host = [[ArktPlaceholderWindowHost alloc] init];
+  // The embedder's host first: the one passed to createBrowser(host:), or,
+  // once the embedder is ready, its answer for an engine-initiated window
+  // (week-3 plan, Decision 2). Otherwise the placeholder host.
+  id<ArktWindowHost> host = HostForArktBrowserWindow(browser);
+  ArktPlaceholderWindowHost* placeholder = nil;
+  if (!host) {
+    placeholder = [[ArktPlaceholderWindowHost alloc] init];
+    host = placeholder;
+  }
   auto* window = new ArktBrowserWindow(browser, host);
-  // With a Swift embedder: queue the window until it is ready, or ask it for
-  // a host (week-3 plan, Decision 2). A no-op without one.
+  // With an embedder that is not ready yet: queue the window (held hidden)
+  // until it is; after embedderFailed: hold and close it. A no-op without an
+  // embedder or with an embedder host.
   OnArktBrowserWindowCreated(browser, window);
+  if (!placeholder) {
+    return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(window);
+  }
   // The Browser is still being constructed here; attach the sidebar
   // Extensions menu once it exists. The window owns it through its
-  // ExtensionsContainer. The menu follows the active tab.
+  // ExtensionsContainer. The menu follows the active tab. A held window that
+  // has moved to an embedder host by then gets none.
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(
           [](base::WeakPtr<ArktBrowserWindow> window,
              ArktPlaceholderWindowHost* host) {
-            if (!window) {
+            if (!window || window->host() != host) {
               return;
             }
             window->extensions_container()->SetMenu(
@@ -165,7 +178,7 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
             };
             ApplyExtensionsMenuSwitches(menu);
           },
-          window->GetWeakPtr(), host));
+          window->GetWeakPtr(), placeholder));
   return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(window);
 }
 

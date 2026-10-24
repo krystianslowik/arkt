@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "arkt/api/arkt_embedder.h"
@@ -27,9 +28,11 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/native_ui_types.h"
 #include "url/gurl.h"
@@ -145,6 +148,8 @@ const char* KindName(ArktEngineEventKind kind) {
 - (void)unbind;
 - (tabs::TabInterface*)tabInterface;
 - (content::WebContents*)contents;
+// The contents' beforeunload outcome (WebContentsObserver::BeforeUnloadFired).
+- (void)beforeUnloadFired:(BOOL)proceed;
 @property(nonatomic) BOOL closingByClient;
 @property(nonatomic) BOOL closing;
 @end
@@ -213,6 +218,12 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
 
   void SetTerminating(bool terminating) { terminating_ = terminating; }
 
+  void AdoptHeld(BrowserWindowInterface* browser) {
+    ++in_notification_;
+    Adopt(browser);
+    --in_notification_;
+  }
+
   id<NSObject> AddSink(void (^block)(NSArray<id<ArktEngineEvent>>*)) {
     ArktFacadeSink* sink = [[ArktFacadeSink alloc] init];
     sink.block = block;
@@ -230,6 +241,19 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     posted_ = true;
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&Facade::Deliver, base::Unretained(this)));
+  }
+
+  // A held close (of the tab, or of its window or the application) was
+  // cancelled: the tab stays (Decision 11). Called from a WebContents
+  // notification.
+  void RecordCloseCancelled(ArktFacadeTab* tab) {
+    ++in_notification_;
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindCloseCancelled;
+    event.tab = tab;
+    event.browser = tab.browser;
+    Record(event);
+    --in_notification_;
   }
 
   // BrowserCollectionObserver:
@@ -271,7 +295,14 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
         }
       } else if (change.type() == TabStripModelChange::kRemoved) {
         for (const auto& removed : change.GetRemove()->contents) {
-          Removed(removed.tab, removed.remove_reason);
+          Removed(removed.tab, removed.remove_reason, model);
+        }
+      } else if (change.type() == TabStripModelChange::kReplaced) {
+        // Same tab, new contents: the handle observes the new one. The
+        // TabReplaced event is Task W3-5.
+        const TabStripModelChange::Replace* replace = change.GetReplace();
+        if (ArktFacadeTab* tab = HandleForTab(replace->tab)) {
+          [tab bindTab:replace->tab browser:browser];
         }
       }
       if (selection.active_tab_changed() && selection.new_tab) {
@@ -291,7 +322,13 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
 
  private:
   void Adopt(BrowserWindowInterface* browser) {
-    if (HandleForBrowser(browser) || !ArktBrowserWindow::FromBrowser(browser)) {
+    ArktBrowserWindow* window = ArktBrowserWindow::FromBrowser(browser);
+    if (HandleForBrowser(browser) || !window) {
+      return;
+    }
+    // A window held before the embedder was ready is announced at replay,
+    // once it has the embedder's host (AdoptHeldBrowser).
+    if (window->IsShowHeld()) {
       return;
     }
     ArktFacadeBrowser* handle =
@@ -336,7 +373,9 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     Record(event);
   }
 
-  void Removed(tabs::TabInterface* tab, TabRemovedReason reason) {
+  void Removed(tabs::TabInterface* tab,
+               TabRemovedReason reason,
+               TabStripModel* model) {
     if (!TabRemoveReasonUtils::WillDeleteTab(reason)) {
       // Moving to another window: the handle stays and TabMoved follows.
       return;
@@ -349,10 +388,14 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     event.kind = ArktEngineEventKindTabClosed;
     event.tab = handle;
     event.browser = handle.browser;
-    // Page and extension closes and window closes are told apart in W3-5
-    // (Decision 12); until then they report ArktCloseReasonNone.
+    // Decision 12. A window close (the host's close button, closeBrowser,
+    // Close Window, chrome.windows.remove) closes every tab at once
+    // (TabStripModel::CloseAllTabs). Page and extension closes of single
+    // tabs are told apart in W3-5; until then they report
+    // ArktCloseReasonNone.
     event.closeReason = handle.closingByClient ? ArktCloseReasonClient
-                        : terminating_         ? ArktCloseReasonAppTerminating
+                        : terminating_ ? ArktCloseReasonAppTerminating
+                        : model->closing_all() ? ArktCloseReasonWindowClosing
                                                : ArktCloseReasonNone;
     Record(event);
     [handle unbind];
@@ -396,6 +439,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
 // Runs `work` now, or, inside a nested run loop, from a posted task (Decision
 // 3). Returns true when the work was deferred.
 bool RunOrDefer(const char* call, base::OnceClosure work) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   g_facade->CheckNotInNotification(call);
   if (!IsInNestedLoop()) {
     std::move(work).Run();
@@ -415,10 +459,34 @@ void LogNotYet(const char* call, const char* task) {
 }  // namespace
 }  // namespace arkt
 
+namespace arkt {
+namespace {
+
+// Tells the handle how a beforeunload ended, so a cancelled held close is
+// reported (CloseCancelled) and the handle stops reporting isClosing.
+class TabCloseObserver : public content::WebContentsObserver {
+ public:
+  explicit TabCloseObserver(ArktFacadeTab* handle) : handle_(handle) {}
+
+  void SetContents(content::WebContents* contents) { Observe(contents); }
+
+  // content::WebContentsObserver:
+  void BeforeUnloadFired(bool proceed) override {
+    [handle_ beforeUnloadFired:proceed];
+  }
+
+ private:
+  ArktFacadeTab* __weak handle_;
+};
+
+}  // namespace
+}  // namespace arkt
+
 // -----------------------------------------------------------------------------
 
 @implementation ArktFacadeTab {
   raw_ptr<tabs::TabInterface> _tab;
+  std::unique_ptr<arkt::TabCloseObserver> _closeObserver;
   ArktFacadeBrowser* __weak _browser;
   NSView* _emptyContainer;
   ArktTabOrigin _origin;
@@ -437,12 +505,34 @@ void LogNotYet(const char* call, const char* task) {
 - (void)bindTab:(tabs::TabInterface*)tab browser:(ArktFacadeBrowser*)browser {
   _tab = tab;
   _browser = browser;
+  if (!_closeObserver) {
+    _closeObserver = std::make_unique<arkt::TabCloseObserver>(self);
+  }
+  _closeObserver->SetContents(tab->GetContents());
 }
 
 - (void)unbind {
   _tab = nullptr;
   _browser = nil;
   _closing = NO;
+  _closeObserver.reset();
+}
+
+- (void)beforeUnloadFired:(BOOL)proceed {
+  if (proceed || !_tab) {
+    return;
+  }
+  // A navigation's beforeunload can be cancelled too; only a close counts.
+  arkt::ArktBrowserWindow* window =
+      _browser ? arkt::ArktBrowserWindow::FromBrowser(_browser.browserInterface)
+               : nullptr;
+  if (!_closing && !(window && window->IsAttemptingToClose())) {
+    return;
+  }
+  _closing = NO;
+  _closingByClient = NO;
+  LOG(WARNING) << "ARKT: facade close cancelled session id " << self.sessionId;
+  arkt::g_facade->RecordCloseCancelled(self);
 }
 
 - (tabs::TabInterface*)tabInterface {
@@ -672,6 +762,8 @@ void LogNotYet(const char* call, const char* task) {
 
 @implementation ArktFacadeBrowser {
   raw_ptr<BrowserWindowInterface> _browser;
+  // The last host the window had: a held window moves to the embedder's host
+  // at replay, and the handle keeps answering after the window is gone.
   id<ArktWindowHost> __weak _host;
   int32_t _windowId;
 }
@@ -680,10 +772,6 @@ void LogNotYet(const char* call, const char* task) {
   if ((self = [super init])) {
     _browser = browser;
     _windowId = browser->GetSessionID().id();
-    if (arkt::ArktBrowserWindow* window =
-            arkt::ArktBrowserWindow::FromBrowser(browser)) {
-      _host = window->host();
-    }
   }
   return self;
 }
@@ -701,6 +789,10 @@ void LogNotYet(const char* call, const char* task) {
 }
 
 - (id<ArktWindowHost>)host {
+  if (arkt::ArktBrowserWindow* window =
+          _browser ? arkt::ArktBrowserWindow::FromBrowser(_browser) : nullptr) {
+    _host = window->host();
+  }
   return _host;
 }
 
@@ -776,11 +868,13 @@ void LogNotYet(const char* call, const char* task) {
 @implementation ArktFacadeEngine
 
 - (void)embedderReady {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   arkt::g_facade->CheckNotInNotification("embedderReady");
   arkt::g_facade->delegate()->OnEmbedderReady();
 }
 
 - (void)embedderFailed {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   arkt::g_facade->CheckNotInNotification("embedderFailed");
   arkt::g_facade->delegate()->OnEmbedderFailed();
 }
@@ -790,8 +884,16 @@ void LogNotYet(const char* call, const char* task) {
 }
 
 - (id<ArktBrowserHandle>)createBrowserWithHost:(id<ArktWindowHost>)host {
-  // Host mode is Task W3-4; nothing calls this before it lands.
-  NOTREACHED() << "ARKT: facade createBrowser(host:) not available before W3-4";
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  arkt::g_facade->CheckNotInNotification("createBrowser");
+  BrowserWindowInterface* browser =
+      arkt::g_facade->delegate()->CreateBrowserForHost(host);
+  // Adopted from OnBrowserCreated, inside Browser construction.
+  ArktFacadeBrowser* handle = arkt::g_facade->HandleForBrowser(browser);
+  CHECK(handle);
+  LOG(WARNING) << "ARKT: facade createBrowser(host:) window id "
+               << handle.windowId;
+  return handle;
 }
 
 - (NSArray<id<ArktExtensionAction>>*)extensionActionsForBrowser:
@@ -852,6 +954,12 @@ id<ArktEngine> CreateEngineFacade(FacadeDelegate* delegate) {
 
 id<ArktBrowserHandle> BrowserHandleFor(BrowserWindowInterface* browser) {
   return g_facade ? g_facade->HandleForBrowser(browser) : nil;
+}
+
+void AdoptHeldBrowser(BrowserWindowInterface* browser) {
+  if (g_facade) {
+    g_facade->AdoptHeld(browser);
+  }
 }
 
 void SetFacadeTerminating(bool terminating) {

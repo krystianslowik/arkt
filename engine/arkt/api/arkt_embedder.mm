@@ -10,6 +10,7 @@
 #import "arkt/api/arkt_engine.h"
 #import "arkt/api/arkt_engine_facade.h"
 #include "arkt/api/arkt_reentrancy_probe.h"
+#import "arkt/api/arkt_selftest_embedder.h"
 #include "arkt/browser/arkt_browser_window.h"
 #include "base/apple/scoped_cftyperef.h"
 #include "base/callback_list.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/lifetime/termination_notification.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_init_state.h"
 // //chrome/browser/ui reaches //arkt through //chrome/browser, so this
 // target cannot depend on it; the symbol is in the same framework.
 #include "chrome/browser/ui/browser_tabstrip.h"  // nogncheck
@@ -37,8 +39,12 @@
 #include "chrome/common/chrome_paths_internal.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/base_window.h"
+#include "ui/base/mojom/window_show_state.mojom.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/mac/coordinate_conversion.h"
 #include "url/gurl.h"
 
 // A window request as plain values (arkt_engine.h).
@@ -100,10 +106,15 @@ const char* RequestKindName(ArktWindowRequestKind kind) {
   return "unknown";
 }
 
-bool IsBlankURL(const GURL& url) {
-  return !url.is_valid() || url.IsAboutBlank() ||
-         url.spec() == "chrome://newtab/";
-}
+// A window request as the factory knows it: why the Browser exists, from its
+// call site (week-3 plan, Interface boundary).
+struct RequestFields {
+  ArktWindowRequestKind kind = ArktWindowRequestKindReopen;
+  GURL url;
+  gfx::Rect bounds;
+  // How the kind was found, for logs.
+  const char* source = "";
+};
 
 // Every selector of ArktEngineEmbedder. The stand-in Swift class (Task W3-3)
 // does not import the header, so it implements them without declaring the
@@ -140,30 +151,37 @@ class Embedder : public FacadeDelegate {
     if (!embedder_class) {
       LOG(WARNING) << "ARKT: embedder class "
                    << base::SysNSStringToUTF8(kEmbedderClassName) << " absent";
-      return;
+      // The engine lane's check of the facade without the Swift app.
+      embedder_ = CreateSelfTestEmbedder();
+      if (!embedder_) {
+        return;
+      }
+      LOG(WARNING) << "ARKT: self-test embedder in use (--"
+                   << kFacadeSelfTestSwitch << ")";
+    } else {
+      std::string missing;
+      if (!RespondsToEmbedderSelectors(embedder_class, &missing)) {
+        LOG(ERROR) << "ARKT: embedder class "
+                   << base::SysNSStringToUTF8(kEmbedderClassName)
+                   << " found without " << missing
+                   << "; keeping the placeholder host";
+        return;
+      }
+      LOG(WARNING) << "ARKT: embedder class "
+                   << base::SysNSStringToUTF8(kEmbedderClassName)
+                   << " found (conforms to ArktEngineEmbedder "
+                   << ([embedder_class
+                          conformsToProtocol:@protocol(ArktEngineEmbedder)]
+                           ? "yes"
+                           : "no")
+                   << ", responds to every selector yes)";
+      embedder_ = [embedder_class sharedEmbedder];
     }
-    std::string missing;
-    if (!RespondsToEmbedderSelectors(embedder_class, &missing)) {
-      LOG(ERROR) << "ARKT: embedder class "
-                 << base::SysNSStringToUTF8(kEmbedderClassName)
-                 << " found without " << missing
-                 << "; keeping the placeholder host";
-      return;
-    }
-    LOG(WARNING) << "ARKT: embedder class "
-                 << base::SysNSStringToUTF8(kEmbedderClassName)
-                 << " found (conforms to ArktEngineEmbedder "
-                 << ([embedder_class
-                        conformsToProtocol:@protocol(ArktEngineEmbedder)]
-                         ? "yes"
-                         : "no")
-                 << ", responds to every selector yes)";
     base::FilePath user_data;
     if (chrome::GetDefaultUserDataDirectory(&user_data)) {
       LOG(WARNING) << "ARKT: default user data dir " << user_data.value();
     }
 
-    embedder_ = [embedder_class sharedEmbedder];
     facade_ = CreateEngineFacade(this);
 
     // Registered now, while registration is still allowed
@@ -188,8 +206,9 @@ class Embedder : public FacadeDelegate {
         continue;
       }
       QueuedRequest request;
-      request.kind = ArktWindowRequestKindStartupURL;
-      request.url = url;
+      request.fields.kind = ArktWindowRequestKindStartupURL;
+      request.fields.url = url;
+      request.fields.source = "launch argument";
       queue_.push_back(std::move(request));
       LOG(WARNING) << "ARKT: window request queued kind=startupURL url="
                    << url.possibly_invalid_spec();
@@ -206,30 +225,64 @@ class Embedder : public FacadeDelegate {
     }
   }
 
+  // Inside Browser construction, before the window exists.
+  id<ArktWindowHost> HostForWindow(BrowserWindowInterface* browser) {
+    if (pending_host_) {
+      // -createBrowserWithHost: (shell-initiated window).
+      id<ArktWindowHost> host = pending_host_;
+      pending_host_ = nil;
+      LOG(WARNING) << "ARKT: window host from createBrowser(host:) "
+                   << base::SysNSStringToUTF8(NSStringFromClass([host class]))
+                   << " window session id " << browser->GetSessionID().id();
+      return host;
+    }
+    if (!present() || state_ != State::kReady) {
+      return nil;
+    }
+    return AskHost(ClassifyRequest(browser), browser);
+  }
+
   void OnWindowCreated(BrowserWindowInterface* browser,
                        ArktBrowserWindow* window) {
-    if (!present() || state_ == State::kFailed) {
+    if (!present() || window->host_mode()) {
       return;
     }
-    if (state_ == State::kStarting) {
-      // No seam exists before Browser construction (Decision 2): hold the
-      // window hidden and queue its host request.
-      window->HoldShow();
-      QueuedRequest request;
-      request.kind = creating_kind_;
-      request.window = window->GetWeakPtr();
-      queue_.push_back(std::move(request));
-      LOG(WARNING) << "ARKT: window request queued kind="
-                   << (creating_kind_ ? RequestKindName(*creating_kind_)
-                                      : "pending")
-                   << " window session id " << browser->GetSessionID().id()
-                   << " (window held hidden)";
-      return;
+    switch (state_) {
+      case State::kStarting: {
+        // No seam exists before Browser construction (Decision 2): hold the
+        // window hidden and queue its host request, with the kind its call
+        // site gives.
+        window->HoldShow();
+        QueuedRequest request;
+        request.fields = ClassifyRequest(browser);
+        request.window = window->GetWeakPtr();
+        LOG(WARNING) << "ARKT: window request queued kind="
+                     << RequestKindName(request.fields.kind) << " ("
+                     << request.fields.source << ") window session id "
+                     << browser->GetSessionID().id() << " (window held hidden)";
+        queue_.push_back(std::move(request));
+        return;
+      }
+      case State::kFailed:
+        // The shell is quitting after a failed start: never show the window
+        // (W3-3 review).
+        window->HoldShow();
+        LOG(WARNING) << "ARKT: window after embedderFailed held and closed, "
+                        "window session id "
+                     << browser->GetSessionID().id();
+        base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+            FROM_HERE, base::BindOnce(
+                           [](base::WeakPtr<ArktBrowserWindow> window) {
+                             if (window) {
+                               window->Close();
+                             }
+                           },
+                           window->GetWeakPtr()));
+        return;
+      case State::kReady:
+        // The embedder had no usable host for it (logged by AskHost).
+        return;
     }
-    ArktWindowRequestKind kind =
-        creating_kind_.value_or(ArktWindowRequestKindReopen);
-    AskHost(kind, creating_url_, browser,
-            creating_kind_ ? "" : " (kind not known to the factory, W3-4)");
   }
 
   // FacadeDelegate:
@@ -271,16 +324,41 @@ class Embedder : public FacadeDelegate {
     }
   }
 
+  BrowserWindowInterface* CreateBrowserForHost(
+      id<ArktWindowHost> host) override {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    // The initial profile is loaded before the hook runs
+    // (chrome_browser_main.cc:1919, :2167); profile-picker mode is out of
+    // scope.
+    CHECK(profile_) << "ARKT: createBrowser(host:) before the initial profile";
+    std::string missing;
+    CHECK(IsUsableWindowHost(host, &missing))
+        << "ARKT: createBrowser(host:) with a host without " << missing;
+    if (IsInNestedLoop()) {
+      // A deferred creation could not return the handle (Decision 3 lists
+      // createBrowser among the deferred mutators; W3-4 deviation).
+      LOG(WARNING) << "ARKT: createBrowser(host:) inside a nested loop ("
+                   << DescribeRunLoopNesting() << "), created at once";
+    }
+    CHECK(!pending_host_);
+    pending_host_ = host;
+    BrowserWindowInterface* browser = CreateBrowserWindow(
+        BrowserWindowCreateParams(BrowserWindowInterface::TYPE_NORMAL,
+                                  profile_.get(), true));
+    // The factory took the host: the window is an ArktBrowserWindow in it.
+    CHECK(!pending_host_);
+    ArktBrowserWindow* window = ArktBrowserWindow::FromBrowser(browser);
+    CHECK(window && window->host() == host);
+    return browser;
+  }
+
  private:
   enum class State { kStarting, kReady, kFailed };
 
   struct QueuedRequest {
-    // Unset for a Browser Chromium created before the embedder was ready; it
-    // is resolved from the window's first tab at replay.
-    std::optional<ArktWindowRequestKind> kind;
-    // A startup URL with no Browser yet.
-    GURL url;
-    // A Browser Chromium created before readiness, its window held hidden.
+    RequestFields fields;
+    // A Browser Chromium created before readiness, its window held hidden;
+    // unset for a startup URL with no Browser yet.
     base::WeakPtr<ArktBrowserWindow> window;
   };
 
@@ -295,61 +373,116 @@ class Embedder : public FacadeDelegate {
     creating_kind_.reset();
   }
 
+  // Why `browser` exists, from what its call site passed (no patch): the
+  // seam's own creations name their kind; otherwise the Browser's create
+  // params tell startup windows (StartupBrowserCreator, also for a URL opened
+  // by another application) and chrome.windows.create (it always sets a show
+  // state and usually bounds, tabs_api.cc:189-190) from the rest, which have
+  // default params: Dock reopen and New Window, and a page's NEW_WINDOW
+  // navigation, which cannot be told apart without a patch.
+  RequestFields ClassifyRequest(BrowserWindowInterface* browser) const {
+    RequestFields fields;
+    const BrowserInitState* init = BrowserInitState::From(browser);
+    if (init) {
+      fields.bounds = init->create_params().initial_bounds;
+    }
+    if (creating_kind_) {
+      fields.kind = *creating_kind_;
+      fields.url = creating_url_;
+      fields.source = "seam call site";
+      return fields;
+    }
+    if (!init) {
+      fields.source = "no create params";
+      return fields;
+    }
+    const BrowserWindowCreateParams& params = init->create_params();
+    if (init->creation_source() ==
+        BrowserWindowCreateParams::CreationSource::kStartupCreator) {
+      fields.kind = ArktWindowRequestKindStartupURL;
+      fields.source = "startup browser creator";
+    } else if (params.initial_show_state !=
+                   ui::mojom::WindowShowState::kDefault ||
+               !params.initial_bounds.IsEmpty()) {
+      fields.kind = ArktWindowRequestKindExtension;
+      fields.source = "show state or bounds given (chrome.windows.create)";
+    } else {
+      fields.kind = ArktWindowRequestKindReopen;
+      fields.source = "default params (reopen, New Window, page NEW_WINDOW)";
+    }
+    return fields;
+  }
+
   void Replay() {
     std::vector<QueuedRequest> queue;
     queue.swap(queue_);
     for (QueuedRequest& request : queue) {
       if (request.window) {
-        BrowserWindowInterface* browser = request.window->browser();
-        content::WebContents* contents =
-            browser->GetTabStripModel()->GetActiveWebContents();
-        GURL url = contents ? contents->GetVisibleURL() : GURL();
-        ArktWindowRequestKind kind = request.kind.value_or(
-            IsBlankURL(url) ? ArktWindowRequestKindReopen
-                            : ArktWindowRequestKindStartupURL);
-        AskHost(kind, url, browser,
-                request.kind ? "" : " (kind resolved from the first tab)");
-        request.window->ReleaseHeldShow();
+        base::WeakPtr<ArktBrowserWindow> window = request.window;
+        id<ArktWindowHost> host = AskHost(request.fields, window->browser());
+        // The embedder may have closed it from inside the call; it must not.
+        if (!window) {
+          continue;
+        }
+        if (host) {
+          window->ReplaceHost(host);
+        }
+        window->ReleaseHeldShow();
+        AdoptHeldBrowser(window->browser());
         continue;
       }
-      if (!request.url.is_valid()) {
+      if (!request.fields.url.is_valid()) {
         continue;
       }
       if (!profile_) {
         LOG(ERROR) << "ARKT: startup URL request without a profile";
         continue;
       }
-      creating_kind_ = ArktWindowRequestKindStartupURL;
-      creating_url_ = request.url;
+      creating_kind_ = request.fields.kind;
+      creating_url_ = request.fields.url;
       BrowserWindowInterface* browser =
           CreateBrowserWindow(BrowserWindowCreateParams(profile_, true));
       creating_kind_.reset();
       creating_url_ = GURL();
-      chrome::AddTabAt(browser, request.url, -1, true);
+      chrome::AddTabAt(browser, request.fields.url, -1, true);
       browser->GetWindow()->Show();
     }
   }
 
-  void AskHost(ArktWindowRequestKind kind,
-               const GURL& url,
-               BrowserWindowInterface* browser,
-               const char* note) {
+  // Asks the embedder for a host. Returns nil (the placeholder host stays)
+  // when it answers nil or a host the window cannot use.
+  id<ArktWindowHost> AskHost(const RequestFields& fields,
+                             BrowserWindowInterface* browser) {
     ArktEmbedderWindowRequest* request =
         [[ArktEmbedderWindowRequest alloc] init];
-    request.kind = kind;
+    request.kind = fields.kind;
     request.profileId = @"default";
-    if (url.is_valid()) {
+    if (fields.url.is_valid()) {
       request.initialURL =
-          [NSURL URLWithString:base::SysUTF8ToNSString(url.spec())];
+          [NSURL URLWithString:base::SysUTF8ToNSString(fields.url.spec())];
+    }
+    if (!fields.bounds.IsEmpty()) {
+      request.bounds = gfx::ScreenRectToNSRect(fields.bounds);
+      request.hasBounds = YES;
     }
     id<ArktWindowHost> host = [embedder_ hostForEngineWindowRequest:request];
-    LOG(WARNING) << "ARKT: host asked kind=" << RequestKindName(kind) << note
-                 << " window session id " << browser->GetSessionID().id()
+    std::string missing;
+    bool usable = host && IsUsableWindowHost(host, &missing);
+    LOG(WARNING) << "ARKT: host asked kind=" << RequestKindName(fields.kind)
+                 << " (" << fields.source << ") window session id "
+                 << browser->GetSessionID().id()
+                 << (fields.bounds.IsEmpty()
+                         ? std::string()
+                         : " bounds " + fields.bounds.ToString())
                  << " answered "
                  << (host ? base::SysNSStringToUTF8(
                                 NSStringFromClass([host class]))
                           : std::string("nil"))
-                 << "; placeholder host kept until W3-4";
+                 << (usable ? ""
+                     : host ? "; unusable (no " + missing +
+                                  "), placeholder host kept"
+                            : "; placeholder host kept");
+    return usable ? host : nil;
   }
 
   void OnClosingAllBrowsers(bool closing) {
@@ -401,6 +534,8 @@ class Embedder : public FacadeDelegate {
   // factory knows why the window exists.
   std::optional<ArktWindowRequestKind> creating_kind_;
   GURL creating_url_;
+  // Set by CreateBrowserForHost for the factory, which takes it.
+  id<ArktWindowHost> __strong pending_host_ = nil;
   std::unique_ptr<ScopedKeepAlive> keep_alive_;
   base::CallbackListSubscription closing_all_subscription_;
   base::CallbackListSubscription terminating_subscription_;
@@ -425,6 +560,34 @@ void StartEmbedder() {
 
 bool HasEmbedder() {
   return GetEmbedder().present();
+}
+
+id<ArktWindowHost> HostForArktBrowserWindow(BrowserWindowInterface* browser) {
+  return GetEmbedder().HostForWindow(browser);
+}
+
+bool IsUsableWindowHost(id host, std::string* missing) {
+  // Selectors, not conformsToProtocol: the W3-3 Swift stand-in implements
+  // methods without declaring the protocol (it cannot import the header).
+  for (NSString* name in @[
+         @"window", @"cardView", @"setCloseRequested:", @"setValidateCommand:",
+         @"setExecuteCommand:"
+       ]) {
+    if (![host respondsToSelector:NSSelectorFromString(name)]) {
+      *missing = base::SysNSStringToUTF8(name);
+      return false;
+    }
+  }
+  id<ArktWindowHost> typed = host;
+  if (!typed.window) {
+    *missing = "a window";
+    return false;
+  }
+  if (!typed.cardView) {
+    *missing = "a card view";
+    return false;
+  }
+  return true;
 }
 
 void OnArktBrowserWindowCreated(BrowserWindowInterface* browser,

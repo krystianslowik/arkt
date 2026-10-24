@@ -3,6 +3,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -55,6 +56,15 @@ class ArktBrowserWindow : public BrowserWindow,
     return weak_factory_.GetWeakPtr();
   }
   id<ArktWindowHost> host() const { return host_; }
+  // True when the host is an embedder's (ShellUI, the self-test embedder),
+  // false for the placeholder host. Embedder hosts mount tab views
+  // themselves (week-3 plan, Decision 6); the placeholder host gets the
+  // active tab mounted in its card and the tab list events.
+  bool host_mode() const { return host_mode_; }
+  // Moves the window to `host` (a window held before the embedder was ready,
+  // whose host is asked for at replay). The old host's window is ordered out
+  // and released.
+  void ReplaceHost(id<ArktWindowHost> host);
   // Registered as the browser's ExtensionsContainer for the window's life.
   ArktExtensionsContainer* extensions_container() const {
     return extensions_container_.get();
@@ -215,8 +225,15 @@ class ArktBrowserWindow : public BrowserWindow,
   // While held, Show(), ShowInactive() and Activate() only record that the
   // window should be shown; ReleaseHeldShow() shows it then. Used for a window
   // Chromium creates before the embedder is ready (week-3 plan, Decision 2).
+  // Minimize, Maximize, Restore and entering fullscreen are ignored while
+  // held, so the window cannot become visible through them either.
   void HoldShow();
   void ReleaseHeldShow();
+  bool IsShowHeld() const { return show_held_; }
+
+  // True while the Browser is trying to close (unload processing of its tabs
+  // runs or ran), until it closes or the close is cancelled.
+  bool IsAttemptingToClose() const;
 
  protected:
   // BrowserWindow:
@@ -230,9 +247,20 @@ class ArktBrowserWindow : public BrowserWindow,
     GURL url;
   };
 
+  enum class PendingShow { kNone, kShow, kShowInactive };
+
+  // Sets the engine's blocks on `host_` and observes its window and card;
+  // UnbindHost undoes both, unmounts the placeholder's tab and orders the
+  // window out.
+  void BindHost();
+  void UnbindHost();
   void Mount(content::WebContents* contents);
   void Unmount(content::WebContents* contents);
   void OnCardResized();
+  // The view a tab-modal dialog of `contents` and the contents size follow:
+  // in host mode the tab's view when the embedder has mounted it in this
+  // window, else the host's card (Decision 6). nullptr means the active tab.
+  NSView* DialogHostViewFor(content::WebContents* contents) const;
   // Builds an event for the tab at `index` that carries its title and URL, and
   // stores them in `entries_[index]`.
   ArktTabEvent* EntryEvent(ArktTabEventKind kind,
@@ -244,6 +272,7 @@ class ArktBrowserWindow : public BrowserWindow,
 
   const raw_ptr<BrowserWindowInterface> browser_;
   id<ArktWindowHost> __strong host_;
+  bool host_mode_ = false;
   // NSNotificationCenter observer tokens for the host window and card.
   NSMutableArray* __strong notification_tokens_;
   // The WebContents whose view is mounted in the card, if any.
@@ -254,7 +283,11 @@ class ArktBrowserWindow : public BrowserWindow,
   const bool trace_visibility_;
 
   std::unique_ptr<ArktExclusiveAccessContext> exclusive_access_context_;
+  // The window's dialog host (the active tab's view or the card) and, in
+  // host mode, one per tab (its view, the card as fallback).
   std::unique_ptr<ArktModalDialogHost> modal_dialog_host_;
+  std::map<content::WebContents*, std::unique_ptr<ArktModalDialogHost>>
+      tab_modal_dialog_hosts_;
   std::unique_ptr<ArktStubLocationBar> location_bar_;
   std::unique_ptr<ArktSidePanelUI> side_panel_ui_;
   std::unique_ptr<new_tab_footer::NewTabFooterController>
@@ -265,7 +298,7 @@ class ArktBrowserWindow : public BrowserWindow,
   // The window frame when native fullscreen began (GetRestoredBounds).
   gfx::Rect bounds_before_fullscreen_;
   bool show_held_ = false;
-  bool show_pending_ = false;
+  PendingShow show_pending_ = PendingShow::kNone;
 
   base::WeakPtrFactory<ArktBrowserWindow> weak_factory_{this};
 };
