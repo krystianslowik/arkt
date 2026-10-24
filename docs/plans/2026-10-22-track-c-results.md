@@ -1159,9 +1159,9 @@ hitches in 60 swipes, max 3.8 ms, p95 0.56 ms). Keyboard switches after the fix:
 0 hitches. With all six legs (15 rounds, load1 9-16), before/after: Debug 15 / 2 pacer hitches, `-O` 1 / 0; the
 light/dark legs keep their flip pass (below), every other leg's maximum went from 5.9-13.9 ms to 1.8-3.2 ms. Main-thread samples inside the window-server query during a swipe loop: 25% before, 0.3% after.
 
-`testFramePacingDuringSwipeAndKeyboardSwitch` (wall clock, asserts only below load 10), after the fix, 4 runs at load1
-6.0-8.3: `space-swipe` `over8.6=0 maxMs=8.33` 4 of 4. `space-key` failed twice (`9@17.00`, `9@20.36`) and
-`space-swipe-flavor` once (`64@20.58`). The probe names both:
+`testFramePacingDuringSwipeAndKeyboardSwitch` (wall clock, asserts only below load 10), after the fix, 7 runs at load1
+5.6-8.3: `space-swipe` `over8.6=0 maxMs=8.33` 7 of 7. `space-key` failed 3 times (`9@17.00`, `9@20.36`, `9@21.21`)
+and `space-swipe-flavor` once (`64@20.58`). The probe names both:
 - Frame 9 of the Work -> Dev switch is the halfway light -> dark chrome flip (`SidebarContainerView.setFlavor`, then a
   commit that relayouts and redisplays the chrome): 4 ms CPU optimized, 10-29 ms in Debug
   (`hitch label=space-key frame=9 ... cpuMs=29.30 offCpuMs=1.04`). App work, but in the sidebar chrome, not the pager;
