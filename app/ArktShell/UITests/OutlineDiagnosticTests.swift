@@ -7,29 +7,42 @@ final class OutlineDiagnosticTests: ArktUITestCase {
   func test_Z_dumpOutlineTree() async throws {
     let server = try await fixtureServer()
     let app = try launch(try Sandbox())
-    var log: [String] = ["os=\(ProcessInfo.processInfo.operatingSystemVersionString) trusted=\(AXIsProcessTrusted())"]
+    emit("os=\(ProcessInfo.processInfo.operatingSystemVersionString) trusted=\(AXIsProcessTrusted())")
 
     app.typeKey("t", modifierFlags: .command)
     let field = app.textFields[AXID.CommandBar.field]
     XCTAssertTrue(waitFor(field))
     field.typeText(server.page("alpha"))
-    let results = app.tables[AXID.CommandBar.results]
-    Waits.until("results", { results.exists })
-    Waits.until("command bar rows", { app.tables[AXID.CommandBar.results].tableRows.count > 0 })
-    log.append("cmdbar.tableRows=\(results.tableRows.count) children=\(results.children(matching: .any).count)")
-    log.append("cmdbar.rowIds=\(results.tableRows.allElementsBoundByIndex.map(\.identifier))")
-    log += snapshotLines(results, "cmdbar")
-    log += rawAX(app, role: "AXTable")
     field.typeKey(.return, modifierFlags: [])
 
     let title = FixtureServer.title(ofPage: "alpha")
-    Waits.until("web view label", { app.webViews.firstMatch.exists && app.webViews.firstMatch.label == title })
+    quietWait { app.webViews.firstMatch.exists && app.webViews.firstMatch.label == title }
     let outline = app.outlines.firstMatch
-    log.append("outlines=\(app.outlines.count) outlineRows=\(app.outlineRows.count) cells=\(app.cells.count)")
-    log.append("outline.children=\(outline.children(matching: .any).count) descendants=\(outline.descendants(matching: .any).count)")
-    log += snapshotLines(outline, "outline")
-    log += rawAX(app, role: "AXOutline")
-    XCTFail("DIAG\n" + log.joined(separator: "\n"))
+    emit("outlines=\(app.outlines.count) outlineRows=\(app.outlineRows.count) cells=\(app.cells.count)")
+    if outline.exists {
+      emit("outline.children=\(outline.children(matching: .any).count)")
+      snapshotLines(outline, "outline").forEach(emit)
+    }
+    rawAX(role: "AXOutline").forEach(emit)
+
+    app.typeKey("t", modifierFlags: .command)
+    quietWait { field.exists }
+    field.typeText("Fixture")
+    let results = app.tables[AXID.CommandBar.results]
+    quietWait { results.exists && results.tableRows.count > 0 }
+    emit("cmdbar.exists=\(results.exists) tableRows=\(results.tableRows.count) children=\(results.children(matching: .any).count)")
+    emit("cmdbar.rowIds=\(results.tableRows.allElementsBoundByIndex.map(\.identifier))")
+    if results.exists { snapshotLines(results, "cmdbar").forEach(emit) }
+    rawAX(role: "AXTable").forEach(emit)
+    XCTFail("DIAG done")
+  }
+
+  private func emit(_ line: String) { print("DIAG " + line) }
+
+  /// Waits without recording a failure.
+  private func quietWait(_ condition: @escaping @MainActor () -> Bool) {
+    let predicate = NSPredicate { _, _ in MainActor.assumeIsolated { condition() } }
+    _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: nil)], timeout: Waits.scaled(nil))
   }
 
   private func snapshotLines(_ element: XCUIElement, _ name: String) -> [String] {
@@ -46,7 +59,7 @@ final class OutlineDiagnosticTests: ArktUITestCase {
   }
 
   /// Direct AX from the runner (may fail in the runner's sandbox; the error codes are the point).
-  private func rawAX(_ app: XCUIApplication, role wanted: String) -> [String] {
+  private func rawAX(role wanted: String) -> [String] {
     guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.arkt.ArktShell").first else {
       return ["rawAX: no running app"]
     }
@@ -74,6 +87,9 @@ final class OutlineDiagnosticTests: ArktUITestCase {
                         "AXIdentifier"] {
         let (v, err) = value(element, attribute)
         let count = (v as? [AXUIElement])?.count
+        var n: CFIndex = -1
+        let cerr = AXUIElementGetAttributeValueCount(element, attribute as CFString, &n)
+        lines.append("  \(attribute) countAPI err=\(cerr.rawValue) n=\(n)")
         lines.append("  \(attribute) err=\(err) count=\(count.map(String.init) ?? "-") value=\(count == nil ? String(describing: v) : "")")
       }
       let children = (value(element, "AXRows").0 as? [AXUIElement] ?? []) + (value(element, "AXChildren").0 as? [AXUIElement] ?? [])

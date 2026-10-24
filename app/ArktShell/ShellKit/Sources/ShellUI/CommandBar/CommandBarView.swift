@@ -11,6 +11,38 @@ final class CommandBarTableView: NSTableView {
   }
 
   override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
+
+  // Temporary (#269 diagnostic): route the legacy attribute entry points to the overrides above.
+  private nonisolated func overridden(_ attribute: NSAccessibility.Attribute) -> [Any]? {
+    nonisolated(unsafe) var result: [Any]?
+    MainActor.assumeIsolated {
+      switch attribute {
+      case .children, NSAccessibility.Attribute(rawValue: "AXChildrenInNavigationOrder"), .visibleChildren:
+        result = accessibilityChildren()
+      case .rows: result = accessibilityRows()
+      case .visibleRows: result = accessibilityVisibleRows()
+      default: result = nil
+      }
+    }
+    return result
+  }
+
+  override func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
+    overridden(attribute) ?? super.accessibilityAttributeValue(attribute)
+  }
+
+  override func accessibilityArrayAttributeCount(_ attribute: NSAccessibility.Attribute) -> Int {
+    overridden(attribute)?.count ?? super.accessibilityArrayAttributeCount(attribute)
+  }
+
+  override func accessibilityArrayAttributeValues(_ attribute: NSAccessibility.Attribute, index: Int,
+                                                  maxCount: Int) -> [Any] {
+    guard let all = overridden(attribute) else {
+      return super.accessibilityArrayAttributeValues(attribute, index: index, maxCount: maxCount)
+    }
+    guard index >= 0, index < all.count else { return [] }
+    return Array(all[index..<min(all.count, index + maxCount)])
+  }
 }
 
 /// Root view of the command bar: input row, divider, results table. Frames are set in `layout()`.
