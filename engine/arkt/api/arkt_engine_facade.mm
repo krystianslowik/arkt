@@ -12,8 +12,11 @@
 #include "arkt/api/arkt_embedder.h"
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_extension_calls.h"
+#include "arkt/browser/arkt_extensions_container.h"
+#include "arkt/browser/arkt_extensions_menu.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
+#include "base/command_line.h"
 #include "base/check_op.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
@@ -24,6 +27,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/tab_list/tab_removed_reason.h"
 // //chrome/browser/ui reaches //arkt through //chrome/browser, so this
 // target cannot depend on it; the symbol is in the same framework.
@@ -37,16 +41,20 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "components/favicon/content/content_favicon_driver.h"
+#include "components/javascript_dialogs/tab_modal_dialog_manager.h"
 #include "components/favicon/core/favicon_driver.h"
 #include "components/favicon/core/favicon_driver_observer.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/isolated_world_ids.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -83,22 +91,34 @@ void CheckFacadeEntry() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
-// The favicon as PNG, at 2x when the image has that representation (the
-// 16 pt icon of a Retina sidebar), else at 1x; nil for an empty image.
+// --arkt-engine-test-api enables the facade's test API (Task W3-5 step 5).
+constexpr char kTestAPISwitch[] = "arkt-engine-test-api";
+
+// A 16 pt icon as PNG at 2x (the size a Retina sidebar draws); nil when the
+// image has no representation.
+NSData* ImageSkiaPNG(const gfx::ImageSkia& image) {
+  if (image.isNull()) {
+    return nil;
+  }
+  const gfx::ImageSkiaRep& rep = image.GetRepresentation(2.0f);
+  if (rep.is_null()) {
+    return nil;
+  }
+  std::optional<std::vector<uint8_t>> png = gfx::PNGCodec::EncodeBGRASkBitmap(
+      rep.GetBitmap(), /*discard_transparency=*/false);
+  return png ? [NSData dataWithBytes:png->data() length:png->size()] : nil;
+}
+
+// The favicon as PNG, at 2x when the image has that representation, else at
+// 1x; nil for an empty image.
 NSData* FaviconPNG(const gfx::Image& image) {
   if (image.IsEmpty()) {
     return nil;
   }
   const gfx::ImageSkia* skia = image.ToImageSkia();
-  if (skia && !skia->isNull()) {
-    const gfx::ImageSkiaRep& rep = skia->GetRepresentation(2.0f);
-    if (!rep.is_null()) {
-      std::optional<std::vector<uint8_t>> png =
-          gfx::PNGCodec::EncodeBGRASkBitmap(rep.GetBitmap(),
-                                            /*discard_transparency=*/false);
-      if (png) {
-        return [NSData dataWithBytes:png->data() length:png->size()];
-      }
+  if (skia) {
+    if (NSData* png = ImageSkiaPNG(*skia)) {
+      return png;
     }
   }
   scoped_refptr<base::RefCountedMemory> bytes = image.As1xPNGBytes();
@@ -106,6 +126,53 @@ NSData* FaviconPNG(const gfx::Image& image) {
     return nil;
   }
   return [NSData dataWithBytes:bytes->data() length:bytes->size()];
+}
+
+// A script result as Foundation values (the JSON-compatible subset); nil for
+// none and null.
+id ToFoundation(const base::Value& value) {
+  switch (value.type()) {
+    case base::Value::Type::NONE:
+      return nil;
+    case base::Value::Type::BOOLEAN:
+      return @(value.GetBool());
+    case base::Value::Type::INTEGER:
+      return @(value.GetInt());
+    case base::Value::Type::DOUBLE:
+      return @(value.GetDouble());
+    case base::Value::Type::STRING:
+      return base::SysUTF8ToNSString(value.GetString());
+    case base::Value::Type::BINARY:
+      return [NSData dataWithBytes:value.GetBlob().data()
+                            length:value.GetBlob().size()];
+    case base::Value::Type::DICT: {
+      NSMutableDictionary* dict = [NSMutableDictionary dictionary];
+      for (const auto [key, item] : value.GetDict()) {
+        id converted = ToFoundation(item);
+        dict[base::SysUTF8ToNSString(key)] = converted ?: [NSNull null];
+      }
+      return dict;
+    }
+    case base::Value::Type::LIST: {
+      NSMutableArray* list = [NSMutableArray array];
+      for (const base::Value& item : value.GetList()) {
+        id converted = ToFoundation(item);
+        [list addObject:converted ?: [NSNull null]];
+      }
+      return list;
+    }
+  }
+  return nil;
+}
+
+NSError* TestAPIError(NSString* message) {
+  return [NSError errorWithDomain:@"ArktEngine"
+                             code:1
+                         userInfo:@{NSLocalizedDescriptionKey : message}];
+}
+
+bool TestAPIEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(kTestAPISwitch);
 }
 
 const char* ReasonName(ArktCloseReason reason) {
@@ -230,6 +297,32 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize block = _block;
 @end
 
+
+// One back or forward entry.
+@interface ArktFacadeHistoryEntry : NSObject <ArktHistoryEntry>
+@property(nonatomic, copy) NSURL* url;
+@property(nonatomic, copy) NSString* title;
+@end
+
+@implementation ArktFacadeHistoryEntry
+@synthesize url = _url;
+@synthesize title = _title;
+@end
+
+// One extension toolbar action of a window.
+@interface ArktFacadeExtensionAction : NSObject <ArktExtensionAction>
+@property(nonatomic, copy) NSString* actionId;
+@property(nonatomic, copy) NSString* name;
+@property(nonatomic, nullable, copy) NSData* iconPNG;
+@property(nonatomic) BOOL isEnabled;
+@end
+
+@implementation ArktFacadeExtensionAction
+@synthesize actionId = _actionId;
+@synthesize name = _name;
+@synthesize iconPNG = _iconPNG;
+@synthesize isEnabled = _isEnabled;
+@end
 
 // -----------------------------------------------------------------------------
 // Tab handle
@@ -366,16 +459,40 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     RecordFromNotification(event);
   }
 
-  // A client createTab whose deferred insert was dropped (its window closed
-  // first). ChromiumEngine announced the tab when createTab returned
-  // (Decision 4), so it gets its terminal TabClosed.
-  void RecordDroppedInsert(ArktFacadeTab* tab, ArktFacadeBrowser* browser) {
+  // A client createTab or duplicate whose insert did not happen: its window
+  // closed first, or the insert added nothing to a live window. ChromiumEngine
+  // announced the tab when the call returned (Decision 4), so it gets its
+  // terminal TabClosed: client when the client had asked to close it
+  // meanwhile, else windowClosing (window gone) or page (nothing inserted).
+  void RecordDroppedInsert(ArktFacadeTab* tab,
+                           ArktFacadeBrowser* browser,
+                           bool window_gone) {
     ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
     event.kind = ArktEngineEventKindTabClosed;
     event.tab = tab;
     event.browser = browser;
-    event.closeReason = ArktCloseReasonWindowClosing;
+    event.closeReason = tab.closingByClient ? ArktCloseReasonClient
+                        : window_gone       ? ArktCloseReasonWindowClosing
+                                            : ArktCloseReasonPage;
+    LOG(WARNING) << "ARKT: facade insert dropped ("
+                 << (window_gone ? "window gone" : "nothing inserted")
+                 << "), TabClosed reason " << ReasonName(event.closeReason);
     Record(event);
+  }
+
+  // The window's extension action list changed (ToolbarActionsModel, a
+  // Chromium notification). One event per window per batch.
+  void RecordActionsChanged(ArktFacadeBrowser* browser) {
+    for (ArktFacadeEvent* pending in pending_) {
+      if (pending.kind == ArktEngineEventKindExtensionActionsChanged &&
+          pending.browser == browser) {
+        return;
+      }
+    }
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindExtensionActionsChanged;
+    event.browser = browser;
+    RecordFromNotification(event);
   }
 
   // BrowserCollectionObserver:
@@ -473,7 +590,14 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     for (int i = 0; i < model->count(); ++i) {
       Inserted(model->GetTabAtIndex(i), handle, model);
     }
+    // The action list needs a fully constructed Browser (we may be inside
+    // its construction), so the window's actions menu is attached from a
+    // posted task.
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(&AttachActionsAfterAdopt, window->GetWeakPtr()));
   }
+
+  static void AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window);
 
   void Inserted(tabs::TabInterface* tab,
                 ArktFacadeBrowser* browser,
@@ -647,10 +771,6 @@ bool RunOrDefer(const char* call, base::OnceClosure work) {
   return true;
 }
 
-void LogNotYet(const char* call, const char* task) {
-  LOG(WARNING) << "ARKT: facade " << call << " not available before " << task;
-}
-
 // Records a tab's state changes as facade events, in Chromium's order
 // (Task W3-5 step 2). Each kind is recorded only when its value changed
 // since the last report. Every callback is a Chromium notification.
@@ -703,11 +823,12 @@ class TabObserver : public content::WebContentsObserver,
     ReportTitle();
     ReportLoading(contents->IsLoading());
     ReportHistory();
-    if (favicon::FaviconDriver* driver = favicon_observation_.GetSource()) {
-      if (driver->FaviconIsValid()) {
-        ReportFavicon(FaviconPNG(driver->GetFavicon()));
-      }
-    }
+    // New contents without a favicon (yet) clear the old one (#256
+    // review); a later OnFaviconUpdated sets it.
+    favicon::FaviconDriver* driver = favicon_observation_.GetSource();
+    ReportFavicon(driver && driver->FaviconIsValid()
+                      ? FaviconPNG(driver->GetFavicon())
+                      : nil);
   }
 
   NSData* favicon() const { return favicon_; }
@@ -867,6 +988,90 @@ class TabObserver : public content::WebContentsObserver,
                           favicon::FaviconDriverObserver>
       favicon_observation_{this};
 };
+
+}  // namespace
+}  // namespace arkt
+
+namespace arkt {
+namespace {
+
+// Runs `insert` with `handle` bound to the next inserted tab (createTab,
+// duplicate). A handle whose insert did not happen gets its terminal
+// TabClosed (#256 review); one that was inserted runs the calls queued
+// behind it.
+void InsertClientTab(
+    ArktFacadeBrowser* browser_handle,
+    ArktFacadeTab* handle,
+    base::OnceCallback<void(BrowserWindowInterface*)> insert) {
+  BrowserWindowInterface* browser = browser_handle.browserInterface;
+  if (!browser) {
+    g_facade->RecordDroppedInsert(handle, browser_handle,
+                                  /*window_gone=*/true);
+    [handle insertFinished:NO];
+    return;
+  }
+  g_facade->SetBinding(handle);
+  std::move(insert).Run(browser);
+  g_facade->SetBinding(nil);
+  if (!handle.tabInterface) {
+    g_facade->RecordDroppedInsert(handle, browser_handle,
+                                  /*window_gone=*/false);
+    [handle insertFinished:NO];
+    return;
+  }
+  LOG(WARNING) << "ARKT: facade client tab inserted session id "
+               << handle.sessionId;
+  [handle insertFinished:YES];
+}
+
+// The actions menu of an embedder host's window (Decision 10): it holds the
+// view models of the profile's toolbar actions, runs them and anchors their
+// popups, and is the window's ExtensionsContainer menu, so
+// chrome.action.openPopup works there too. The placeholder host gets its
+// sidebar menu from the hook; the facade lists and runs that one.
+ArktExtensionsMenu* EnsureActionsMenu(ArktBrowserWindow* window) {
+  if (!window) {
+    return nullptr;
+  }
+  ArktExtensionsContainer* container = window->extensions_container();
+  ArktExtensionsMenu* menu = container->menu();
+  if (!menu) {
+    if (!window->host_mode()) {
+      return nullptr;
+    }
+    container->SetMenu(std::make_unique<ArktExtensionsMenu>(
+        window->browser(), nullptr, window->host().cardView));
+    menu = container->menu();
+    menu->SetDump(base::CommandLine::ForCurrentProcess()->HasSwitch(
+        "arkt-extensions-menu-dump"));
+    LOG(WARNING) << "ARKT: facade actions menu attached, window session id "
+                 << window->browser()->GetSessionID().id();
+  }
+  menu->SetOnChanged(base::BindRepeating(
+      [](base::WeakPtr<ArktBrowserWindow> window) {
+        if (!window || !g_facade) {
+          return;
+        }
+        if (ArktFacadeBrowser* handle =
+                g_facade->HandleForBrowser(window->browser())) {
+          g_facade->RecordActionsChanged(handle);
+        }
+      },
+      window->GetWeakPtr()));
+  return menu;
+}
+
+// static
+void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
+  if (!window || !g_facade || !window->host_mode()) {
+    return;
+  }
+  ArktFacadeBrowser* handle = g_facade->HandleForBrowser(window->browser());
+  if (handle && EnsureActionsMenu(window.get())) {
+    // The list can be read now.
+    g_facade->RecordActionsChanged(handle);
+  }
+}
 
 }  // namespace
 }  // namespace arkt
@@ -1085,16 +1290,42 @@ class TabObserver : public content::WebContentsObserver,
   return contents && contents->GetController().CanGoForward();
 }
 
+// Entries from the last committed one outwards, `step` -1 (back) or +1
+// (forward), nearest first (contract rule 9).
+- (NSArray<id<ArktHistoryEntry>>*)historyEntriesInDirection:(int)step {
+  content::WebContents* contents = self.contents;
+  NSMutableArray<id<ArktHistoryEntry>>* entries = [NSMutableArray array];
+  if (!contents) {
+    return entries;
+  }
+  content::NavigationController& controller = contents->GetController();
+  int current = controller.GetLastCommittedEntryIndex();
+  if (current < 0) {
+    return entries;
+  }
+  for (int i = current + step; i >= 0 && i < controller.GetEntryCount();
+       i += step) {
+    content::NavigationEntry* entry = controller.GetEntryAtIndex(i);
+    NSURL* url = entry ? arkt::ToNSURL(entry->GetURL()) : nil;
+    if (!url) {
+      continue;
+    }
+    ArktFacadeHistoryEntry* item = [[ArktFacadeHistoryEntry alloc] init];
+    item.url = url;
+    item.title = base::SysUTF16ToNSString(entry->GetTitleForDisplay());
+    [entries addObject:item];
+  }
+  return entries;
+}
+
 - (NSArray<id<ArktHistoryEntry>>*)backEntries {
   arkt::CheckFacadeEntry();
-  arkt::LogNotYet("backEntries", "W3-5b");
-  return @[];
+  return [self historyEntriesInDirection:-1];
 }
 
 - (NSArray<id<ArktHistoryEntry>>*)forwardEntries {
   arkt::CheckFacadeEntry();
-  arkt::LogNotYet("forwardEntries", "W3-5b");
-  return @[];
+  return [self historyEntriesInDirection:1];
 }
 
 - (id<ArktTabHandle>)opener {
@@ -1273,11 +1504,53 @@ class TabObserver : public content::WebContentsObserver,
 
 - (id<ArktTabHandle>)duplicate {
   arkt::CheckFacadeEntry();
-  arkt::LogNotYet("duplicate", "W3-5b");
-  return nil;
+  arkt::g_facade->CheckNotInNotification("duplicate");
+  ArktFacadeBrowser* browser = _browser;
+  BrowserWindowInterface* interface =
+      browser ? browser.browserInterface : nullptr;
+  if (_pending || !_tab || !interface) {
+    return nil;
+  }
+  int index = interface->GetTabStripModel()->GetIndexOfTab(_tab);
+  if (index == TabStripModel::kNoTab ||
+      !chrome::CanDuplicateTabAt(interface, index)) {
+    return nil;
+  }
+  // The copy (navigation entries, the current one loading) is inserted next
+  // to this tab and reported with TabCreated, origin client, like createTab:
+  // now, or from a posted task inside a nested run loop.
+  ArktFacadeTab* handle =
+      [[ArktFacadeTab alloc] initWithOrigin:ArktTabOriginClient];
+  bool deferred = arkt::RunOrDefer(
+      "duplicate",
+      base::BindOnce(
+          [](ArktFacadeBrowser* that, ArktFacadeTab* source,
+             ArktFacadeTab* handle) {
+            arkt::InsertClientTab(
+                that, handle, base::BindOnce(
+                                  [](ArktFacadeTab* source,
+                                     BrowserWindowInterface* browser) {
+                                    int index =
+                                        source.tabInterface
+                                            ? browser->GetTabStripModel()
+                                                  ->GetIndexOfTab(
+                                                      source.tabInterface)
+                                            : TabStripModel::kNoTab;
+                                    if (index != TabStripModel::kNoTab) {
+                                      chrome::DuplicateTabAt(browser, index);
+                                    }
+                                  },
+                                  source));
+          },
+          browser, self, handle));
+  if (deferred) {
+    [handle markPending];
+  }
+  return handle;
 }
 
 @end
+
 
 // -----------------------------------------------------------------------------
 
@@ -1353,19 +1626,13 @@ class TabObserver : public content::WebContentsObserver,
       base::BindOnce(
           [](ArktFacadeBrowser* that, ArktFacadeTab* handle, GURL url,
              bool active) {
-            BrowserWindowInterface* browser = that.browserInterface;
-            if (!browser) {
-              LOG(WARNING) << "ARKT: facade createTab dropped: window gone";
-              arkt::g_facade->RecordDroppedInsert(handle, that);
-              [handle insertFinished:NO];
-              return;
-            }
-            arkt::g_facade->SetBinding(handle);
-            chrome::AddTabAt(browser, url, -1, active);
-            arkt::g_facade->SetBinding(nil);
-            LOG(WARNING) << "ARKT: facade createTab inserted session id "
-                         << handle.sessionId;
-            [handle insertFinished:handle.tabInterface != nullptr];
+            arkt::InsertClientTab(
+                that, handle,
+                base::BindOnce(
+                    [](GURL url, bool active, BrowserWindowInterface* browser) {
+                      chrome::AddTabAt(browser, url, -1, active);
+                    },
+                    url, active));
           },
           self, handle, arkt::ToGURL(url), static_cast<bool>(active)));
   if (deferred) {
@@ -1434,15 +1701,55 @@ class TabObserver : public content::WebContentsObserver,
 - (NSArray<id<ArktExtensionAction>>*)extensionActionsForBrowser:
     (id<ArktBrowserHandle>)browser {
   arkt::CheckFacadeEntry();
-  arkt::LogNotYet("extensionActions(in:)", "W3-5b");
-  return @[];
+  NSMutableArray<id<ArktExtensionAction>>* actions = [NSMutableArray array];
+  if (![browser isKindOfClass:[ArktFacadeBrowser class]]) {
+    return actions;
+  }
+  BrowserWindowInterface* interface =
+      static_cast<ArktFacadeBrowser*>(browser).browserInterface;
+  arkt::ArktExtensionsMenu* menu = arkt::EnsureActionsMenu(
+      interface ? arkt::ArktBrowserWindow::FromBrowser(interface) : nullptr);
+  if (!menu) {
+    return actions;
+  }
+  for (const auto& info : menu->GetActions()) {
+    ArktFacadeExtensionAction* action =
+        [[ArktFacadeExtensionAction alloc] init];
+    action.actionId = base::SysUTF8ToNSString(info.id);
+    action.name = base::SysUTF16ToNSString(info.name);
+    action.iconPNG = arkt::ImageSkiaPNG(info.icon);
+    action.isEnabled = info.enabled;
+    [actions addObject:action];
+  }
+  return actions;
 }
 
 - (void)runExtensionAction:(NSString*)actionId
                  inBrowser:(id<ArktBrowserHandle>)browser
                     anchor:(NSView*)anchor {
   arkt::CheckFacadeEntry();
-  arkt::LogNotYet("runExtensionAction", "W3-5b");
+  if (![browser isKindOfClass:[ArktFacadeBrowser class]]) {
+    return;
+  }
+  arkt::RunOrDefer(
+      "runExtensionAction",
+      base::BindOnce(
+          [](ArktFacadeBrowser* browser, std::string action_id, NSView* anchor) {
+            BrowserWindowInterface* interface = browser.browserInterface;
+            arkt::ArktExtensionsMenu* menu = arkt::EnsureActionsMenu(
+                interface ? arkt::ArktBrowserWindow::FromBrowser(interface)
+                          : nullptr);
+            if (!menu) {
+              LOG(WARNING) << "ARKT: facade runExtensionAction: no window";
+              return;
+            }
+            // The popup anchors to the shell's view (Decision 10).
+            menu->SetAnchor(anchor);
+            LOG(WARNING) << "ARKT: facade runExtensionAction " << action_id;
+            menu->RunAction(action_id);
+          },
+          static_cast<ArktFacadeBrowser*>(browser),
+          base::SysNSStringToUTF8(actionId), anchor));
 }
 
 - (id<NSObject>)addEventSink:
@@ -1458,28 +1765,79 @@ class TabObserver : public content::WebContentsObserver,
 
 - (BOOL)testAPIEnabled {
   arkt::CheckFacadeEntry();
-  return NO;
+  return arkt::TestAPIEnabled();
 }
 
+// Runs `script` in the tab's main frame (the page's world) through
+// RenderFrameHost::ExecuteJavaScriptForTests or its user-gesture variant.
+// Unlike CDP Runtime.evaluate, a returned promise is not awaited (the public
+// API passes resolve_promises=false) and a thrown exception gives a nil
+// result, not an error.
 - (void)evaluateScript:(NSString*)script
                  inTab:(id<ArktTabHandle>)tab
            userGesture:(BOOL)userGesture
             completion:(void (^)(id _Nullable result,
                                  NSError* _Nullable error))completion {
   arkt::CheckFacadeEntry();
-  arkt::LogNotYet("evaluateScript", "W3-5b");
-  completion(nil, [NSError errorWithDomain:@"ArktEngine"
-                                      code:1
-                                  userInfo:@{
-                                    NSLocalizedDescriptionKey :
-                                        @"The test API is not available yet"
-                                  }]);
+  if (!arkt::TestAPIEnabled()) {
+    LOG(WARNING) << "ARKT: facade evaluateScript ignored (no --"
+                 << arkt::kTestAPISwitch << ")";
+    completion(nil, arkt::TestAPIError(@"The test API is not enabled"));
+    return;
+  }
+  content::WebContents* contents =
+      [tab isKindOfClass:[ArktFacadeTab class]]
+          ? static_cast<ArktFacadeTab*>(tab).contents
+          : nullptr;
+  content::RenderFrameHost* frame =
+      contents ? contents->GetPrimaryMainFrame() : nullptr;
+  if (!frame || !frame->IsRenderFrameLive()) {
+    completion(nil, arkt::TestAPIError(@"The tab has no live page"));
+    return;
+  }
+  auto done = base::BindOnce(
+      [](void (^completion)(id, NSError*), base::Value result) {
+        completion(arkt::ToFoundation(result), nil);
+      },
+      completion);
+  std::u16string source = base::SysNSStringToUTF16(script);
+  if (userGesture) {
+    frame->ExecuteJavaScriptWithUserGestureForTests(
+        source, std::move(done), content::ISOLATED_WORLD_ID_GLOBAL);
+  } else {
+    frame->ExecuteJavaScriptForTests(source, std::move(done),
+                                     content::ISOLATED_WORLD_ID_GLOBAL);
+  }
 }
 
+// Closes the tab's pending JavaScript dialog (alert, confirm, prompt,
+// beforeunload) through its TabModalDialogManager. A prompt is answered with
+// an empty string.
 - (BOOL)answerDialogInTab:(id<ArktTabHandle>)tab accept:(BOOL)accept {
   arkt::CheckFacadeEntry();
-  arkt::LogNotYet("answerDialog", "W3-5b");
-  return NO;
+  if (!arkt::TestAPIEnabled()) {
+    LOG(WARNING) << "ARKT: facade answerDialog ignored (no --"
+                 << arkt::kTestAPISwitch << ")";
+    return NO;
+  }
+  content::WebContents* contents =
+      [tab isKindOfClass:[ArktFacadeTab class]]
+          ? static_cast<ArktFacadeTab*>(tab).contents
+          : nullptr;
+  auto* manager =
+      contents
+          ? javascript_dialogs::TabModalDialogManager::FromWebContents(contents)
+          : nullptr;
+  if (!manager) {
+    return NO;
+  }
+  // HandleJavaScriptDialog reads the dialog's input unless an override is
+  // given, and a dialog still pending has no view to read it from.
+  std::u16string prompt;
+  bool answered = manager->HandleJavaScriptDialog(contents, accept, &prompt);
+  LOG(WARNING) << "ARKT: facade answerDialog accept=" << (accept ? "yes" : "no")
+               << " answered=" << (answered ? "yes" : "no");
+  return answered;
 }
 
 @end

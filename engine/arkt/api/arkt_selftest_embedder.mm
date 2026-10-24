@@ -74,11 +74,14 @@ const char* ReasonName(ArktCloseReason reason) {
 - (instancetype)initWithFrame:(NSRect)frame title:(NSString*)title;
 // Shows `tab`'s container as the card's only subview.
 - (void)mountTab:(id<ArktTabHandle>)tab;
+// A small view above the card that extension popups anchor to.
+@property(nonatomic, readonly) NSView* anchorView;
 @end
 
 @implementation ArktSelfTestWindowHost {
   NSWindow* _window;
   NSView* _cardView;
+  NSView* _anchorView;
 }
 
 @synthesize closeRequested = _closeRequested;
@@ -101,8 +104,22 @@ const char* ReasonName(ArktCloseReason reason) {
     _cardView = [[NSView alloc] initWithFrame:_window.contentView.bounds];
     _cardView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [_window.contentView addSubview:_cardView];
+    // Top left, above the card (the content view is not flipped).
+    NSRect content = _window.contentView.bounds;
+    _anchorView = [[NSView alloc]
+        initWithFrame:NSMakeRect(8, NSHeight(content) - 32, 96, 24)];
+    _anchorView.autoresizingMask = NSViewMinYMargin;
+    _anchorView.wantsLayer = YES;
+    _anchorView.layer.backgroundColor = NSColor.systemBlueColor.CGColor;
+    [_window.contentView addSubview:_anchorView
+                         positioned:NSWindowAbove
+                         relativeTo:_cardView];
   }
   return self;
+}
+
+- (NSView*)anchorView {
+  return _anchorView;
 }
 
 - (NSWindow*)window {
@@ -340,6 +357,7 @@ const char* ReasonName(ArktCloseReason reason) {
       case ArktEngineEventKindExtensionActionsChanged:
         LOG(WARNING) << "ARKT selftest extensionActionsChanged window="
                      << window;
+        [self logActionsOf:event.browser];
         break;
     }
   }
@@ -371,6 +389,64 @@ const char* ReasonName(ArktCloseReason reason) {
                << " container=" << (__bridge void*)container
                << " subviews=" << container.subviews.count
                << " inWindow=" << (container.window ? "yes" : "no");
+}
+
+- (void)logActionsOf:(id<ArktBrowserHandle>)browser {
+  NSArray<id<ArktExtensionAction>>* actions =
+      [_engine extensionActionsForBrowser:browser];
+  LOG(WARNING) << "ARKT selftest actions window=" << browser.windowId
+               << " count=" << actions.count;
+  for (id<ArktExtensionAction> action in actions) {
+    LOG(WARNING) << "ARKT selftest action "
+                 << base::SysNSStringToUTF8(action.actionId) << " "
+                 << base::SysNSStringToUTF8(action.name)
+                 << " enabled=" << (action.isEnabled ? "1" : "0") << " icon="
+                 << (action.iconPNG
+                         ? base::NumberToString(action.iconPNG.length) + " bytes"
+                         : std::string("none"));
+  }
+}
+
+- (void)logHistoryOf:(id<ArktTabHandle>)tab {
+  std::string back;
+  for (id<ArktHistoryEntry> entry in tab.backEntries) {
+    back += (back.empty() ? "" : ",") +
+            base::SysNSStringToUTF8(entry.url.absoluteString) + "|" +
+            base::SysNSStringToUTF8(entry.title);
+  }
+  std::string forward;
+  for (id<ArktHistoryEntry> entry in tab.forwardEntries) {
+    forward += (forward.empty() ? "" : ",") +
+               base::SysNSStringToUTF8(entry.url.absoluteString) + "|" +
+               base::SysNSStringToUTF8(entry.title);
+  }
+  LOG(WARNING) << "ARKT selftest history tab=" << tab.sessionId
+               << " url=" << Describe(tab.url) << " back=[" << back
+               << "] forward=[" << forward << "]";
+}
+
+- (void)evaluate:(NSString*)script
+           inTab:(id<ArktTabHandle>)tab
+     userGesture:(BOOL)userGesture
+           label:(const char*)label {
+  int32_t sessionId = tab.sessionId;
+  std::string name(label);
+  [_engine evaluateScript:script
+                    inTab:tab
+              userGesture:userGesture
+               completion:^(id result, NSError* error) {
+                 LOG(WARNING) << "ARKT selftest eval " << name
+                              << " tab=" << sessionId << " result="
+                              << base::SysNSStringToUTF8(
+                                     [result description] ?: @"nil")
+                              << " class="
+                              << base::SysNSStringToUTF8(
+                                     result ? NSStringFromClass([result class])
+                                            : @"none")
+                              << " error="
+                              << base::SysNSStringToUTF8(
+                                     error.localizedDescription ?: @"none");
+               }];
 }
 
 - (id<ArktTabHandle>)tabWithSessionId:(int32_t)sessionId {
@@ -453,6 +529,17 @@ const char* ReasonName(ArktCloseReason reason) {
   }
   const std::string& command = words[0];
   const std::string argument = words.size() > 1 ? words[1] : std::string();
+  // "@<session id>" as the last word runs history, goto and duplicate on
+  // that tab instead: a page restored from the back-forward cache shows its
+  // old title again, which would repeat a command it ran itself.
+  if (words.size() > 1 && words.back().starts_with("@")) {
+    int32_t sessionId = 0;
+    if (base::StringToInt(words.back().substr(1), &sessionId)) {
+      if (id<ArktTabHandle> target = [self tabWithSessionId:sessionId]) {
+        tab = target;
+      }
+    }
+  }
   LOG(WARNING) << "ARKT selftest command " << command << " " << argument
                << " tab=" << tab.sessionId;
   if (command == "close") {
@@ -492,6 +579,73 @@ const char* ReasonName(ArktCloseReason reason) {
     }
   } else if (command == "pending") {
     [self runPendingCheckIn:tab.browser];
+  } else if (command == "history") {
+    [self logHistoryOf:tab];
+  } else if (command == "goto") {
+    int offset = 0;
+    if (base::StringToInt(argument, &offset)) {
+      [tab goToHistoryOffset:offset];
+    }
+  } else if (command == "duplicate") {
+    id<ArktTabHandle> copy = [tab duplicate];
+    LOG(WARNING) << "ARKT selftest duplicate of tab=" << tab.sessionId
+                 << " copy=" << (copy ? copy.sessionId : -2) << " origin="
+                 << (copy && copy.origin == ArktTabOriginClient ? "client"
+                                                                : "-");
+    if (copy) {
+      [self logHistoryOf:copy];
+    }
+  } else if (command == "actions") {
+    [self logActionsOf:tab.browser];
+  } else if (command == "run") {
+    ArktSelfTestWindowHost* host = [self hostOf:tab.browser];
+    LOG(WARNING) << "ARKT selftest run action " << argument << " anchor="
+                 << (__bridge void*)host.anchorView;
+    [_engine runExtensionAction:base::SysUTF8ToNSString(argument)
+                      inBrowser:tab.browser
+                         anchor:host.anchorView];
+  } else if (command == "eval") {
+    LOG(WARNING) << "ARKT selftest testAPIEnabled="
+                 << (_engine.testAPIEnabled ? "yes" : "no");
+    [self evaluate:@"({sum: 1 + 2, list: [1, 'two', null], ok: true, "
+                   @"title: document.title})"
+             inTab:tab
+       userGesture:NO
+             label:"value"];
+    [self evaluate:@"navigator.userActivation.isActive"
+             inTab:tab
+       userGesture:NO
+             label:"no-gesture"];
+    [self evaluate:@"navigator.userActivation.isActive"
+             inTab:tab
+       userGesture:YES
+             label:"gesture"];
+    [self evaluate:@"Promise.resolve(7)" inTab:tab userGesture:NO
+             label:"promise"];
+    [self evaluate:@"undefinedName.x" inTab:tab userGesture:NO
+             label:"throws"];
+  } else if (command == "hold") {
+    // The harness's holdClose: a beforeunload handler with sticky user
+    // activation, through the test API.
+    [self evaluate:@"window.onbeforeunload = e => { e.preventDefault(); "
+                   @"e.returnValue = ''; }; "
+                   @"navigator.userActivation.hasBeenActive"
+             inTab:tab
+       userGesture:YES
+             label:"hold"];
+  } else if (command == "answer") {
+    // answer <session id> accept|cancel (from another tab: the dialog's page
+    // cannot run script).
+    int32_t sessionId = 0;
+    id<ArktTabHandle> target =
+        base::StringToInt(argument, &sessionId)
+            ? [self tabWithSessionId:sessionId]
+            : nil;
+    const bool accept = words.size() > 2 && words[2] == "accept";
+    BOOL answered = target && [_engine answerDialogInTab:target accept:accept];
+    LOG(WARNING) << "ARKT selftest answer tab=" << sessionId
+                 << " accept=" << (accept ? "yes" : "no")
+                 << " answered=" << (answered ? "yes" : "no");
   } else if (command == "devtools") {
     id<ArktWindowHost> host = tab.browser.host;
     if (host.executeCommand) {

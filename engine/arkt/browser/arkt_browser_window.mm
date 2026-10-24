@@ -597,7 +597,6 @@ void ArktBrowserWindow::ReleaseHeldShow() {
   PendingShow pending = show_pending_;
   show_pending_ = PendingShow::kNone;
   PendingState state = state_pending_;
-  state_pending_ = PendingState::kNone;
   if (state == PendingState::kNone) {
     // chrome.windows.create({state}) asks through the create params on Mac
     // (tabs_api.cc), not through Maximize() and friends. Applied here for a
@@ -627,8 +626,15 @@ void ArktBrowserWindow::ReleaseHeldShow() {
                  << bounds.ToString();
     SetBounds(bounds);
   }
+  // The state is applied by the show (ApplyPendingState); a window nobody
+  // asked to show keeps it until it is shown, so a held maximize cannot make
+  // it visible (#256 review).
+  state_pending_ = state;
   switch (pending) {
     case PendingShow::kNone:
+      if (state != PendingState::kNone) {
+        LOG(WARNING) << "ARKT: native window held state kept until shown";
+      }
       break;
     case PendingShow::kShow:
       Show();
@@ -638,6 +644,11 @@ void ArktBrowserWindow::ReleaseHeldShow() {
       ShowInactive();
       break;
   }
+}
+
+void ArktBrowserWindow::ApplyPendingState() {
+  PendingState state = state_pending_;
+  state_pending_ = PendingState::kNone;
   switch (state) {
     case PendingState::kNone:
       break;
@@ -680,10 +691,12 @@ void ArktBrowserWindow::Show() {
   NSWindow* window = host_.window;
   if (window.isVisible) {
     [window makeKeyAndOrderFront:nil];
+    ApplyPendingState();
     return;
   }
   [NSApp activateIgnoringOtherApps:YES];
   [window makeKeyAndOrderFront:nil];
+  ApplyPendingState();
   if (mounted_) {
     mounted_->Focus();
   }
@@ -709,6 +722,7 @@ void ArktBrowserWindow::ShowInactive() {
     return;
   }
   [host_.window orderFront:nil];
+  ApplyPendingState();
   LOG(WARNING) << "ARKT: window number " << host_.window.windowNumber
                << " (shown inactive)";
 }

@@ -25,7 +25,11 @@ namespace arkt {
 // [<session id>], activate <session id>, devtools (Chromium's Developer
 // Tools command through the host), and pending (a createTab deferred inside
 // an NSMenu, then navigate, activate and close on its handle before the
-// insert has run). Words starting with '#' are ignored.
+// insert has run). W3-5b adds history, goto <offset>, duplicate, actions,
+// run <action id> (anchored to a view above the card), eval (test API
+// values, with and without a user gesture), hold (a beforeunload handler
+// with a user gesture, through the test API) and answer <session id>
+// accept|cancel. Words starting with '#' are ignored.
 inline constexpr char kFacadeSelfTestSwitch[] = "arkt-facade-selftest";
 
 // The self-test embedder, or nil when the switch is absent.
