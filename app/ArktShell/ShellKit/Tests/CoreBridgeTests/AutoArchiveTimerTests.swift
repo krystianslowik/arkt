@@ -96,6 +96,35 @@ struct AutoArchiveTimerTests {
     harness.timer.stop()
   }
 
+  /// Decision 10: a shown split exempts every pane. Both panes are idle past the threshold, so the split would
+  /// archive as one unit; exempting both panes (the window's visible set) keeps it. Dropping the exemption archives
+  /// the split.
+  @Test func autoArchiveExemptsEveryVisiblePane() async throws {
+    let harness = Harness()
+    await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))
+    let idle = harness.clock.now.addingTimeInterval(-40 * Self.hour)
+    let alsoIdle = harness.clock.now.addingTimeInterval(-20 * Self.hour)
+    let (split, panes) = try harness.source.mutate { sidebar -> (UUID, [UUID]) in
+      let split = try sidebar.addSplit(
+        orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(harness.space), createdAt: idle)
+      let left = try sidebar.addTab(
+        url: Self.url, title: "L", lastActiveAt: idle, in: .split(split), createdAt: idle)
+      let right = try sidebar.addTab(
+        url: Self.url, title: "R", lastActiveAt: alsoIdle, in: .split(split), createdAt: alsoIdle)
+      return (split, [left, right])
+    }
+    harness.exempt = Set(panes)
+
+    try await harness.timer.start()
+
+    #expect(harness.timer.exempt() == Set(panes))
+    #expect(harness.reports.isEmpty)
+    #expect(harness.today == [split])
+    harness.exempt = []
+    #expect(harness.timer.tick().map(\.id) == [split])
+    harness.timer.stop()
+  }
+
   @Test func freshStartProtectsOldTabs() async throws {  // first launch: the clock starts now
     let harness = Harness()
     _ = try harness.addTodayTab(idleHours: 400)
