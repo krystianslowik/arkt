@@ -673,9 +673,11 @@ this change.
 
 - `scripts/ui-tests/parity-report.sh` reads the spec with `grep -oE '^\| (KB|BH|GS)-[0-9]{3} '` (346 rows), the test
   results from `xcrun xcresulttool get test-results tests`, and `app/ArktShell/UITests/parity-deferred.txt`
-  (`ID<TAB>reason<TAB>#issue`). It prints counts per section (1.x, 2.x, 3) and status, then the failing rows, the
-  deferred rows with issue links, and NEEDS-RUNTIME-CHECK rows that pass ("passing [I]"). Exit status is non-zero only
-  for malformed input.
+  (`ID<TAB>reason<TAB>#issue`). It prints counts per section (1.x, 2.x, 3) and status, then the five slowest tests
+  (name, the Test Case `duration` string, and `durationInSeconds`), then the failing rows, the deferred rows with
+  issue links, and NEEDS-RUNTIME-CHECK rows that pass ("passing [I]"). Exit status is non-zero only for malformed
+  input. A test with no numeric duration is left out of the slowest list. A Test Case duration wins over its runs;
+  otherwise the longest Test Case Run is kept.
 - Precedence: any `Failed` test fails the row; every naming test `Passed` passes the row, including a row still listed
   in the deferred file; a deferred-file row that is not fully passing is deferred; skipped tests and expected failures
   are deferred; a mix of passes and skips or expected failures is deferred, because passing requires every naming test
@@ -740,14 +742,36 @@ NEEDS-RUNTIME-CHECK, a deferred id that is not a spec row, a duplicate deferred 
 that is not `#N`, and a deferred line with the wrong number of fields. An empty deferred file is accepted and still
 fails later when the xcresult cannot be read.
 
-UI suite wall time, locally and in CI, was not measured. The slowest five UI tests were not measured. The fixture is
-not the suite. Promotion still waits on 10 green `UI tests (informative)` runs on `main`, one local
+The full UI suite was not run. `/tmp/arkt-gui-lock` was held, so this check did not start a second `xcodebuild`. CI
+wall time is still unmeasured.
+
+Slowest five and the only measured elapsed time come from a completed partial bundle another issue already wrote:
+`177-space-switching/app/ArktShell/build/ui-1792868138.xcresult` (`ArktShellUITests/SpaceSwitchTests`, five tests).
+`xcrun xcresulttool` 25115, schema 0.4.0. Each Test Case node has `duration` (string) and `durationInSeconds` (number).
+Observed Test Case keys: `children`, `duration`, `durationInSeconds`, `name`, `nodeIdentifier`, `nodeIdentifierURL`,
+`nodeType`, `result`. That bundle has no Test Case Run nodes. `get test-results summary` reports `startTime`
+1792868139.378 and `finishTime` 1792868456.992, an elapsed 317.614 seconds for this SpaceSwitchTests run.
+
+Command: `scripts/ui-tests/parity-report.sh /Users/slovik/Desktop/Codewrabler/Projekty/arkt-wt/177-space-switching/app/ArktShell/build/ui-1792868138.xcresult docs/spec/arc-parity-spec.md app/ArktShell/UITests/parity-deferred.txt`
+
+Exit code 0. The script printed these five lines after the status table:
+
+```
+`test_BH036_switchingBackRestoresLastActiveTab()` 3m 13s (193.8715180158615s)
+`test_KB035_BH041_ctrlNumberGoesToSpace()` 1m 16s (76.50147294998169s)
+`test_KB033_KB034_cmdOptArrowsMoveBetweenSpaces()` 16s (16.32246494293213s)
+`test_BH035_spaceDotClickSelectsSpace()` 13s (13.301324009895325s)
+`test_GS001_twoFingerSwipeMovesSpace()` 10s (10.702916026115417s)
+```
+
+Promotion still waits on 10 green `UI tests (informative)` runs on `main`, one local
 `-test-iterations 20 -run-tests-until-failure` run with no failure, and a maintainer decision in #161.
 
 ### Deviations from the plan
 
 - Step 6 is not done: `continue-on-error` is unchanged, the job is not in the gate, and CONTRIBUTING.md is not edited.
-- The classifier was checked with a schema fixture, not `$DD/ui-*.xcresult`.
+- The classifier counts above were checked with a schema fixture. The slowest five were printed by re-running the
+  script on `177-space-switching`'s completed `ui-1792868138.xcresult`. The full UI suite was not run.
 - A mix of passed and skipped or expected-failure tests is deferred. The plan states passing as every test passed, and
   deferred as only skipped tests or a deferred-file row; the mix is neither passing nor failing.
 - GS-001 and BH-040 are in the starter file even though U12's probe is not on this branch.

@@ -127,6 +127,10 @@ fi
 cat > "$workdir/extract.jq" <<'JQ'
 def walk_objects:
   .. | objects;
+def number_or_null:
+  if type == "number" then . else null end;
+def string_or_empty:
+  if type == "string" then . else "" end;
 if type != "object" or (.testNodes | type? != "array") then
   error("missing testNodes")
 else
@@ -137,6 +141,26 @@ end
     | select(.nodeType == "Test Case")
     | . as $case
     | ($case | [walk_objects | select(.nodeType == "Test Case Run")]) as $runs
+    # One duration per test case. Prefer the case value so repeated runs are not added.
+    # Otherwise keep the longest Test Case Run. A missing number is omitted later.
+    | ($case.durationInSeconds | number_or_null) as $case_seconds
+    | (
+        [ $runs[]
+          | select(.durationInSeconds | type == "number")
+          | {seconds: .durationInSeconds, label: (.duration | string_or_empty)}
+        ]
+        | sort_by(.seconds)
+        | last
+      ) as $run_best
+    | (
+        if $case_seconds != null then
+          {seconds: $case_seconds, label: ($case.duration | string_or_empty)}
+        elif $run_best != null then
+          $run_best
+        else
+          {seconds: null, label: ""}
+        end
+      ) as $timing
     | (if ($runs | length) > 0 then $runs[] else $case end) as $obs
     | ($obs.result // $case.result) as $result
     | if $result == null then
@@ -145,6 +169,8 @@ end
         {
           name: $case.name,
           result: $result,
+          seconds: $timing.seconds,
+          duration: $timing.label,
           notes: (
             [ $case | walk_objects
               | select(.nodeType == "Skip Message" or .nodeType == "Expected Failure" or .nodeType == "Failure Message")
@@ -202,6 +228,13 @@ def issue_from($tests):
 def testlist($tests):
   [ $tests | sort_by(.name)[] | "`\(.name)` \(.result)" ] | join(", ");
 
+def slow_line:
+  if (.duration | type) == "string" and .duration != "" then
+    "`\(.name)` \(.duration) (\(.seconds)s)"
+  else
+    "`\(.name)` \(.seconds)s"
+  end;
+
 def count($rows; $status):
   [$rows[] | select(.classification == $status)] | length;
 
@@ -258,6 +291,27 @@ $rowfile[0] as $rows
   + [
       "| Total | \(count($classified; "passing")) | \(count($classified; "failing")) | \(count($classified; "deferred")) | \(count($classified; "not covered")) | \($nrow) |",
       "",
+      "## Slowest five",
+      ""
+    ]
+  + (
+      (
+        [ $obs
+          | group_by(.name)[]
+          | (map(select(.seconds | type == "number")) | max_by(.seconds)) as $best
+          | select($best != null)
+          | $best
+        ]
+        | sort_by(-.seconds)
+        | .[0:5]
+      ) as $slow
+      | if ($slow | length) == 0 then
+          ["None.", ""]
+        else
+          [ $slow[] | slow_line ] + [""]
+        end
+    )
+  + [
       "## Failing",
       ""
     ]
