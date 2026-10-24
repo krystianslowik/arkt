@@ -1,10 +1,13 @@
 #if ARKT_CHROMIUM_ENGINE
 import AppKit
+import ChromiumEngineKit
+import EngineAPI
 
 /// The Swift half of the W3-3 re-entrancy gate (`--arkt-reentrancy-probe`;
 /// engine half in engine/arkt/api/arkt_reentrancy_probe.{h,mm}). The engine
 /// runs the phases from posted Chromium tasks and posts
-/// `ArktReentrancyProbePhase` at each phase start and end.
+/// `ArktReentrancyProbePhase` at each phase start and end. Since W3-6 the Swift half drives the facade through
+/// `ChromiumEngine` (its calls answer at once: a deferred `createTab` is announced, a deferred close holds).
 @MainActor
 final class ReentrancyProbe {
     private static let probeURL = URL(string: "data:text/html,<title>W3-3 swift tab</title>")
@@ -12,8 +15,8 @@ final class ReentrancyProbe {
     private static let alertOpenFor: TimeInterval = 2.0
     private static let mutateInsideAlertAfter: TimeInterval = 0.4
 
-    private let engine: EngineFacade
-    private weak var embedder: ArktShellEmbedder?
+    private let engine: ChromiumEngine
+    private weak var shell: StandInShell?
     private var observer: (any NSObjectProtocol)?
     private var phase = ""
     /// Phase swift-alert-inside-batch: the next batch with a TabCreated opens
@@ -21,9 +24,9 @@ final class ReentrancyProbe {
     private var alertInNextCreatedBatch = false
     private var swiftAlertUp = false
 
-    init(engine: EngineFacade, embedder: ArktShellEmbedder) {
+    init(engine: ChromiumEngine, shell: StandInShell) {
         self.engine = engine
-        self.embedder = embedder
+        self.shell = shell
         observer = NotificationCenter.default.addObserver(
             forName: Notification.Name("ArktReentrancyProbePhase"), object: nil, queue: nil
         ) { [weak self] note in
@@ -67,31 +70,27 @@ final class ReentrancyProbe {
         }
     }
 
-    /// createTab and close on the facade while a nested loop is up.
+    /// createTab and close through the engine while a nested loop is up.
     private func mutate(during phase: String) {
-        guard let browser = engine.browsers.first else {
-            shellLog("probe \(phase): no facade browser")
+        guard let window = engine.windowIDs.first else {
+            shellLog("probe \(phase): no engine window")
             return
         }
-        guard let tab = browser.createTab(url: Self.probeURL, active: false) else {
-            shellLog("probe \(phase): createTab returned nil")
-            return
-        }
-        shellLog(
-            "probe \(phase): createTab returned a handle (session id \(tab.sessionId), "
-                + "-1 = not inserted yet)")
-        let held = tab.closeHonouringUnloadHandlers()
+        let tab = engine.createTab(url: Self.probeURL, in: window)
+        shellLog("probe \(phase): createTab returned \(tab)")
+        engine.closeTab(tab)
+        let held = engine.snapshot(of: tab)?.isClosing == true
         shellLog("probe \(phase): close answered \(held ? "held" : "closed")")
     }
 
-    /// Called by the embedder after it handled a batch.
-    func didHandle(_ batch: [FacadeEvent]) {
+    /// Called by the shell after each engine event.
+    func didHandle(_ event: EngineEvent) {
         if swiftAlertUp {
-            shellLog("probe \(phase): batch handled while the Swift alert is up")
+            shellLog("probe \(phase): event handled while the Swift alert is up: \(event)")
         }
-        guard alertInNextCreatedBatch, batch.contains(where: { $0.kind == .tabCreated }) else { return }
+        guard alertInNextCreatedBatch, case .tabCreated = event else { return }
         alertInNextCreatedBatch = false
-        shellLog("probe \(phase): opening an NSAlert inside the batch handler (the forbidden case)")
+        shellLog("probe \(phase): opening an NSAlert inside an engine event handler (the forbidden case)")
         let start = ContinuousClock.now
         runAlert()
         let elapsed = Int((ContinuousClock.now - start) / .milliseconds(1))
@@ -136,8 +135,8 @@ final class ReentrancyProbe {
     }
 
     private func logConsistency(_ label: String) {
-        guard let embedder else { return }
-        let state = embedder.tabsConsistent()
+        guard let shell else { return }
+        let state = shell.tabsConsistent()
         shellLog(
             "probe \(label): shell state consistent \(state.consistent ? "yes" : "no") "
                 + "(shell \(state.shell) tab(s), engine \(state.engine))")

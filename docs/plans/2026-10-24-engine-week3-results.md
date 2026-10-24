@@ -13,7 +13,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | DONE | **GATE PASS** with recorded deviations (readiness queue for Chromium-created windows, quit-start seam, CDP keep-alive); see "W3-3" below |
 | W3-4 | Host mode for ShellUI windows | DONE | embedder hosts own Arkt windows, `createBrowserWithHost:`, request kinds from the call site, self-test embedder; all acceptance rows pass on `Chromium.app`; see "W3-4" below |
 | W3-5 | Tab facade | DONE (W3-5a #256, W3-5b) | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state. W3-5b: history and duplicate, extension actions for embedder windows, the test API; page context menu still blocked. See "W3-5a" and "W3-5b" below; review follow-ups in "#258" |
-| W3-6 | `ChromiumEngineKit` over the facade | TODO | |
+| W3-6 | `ChromiumEngineKit` over the facade | DONE | `ChromiumEngine: EngineClient, EngineExtensions` and the typed `ArktShellEmbedder` in `ChromiumEngineKit`; contract rules 1-16 pass against a scripted facade with every driver (24 checks x 2 event orders, none not applicable); ShellKit 509 + 28; see "W3-6" below |
 | W3-7 | The shell as engine host, composition root (Swift lane) | TODO | |
 | W3-8 | Main menu inventory and owner decision | TODO | |
 | W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | TODO | |
@@ -36,6 +36,118 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-6: ChromiumEngineKit over the facade
+
+Date 2026-10-24. Branch `engine/33-w3-6-chromiumenginekit` off `main` at `0710668`. Swift only: no Chromium build, no
+engine worktree, `$CR` not touched, no app launch; the facade header is unchanged. Builds at `nice -n 10`, `-j 4`,
+scratch and derived data on the Chromium disk.
+
+### What landed
+
+- **`ChromiumEngineKit`** (ShellKit target and product; `internal import ArktEngineABI`, so no facade type is part of
+  its public API). `ChromiumEngine: EngineClient, EngineExtensions` over `any ArktEngine`:
+  - Decision 4: `createTab(url:in:)`, `duplicateTab` and `createWindow(host:)` announce `.tabCreated` /
+    `.windowOpened` before they return, and a close the facade answers `closed` emits `.tabClosed(reason: .client)`
+    at once; the facade's later `TabCreated`, `WindowOpened` and `TabClosed` for those calls are dropped (a retired
+    handle is released by the facade's own `TabClosed`). A close answered `held`, a deferred insert that never
+    happens and every engine-started close are forwarded from the facade with its reason.
+  - Tables from events (url, title, favicon, loading, history flags, window, opener, origin, activation), updated
+    before each event is emitted. `isClosing`, `wouldHoldClose` and the history entries have no facade event and are
+    read from the handle. `EngineEventHub.assign(_:to:)` runs before every `.tabCreated` (with the window the caller
+    named, as a deferred handle has no browser yet) and on every `TabMoved`.
+  - Batches: within one batch, a title or favicon clear the facade recorded after the same load's end is delivered
+    before it (rules 2 and 6, Risk 2); nothing moves across batches. Handlers may call back into the engine; the rest
+    of the batch drops events for a tab closed meanwhile.
+  - Windows: `EngineWindowHosting` is wrapped in an `ArktWindowHost` object (`WindowHostAdapter`); the facade's
+    blocks become the host's `onCloseRequested` and `forward`, and `forward` asks the host's claims first, then the
+    engine (`IDC_*` and `WindowOpenDisposition` raw values passed through). Engine-initiated windows: the facade's
+    `-hostForEngineWindowRequest:` goes to `windowHostProvider` (an `EngineWindowRequest`, opener mapped when it is
+    this instance's window); the window is listed and announced when the facade's `WindowOpened` names that host.
+    A closed window leaves its host no engine closures.
+  - Instance scoping: an instance lists only the windows it created or got through its provider, and their tabs;
+    a tab moved into another instance's window ends with `.tabClosed(reason: .extension)` here and is adopted there.
+    `createTab(url:)` with no window is a precondition failure (tested as an exit test).
+  - `EngineExtensions` over `extensionActions(in:)` / `runExtensionAction`, `.extensionActionsChanged` from the
+    facade. `host(of:)` returns a window's host. Test API for W3-9's runner, which cannot see the header:
+    `testAPIEnabled`, `evaluateScript(_:in:userGesture:) async throws -> ScriptValue?`, `answerDialog(in:accept:)`.
+  - The event sink is removed when the instance is released (`isolated deinit`).
+- **Typed `@objc(ArktShellEmbedder)`** (moved from `App/Engine/`, decided 2026-10-24): `ArktEngineEmbedder` in
+  `ChromiumEngineKit`, driven by a `ChromiumEmbedderDelegate` (`start(engine:) async throws`, `startFailed`,
+  `host(for:in:)`, the three quit seams). `-engineDidStart:` makes the `ChromiumEngine`, runs `start`, then
+  `embedderReady`; a throwing start calls `embedderFailed` and then `startFailed` from a run-loop callout
+  (`RunLoop.main.perform(inModes: [.common])`, never a modal from a main-actor job). `-engineWillTerminate:` calls the
+  completion after the delegate's flush. `ChromiumEmbedding.install(_:)` (called by `engineMain()` before
+  `ChromeMain`) references the class: the dead-strip safeguard. `ChromiumEmbedding.makeEngine()` gives a further
+  instance over the same facade (the runner).
+- **App** (`App/Engine/`, Engine configuration only): `FacadeStandIn.swift` and the app's `ArktShellEmbedder.swift`
+  are gone. `StandInShell.swift` is the delegate until W3-7 part C and W3-9: the 2 s simulated start (and
+  `--arkt-embedder-fail`), plain windows for engine window requests that mount the active tab's container, logged quit
+  seams and a 300 ms simulated flush. `ReentrancyProbe.swift` drives `ChromiumEngine` instead of selectors.
+  `project.yml` gains the `ChromiumEngineKit` product for the app target.
+- **Tests** (`ChromiumEngineKitTests`, plain `swift test`, no Chromium): a scripted facade (`ScriptedFacade.swift`)
+  that records plain-value events and delivers one batch on the next main-actor turn, holds closes on a
+  `beforeunload` page, defers calls while "nested" (pending handle, `held`), and answers the drivers' scripts through
+  the test API. The harness's `makeEngine` creates the instance's window first; drivers: `retitle`, `holdClose` and
+  `engineCreateTab` (with an opener) through `evaluateScript`, `answerDialog` through the test API,
+  `engineCloseTab` and `engineActivate` as an extension would. Every `EngineContract` check runs twice: Chromium's
+  event order and title/favicon-clear after the load end.
+- **Isolation** (`ChromiumEngineKitIsolationTests`): only `App/Engine/` and the kit's tests import
+  `ChromiumEngineKit`, every app importer starts with `#if ARKT_CHROMIUM_ENGINE`, and only `ChromiumEngineKitTests`
+  depends on it in `Package.swift`. `EngineABIIsolationTests` unchanged and passing (the kit is its allowed importer).
+
+### Contract results
+
+| Rules | Checks | Chromium order | Title after load end |
+|---|---|---|---|
+| 1-10 | 14 | pass | pass |
+| 11 | `windowIsListedAndAnnounced`, `closeWindowClosesItsTabsThenReportsWindowClosed`, `hostCloseRequestClosesTheWindow` | pass | pass |
+| 12 | `activationIsOneTabPerWindow` | pass | pass |
+| 13 | `engineCreatedTabIsAnnounced` | pass | pass |
+| 14 | `engineCloseIsTerminal` | pass | pass |
+| 15 | `windowlessCreateTabLandsInMostRecentlyActiveWindow` | pass | pass |
+| 16 | `heldCloseKeepsTheTabUntilAnswered`, `skipUnloadHandlersNeverHolds`, `cancelledWindowCloseKeepsTheWindow` | pass | pass |
+
+16/16 rules, 24 checks x 2 = 48 cases, none not applicable (`everyDriverIsPresent`; `everyContractCheckIsListed` reads
+the check names from `EngineContract`'s sources). Scripts beyond the contract (`ChromiumEngineScriptTests`, 16): batch
+reordering and its bound, Decision 4 deduplication, a second close while held, deferred calls behind a pending insert,
+a deferred insert into a closed window, contents replacement (same container and ID, new session id), moves between
+own and foreign windows, a provider window listed only after `WindowOpened`, two instances over one facade, the
+window-less precondition (exit test), sink removal, host claims before forwarding, extension actions, quit
+(`.appTerminating`), the test API. Embedder (`ArktShellEmbedderTests`, 4): lookup by runtime name and protocol
+conformance, ready after start, window requests to the delegate, a failed start, the quit seams. Checked to fail:
+without the reordering, both reorder-mode contract cases for rules 2 and 6 and the reorder script fail.
+
+### Verification
+
+- ShellKit `swift test --skip ShellKitGUITests`: baseline 509 (W3-1), now **537** (509 + 28: ChromiumEngineKitTests
+  23 with the contract as one parameterized test of 48 cases, IsolationTests 23 to 28), all pass, 1 known issue (the
+  W3-1 lint allowance). GUI tests not run: no ShellUI or other GUI-visible file changed.
+- ArktCore `swift test`: 349, all pass.
+- Debug app (`xcodegen generate`, `xcodebuild -configuration Debug CODE_SIGNING_ALLOWED=NO`): `BUILD SUCCEEDED`;
+  `NSPrincipalClass` `NSApplication`; `strings` counts 0 `ARKT engine` in each binary; no `Contents/Frameworks`.
+  The Debug app now links the `ChromiumEngineKit` product (one dependency list per target), unreferenced:
+  `ArktShell.debug.dylib` exports its Swift symbols and contains the `ArktShellEmbedder` class, which nothing in
+  Debug looks up (only the engine's hook does).
+- Engine configuration (build only, into a scratch directory on the Chromium disk, `ARKT_ENGINE_APP` =
+  `out/Spike/Chromium.app` read-only; `$EMB` not written): `BUILD SUCCEEDED`, `Engine framework copied`, the three
+  Info.plist keys, framework CDHash equal to `out/Spike`'s (not re-signed). `nm -u <app binary> | grep -cF
+  '_OBJC_CLASS_$_Arkt'` prints `0`; `nm -m` shows `(__DATA,__objc_data) non-external _OBJC_CLASS_$_ArktShellEmbedder`
+  (internal Swift class; the hook uses `NSClassFromString`, which the embedder test checks in-process).
+
+### What W3-7 and W3-9 need
+
+- W3-7 part C: `AppComposition` adopts `ChromiumEmbedderDelegate` (or `StandInShell` forwards to it):
+  `start(engine:)` is `AppComposition.start(engine:windowHostProvider:)`, `host(for:in:)` builds a
+  `ShellWindowController`, `startFailed` shows the launch-failure alert and quits through the engine
+  (`chrome::AttemptExit()` has no facade call yet; the header needs one, or the shell keeps `NSApp.terminate` under
+  Chromium's `terminate:`), `engineWillBeginTerminating` / `engineWillTerminate` are `prepareForTermination()` /
+  `flush()`.
+- W3-9: replace `StandInShell` in `EngineMain.swift`; the runner gets instances from `ChromiumEmbedding.makeEngine()`
+  (each creates its window first) and drives `holdClose`, `retitle`, `window.open` and `answerDialog` through
+  `ChromiumEngine`'s test API; `engineCloseTab` / `engineActivate` need the tabs probe extension. On the real facade,
+  a client tab without a URL may report about:blank loading events after `TabCreated`, which rule 2's order check
+  (first `loadingChanged(true)`) would see; the scripted facade models the initial about:blank without a load.
 
 ## W3-1: EngineAPI additions and contract rules 11-16
 
