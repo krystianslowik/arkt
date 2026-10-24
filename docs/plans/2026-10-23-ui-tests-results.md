@@ -584,3 +584,48 @@ Base: `origin/main` at `ab08905`, branch `chore/171-ui-tests-u6`.
 | Single `ARKT_SMOKE` site | `grep -rn ARKT_SMOKE app/ArktShell/UITests` | 1 hit (`Sandbox.seedFromArcFixture`) |
 | `ArcFixture` render & checksums | `xctest -XCTest ArktShellUITests.LaunchTests/test_E_arcFixtureRenderRewritesURLsAndMatchesExpectedCounts` | pass (0.009 s) |
 | `build-for-testing` | `xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build build-for-testing` | `** TEST BUILD SUCCEEDED **` |
+
+## U7: First run, New Space, Cmd-T, Today, Cmd-L (#172)
+
+Base: `origin/main` at `01e68c3`, branch `chore/172-ui-tests-u7`.
+
+### What was done
+
+- `UITests/FirstRunAndOpenTests.swift`: 9 tests (the plan's 8, with the `Space 1` naming rule as its own test).
+- `UITests/Harness/Shell.swift` (new): command bar and sidebar row helpers (`openCommandBar`, `openInNewTab`, `submit`,
+  `waitForCommandBar`, `todayRow`, `todayRows`, `spaceDots`). The plan's `Shell.openInNewTab(_:)` for U8 is
+  `Shell.openInNewTab(_:in:)`.
+- #269 known issue narrowed (review follow-up from #270): `expectOutlineRowsKnownIssue()` marked the whole test. It is
+  replaced by `ArktUITestCase.waitForOutlineRows(_:_:)`, which wraps only the row wait in a non-strict
+  `XCTExpectFailure` and returns whether the rows were there. Any other failure in the test still fails it, and the
+  checks after the wait run (`continueAfterFailure` is on for the duration of the wait). `LaunchTests` and
+  `LoopbackPageTests` use it.
+- Deviation: the first-run test renders the Arc fixture into the same sandbox after a quit and relaunches, because a
+  test launches into one sandbox only.
+- Deviation: the closed command bar is "root absent or value `closed`", since a hidden panel can leave the
+  accessibility tree.
+- Not covered: a second Space cannot be created from the UI until #106, so `Space 2` is not asserted.
+
+### Tests
+
+| Test | Parity | Run time (CI) |
+|---|---|---|
+| `test_E_firstRunShowsEmptyStateWithoutImport` | none | 12.2 s |
+| `test_E_newSpaceCreatesFirstSpace` | none | 6.6 s |
+| `test_E_newSpaceTitleFollowsDecision106` (strict expected failure until #106) | none | 5.0 s |
+| `test_KB001_BH100_cmdTOpensURLInNewTodayTab` | KB-001, BH-100 | 77.5 s (two #269 waits) |
+| `test_KB002_BH101_cmdLEditedEnterNavigatesCurrentTab` | KB-002, BH-101 | 79.9 s (two #269 waits) |
+| `test_KB004_BH102_cmdLUneditedEnterReloads` | KB-004, BH-102 | 48.6 s (one #269 wait) |
+| `test_KB003_BH103_cmdTOrCmdLWhileOpenCloses` | KB-003, BH-103 | 13.8 s |
+| `test_KB084_escClosesCommandBar` | KB-084, NEEDS-RUNTIME-CHECK RT-08 | 10.1 s |
+| `test_E_cmdTWithNoSpaceCreatesSpaceThenTab` | none | 44.8 s (one #269 wait) |
+
+### Verification
+
+Run on CI ("UI tests (informative)", macos-26, `ARKT_UITEST_TIMEOUT_SCALE=3`), not locally: the machine was under load
+and other GUI work was running. 14 tests, 0 unexpected failures, 380 s. On macOS 26 the sidebar rows are missing
+(#269), so each row wait times out at 30 s as an expected failure; the remaining checks of each test ran and passed.
+The `Space 1` test reported its expected failure (`"Space"` is not `"Space 1"`). Run times with rows exposed
+(macOS 27) are not measured yet.
+
+Known issues used: #269 (outline rows), #106 (Space naming).
