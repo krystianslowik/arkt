@@ -9,8 +9,9 @@ configs:
   Release: release
   # Release settings plus the scripted smoke (`-ArktSmoke YES`): optimized pacing runs. Never shipped.
   Profile: release
-  # Embedding spike (engine week 2, Task WE): main.swift hands the process to Chromium's ChromeMain. Never shipped.
-  Spike: debug
+  # Development build on the real engine (week-3 plan, Task W3-3): main.swift hands the process to the engine
+  # framework's ChromeMain. Additive: Debug, Release and Profile build the FakeEngine app as before.
+  Engine: debug
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -23,7 +24,7 @@ settings:
     DEAD_CODE_STRIPPING: YES
     ARKT_PRINCIPAL_CLASS: NSApplication
     # Info.plist `ArktEnvironmentOverrides`: YES only where the build reads the ARKT_* environment overrides (Debug,
-    # Profile); NO in Release, Spike and any new config. The UI test harness refuses to launch a bundle without YES.
+    # Profile); NO in Release, Engine and any new config. The UI test harness refuses to launch a bundle without YES.
     ARKT_ENV_OVERRIDES: "NO"
   configs:
     Debug:
@@ -31,10 +32,11 @@ settings:
     Profile:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_SMOKE_BUILD"
       ARKT_ENV_OVERRIDES: "YES"
-    Spike:
-      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_CHROMIUM_SPIKE"
+    Engine:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_CHROMIUM_ENGINE"
       # Chromium CHECKs that NSApp is a BrowserCrApplication (chrome_browser_application_mac.mm).
       ARKT_PRINCIPAL_CLASS: BrowserCrApplication
+      # Development only; the signed release bundle is Task W3-11.
       ENABLE_HARDENED_RUNTIME: NO
       # Keep the Swift entry point in the main executable, like Chromium's stub, instead of
       # Xcode's debug stub plus ArktShell.debug.dylib.
@@ -67,6 +69,53 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.arkt.ArktShell
         PRODUCT_NAME: ArktShell
+    # Engine only: where the engine app is (Engine.xcconfig, which includes the uncommitted Local.xcconfig when it
+    # exists, and says where to build the bundle).
+    configFiles:
+      Engine: Engine.xcconfig
+    # Engine only (the script exits at once in every other configuration). Runs after the Info.plist is processed
+    # (its input) and before Xcode signs the app. Copies the engine framework into Contents/Frameworks when it changed (an APFS
+    # clone when on the same volume) and writes ArktEngineFrameworkName and ArktEngineFrameworkVersion from the
+    # framework's own Info.plist and Versions/Current, plus CrProductDirName (Decision 8). The framework is in no
+    # embed phase, so Xcode never re-signs it.
+    postBuildScripts:
+      - name: Embed the engine framework (Engine only)
+        basedOnDependencyAnalysis: false
+        # Orders the phase after Info.plist processing in incremental builds too (without it, Xcode ran the
+        # phase first and then rewrote the Info.plist, dropping the keys).
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        shell: /bin/zsh
+        script: |
+          [[ $CONFIGURATION == Engine ]] || exit 0
+          if [[ -z $ARKT_ENGINE_APP || ! -d $ARKT_ENGINE_APP ]]; then
+            print -u2 "error: set ARKT_ENGINE_APP in app/ArktShell/Local.xcconfig to a built engine app (out/Spike/Chromium.app)"
+            exit 1
+          fi
+          frameworks=( "$ARKT_ENGINE_APP"/Contents/Frameworks/*.framework(N) )
+          if (( ${#frameworks} != 1 )); then
+            print -u2 "error: expected one framework in $ARKT_ENGINE_APP/Contents/Frameworks, found ${#frameworks}"
+            exit 1
+          fi
+          src=${frameworks[1]}
+          version=$(readlink "$src/Versions/Current") || exit 1
+          name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$src/Versions/$version/Resources/Info.plist") || exit 1
+          dest="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/${src:t}"
+          stamp="$DERIVED_FILE_DIR/engine-framework.stamp"
+          current="$src $(stat -f '%m %z' "$src/Versions/$version/$name") $(stat -f '%m' "$src/Versions/$version/Resources/Info.plist")"
+          if [[ -d $dest && -f $stamp && "$(<$stamp)" == "$current" ]]; then
+            print "Engine framework unchanged: ${src:t} $version"
+          else
+            rm -rf "$dest"
+            mkdir -p "${dest:h}" "${stamp:h}"
+            cp -c -Rp "$src" "$dest" 2>/dev/null || cp -Rp "$src" "$dest" || exit 1
+            print -r -- "$current" > "$stamp"
+            print "Engine framework copied: ${src:t} $version"
+          fi
+          plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          plutil -replace ArktEngineFrameworkName -string "$name" "$plist" || exit 1
+          plutil -replace ArktEngineFrameworkVersion -string "$version" "$plist" || exit 1
+          plutil -replace CrProductDirName -string "Arkt Dev Engine" "$plist" || exit 1
     dependencies:
       - package: ShellKit
         product: ShellUI

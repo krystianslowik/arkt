@@ -238,11 +238,12 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
     `-applicationShouldTerminate:` is not supported (`chrome_browser_application_mac.mm:289-321`). Quit closes every
     `Browser` first (`CloseAllBrowsersAndQuit`, `application_lifetime_desktop.cc:335-358`), and `NotifyAppTerminating`
     fires only after the last one is gone (`:300-326`). The hook names two seams:
-    - **Quit start.** The facade observes `BrowserListObserver::OnBrowserClosing`; the first call while
-      `browser_shutdown::IsTryingToQuit()` is true calls `-[ArktEngineEmbedder engineWillBeginTerminating]`, and the
+    - **Quit start.** The seam subscribes `chrome::AddClosingAllBrowsersCallback` (156 has no
+      `BrowserListObserver::OnBrowserClosing` on desktop; W3-3): the first `true`, which `tryToTerminateApplication`
+      sends before `CloseAllBrowsersAndQuit`, calls `-[ArktEngineEmbedder engineWillBeginTerminating]`, and the
       shell runs `prepareForTermination()` (stamps visible tabs, decision 10 of the shell plan) while its windows still
-      exist. A cancelled quit (`stopTryingToTerminateApplication`, a held `beforeunload`) calls
-      `-engineDidCancelTerminating`.
+      exist. A cancelled quit (`stopTryingToTerminateApplication`, a held `beforeunload`; Chromium then sends `false`,
+      once per browser) calls `-engineDidCancelTerminating` once.
     - **Terminating.** At `engineDidStart:` the facade registers one `ScopedKeepAlive` with an existing non-`BROWSER`
       `KeepAliveOrigin` (adding one would be a patch; `applicationWillTerminate` `CHECK`s on `BROWSER`, `:1055`), held
       for the life of the process, so the keep-alive is never registered late (`KeepAliveRegistry::Register` `CHECK`s

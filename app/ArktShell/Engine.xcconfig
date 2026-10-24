@@ -1,0 +1,13 @@
+// Engine configuration of the ArktShell target (week-3 plan, Task W3-3).
+//
+// Local.xcconfig (not committed, see .gitignore) names this machine's engine:
+//   ARKT_ENGINE_APP = <chromium src>/out/Spike/Chromium.app
+// out/Spike is a component build: its dylibs must sit next to the app bundle.
+// Build into a directory on the Chromium disk that holds clones of them, for
+// all targets at once (package products included):
+//   xcodebuild -scheme ArktShell -configuration Engine \
+//     CONFIGURATION_BUILD_DIR=<embed dir> build
+
+ARKT_ENGINE_APP =
+
+#include? "Local.xcconfig"

@@ -1,0 +1,49 @@
+# The engine facade header (week-3 plan, Decision 1): Objective-C protocols and
+# enums only, shared byte for byte with the Swift module ArktEngineABI.
+source_set("api") {
+  sources = [ "arkt_engine.h" ]
+  frameworks = [
+    "AppKit.framework",
+    "Foundation.framework",
+  ]
+}
+
+# The embedder seam (Task W3-3): finds the Swift embedder through the
+# Objective-C runtime, owns the readiness queue, the quit seams, the lifetime
+# keep-alive and the nesting guard, and vends the facade objects. Without an
+# embedder class in the process (the GN-built Chromium.app) it does nothing.
+source_set("embedder") {
+  sources = [
+    "arkt_embedder.h",
+    "arkt_embedder.mm",
+    "arkt_engine_facade.h",
+    "arkt_engine_facade.mm",
+    "arkt_reentrancy_probe.h",
+    "arkt_reentrancy_probe.mm",
+  ]
+  public_deps = [ ":api" ]
+  deps = [
+    "//arkt/browser:window",
+    "//base",
+    "//chrome/browser/lifetime",
+    "//chrome/browser/lifetime:termination_notification",
+    "//chrome/browser/profiles:profile",
+    "//chrome/browser/tab_list",
+    "//chrome/browser/ui:browser_commands",
+    "//chrome/browser/ui/browser_window",
+    "//chrome/browser/ui/browser_window:create_browser_window",
+    "//chrome/browser/ui/tabs:tab_strip",
+    "//chrome/common:constants",
+    "//components/keep_alive_registry",
+    "//components/sessions",
+    "//components/tabs:public",
+    "//content/public/browser",
+    "//ui/base",
+    "//ui/gfx",
+    "//url",
+  ]
+  frameworks = [
+    "AppKit.framework",
+    "Foundation.framework",
+  ]
+}

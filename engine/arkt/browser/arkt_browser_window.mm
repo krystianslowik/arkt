@@ -496,7 +496,24 @@ gfx::Rect ArktBrowserWindow::GetBounds() const {
   return gfx::ScreenRectFromNSRect(host_.window.frame);
 }
 
+void ArktBrowserWindow::HoldShow() {
+  show_held_ = true;
+}
+
+void ArktBrowserWindow::ReleaseHeldShow() {
+  show_held_ = false;
+  if (show_pending_) {
+    show_pending_ = false;
+    Show();
+  }
+}
+
 void ArktBrowserWindow::Show() {
+  if (show_held_) {
+    show_pending_ = true;
+    LOG(WARNING) << "ARKT: native window show held (embedder not ready)";
+    return;
+  }
   // Activation is asynchronous on Mac; the Browser must be the last active one
   // as soon as Show() returns (as BrowserView and WebUIBrowserWindow do).
   BrowserActiveStateManager::From(browser_)->DidBecomeActive();
@@ -523,6 +540,10 @@ bool ArktBrowserWindow::IsVisible() const {
 }
 
 void ArktBrowserWindow::ShowInactive() {
+  if (show_held_) {
+    show_pending_ = true;
+    return;
+  }
   [host_.window orderFront:nil];
 }
 
@@ -553,6 +574,10 @@ void ArktBrowserWindow::Close() {
 }
 
 void ArktBrowserWindow::Activate() {
+  if (show_held_) {
+    show_pending_ = true;
+    return;
+  }
   BrowserActiveStateManager::From(browser_)->DidBecomeActive();
   [NSApp activateIgnoringOtherApps:YES];
   [host_.window makeKeyAndOrderFront:nil];

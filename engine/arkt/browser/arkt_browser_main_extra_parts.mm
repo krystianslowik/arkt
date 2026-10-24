@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "arkt/api/arkt_embedder.h"
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_browser_window_factory_hook.h"
 #include "arkt/browser/arkt_extension_dialogs.h"
@@ -138,6 +139,9 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
   }
   ArktPlaceholderWindowHost* host = [[ArktPlaceholderWindowHost alloc] init];
   auto* window = new ArktBrowserWindow(browser, host);
+  // With a Swift embedder: queue the window until it is ready, or ask it for
+  // a host (week-3 plan, Decision 2). A no-op without one.
+  OnArktBrowserWindowCreated(browser, window);
   // The Browser is still being constructed here; attach the sidebar
   // Extensions menu once it exists. The window owns it through its
   // ExtensionsContainer. The menu follows the active tab.
@@ -216,29 +220,6 @@ BrowserCensus& Census() {
   return *census;
 }
 
-// Week-3 handshake check (W3-0): the embedding app's Swift class is reached
-// through the Objective-C runtime only, never by symbol (the framework hides
-// every symbol but ChromeMain, and the app is not linked against it). Logs
-// `ARKT: embedder class <name> <found|absent>`; for a found class, whether its
-// instances respond to the handshake selector. The W3-0a probe class stands in
-// for the embedder until W3-3 creates the facade.
-void LogEmbedderClass() {
-  for (NSString* name in @[ @"ArktShellEmbedderProbe", @"ArktShellEmbedder" ]) {
-    Class embedder = NSClassFromString(name);
-    if (!embedder) {
-      LOG(WARNING) << "ARKT: embedder class " << name.UTF8String << " absent";
-      continue;
-    }
-    BOOL nsobject =
-        [embedder instancesRespondToSelector:NSSelectorFromString(@"init")];
-    BOOL handshake = [embedder
-        instancesRespondToSelector:NSSelectorFromString(@"engineDidStart:")];
-    LOG(WARNING) << "ARKT: embedder class " << name.UTF8String
-                 << " found (responds to init " << (nsobject ? "yes" : "no")
-                 << ", engineDidStart: " << (handshake ? "yes" : "no") << ")";
-  }
-}
-
 }  // namespace
 
 ArktBrowserMainExtraParts::ArktBrowserMainExtraParts() = default;
@@ -251,6 +232,13 @@ void ArktBrowserMainExtraParts::PreProfileInit() {
     SetCreateBrowserWindowOverride(&CreateArktBrowserWindow);
     LOG(WARNING) << "ARKT: native window factory registered";
     RegisterExtensionDialogSheets();
+  }
+}
+
+void ArktBrowserMainExtraParts::PostProfileInit(Profile* profile,
+                                                bool is_initial_profile) {
+  if (is_initial_profile) {
+    SetEmbedderProfile(profile);
   }
 }
 
@@ -272,7 +260,8 @@ void ArktBrowserMainExtraParts::PreBrowserStart() {
 
 void ArktBrowserMainExtraParts::PostBrowserStart() {
   LOG(WARNING) << "ARKT: in-process hook alive";
-  LogEmbedderClass();
+  // The Swift embedder, when the process has one (week-3 plan, Decision 1).
+  StartEmbedder();
   if (NativeWindowEnabled()) {
     return;
   }

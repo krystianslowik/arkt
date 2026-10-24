@@ -10,7 +10,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-0 | Engine worktree, baselines, class lookup, command ids | DONE | lookup `found` in the app, `absent` in `Chromium.app`; 7 patch files, 17 upstream files, 0 hot-file hunks; W5c Step 3 and W6 Step 3 pass; command-id table; Swift baselines ShellKit 481, ArktCore 349; see "W3-0" below |
 | W3-1 | `EngineAPI` additions, harness drivers, contract rules 11-16 (Swift lane) | TODO | |
 | W3-2 | Facade header and its Swift module | DONE (#246) | see "W3-2" below |
-| W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | TODO | |
+| W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | DONE | **GATE PASS** with recorded deviations (readiness queue for Chromium-created windows, quit-start seam, CDP keep-alive); see "W3-3" below |
 | W3-4 | Host mode for ShellUI windows | TODO | |
 | W3-5 | Tab facade | TODO | |
 | W3-6 | `ChromiumEngineKit` over the facade | TODO | |
@@ -35,6 +35,228 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-3: Engine configuration, readiness and quit seams, re-entrancy gate
+
+Date 2026-10-24. Branch `engine/33-w3-3-gate` off `main` at `abeeec6`. `$CR` branch `arkt` at `e4a2ca5cca` (0001-0007)
+before and after: no patch, no export. `/` had 12 GiB free and swap 8.8 GB used of 10 GB at the start of each build.
+
+### What landed
+
+- `app/ArktShell/project.yml`: configuration `Engine` replaces `Spike` (`ARKT_CHROMIUM_ENGINE`, `NSPrincipalClass`
+  `BrowserCrApplication`, hardened runtime off, `ENABLE_DEBUG_DYLIB: NO`, `ArktEnvironmentOverrides` NO). A post-build
+  script phase, which exits at once outside `Engine`, copies the engine framework when it changed (stamp of path, size
+  and mtime; `cp -c` clone) and writes `ArktEngineFrameworkName` and `ArktEngineFrameworkVersion` from the framework's
+  own `Info.plist` (`CFBundleExecutable`) and `Versions/Current`, plus `CrProductDirName = Arkt Dev Engine`, into the
+  built `Info.plist`. The build log orders it `ProcessInfoPlistFile` -> `Ld` -> `PhaseScriptExecution Embed the engine
+  framework` -> `CodeSign`. `Engine.xcconfig` (target level, `Engine` only) has `#include? "Local.xcconfig"`; the
+  uncommitted `Local.xcconfig` names `ARKT_ENGINE_APP` (`.gitignore` line).
+- `App/main.swift`: `#if ARKT_CHROMIUM_ENGINE` calls `engineMain()` and nothing else. `App/Engine/EngineMain.swift`
+  (replaces `ChromiumSpikeMain.swift`; `ChromiumSpikeProbe.swift` is gone with the spike): `_ = ArktShellEmbedder.self`,
+  the versioned path from the two keys, `dlopen(RTLD_LAZY | RTLD_LOCAL | RTLD_FIRST)`, `--no-startup-window` appended
+  unless passed, `ChromeMain`, `exit`. No `--arkt-native-window` (#21 has landed).
+- `App/Engine/ArktShellEmbedder.swift`, `FacadeStandIn.swift`, `ReentrancyProbe.swift`: the stand-in embedder (below).
+- Engine: `engine/arkt/api/BUILD.gn` (`//arkt/api` = the facade header, `//arkt/api:embedder`),
+  `arkt_embedder.{h,mm}` (lookup, readiness queue, quit seams, lifetime keep-alive, nesting guard),
+  `arkt_engine_facade.{h,mm}` (a first cut of the facade, below), `arkt_reentrancy_probe.{h,mm}`
+  (`--arkt-reentrancy-probe`). `//arkt/browser` is split into `browser` (the hook) and `window` (everything else) so
+  the hook can depend on the embedder, which uses the window code; `ArktBrowserWindow` gains `HoldShow` /
+  `ReleaseHeldShow`. `gn check out/Spike '//arkt/*'`: `Header dependency check OK`. `browser_tabstrip.h` is included
+  with `// nogncheck` (`//chrome/browser/ui` reaches `//arkt` through `//chrome/browser`).
+
+Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome` (one fix for a missing `@` on a string literal, then
+`The build has finished successfully.`, 0 `FAILED:`). Only `libchrome_dll.dylib` changed among the 518 dylibs; it was
+re-cloned next to the bundle. App: `xcodegen generate`, then `xcodebuild -scheme ArktShell -configuration Engine
+-derivedDataPath <scratch> -jobs 2 CONFIGURATION_BUILD_DIR=$EMB build`. A target-level `CONFIGURATION_BUILD_DIR`
+does not work: the package modules (`ShellUI`, `Persistence`, ...) are then not found, so the bundle directory is
+passed on the command line for all targets.
+
+### Deviations from the plan
+
+1. **Stand-in embedder without the header.** `EngineABIIsolationTests` lets only `ChromiumEngineKit` (W3-6) import
+   `ArktEngineABI` and bars `project.yml` from naming it (#246 review: the typed embedder belongs in
+   `ChromiumEngineKit`). W3-3 therefore keeps `@objc(ArktShellEmbedder)` in `App/Engine/`, implementing every
+   `ArktEngineEmbedder` selector without declaring the protocol, and reaches the facade by selector name
+   (`FacadeStandIn.swift`). The hook checks the selectors instead of `conformsToProtocol:` and logs both. W3-6/W3-9
+   move the typed embedder into `ChromiumEngineKit` and delete the stand-in. W3-3 does not need W3-1.
+2. **A first cut of the facade lands here, not in W3-4/W3-5.** The probes call `createTab` and `close` on a facade tab,
+   so `arkt_engine_facade.mm` implements browsers, tab lists, tab creation, activation, navigation and closes with the
+   nesting guard, and the `TabCreated`, `TabClosed`, `ActiveTabChanged`, `WindowOpened`, `WindowClosed` events in
+   batches from a posted task (a facade call inside a notification `CHECK`s). Not yet: host mode and
+   `createBrowserWithHost:` (W3-4, `NOTREACHED`), per-tab state events, stable containers, history, duplicate, close
+   reasons other than `client` / `appTerminating`, `.skipUnloadHandlers`, extension actions and the test API (W3-5;
+   logged, empty answers).
+3. **Readiness queue for Chromium-created windows.** A URL argument is a real queued request: `--no-startup-window`
+   makes `StartupBrowserCreator::ProcessCmdLineImpl` drop URL arguments (`startup_browser_creator.cc:1173`), so the
+   seam reads `CommandLine::GetArgs()` and creates the `Browser` only after `embedderReady`. A `Browser` Chromium
+   creates on its own (Dock reopen through `CreateBrowser` -> `chrome::NewEmptyWindow`, a URL from `open -a`) has no
+   seam before construction short of a patch, so its window is built, **held hidden** (`HoldShow`) and its host request
+   queued; replay asks the host and shows it. Its request kind is resolved at replay from the first tab (W3-4 owns the
+   request fields). Until host mode (W3-4) the engine logs the embedder's host and keeps the placeholder host.
+4. **Quit start uses `chrome::AddClosingAllBrowsersCallback`** (156 has no desktop `BrowserListObserver::
+   OnBrowserClosing`; plan Decision 13 updated). `true` arrives from `tryToTerminateApplication` before
+   `CloseAllBrowsersAndQuit` sets `IsTryingToQuit` (hence `trying to quit no` in the logs); `false` arrives once per
+   browser on a cancel and is reported once. The same callback fires for "quit prevented by apps" and session end;
+   W3-9 records those paths.
+5. **Lifetime keep-alive origin `KeepAliveOrigin::PANEL_VIEW`**: referenced only by tests in 156 (`git grep` of
+   `IsOriginRegistered` and of the origin), so registering it changes no shipped code path; `applicationWillTerminate`
+   only `CHECK`s `BROWSER`.
+
+### Gate
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| Launch from `$EMB`: class found, `engineDidStart`, no startup window, `embedderReady` after about 2 s, alive 30 s, 0 `FATAL`/`Check failed`, default user data dir ends in `Arkt Dev Engine` | PASS | run 1 below; census shows only the two requested windows |
+| `nm -u` class check prints `0`; `ArktShellEmbedder` defined | PASS | below |
+| Readiness: URL argument and Dock-style reopen queued, replayed after ready (queued, ready, host asked) | PASS (deviation 3) | run 1 |
+| Quit: `engineWillBeginTerminating` before `native window destroyed`, then `engineWillTerminate`, exit after the completion; cancelled quit logs `engineDidCancelTerminating` and stays; no keep-alive `Check failed` | PASS | runs 1 and 2 |
+| Re-entrancy probes recorded; mutators deferred in nested loops; forbidden case stall measured; batch under a Swift `NSAlert` handled, state consistent; engine-opened context menu measured | PASS (context menu: modelled, see below) | run 3 |
+| `Chromium.app` logs `embedder class absent`, W5c checks pass; `Debug` unchanged | PASS | run 4, Debug comparison |
+
+Binary checks (`$EMB/ArktShell.app`):
+
+```
+$ nm -u ArktShell.app/Contents/MacOS/ArktShell | grep -cF '_OBJC_CLASS_$_Arkt'
+0
+$ nm -m ArktShell.app/Contents/MacOS/ArktShell | grep -F 'OBJC_CLASS_$_Arkt'
+0000000100458f30 (__DATA,__objc_data) external _OBJC_CLASS_$_ArktShellEmbedder
+0000000100459000 (__DATA,__objc_data) external _OBJC_CLASS_$_ArktShellStandInWindowHost
+$ plutil -p ArktShell.app/Contents/Info.plist   # Engine keys
+  "ArktEngineFrameworkName" => "Chromium Framework"
+  "ArktEngineFrameworkVersion" => "156.0.8078.48"
+  "CrProductDirName" => "Arkt Dev Engine"
+  "NSPrincipalClass" => "BrowserCrApplication"
+$ codesign -dvvv <framework in the app>; codesign -dvvv <framework in out/Spike>
+CDHash=0754af13a4a73b567d327a0424638020311ded9b   (both: Xcode did not re-sign the framework)
+```
+
+**Run 1** (readiness, cancelled quit; profile `$PROF/w3-3-run1`, port 9441, `--arkt-debug-reopen-before-ready`, a
+`data:` URL argument). Launched 04:19:41; hook at 04:19:50 (9 s: no long first-launch scan this time, the framework
+clone had the same content as the copy scanned in W3-0). Log, `ARKT:` prefixes shortened:
+
+```
+04:19:50.415 in-process hook alive
+04:19:50.415 embedder class ArktShellEmbedder found (conforms to ArktEngineEmbedder no, responds to every selector yes)
+04:19:50.415 default user data dir /Users/<user>/Library/Application Support/Arkt Dev Engine
+04:19:50.415 lifetime keep-alive registered (origin PANEL_VIEW)
+04:19:50.415 window request queued kind=startupURL url=data:text/html,<title>W3-3 startup URL</title>...
+04:19:50.415 engineDidStart
+04:19:50.577 debug reopen (chrome::NewEmptyWindow) before ready
+04:19:50.699 window request queued kind=reopen window session id 951776989 (window held hidden)
+04:19:50.811 native window show held (embedder not ready)
+04:19:52.565 [shell] simulated start finished, calling embedderReady
+04:19:52.565 embedderReady (2 queued request(s))
+04:19:52.579 [shell] hostForEngineWindowRequest kind 3 initial URL data:text/html,...
+04:19:52.581 host asked kind=startupURL window session id 951776991 answered ArktShellStandInWindowHost; placeholder host kept until W3-4
+04:19:52.697 [shell] hostForEngineWindowRequest kind 2 initial URL chrome://newtab/
+04:19:52.700 host asked kind=reopen window session id 951776989 answered ArktShellStandInWindowHost; placeholder host kept until W3-4
+04:19:52.711 window number 95173
+```
+
+Census `normal=1` after the reopen and `normal=2` after replay; no other window: `--no-startup-window` holds. CDP
+`/json/list`: the startup URL page and the reopen's New Tab only. Alive 29 s later, 0 `FATAL`/`Check failed` (one
+`ERROR`: an IPH shown before its browser was active, Chromium's, harmless).
+
+Cancelled quit: `onbeforeunload` set with a user gesture (`cdp.mjs --user-gesture`, `hasBeenActive` true); after the
+frontmost check, AX `click menu item "Quit Chromium"`. Chromium showed its "Leave site?" dialog (an `AXDialog`
+window, buttons Cancel and Leave); AX `click button "Cancel"`:
+
+```
+04:20:33.356 quit started (trying to quit no)
+04:20:33.356 [shell] engineWillBeginTerminating
+04:21:17.531 quit cancelled
+04:21:17.531 [shell] engineDidCancelTerminating
+```
+
+The process stayed. Then, handler cleared, Quit again: `quit started` 04:21:23.214, both `TabClosed(reason 5)` (app
+terminating) and `WindowClosed` batches, `native window destroyed` twice from 04:21:23.241, `app terminating`
+04:21:23.272, `engineWillTerminate`, completion and `lifetime keep-alive released (embedder flushed)` 04:21:23.596.
+**The process did not exit**: `ChromeDevToolsManagerDelegate` (`chrome_devtools_manager_delegate.cc:195-205`)
+registers a `REMOTE_DEBUGGING` keep-alive whenever `--no-startup-window` and `--remote-debugging-port` are both
+present ("controlled entirely by the automation process"). A sample showed the main thread idle in `[NSApp run]`;
+stopped by its PID. This is Chromium's behaviour, not the seam's, and it matters for W3-9 (below).
+
+**Run 2** (full quit; profile `$PROF/w3-3-run2`, no CDP port): AX Quit at 04:24:37:
+
+```
+04:24:37.526 quit started (trying to quit no)
+04:24:37.526 [shell] engineWillBeginTerminating
+04:24:37.552 native window destroyed
+04:24:37.552 app terminating
+04:24:37.552 [shell] engineWillTerminate
+04:24:37.877 [shell] simulated flush done, calling the completion
+04:24:37.877 lifetime keep-alive released (embedder flushed)
+```
+
+The process exited right after the release (last log write 04:24:37). 0 `FATAL`/`Check failed` in runs 1 and 2; no
+`KeepAliveRegistry` check. Crash dumps under `~/Library/Application Support/Arkt Dev Engine/Crashpad`: 0 before and
+after all runs.
+
+**Run 3** (`--arkt-reentrancy-probe`; profile `$PROF/w3-3-run3`, port 9442). The engine opens each loop from a posted
+Chromium task and closes it after 2 s with a common-mode timer; a 20 ms heartbeat timer measures Chromium task stalls;
+the app was activated only for these phases. Times are from the phase's begin line.
+
+| Phase | Main-actor job ran in the loop | Facade calls from it | Deferred work ran | Chromium heartbeat max gap |
+|---|---|---|---|---|
+| `NSMenu` from a Chromium task | yes, +342 ms, mode `NSEventTrackingRunLoopMode` | `createTab` deferred (handle at once, session id -1), `close` answered `held` | after the menu closed (+2.27 s): inserted, then `TabCreated`, `TabClosed(client)` | 2247 ms (Chromium bans its tasks) |
+| `NSMenu` from a Chromium task, application tasks allowed (as `RenderViewContextMenuMacCocoa` via `ui::ShowContextMenu(allow_nested_tasks=true)`) | yes, +321 ms, tracking mode | deferred, `held` | inside the menu (+11 ms), batch delivered in tracking mode | 525 ms |
+| `NSAlert runModal` from a Chromium task | yes, +389 ms, `NSModalPanelRunLoopMode` | deferred, `held` | after the alert (+2.06 s) | 2038 ms |
+| Forbidden: Swift `NSAlert runModal` inside a batch handler | - | - | - | **2018 ms**: Chromium tasks stall for the whole alert (the handler runs inside a Chromium task) |
+| Batch while a Swift `NSAlert` (opened from a run-loop callout) is up | timer callout inside the alert, modal mode | deferred, `held` | inside the alert (+12 ms) | 38 ms; two batches (`TabCreated, TabClosed` from Swift's calls, then the engine's `TabCreated`) handled under the alert; shell state consistent after it (3 tabs shell, 3 engine) |
+
+Shell state (the stand-in's tab table from events against the facade's tab lists) was consistent at every phase end.
+0 `FATAL`/`Check failed`; alive until stopped by its PID.
+
+Engine-opened page context menu: still not shown on an Arkt window (`RenderViewContextMenuMacCocoa::Show` returns
+without a top-level `views::Widget`, `render_view_context_menu_mac_cocoa.mm:77-82`, week-2 results row 7), so it
+cannot be opened for real. The second phase models it exactly: an `NSMenu` tracked from inside a Chromium task with
+`ScopedAllowApplicationTasksInNativeNestedLoop`, which is what `ui::ShowContextMenu(..., allow_nested_tasks=true)`
+does. In that case Chromium tasks, facade batches and deferred facade work all run inside the menu; Swift handlers
+must tolerate that (Decision 3 already says so).
+
+**Run 4** (`$OUT/Chromium.app`, profile `$PROF/w3-3-chromium`, port 9443, the three probes, `--arkt-trace-visibility`,
+`https://example.com`): `ARKT: embedder class ArktShellEmbedder absent`; W5c Step 3 over CDP: example.com `visible`,
+`probe.create()` -> still `visible` (`tab list rows 2`), activate about:blank -> `hidden`, back -> `visible`, with
+matching `ARKT: visibility` lines; 0 `FATAL`/`Check failed`. The AX row-selection half was not repeated (the window
+code it exercises is unchanged; W3-0 ran it).
+
+**Debug unchanged.** `main` at `abeeec6` and this branch, both built `Debug` with `CODE_SIGNING_ALLOWED=NO` (as CI):
+`Info.plist` identical (`diff` of `plutil -p` empty; `NSPrincipalClass` `NSApplication`), `strings <ArktShell.debug.dylib>
+| grep -c "ARKT engine"` prints `0` in both (the Engine binary has 3), no engine symbol (`ArktShellEmbedder`,
+`engineMain`, `ChromeMain`) and no `Contents/Frameworks`; the embed script phase runs and exits at once.
+
+Copy only on change: an incremental `Engine` rebuild prints `Engine framework unchanged: Chromium Framework.framework
+156.0.8078.48`; the framework binary keeps its inode (4723531) and CDHash. The first incremental rebuild also showed
+that without a declared input Xcode ran the script phase before `ProcessInfoPlistFile` and then rewrote the
+Info.plist, dropping the three keys (the app then stops with `Info.plist has no ArktEngineFrameworkName`); the phase
+now lists `$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)` as its input, and two further incremental rebuilds order it
+`ProcessInfoPlistFile` -> script -> `CodeSign` with the keys present and `codesign -v` passing.
+
+**Run 5** (`--arkt-embedder-fail`, URL argument, `--arkt-debug-reopen-before-ready`; profile `$PROF/w3-3-run5`):
+`embedderFailed (dropping 2 queued request(s))` 2 s after start, the held reopen window's `Browser` closed (`browsers
+normal=0`, `native window destroyed`), no window shown, 0 `FATAL`/`Check failed`. The process stays: the stand-in has
+no launch-failure alert and no quit path yet (W3-7 part C); stopped by its PID.
+
+Swift: `swift test --skip ShellKitGUITests` in ShellKit: 481 tests (baseline + 0), all pass, including
+`EngineABIIsolationTests` (no app file imports `ArktEngineABI`, `project.yml` does not name it).
+
+### What W3-4 and later need
+
+- W3-4: host mode with the embedder's host (today logged and discarded), `createBrowserWithHost:`, request kinds from
+  the call site instead of resolution at replay, `respondsToSelector:` guards for `activateTab` / `tabListChanged:`
+  (#246 follow-up), and the held-window path switched to the embedder host at replay.
+- W3-5: close reasons `page` / `extension` / `windowClosing`, `.skipUnloadHandlers`, stable containers, state events,
+  history, duplicate, extension actions, the test API. The facade file from this task is its starting point. Known
+  gap: `closeWithMode:` on a handle whose deferred insert has not run yet, called outside a nested loop, finds no tab
+  and answers `closed` while the insert still lands later; closes of pending handles must queue behind the insert.
+- The stand-in's `engineWillBeginTerminating (<n> visible window(s))` counts `NSApp.windows`, not shell windows.
+- W3-6/W3-9: move the typed `ArktShellEmbedder` into `ChromiumEngineKit` and delete `FacadeStandIn.swift`; the hook
+  already accepts either (selector check).
+- W3-9: an engine launch with `--remote-debugging-port` (implied by `--no-startup-window`) never exits on Quit, because
+  of Chromium's `REMOTE_DEBUGGING` keep-alive. Quit and Dock Quit checks must run without a CDP port (as run 2), or the
+  runner closes the browser over CDP (`Browser.close`) for those runs.
+- W3-7 part C can wire `AppComposition.start` / `prepareForTermination()` / `flush()` to the seams as described; they
+  fire in the planned order.
 
 ## W3-0: engine baselines and embedder class lookup
 
