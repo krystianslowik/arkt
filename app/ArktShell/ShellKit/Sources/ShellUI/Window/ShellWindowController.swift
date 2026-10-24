@@ -58,6 +58,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The engine's active tab closed while the window still had tabs: the engine's own pick of the next active tab is
   /// not followed (the shell picks the successor), it is answered with the shell's current tab.
   var expectsEngineReactivation = false
+  /// The window closed. A closed controller is not shown again (its command bar and pager released their display
+  /// links); the app builds a new window instead (#241: Dock reopen).
+  public private(set) var isClosed = false
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
   /// The engine reported a favicon for a sidebar node (nil: cleared); the app persists it. Called for favicons
@@ -652,6 +655,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The shown tabs, every pane of a split, stop being visible (decision 10). The command bar's display link retains
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
+    isClosed = true
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
     commandBar.invalidate()

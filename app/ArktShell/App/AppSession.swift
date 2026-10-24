@@ -19,7 +19,10 @@ final class AppSession {
   let database: ArktDatabase
   let source: ModelSidebarSource
   let autosaver: SidebarAutosaver
-  let window: ShellWindowController
+  /// The browser window. Replaced by a new one when the user reopens the app after closing it (#241); a closed
+  /// controller is never shown again.
+  private(set) var window: ShellWindowController
+  private let engine: any EngineClient
   /// One instance for every window, so Show / Hide Toolbar reaches all of them.
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
   let archiveStore: ArchiveStore
@@ -53,6 +56,7 @@ final class AppSession {
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
+    self.engine = engine
     self.window = ShellWindowController(engine: engine, sidebar: source,
                                         toolbarSetting: toolbarSetting)
     let archiveStore = ArchiveStore(database: state.database)
@@ -79,10 +83,7 @@ final class AppSession {
 
   func start(outcome: OpenOutcome) {
     startFavicons(prune: outcome == .opened)          // before the window can create engine tabs
-    window.onImportFromArc = { [weak self] in self?.importFromArc() }
-    window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
-    window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
-    window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
+    wire(window)
     window.window?.center()
     window.showWindow(nil)
     refreshArcImportAvailability()
@@ -107,6 +108,36 @@ final class AppSession {
     #if DEBUG
     if let phase = AppEnvironment.smokePhase { runSmoke(phase, outcome: outcome) }
     #endif
+  }
+
+  /// The app's hooks on a browser window: the first one at launch, and each window a reopen builds (#241).
+  private func wire(_ window: ShellWindowController) {
+    window.onImportFromArc = { [weak self] in self?.importFromArc() }
+    window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
+    window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
+    window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
+    window.onFaviconChanged = { [weak faviconWriter] id, data in faviconWriter?.record(data, for: id) }
+    window.isArcImportAvailable = isArcImportAvailable
+  }
+
+  /// Dock reopen with no browser window (#241: closing the last window keeps the app running): fronts the window,
+  /// or builds a new one when it was closed. Its stored favicons load again off the main actor.
+  func reopenWindow() {
+    guard window.isClosed else {
+      window.showWindow(nil)
+      return
+    }
+    let reopened = ShellWindowController(engine: engine, sidebar: source, toolbarSetting: toolbarSetting)
+    window = reopened
+    wire(reopened)
+    reopened.window?.center()
+    reopened.showWindow(nil)
+    guard let writer = faviconWriter else { return }
+    let load = writer.loadStored(Set(source.sidebar.nodes.keys))
+    Task { [weak reopened] in
+      let loaded = await load.value
+      reopened?.sidebarController.setFavicons(loaded)
+    }
   }
 
   /// E5d: the visible tab is exempt (BH-076 media-playing tabs join once the engine reports audio state), each
@@ -171,7 +202,6 @@ final class AppSession {
     let writer = FaviconWriter(store: store, after: pruning)
     faviconWriter = writer
     let launchLoad = writer.loadStored(ids)
-    window.onFaviconChanged = { [weak writer] id, data in writer?.record(data, for: id) }
     Task { [weak self] in
       let loaded = await launchLoad.value
       self?.window.sidebarController.setFavicons(loaded)

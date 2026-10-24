@@ -112,7 +112,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return .terminateLater
   }
 
-  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+  /// Closing the last window keeps the app running, as the engine build does (Chromium's keep-alive) and as macOS
+  /// apps do (maintainer decision on #241); Quit is the way out.
+  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+  /// Dock click (or `open`) while the browser window is closed or minimized: it comes back (#241), also when only
+  /// the Archive window is open.
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    guard let session, session.window.isClosed || session.window.window?.isVisible != true else { return true }
+    session.reopenWindow()
+    return false
+  }
 
   /// File > Import from Arc... (nil-targeted; the app delegate ends the responder chain).
   @objc func importFromArc(_ sender: Any?) { session?.importFromArc() }
