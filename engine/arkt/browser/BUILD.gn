@@ -9,6 +9,20 @@ source_set("window_factory_hook") {
   public_deps = [ "//chrome/browser/ui:browser_window_deleter" ]
 }
 
+# Lets //arkt/browser show extension dialogs on Arkt windows as native sheets.
+# Kept light for the same reason: the Views extension dialog targets depend on
+# it (patch 0007).
+source_set("extension_dialog_hook") {
+  sources = [
+    "arkt_extension_dialog_hook.cc",
+    "arkt_extension_dialog_hook.h",
+  ]
+  public_deps = [
+    "//extensions/browser",
+    "//ui/gfx",
+  ]
+}
+
 # In-process browser hook, registered from
 # chrome/browser/chrome_browser_main.cc (patch 0001).
 source_set("browser") {
@@ -19,6 +33,10 @@ source_set("browser") {
     "arkt_browser_window.mm",
     "arkt_browser_window_parts.h",
     "arkt_browser_window_parts.mm",
+    "arkt_dialog_sheet.h",
+    "arkt_dialog_sheet.mm",
+    "arkt_extension_dialogs.h",
+    "arkt_extension_dialogs.mm",
     "arkt_extensions_bridge.h",
     "arkt_extensions_bridge.mm",
     "arkt_extensions_container.h",
@@ -35,8 +53,10 @@ source_set("browser") {
     "arkt_window_host.mm",
   ]
   deps = [
+    ":extension_dialog_hook",
     ":window_factory_hook",
     "//base",
+    "//base:i18n",
     "//chrome/app:command_ids",
     "//chrome/app:generated_resources",
     "//chrome/browser/extensions",
@@ -73,9 +93,12 @@ source_set("browser") {
     "//ui/base",
     "//ui/base:types",
     "//ui/base/unowned_user_data",
+    "//ui/events",
     "//ui/color",
     "//ui/gfx",
     "//ui/native_theme",
+    "//ui/strings",
+    "//url",
   ]
   public_deps = [ "//chrome/browser:main_extra_parts" ]
   frameworks = [
