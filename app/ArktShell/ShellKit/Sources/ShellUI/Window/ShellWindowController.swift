@@ -27,10 +27,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var isArcImportAvailable = false { didSet { emptyState.showsImport = isArcImportAvailable } }
   /// "Import from Arc" in the empty state.
   public var onImportFromArc: (@MainActor () -> Void)?
-  /// "New Space" in the empty state. Default: creates a Space named `newSpaceTitle`.
+  /// "New Space" in the empty state. Default: `newSpace(_:)` ("Space N" after the current Space, title open).
   public var onNewSpace: (@MainActor () -> Void)?
-  /// Name of a Space created by "New Space" or by Cmd-T with no Space.
-  public static let newSpaceTitle = "Space"               // [I] product wording, see open questions
+  /// Base of the "Space N" name given to a Space created by New Space or by Cmd-T with no Space (decision on #106).
+  public static let newSpaceTitle = "Space"
   public var isShowingEmptyState: Bool { sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
@@ -133,7 +133,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     onError = { [weak self] mutation, error in
       self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error)))
     }
-    onNewSpace = { [weak self] in self?.createSpace() }
+    onNewSpace = { [weak self] in self?.newSpace(nil) }
+    wireSpaceEntryPoints()
     confirmSpaceRemoval = { [weak self] prompt, answer in self?.presentSpaceRemovalSheet(prompt, answer: answer) }
     emptyState.onNewSpace = { [weak self] in self?.onNewSpace?() }
     emptyState.onImport = { [weak self] in self?.onImportFromArc?() }
@@ -221,10 +222,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   // MARK: Spaces
 
-  /// Creates a Space named `newSpaceTitle`; it becomes current through `.spaceAdded`. Reports a failure via `onError`.
+  /// Creates a Space named "Space N" right after the current one, without showing it (`newSpace(_:)` is the user's
+  /// New Space); the first Space becomes current through `.spaceAdded`. Reports a failure via `onError`.
   @discardableResult
   func createSpace() -> SpaceID? {
-    do { return try sidebar.addSpace(title: Self.newSpaceTitle) } catch { onError?(.addSpace, error); return nil }
+    do { return try sidebar.addSpace(title: nextSpaceTitle(), after: currentSpace) } catch {
+      onError?(.addSpace, error)
+      return nil
+    }
   }
 
   private func updateEmptyState() {

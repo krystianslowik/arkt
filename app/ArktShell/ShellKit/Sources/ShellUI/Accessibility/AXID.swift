@@ -60,6 +60,8 @@ public enum AXID {
     /// Label: Space title. Selected: current Space's page.
     public static let page = "sidebar.page"
     public static let spaceTitle = "sidebar.spaceTitle"
+    /// The Space header's hover edit button (#106); present only while shown.
+    public static let spaceRename = "sidebar.spaceRename"
     /// Label: row title. Selected: row state is `current`.
     public static let rowPinned = "sidebar.row.pinned"
     /// Label: row title. Selected: row state is `current`.

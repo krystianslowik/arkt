@@ -133,6 +133,14 @@ public protocol SidebarSource: AnyObject {
   @discardableResult func addTab(url: URL, title: String, in location: SidebarLocation) throws -> NodeID
   /// A new Space for this source's default profile, appended to `spaceOrder`. Emits `.spaceAdded`.
   @discardableResult func addSpace(title: String) throws -> SpaceID
+  /// New Space (BH-037): a Space for the default profile inserted directly after `space`; nil or an unknown Space
+  /// appends. Emits `.spaceAdded` only (the other Spaces keep their relative order).
+  @discardableResult func addSpace(title: String, after space: SpaceID?) throws -> SpaceID
+  /// Sets a Space's title (BH-038). Emits `.spaceChanged` when it changed; an unknown id is ignored.
+  func renameSpace(_ id: SpaceID, to title: String)
+  /// Moves a Space so that it lands at `index`, measured before it is removed, clamped (BH-039). Emits `.spaceMoved`
+  /// when the order changed; an unknown id is ignored.
+  func moveSpace(_ id: SpaceID, to index: Int)
   func updateTab(_ id: NodeID, url: URL?, title: String?)
 
   // Split writes (BH-115, BH-116, BH-120). Each applies as one step: observers get its changes once, and a throw

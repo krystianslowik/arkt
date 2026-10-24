@@ -61,6 +61,24 @@ public final class ModelSidebarSource: SidebarSource {
     mutate { $0.addSpace(title: title, profile: defaultProfile) }
   }
 
+  /// One mutation: the Space is appended, then moved right after `space`, so observers see `.spaceAdded` only.
+  @discardableResult
+  public func addSpace(title: String, after space: UUID?) throws -> UUID {
+    mutate { sidebar in
+      let id = sidebar.addSpace(title: title, profile: defaultProfile)
+      if let space, let index = sidebar.spaceOrder.firstIndex(of: space) { sidebar.moveSpace(id, to: index + 1) }
+      return id
+    }
+  }
+
+  public func renameSpace(_ id: UUID, to title: String) {
+    mutate { $0.renameSpace(id, to: title) }
+  }
+
+  public func moveSpace(_ id: UUID, to index: Int) {
+    mutate { $0.moveSpace(id, to: index) }
+  }
+
   /// Engine-driven title / URL changes. Unknown or non-tab ids are ignored, like `StubSidebar`.
   public func updateTab(_ id: UUID, url: URL?, title: String?) {
     _ = try? mutate { try $0.updateTab(id, url: url, title: title) }

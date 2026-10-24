@@ -61,7 +61,7 @@ final class EmptyStateTests: XCTestCase {
     controller.emptyState.newSpaceButton.performClick(nil)
     XCTAssertEqual(stub.spaceOrder.count, 1)
     let space = try XCTUnwrap(stub.spaceOrder.first)
-    XCTAssertEqual(stub.space(space)?.title, ShellWindowController.newSpaceTitle)
+    XCTAssertEqual(stub.space(space)?.title, "Space 1", "decision on #106")
     XCTAssertFalse(controller.isShowingEmptyState)
     XCTAssertNil(controller.emptyState.superview)
     XCTAssertEqual(controller.currentSpace, space)

@@ -41,9 +41,21 @@ public final class StubSidebar: SidebarSource {
     addSpace(title: title, theme: SpaceThemeInfo(baseColors: [], isDark: false))
   }
 
-  /// Renames a Space. Emits `.spaceChanged`.
+  /// `addSpace(title:)` inserted directly after `space` (nil or unknown: appended). Emits `.spaceAdded` only.
+  @discardableResult
+  public func addSpace(title: String, after space: SpaceID?) -> SpaceID {
+    let id = SpaceID()
+    spaces[id] = SidebarSpaceInfo(id: id, title: title, profile: "default",
+                                  theme: SpaceThemeInfo(baseColors: [], isDark: false))
+    let index = space.flatMap { spaceOrder.firstIndex(of: $0) }.map { $0 + 1 } ?? spaceOrder.count
+    spaceOrder.insert(id, at: index)
+    hub.emit(.spaceAdded(id))
+    return id
+  }
+
+  /// Renames a Space. Emits `.spaceChanged` when the title changed.
   public func renameSpace(_ id: SpaceID, to title: String) {
-    guard spaces[id] != nil else { return }
+    guard let current = spaces[id], current.title != title else { return }
     spaces[id]?.title = title
     hub.emit(.spaceChanged(id))
   }
