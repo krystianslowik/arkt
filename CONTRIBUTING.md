@@ -419,9 +419,10 @@ Recommendations only; repository settings are changed by the maintainer.
   without signing). The gate job **`Swift tests`** passes only when all four pass; it is the one check to require on
   `main`. "ShellKit GUI tests (informative)" runs the GUI suite on the runner's virtual display and may fail without
   blocking; its frame-timing gates (command bar latency, Space swipe pacing) and the two tests that catch a Space
-  settle mid-flight run in a separate step whose numbers are printed but not asserted, because shared runners have a
-  60 Hz virtual display and a load far above their core count. GUI tests and timing gates stay a local check
-  (section 7). "UI tests (informative)" builds the Debug app and runs the XCUITest scheme `ArktShellUITests` with
+  settle mid-flight skip themselves as NOT-MEASURABLE on a screen below 120 Hz or a load at or above the core count
+  (the rule of the app's SmokeRunner), which shared runners always meet, and assert on a developer machine. GUI tests
+  and timing gates stay a local check (section 7). "UI tests (informative)" builds the Debug app and runs the
+  XCUITest scheme `ArktShellUITests` with
   wait timeouts scaled by 3; it is not part of the gate and may fail without blocking. When it fails it uploads the
   result bundle (`ui-tests-xcresult`, kept 7 days) with the failing test's window screenshot, accessibility tree and
   sandbox file listing. It is promoted to a required check only after 10 consecutive green runs on `main` and a local

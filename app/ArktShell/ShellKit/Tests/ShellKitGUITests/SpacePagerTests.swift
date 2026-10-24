@@ -102,6 +102,13 @@ final class SpacePagerTests: XCTestCase {
     controller.pager.onSettleForTesting = nil
   }
 
+  /// Returns after `count` display frames have run, so a "holds still" check spans real frames, not a sleep.
+  private func displayFrames(_ count: Int, on view: NSView) async {
+    let ran = expectation(description: "\(count) display frames")
+    _ = FrameScript(view: view, frames: count, step: { _ in }, done: { ran.fulfill() })
+    await fulfillment(of: [ran], timeout: 3)
+  }
+
   /// Polls once a millisecond (display frames keep running meanwhile) until `condition` holds.
   private func waitUntil(timeout: Double = 2, _ condition: () -> Bool) async -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
@@ -200,7 +207,7 @@ final class SpacePagerTests: XCTestCase {
     let pager = controller.pager
     controller.nextSpace(nil)
     let moving = await waitUntil { pager.offset < -0.2 * pager.bounds.width }
-    XCTAssertTrue(moving && pager.offset > -pager.bounds.width, "mid-settle")
+    try PacingEnvironment.requireCaught(moving && pager.offset > -pager.bounds.width, "the settle mid-flight")
     let before = pager.offset
     pager.beginTracking()
     pager.track(delta: 0, at: 1)
@@ -399,6 +406,7 @@ final class SpacePagerTests: XCTestCase {
 
   // Frame pacing: a display-paced scripted swipe and a keyboard switch, measured on the pager's display link.
   func testFramePacingDuringSwipeAndKeyboardSwitch() async throws {
+    try PacingEnvironment.skipIfNotMeasurable(screen: controller.window?.screen)
     let pager = controller.pager
     // The window just appeared: its first frames carry window-server start-up (a 13.8 ms frame 0 seen once,
     // C7 phase 2). Measure from a steady display: wait for consecutive on-time frames first. The gate on the
@@ -485,11 +493,11 @@ final class SpacePagerTests: XCTestCase {
     let pager = controller.pager
     controller.nextSpace(nil)
     let moving = await waitUntil { pager.offset < -0.2 * pager.bounds.width }
-    XCTAssertTrue(moving, "the settle got under way before the fingers touched down")
+    try PacingEnvironment.requireCaught(moving, "the settle under way before the fingers touch down")
     pager.gestureMayBegin()
     let frozen = pager.offset
-    XCTAssertEqual(pager.frozenTarget, 1)
-    try? await Task.sleep(nanoseconds: 50_000_000)
+    try PacingEnvironment.requireCaught(pager.frozenTarget == 1, "the settle still running at touch down")
+    await displayFrames(3, on: pager)
     XCTAssertEqual(pager.offset, frozen, "the strip holds still under the fingers")
     await awaitSettle { pager.gestureEndedWithoutPaging() }
     XCTAssertEqual(pager.index, 1)

@@ -85,6 +85,7 @@ final class LaunchTests: ArktUITestCase {
   }
 
   func test_E_seededLaunchShowsImportedSpaces() async throws {
+    expectOutlineRowsKnownIssue()
     let server = try await fixtureServer()
     let sandbox = try Sandbox()
     let checksums = try sandbox.seedFromArcFixture(server: server)

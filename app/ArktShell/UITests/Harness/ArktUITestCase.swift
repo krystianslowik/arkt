@@ -27,6 +27,14 @@ class ArktUITestCase: XCTestCase {
     continueAfterFailure = false
   }
 
+  /// The sidebar outline rows are missing from the accessibility tree on the macOS 26 runner (#269). Non-strict: the
+  /// test passes where the rows are exposed (macOS 27) and is reported as an expected failure where they are not.
+  func expectOutlineRowsKnownIssue() {
+    let options = XCTExpectedFailure.Options()
+    options.isStrict = false
+    XCTExpectFailure("Outline rows are not in the out-of-process accessibility tree on macOS 26 (#269)", options: options)
+  }
+
   /// The test's loopback page server, started on first use and stopped in tear-down. Tests type only its URLs
   /// (plan, Rules: "No network").
   func fixtureServer() async throws -> FixtureServer {

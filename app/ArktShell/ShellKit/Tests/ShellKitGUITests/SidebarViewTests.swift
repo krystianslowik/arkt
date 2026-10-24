@@ -630,7 +630,9 @@ final class SidebarReviewTests: XCTestCase {
     let outlineController = try XCTUnwrap(controller.currentPage?.outlineController)
     let divider = try XCTUnwrap(controller.view.currentOutline?.view(
       atColumn: 0, row: outlineController.dividerRow, makeIfNecessary: false) as? SidebarDividerView)
-    XCTAssertFalse(divider.isAccessibilityElement())
+    XCTAssertTrue(divider.isAccessibilityElement(), "the divider is exposed as a splitter (U4b, #226)")
+    XCTAssertEqual(divider.accessibilityRole(), .splitter)
+    XCTAssertEqual(divider.accessibilityIdentifier(), AXID.Sidebar.divider)
   }
 
   private func faviconData() throws -> Data {
