@@ -172,6 +172,21 @@ public struct Sidebar: Hashable, Sendable {
     spaceOrder.append(space.id)
   }
 
+  /// Sets Space `id`'s title (BH-038). An unknown `id` is a silent no-op, like `removeSpace(_:)`.
+  public mutating func renameSpace(_ id: SpaceID, to title: String) {
+    guard spaces[id] != nil else { return }
+    spaces[id]?.title = title
+  }
+
+  /// Moves Space `id` so that it lands at `index`, measured before it is removed (the `move(_:to:at:)` convention),
+  /// clamped to the order (BH-039). Its sections go with it. An unknown `id` is a silent no-op.
+  public mutating func moveSpace(_ id: SpaceID, to index: Int) {
+    guard let old = spaceOrder.firstIndex(of: id) else { return }
+    spaceOrder.remove(at: old)
+    let target = old < index ? index - 1 : index
+    spaceOrder.insert(id, at: min(max(target, 0), spaceOrder.count))
+  }
+
   /// Removes Space `id` with every node in its Pinned and Today sections; Favorites belong to the profile and stay.
   /// An unknown `id` is a silent no-op, like `remove(_:)`. Archiving the Space's items first is the caller's job
   /// (`Archiver.removeSpace`).

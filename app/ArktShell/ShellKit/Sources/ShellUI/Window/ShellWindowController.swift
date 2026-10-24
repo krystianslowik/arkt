@@ -133,7 +133,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     onError = { [weak self] mutation, error in
       self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error)))
     }
-    onNewSpace = { [weak self] in self?.createSpace() }
+    onNewSpace = { [weak self] in self?.newSpace(nil) }
+    wireSpaceEntryPoints()
     confirmSpaceRemoval = { [weak self] prompt, answer in self?.presentSpaceRemovalSheet(prompt, answer: answer) }
     emptyState.onNewSpace = { [weak self] in self?.onNewSpace?() }
     emptyState.onImport = { [weak self] in self?.onImportFromArc?() }
@@ -221,10 +222,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   // MARK: Spaces
 
-  /// Creates a Space named `newSpaceTitle`; it becomes current through `.spaceAdded`. Reports a failure via `onError`.
+  /// Creates a Space named "Space N" right after the current one, without showing it (`newSpace(_:)` is the user's
+  /// New Space); the first Space becomes current through `.spaceAdded`. Reports a failure via `onError`.
   @discardableResult
   func createSpace() -> SpaceID? {
-    do { return try sidebar.addSpace(title: Self.newSpaceTitle) } catch { onError?(.addSpace, error); return nil }
+    do { return try sidebar.addSpace(title: nextSpaceTitle(), after: currentSpace) } catch {
+      onError?(.addSpace, error)
+      return nil
+    }
   }
 
   private func updateEmptyState() {

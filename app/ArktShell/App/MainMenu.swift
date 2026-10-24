@@ -34,7 +34,13 @@ enum MainMenu {
     // KB-033, KB-034 (Cmd-Opt-Right / Left) and KB-035, BH-041 (Ctrl-1 ... Ctrl-9).
     let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)
     let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
+    // #106: New Space is unbound (KB-043); Rename and Move are [I], PARITY(NEEDS-RUNTIME-CHECK): Arc's titles and place.
     var spaces: [NSMenuItem] = [
+      item("New Space", #selector(ShellWindowController.newSpace(_:)), "", []),
+      item("Rename Space", #selector(ShellWindowController.renameSpace(_:)), "", []),
+      item("Move Space Left", #selector(ShellWindowController.moveSpaceLeft(_:)), "", []),
+      item("Move Space Right", #selector(ShellWindowController.moveSpaceRight(_:)), "", []),
+      .separator(),
       item("Next Space", #selector(ShellWindowController.nextSpace(_:)), right, [.command, .option]),
       item("Previous Space", #selector(ShellWindowController.previousSpace(_:)), left, [.command, .option]),
       .separator(),
