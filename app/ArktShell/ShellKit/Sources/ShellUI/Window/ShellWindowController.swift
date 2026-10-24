@@ -56,8 +56,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The engine's active tab of this window as last asked for or reported.
   var engineActiveTab: TabID?
   /// The engine's active tab closed while the window still had tabs: the engine's own pick of the next active tab is
-  /// not followed (the shell picks the successor), it is answered with the shell's current tab.
+  /// not followed (the shell picks the successor), it is answered with the shell's current tab. In-process engines
+  /// report their pick after the shell's own activation, Chromium one task later, and none when the pick is already
+  /// the active tab, so the expectation also lapses after `reactivationGrace` (`expectEngineReactivation()`).
   var expectsEngineReactivation = false
+  var reactivationGeneration = 0
+  /// A close was requested for the whole window and is held behind a prompt: tabs the engine opens in it meanwhile get
+  /// no row (they would outlive the window in the sidebar).
+  var isWindowCloseRequested = false
   /// The window closed. A closed controller is not shown again (its command bar and pager released their display
   /// links); the app builds a new window instead (#241: Dock reopen).
   public private(set) var isClosed = false
@@ -578,8 +584,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A tab of this window closed (week-3 Decision 12). The page is gone in every case; what happens to its row
   /// depends on why:
   /// - `.windowClosing`, `.appTerminating`: unload only. Nothing in the sidebar changes and nothing else is shown or
-  ///   opened (the window is going away); a shown tab still counts as hidden on a window close (decision 10), not on
-  ///   quit, where `prepareForTermination` has stamped it already.
+  ///   opened (the window is going away). The close button reports the shown tabs hidden before it asks the engine
+  ///   (decision 10), as `prepareForTermination` does before quit, so the closes themselves write nothing.
   /// - `.client`: as asked. A Today node waiting in `pendingArchives` is archived once its last page is gone.
   /// - `.page`, `.extension`: the page or an extension closed it; a Today row is archived, a Pinned or Favorite row
   ///   stays unloaded as after Cmd-W.
@@ -589,7 +595,6 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     let wasCurrent = currentTab == tab
     switch reason {
     case .windowClosing, .appTerminating:
-      if reason == .windowClosing, shownNodes.contains(node) { onTabHidden?(node) }
       shownNodes.removeAll { $0 == node }
       sidebarController.visible.remove(node)
       if wasCurrent { currentTab = nil; rootView.card.setContent(nil) }
@@ -603,7 +608,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     if wasCurrent { currentTab = nil }
     if tab == engineActiveTab {
       engineActiveTab = nil
-      expectsEngineReactivation = !tabsByNode.isEmpty       // the engine picks a next active tab; the shell does
+      if !tabsByNode.isEmpty { expectEngineReactivation() }  // the engine picks a next active tab; the shell does
     }
     if splitState.panes.contains(node) {
       sidebarController.deactivate(node: node)
@@ -646,7 +651,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// cancelled prompt keeps it open. Without one (no tab was ever shown) the window closes as before.
   public func windowShouldClose(_ sender: NSWindow) -> Bool {
     guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
+    for node in shownNodes { onTabHidden?(node) }          // decision 10, before any tab closes
     let open = Array(tabsByNode.values)
+    isWindowCloseRequested = true
     request()
     markHeldCloses(open)
     return false

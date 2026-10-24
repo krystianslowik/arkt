@@ -133,9 +133,10 @@ final class EngineHostingTests: XCTestCase {
     let tab = try XCTUnwrap(harness.controller.currentTab)
     let engineWindow = try XCTUnwrap(harness.controller.engineWindow)
     harness.engine.holdClose(tab)
-    let before = try SidebarStorageFormat.encode(harness.source.sidebar)
+    harness.hidden = []
 
     XCTAssertFalse(harness.controller.windowShouldClose(window))
+    XCTAssertEqual(harness.hidden, [world.today[0]], "the shown tab is reported hidden before the engine closes it")
 
     XCTAssertTrue(window.isVisible)
     XCTAssertEqual(harness.engine.snapshot(of: tab)?.isClosing, true)
@@ -152,8 +153,27 @@ final class EngineHostingTests: XCTestCase {
     XCTAssertFalse(window.isVisible, "closed on .windowClosed")
     XCTAssertNil(harness.controller.engineWindow)
     XCTAssertTrue(harness.engine.windowIDs.isEmpty)
-    XCTAssertEqual(try SidebarStorageFormat.encode(harness.source.sidebar), before)
     XCTAssertTrue(harness.archived.isEmpty)
+    XCTAssertNotNil(harness.source.node(world.today[0]))
+  }
+
+  /// A tab the engine opens while the window's close is held gets no row: the window is going away.
+  func testAnEngineTabOpenedWhileTheWindowCloseIsHeldGetsNoRow() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: world.today[0])
+    let tab = try XCTUnwrap(harness.controller.currentTab)
+    harness.engine.holdClose(tab)
+    XCTAssertFalse(harness.controller.windowShouldClose(window))
+    let before = try SidebarStorageFormat.encode(harness.source.sidebar)
+
+    let popup = harness.engine.engineCreateTab(url: EngineWorld.url("popup"),
+                                               in: try XCTUnwrap(harness.controller.engineWindow), active: true)
+
+    XCTAssertNil(harness.engine.snapshot(of: popup), "closed without a row")
+    XCTAssertTrue(harness.engine.answerDialog(tab, accept: true))
+    XCTAssertEqual(try SidebarStorageFormat.encode(harness.source.sidebar), before)
   }
 }
 
@@ -247,6 +267,30 @@ final class EngineTabRoutingTests: XCTestCase {
     XCTAssertEqual(harness.engine.activeTab(in: window), harness.controller.engineTab(of: world.today[0]))
   }
 
+  /// When the engine's pick after a close is the shell's successor, no stray event follows; a later engine
+  /// activation (an extension's `chrome.tabs.update`) is followed again.
+  func testAnEngineActivationIsFollowedAfterAgreeingSuccessors() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    for node in world.today { harness.controller.activate(node: node) }
+    harness.controller.activate(node: world.today[1])
+    let held = try XCTUnwrap(harness.controller.currentTab)
+    let first = try XCTUnwrap(harness.controller.engineTab(of: world.today[0]))
+    harness.engine.holdClose(held)
+    harness.controller.closeTab(nil)
+    XCTAssertTrue(harness.engine.answerDialog(held, accept: true))
+    XCTAssertEqual(harness.controller.currentNode, world.today[2])
+
+    let lapsed = expectation(description: "reactivation grace lapsed")
+    DispatchQueue.main.asyncAfter(deadline: .now() + ShellWindowController.reactivationGrace + 0.1) {
+      lapsed.fulfill()
+    }
+    wait(for: [lapsed], timeout: ShellWindowController.reactivationGrace + 2)
+    harness.engine.engineActivate(first)
+
+    XCTAssertEqual(harness.controller.currentNode, world.today[0])
+  }
+
   // MARK: Close reasons
 
   func testAnExtensionCloseRemovesATodayRowOnce() throws {
@@ -276,8 +320,8 @@ final class EngineTabRoutingTests: XCTestCase {
     XCTAssertNil(harness.controller.engineTab(of: world.pinned))
   }
 
-  /// Closing the window only unloads: the stored sidebar is byte-identical, and the shown tab counts as hidden once
-  /// (decision 10).
+  /// The engine closing the window (`chrome.windows.remove`, the close button after its stamp) only unloads: the
+  /// stored sidebar is byte-identical, with the app's `markInactive` wiring in place.
   func testAWindowCloseLeavesTheStoredSidebarByteIdentical() throws {
     let world = try EngineWorld.make()
     let harness = EngineHarnessWindow(world.sidebar)
@@ -292,7 +336,7 @@ final class EngineTabRoutingTests: XCTestCase {
 
     XCTAssertEqual(try SidebarStorageFormat.encode(harness.source.sidebar), before)
     XCTAssertTrue(harness.archived.isEmpty)
-    XCTAssertEqual(harness.hidden, [world.today[2]])
+    XCTAssertTrue(harness.hidden.isEmpty)
     XCTAssertNil(harness.controller.currentTab)
     XCTAssertTrue(harness.controller.sidebarController.loadedNodes.isEmpty)
     XCTAssertTrue(harness.engine.tabIDs.isEmpty, "nothing reopened while the window closed")
@@ -413,6 +457,27 @@ final class EngineTabRoutingTests: XCTestCase {
     XCTAssertNil(harness.controller.engineTab(of: world.today[0]))
   }
 
+  /// A row removed while its prompt is up (Delete Space, an import merge): cancelling the prompt closes the page, so
+  /// no live tab is left without a row; accepting archives nothing more.
+  func testARowRemovedWhileItsCloseIsHeldLeavesNoLiveTab() throws {
+    for accept in [false, true] {
+      let world = try EngineWorld.make()
+      let harness = EngineHarnessWindow(world.sidebar)
+      harness.controller.activate(node: world.today[1])
+      let tab = try XCTUnwrap(harness.controller.currentTab)
+      harness.engine.holdClose(tab)
+      harness.controller.closeTab(nil)
+      harness.source.archive([world.today[1]], reason: .manual, at: EngineWorld.now)
+      XCTAssertNotNil(harness.engine.snapshot(of: tab), "still held")
+
+      XCTAssertTrue(harness.engine.answerDialog(tab, accept: accept))
+
+      XCTAssertNil(harness.engine.snapshot(of: tab), "accept \(accept)")
+      XCTAssertNil(harness.controller.nodeByTab[tab])
+      XCTAssertTrue(harness.archived.isEmpty, "the row was removed elsewhere; nothing is archived again")
+    }
+  }
+
   // MARK: Engine-initiated windows
 
   /// A window the engine asks for (Dock reopen, `chrome.windows.create`) is built by the provider without calling
@@ -528,7 +593,7 @@ struct EngineWorld {
 }
 
 /// One shell window over a model source and an `InMemoryEngine`; archives go to the model like the app's
-/// ArchiveCoordinator, and hidden tabs are recorded.
+/// ArchiveCoordinator, and hidden tabs are recorded and stamped in the model like the app's `markInactive`.
 @MainActor
 final class EngineHarnessWindow {
   let source: ModelSidebarSource
@@ -547,7 +612,10 @@ final class EngineHarnessWindow {
       archived.append(ids)
       source.archive(ids, reason: .manual, at: EngineWorld.now)
     }
-    controller.onTabHidden = { [unowned self] id in hidden.append(id) }
+    controller.onTabHidden = { [unowned self] id in               // stamps `lastActiveAt`, as the app does
+      hidden.append(id)
+      source.markInactive([id], at: EngineWorld.now.addingTimeInterval(TimeInterval(hidden.count)))
+    }
   }
 }
 

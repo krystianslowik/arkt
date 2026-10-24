@@ -57,6 +57,7 @@ extension ShellWindowController {
       // Its tabs reported `.tabClosed(reason: .windowClosing)` already (contract rule 11).
       engineWindow = nil
       engineActiveTab = nil
+      isWindowCloseRequested = false
       tabObservation = nil
       windowObservation = nil
       pendingArchives = [:]
@@ -75,6 +76,10 @@ extension ShellWindowController {
     guard let snapshot = engine.snapshot(of: tab), snapshot.origin == .engine,
           snapshot.window != nil, snapshot.window == engineWindow else { return }
     expectsEngineReactivation = false
+    guard !isWindowCloseRequested else {                  // the window is going away: no row that would outlive it
+      engine.closeTab(tab, mode: .skipUnloadHandlers)
+      return
+    }
     let url = snapshot.url ?? Self.blankPage
     let title = snapshot.title.isEmpty ? (url.host() ?? url.absoluteString) : snapshot.title
     let node: NodeID
@@ -98,6 +103,20 @@ extension ShellWindowController {
   /// The row of an engine tab whose first URL is not known yet; the tab's `.urlChanged` replaces it.
   // A constant literal that always parses.
   static let blankPage = URL(string: "about:blank")!
+
+  /// Ignore the engine's next pick of an active tab other than the shell's, for `reactivationGrace`.
+  func expectEngineReactivation() {
+    expectsEngineReactivation = true
+    reactivationGeneration += 1
+    let generation = reactivationGeneration
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.reactivationGrace) { [weak self] in
+      guard let self, self.reactivationGeneration == generation else { return }
+      self.expectsEngineReactivation = false
+    }
+  }
+
+  /// How long after its active tab closed an engine activation is taken for the engine's own pick. [I]
+  static let reactivationGrace: TimeInterval = 1
 
   /// The engine made `tab` its active tab. The shell follows (an extension's `chrome.tabs.update`, an engine tab
   /// opened in the foreground), except for the engine's own pick after the current tab closed: the shell has chosen
@@ -129,13 +148,17 @@ extension ShellWindowController {
     }
   }
 
-  /// The user stayed on the page: the tab stays, and the archive that waited for it is dropped.
+  /// The user stayed on the page: the tab stays, and the archive that waited for it is dropped. A tab whose row was
+  /// removed while the prompt was up (Delete Space, an import merge) closes now without a prompt, so no live tab is
+  /// left without a row.
   func closeWasCancelled(_ tab: TabID, node: NodeID) {
+    isWindowCloseRequested = false
     sidebarController.setClosing(node, false)
     for (target, pending) in pendingArchives where pending.tabs.contains(tab) {
       pendingArchives[target] = nil
       for other in pending.tabs { if let node = nodeByTab[other] { sidebarController.setClosing(node, false) } }
     }
+    if sidebar.node(node) == nil { engine.closeTab(tab, mode: .skipUnloadHandlers) }
   }
 
   /// One page of a pending archive closed; the node is archived after its last one. False when no archive waited
@@ -149,7 +172,7 @@ extension ShellWindowController {
       return true
     }
     pendingArchives[target] = nil
-    archive(target, heldCurrent: pending.heldCurrent)
+    if sidebar.node(target) != nil { archive(target, heldCurrent: pending.heldCurrent) }   // gone: nothing to archive
     return true
   }
 
