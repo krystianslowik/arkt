@@ -162,13 +162,6 @@ final class ArcImportTests: ArktUITestCase {
       host = Self.importedSheet(in: app)
       return host != nil
     }, file: file, line: line)
-    if let host {
-      let texts = host.staticTexts.allElementsBoundByIndex.prefix(6).map { element in
-        let value = (element.value as? String) ?? ""
-        return "[\(element.label)]{\(value)}"
-      }.joined(separator: " ")
-      XCTContext.runActivity(named: "sheet texts \(texts)") { _ in }
-    }
     let ok = host?.buttons["OK"] ?? app.buttons["OK"]
     XCTAssertTrue(waitFor(ok, file: file, line: line), file: file, line: line)
     ok.click()
