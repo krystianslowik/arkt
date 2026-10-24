@@ -6,15 +6,15 @@ Subject: [PATCH] Arkt: tolerate a non-BrowserView window in dialogs
 Permission bubbles anchor through GetPageInfoAnchorConfiguration and
 GetPageInfoAnchorRect, which dereferenced the window's BrowserView. For a
 normal window that is not a BrowserView, the configuration is empty and the
-anchor rect is the window's top-left corner. The pointer and keyboard lock
+anchor rect is the window's top-left corner (top-right in RTL UI). The pointer and keyboard lock
 prompt no longer assumes the location bar has a chip controller. The
 post-install dialog's pinned-by-default hint is skipped when the window is
 not a BrowserView instead of dereferencing it when the dialog closes.
 ---
- .../ui/extensions/extension_install_ui_desktop.cc   |  2 +-
- chrome/browser/ui/views/bubble_anchor_util_views.cc | 13 +++++++++++++
- .../exclusive_access_permission_prompt.cc           |  3 ++-
- 3 files changed, 16 insertions(+), 2 deletions(-)
+ .../ui/extensions/extension_install_ui_desktop.cc |  2 +-
+ .../browser/ui/views/bubble_anchor_util_views.cc  | 15 +++++++++++++++
+ .../exclusive_access_permission_prompt.cc         |  3 ++-
+ 3 files changed, 18 insertions(+), 2 deletions(-)
 
 diff --git a/chrome/browser/ui/extensions/extension_install_ui_desktop.cc b/chrome/browser/ui/extensions/extension_install_ui_desktop.cc
 index c9e2a59c3e..3959e16a71 100644
@@ -30,10 +30,18 @@ index c9e2a59c3e..3959e16a71 100644
                }
                ExtensionsToolbarDesktop* extensions_toolbar =
 diff --git a/chrome/browser/ui/views/bubble_anchor_util_views.cc b/chrome/browser/ui/views/bubble_anchor_util_views.cc
-index bd418d5445..9d14d4429f 100644
+index bd418d5445..7bdc46a8b2 100644
 --- a/chrome/browser/ui/views/bubble_anchor_util_views.cc
 +++ b/chrome/browser/ui/views/bubble_anchor_util_views.cc
-@@ -66,6 +66,12 @@ AnchorConfiguration GetPageInfoAnchorConfiguration(
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
+ 
+ #include "base/feature_list.h"
++#include "base/i18n/rtl.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/browser_window.h"
+@@ -66,6 +67,12 @@ AnchorConfiguration GetPageInfoAnchorConfiguration(
      }
    }
  
@@ -46,16 +54,17 @@ index bd418d5445..9d14d4429f 100644
    if (anchor == Anchor::kLocationBar) {
      LocationBar* location_bar =
          browser_view ? browser_view->GetLocationBar() : nullptr;
-@@ -183,6 +189,13 @@ gfx::Rect GetPageInfoAnchorRect(BrowserWindowInterface* browser) {
+@@ -183,6 +190,14 @@ gfx::Rect GetPageInfoAnchorRect(BrowserWindowInterface* browser) {
    DCHECK(GetPageInfoAnchorConfiguration(browser).anchor.IsNull());
  
    BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
 +  if (!browser_view) {
-+    // Not a BrowserView (Arkt): the top-left corner of the window.
-+    gfx::Point origin =
-+        BrowserWindow::FromBrowser(browser)->GetBounds().origin();
-+    origin += gfx::Vector2d(kNoToolbarLeftOffset, 0);
-+    return gfx::Rect(origin, gfx::Size());
++    // Not a BrowserView (Arkt): the window's top-left corner, top-right in
++    // RTL UI.
++    gfx::Rect bounds = BrowserWindow::FromBrowser(browser)->GetBounds();
++    int x = base::i18n::IsRTL() ? bounds.right() - kNoToolbarLeftOffset
++                                : bounds.x() + kNoToolbarLeftOffset;
++    return gfx::Rect(gfx::Point(x, bounds.y()), gfx::Size());
 +  }
    // Get position in view (taking RTL UI into account).
    int x_within_browser_view = browser_view->GetMirroredXInView(

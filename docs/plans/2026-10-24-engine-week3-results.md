@@ -202,7 +202,8 @@ All processes were stopped by PID; the fixture server was stopped.
 
 ### Remaining after W3-5
 
-Decision 12 gaps (W3-5a, plus follow-up (a) above); tab-modal dialog positioning on the container; audible state (no
+Decision 12 gaps (W3-5a, plus follow-up (a) above); tab-modal dialog positioning on the container (done in #250: child
+windows over the tab's container, see the week-2 results, "#250"); audible state (no
 header event); a page's `NEW_WINDOW` window reports `reopen`; initial show state for windows shown at once; the test
 API's promise and exception semantics; the page context menu (needs context menus on Arkt windows).
 

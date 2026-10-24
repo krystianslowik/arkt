@@ -126,6 +126,7 @@ source_set("window") {
     "//ui/gfx",
     "//ui/native_theme",
     "//ui/strings",
+    "//ui/views",
     "//url",
   ]
   public_deps = [ "//arkt/api" ]

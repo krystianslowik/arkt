@@ -6,7 +6,9 @@
 #include <utility>
 #include <vector>
 
+#include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_extensions_bridge.h"
+#include "arkt/browser/arkt_extensions_container.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
@@ -107,7 +109,7 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
     LOG(WARNING) << "ARKT: action disabled on this tab; no context menu yet";
   }
 
-  void CloseExtensionsMenuIfOpen() override { menu_->CloseIfOpen(); }
+  void CloseExtensionsMenuIfOpen() override { menu_->CloseForAction(); }
 
   content::WebContents* GetActiveWebContents() const override {
     return menu_->active_web_contents();
@@ -279,6 +281,15 @@ bool ArktExtensionsMenu::IsShowing() const {
 
 void ArktExtensionsMenu::CloseIfOpen() {
   [shown_menu_ cancelTracking];
+}
+
+void ArktExtensionsMenu::CloseForAction() {
+  ArktBrowserWindow* window = ArktBrowserWindow::FromBrowser(browser_);
+  if (window && window->extensions_container()->menu() == this) {
+    window->extensions_container()->CloseExtensionsMenuIfOpen();
+    return;
+  }
+  CloseIfOpen();
 }
 
 ExtensionActionViewModel* ArktExtensionsMenu::GetViewModel(

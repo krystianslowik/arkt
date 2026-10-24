@@ -82,6 +82,10 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer {
   bool IsShowing() const;
   // Cancels an open menu; Show then returns.
   void CloseIfOpen();
+  // An action asked to close the menu (ExtensionActionViewModel's
+  // CloseMenuTask). As Chrome's toolbar action views, this goes through the
+  // window's ExtensionsContainer when this menu is that container's menu.
+  void CloseForAction();
 
   // The view model of `extension_id`'s action, or nullptr.
   ExtensionActionViewModel* GetViewModel(

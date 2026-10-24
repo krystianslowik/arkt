@@ -170,10 +170,12 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
                 std::make_unique<ArktExtensionsMenu>(
                     window->browser(), nullptr, host.extensionsButton));
             ArktExtensionsMenu* menu = window->extensions_container()->menu();
-            base::WeakPtr<ArktExtensionsMenu> weak_menu = menu->GetWeakPtr();
+            // The button toggles the menu through the window's
+            // ExtensionsContainer, as Chrome's Extensions toolbar button does.
+            base::WeakPtr<ArktBrowserWindow> weak_window = window;
             host.extensionsButtonAction = ^{
-              if (weak_menu) {
-                weak_menu->Show();
+              if (weak_window) {
+                weak_window->extensions_container()->ToggleExtensionsMenu();
               }
             };
             ApplyExtensionsMenuSwitches(menu);

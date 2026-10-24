@@ -95,7 +95,10 @@ const char* VisibilityName(content::Visibility visibility) {
 // Views browser window.
 
 // AppController keyWindowIsModal: an app-modal session, or a sheet on the
-// window (the file chooser; Arkt's tab-modal dialogs are not sheets yet).
+// window (the file chooser, the extension install and uninstall sheets).
+// Tab-modal dialogs are child windows over their tab, not sheets; as in
+// Chrome they block their tab (TabStripModel::SetTabBlocked), which the
+// command controller turns into disabled tab commands (Find).
 bool KeyWindowIsModal(NSWindow* window) {
   return NSApp.modalWindow != nil || window.attachedSheet != nil;
 }
