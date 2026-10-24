@@ -752,7 +752,7 @@ Observed Test Case keys: `children`, `duration`, `durationInSeconds`, `name`, `n
 `nodeType`, `result`. That bundle has no Test Case Run nodes. `get test-results summary` reports `startTime`
 1792868139.378 and `finishTime` 1792868456.992, an elapsed 317.614 seconds for this SpaceSwitchTests run.
 
-Command: `scripts/ui-tests/parity-report.sh /Users/slovik/Desktop/Codewrabler/Projekty/arkt-wt/177-space-switching/app/ArktShell/build/ui-1792868138.xcresult docs/spec/arc-parity-spec.md app/ArktShell/UITests/parity-deferred.txt`
+Command: `scripts/ui-tests/parity-report.sh <SpaceSwitchTests xcresult> docs/spec/arc-parity-spec.md app/ArktShell/UITests/parity-deferred.txt`
 
 Exit code 0. The script printed these five lines after the status table:
 
