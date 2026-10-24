@@ -58,6 +58,7 @@ extension ShellWindowController {
       engineWindow = nil
       engineActiveTab = nil
       isWindowCloseRequested = false
+      stampsShownTabsOnWindowClose = false
       tabObservation = nil
       windowObservation = nil
       pendingArchives = [:]
@@ -153,6 +154,7 @@ extension ShellWindowController {
   /// left without a row.
   func closeWasCancelled(_ tab: TabID, node: NodeID) {
     isWindowCloseRequested = false
+    stampsShownTabsOnWindowClose = false                  // the tabs stayed visible: nothing to stamp
     sidebarController.setClosing(node, false)
     for (target, pending) in pendingArchives where pending.tabs.contains(tab) {
       pendingArchives[target] = nil
