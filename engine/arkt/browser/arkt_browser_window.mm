@@ -6,7 +6,10 @@
 #include <utility>
 
 #include "arkt/browser/arkt_browser_window_parts.h"
+#include "arkt/browser/arkt_extensions_bridge.h"
 #include "arkt/browser/arkt_extensions_container.h"
+#import "arkt/browser/arkt_placeholder_window_host.h"
+#include "base/apple/foundation_util.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/containers/flat_set.h"
@@ -16,6 +19,7 @@
 #include "base/no_destructor.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/custom_theme_supplier.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -30,7 +34,11 @@
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/views/new_tab_footer/footer_controller.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/input/native_web_keyboard_event.h"
+#include "components/prefs/pref_service.h"
 #include "components/search/ntp_features.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
@@ -38,6 +46,7 @@
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/mojom/window_show_state.mojom.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/color/color_provider_manager.h"
@@ -75,6 +84,152 @@ const char* VisibilityName(content::Visibility visibility) {
       return "occluded";
   }
   return "unknown";
+}
+
+// Main menu validation, as BrowserNativeWidgetMac::ValidateUserInterfaceItem
+// and BrowserWindowCommandHandler validateUserInterfaceItem:window: do for a
+// Views browser window.
+
+// AppController keyWindowIsModal: an app-modal session, or a sheet on the
+// window (the file chooser; Arkt's tab-modal dialogs are not sheets yet).
+bool KeyWindowIsModal(NSWindow* window) {
+  return NSApp.modalWindow != nil || window.attachedSheet != nil;
+}
+
+// Commands that would put up their own dialog or be confusing to run while
+// a modal dialog is up.
+bool IsDisabledWhileModal(int command) {
+  switch (command) {
+    case IDC_BACK:
+    case IDC_BOOKMARK_ALL_TABS:
+    case IDC_BOOKMARK_THIS_TAB:
+    case IDC_CREATE_NEW_TAB_GROUP:
+    case IDC_DUPLICATE_TAB:
+    case IDC_DUPLICATE_TARGET_TAB:
+    case IDC_FOCUS_LOCATION:
+    case IDC_FORWARD:
+    case IDC_GROUP_TARGET_TAB:
+    case IDC_HOME:
+    case IDC_MANAGE_EXTENSIONS:
+    case IDC_MOVE_TAB_TO_NEW_WINDOW:
+    case IDC_MUTE_TARGET_SITE:
+    case IDC_NAME_WINDOW:
+    case IDC_NEW_TAB_TO_RIGHT:
+    case IDC_NEW_TAB:
+    case IDC_OPEN_FILE:
+    case IDC_PIN_TARGET_TAB:
+    case IDC_PRINT:
+    case IDC_RELOAD:
+    case IDC_SAVE_PAGE:
+    case IDC_SELECT_NEXT_TAB:
+    case IDC_SELECT_PREVIOUS_TAB:
+    case IDC_CYCLE_TO_NEXT_TAB:
+    case IDC_CYCLE_TO_PREV_TAB:
+    case IDC_SHOW_BOOKMARK_MANAGER:
+    case IDC_SHOW_DOWNLOADS:
+    case IDC_STOP:
+    case IDC_TAB_SEARCH:
+    case IDC_WINDOW_CLOSE_OTHER_TABS:
+    case IDC_WINDOW_CLOSE_TABS_TO_RIGHT:
+    case IDC_WINDOW_GROUP_TAB:
+    case IDC_WINDOW_MUTE_SITE:
+    case IDC_WINDOW_PIN_TAB:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// The enabled state every host gets through validateCommand.
+bool IsCommandEnabledInWindow(BrowserWindowInterface* browser,
+                              NSWindow* window,
+                              int command) {
+  return chrome::SupportsCommand(browser, command) &&
+         chrome::IsCommandEnabled(browser, command) &&
+         !(IsDisabledWhileModal(command) && KeyWindowIsModal(window));
+}
+
+void SetToggleState(id item, bool on) {
+  NSControlStateValue state = on ? NSControlStateValueOn : NSControlStateValueOff;
+  if (NSMenuItem* menu_item = base::apple::ObjCCast<NSMenuItem>(item)) {
+    if (menu_item.state != state) {
+      menu_item.state = state;
+    }
+  } else if (NSButton* button = base::apple::ObjCCast<NSButton>(item)) {
+    if (button.state != state) {
+      button.state = state;
+    }
+  }
+}
+
+// The item-level part (toggle state, hidden state, dynamic title, key
+// equivalent rule). The facade's validateCommand block only carries the
+// command id, so only the placeholder host gets this part.
+BOOL ValidateCommandItem(BrowserWindowInterface* browser,
+                         NSWindow* window,
+                         id<NSValidatedUserInterfaceItem> item) {
+  const int command = static_cast<int>(item.tag);
+  if (!chrome::SupportsCommand(browser, command)) {
+    return NO;
+  }
+  bool enable = IsCommandEnabledInWindow(browser, window, command);
+  NSMenuItem* menu_item = base::apple::ObjCCast<NSMenuItem>(item);
+  PrefService* prefs = browser->GetProfile()->GetPrefs();
+  TabStripModel* model = browser->GetTabStripModel();
+  const bool has_active_tab =
+      !model->empty() && model->active_index() != TabStripModel::kNoTab;
+  switch (command) {
+    case IDC_CLOSE_TAB:
+      // disable_if_has_no_key_equivalent: AppController decides through the
+      // item's key equivalent whether the window is tabbed.
+      if (menu_item) {
+        enable &= menu_item.keyEquivalent.length > 0;
+      }
+      break;
+    case IDC_FULLSCREEN:
+      if (menu_item) {
+        NSString* title = base::SysUTF16ToNSString(l10n_util::GetStringUTF16(
+            browser->GetWindow()->IsFullscreen() ? IDS_EXIT_FULLSCREEN_MAC
+                                                 : IDS_ENTER_FULLSCREEN_MAC));
+        if (![menu_item.title isEqualToString:title]) {
+          menu_item.title = title;
+        }
+      }
+      break;
+    case IDC_SHOW_AS_TAB:
+      if (menu_item) {
+        menu_item.hidden =
+            browser->GetType() == BrowserWindowInterface::TYPE_NORMAL ||
+            browser->GetType() == BrowserWindowInterface::TYPE_DEVTOOLS;
+      }
+      break;
+    case IDC_SHOW_BOOKMARK_BAR:
+      SetToggleState(item, prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar));
+      break;
+    case IDC_TOGGLE_FULLSCREEN_TOOLBAR:
+      // Arkt windows are never app windows (no AppBrowserController).
+      SetToggleState(item, prefs->GetBoolean(prefs::kShowFullscreenToolbar));
+      break;
+    case IDC_TOGGLE_JAVASCRIPT_APPLE_EVENTS:
+      SetToggleState(item,
+                     prefs->GetBoolean(prefs::kAllowJavascriptAppleEvents));
+      break;
+    case IDC_WINDOW_MUTE_SITE:
+      SetToggleState(item, has_active_tab && !model->WillContextMenuMuteSites(
+                                                 model->active_index()));
+      break;
+    case IDC_WINDOW_PIN_TAB:
+      SetToggleState(item, has_active_tab &&
+                               !model->WillContextMenuPin(model->active_index()));
+      break;
+    case IDC_WINDOW_GROUP_TAB:
+      SetToggleState(item, has_active_tab && !model->WillContextMenuGroup(
+                                                 model->active_index()));
+      break;
+    default:
+      break;
+  }
+  return enable;
 }
 
 }  // namespace
@@ -179,9 +334,16 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
   };
   host_.validateCommand = ^BOOL(NSInteger command) {
     return weak &&
-           chrome::SupportsCommand(weak->browser_, static_cast<int>(command)) &&
-           chrome::IsCommandEnabled(weak->browser_, static_cast<int>(command));
+           IsCommandEnabledInWindow(weak->browser_, weak->host_.window,
+                                    static_cast<int>(command));
   };
+  if ([host_ isKindOfClass:[ArktPlaceholderWindowHost class]]) {
+    static_cast<ArktPlaceholderWindowHost*>(host_).validateItem =
+        ^BOOL(id<NSValidatedUserInterfaceItem> item) {
+          return weak && ValidateCommandItem(weak->browser_,
+                                             weak->host_.window, item);
+        };
+  }
   host_.executeCommand = ^(NSInteger command, NSInteger disposition) {
     if (weak) {
       chrome::ExecuteCommandWithDisposition(
@@ -213,6 +375,9 @@ ArktBrowserWindow::~ArktBrowserWindow() {
   }
   host_.closeRequested = nil;
   host_.validateCommand = nil;
+  if ([host_ isKindOfClass:[ArktPlaceholderWindowHost class]]) {
+    static_cast<ArktPlaceholderWindowHost*>(host_).validateItem = nil;
+  }
   host_.executeCommand = nil;
   host_.activateTab = nil;
   [host_.window orderOut:nil];
@@ -516,6 +681,8 @@ ArktTabEvent* ArktBrowserWindow::EntryEvent(ArktTabEventKind kind,
                                             content::WebContents* contents,
                                             int index,
                                             int32_t previous_tab_id) {
+  CHECK_GE(index, 0);
+  CHECK_LT(static_cast<size_t>(index), entries_.size());
   TabEntry& entry = entries_[static_cast<size_t>(index)];
   entry.id = sessions::SessionTabHelper::IdForTab(contents);
   entry.title = contents->GetTitle();
@@ -540,6 +707,8 @@ void ArktBrowserWindow::OnTabStripModelChanged(
   switch (change.type()) {
     case TabStripModelChange::kInserted:
       for (const auto& inserted : change.GetInsert()->contents) {
+        CHECK_GE(inserted.index, 0);
+        CHECK_LE(static_cast<size_t>(inserted.index), entries_.size());
         entries_.insert(entries_.begin() + inserted.index, TabEntry());
         [events addObject:EntryEvent(ArktTabEventKindInserted,
                                      inserted.contents, inserted.index, -1)];
@@ -547,6 +716,8 @@ void ArktBrowserWindow::OnTabStripModelChanged(
       break;
     case TabStripModelChange::kRemoved:
       for (const auto& removed : change.GetRemove()->contents) {
+        CHECK_GE(removed.index, 0);
+        CHECK_LT(static_cast<size_t>(removed.index), entries_.size());
         entries_.erase(entries_.begin() + removed.index);
         [events
             addObject:[[ArktTabEvent alloc] initWithKind:ArktTabEventKindRemoved
@@ -556,8 +727,12 @@ void ArktBrowserWindow::OnTabStripModelChanged(
       break;
     case TabStripModelChange::kMoved: {
       const TabStripModelChange::Move* move = change.GetMove();
+      CHECK_GE(move->from_index, 0);
+      CHECK_LT(static_cast<size_t>(move->from_index), entries_.size());
       TabEntry entry = std::move(entries_[move->from_index]);
       entries_.erase(entries_.begin() + move->from_index);
+      CHECK_GE(move->to_index, 0);
+      CHECK_LE(static_cast<size_t>(move->to_index), entries_.size());
       entries_.insert(entries_.begin() + move->to_index, std::move(entry));
       [events addObject:[[ArktTabEvent alloc] initWithKind:ArktTabEventKindMoved
                                                      tabId:TabId(move->contents)
@@ -572,6 +747,8 @@ void ArktBrowserWindow::OnTabStripModelChanged(
       // Same tab, new WebContents (and session id), e.g. a prerender
       // activation.
       const TabStripModelChange::Replace* replace = change.GetReplace();
+      CHECK_GE(replace->index, 0);
+      CHECK_LT(static_cast<size_t>(replace->index), entries_.size());
       [events
           addObject:EntryEvent(ArktTabEventKindUpdated, replace->new_contents,
                                replace->index, TabId(replace->old_contents))];
@@ -579,6 +756,22 @@ void ArktBrowserWindow::OnTabStripModelChanged(
     }
     case TabStripModelChange::kSelectionOnly:
       break;
+  }
+  // As Chrome's ExtensionPopup: an extension popup belongs to the tab it was
+  // opened on and closes when another tab becomes active. The popup itself
+  // may have caused the change (chrome.tabs.create from its page), so it is
+  // destroyed from a posted task, never under its own call.
+  if (!tab_strip_model->empty() && selection.active_tab_changed()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](base::WeakPtr<ArktBrowserWindow> window) {
+                         if (window && IsShowingAnyPopover()) {
+                           LOG(WARNING) << "ARKT: popup hide (active tab "
+                                           "changed)";
+                           window->extensions_container_->HideActivePopup();
+                         }
+                       },
+                       weak_factory_.GetWeakPtr()));
   }
   if (selection.active_tab_changed() && selection.new_contents) {
     [events addObject:[[ArktTabEvent alloc]

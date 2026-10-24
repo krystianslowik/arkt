@@ -1205,8 +1205,8 @@ tab list or active-tab change that logs `ARKT: visibility <tab id> <visible|hidd
   does.
 - Not exercised at runtime: Chrome's main menu items send `commandDispatch:`; `commandDispatchUsingKeyModifiers:` is
   the selector of toolbar buttons, and the placeholder has none. The ShellUI back/forward/reload buttons will send it.
-- Still deferred (week 3): toggle state, hidden state, dynamic titles (`IDC_FULLSCREEN`) and
-  `disable_if_has_no_key_equivalent` (`IDC_CLOSE_TAB`), and the "key window is modal" disabling.
+- Toggle state, hidden state, dynamic titles, `disable_if_has_no_key_equivalent` and the "key window is modal"
+  disabling were done afterwards (see "#207 leftovers" below).
 
 ### Verification (Step 3)
 
@@ -1689,3 +1689,30 @@ Lite detail page, no window switch.
   1Password's browser check.
 - Week-3 items already listed under W5b, W5c, W6, W7 and W9 (dialogs as free windows, find bar, download UI, patch
   0002 kept).
+
+## #207 leftovers (menu parity, popover close, bounds checks)
+
+Date 2026-10-24. Branch `engine/207-leftovers`. No upstream change: patches still 0001-0006, 13 upstream files
+(`13 files changed, 57 insertions, 5 deletions`), 0 hot-file hunks. Build: `nice -n 10 autoninja -C out/Spike -j 4
+chrome`, `The build has finished successfully.`, 0 `FAILED:`. Every run: fresh profile `w207-*`, CDP port 9411,
+`--use-mock-keychain`, `--load-extension=action-probe`.
+
+| Item | Result |
+|---|---|
+| `entries_` bounds checks | `CHECK_GE`/`CHECK_LT` (`CHECK_LE` for the insert positions) on the inserted, removed, moved and replaced paths of `OnTabStripModelChanged`, and in `EntryEvent` |
+| Popover on active-tab change | `OnTabStripModelChanged` posts a task that hides the active popup when `active_tab_changed()`. Run: `openPopup` then `tabs.update(<other>, {active:true})` gave `ARKT: popup hide (active tab changed)` and `popup closed (hidden)`; no `popup.html` target left |
+| Popover on focus loss | Chrome closes its popup when another widget of the window tree is activated, not when the app loses focus. The popover is made key when shown and closes when any other window of the app becomes key (`NSWindowDidBecomeKeyNotification`), unless an app-modal JavaScript dialog or a web-modal dialog of the popup is up. Run: `openPopup` (`popup key 1`), then `chrome.windows.create` gave `popup closed (another window key)`. Not applied: Chrome's DevTools-inspection exception (needs `//chrome/browser/devtools`, not a dependency of `//arkt/browser`) |
+| Menu parity | `ArktPlaceholderWindowHost` gets a `validateItem` block; `ArktBrowserWindow` fills in toggle state (bookmark bar, fullscreen toolbar, JavaScript from Apple Events, mute site, pin tab, group tab), hidden state (`IDC_SHOW_AS_TAB`), dynamic title (`IDC_FULLSCREEN`), `IDC_CLOSE_TAB` through the key equivalent, and disables the browser commands Chrome disables while the key window is modal (app-modal session or an attached sheet). AX run: View > Always Show Toolbar in Full Screen checked by default; clicking Always Show Bookmarks Bar sets its check mark; after `windows.update(state: fullscreen)` the View menu shows `Exit Full Screen`. The modal disabling was not exercised at runtime (it needs a sheet on the Arkt window; Arkt's tab-modal dialogs are not sheets yet) |
+| Pinned, grouped and split tab events | Not added. Nothing consumes them: the week-3 shell keeps its own tab model and `ArktTabEvent` stays the placeholder's. Hooks are still `OnTabPinnedStateChanged`, `OnTabGroupChanged`, `OnSplitTabChanged` |
+| Post-install dialog at (-224,39) | Not changed. The anchor is `GetPageInfoAnchorRect` in patch 0006 (window origin plus `kNoToolbarLeftOffset`, empty size); a 448 px dialog is centred on that point. Fixing it needs a patch change, deferred with the install sheet |
+| `chrome.runtime.reload()` of a `--load-extension` extension | Reproduced, and it is Chromium's rule, not an Arkt fault: the reload goes through `UnpackedInstaller` as an unpacked extension and Chrome disables it with `unsupportedDeveloperExtension` (`developerPrivate.getExtensionsInfo` on `chrome://extensions`: state `DISABLED`, location `UNPACKED`) while Developer mode is off, which is the default in a fresh profile. With Developer mode on (`developerPrivate.updateProfileConfiguration({inDeveloperMode:true})`) the same extension is re-enabled (`toolbar actions 0` -> `1`), and a later `chrome.runtime.reload()` brings it back (`toolbar actions 0` -> `1`, service worker ready again). Test extensions that call `runtime.reload()` need Developer mode on |
+
+Regression rows (fresh launch, `--arkt-trace-visibility`, 0 `FATAL`/`Check failed`/`Received signal`, no leftover
+process after `kill` by PID): W5b 1 (census `normal=1 arkt=1 views=0`), 2 (navigate to example.org, `visible`), 3
+(`probe.create()`: 2 rows, row 1 selected, example.org `visible`), 5 (`chrome.windows.create`: `normal=2 arkt=2
+views=0`), 6 (closing the active tab: `removed` event), 7 (all windows closed: census 0/0/0, process alive, gone after
+`kill`), 8 (`window.open` with a gesture: a third tab in the window), 13 (AX Edit > Find > Find...: `stub
+FindBar::Show`); W5c Step 3 (CDP `visibilityState` swaps with `tabs.update`, AX `select row` 2 and 1 swap the active
+tab and the `visibility` lines); W6 (`openPopup` ok, `chrome.windows.create` second Arkt window, popover closed).
+
+Deferred to a follow-up issue: tab-modal attachment, the patch 0006 RTL anchor and the post-install dialog anchor.
