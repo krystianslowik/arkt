@@ -3,7 +3,6 @@ import XCTest
 /// Pages come from the test runner's loopback server and load in the engine (infrastructure, no parity row).
 final class LoopbackPageTests: ArktUITestCase {
   func test_E_loopbackPageLoadsInTheEngine() async throws {
-    expectOutlineRowsKnownIssue()
     let server = try await fixtureServer()
     let app = try launch(try Sandbox())
 
@@ -17,7 +16,8 @@ final class LoopbackPageTests: ArktUITestCase {
     // The sidebar row (`sidebar.row.today`, U4b #168) takes the page's title once the page has loaded.
     let title = FixtureServer.title(ofPage: "alpha")
     let row = app.outlineRows[AXID.Sidebar.rowToday].firstMatch
-    XCTAssertTrue(waitFor(row, label: title))
-    XCTAssertTrue(server.requestedPaths.contains("/p/alpha"), "\(server.requestedPaths)")
+    XCTAssertTrue(Waits.until("/p/alpha requested from the loopback server", { server.requestedPaths.contains("/p/alpha") }),
+                  "\(server.requestedPaths)")
+    waitForOutlineRows("\(row) label \(title)") { row.exists && row.label == title }
   }
 }
