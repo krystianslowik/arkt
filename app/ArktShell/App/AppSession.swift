@@ -113,7 +113,12 @@ final class AppSession {
   /// pass that archived something shows the BH-085 toast, and an Arc import that adds a Space restarts the clock for
   /// the running timer before the merged tabs appear (plan decision 7).
   private func startAutoArchive() {
-    autoArchive.exempt = { [weak self] in self?.window.sidebarController.resolver.visible ?? [] }
+    // A tab whose close a leave-site prompt would hold is skipped too, and retried on the next pass (week-3
+    // Decision 11).
+    autoArchive.exempt = { [weak self] in
+      guard let window = self?.window else { return [] }
+      return window.sidebarController.resolver.visible.union(window.nodesHoldingClose)
+    }
     autoArchive.onArchived = { [weak self] archived in
       self?.window.toasts.show(Toast(text: ToastText.autoArchived(archived.count)))
     }

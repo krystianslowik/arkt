@@ -139,10 +139,12 @@ final class EngineHostingTests: XCTestCase {
 
     XCTAssertTrue(window.isVisible)
     XCTAssertEqual(harness.engine.snapshot(of: tab)?.isClosing, true)
+    XCTAssertTrue(harness.controller.sidebarController.closingNodes.contains(world.today[0]))
     XCTAssertTrue(harness.engine.answerDialog(tab, accept: false))
     XCTAssertTrue(window.isVisible)
     XCTAssertEqual(harness.controller.engineWindow, engineWindow)
     XCTAssertEqual(harness.controller.currentTab, tab)
+    XCTAssertFalse(harness.controller.sidebarController.closingNodes.contains(world.today[0]))
 
     XCTAssertFalse(harness.controller.windowShouldClose(window))
     XCTAssertTrue(window.isVisible)
@@ -152,6 +154,299 @@ final class EngineHostingTests: XCTestCase {
     XCTAssertTrue(harness.engine.windowIDs.isEmpty)
     XCTAssertEqual(try SidebarStorageFormat.encode(harness.source.sidebar), before)
     XCTAssertTrue(harness.archived.isEmpty)
+  }
+}
+
+// MARK: - Part B: tabs by window, close reason and activation
+
+/// W3-7 part B: engine tabs become Today rows of their own window, activation goes both ways, and closes follow
+/// their reason (Decision 12) and held prompts (Decision 11).
+@MainActor
+final class EngineTabRoutingTests: XCTestCase {
+  override func setUp() async throws {
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.accessory)
+  }
+
+  // MARK: Engine-created tabs
+
+  func testAnEngineTabBecomesATodayTabOnlyInItsOwnWindowAndIsSelectedWhenActive() throws {
+    let engine = InMemoryEngine()
+    let worldA = try EngineWorld.make()
+    let worldB = try EngineWorld.make()
+    let first = EngineHarnessWindow(worldA.sidebar, engine: engine)
+    let second = EngineHarnessWindow(worldB.sidebar, engine: engine)
+    let todayB = second.source.children(of: .today(worldB.space))
+    let secondCurrent = second.controller.currentTab
+    let url = EngineWorld.url("popup")
+
+    let tab = engine.engineCreateTab(url: url, in: try XCTUnwrap(first.controller.engineWindow), active: true)
+
+    let rows = first.source.children(of: .today(worldA.space))
+    let node = try XCTUnwrap(rows.first { first.controller.engineTab(of: $0) == tab })
+    guard case .tab(_, let rowURL, _)? = first.source.node(node) else { return XCTFail("no tab row") }
+    XCTAssertEqual(rowURL, url)
+    XCTAssertEqual(first.controller.currentTab, tab, "an active engine tab is selected")
+    XCTAssertEqual(first.controller.rowState(for: node), .current)
+    XCTAssertEqual(second.source.children(of: .today(worldB.space)), todayB, "no row in the other window")
+    XCTAssertEqual(second.controller.currentTab, secondCurrent)
+  }
+
+  func testABackgroundEngineTabGetsARowButStaysInTheBackground() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    let current = harness.controller.currentTab
+    let countBefore = harness.source.children(of: .today(world.space)).count
+
+    let tab = harness.engine.engineCreateTab(url: EngineWorld.url("bg"), in: try XCTUnwrap(harness.controller.engineWindow),
+                                             active: false)
+
+    XCTAssertEqual(harness.source.children(of: .today(world.space)).count, countBefore + 1)
+    XCTAssertNotNil(harness.controller.nodeByTab[tab])
+    XCTAssertEqual(harness.controller.currentTab, current)
+  }
+
+  func testAnEngineActivationSelectsItsRow() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    harness.controller.activate(node: world.today[1])
+    let firstTab = try XCTUnwrap(harness.controller.engineTab(of: world.today[0]))
+
+    harness.engine.engineActivate(firstTab)
+
+    XCTAssertEqual(harness.controller.currentNode, world.today[0])
+    XCTAssertEqual(harness.controller.rowState(for: world.today[0]), .current)
+  }
+
+  /// The shell picks the successor after Cmd-W; the engine's own pick is answered with the shell's tab.
+  func testTheEnginesPickAfterAClosedTabIsNotFollowed() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.today[1])
+    let window = try XCTUnwrap(harness.controller.engineWindow)
+
+    harness.controller.closeTab(nil)
+
+    XCTAssertEqual(harness.controller.currentNode, world.today[2], "the sibling below, as before")
+    XCTAssertEqual(harness.engine.activeTab(in: window), harness.controller.currentTab)
+  }
+
+  func testTheEnginesActiveTabFollowsTheFocusedPane() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.engineWindow)
+    harness.controller.activate(node: world.panes[0])
+    XCTAssertEqual(harness.engine.activeTab(in: window), harness.controller.engineTab(of: world.panes[0]))
+
+    harness.controller.focusPane(at: 1)
+
+    XCTAssertEqual(harness.controller.currentNode, world.panes[1])
+    XCTAssertEqual(harness.engine.activeTab(in: window), harness.controller.engineTab(of: world.panes[1]))
+    harness.controller.activate(node: world.today[0])
+    XCTAssertEqual(harness.engine.activeTab(in: window), harness.controller.engineTab(of: world.today[0]))
+  }
+
+  // MARK: Close reasons
+
+  func testAnExtensionCloseRemovesATodayRowOnce() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    let tab = try XCTUnwrap(harness.controller.currentTab)
+
+    harness.engine.engineCloseTab(tab, reason: .extension)
+
+    XCTAssertEqual(harness.archived, [[world.today[0]]])
+    XCTAssertNil(harness.source.node(world.today[0]))
+    XCTAssertEqual(harness.controller.currentNode, world.today[1], "the sibling below becomes current")
+    XCTAssertTrue(harness.engine.tabIDs.allSatisfy { harness.controller.nodeByTab[$0] != nil })
+  }
+
+  func testAPageCloseOfAPinnedTabKeepsItsRow() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.pinned)
+    let tab = try XCTUnwrap(harness.controller.currentTab)
+
+    harness.engine.engineCloseTab(tab, reason: .page)
+
+    XCTAssertTrue(harness.archived.isEmpty)
+    XCTAssertNotNil(harness.source.node(world.pinned))
+    XCTAssertNil(harness.controller.engineTab(of: world.pinned))
+  }
+
+  /// Closing the window only unloads: the stored sidebar is byte-identical, and the shown tab counts as hidden once
+  /// (decision 10).
+  func testAWindowCloseLeavesTheStoredSidebarByteIdentical() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.panes[0])
+    harness.controller.activate(node: world.today[2])
+    harness.engine.engineCreateTab(url: EngineWorld.url("x"), in: try XCTUnwrap(harness.controller.engineWindow),
+                                   active: false)
+    let before = try SidebarStorageFormat.encode(harness.source.sidebar)
+    harness.hidden = []
+
+    harness.engine.closeWindow(try XCTUnwrap(harness.controller.engineWindow))
+
+    XCTAssertEqual(try SidebarStorageFormat.encode(harness.source.sidebar), before)
+    XCTAssertTrue(harness.archived.isEmpty)
+    XCTAssertEqual(harness.hidden, [world.today[2]])
+    XCTAssertNil(harness.controller.currentTab)
+    XCTAssertTrue(harness.controller.sidebarController.loadedNodes.isEmpty)
+    XCTAssertTrue(harness.engine.tabIDs.isEmpty, "nothing reopened while the window closed")
+  }
+
+  /// Quit only unloads, and stamps nothing (`prepareForTermination` did that before the closes).
+  func testAnAppTerminatingCloseLeavesTheStoredSidebarByteIdentical() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.panes[1])
+    harness.controller.activate(node: world.today[0])
+    let before = try SidebarStorageFormat.encode(harness.source.sidebar)
+    harness.hidden = []
+
+    for tab in harness.engine.tabIDs { harness.engine.engineCloseTab(tab, reason: .appTerminating) }
+
+    XCTAssertEqual(try SidebarStorageFormat.encode(harness.source.sidebar), before)
+    XCTAssertTrue(harness.archived.isEmpty)
+    XCTAssertTrue(harness.hidden.isEmpty)
+    XCTAssertNil(harness.controller.currentTab)
+    XCTAssertTrue(harness.engine.tabIDs.isEmpty, "nothing reopened while quitting")
+  }
+
+  // MARK: Held closes (Decision 11)
+
+  func testAHeldCmdWKeepsTheRowUntilTheTabCloses() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.today[1])
+    let tab = try XCTUnwrap(harness.controller.currentTab)
+    let page = try XCTUnwrap(harness.engine.contentView(for: tab))
+    harness.engine.holdClose(tab)
+
+    harness.controller.closeTab(nil)
+
+    XCTAssertTrue(harness.archived.isEmpty)
+    XCTAssertNotNil(harness.source.node(world.today[1]))
+    XCTAssertTrue(harness.controller.sidebarController.closingNodes.contains(world.today[1]))
+    XCTAssertEqual(harness.controller.currentTab, tab)
+    XCTAssertTrue(page.isDescendant(of: harness.controller.rootView.card), "the prompt's page stays mounted")
+    XCTAssertEqual(harness.controller.engineHost.claim(.closeTab), CommandClaim(isEnabled: true))
+    harness.controller.closeTab(nil)
+    XCTAssertTrue(harness.archived.isEmpty, "a second Cmd-W while held does nothing")
+
+    XCTAssertTrue(harness.engine.answerDialog(tab, accept: true))
+
+    XCTAssertEqual(harness.archived, [[world.today[1]]])
+    XCTAssertNil(harness.source.node(world.today[1]))
+    XCTAssertEqual(harness.controller.currentNode, world.today[2])
+    XCTAssertTrue(harness.controller.sidebarController.closingNodes.isEmpty)
+  }
+
+  func testACancelledCmdWKeepsTheTabAndDoesNotArchive() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.today[1])
+    let tab = try XCTUnwrap(harness.controller.currentTab)
+    harness.engine.holdClose(tab)
+    harness.controller.closeTab(nil)
+
+    XCTAssertTrue(harness.engine.answerDialog(tab, accept: false))
+
+    XCTAssertTrue(harness.archived.isEmpty)
+    XCTAssertNotNil(harness.source.node(world.today[1]))
+    XCTAssertEqual(harness.controller.currentTab, tab)
+    XCTAssertEqual(harness.controller.engineTab(of: world.today[1]), tab)
+    XCTAssertTrue(harness.controller.sidebarController.closingNodes.isEmpty)
+    // The page keeps its handler: Cmd-W asks again, and accepting archives.
+    harness.controller.closeTab(nil)
+    XCTAssertTrue(harness.engine.answerDialog(tab, accept: true))
+    XCTAssertEqual(harness.archived, [[world.today[1]]])
+  }
+
+  /// The X on a Today split row archives the split once all its pages have closed; one held pane holds the archive.
+  func testASplitArchivesAfterItsLastPaneCloses() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.panes[0])
+    let held = try XCTUnwrap(harness.controller.engineTab(of: world.panes[1]))
+    harness.engine.holdClose(held)
+
+    harness.controller.close(node: world.split)
+
+    XCTAssertTrue(harness.archived.isEmpty)
+    XCTAssertNotNil(harness.source.node(world.split))
+    XCTAssertTrue(harness.engine.answerDialog(held, accept: true))
+    XCTAssertEqual(harness.archived, [[world.split]])
+    XCTAssertNil(harness.source.node(world.split))
+  }
+
+  /// Auto-archive skips a tab that would hold (and its split), and tries again on its next pass.
+  func testTabsThatWouldHoldTheirCloseAreReportedForAutoArchive() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    harness.controller.activate(node: world.panes[1])
+    XCTAssertTrue(harness.controller.nodesHoldingClose.isEmpty)
+
+    harness.engine.holdClose(try XCTUnwrap(harness.controller.engineTab(of: world.today[0])))
+    harness.engine.holdClose(try XCTUnwrap(harness.controller.engineTab(of: world.panes[1])))
+
+    XCTAssertEqual(harness.controller.nodesHoldingClose, [world.today[0], world.panes[1], world.split])
+  }
+
+  /// A row removed by something other than Cmd-W (auto-archive, Delete Space) closes its page without a prompt, so no
+  /// live tab is left without a row.
+  func testARemovedRowClosesItsPageWithoutAPrompt() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    harness.controller.activate(node: world.today[1])
+    let tab = try XCTUnwrap(harness.controller.engineTab(of: world.today[0]))
+    harness.engine.holdClose(tab)
+
+    harness.source.archive([world.today[0]], reason: .auto, at: EngineWorld.now)
+
+    XCTAssertNil(harness.engine.snapshot(of: tab), "closed, not held")
+    XCTAssertNil(harness.controller.engineTab(of: world.today[0]))
+  }
+
+  // MARK: Engine-initiated windows
+
+  /// A window the engine asks for (Dock reopen, `chrome.windows.create`) is built by the provider without calling
+  /// the engine, adopted on its `.windowOpened`, and shows the engine's tab as a Today tab.
+  func testAnEngineInitiatedWindowIsAdoptedAndShowsItsTab() throws {
+    let world = try EngineWorld.make()
+    let engine = InMemoryEngine()
+    let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
+    var pending: [ShellWindowController] = []
+    var adopted: [ShellWindowController] = []
+    engine.windowHostProvider = { _ in
+      let controller = ShellWindowController(engine: engine, sidebar: source, opensFirstTab: false)
+      pending.append(controller)
+      return controller.engineHost
+    }
+    let pairing = engine.observeWindows { event in
+      guard case .windowOpened(let id) = event, !pending.isEmpty else { return }
+      let controller = pending.removeFirst()
+      controller.adopt(engineWindow: id)
+      adopted.append(controller)
+    }
+    let url = EngineWorld.url("reopen")
+
+    let window = try XCTUnwrap(engine.openEngineWindow(
+      EngineWindowRequest(kind: .reopen, profile: EngineProfileID("default"), initialURL: url)))
+
+    let controller = try XCTUnwrap(adopted.first)
+    XCTAssertEqual(controller.engineWindow, window)
+    XCTAssertEqual(engine.windowIDs, [window], "the provider's window created no engine window of its own")
+    let tab = try XCTUnwrap(controller.currentTab)
+    let node = try XCTUnwrap(controller.currentNode)
+    XCTAssertEqual(engine.snapshot(of: tab)?.window, window)
+    XCTAssertEqual(source.section(containing: node), .today(world.space))
+    pairing.cancel()
   }
 }
 

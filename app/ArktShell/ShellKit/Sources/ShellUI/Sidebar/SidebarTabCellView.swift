@@ -39,7 +39,22 @@ public final class SidebarTabCellView: NSTableCellView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-  public func configure(title: String, image: NSImage, flavor: ThemeFlavor, closeAction: RowCloseAction? = nil) {
+  /// Opacity of a row's favicon and title while its close is held (week-3 Decision 11). [I]
+  public static let closingAlpha: CGFloat = 0.45
+
+  /// True while the row's page close waits on a leave-site prompt; the row is dimmed, without an animation (the
+  /// state follows Cmd-W or a click, and the prompt itself is the feedback).
+  public private(set) var isClosing = false
+
+  public func configure(title: String, image: NSImage, flavor: ThemeFlavor, closeAction: RowCloseAction? = nil,
+                        isClosing: Bool = false) {
+    if isClosing != self.isClosing {
+      self.isClosing = isClosing
+      let alpha: CGFloat = isClosing ? Self.closingAlpha : 1
+      titleField.alphaValue = alpha
+      faviconView.alphaValue = alpha
+      setAccessibilityValue(isClosing ? "Closing" : nil)
+    }
     titleField.stringValue = title
     titleField.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     faviconView.image = image
