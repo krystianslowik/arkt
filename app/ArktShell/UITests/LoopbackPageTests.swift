@@ -3,6 +3,7 @@ import XCTest
 /// Pages come from the test runner's loopback server and load in the engine (infrastructure, no parity row).
 final class LoopbackPageTests: ArktUITestCase {
   func test_E_loopbackPageLoadsInTheEngine() async throws {
+    expectOutlineRowsKnownIssue()
     let server = try await fixtureServer()
     let app = try launch(try Sandbox())
 

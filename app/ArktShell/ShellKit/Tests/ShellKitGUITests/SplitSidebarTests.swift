@@ -246,13 +246,18 @@ final class SplitSidebarTests: XCTestCase {
   func testOptClickMouseDownOnASplitRowSeparatesIt() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
+    // NSTableView's mouse tracking runs against a window on screen, as in a real click.
+    harness.controller.showWindow(nil)
     let window = try XCTUnwrap(harness.controller.window)
     harness.controller.activate(node: world.panes[0])
     let view = try harness.outline().outlineView
+    window.contentView?.layoutSubtreeIfNeeded()
     view.layoutSubtreeIfNeeded()
     XCTAssertTrue(window.makeFirstResponder(view))
-    let rect = view.rect(ofRow: try harness.row(world.split))
+    let splitRow = try harness.row(world.split)
+    let rect = view.rect(ofRow: splitRow)
     let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    XCTAssertEqual(view.row(at: view.convert(point, from: nil)), splitRow, "the click lands on the split row")
     let down = try XCTUnwrap(NSEvent.mouseEvent(
       with: .leftMouseDown, location: point, modifierFlags: [.option], timestamp: ProcessInfo.processInfo.systemUptime,
       windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))

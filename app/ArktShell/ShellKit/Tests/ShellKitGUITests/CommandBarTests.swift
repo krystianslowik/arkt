@@ -81,18 +81,16 @@ final class CommandBarTests: XCTestCase {
     XCTAssertLessThan(cpuP95, 0.004, "show() main-thread CPU time over budget")
 
     let bound = wallP95 + 2 * interval + 0.0005
-    var load = [0.0]
-    let cores = ProcessInfo.processInfo.activeProcessorCount
-    let loaded = getloadavg(&load, 1) != 1 || load[0] >= Double(cores)
-    let summary = String(format: "commandbar.earliestframe p95=%.2f bound=%.2f load1=%.2f cores=%d asserted=%@",
-                         p95 * 1000, bound * 1000, load[0], cores, loaded ? "no" : "yes")
+    let notMeasurable = PacingEnvironment.notMeasurableReason()
+    let summary = String(format: "commandbar.earliestframe p95=%.2f bound=%.2f asserted=%@",
+                         p95 * 1000, bound * 1000, notMeasurable.map { "no (NOT-MEASURABLE: \($0))" } ?? "yes")
     print(summary)
     let attachment = XCTAttachment(string: summary)
     attachment.name = "commandbar.earliestframe"
     attachment.lifetime = .keepAlways
     add(attachment)
-    if loaded {
-      print("commandbar.earliestframe skipped: 1-minute load \(load[0]) >= \(cores) active cores")
+    if let notMeasurable {
+      print("commandbar.earliestframe skipped: NOT-MEASURABLE (\(notMeasurable))")
     } else {
       XCTAssertLessThanOrEqual(p95, bound, "panel missed its earliest possible frame")
     }
