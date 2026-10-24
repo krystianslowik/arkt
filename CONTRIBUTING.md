@@ -285,8 +285,8 @@ comment (a fix, or a reason not to) before merging.
 ### Before opening a pull request
 
 ```zsh
-cd app/ArktCore && swift test
-cd app/ArktShell/ShellKit && swift test --skip ShellKitGUITests
+(cd app/ArktCore && swift test)
+(cd app/ArktShell/ShellKit && swift test --skip ShellKitGUITests)
 ```
 
 Run the GUI tests (`swift test --filter ShellKitGUITests`, logged-in GUI session) when you touch the shell UI, and
