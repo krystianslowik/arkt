@@ -75,3 +75,15 @@ enum Shell {
     app.buttons.matching(identifier: AXID.Sidebar.spaceDot)
   }
 }
+
+extension ArktUITestCase {
+  /// Presses "New Space" in the empty state and waits until the first Space exists.
+  func createFirstSpace(in app: XCUIApplication) throws {
+    let newSpace = app.buttons[AXID.EmptyState.newSpace]
+    XCTAssertTrue(waitFor(newSpace))
+    newSpace.click()
+    XCTAssertTrue(waitUntilGone(Shell.element(app, AXID.EmptyState.root)))
+    let dots = Shell.spaceDots(app)
+    XCTAssertTrue(Waits.until("one Space dot") { dots.count == 1 })
+  }
+}

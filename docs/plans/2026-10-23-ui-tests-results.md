@@ -629,3 +629,37 @@ The `Space 1` test reported its expected failure (`"Space"` is not `"Space 1"`).
 (macOS 27) are not measured yet.
 
 Known issues used: #269 (outline rows), #106 (Space naming).
+
+## U8: Toolbar and Back / Forward (#173)
+
+Base: `origin/main` at `12202c5`, branch `chore/173-ui-tests-u8`.
+
+### What was done
+
+- `UITests/ToolbarTests.swift`: 4 tests, as in the plan.
+- `UITests/Harness/Shell.swift`: `createFirstSpace(in:)` moved here from `FirstRunAndOpenTests` (now an
+  `ArktUITestCase` extension) so both suites share it.
+- Back / Forward state is also checked through `toolbar.urlBar`, which is not an outline row, so only the row-label
+  checks go through `waitForOutlineRows` (#269).
+- A test launches into one sandbox only, so "a fresh sandbox starts with the Toolbar off" is asserted at the start of
+  the toggle and relaunch tests (each runs in its own new suite) rather than by a second launch. A Toolbar left on in
+  the real `dev.arkt.ArktShell` domain would make those assertions fail.
+- Deferred: KB-031 / KB-032 (Cmd-[ / Cmd-]) to #119; `parity-deferred.txt` entries are added in U16.
+
+### Tests
+
+| Test | Parity |
+|---|---|
+| `test_KB018_BH032_cmdShiftDTogglesToolbar` | KB-018, BH-032 |
+| `test_BH031_GS042_sidebarURLBarContextMenuShowsToolbar` | BH-031, GS-042 |
+| `test_BH032_toolbarSettingSurvivesRelaunchInSameSuite` | BH-032 |
+| `test_BH032_backForwardEnabledFollowsHistory` | BH-032 |
+
+### Verification
+
+Source typecheck with `swiftc -typecheck` against XCTest (the machine was under load, load average above 20, so no
+local UI run). CI "UI tests (informative)" on `d9a9145` (macos-26, scale 3, 10 m 55 s): pass, all 4 `ToolbarTests` passed
+beside the existing 14 tests. The context menu item "Show Toolbar" shares its title with the View menu item, so the
+test clicks the hittable match.
+
+Known issues used: #269 (outline rows).
