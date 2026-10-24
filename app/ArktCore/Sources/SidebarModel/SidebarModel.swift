@@ -33,17 +33,29 @@ public struct SpaceTheme: Hashable, Sendable, Codable {
   }
 }
 
+/// A Space's icon (BH-034): an SF Symbol name such as "star". Nil means the dock draws a dot.
+public struct SpaceIcon: Hashable, Sendable, Codable {
+  public var symbol: String
+
+  public init(symbol: String) { self.symbol = symbol }
+}
+
 public struct Space: Hashable, Sendable, Codable, Identifiable {
   public var id: SpaceID
   public var title: String
   public var profile: String
   public var theme: SpaceTheme?
+  public var icon: SpaceIcon?
 
-  public init(id: SpaceID = SpaceID(), title: String, profile: String = "default", theme: SpaceTheme? = nil) {
+  public init(
+    id: SpaceID = SpaceID(), title: String, profile: String = "default", theme: SpaceTheme? = nil,
+    icon: SpaceIcon? = nil
+  ) {
     self.id = id
     self.title = title
     self.profile = profile
     self.theme = theme
+    self.icon = icon
   }
 }
 
@@ -176,6 +188,20 @@ public struct Sidebar: Hashable, Sendable {
   public mutating func renameSpace(_ id: SpaceID, to title: String) {
     guard spaces[id] != nil else { return }
     spaces[id]?.title = title
+  }
+
+  /// Sets Space `id`'s icon (BH-034). Nil clears it. An unknown `id`, or the icon it already has, changes nothing.
+  public mutating func setIcon(_ id: SpaceID, to icon: SpaceIcon?) {
+    guard var space = spaces[id], space.icon != icon else { return }
+    space.icon = icon
+    spaces[id] = space
+  }
+
+  /// Sets Space `id`'s theme (BH-034). Nil clears it. An unknown `id`, or the theme it already has, changes nothing.
+  public mutating func setTheme(_ id: SpaceID, to theme: SpaceTheme?) {
+    guard var space = spaces[id], space.theme != theme else { return }
+    space.theme = theme
+    spaces[id] = space
   }
 
   /// Moves Space `id` so that it lands at `index`, measured before it is removed (the `move(_:to:at:)` convention),

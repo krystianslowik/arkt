@@ -78,10 +78,34 @@ struct SidebarStorageFormatTests {
     #expect(try SidebarStorageFormat.encode(SidebarStorageFormat.decode(first)) == first)
   }
 
-  /// Golden test: decoding and re-encoding the frozen v1 fixture reproduces it (compared as JSON values, not bytes).
-  @Test func reencodingVersion1FixtureReproducesIt() throws {
+  static func fixtureData(version name: String) throws -> Data {
+    let url = try #require(Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures"))
+    return try Data(contentsOf: url)
+  }
+
+  /// Version 1 has no Space icon. Reading it is the migration: every icon stays nil, and writing it back stores
+  /// version 2. Compared as JSON values, not bytes.
+  @Test func reencodingVersion1FixtureMigratesToVersion2WithoutIcons() throws {
     let fixture = try Self.fixtureData()
-    let reencoded = try SidebarStorageFormat.encode(SidebarStorageFormat.decode(fixture))
+    let sidebar = try SidebarStorageFormat.decode(fixture)
+    #expect(sidebar.spaces.values.allSatisfy { $0.icon == nil })
+    let reencoded = try SidebarStorageFormat.encode(sidebar)
+    var expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+    expected["version"] = SidebarStorageFormat.currentVersion
+    let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
+    #expect(SidebarStorageFormat.currentVersion == 2)
+    #expect(actual == (expected as NSDictionary))
+  }
+
+  /// Golden test: decoding and re-encoding the frozen v2 fixture reproduces it (compared as JSON values, not bytes).
+  @Test func reencodingVersion2FixtureReproducesIt() throws {
+    let fixture = try Self.fixtureData(version: "sidebar-v2")
+    let sidebar = try SidebarStorageFormat.decode(fixture)
+    let alpha = try #require(UUID(uuidString: "D1000000-0000-4000-8000-0000000000A1"))
+    #expect(sidebar.spaces[alpha]?.icon == SpaceIcon(symbol: "star"))
+    let beta = try #require(UUID(uuidString: "D1000000-0000-4000-8000-0000000000B1"))
+    #expect(sidebar.spaces[beta]?.icon == nil)
+    let reencoded = try SidebarStorageFormat.encode(sidebar)
     let expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? NSDictionary)
     let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
     #expect(actual == expected)
