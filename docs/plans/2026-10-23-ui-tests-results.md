@@ -663,3 +663,91 @@ beside the existing 14 tests. The context menu item "Show Toolbar" shares its ti
 test clicks the hittable match.
 
 Known issues used: #269 (outline rows).
+
+## U16: Parity report (#181)
+
+Base: `origin/main` at `46f3729`, branch `chore/181-parity-report`. Step 6 (promotion to a required check) is not in
+this change.
+
+### What was done
+
+- `scripts/ui-tests/parity-report.sh` reads the spec with `grep -oE '^\| (KB|BH|GS)-[0-9]{3} '` (346 rows), the test
+  results from `xcrun xcresulttool get test-results tests`, and `app/ArktShell/UITests/parity-deferred.txt`
+  (`ID<TAB>reason<TAB>#issue`). It prints counts per section (1.x, 2.x, 3) and status, then the failing rows, the
+  deferred rows with issue links, and NEEDS-RUNTIME-CHECK rows that pass ("passing [I]"). Exit status is non-zero only
+  for malformed input.
+- Precedence: any `Failed` test fails the row; every naming test `Passed` passes the row, including a row still listed
+  in the deferred file; a deferred-file row that is not fully passing is deferred; skipped tests and expected failures
+  are deferred; a mix of passes and skips or expected failures is deferred, because passing requires every naming test
+  to pass. Anything else with no test is not covered.
+- Deferred file, 25 starter rows: KB-031 and KB-032 (#119); GS-001 and BH-040 (#26; U12 has not landed on this branch);
+  BH-087 (#111); BH-069 (#85); the U15 split rows KB-070 to KB-075, BH-115, BH-116, BH-117, BH-120, BH-121, BH-122,
+  BH-123, BH-125, BH-128, GS-010, GS-011, GS-032, GS-033 (#54 to #58, matching the U15 test table; GS-010 is #57).
+  BH-118, BH-119, BH-124, BH-126 and BH-127 stay not covered.
+- `.github/workflows/swift-tests.yml`: after the UI test step, if the job was not cancelled, the script appends the
+  report to the job summary and `parity-report.md` is uploaded with the `.xcresult`. On failure, attachments are
+  exported and uploaded. `continue-on-error` stays, and `ui-tests` stays out of the gate.
+
+### Classifier run
+
+No UI suite xcresult. Both swift slots and the GUI lock were already held, so this check did not build or launch the
+app. The script was run against the real spec and the real deferred file. `xcrun xcresulttool get test-results tests`
+was given a JSON document in schema 0.4.0 (`Test Case` nodes; one row also nested a `Test Case Run`) instead of a
+bundle from `xcodebuild`.
+
+Fixture cases: `test_KB001_BH100_passes` Passed; `test_KB084_passes` Passed; `test_KB018_fails` Failed;
+`test_KB002_BH101_skipped` Skipped (`#172`); `test_KB070_BH116_skipped` Skipped; `test_KB030_expected` Expected Failure;
+`test_KB004_passes` Passed and `test_KB004_skipped` Skipped; `test_BH032_passes` Passed and `test_BH032_fails` Failed;
+`test_GS042_passes` Passed; `test_E_infra` Passed (no row).
+
+Command: `scripts/ui-tests/parity-report.sh <fixture> docs/spec/arc-parity-spec.md app/ArktShell/UITests/parity-deferred.txt`
+
+Exit code 0 (the two failing rows do not fail the script).
+
+| Section | Passing | Failing | Deferred | Not covered | Total |
+|---|---:|---:|---:|---:|---:|
+| 1.1 Tabs, windows, sidebar, navigation (global) | 1 | 1 | 5 | 36 | 43 |
+| 1.2 App, page, tools | 0 | 0 | 0 | 26 | 26 |
+| 1.3 Split View | 0 | 0 | 6 | 0 | 6 |
+| 1.4 Peek, Little Arc, command bar, PiP | 1 | 0 | 0 | 13 | 14 |
+| 2.1 Sidebar | 0 | 1 | 0 | 32 | 33 |
+| 2.2 Spaces | 0 | 0 | 1 | 10 | 11 |
+| 2.3 Favorites | 0 | 0 | 0 | 9 | 9 |
+| 2.4 Pinned tabs | 0 | 0 | 1 | 16 | 17 |
+| 2.5 Today and Archive | 0 | 0 | 1 | 18 | 19 |
+| 2.6 Folders | 0 | 0 | 0 | 10 | 10 |
+| 2.7 Command bar | 1 | 0 | 1 | 13 | 15 |
+| 2.8 Split View | 0 | 0 | 9 | 5 | 14 |
+| 2.9 Little Arc | 0 | 0 | 0 | 15 | 15 |
+| 2.10 Peek | 0 | 0 | 0 | 11 | 11 |
+| 2.11 Air Traffic Control | 0 | 0 | 0 | 7 | 7 |
+| 2.12 Links and clicks | 0 | 0 | 0 | 8 | 8 |
+| 2.13 Windows, Incognito, Profiles | 0 | 0 | 0 | 10 | 10 |
+| 2.14 Downloads and Library | 0 | 0 | 0 | 3 | 3 |
+| 2.15 Media and Picture in Picture | 0 | 0 | 0 | 7 | 7 |
+| 2.16 Toasts and notifications | 0 | 0 | 0 | 8 | 8 |
+| 2.17 Settings and shortcut system | 0 | 0 | 0 | 16 | 16 |
+| 3. Mouse, trackpad and modifier-click gestures | 1 | 0 | 5 | 38 | 44 |
+| Total | 4 | 2 | 29 | 311 | 346 |
+
+Passing is KB-001, BH-100, KB-084, GS-042. Failing is KB-018, and BH-032 (one pass and one fail). Deferred adds KB-002,
+BH-101 (skip only), KB-030 (expected failure) and KB-004 (pass and skip) to the 25 file rows. Passing [I] is KB-084
+only. A second run that also passed `test_KB031_passes` reported 5 passing, 2 failing, 28 deferred, 311 not covered:
+KB-031 left the deferred list.
+
+Malformed input exits non-zero: missing arguments, missing spec, a spec status other than CONFIRMED / SINGLE-SOURCE /
+NEEDS-RUNTIME-CHECK, a deferred id that is not a spec row, a duplicate deferred id, a reason containing `|`, an issue
+that is not `#N`, and a deferred line with the wrong number of fields. An empty deferred file is accepted and still
+fails later when the xcresult cannot be read.
+
+UI suite wall time, locally and in CI, was not measured. The slowest five UI tests were not measured. The fixture is
+not the suite. Promotion still waits on 10 green `UI tests (informative)` runs on `main`, one local
+`-test-iterations 20 -run-tests-until-failure` run with no failure, and a maintainer decision in #161.
+
+### Deviations from the plan
+
+- Step 6 is not done: `continue-on-error` is unchanged, the job is not in the gate, and CONTRIBUTING.md is not edited.
+- The classifier was checked with a schema fixture, not `$DD/ui-*.xcresult`.
+- A mix of passed and skipped or expected-failure tests is deferred. The plan states passing as every test passed, and
+  deferred as only skipped tests or a deferred-file row; the mix is neither passing nor failing.
+- GS-001 and BH-040 are in the starter file even though U12's probe is not on this branch.
