@@ -14,6 +14,8 @@
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/extensions/extension_view.h"
 #include "chrome/browser/extensions/extension_view_host.h"
+#include "components/javascript_dialogs/app_modal_dialog_queue.h"
+#include "components/web_modal/web_modal_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
@@ -29,8 +31,9 @@ class PopoverExtensionView;
 void ClosePopup(PopoverExtensionView* popup, const char* reason);
 
 // An extension popup hosted in an NSPopover instead of Chrome's Views bubble.
-// It closes when the page calls window.close() or its extension unloads, as
-// Chrome's ExtensionPopup does.
+// It closes when the page calls window.close(), its extension unloads or
+// another window of the app becomes key, as Chrome's ExtensionPopup does
+// (the active-tab close is the window's: ArktBrowserWindow).
 class PopoverExtensionView : public extensions::ExtensionView,
                              public extensions::ExtensionRegistryObserver {
  public:
@@ -75,6 +78,9 @@ class PopoverExtensionView : public extensions::ExtensionView,
   }
 
   ~PopoverExtensionView() override {
+    if (key_observer_) {
+      [NSNotificationCenter.defaultCenter removeObserver:key_observer_];
+    }
     [popover_ close];
     host_->set_view(nullptr);
     // The popup never showed: report the failure, as Chrome's popup does.
@@ -140,18 +146,73 @@ class PopoverExtensionView : public extensions::ExtensionView,
     [popover_ showRelativeToRect:anchor_.bounds
                           ofView:anchor_
                    preferredEdge:NSRectEdgeMaxX];
+    // As Chrome's popup: the page gets focus when it is shown, so the popover
+    // is the key window and activating any other window closes it.
+    NSWindow* popover_window = popover_.contentViewController.view.window;
+    [popover_window makeKeyWindow];
+    host_->host_contents()->Focus();
+    LOG(WARNING) << "ARKT: popup key " << popover_window.isKeyWindow;
+    ObserveKeyWindow();
     if (on_loaded_) {
       std::move(on_loaded_).Run(host_.get());
     }
   }
 
  private:
+  // Chrome closes the popup when another widget of the anchor window's tree
+  // is activated (ExtensionPopup::OnWidgetTreeActivated), not when the app
+  // loses focus. Here: any other window of the app becoming key, which also
+  // covers a click back into the anchor window.
+  void ObserveKeyWindow() {
+    if (key_observer_) {
+      return;
+    }
+    base::WeakPtr<PopoverExtensionView> weak = weak_factory_.GetWeakPtr();
+    key_observer_ = [NSNotificationCenter.defaultCenter
+        addObserverForName:NSWindowDidBecomeKeyNotification
+                    object:nil
+                     queue:nil
+                usingBlock:^(NSNotification* notification) {
+                  if (weak) {
+                    weak->OnWindowBecameKey(notification.object);
+                  }
+                }];
+  }
+
+  void OnWindowBecameKey(NSWindow* window) {
+    NSWindow* popover_window = popover_.contentViewController.view.window;
+    for (NSWindow* w = window; w; w = w.parentWindow) {
+      if (w == popover_window) {
+        return;
+      }
+    }
+    // Chrome's exceptions (CloseUnlessBlockedByInspectionOrJSDialog): an app
+    // modal JavaScript dialog (on Arkt an unparented window, often the
+    // popup's own alert) or a web modal dialog of the popup keeps it open.
+    // The DevTools-inspection exception needs //chrome/browser/devtools,
+    // which //arkt/browser cannot depend on; not applied.
+    if (javascript_dialogs::AppModalDialogQueue::GetInstance()
+            ->HasActiveDialog() ||
+        web_modal::WebContentsHasActiveWebModal(host_->host_contents())) {
+      return;
+    }
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](base::WeakPtr<PopoverExtensionView> popup) {
+                         if (popup) {
+                           ClosePopup(popup.get(), "another window key");
+                         }
+                       },
+                       weak_factory_.GetWeakPtr()));
+  }
+
   std::unique_ptr<extensions::ExtensionViewHost> host_;
   NSView* __weak anchor_;
   // The owner's address, compared only, never dereferenced.
   const uintptr_t owner_;
   NSPopover* __strong popover_;
   ShowPopupCallback on_loaded_;
+  id __strong key_observer_;
   base::ScopedObservation<extensions::ExtensionRegistry,
                           extensions::ExtensionRegistryObserver>
       registry_observation_{this};
@@ -203,8 +264,8 @@ bool IsShowingAnyPopover() {
 
 void HidePopover(const extensions::ExtensionId& extension_id,
                  const void* owner) {
-  if (PopupFor(extension_id, owner)) {
-    CurrentPopup().reset();
+  if (PopoverExtensionView* popup = PopupFor(extension_id, owner)) {
+    ClosePopup(popup, "hidden");
   }
 }
 

@@ -32,6 +32,7 @@ constexpr CGFloat kSidebarPadding = 8;
 @synthesize validateCommand = _validateCommand;
 @synthesize executeCommand = _executeCommand;
 @synthesize activateTab = _activateTab;
+@synthesize validateItem = _validateItem;
 
 - (instancetype)init {
   if ((self = [super init])) {
@@ -160,6 +161,9 @@ constexpr CGFloat kSidebarPadding = 8;
   SEL action = item.action;
   if (action == @selector(commandDispatch:) ||
       action == @selector(commandDispatchUsingKeyModifiers:)) {
+    if (_validateItem) {
+      return _validateItem(item);
+    }
     return _validateCommand && _validateCommand(item.tag);
   }
   return [self respondsToSelector:action];

@@ -15,6 +15,12 @@
 @property(nonatomic, copy) void (^extensionsButtonAction)(void);
 // One consumer of the tab events: an NSTableView in the sidebar.
 @property(nonatomic, readonly) ArktTabListView* tabList;
+// Set by the engine. Validates a main menu item (or button) for a browser
+// command and updates its toggle state, hidden state and title, as Chrome's
+// BrowserWindowCommandHandler does. Preferred over validateCommand, which
+// sees the command id only.
+@property(nonatomic, copy) BOOL (^validateItem)
+    (id<NSValidatedUserInterfaceItem> item);
 @end
 
 #endif  // ARKT_BROWSER_ARKT_PLACEHOLDER_WINDOW_HOST_H_
