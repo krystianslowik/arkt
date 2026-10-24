@@ -187,10 +187,13 @@ on both paths.
 3. Tab list and visibility, W5c Step 3. (F)
 4. Web Store install on the native window, W7: uBlock Origin Lite installs, census `views=0`.
 5. Extension popup: the uBO Lite popup opens from the Extensions menu path (W4 Step 7).
-6. Web identity on the signed `Arkt.app` (W2 Step 3, `engine/README.md` "Web identity", #9): `navigator.userAgent`
-   contains `Chrome/<new major>.0.0.0 Safari/537.36`; `navigator.userAgentData.brands` and the `fullVersionList`
-   brands contain no `Arkt`; the `Sec-CH-UA` request header seen by a UA echo page carries the same brands (#9);
-   `_ChromeMain` count is `1`.
+6. Web identity on the signed `Arkt.app` (W2 Step 3, `engine/README.md` "Web identity", #9), with the commands in
+   that section: `navigator.userAgent` is the stock reduced string ending in `Chrome/<new major>.0.0.0
+   Safari/537.36`; `navigator.userAgentData.brands` and the `fullVersionList` brands are exactly `Chromium` (new
+   major or full version) plus one GREASE brand, no `Arkt`, no other product brand; the loopback echo page shows the
+   same `user-agent`, `sec-ch-ua` and `sec-ch-ua-full-version-list`; `_ChromeMain` count is `1`. A changed brand
+   list (a product brand appearing, `Chromium` missing) or any `Arkt` token fails the check. The Web Store "Switch to
+   Chrome" banner is expected and is not part of this check.
 7. Keychain item, W8 Step 3 on `Arkt Framework`: `Arkt Safe Storage` present, `Chromium Safe Storage` absent. If
    patch 0003 changed in this rebase, the maintainer repeats W8 "Needs the user" step 2 on the installed app.
 8. Embedding: the Swift app loads the new framework and renders a page (week-2 Task WE, or the shipping embedding

@@ -98,8 +98,13 @@ Sites must see Arkt as Chrome. Issue #9 owns the product side; the checks run in
   `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<major>.0.0.0 Safari/537.36`.
   No patch touches it, and no `Arkt` token is added anywhere sites can read it.
 - The client hints follow from the branding: with our branding file the build is `CHROMIUM_BRANDING`, so
-  `Sec-CH-UA` and `navigator.userAgentData.brands` carry `Chromium` plus a GREASE brand and no product brand.
-  Whether to also send a "Google Chrome" brand for parity is an open question (week-2 plan, "Open questions" 6).
+  `Sec-CH-UA` and `navigator.userAgentData.brands` carry `Chromium` plus a GREASE brand and no product brand
+  (for 156: `"Not:A-Brand";v="8", "Chromium";v="156"`). No "Google Chrome" brand: it would take a patch
+  (`ChromeContentBrowserClient::GetUserAgentMetadata`), and it does not remove the Web Store "Switch to Chrome"
+  banner, which shows even with that brand sent (#9; week-3 results, "#9: Web identity"). The banner is expected and
+  is not a regression.
+- Never set `is_chrome_branded`: it turns on Google-only code paths, and with our branding file it would add
+  `PRODUCT_FULLNAME` ("Arkt") to the brand list. The branding file alone never changes the brands.
 - Never pass `--user-agent`, in any launch or test: it replaces the UA string but not the client hints, so the two
   disagree, and it hides what the build really sends.
 
@@ -110,8 +115,19 @@ After a rebase, on the rebuilt and installed bundle (launched with `--remote-deb
     node $REPO/engine/tools/cdp.mjs example.com 'navigator.userAgentData.brands.map(b=>b.brand)'
     node $REPO/engine/tools/cdp.mjs example.com 'navigator.userAgentData.getHighEntropyValues(["fullVersionList"]).then(v=>v.fullVersionList.map(b=>b.brand))'
 
-Expected: the UA contains `Chrome/<new major>.0.0.0 Safari/537.36` for the new milestone and no `Arkt`; neither brand
-list contains `Arkt`.
+Then the request headers, on a loopback echo page (no external echo service; it asks for the high-entropy hints with
+`Accept-CH`, so load it twice):
+
+    node -e 'require("http").createServer((q,r)=>{r.setHeader("Accept-CH","Sec-CH-UA-Full-Version-List");r.end(JSON.stringify(q.headers,null,1))}).listen(9480,"127.0.0.1")' & ECHO=$!
+    node $REPO/engine/tools/cdp.mjs --navigate type:page http://127.0.0.1:9480/
+    node $REPO/engine/tools/cdp.mjs --navigate 127.0.0.1:9480 http://127.0.0.1:9480/
+    node $REPO/engine/tools/cdp.mjs 127.0.0.1:9480 'document.body.innerText'
+    kill $ECHO
+
+Expected: the UA is exactly the stock reduced string above with `Chrome/<new major>.0.0.0 Safari/537.36` for the new
+milestone; `brands`, `fullVersionList`, `sec-ch-ua` and `sec-ch-ua-full-version-list` each list exactly `Chromium`
+(new major, and the full version in the full lists) and one GREASE brand; no `Arkt` and no other product brand
+anywhere; `user-agent` in the echoed headers equals `navigator.userAgent`.
 
 The dev engine (`FakeEngine`, WKWebView) is not Chrome and does not pretend to be: it keeps WebKit's own UA and
 appends `Version/<installed Safari version> Safari/605.1.15` through `applicationNameForUserAgent`, read from the

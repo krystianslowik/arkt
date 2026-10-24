@@ -32,9 +32,71 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
 | - | Quit seams (Decision 13) | existing observers, callback list and `KeepAliveOrigin`, no patch | 0 | 0 |
 | - | Facade, host mode, infobars, menu routing, reserved keys | overlay only | 0 | 0 |
+| - | Web identity (#9): stock reduced UA, `Chromium` + GREASE brands | upstream default, no patch, no overlay code | 0 | 0 |
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## #9: Web identity (user agent and client hints)
+
+Date 2026-10-24. Branch `engine/9-chrome-ua` off `main` at `e3971d0`. `$CR` branch `arkt` at `e4a2ca5cca` (0001-0007)
+before and after: no patch, no overlay change, no build. Checked on the existing `$OUT` build (`Chromium.app`,
+`Chrome/156.0.8078.48`, built from the same overlay), fresh profiles, `--use-mock-keychain`, CDP ports 9471/9472, no
+`--user-agent`. `out/Arkt` and `/Applications/Arkt.app` were not touched; the release bundle sends the same identity
+(W2 Step 3 and W10 Step 2 in the week-2 results recorded the same UA and brands on it).
+
+### What the engine sends (unchanged by this work)
+
+| Surface | Value |
+|---|---|
+| `User-Agent`, `navigator.userAgent` | `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36` |
+| `Sec-CH-UA`, `navigator.userAgentData.brands` | `"Not:A-Brand";v="8", "Chromium";v="156"` |
+| `Sec-CH-UA-Full-Version-List`, `fullVersionList` | `"Not:A-Brand";v="8.0.0.0", "Chromium";v="156.0.8078.48"` |
+| Other hints (after `Accept-CH`) | platform `"macOS"`, platform version `"27.0.0"`, arch `"arm"`, bitness `"64"`, model `""`, mobile `?0`, form factors `"Desktop"` |
+
+No `Arkt` token anywhere. The request headers came from a loopback echo page (a Node `http` server on
+`127.0.0.1:9480` that prints the request headers and sends `Accept-CH` for the high-entropy hints); no external echo
+service. google.com serves its current page (the search `textarea`, no legacy `input`), with no "Switch to Chrome" promo.
+
+### Where the brand list comes from
+
+`components/embedder_support/user_agent_utils.cc`, `GetUserAgentBrandList`: the product brand is
+`version_info::GetProductName()` only when `!BUILDFLAG(CHROMIUM_BRANDING)`; `GenerateBrandVersionList` always adds
+`Chromium` and a GREASE brand and shuffles by the major version. `CHROMIUM_BRANDING` is false only with
+`is_chrome_branded = true` (`build/BUILD.gn`, `branding_buildflags`), which turns on Google-only code paths and is not
+an option. With any custom `BRANDING` file the product name would be `PRODUCT_FULLNAME` ("Arkt"), so the
+patch-free knobs (`branding_file_path`, GN args) can only add an `Arkt` brand, never a "Google Chrome" one. The one
+embedder seam that sets arbitrary brands is `ContentBrowserClient::GetUserAgentMetadata`, implemented by
+`ChromeContentBrowserClient` (`chrome/browser/chrome_content_browser_client.cc`), which the overlay cannot replace
+without a patch. Per-tab `WebContents::SetUserAgentOverride` would miss workers and disagree with the default, so it
+is not a fix either. Result: a "Google Chrome" brand costs one patch; everything else needed is the upstream default.
+
+### Web Store banner: the brand list is not the trigger
+
+The Web Store detail page for uBlock Origin Lite shows the "Switch to Chrome?" dialog and the "Switch to Chrome to
+install extensions and themes / Install Chrome" banner on the stock brands (the "Add to Chrome" button is still there,
+and the install itself works: week-2 W7). Experiment, CDP `Emulation.setUserAgentOverride` with the same UA and a
+brand list of `Not:A-Brand`, `Chromium`, `Google Chrome` (major and full versions), applied before the first request:
+
+| Run | `Sec-CH-UA` on the document request (not from a service worker) | `navigator.userAgentData.brands` | Banner and dialog |
+|---|---|---|---|
+| Stock, fresh profile | `Not:A-Brand`, `Chromium` | same | shown |
+| "Google Chrome" added, same profile, service workers and cache cleared | `Not:A-Brand`, `Chromium`, `Google Chrome` | same | shown |
+| "Google Chrome" added, second fresh profile, first request already carried it | `Not:A-Brand`, `Chromium`, `Google Chrome` | same | shown |
+
+The page scripts loaded at that point read `userAgentData.brands` only for generic library checks; the one literal
+`"Google Chrome"` check gates something on versions 115/116, not the banner. The mechanism was not identified further
+(it is not the UA and not the brand list). Google consent was answered "Reject all" in the throwaway profiles; no
+sign-in, no install. Screenshots are kept locally, not committed.
+
+### Decision
+
+Keep the upstream brands (`Chromium` + GREASE), no "Google Chrome" brand, no patch. Reasons: it would not remove the
+banner (above); it costs a patch kept on every rebase; and claiming another vendor's product brand is a different
+thing from sending the Chromium identity the engine really has. Sites that test for Chrome (`brands` containing
+`Chromium`, or `Chrome/` in the UA) already match. The comparison with the brand list Arc sent could not be made:
+nothing is recorded in the repository and Arc itself is not inspected (clean room); the question goes to the
+maintainer on #9.
 
 ## W3-5b: History, duplicate, extension actions and the test API
 
