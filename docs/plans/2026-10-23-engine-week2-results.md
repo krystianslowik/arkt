@@ -1955,19 +1955,19 @@ FindBar::Show`); W5c Step 3 (`tabs.update` to the background tab: `hidden`, back
 
 - **beforeunload ("Leave site?") stays app-modal.** Chromium shows it through
   `TabModalDialogManager::RunBeforeUnloadDialog` as an app-modal window on purpose; a per-tab sheet needs a patch in
-  that path. Not done; recorded in the follow-up issue. The menu rules of #250 already disable the window's commands
+  that path. Not done; recorded in #265. The menu rules of #250 already disable the window's commands
   while it is up.
 - **Pinned-by-default hint: none for now.** Chrome's hint is a feature-promo bubble on its toolbar
   (`ExtensionsToolbarDesktop::ShowPinnedByDefaultIPH`); Arkt has no toolbar and no pinned extension actions yet
   (#121 owns pinning). Patch 0006 keeps skipping it. When ShellUI shows pinned actions it can draw its own hint from
-  the extension's pinned state; that is recorded in the follow-up issue, not built.
+  the extension's pinned state; that is recorded in #265, not built.
 - **Pinned, group and split tab events: not added.** Arkt's sidebar keeps its own pinned tabs and folders, and nothing
   in ShellUI consumes Chromium's pinned state, tab groups or split tabs. They need new event kinds in the facade header
   (`TabStripModelObserver::OnTabPinnedStateChanged`, `OnTabGroupChanged`, `OnSplitTabChanged`); added when the shell
   starts mirroring a Chromium-side change (for example `chrome.tabs.update({pinned})` from an extension). Recorded in
-  the follow-up issue.
+  #265.
 
-### Left open (follow-up issue)
+### Left open (#265)
 
 - The view-factory seam is `set_view_factory_for_testing`; a named hook would need a patch. It is set on tab insert,
   so a contents that gets a permission request before it is in an Arkt window keeps Chrome's prompt for it.
