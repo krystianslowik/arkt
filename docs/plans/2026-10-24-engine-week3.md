@@ -63,7 +63,7 @@ window-only screenshots, CDP, mock keychain, user data, time-boxes, file-level c
 
 - **Two lanes, one owner each.** The engine lane owns `engine/`, the `Engine` configuration in `project.yml`,
   `app/ArktShell/App/Engine/` and the `ChromiumEngineKit` target (until W3-9, decision 5). The Swift lane owns
-  `EngineAPI`, `EngineAPITestSupport`, `FakeEngineKit`, `ShellUI`, `CoreBridge` and the rest of `app/ArktShell/App`. A
+  `EngineAPI`, `EngineAPITestSupport`, `FakeEngineKit`, `ShellUI`, `CoreBridge` and the rest of `app/ArktShell/App`; the engine lane takes W3-1's changes to the first three. A
   change to the other lane's files goes through that lane's review. The interface between them is the table in
   "Interface boundary"; it changes only by a pull request both lanes approve.
 - **Engine worktree.** Only the engine lane uses `$REPO` and builds `out/Spike`. It starts after #18 (pull request
