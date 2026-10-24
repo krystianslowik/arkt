@@ -2,12 +2,18 @@
 
 #import <AppKit/AppKit.h>
 
+#include <map>
 #include <string>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "ui/base/window_open_disposition.h"
 
 namespace {
 
@@ -16,6 +22,13 @@ constexpr char kDefaultURL[] =
     "data:text/html,<title>W3-4 shell window</title><h1>Shell-initiated "
     "window</h1>";
 constexpr NSTimeInterval kDelayedStart = 5.0;
+// A page title starting with this runs a self-test command on its tab
+// (the scripted runs set it over CDP): "arkt-selftest <command> [argument]";
+// words starting with '#' are ignored, so a command can be repeated.
+constexpr char kCommandPrefix[] = "arkt-selftest ";
+// The pending-handle check (W3-3 review): the URL its tab navigates to.
+constexpr char kPendingURL[] =
+    "data:text/html,<title>W3-5 pending</title><h1>Pending handle</h1>";
 
 std::string Describe(NSURL* url) {
   return url ? base::SysNSStringToUTF8(url.absoluteString) : "none";
@@ -112,7 +125,9 @@ const char* ReasonName(ArktCloseReason reason) {
   container.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   container.hidden = NO;
   [_cardView addSubview:container];
-  LOG(WARNING) << "ARKT selftest mounted tab=" << tab.sessionId;
+  LOG(WARNING) << "ARKT selftest mounted tab=" << tab.sessionId
+               << " container=" << (__bridge void*)container
+               << " subviews=" << container.subviews.count;
 }
 
 // NSWindowDelegate:
@@ -134,6 +149,8 @@ const char* ReasonName(ArktCloseReason reason) {
   id<ArktEngine> _engine;
   NSMutableArray<ArktSelfTestWindowHost*>* _hosts;
   NSInteger _windowCount;
+  // When each tab's close was asked for (session id), for held durations.
+  std::map<int32_t, NSDate*> _closeStarts;
 }
 
 + (id<ArktEngineEmbedder>)sharedEmbedder {
@@ -227,24 +244,82 @@ const char* ReasonName(ArktCloseReason reason) {
                      << (event.origin == ArktTabOriginEngine ? "engine"
                                                              : "client")
                      << " active=" << (event.isActive ? "yes" : "no")
+                     << " opener=" << (event.opener ? event.opener.sessionId : -1)
                      << " url=" << Describe(event.url);
         if (event.isActive) {
           [[self hostOf:event.browser] mountTab:event.tab];
         }
         break;
-      case ArktEngineEventKindTabClosed:
+      case ArktEngineEventKindTabClosed: {
+        std::string elapsed;
+        auto start = _closeStarts.find(tab);
+        if (start != _closeStarts.end()) {
+          elapsed = " after " +
+                    base::NumberToString(static_cast<int>(
+                        -[start->second timeIntervalSinceNow] * 1000)) +
+                    " ms";
+          _closeStarts.erase(start);
+        }
         LOG(WARNING) << "ARKT selftest tabClosed window=" << window
                      << " tab=" << tab
-                     << " reason=" << ReasonName(event.closeReason);
+                     << " reason=" << ReasonName(event.closeReason)
+                     << elapsed;
         break;
+      }
       case ArktEngineEventKindActiveTabChanged:
         LOG(WARNING) << "ARKT selftest activeTabChanged window=" << window
                      << " tab=" << tab;
         [[self hostOf:event.browser] mountTab:event.tab];
         break;
       case ArktEngineEventKindCloseCancelled:
+        _closeStarts.erase(tab);
         LOG(WARNING) << "ARKT selftest closeCancelled window=" << window
-                     << " tab=" << tab;
+                     << " tab=" << tab
+                     << " isClosing=" << (event.tab.isClosing ? "yes" : "no");
+        break;
+      case ArktEngineEventKindURLChanged:
+        LOG(WARNING) << "ARKT selftest urlChanged tab=" << tab
+                     << " url=" << Describe(event.url);
+        break;
+      case ArktEngineEventKindTitleChanged: {
+        std::string title = base::SysNSStringToUTF8(event.title);
+        LOG(WARNING) << "ARKT selftest titleChanged tab=" << tab
+                     << " title=" << title;
+        if (title.starts_with(kCommandPrefix)) {
+          [self runCommand:title.substr(sizeof(kCommandPrefix) - 1)
+                     onTab:event.tab];
+        }
+        break;
+      }
+      case ArktEngineEventKindLoadingChanged:
+        LOG(WARNING) << "ARKT selftest loadingChanged tab=" << tab
+                     << " loading=" << (event.isLoading ? "yes" : "no");
+        break;
+      case ArktEngineEventKindHistoryChanged:
+        LOG(WARNING) << "ARKT selftest historyChanged tab=" << tab
+                     << " back=" << (event.canGoBack ? "yes" : "no")
+                     << " forward=" << (event.canGoForward ? "yes" : "no");
+        break;
+      case ArktEngineEventKindFaviconChanged:
+        LOG(WARNING) << "ARKT selftest faviconChanged tab=" << tab << " png="
+                     << (event.faviconPNG
+                             ? base::NumberToString(event.faviconPNG.length) +
+                                   " bytes"
+                             : std::string("none"));
+        break;
+      case ArktEngineEventKindTabReplaced:
+        LOG(WARNING) << "ARKT selftest tabReplaced window=" << window
+                     << " tab=" << tab << " container="
+                     << (__bridge void*)event.tab.containerView;
+        [[self hostOf:event.browser] mountTab:event.tab];
+        break;
+      case ArktEngineEventKindTabMoved:
+        LOG(WARNING) << "ARKT selftest tabMoved window=" << window
+                     << " tab=" << tab
+                     << " active=" << (event.isActive ? "yes" : "no");
+        if (event.isActive) {
+          [[self hostOf:event.browser] mountTab:event.tab];
+        }
         break;
       case ArktEngineEventKindWindowOpened:
         windows_changed = true;
@@ -262,10 +337,9 @@ const char* ReasonName(ArktCloseReason reason) {
         }
         break;
       }
-      default:
-        LOG(WARNING) << "ARKT selftest event kind="
-                     << static_cast<int>(event.kind) << " window=" << window
-                     << " tab=" << tab;
+      case ArktEngineEventKindExtensionActionsChanged:
+        LOG(WARNING) << "ARKT selftest extensionActionsChanged window="
+                     << window;
         break;
     }
   }
@@ -275,6 +349,157 @@ const char* ReasonName(ArktCloseReason reason) {
       ids += (ids.empty() ? "" : ",") + std::to_string(browser.windowId);
     }
     LOG(WARNING) << "ARKT selftest windows ids=" << (ids.empty() ? "none" : ids);
+  }
+}
+
+- (void)logStateOf:(id<ArktTabHandle>)tab {
+  NSView* container = tab.containerView;
+  LOG(WARNING) << "ARKT selftest state tab=" << tab.sessionId
+               << " window=" << (tab.browser ? tab.browser.windowId : -1)
+               << " url=" << Describe(tab.url)
+               << " title=" << base::SysNSStringToUTF8(tab.title)
+               << " loading=" << (tab.isLoading ? "yes" : "no")
+               << " back=" << (tab.canGoBack ? "yes" : "no")
+               << " forward=" << (tab.canGoForward ? "yes" : "no")
+               << " active=" << (tab.isActive ? "yes" : "no")
+               << " closing=" << (tab.isClosing ? "yes" : "no")
+               << " wouldHoldClose=" << (tab.wouldHoldClose ? "yes" : "no")
+               << " favicon="
+               << (tab.faviconPNG ? base::NumberToString(tab.faviconPNG.length)
+                                  : std::string("none"))
+               << " opener=" << (tab.opener ? tab.opener.sessionId : -1)
+               << " container=" << (__bridge void*)container
+               << " subviews=" << container.subviews.count
+               << " inWindow=" << (container.window ? "yes" : "no");
+}
+
+- (id<ArktTabHandle>)tabWithSessionId:(int32_t)sessionId {
+  for (id<ArktBrowserHandle> browser in _engine.browsers) {
+    for (id<ArktTabHandle> tab in browser.tabs) {
+      if (tab.sessionId == sessionId) {
+        return tab;
+      }
+    }
+  }
+  return nil;
+}
+
+- (void)closeTab:(id<ArktTabHandle>)tab mode:(ArktCloseMode)mode {
+  int32_t sessionId = tab.sessionId;
+  _closeStarts[sessionId] = [NSDate date];
+  ArktCloseResult result = [tab closeWithMode:mode];
+  LOG(WARNING) << "ARKT selftest close tab=" << sessionId << " mode="
+               << (mode == ArktCloseModeSkipUnloadHandlers ? "skip" : "honour")
+               << " result="
+               << (result == ArktCloseResultHeld ? "held" : "closed")
+               << " isClosing=" << (tab.isClosing ? "yes" : "no");
+  if (result == ArktCloseResultClosed) {
+    _closeStarts.erase(sessionId);
+  }
+}
+
+// The W3-3 review case: a createTab deferred inside a nested loop, then
+// navigate, activate and close on its handle after the loop has ended but
+// before the deferred insert has run. They queue behind the insert; the close
+// answers held, and the tab ends with TabClosed(client).
+- (void)runPendingCheckIn:(id<ArktBrowserHandle>)browser {
+  ArktSelfTestWindowHost* host = [self hostOf:browser];
+  if (!host) {
+    return;
+  }
+  NSMenu* menu = [[NSMenu alloc] initWithTitle:@"Arkt selftest"];
+  [menu addItemWithTitle:@"Pending handle check" action:nil keyEquivalent:@""];
+  __block id<ArktTabHandle> pending = nil;
+  NSTimer* timer = [NSTimer
+      timerWithTimeInterval:0.3
+                    repeats:NO
+                      block:^(NSTimer*) {
+                        pending = [browser createTabWithURL:nil active:NO];
+                        LOG(WARNING) << "ARKT selftest pending createTab "
+                                        "inside the menu, session id "
+                                     << pending.sessionId;
+                        [menu cancelTracking];
+                      }];
+  [[NSRunLoop currentRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+  LOG(WARNING) << "ARKT selftest pending menu open";
+  [menu popUpMenuPositioningItem:nil
+                      atLocation:NSMakePoint(20, 20)
+                          inView:host.cardView];
+  LOG(WARNING) << "ARKT selftest pending menu closed";
+  if (!pending) {
+    LOG(WARNING) << "ARKT selftest pending check: no handle";
+    return;
+  }
+  [pending navigateToURL:[NSURL URLWithString:base::SysUTF8ToNSString(
+                                                  kPendingURL)]];
+  [pending activate];
+  ArktCloseResult result =
+      [pending closeWithMode:ArktCloseModeHonourUnloadHandlers];
+  LOG(WARNING) << "ARKT selftest pending close result="
+               << (result == ArktCloseResultHeld ? "held" : "closed")
+               << " isClosing=" << (pending.isClosing ? "yes" : "no");
+}
+
+- (void)runCommand:(const std::string&)line onTab:(id<ArktTabHandle>)tab {
+  std::vector<std::string> words;
+  for (const std::string& word : base::SplitString(
+           line, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+    if (!word.starts_with("#")) {
+      words.push_back(word);
+    }
+  }
+  if (words.empty()) {
+    return;
+  }
+  const std::string& command = words[0];
+  const std::string argument = words.size() > 1 ? words[1] : std::string();
+  LOG(WARNING) << "ARKT selftest command " << command << " " << argument
+               << " tab=" << tab.sessionId;
+  if (command == "close") {
+    [self closeTab:tab
+              mode:argument == "skip" ? ArktCloseModeSkipUnloadHandlers
+                                      : ArktCloseModeHonourUnloadHandlers];
+  } else if (command == "close-other") {
+    // Closes the tab with session id `argument`, from another tab (whose
+    // page is not blocked by a dialog).
+    int32_t sessionId = 0;
+    id<ArktTabHandle> target =
+        base::StringToInt(argument, &sessionId)
+            ? [self tabWithSessionId:sessionId]
+            : nil;
+    if (target) {
+      [self closeTab:target mode:ArktCloseModeHonourUnloadHandlers];
+    }
+  } else if (command == "state") {
+    [self logStateOf:tab];
+  } else if (command == "navigate") {
+    [tab navigateToURL:[NSURL URLWithString:base::SysUTF8ToNSString(argument)]];
+  } else if (command == "reload") {
+    // Of this tab, or of the tab with session id `argument` (a crashed page
+    // cannot set its own title).
+    int32_t sessionId = 0;
+    id<ArktTabHandle> target =
+        base::StringToInt(argument, &sessionId)
+            ? [self tabWithSessionId:sessionId]
+            : tab;
+    LOG(WARNING) << "ARKT selftest reload tab=" << target.sessionId
+                 << " container=" << (__bridge void*)target.containerView;
+    [target reload];
+  } else if (command == "activate") {
+    int32_t sessionId = 0;
+    if (base::StringToInt(argument, &sessionId)) {
+      [[self tabWithSessionId:sessionId] activate];
+    }
+  } else if (command == "pending") {
+    [self runPendingCheckIn:tab.browser];
+  } else if (command == "devtools") {
+    id<ArktWindowHost> host = tab.browser.host;
+    if (host.executeCommand) {
+      host.executeCommand(IDC_DEV_TOOLS, static_cast<NSInteger>(
+                                             WindowOpenDisposition::CURRENT_TAB));
+    }
+  } else {
+    LOG(WARNING) << "ARKT selftest unknown command " << command;
   }
 }
 

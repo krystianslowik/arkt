@@ -6,10 +6,12 @@
 #include <utility>
 
 #include "arkt/browser/arkt_browser_window_parts.h"
+#include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extensions_bridge.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
+#import "arkt/browser/arkt_tab_container_view.h"
 #include "base/apple/foundation_util.h"
 #include "base/check.h"
 #include "base/command_line.h"
@@ -27,6 +29,7 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_active_state_manager/browser_active_state_manager.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_init_state.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
@@ -469,10 +472,13 @@ NSView* ArktBrowserWindow::DialogHostViewFor(
     if (!contents) {
       contents = browser_->GetTabStripModel()->GetActiveWebContents();
     }
-    // Until the tab facade's stable containers (Task W3-5), a tab's
-    // container is its contents view.
+    // The facade keeps each tab's contents view in a stable container
+    // (Task W3-5); the embedder mounts the container.
     NSView* view =
         contents ? contents->GetNativeView().GetNativeNSView() : nil;
+    if (view && [view.superview isKindOfClass:[ArktTabContainerView class]]) {
+      view = view.superview;
+    }
     if (view && view.window == host_.window) {
       return view;
     }
@@ -590,6 +596,37 @@ void ArktBrowserWindow::ReleaseHeldShow() {
   show_held_ = false;
   PendingShow pending = show_pending_;
   show_pending_ = PendingShow::kNone;
+  PendingState state = state_pending_;
+  state_pending_ = PendingState::kNone;
+  if (state == PendingState::kNone) {
+    // chrome.windows.create({state}) asks through the create params on Mac
+    // (tabs_api.cc), not through Maximize() and friends. Applied here for a
+    // held window only; a window shown at once ignores the initial state
+    // (known gap, as before W3-5).
+    if (const BrowserInitState* init = BrowserInitState::From(browser_)) {
+      switch (init->initial_show_state()) {
+        case ui::mojom::WindowShowState::kMaximized:
+          state = PendingState::kMaximized;
+          break;
+        case ui::mojom::WindowShowState::kMinimized:
+          state = PendingState::kMinimized;
+          break;
+        case ui::mojom::WindowShowState::kFullscreen:
+          state = PendingState::kFullscreen;
+          break;
+        default:
+          break;
+      }
+    }
+  }
+  gfx::Rect bounds = bounds_pending_;
+  bounds_pending_ = gfx::Rect();
+  // Bounds first: the host may have been replaced since they were set.
+  if (!bounds.IsEmpty()) {
+    LOG(WARNING) << "ARKT: native window held bounds applied "
+                 << bounds.ToString();
+    SetBounds(bounds);
+  }
   switch (pending) {
     case PendingShow::kNone:
       break;
@@ -601,6 +638,34 @@ void ArktBrowserWindow::ReleaseHeldShow() {
       ShowInactive();
       break;
   }
+  switch (state) {
+    case PendingState::kNone:
+      break;
+    case PendingState::kMaximized:
+      LOG(WARNING) << "ARKT: native window held maximize applied";
+      Maximize();
+      break;
+    case PendingState::kMinimized:
+      LOG(WARNING) << "ARKT: native window held minimize applied";
+      Minimize();
+      break;
+    case PendingState::kRestored:
+      LOG(WARNING) << "ARKT: native window held restore applied";
+      Restore();
+      break;
+    case PendingState::kFullscreen:
+      if (!IsFullscreen()) {
+        LOG(WARNING) << "ARKT: native window held fullscreen applied";
+        [host_.window toggleFullScreen:nil];
+      }
+      break;
+  }
+}
+
+void ArktBrowserWindow::DeferFullscreenWhileHeld() {
+  CHECK(show_held_);
+  state_pending_ = PendingState::kFullscreen;
+  LOG(WARNING) << "ARKT: native window fullscreen deferred (show held)";
 }
 
 void ArktBrowserWindow::Show() {
@@ -649,6 +714,16 @@ void ArktBrowserWindow::ShowInactive() {
 }
 
 void ArktBrowserWindow::Close() {
+  // chrome.windows.remove calls Close() from inside the extension function;
+  // its keepalive is gone by the time the posted close runs. A close already
+  // under way (the TabStripEmpty() call below) keeps the first answer.
+  if (!IsAttemptingToClose()) {
+    closed_by_extension_ =
+        IsExtensionApiCallInFlight(browser_->GetProfile(), "windows.remove");
+    if (closed_by_extension_) {
+      LOG(WARNING) << "ARKT: native window close by chrome.windows.remove";
+    }
+  }
   // Close() is called again by Browser::TabStripEmpty() while the first call
   // is still closing tabs; run each request from the run loop, as a Widget
   // close would, so that call never re-enters UnloadController.
@@ -692,7 +767,8 @@ void ArktBrowserWindow::Deactivate() {
 
 void ArktBrowserWindow::Maximize() {
   if (show_held_) {
-    LOG(WARNING) << "ARKT: native window maximize ignored (show held)";
+    state_pending_ = PendingState::kMaximized;
+    LOG(WARNING) << "ARKT: native window maximize deferred (show held)";
     return;
   }
   if (!host_.window.isZoomed) {
@@ -702,7 +778,8 @@ void ArktBrowserWindow::Maximize() {
 
 void ArktBrowserWindow::Minimize() {
   if (show_held_) {
-    LOG(WARNING) << "ARKT: native window minimize ignored (show held)";
+    state_pending_ = PendingState::kMinimized;
+    LOG(WARNING) << "ARKT: native window minimize deferred (show held)";
     return;
   }
   [host_.window miniaturize:nil];
@@ -710,7 +787,8 @@ void ArktBrowserWindow::Minimize() {
 
 void ArktBrowserWindow::Restore() {
   if (show_held_) {
-    LOG(WARNING) << "ARKT: native window restore ignored (show held)";
+    state_pending_ = PendingState::kRestored;
+    LOG(WARNING) << "ARKT: native window restore deferred (show held)";
     return;
   }
   NSWindow* window = host_.window;
@@ -724,6 +802,13 @@ void ArktBrowserWindow::Restore() {
 }
 
 void ArktBrowserWindow::SetBounds(const gfx::Rect& bounds) {
+  if (show_held_) {
+    // Applied now so GetBounds() answers them, and again at release: a held
+    // window gets the embedder's host (and its window) at replay.
+    bounds_pending_ = bounds;
+    LOG(WARNING) << "ARKT: native window bounds deferred (show held) "
+                 << bounds.ToString();
+  }
   [host_.window setFrame:gfx::ScreenRectToNSRect(bounds) display:YES];
 }
 
@@ -1073,7 +1158,11 @@ ArktBrowserWindow::GetWebContentsModalDialogHost() {
 web_modal::WebContentsModalDialogHost*
 ArktBrowserWindow::GetWebContentsModalDialogHostFor(
     content::WebContents* web_contents) {
-  if (!host_mode_ || !web_contents) {
+  // Only this window's tabs get their own host; one for a contents that is
+  // not in this window would stay until the window goes (#255 review).
+  if (!host_mode_ || !web_contents ||
+      browser_->GetTabStripModel()->GetIndexOfWebContents(web_contents) ==
+          TabStripModel::kNoTab) {
     return modal_dialog_host_.get();
   }
   // In host mode a tab-modal dialog belongs to its tab's view (Decision 6).

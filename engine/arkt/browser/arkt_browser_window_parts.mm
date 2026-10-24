@@ -54,7 +54,7 @@ void ArktExclusiveAccessContext::EnterFullscreen(
     return;
   }
   if (window_->IsShowHeld()) {
-    LOG(WARNING) << "ARKT: enter fullscreen ignored (window show held)";
+    window_->DeferFullscreenWhileHeld();
     return;
   }
   LOG(WARNING) << "ARKT: enter fullscreen";

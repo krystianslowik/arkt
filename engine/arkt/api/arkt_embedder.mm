@@ -376,7 +376,8 @@ class Embedder : public FacadeDelegate {
   // Why `browser` exists, from what its call site passed (no patch): the
   // seam's own creations name their kind; otherwise the Browser's create
   // params tell startup windows (StartupBrowserCreator, also for a URL opened
-  // by another application) and chrome.windows.create (it always sets a show
+  // by another application; the last-and-URLs startup preference), session
+  // restore and desk templates, and chrome.windows.create (it always sets a show
   // state and usually bounds, tabs_api.cc:189-190) from the rest, which have
   // default params: Dock reopen and New Window, and a page's NEW_WINDOW
   // navigation, which cannot be told apart without a patch.
@@ -397,13 +398,31 @@ class Embedder : public FacadeDelegate {
       return fields;
     }
     const BrowserWindowCreateParams& params = init->create_params();
-    if (init->creation_source() ==
-        BrowserWindowCreateParams::CreationSource::kStartupCreator) {
-      fields.kind = ArktWindowRequestKindStartupURL;
-      fields.source = "startup browser creator";
-    } else if (params.initial_show_state !=
-                   ui::mojom::WindowShowState::kDefault ||
-               !params.initial_bounds.IsEmpty()) {
+    // Sources that set bounds and a show state of their own are named before
+    // the bounds check below (#255 review). Session restore is out of scope
+    // this week (#116); Arkt owns tab persistence.
+    switch (init->creation_source()) {
+      case BrowserWindowCreateParams::CreationSource::kStartupCreator:
+        fields.kind = ArktWindowRequestKindStartupURL;
+        fields.source = "startup browser creator";
+        return fields;
+      case BrowserWindowCreateParams::CreationSource::kLastAndUrlsStartupPref:
+        fields.kind = ArktWindowRequestKindStartupURL;
+        fields.source = "last-and-URLs startup preference";
+        return fields;
+      case BrowserWindowCreateParams::CreationSource::kSessionRestore:
+        fields.kind = ArktWindowRequestKindReopen;
+        fields.source = "session restore";
+        return fields;
+      case BrowserWindowCreateParams::CreationSource::kDeskTemplate:
+        fields.kind = ArktWindowRequestKindReopen;
+        fields.source = "desk template";
+        return fields;
+      case BrowserWindowCreateParams::CreationSource::kUnknown:
+        break;
+    }
+    if (params.initial_show_state != ui::mojom::WindowShowState::kDefault ||
+        !params.initial_bounds.IsEmpty()) {
       fields.kind = ArktWindowRequestKindExtension;
       fields.source = "show state or bounds given (chrome.windows.create)";
     } else {
