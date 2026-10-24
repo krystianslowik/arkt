@@ -11,6 +11,85 @@ final class ArchiveTableView: NSTableView {
   }
 
   override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
+
+  /// Stand-ins for rows that `NSTableView` has not tiled yet. Tiling while an out-of-process client is mid-query
+  /// deadlocks that client, so the legacy attribute path returns these instead of creating row views.
+  /// In-process walks keep using `accessibilityChildren()` (the real row views) and never see this list.
+  private var rowProxies: [NSAccessibilityElement] = []
+
+  /// The table often has a frame before it has tiled, so `rowView(atRow:makeIfNecessary: false)` stays nil and an
+  /// out-of-process client sees no rows. Create them after the reload, on the main thread, outside an accessibility
+  /// callback.
+  func materializeRows() {
+    layoutSubtreeIfNeeded()
+    guard numberOfRows > 0 else { return }
+    tile()
+    for index in 0..<numberOfRows {
+      guard let row = rowView(atRow: index, makeIfNecessary: true) else { continue }
+      if row.accessibilityIdentifier() != AXID.Archive.row {
+        row.setAccessibilityElement(true)
+        row.setAccessibilityRole(.row)
+        row.setAccessibilityIdentifier(AXID.Archive.row)
+      }
+    }
+  }
+
+  func setRowProxies(_ labels: [String]) {
+    if rowProxies.count != labels.count {
+      rowProxies = labels.map { _ in
+        let element = NSAccessibilityElement()
+        element.setAccessibilityElement(true)
+        element.setAccessibilityRole(.row)
+        element.setAccessibilityIdentifier(AXID.Archive.row)
+        element.setAccessibilityParent(self)
+        return element
+      }
+    }
+    for (element, label) in zip(rowProxies, labels) {
+      element.setAccessibilityLabel(label)
+    }
+  }
+
+  /// Real row views when every row is tiled; otherwise the proxies from `setRowProxies` when they match.
+  private func exposedRows() -> [Any] {
+    let views = (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) }
+    if views.count == numberOfRows { return views }
+    if rowProxies.count == numberOfRows { return rowProxies }
+    return views
+  }
+
+  /// Out-of-process clients read rows through these legacy attributes. `NSTableView` does not route them to
+  /// `accessibilityChildren()` or `accessibilityRows()`. The attribute methods are nonisolated; the handoff is
+  /// main-thread only (`assumeIsolated` traps otherwise).
+  private nonisolated func legacyAttribute(_ attribute: NSAccessibility.Attribute) -> [Any]? {
+    nonisolated(unsafe) var result: [Any]?
+    MainActor.assumeIsolated {
+      switch attribute {
+      case .children, NSAccessibility.Attribute(rawValue: "AXChildrenInNavigationOrder"), .visibleChildren,
+           .rows, .visibleRows:
+        result = exposedRows()
+      default: result = nil
+      }
+    }
+    return result
+  }
+
+  nonisolated override func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
+    legacyAttribute(attribute) ?? super.accessibilityAttributeValue(attribute)
+  }
+
+  nonisolated override func accessibilityArrayAttributeCount(_ attribute: NSAccessibility.Attribute) -> Int {
+    legacyAttribute(attribute)?.count ?? super.accessibilityArrayAttributeCount(attribute)
+  }
+
+  nonisolated override func accessibilityArrayAttributeValues(_ attribute: NSAccessibility.Attribute, index: Int,
+                                                             maxCount: Int) -> [Any] {
+    guard let all = legacyAttribute(attribute) else {
+      return super.accessibilityArrayAttributeValues(attribute, index: index, maxCount: maxCount)
+    }
+    guard index >= 0, index < all.count else { return [] }
+    return Array(all[index..<min(all.count, index + maxCount)])
+  }
 }
 
 @MainActor
@@ -126,6 +205,11 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     let selected = rows.indices.contains(tableView.selectedRow) ? rows[tableView.selectedRow].id : nil
     rows = page.rows
     tableView.reloadData()
+    if let table = tableView as? ArchiveTableView {
+      table.setRowProxies(rows.map(\.title))
+      table.materializeRows()
+      table.setAccessibilityValue("rows \(rows.count)")
+    }
     if let selected, let index = rows.firstIndex(where: { $0.id == selected }) {
       tableView.selectRowIndexes([index], byExtendingSelection: false)
     }

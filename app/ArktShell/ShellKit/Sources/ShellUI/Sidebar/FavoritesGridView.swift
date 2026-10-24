@@ -193,9 +193,46 @@ final class FavoritesCollectionView: NSCollectionView {
   override func moveDown(_ sender: Any?) { onMoveCommand?(0, 1) }
   override func moveUp(_ sender: Any?) { onMoveCommand?(0, -1) }
 
+  /// The grid sets this so an accessibility query can materialize tiles before reading them.
+  var realizeItems: (@MainActor () -> Void)?
+
   override func accessibilityChildren() -> [Any]? {
+    realizeItems?()
+    guard numberOfSections > 0 else { return [] }
     let items = (0..<numberOfItems(inSection: 0)).compactMap { item(at: IndexPath(item: $0, section: 0))?.view }
     return NSAccessibility.unignoredChildren(from: items)
+  }
+
+  /// Out-of-process clients read `AXChildren` through the legacy attribute, which `NSCollectionView` does not
+  /// route to `accessibilityChildren()`. The attribute methods are nonisolated; the handoff is main-thread only
+  /// (`assumeIsolated` traps otherwise).
+  private nonisolated func legacyChildren(_ attribute: NSAccessibility.Attribute) -> [Any]? {
+    switch attribute {
+    case .children, NSAccessibility.Attribute(rawValue: "AXChildrenInNavigationOrder"), .visibleChildren:
+      break
+    default:
+      return nil
+    }
+    nonisolated(unsafe) var result: [Any]?
+    MainActor.assumeIsolated { result = accessibilityChildren() }
+    return result
+  }
+
+  nonisolated override func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
+    legacyChildren(attribute) ?? super.accessibilityAttributeValue(attribute)
+  }
+
+  nonisolated override func accessibilityArrayAttributeCount(_ attribute: NSAccessibility.Attribute) -> Int {
+    legacyChildren(attribute)?.count ?? super.accessibilityArrayAttributeCount(attribute)
+  }
+
+  nonisolated override func accessibilityArrayAttributeValues(_ attribute: NSAccessibility.Attribute, index: Int,
+                                                             maxCount: Int) -> [Any] {
+    guard let all = legacyChildren(attribute) else {
+      return super.accessibilityArrayAttributeValues(attribute, index: index, maxCount: maxCount)
+    }
+    guard index >= 0, index < all.count else { return [] }
+    return Array(all[index..<min(all.count, index + maxCount)])
   }
 }
 
@@ -223,6 +260,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   private var isTrackingMouse = false
   private var didDragInMouseDown = false
   private var isDragging = false
+  private var realizingTiles = false
 
   private let flowLayout = NSCollectionViewFlowLayout()
   private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
@@ -264,6 +302,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       favoritesCollectionView.onMoveCommand = { [weak self] deltaColumns, deltaRows in
         self?.moveKeyboardFocus(deltaColumns: deltaColumns, deltaRows: deltaRows)
       }
+      favoritesCollectionView.realizeItems = { [weak self] in self?.realizeTilesIfNeeded() }
     }
     collectionView.dataSource = self
     collectionView.delegate = self
@@ -297,6 +336,21 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       flowLayout.invalidateLayout()
     }
     collectionView.frame = bounds
+    realizeTilesIfNeeded()
+  }
+
+  /// A batch insert before the collection view has a size leaves `item(at:)` nil. Reload once the view has a width
+  /// and any favorite has no realized item.
+  private func realizeTilesIfNeeded() {
+    guard !realizingTiles, !nodeIDs.isEmpty, collectionView.bounds.width > 0 else { return }
+    let missing = nodeIDs.indices.contains { index in
+      collectionView.numberOfSections == 0 || collectionView.item(at: IndexPath(item: index, section: 0)) == nil
+    }
+    guard missing else { return }
+    realizingTiles = true
+    collectionView.reloadData()
+    collectionView.layoutSubtreeIfNeeded()
+    realizingTiles = false
   }
 
   // MARK: Hover
