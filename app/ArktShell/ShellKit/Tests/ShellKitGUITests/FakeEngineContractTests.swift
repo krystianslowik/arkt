@@ -37,6 +37,54 @@ final class FakeEngineContractTests: XCTestCase {
   func testHistoryAvailabilityIsReported() async throws { try await EngineContract.historyAvailabilityIsReported(harness) }
   func testHistoryEntriesAndOffsetNavigation() async throws { try await EngineContract.historyEntriesAndOffsetNavigation(harness) }
   func testDuplicateTabCopiesURLTitleAndHistory() async throws { try await EngineContract.duplicateTabCopiesURLTitleAndHistory(harness) }
+  // Rules 11, 12 and 15 apply; 13, 14 and 16 need engine drivers FakeEngine does not have and are skipped.
+  func testWindowIsListedAndAnnounced() async throws { try await EngineContract.windowIsListedAndAnnounced(harness) }
+  func testCloseWindowClosesItsTabsThenReportsWindowClosed() async throws {
+    try await EngineContract.closeWindowClosesItsTabsThenReportsWindowClosed(harness)
+  }
+  func testHostCloseRequestClosesTheWindow() async throws { try await EngineContract.hostCloseRequestClosesTheWindow(harness) }
+  func testActivationIsOneTabPerWindow() async throws { try await EngineContract.activationIsOneTabPerWindow(harness) }
+  func testWindowlessCreateTabLandsInMostRecentlyActiveWindow() async throws {
+    try await EngineContract.windowlessCreateTabLandsInMostRecentlyActiveWindow(harness)
+  }
+  func testEngineCreatedTabIsAnnounced() async throws {
+    try await notApplicable { try await EngineContract.engineCreatedTabIsAnnounced(harness) }
+  }
+  func testEngineCloseIsTerminal() async throws {
+    try await notApplicable { try await EngineContract.engineCloseIsTerminal(harness) }
+  }
+  func testHeldCloseKeepsTheTabUntilAnswered() async throws {
+    try await notApplicable { try await EngineContract.heldCloseKeepsTheTabUntilAnswered(harness) }
+  }
+  func testSkipUnloadHandlersNeverHolds() async throws {
+    try await notApplicable { try await EngineContract.skipUnloadHandlersNeverHolds(harness) }
+  }
+  func testCancelledWindowCloseKeepsTheWindow() async throws {
+    try await notApplicable { try await EngineContract.cancelledWindowCloseKeepsTheWindow(harness) }
+  }
+
+  /// Reports a rule without its driver as skipped (not applicable), never as passed.
+  private func notApplicable(_ rule: () async throws -> Void) async throws {
+    do {
+      try await rule()
+    } catch let missing as ContractNotApplicable {
+      throw XCTSkip(missing.description)
+    }
+  }
+
+  /// FakeEngine only: closes never hold, so both modes close at once and nothing would hold.
+  func testClosesNeverHold() async throws {
+    let engine = FakeEngine()
+    let recorder = EventRecorder(engine)
+    let window = engine.createWindow(host: StubWindowHost())
+    let id = engine.createTab(url: try harness.pageURL("NeverHeld"), in: window)
+    try await harness.settle(engine, id)
+    XCTAssertEqual(engine.snapshot(of: id)?.wouldHoldClose, false)
+    XCTAssertEqual(engine.snapshot(of: id)?.origin, .client)
+    engine.closeTab(id, mode: .honourUnloadHandlers)
+    XCTAssertNil(engine.snapshot(of: id))
+    XCTAssertEqual(recorder.events(for: id).last, .tabClosed(id, reason: .client))
+  }
 
   /// FakeEngine only: a favicon that is not HTTP 200 + image/* is ignored.
   func testRejectsNonImageFavicon() async throws {

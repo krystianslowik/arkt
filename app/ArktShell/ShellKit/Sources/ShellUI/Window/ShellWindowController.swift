@@ -497,7 +497,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .historyChanged(let tab, _, _):
       if tab == toolbarTab { refreshToolbarHistory() }
       refreshPaneToolbar(of: node)
-    case .tabClosed(let tab):
+    case .tabClosed(let tab, _):        // every reason, as before; routing by reason is W3-7 (Decision 12)
       tabsByNode[node] = nil
       nodeByTab[tab] = nil
       let wasCurrent = currentTab == tab

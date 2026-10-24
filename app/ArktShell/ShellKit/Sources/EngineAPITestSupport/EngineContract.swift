@@ -5,9 +5,26 @@ public struct ContractViolation: Error, CustomStringConvertible {
   public let description: String
 }
 
+/// A contract rule that needs a harness driver the engine's harness does not provide. Reported as not applicable,
+/// never as passed: the XCTest runner turns it into a skip, the in-app runner lists it.
+public struct ContractNotApplicable: Error, CustomStringConvertible {
+  public let driver: String
+  public var description: String { "not applicable: the harness has no \(driver) driver" }
+}
+
 /// Everything an engine-specific test needs to drive the shared contract.
 @MainActor
 public struct EngineHarness {
+  /// Makes the engine open a tab on its own in `window` (a link with `target=_blank`, `window.open`,
+  /// `chrome.tabs.create`), opened by `opener` when given, and returns it once it is listed.
+  public typealias EngineCreateTab = @MainActor (_ engine: any EngineClient, _ window: EngineWindowID,
+                                                 _ opener: TabID?, _ active: Bool) async throws -> TabID
+  /// Makes the engine (the page or an extension) close `id` on its own.
+  public typealias EngineTabAction = @MainActor (_ engine: any EngineClient, _ id: TabID) async throws -> Void
+  /// Answers the pending leave-site dialog of `id`: stay (`false`) or leave (`true`).
+  public typealias AnswerDialog = @MainActor (_ engine: any EngineClient, _ id: TabID, _ accept: Bool) async throws
+    -> Void
+
   public let makeEngine: @MainActor () -> any EngineClient
   /// A URL whose page has `<title>title</title>` and needs no network.
   public let pageURL: @MainActor (_ title: String) throws -> URL
@@ -17,17 +34,37 @@ public struct EngineHarness {
   public let retitle: @MainActor (_ engine: any EngineClient, _ id: TabID, _ title: String) async throws -> Void
   /// Two pages on different hosts, each declaring a favicon the engine will pick up.
   public let pagesOnTwoHosts: @MainActor () throws -> (URL, URL)
+  /// A host for `createWindow(host:)` (rules 11, 12, 13, 15, 16).
+  public let makeWindowHost: @MainActor () -> any EngineWindowHosting
+
+  // Drivers for engine-side behaviour (rules 13, 14, 16). A rule whose driver is nil is not applicable.
+  public let engineCreateTab: EngineCreateTab?
+  public let engineCloseTab: EngineTabAction?
+  /// Makes the engine activate `id` on its own (an extension's `chrome.tabs.update({active: true})`).
+  public let engineActivate: EngineTabAction?
+  /// Makes the page register a `beforeunload` handler with sticky user activation, so an honouring close holds.
+  public let holdClose: EngineTabAction?
+  public let answerDialog: AnswerDialog?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
               settle: @escaping @MainActor (any EngineClient, TabID) async throws -> Void,
               retitle: @escaping @MainActor (any EngineClient, TabID, String) async throws -> Void,
-              pagesOnTwoHosts: @escaping @MainActor () throws -> (URL, URL)) {
+              pagesOnTwoHosts: @escaping @MainActor () throws -> (URL, URL),
+              makeWindowHost: @escaping @MainActor () -> any EngineWindowHosting = { StubWindowHost() },
+              engineCreateTab: EngineCreateTab? = nil,
+              engineCloseTab: EngineTabAction? = nil,
+              engineActivate: EngineTabAction? = nil,
+              holdClose: EngineTabAction? = nil,
+              answerDialog: AnswerDialog? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
-    self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts
+    self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
+    self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
+    self.engineActivate = engineActivate; self.holdClose = holdClose; self.answerDialog = answerDialog
   }
 
-  /// In-memory pages: the title is the last path component; every finished load carries a favicon.
+  /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
+  /// present.
   public static func inMemory() -> EngineHarness {
     EngineHarness(
       makeEngine: { InMemoryEngine() },
@@ -39,8 +76,26 @@ public struct EngineHarness {
       retitle: { engine, id, title in (engine as? InMemoryEngine)?.setDocumentTitle(id, title) },
       pagesOnTwoHosts: {
         (URL(string: "arkt-test://alpha.test/Alpha")!, URL(string: "arkt-test://beta.test/Beta")!)
+      },
+      engineCreateTab: { engine, window, opener, active in
+        try inMemory(engine).engineCreateTab(url: nil, in: window, opener: opener, active: active)
+      },
+      engineCloseTab: { engine, id in try inMemory(engine).engineCloseTab(id, reason: .page) },
+      engineActivate: { engine, id in try inMemory(engine).engineActivate(id) },
+      holdClose: { engine, id in try inMemory(engine).holdClose(id) },
+      answerDialog: { engine, id, accept in
+        guard try inMemory(engine).answerDialog(id, accept: accept) else {
+          throw ContractViolation(description: "no pending dialog in \(id)")
+        }
       }
     )
+  }
+
+  private static func inMemory(_ engine: any EngineClient) throws -> InMemoryEngine {
+    guard let engine = engine as? InMemoryEngine else {
+      throw ContractViolation(description: "the in-memory harness needs an InMemoryEngine, got \(type(of: engine))")
+    }
+    return engine
   }
 }
 
@@ -65,6 +120,25 @@ public struct EngineHarness {
 ///    nothing (#81, GS-024).
 /// 10. `duplicateTab(_:)` creates a new tab with the source tab's URL, title and back/forward history (#81, BH-027,
 ///     GS-026); nil for an unknown or closed tab.
+/// 11. A window from `createWindow(host:)` is listed in `windowIDs` and announced with `.windowOpened`; every tab's
+///     snapshot names its window; `closeWindow` (or the host's `onCloseRequested`) closes its tabs
+///     (`.tabClosed(reason: .windowClosing)` each) and then reports `.windowClosed`.
+/// 12. `activateTab` makes the tab its window's active tab: `.activeTabChanged(id)` and `isActive` in the snapshot,
+///     with exactly one active tab per window that has tabs (the first tab of a window is active; closing the
+///     active tab activates another).
+/// 13. A tab the engine creates on its own is announced with `.tabCreated` and its snapshot has `origin == .engine`,
+///     its window, its opener (when there is one) and `isActive`; an engine-side activation is announced with
+///     `.activeTabChanged`. Needs `engineCreateTab` and `engineActivate`.
+/// 14. A tab the engine closes on its own ends with one `.tabClosed` with reason `.page` or `.extension`, and nothing
+///     after it, as rule 4. Needs `engineCloseTab`.
+/// 15. `createTab(url:)` without a window lands in the most recently active window.
+/// 16. A held close keeps the tab listed with `isClosing` until `.tabClosed(reason: .client)`; a cancelled close
+///     reports `.closeCancelled` and leaves the tab open with no `.tabClosed`; `.skipUnloadHandlers` never holds on a
+///     `beforeunload` page. A window close with a held tab that is cancelled keeps the window and its tabs open (no
+///     `.windowClosed`). Needs `holdClose` and `answerDialog`.
+///
+/// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
+/// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
 @MainActor
 public enum EngineContract {
   static func require(_ condition: Bool, _ message: @autoclosure () -> String) throws {
@@ -142,8 +216,9 @@ public enum EngineContract {
     try await Task.sleep(for: .milliseconds(50))
     try require(!engine.tabIDs.contains(id), "closed tab still listed")
     try require(engine.snapshot(of: id) == nil && engine.contentView(for: id) == nil, "closed tab still resolvable")
-    let closes = recorder.events(for: id).filter { $0 == .tabClosed(id) }.count
-    try require(closes == 1 && recorder.events(for: id).last == .tabClosed(id), "tabClosed must be last and once")
+    let closes = recorder.events(for: id).filter { $0 == .tabClosed(id, reason: .client) }.count
+    try require(closes == 1 && recorder.events(for: id).last == .tabClosed(id, reason: .client),
+                "tabClosed(reason: .client) must be last and once")
   }
 
   /// An observer closes the tab while the title is being delivered; a second observer must still see
@@ -164,7 +239,8 @@ public enum EngineContract {
     try await Task.sleep(for: .milliseconds(50))
     let seen = watcher.events(for: id)
     try require(seen == closer, "observers disagree:\n closer \(closer)\n watcher \(seen)")
-    try require(seen.last == .tabClosed(id) && seen.filter { $0 == .tabClosed(id) }.count == 1,
+    try require(seen.last == .tabClosed(id, reason: .client)
+                  && seen.filter { $0 == .tabClosed(id, reason: .client) }.count == 1,
                 "tabClosed must be last and once: \(seen)")
     closing.cancel()
   }

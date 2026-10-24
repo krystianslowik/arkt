@@ -2,9 +2,21 @@ import AppKit
 import EngineAPI
 
 /// Pure in-memory engine for tests and previews. Loads complete only when `finishLoad` is called,
-/// which makes event order fully deterministic.
+/// which makes event order fully deterministic. Every event is emitted synchronously.
+///
+/// Windows, activation and held closes follow contract rules 11-16; the engine-side test drivers
+/// (`engineCreateTab`, `engineCloseTab`, `engineActivate`, `holdClose`, `answerDialog`, `openEngineWindow`,
+/// `setExtensionActions`) stand in for what a page, an extension or the user does in a real engine.
 @MainActor
-public final class InMemoryEngine: EngineClient {
+public final class InMemoryEngine: EngineClient, EngineExtensions {
+  /// A close waiting on a leave-site dialog.
+  private enum HeldClose {
+    /// One tab, closed by the client or the engine, with the reason it will report.
+    case tab(CloseReason)
+    /// The tab's window is closing.
+    case window(EngineWindowID)
+  }
+
   private var snapshots: [TabID: TabSnapshot] = [:]
   private var views: [TabID: NSView] = [:]
   /// Per-tab history: entries behind and ahead of the current one (nearest last on each stack).
@@ -12,25 +24,47 @@ public final class InMemoryEngine: EngineClient {
   private let hub = EngineEventHub()
   public private(set) var tabIDs: [TabID] = []
 
+  public private(set) var windowIDs: [EngineWindowID] = []
+  private var hosts: [EngineWindowID: any EngineWindowHosting] = [:]
+  private var activeTabs: [EngineWindowID: TabID] = [:]
+  private var lastActiveWindow: EngineWindowID?
+  private var heldCloses: [TabID: HeldClose] = [:]
+  private var actions: [EngineWindowID: [ExtensionAction]] = [:]
+
+  /// Builds hosts for `openEngineWindow(_:)`, as the app's provider does for a real engine.
+  public var windowHostProvider: EngineWindowHostProvider?
+  /// Commands that reached the engine through a host's `forward.execute`, in order.
+  public private(set) var executedCommands: [(command: EngineCommand, disposition: EngineDisposition,
+                                              window: EngineWindowID)] = []
+  /// Actions run through `runExtensionAction`, in order.
+  public private(set) var ranExtensionActions: [(id: String, window: EngineWindowID, anchor: NSView)] = []
+
   public init() {}
+
+  // MARK: - Tabs
 
   @discardableResult
   public func createTab(url: URL?) -> TabID {
-    let id = TabID()
-    snapshots[id] = TabSnapshot(id: id)
-    tabIDs.append(id)
-    hub.emit(.tabCreated(id))
-    if let url { navigate(id, to: url) }
-    return id
+    let window = lastActiveWindow.flatMap { windowIDs.contains($0) ? $0 : nil }
+    return insertTab(url: url, window: window, opener: nil, origin: .client, activate: false)
   }
 
-  public func closeTab(_ id: TabID) {
-    guard snapshots.removeValue(forKey: id) != nil else { return }
-    tabIDs.removeAll { $0 == id }
-    views[id]?.removeFromSuperview()
-    views[id] = nil
-    history[id] = nil
-    hub.emit(.tabClosed(id))
+  @discardableResult
+  public func createTab(url: URL?, in window: EngineWindowID) -> TabID {
+    precondition(windowIDs.contains(window), "createTab(url:in:) needs a listed window, got \(window)")
+    lastActiveWindow = window
+    return insertTab(url: url, window: window, opener: nil, origin: .client, activate: false)
+  }
+
+  public func closeTab(_ id: TabID) { closeTab(id, mode: .honourUnloadHandlers) }
+
+  public func closeTab(_ id: TabID, mode: CloseMode) {
+    guard let current = snapshots[id], !current.isClosing else { return }
+    if mode == .honourUnloadHandlers, current.wouldHoldClose {
+      hold(id, .tab(.client))
+    } else {
+      removeTab(id, reason: .client)
+    }
   }
 
   /// Starts a load and commits it at once: url, loading, then (on a host change) the favicon reset. A new
@@ -85,20 +119,207 @@ public final class InMemoryEngine: EngineClient {
     return TabHistory(back: Array(stack.back.reversed()), forward: Array(stack.forward.reversed()))
   }
 
+  /// The copy lands in the source's window, after the source in `tabIDs`, and does not take activation.
   @discardableResult
   public func duplicateTab(_ id: TabID) -> TabID? {
     guard let source = snapshots[id] else { return nil }
-    let copy = TabID()
-    snapshots[copy] = TabSnapshot(id: copy)
-    tabIDs.append(copy)
-    history[copy] = history[id] ?? ([], [])
-    hub.emit(.tabCreated(copy))
+    let copy = insertTab(url: nil, window: source.window, opener: nil, origin: .client, activate: false,
+                         history: history[id] ?? ([], []))
     if let url = source.url, let initial = snapshots[copy] {
       load(copy, url, title: source.title, previous: initial)
     } else {
       reportHistory(copy)
     }
     return copy
+  }
+
+  public func reload(_ id: TabID) {
+    guard let current = snapshots[id], current.url != nil, !current.isLoading else { return }
+    snapshots[id]?.isLoading = true
+    hub.emit(.loadingChanged(id, isLoading: true))
+  }
+
+  public func snapshot(of id: TabID) -> TabSnapshot? { snapshots[id] }
+
+  public func contentView(for id: TabID) -> NSView? {
+    guard snapshots[id] != nil else { return nil }
+    if let view = views[id] { return view }
+    let view = InMemoryPageView()
+    view.identifier = NSUserInterfaceItemIdentifier("in-memory-tab-\(id)")
+    views[id] = view
+    return view
+  }
+
+  public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
+    hub.add(handler)
+  }
+
+  // MARK: - Windows
+
+  @discardableResult
+  public func createWindow(host: any EngineWindowHosting) -> EngineWindowID {
+    let id = EngineWindowID()
+    windowIDs.append(id)
+    hosts[id] = host
+    lastActiveWindow = id
+    host.onCloseRequested = { [weak self] in self?.closeWindow(id) }
+    host.forward = EngineCommandForwarding(
+      validate: { _ in true },
+      execute: { [weak self] command, disposition in self?.executedCommands.append((command, disposition, id)) }
+    )
+    hub.emit(.windowOpened(id))
+    return id
+  }
+
+  /// A window close already waiting on a dialog is not started again.
+  public func closeWindow(_ id: EngineWindowID) {
+    guard windowIDs.contains(id) else { return }
+    let tabs = tabs(in: id)
+    guard !tabs.contains(where: { snapshots[$0]?.isClosing == true }) else { return }
+    let holding = tabs.filter { snapshots[$0]?.wouldHoldClose == true }
+    guard holding.isEmpty else {
+      for tab in holding { hold(tab, .window(id)) }
+      return
+    }
+    finishWindowClose(id)
+  }
+
+  public func activateTab(_ id: TabID) { setActive(id) }
+
+  public func activeTab(in window: EngineWindowID) -> TabID? { activeTabs[window] }
+
+  public func observeWindows(_ handler: @escaping @MainActor (EngineWindowEvent) -> Void) -> EngineObservation {
+    hub.addWindowObserver(handler)
+  }
+
+  public func observe(window: EngineWindowID,
+                      _ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
+    hub.add(window: window, handler)
+  }
+
+  /// The host of a listed window.
+  public func host(of window: EngineWindowID) -> (any EngineWindowHosting)? { hosts[window] }
+
+  // MARK: - Extensions
+
+  public func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { actions[window] ?? [] }
+
+  public func runExtensionAction(_ id: String, in window: EngineWindowID, anchor: NSView) {
+    guard actions[window]?.contains(where: { $0.id == id }) == true else { return }
+    ranExtensionActions.append((id, window, anchor))
+  }
+
+  // MARK: - Test drivers
+
+  /// Test hook: the page changed `document.title` after loading.
+  public func setDocumentTitle(_ id: TabID, _ title: String) {
+    guard let current = snapshots[id], current.title != title else { return }
+    snapshots[id]?.title = title
+    hub.emit(.titleChanged(id, title))
+  }
+
+  /// Test hook: completes the pending load the way a real engine would.
+  public func finishLoad(_ id: TabID, title: String, favicon: Data? = nil) {
+    guard let current = snapshots[id] else { return }
+    if current.title != title {
+      snapshots[id]?.title = title
+      hub.emit(.titleChanged(id, title))
+    }
+    if let favicon {
+      snapshots[id]?.faviconData = favicon
+      hub.emit(.faviconChanged(id, favicon))
+    }
+    if current.isLoading {
+      snapshots[id]?.isLoading = false
+      hub.emit(.loadingChanged(id, isLoading: false))
+    }
+  }
+
+  /// Test driver: the engine opens a tab on its own (`window.open`, `chrome.tabs.create`), origin `.engine`.
+  @discardableResult
+  public func engineCreateTab(url: URL? = nil, in window: EngineWindowID, opener: TabID? = nil,
+                              active: Bool = true) -> TabID {
+    precondition(windowIDs.contains(window), "engineCreateTab needs a listed window, got \(window)")
+    return insertTab(url: url, window: window, opener: opener, origin: .engine, activate: active)
+  }
+
+  /// Test driver: the page (`window.close()`, reason `.page`) or an extension (`.extension`) closes the tab. A page
+  /// with a `beforeunload` handler holds the close until `answerDialog`.
+  public func engineCloseTab(_ id: TabID, reason: CloseReason = .page) {
+    guard let current = snapshots[id], !current.isClosing else { return }
+    if current.wouldHoldClose { hold(id, .tab(reason)) } else { removeTab(id, reason: reason) }
+  }
+
+  /// Test driver: the engine activates the tab (an extension's `chrome.tabs.update`).
+  public func engineActivate(_ id: TabID) { setActive(id) }
+
+  /// Test driver: the page registers a `beforeunload` handler with sticky user activation. `wouldHoldClose` stays
+  /// true after a cancelled close, as the handler stays registered.
+  public func holdClose(_ id: TabID) {
+    guard snapshots[id] != nil else { return }
+    snapshots[id]?.wouldHoldClose = true
+  }
+
+  /// Test driver: answers the tab's leave-site dialog. False when no close is held there. Accepting the last held
+  /// tab of a closing window closes the window; cancelling any of them cancels the window close and reports
+  /// `.closeCancelled` for every tab of the window that was closing.
+  @discardableResult
+  public func answerDialog(_ id: TabID, accept: Bool) -> Bool {
+    guard let held = heldCloses.removeValue(forKey: id) else { return false }
+    switch (held, accept) {
+    case (.tab(let reason), true):
+      removeTab(id, reason: reason)
+    case (.tab, false):
+      snapshots[id]?.isClosing = false
+      hub.emit(.closeCancelled(id))
+    case (.window(let window), true):
+      let waiting = heldCloses.values.contains { if case .window(window) = $0 { true } else { false } }
+      if !waiting { finishWindowClose(window) }
+    case (.window(let window), false):
+      for tab in tabs(in: window) where snapshots[tab]?.isClosing == true {
+        heldCloses[tab] = nil
+        snapshots[tab]?.isClosing = false
+        hub.emit(.closeCancelled(tab))
+      }
+    }
+    return true
+  }
+
+  /// Test driver: the engine asks for a window of its own (Dock reopen, `chrome.windows.create`). Builds the host
+  /// through `windowHostProvider` and opens `initialURL` in an engine tab; nil without a provider.
+  @discardableResult
+  public func openEngineWindow(_ request: EngineWindowRequest) -> EngineWindowID? {
+    guard let provider = windowHostProvider else { return nil }
+    let window = createWindow(host: provider(request))
+    if let url = request.initialURL {
+      insertTab(url: url, window: window, opener: nil, origin: .engine, activate: true)
+    }
+    return window
+  }
+
+  /// Test driver: the window's extension actions changed.
+  public func setExtensionActions(_ list: [ExtensionAction], in window: EngineWindowID) {
+    guard windowIDs.contains(window) else { return }
+    actions[window] = list
+    hub.emit(.extensionActionsChanged(window))
+  }
+
+  // MARK: - Internals
+
+  private func tabs(in window: EngineWindowID) -> [TabID] { tabIDs.filter { snapshots[$0]?.window == window } }
+
+  @discardableResult
+  private func insertTab(url: URL?, window: EngineWindowID?, opener: TabID?, origin: TabOrigin, activate: Bool,
+                         history copied: (back: [HistoryEntry], forward: [HistoryEntry])? = nil) -> TabID {
+    let id = TabID()
+    snapshots[id] = TabSnapshot(id: id, window: window, opener: opener, origin: origin)
+    tabIDs.append(id)
+    if let copied { history[id] = copied }
+    hub.assign(id, to: window)
+    hub.emit(.tabCreated(id))
+    if let window, activate || activeTabs[window] == nil { setActive(id) }
+    if let url { navigate(id, to: url) }
+    return id
   }
 
   private func load(_ id: TabID, _ url: URL, title: String?, previous: TabSnapshot) {
@@ -125,49 +346,59 @@ public final class InMemoryEngine: EngineClient {
     hub.emit(.historyChanged(id, canGoBack: back, canGoForward: forward))
   }
 
-  public func reload(_ id: TabID) {
-    guard let current = snapshots[id], current.url != nil, !current.isLoading else { return }
-    snapshots[id]?.isLoading = true
-    hub.emit(.loadingChanged(id, isLoading: true))
+  private func setActive(_ id: TabID) {
+    guard let window = snapshots[id]?.window else { return }
+    lastActiveWindow = window
+    let previous = activeTabs[window]
+    guard previous != id else { return }
+    if let previous { snapshots[previous]?.isActive = false }
+    snapshots[id]?.isActive = true
+    activeTabs[window] = id
+    hub.emit(.activeTabChanged(id))
   }
 
-  /// Test hook: the page changed `document.title` after loading.
-  public func setDocumentTitle(_ id: TabID, _ title: String) {
-    guard let current = snapshots[id], current.title != title else { return }
-    snapshots[id]?.title = title
-    hub.emit(.titleChanged(id, title))
+  private func hold(_ id: TabID, _ close: HeldClose) {
+    heldCloses[id] = close
+    snapshots[id]?.isClosing = true
   }
 
-  /// Test hook: completes the pending load the way a real engine would.
-  public func finishLoad(_ id: TabID, title: String, favicon: Data? = nil) {
-    guard let current = snapshots[id] else { return }
-    if current.title != title {
-      snapshots[id]?.title = title
-      hub.emit(.titleChanged(id, title))
+  /// Removes the tab and reports it. A window's active tab is replaced by its right neighbour, else its left one,
+  /// unless the whole window is closing.
+  private func removeTab(_ id: TabID, reason: CloseReason, reactivate: Bool = true) {
+    guard let removed = snapshots[id] else { return }
+    var successor: TabID?
+    if let window = removed.window, activeTabs[window] == id {
+      activeTabs[window] = nil
+      let siblings = tabs(in: window)
+      if reactivate, let index = siblings.firstIndex(of: id) {
+        if siblings.indices.contains(index + 1) {
+          successor = siblings[index + 1]
+        } else if index > 0 {
+          successor = siblings[index - 1]
+        }
+      }
     }
-    if let favicon {
-      snapshots[id]?.faviconData = favicon
-      hub.emit(.faviconChanged(id, favicon))
-    }
-    if current.isLoading {
-      snapshots[id]?.isLoading = false
-      hub.emit(.loadingChanged(id, isLoading: false))
-    }
+    snapshots[id] = nil
+    tabIDs.removeAll { $0 == id }
+    views[id]?.removeFromSuperview()
+    views[id] = nil
+    history[id] = nil
+    heldCloses[id] = nil
+    hub.emit(.tabClosed(id, reason: reason))
+    if let successor { setActive(successor) }
   }
 
-  public func snapshot(of id: TabID) -> TabSnapshot? { snapshots[id] }
-
-  public func contentView(for id: TabID) -> NSView? {
-    guard snapshots[id] != nil else { return nil }
-    if let view = views[id] { return view }
-    let view = InMemoryPageView()
-    view.identifier = NSUserInterfaceItemIdentifier("in-memory-tab-\(id)")
-    views[id] = view
-    return view
-  }
-
-  public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
-    hub.add(handler)
+  private func finishWindowClose(_ id: EngineWindowID) {
+    for tab in tabs(in: id) { removeTab(tab, reason: .windowClosing, reactivate: false) }
+    windowIDs.removeAll { $0 == id }
+    activeTabs[id] = nil
+    actions[id] = nil
+    if let host = hosts.removeValue(forKey: id) {
+      host.onCloseRequested = nil
+      host.forward = nil
+    }
+    if lastActiveWindow == id { lastActiveWindow = windowIDs.last }
+    hub.emit(.windowClosed(id))
   }
 }
 

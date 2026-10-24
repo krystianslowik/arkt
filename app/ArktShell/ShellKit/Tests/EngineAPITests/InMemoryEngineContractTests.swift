@@ -21,6 +21,32 @@ struct InMemoryEngineContractTests {
   @Test func historyAvailabilityIsReported() async throws { try await EngineContract.historyAvailabilityIsReported(harness) }
   @Test func historyEntriesAndOffsetNavigation() async throws { try await EngineContract.historyEntriesAndOffsetNavigation(harness) }
   @Test func duplicateTabCopiesURLTitleAndHistory() async throws { try await EngineContract.duplicateTabCopiesURLTitleAndHistory(harness) }
+  // Rules 11-16
+  @Test func windowIsListedAndAnnounced() async throws { try await EngineContract.windowIsListedAndAnnounced(harness) }
+  @Test func closeWindowClosesItsTabsThenReportsWindowClosed() async throws {
+    try await EngineContract.closeWindowClosesItsTabsThenReportsWindowClosed(harness)
+  }
+  @Test func hostCloseRequestClosesTheWindow() async throws { try await EngineContract.hostCloseRequestClosesTheWindow(harness) }
+  @Test func activationIsOneTabPerWindow() async throws { try await EngineContract.activationIsOneTabPerWindow(harness) }
+  @Test func engineCreatedTabIsAnnounced() async throws { try await EngineContract.engineCreatedTabIsAnnounced(harness) }
+  @Test func engineCloseIsTerminal() async throws { try await EngineContract.engineCloseIsTerminal(harness) }
+  @Test func windowlessCreateTabLandsInMostRecentlyActiveWindow() async throws {
+    try await EngineContract.windowlessCreateTabLandsInMostRecentlyActiveWindow(harness)
+  }
+  @Test func heldCloseKeepsTheTabUntilAnswered() async throws { try await EngineContract.heldCloseKeepsTheTabUntilAnswered(harness) }
+  @Test func skipUnloadHandlersNeverHolds() async throws { try await EngineContract.skipUnloadHandlersNeverHolds(harness) }
+  @Test func cancelledWindowCloseKeepsTheWindow() async throws { try await EngineContract.cancelledWindowCloseKeepsTheWindow(harness) }
+
+  /// A harness without engine drivers reports rules 13, 14 and 16 as not applicable, never as passed.
+  @Test func missingDriversAreNotApplicable() async throws {
+    let bare = EngineHarness(makeEngine: harness.makeEngine, pageURL: harness.pageURL, settle: harness.settle,
+                             retitle: harness.retitle, pagesOnTwoHosts: harness.pagesOnTwoHosts)
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.engineCreatedTabIsAnnounced(bare) }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.engineCloseIsTerminal(bare) }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.heldCloseKeepsTheTabUntilAnswered(bare) }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.skipUnloadHandlersNeverHolds(bare) }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.cancelledWindowCloseKeepsTheWindow(bare) }
+  }
 }
 
 @MainActor

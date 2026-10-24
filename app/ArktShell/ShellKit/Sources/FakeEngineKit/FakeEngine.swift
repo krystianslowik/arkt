@@ -3,6 +3,9 @@ internal import WebKit
 import EngineAPI
 
 /// Development stand-in for the Chromium engine. Renders with WKWebView.
+/// Windows and activation follow contract rules 11, 12 and 15. Every tab has `origin == .client` (WKWebView opens no
+/// tabs of its own here) and closes never hold (`wouldHoldClose` is always false, so both close modes close at once);
+/// rules 13, 14 and 16 are not applicable.
 /// Nothing outside this file may import WebKit, and the import is `internal`, so the compiler
 /// rejects any WebKit type in the public surface (EngineAPI types and NSView only).
 @MainActor
@@ -35,6 +38,10 @@ public final class FakeEngine: EngineClient {
 
   private var entries: [TabID: Entry] = [:]
   private let hub = EngineEventHub()
+  public private(set) var windowIDs: [EngineWindowID] = []
+  private var hosts: [EngineWindowID: any EngineWindowHosting] = [:]
+  private var activeTabs: [EngineWindowID: TabID] = [:]
+  private var lastActiveWindow: EngineWindowID?
   private let configuration: WKWebViewConfiguration
   private let faviconSession = URLSession(configuration: .ephemeral)
   public private(set) var tabIDs: [TabID] = []
@@ -48,16 +55,29 @@ public final class FakeEngine: EngineClient {
 
   @discardableResult
   public func createTab(url: URL?) -> TabID {
+    makeTab(url: url, window: lastActiveWindow.flatMap { windowIDs.contains($0) ? $0 : nil })
+  }
+
+  @discardableResult
+  public func createTab(url: URL?, in window: EngineWindowID) -> TabID {
+    precondition(windowIDs.contains(window), "createTab(url:in:) needs a listed window, got \(window)")
+    lastActiveWindow = window
+    return makeTab(url: url, window: window)
+  }
+
+  private func makeTab(url: URL?, window: EngineWindowID?) -> TabID {
     let id = TabID()
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.autoresizingMask = [.width, .height]
     let navigation = NavigationObserver()
     navigation.onCommit = { [weak self] in self?.didCommit(id) }
     webView.navigationDelegate = navigation
-    let entry = Entry(webView: webView, navigation: navigation, snapshot: TabSnapshot(id: id))
+    let entry = Entry(webView: webView, navigation: navigation, snapshot: TabSnapshot(id: id, window: window))
     entries[id] = entry
     tabIDs.append(id)
+    hub.assign(id, to: window)
     hub.emit(.tabCreated(id))
+    if let window, activeTabs[window] == nil { setActive(id) }
     // KVO handlers are not main-actor isolated in the SDK annotations, but WKWebView
     // always reports on the main thread, so assumeIsolated is a checked, correct hop.
     entry.observations = [
@@ -86,15 +106,34 @@ public final class FakeEngine: EngineClient {
     return id
   }
 
-  public func closeTab(_ id: TabID) {
-    guard let entry = entries.removeValue(forKey: id) else { return }
+  public func closeTab(_ id: TabID) { closeTab(id, mode: .honourUnloadHandlers) }
+
+  /// Never held: WKWebView offers no `beforeunload` hold here, so both modes close at once.
+  public func closeTab(_ id: TabID, mode: CloseMode) { removeTab(id, reason: .client, reactivate: true) }
+
+  private func removeTab(_ id: TabID, reason: CloseReason, reactivate: Bool) {
+    guard let entry = entries[id] else { return }
+    var successor: TabID?
+    if let window = entry.snapshot.window, activeTabs[window] == id {
+      activeTabs[window] = nil
+      let siblings = tabs(in: window)
+      if reactivate, let index = siblings.firstIndex(of: id) {
+        if siblings.indices.contains(index + 1) {
+          successor = siblings[index + 1]
+        } else if index > 0 {
+          successor = siblings[index - 1]
+        }
+      }
+    }
+    entries[id] = nil
     entry.observations.forEach { $0.invalidate() }
     entry.navigation.onCommit = nil
     entry.webView.navigationDelegate = nil
     entry.webView.stopLoading()
     entry.webView.removeFromSuperview()
     tabIDs.removeAll { $0 == id }
-    hub.emit(.tabClosed(id))
+    hub.emit(.tabClosed(id, reason: reason))
+    if let successor { setActive(successor) }
   }
 
   public func navigate(_ id: TabID, to url: URL) {
@@ -170,7 +209,7 @@ public final class FakeEngine: EngineClient {
   @discardableResult
   public func duplicateTab(_ id: TabID) -> TabID? {
     guard let sourceEntry = entries[id], let sourceHistory = history(of: id) else { return nil }
-    let copy = createTab(url: nil)
+    let copy = makeTab(url: nil, window: sourceEntry.snapshot.window)
     guard let copyEntry = entries[copy] else { return nil }
     copyEntry.clonedHistory = (
       back: Array(sourceHistory.back.reversed()),
@@ -186,6 +225,62 @@ public final class FakeEngine: EngineClient {
   public func snapshot(of id: TabID) -> TabSnapshot? { entries[id]?.snapshot }
   public func contentView(for id: TabID) -> NSView? { entries[id]?.webView }
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation { hub.add(handler) }
+
+  // MARK: - Windows
+
+  @discardableResult
+  public func createWindow(host: any EngineWindowHosting) -> EngineWindowID {
+    let id = EngineWindowID()
+    windowIDs.append(id)
+    hosts[id] = host
+    lastActiveWindow = id
+    host.onCloseRequested = { [weak self] in self?.closeWindow(id) }
+    // No engine commands: everything the host does not claim is disabled.
+    host.forward = EngineCommandForwarding(validate: { _ in false }, execute: { _, _ in })
+    hub.emit(.windowOpened(id))
+    return id
+  }
+
+  public func closeWindow(_ id: EngineWindowID) {
+    guard windowIDs.contains(id) else { return }
+    for tab in tabs(in: id) { removeTab(tab, reason: .windowClosing, reactivate: false) }
+    windowIDs.removeAll { $0 == id }
+    activeTabs[id] = nil
+    if let host = hosts.removeValue(forKey: id) {
+      host.onCloseRequested = nil
+      host.forward = nil
+    }
+    if lastActiveWindow == id { lastActiveWindow = windowIDs.last }
+    hub.emit(.windowClosed(id))
+  }
+
+  public func activateTab(_ id: TabID) { setActive(id) }
+
+  public func activeTab(in window: EngineWindowID) -> TabID? { activeTabs[window] }
+
+  public func observeWindows(_ handler: @escaping @MainActor (EngineWindowEvent) -> Void) -> EngineObservation {
+    hub.addWindowObserver(handler)
+  }
+
+  public func observe(window: EngineWindowID,
+                      _ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
+    hub.add(window: window, handler)
+  }
+
+  private func tabs(in window: EngineWindowID) -> [TabID] {
+    tabIDs.filter { entries[$0]?.snapshot.window == window }
+  }
+
+  private func setActive(_ id: TabID) {
+    guard let window = entries[id]?.snapshot.window else { return }
+    lastActiveWindow = window
+    let previous = activeTabs[window]
+    guard previous != id else { return }
+    if let previous { entries[previous]?.snapshot.isActive = false }
+    entries[id]?.snapshot.isActive = true
+    activeTabs[window] = id
+    hub.emit(.activeTabChanged(id))
+  }
 
   /// Test hook (reachable through `@testable import`): runs page script, ignoring its result.
   func runScript(_ script: String, in id: TabID) async {
