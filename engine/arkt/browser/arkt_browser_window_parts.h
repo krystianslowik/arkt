@@ -92,8 +92,9 @@ class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost,
   void RemoveObserver(web_modal::ModalDialogHostObserver* observer) override;
   void NotifyPositionRequiresUpdate() override;
 
-  // A claimed dialog is not shown (Chromium has not shown it yet, or hid it).
-  bool HasUnshownDialog() const;
+  // This host has claimed dialogs; one of them is shown.
+  bool HasDialogs() const { return !dialogs_.empty(); }
+  bool HasVisibleDialog() const;
 
   // views::WidgetObserver:
   void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;

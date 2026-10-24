@@ -215,10 +215,10 @@ void ArktModalDialogHost::NotifyPositionRequiresUpdate() {
   }
 }
 
-bool ArktModalDialogHost::HasUnshownDialog() const {
+bool ArktModalDialogHost::HasVisibleDialog() const {
   return std::any_of(
       dialogs_.begin(), dialogs_.end(),
-      [](views::Widget* widget) { return !widget->IsVisible(); });
+      [](views::Widget* widget) { return widget->IsVisible(); });
 }
 
 void ArktModalDialogHost::OnWidgetVisibilityChanged(views::Widget* widget,

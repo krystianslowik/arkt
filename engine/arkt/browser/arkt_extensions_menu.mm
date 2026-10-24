@@ -16,6 +16,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/extensions/extension_action_delegate.h"
 #include "chrome/browser/ui/extensions/extension_action_view_model.h"
@@ -166,6 +168,13 @@ ArktExtensionsMenu::ArktExtensionsMenu(BrowserWindowInterface* browser,
       },
       weak_this));
 
+  if (ThemeService* theme =
+          ThemeServiceFactory::GetForProfile(browser_->GetProfile())) {
+    theme_observation_.Observe(theme);
+  }
+  if (ui::NativeTheme* native = ui::NativeTheme::GetInstanceForNativeUi()) {
+    native_theme_observation_.Observe(native);
+  }
   model_ = ToolbarActionsModel::Get(browser_->GetProfile());
   if (!model_) {
     LOG(ERROR) << "ARKT: no toolbar actions model for this profile";
@@ -389,6 +398,22 @@ void ArktExtensionsMenu::OnToolbarModelInitialized() {
   MaybeRunPendingAction();
 }
 
+void ArktExtensionsMenu::OnThemeChanged() {
+  OnColorsChanged();
+}
+
+void ArktExtensionsMenu::OnNativeThemeUpdated(ui::NativeTheme* observed_theme) {
+  OnColorsChanged();
+}
+
+void ArktExtensionsMenu::OnColorsChanged() {
+  if (icon_cache_.empty()) {
+    return;
+  }
+  icon_cache_.clear();
+  NotifyChanged();
+}
+
 void ArktExtensionsMenu::OnToolbarActionsModelShutdown() {
   Shutdown();
 }
@@ -524,6 +549,8 @@ void ArktExtensionsMenu::Shutdown() {
   icon_cache_.clear();
   on_changed_.Reset();
   observation_.Reset();
+  theme_observation_.Reset();
+  native_theme_observation_.Reset();
   model_ = nullptr;
   browser_ = nullptr;
   browser_did_close_ = {};

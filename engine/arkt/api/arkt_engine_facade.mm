@@ -2,6 +2,7 @@
 
 #import <AppKit/AppKit.h>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <optional>
@@ -110,25 +111,27 @@ NSData* ImageSkiaPNG(const gfx::ImageSkia& image) {
   return png ? [NSData dataWithBytes:png->data() length:png->size()] : nil;
 }
 
-// An action icon as PNG. The menu caches its rasterized icons (#258), so an
-// icon backed by the same image as last time reuses that encoding.
-NSData* ActionIconPNG(const std::string& action_id,
+// An action icon encoded once: an icon backed by the same image as last time
+// (the menu caches its rasterized icons, #258) reuses the encoding.
+struct EncodedActionIcon {
+  gfx::ImageSkia icon;
+  NSData* __strong png = nil;
+};
+using ActionIconCache = std::map<std::string, EncodedActionIcon>;
+
+NSData* ActionIconPNG(ActionIconCache& cache,
+                      const std::string& action_id,
                       const gfx::ImageSkia& icon) {
-  struct Encoded {
-    gfx::ImageSkia icon;
-    NSData* __strong png = nil;
-  };
-  static base::NoDestructor<std::map<std::string, Encoded>> cache;
   if (icon.isNull()) {
-    cache->erase(action_id);
+    cache.erase(action_id);
     return nil;
   }
-  auto it = cache->find(action_id);
-  if (it != cache->end() && it->second.icon.BackedBySameObjectAs(icon)) {
+  auto it = cache.find(action_id);
+  if (it != cache.end() && it->second.icon.BackedBySameObjectAs(icon)) {
     return it->second.png;
   }
   NSData* png = ImageSkiaPNG(icon);
-  (*cache)[action_id] = Encoded{icon, png};
+  cache[action_id] = EncodedActionIcon{icon, png};
   return png;
 }
 
@@ -382,6 +385,9 @@ const char* KindName(ArktEngineEventKind kind) {
 - (instancetype)initWithBrowser:(BrowserWindowInterface*)browser;
 - (BrowserWindowInterface*)browserInterface;
 - (void)unbind;
+// The window's encoded action icons, keyed by action id (one cache per
+// window: windows with different active tabs have different icons).
+- (arkt::ActionIconCache&)actionIconCache;
 @end
 
 namespace arkt {
@@ -1629,6 +1635,11 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   // at replay, and the handle keeps answering after the window is gone.
   id<ArktWindowHost> __weak _host;
   int32_t _windowId;
+  arkt::ActionIconCache _actionIcons;
+}
+
+- (arkt::ActionIconCache&)actionIconCache {
+  return _actionIcons;
 }
 
 - (instancetype)initWithBrowser:(BrowserWindowInterface*)browser {
@@ -1645,6 +1656,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 
 - (void)unbind {
   _browser = nullptr;
+  _actionIcons.clear();
 }
 
 - (int32_t)windowId {
@@ -1781,12 +1793,22 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   if (!menu) {
     return actions;
   }
-  for (const auto& info : menu->GetActions()) {
+  arkt::ActionIconCache& icons =
+      static_cast<ArktFacadeBrowser*>(browser).actionIconCache;
+  const std::vector<arkt::ArktExtensionsMenu::ActionInfo> infos =
+      menu->GetActions();
+  // Actions no longer listed (uninstalled, removed) drop their encodings.
+  std::erase_if(icons, [&infos](const auto& entry) {
+    return std::none_of(infos.begin(), infos.end(), [&entry](const auto& info) {
+      return info.id == entry.first;
+    });
+  });
+  for (const auto& info : infos) {
     ArktFacadeExtensionAction* action =
         [[ArktFacadeExtensionAction alloc] init];
     action.actionId = base::SysUTF8ToNSString(info.id);
     action.name = base::SysUTF16ToNSString(info.name);
-    action.iconPNG = arkt::ActionIconPNG(info.id, info.icon);
+    action.iconPNG = arkt::ActionIconPNG(icons, info.id, info.icon);
     action.isEnabled = info.enabled;
     [actions addObject:action];
   }

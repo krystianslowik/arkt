@@ -46,13 +46,12 @@
 #include "components/search/ntp_features.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/eye_dropper.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/visibility.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/visibility.h"
-#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/mojom/window_show_state.mojom.h"
 #include "ui/base/window_open_disposition.h"
@@ -606,7 +605,11 @@ void ArktBrowserWindow::ShowDialogsHeldWhileHidden() {
                                   ? it->second.get()
                                   : modal_dialog_host_.get();
   const content::Visibility visibility = active->GetVisibility();
-  if (!host || !host->HasUnshownDialog() ||
+  // The manager shows only its front dialog; a second one stays hidden
+  // behind it. So replay only when none is visible, never when the front
+  // dialog is up (that would hide and re-show it on every occlusion or Space
+  // change, #262 review).
+  if (!host || !host->HasDialogs() || host->HasVisibleDialog() ||
       visibility == content::Visibility::HIDDEN) {
     return;
   }
@@ -614,7 +617,9 @@ void ArktBrowserWindow::ShowDialogsHeldWhileHidden() {
   // (the manager's delegate asks whether the view's window is visible), and
   // ordering the window out and in leaves the contents' visibility VISIBLE,
   // so the manager never gets the transition that shows it. Replay one
-  // through its WebContentsObserver interface (no patch; #261 review).
+  // through its WebContentsObserver interface (no patch; #261 review). The
+  // replay runs whatever OnVisibilityChanged does; today that is only the
+  // dialog show and hide. Recheck when Chromium adds side effects there.
   LOG(WARNING) << "ARKT: tab-modal dialog held while the window was hidden, "
                   "shown now";
   content::WebContentsObserver* observer = manager;

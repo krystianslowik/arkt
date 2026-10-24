@@ -222,6 +222,23 @@ Placeholder alert with the claim filter (final build, `w258-ph2`, port 9496, a f
 dialog claimed window 95644 host window 95636`, `attached ... frame 766,933 448x144 host view 390,197 1200x880`; the
 Quartz window list shows the dialog `127.0.0.1:8491 says` at the card's top, centred. 0 `FATAL`/`Check failed`.
 
+### #262 review fixes
+
+- **Replay only when no dialog of the tab is shown** (medium). The manager shows only its front dialog, so a second
+  claimed dialog stays hidden behind a shown one; the replay now runs only when the host has dialogs and none is
+  visible (`HasDialogs`, `HasVisibleDialog`). Run 4 (`w258-run4`, port 9497): a Basic-auth `Sign in` dialog (from a
+  `fetch` of a 401 fixture) shown and a JavaScript `alert` queued behind it (claimed, not on screen); `hide`, `show`
+  and bringing the app frontmost logged four `placement changed` lines and no replay, detach or attach; the `Sign in`
+  window stayed on screen. The hidden-window case on another tab still passes (`held while the window was hidden,
+  shown now`, `attached`). A comment records that the replay runs whatever `OnVisibilityChanged` does.
+- **Includes** (low): the duplicate `content/public/browser/visibility.h` removed, the `web_modal` include in order.
+- **Icon caches** (low): the menu observes `ThemeService` and the native-UI `NativeTheme`, and drops its rasterized
+  icons (and reports `ExtensionActionsChanged`) on a theme or color-scheme change. The PNG cache moved from one
+  process-wide map to each window's handle, pruned of actions no longer listed and cleared when the window closes.
+  Repeated `actions` still answer the same PNG objects (run 4).
+- Regression (`w258-reg2`, port 9498): W5c Step 3 (`visible`, `hidden`, `visible`), W6 (`openPopup` `"ok"`, `popup
+  loaded`, second window `normal=2 arkt=2 views=0`). 0 `FATAL`/`Check failed` in runs 4 and `reg2`.
+
 ### Patch budget
 
 Unchanged: 7 patch files, 17 upstream files, 0 hot-file hunks.
