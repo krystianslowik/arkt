@@ -454,7 +454,8 @@ void ArktBrowserWindow::UnbindHost() {
   }
   [notification_tokens_ removeAllObjects];
   if (space_token_) {
-    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:space_token_];
+    [NSWorkspace.sharedWorkspace.notificationCenter
+        removeObserver:space_token_];
     space_token_ = nil;
   }
   if (mounted_) {

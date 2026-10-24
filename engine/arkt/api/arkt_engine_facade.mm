@@ -1215,8 +1215,10 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   std::vector<base::OnceClosure> queued;
   queued.swap(_queued);
   if (!inserted || !_tab) {
-    LOG(WARNING) << "ARKT: facade deferred insert dropped, " << queued.size()
-                 << " queued call(s) dropped";
+    LOG(WARNING) << "ARKT: facade "
+                 << (inserted ? "tab closed at its insert"
+                              : "deferred insert dropped")
+                 << ", " << queued.size() << " queued call(s) dropped";
     _closing = NO;
     return;
   }

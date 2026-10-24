@@ -216,8 +216,9 @@ void ArktModalDialogHost::NotifyPositionRequiresUpdate() {
 }
 
 bool ArktModalDialogHost::HasUnshownDialog() const {
-  return std::any_of(dialogs_.begin(), dialogs_.end(),
-                     [](views::Widget* widget) { return !widget->IsVisible(); });
+  return std::any_of(
+      dialogs_.begin(), dialogs_.end(),
+      [](views::Widget* widget) { return !widget->IsVisible(); });
 }
 
 void ArktModalDialogHost::OnWidgetVisibilityChanged(views::Widget* widget,

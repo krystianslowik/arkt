@@ -218,6 +218,10 @@ with the window frontmost: `"ok"`, `TriggerPopup ... by_user=0`, `popup loaded`;
 Extensions button through AX twice: `toggle menu (showing=0)`, `menu shown 2 items`, `toggle menu (showing=1)`, `menu
 closed`. 0 `FATAL`/`Check failed`.
 
+Placeholder alert with the claim filter (final build, `w258-ph2`, port 9496, a fixture page, `alert` over CDP): `tab-modal
+dialog claimed window 95644 host window 95636`, `attached ... frame 766,933 448x144 host view 390,197 1200x880`; the
+Quartz window list shows the dialog `127.0.0.1:8491 says` at the card's top, centred. 0 `FATAL`/`Check failed`.
+
 ### Patch budget
 
 Unchanged: 7 patch files, 17 upstream files, 0 hot-file hunks.
