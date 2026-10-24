@@ -10,6 +10,8 @@ let package = Package(
     .library(name: "Motion", targets: ["Motion"]),
     .library(name: "ShellUI", targets: ["ShellUI"]),
     .library(name: "CoreBridge", targets: ["CoreBridge"]),
+    // The engine app's composition root only (ChromiumEngineKitIsolationTests).
+    .library(name: "ChromiumEngineKit", targets: ["ChromiumEngineKit"]),
   ],
   dependencies: [
     // Local, relative: ShellKit lives in app/ArktShell/ShellKit, ArktCore in app/ArktCore. Only pure products are
@@ -24,6 +26,8 @@ let package = Package(
     // The engine facade header (engine/arkt/api/arkt_engine.h, a byte-identical copy): protocols and enums only, no
     // code. Only ChromiumEngineKit and its tests may depend on it (EngineABIIsolationTests).
     .target(name: "ArktEngineABI"),
+    // ChromiumEngine (EngineClient, EngineExtensions) over the facade, and the typed ArktShellEmbedder (W3-6).
+    .target(name: "ChromiumEngineKit", dependencies: ["EngineAPI", "ArktEngineABI"]),
     .target(name: "ShellUI", dependencies: ["EngineAPI", "Motion"]),
     .target(
       name: "CoreBridge",
@@ -39,6 +43,11 @@ let package = Package(
     .testTarget(name: "ShellUITests", dependencies: ["ShellUI", "EngineAPITestSupport"]),
     .testTarget(name: "IsolationTests"),
     .testTarget(name: "ArktEngineABITests", dependencies: ["ArktEngineABI"]),
+    // The shared contract against a scripted facade, no Chromium.
+    .testTarget(
+      name: "ChromiumEngineKitTests",
+      dependencies: ["ChromiumEngineKit", "ArktEngineABI", "EngineAPI", "EngineAPITestSupport"]
+    ),
     .testTarget(name: "FakeEngineKitTests", dependencies: ["FakeEngineKit"]),
     .testTarget(
       name: "CoreBridgeTests",

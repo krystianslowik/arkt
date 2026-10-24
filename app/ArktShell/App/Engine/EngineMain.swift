@@ -1,4 +1,5 @@
 #if ARKT_CHROMIUM_ENGINE
+import ChromiumEngineKit
 import Darwin
 import Foundation
 
@@ -7,7 +8,8 @@ import Foundation
 // own stub does (chrome/app/chrome_exe_main_mac.cc). Chromium creates NSApp
 // itself ([BrowserCrApplication sharedApplication]) and owns the run loop, so
 // nothing in this process may touch NSApplication before the call. The Swift UI
-// starts later, from the engine's in-process hook (ArktShellEmbedder).
+// starts later, from the engine's in-process hook, which finds ChromiumEngineKit's
+// ArktShellEmbedder by name; the embedder then calls the delegate installed here.
 
 private typealias ChromeMainFunction =
     @convention(c) (Int32, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Int32
@@ -37,10 +39,11 @@ private func engineFrameworkPath() -> String {
     return "\(frameworks)/\(name).framework/Versions/\(version)/\(name)"
 }
 
+@MainActor
 func engineMain() -> Never {
-    // The hook finds the embedder by name only (NSClassFromString); this
-    // reference keeps dead stripping from dropping the class.
-    _ = ArktShellEmbedder.self
+    // The hook finds the embedder by name only (NSClassFromString). install
+    // references the class, which keeps dead stripping from dropping it.
+    ChromiumEmbedding.install(StandInShell.shared)
 
     let path = engineFrameworkPath()
     FileHandle.standardError.write(Data("ARKT engine shell: dlopen \(path)\n".utf8))

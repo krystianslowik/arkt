@@ -125,6 +125,9 @@ targets:
         product: EngineAPI
       - package: ShellKit
         product: CoreBridge
+      # ChromiumEngine and the typed ArktShellEmbedder; only App/Engine (Engine configuration) imports it.
+      - package: ShellKit
+        product: ChromiumEngineKit
       - package: ArktCore
         product: Persistence      # composition root only: the one GRDB link
       - package: ArktCore
