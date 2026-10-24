@@ -84,6 +84,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var nodeByTab: [TabID: NodeID] = [:]
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
   private var sidebarObservation: SidebarObservation?
+  /// New Window (Cmd-N, `IDC_NEW_WINDOW`): set by the window set that owns this window. Nil: New Window is disabled.
+  public var onNewWindow: (@MainActor () -> Void)?
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
   /// does nothing.
   public var onArchive: (@MainActor ([NodeID]) -> Void)?

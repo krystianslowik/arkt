@@ -71,6 +71,24 @@ final class EngineHostingTests: XCTestCase {
     XCTAssertTrue(harness.engine.executedCommands.isEmpty, "claimed commands never reach the engine")
   }
 
+  /// Close Window (`IDC_CLOSE_WINDOW`, from a Chromium path) takes the close button's way: the engine closes the
+  /// tabs, then the window.
+  func testTheHostClaimsCloseWindowAndAsksTheEngine() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    window.orderFront(nil)
+    defer { window.orderOut(nil) }
+    let host = harness.controller.engineHost
+    XCTAssertEqual(host.claim(.closeWindow), CommandClaim(isEnabled: true))
+
+    XCTAssertTrue(host.perform(.closeWindow, disposition: .currentTab))
+
+    XCTAssertFalse(window.isVisible)
+    XCTAssertTrue(harness.engine.windowIDs.isEmpty)
+    XCTAssertTrue(harness.engine.executedCommands.isEmpty)
+  }
+
   func testCloseTabIsDisabledWithoutACurrentTab() throws {
     var sidebar = SidebarModel.Sidebar()
     _ = sidebar.addSpace(title: "Empty")
