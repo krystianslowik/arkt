@@ -38,10 +38,14 @@ final class ToolbarTests: ArktUITestCase {
     let sidebarURLBar = Shell.element(app, AXID.Sidebar.urlBar)
     XCTAssertTrue(waitFor(sidebarURLBar))
     sidebarURLBar.rightClick()
-    // The View menu in the menu bar has an item with the same title; the context menu is a direct child of the app.
-    let item = app.children(matching: .menu).menuItems["Show Toolbar"]
-    XCTAssertTrue(waitFor(item))
-    item.click()
+    // The View menu in the menu bar has an item with the same title; only the context menu's item can be hit.
+    let items = app.menuItems.matching(identifier: "Show Toolbar")
+    var item: XCUIElement?
+    XCTAssertTrue(Waits.until("a hittable Show Toolbar menu item") {
+      item = items.allElementsBoundByIndex.first { $0.exists && $0.isHittable }
+      return item != nil
+    })
+    item?.click()
 
     XCTAssertTrue(waitFor(toolbar))
   }
