@@ -3,12 +3,15 @@
 #import <AppKit/AppKit.h>
 
 #include <algorithm>
+#include <cmath>
+#include <set>
 #include <utility>
 
 #include "arkt/browser/arkt_browser_window.h"
 #include "base/containers/flat_set.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -18,6 +21,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/range/range.h"
+#include "ui/views/widget/widget_delegate.h"
 #include "url/origin.h"
 
 namespace arkt {
@@ -102,13 +106,38 @@ bool ArktExclusiveAccessContext::CanUserExitFullscreen() const {
 
 // ArktModalDialogHost ---------------------------------------------------------
 
+namespace {
+
+// Dialog widgets some ArktModalDialogHost tracks, so a dialog of one tab is
+// never claimed by another tab's host.
+std::set<views::Widget*>& ClaimedDialogs() {
+  static base::NoDestructor<std::set<views::Widget*>> claimed;
+  return *claimed;
+}
+
+std::string FrameString(NSRect frame) {
+  return base::StringPrintf("%d,%d %dx%d", static_cast<int>(NSMinX(frame)),
+                            static_cast<int>(NSMinY(frame)),
+                            static_cast<int>(NSWidth(frame)),
+                            static_cast<int>(NSHeight(frame)));
+}
+
+}  // namespace
+
 ArktModalDialogHost::ArktModalDialogHost(NSView* (^view)(void))
     : view_([view copy]) {}
 
 ArktModalDialogHost::~ArktModalDialogHost() {
+  // Chromium closes the dialogs that observe this host synchronously.
   for (auto& observer : observers_) {
     observer.OnHostDestroying();
   }
+  for (views::Widget* widget : dialogs_) {
+    Detach(widget);
+    widget->RemoveObserver(this);
+    ClaimedDialogs().erase(widget);
+  }
+  dialogs_.clear();
 }
 
 gfx::NativeView ArktModalDialogHost::GetHostView() const {
@@ -131,6 +160,10 @@ gfx::Size ArktModalDialogHost::GetMaximumDialogSize() {
 void ArktModalDialogHost::AddObserver(
     web_modal::ModalDialogHostObserver* observer) {
   observers_.AddObserver(observer);
+  // A tab-modal dialog registers here right after its widget is created
+  // (CreateWebModalDialogViews) and again when its manager gets this host
+  // (ShowDialogWithManager), both before the widget is shown.
+  ClaimNewDialogs();
 }
 
 void ArktModalDialogHost::RemoveObserver(
@@ -142,6 +175,109 @@ void ArktModalDialogHost::NotifyPositionRequiresUpdate() {
   for (auto& observer : observers_) {
     observer.OnPositionRequiresUpdate();
   }
+  for (views::Widget* widget : dialogs_) {
+    if (widget->IsVisible()) {
+      Attach(widget);
+    }
+  }
+}
+
+void ArktModalDialogHost::OnWidgetVisibilityChanged(views::Widget* widget,
+                                                    bool visible) {
+  if (visible) {
+    Attach(widget);
+  } else {
+    Detach(widget);
+  }
+}
+
+void ArktModalDialogHost::OnWidgetBoundsChanged(views::Widget* widget,
+                                                const gfx::Rect& new_bounds) {
+  // Chromium only resizes the dialog (no host widget); keep it top-centred.
+  if (widget->IsVisible()) {
+    Attach(widget);
+  }
+}
+
+void ArktModalDialogHost::OnWidgetDestroying(views::Widget* widget) {
+  Detach(widget);
+  widget->RemoveObserver(this);
+  ClaimedDialogs().erase(widget);
+  std::erase(dialogs_, widget);
+}
+
+void ArktModalDialogHost::ClaimNewDialogs() {
+  NSView* view = view_();
+  if (!view.window) {
+    return;
+  }
+  for (NSWindow* window in NSApp.windows) {
+    views::Widget* widget =
+        views::Widget::GetWidgetForNativeWindow(gfx::NativeWindow(window));
+    // A tab-modal dialog of an Arkt tab: child-modal, no parent widget (a
+    // Views browser window's dialogs have one), not shown yet.
+    if (!widget || widget->parent() || !widget->widget_delegate() ||
+        widget->widget_delegate()->GetModalType() !=
+            ui::mojom::ModalType::kChild ||
+        window.isVisible || ClaimedDialogs().contains(widget)) {
+      continue;
+    }
+    ClaimedDialogs().insert(widget);
+    dialogs_.push_back(widget);
+    widget->AddObserver(this);
+    LOG(WARNING) << "ARKT: tab-modal dialog claimed window "
+                 << window.windowNumber << " host window "
+                 << view.window.windowNumber;
+  }
+}
+
+void ArktModalDialogHost::Attach(views::Widget* widget) {
+  NSWindow* dialog = widget->GetNativeWindow().GetNativeNSWindow();
+  NSView* view = view_();
+  NSWindow* parent = view.window;
+  // Adding a child to a window that is hidden or on another Space would
+  // switch Spaces (as NativeWidgetNSWindowBridge::OrderChildren).
+  if (!dialog || !parent || !parent.visible || !parent.onActiveSpace) {
+    return;
+  }
+  NSRect host = [parent convertRectToScreen:[view convertRect:view.bounds
+                                                       toView:nil]];
+  NSRect frame = dialog.frame;
+  // Top centre on the view; inside it horizontally when it fits.
+  CGFloat x = NSMidX(host) - NSWidth(frame) / 2;
+  if (NSWidth(frame) <= NSWidth(host)) {
+    x = std::clamp(x, NSMinX(host), NSMaxX(host) - NSWidth(frame));
+  }
+  NSPoint origin = NSMakePoint(std::round(x),
+                               std::round(NSMaxY(host) - NSHeight(frame)));
+  bool moved = !NSEqualPoints(origin, frame.origin);
+  if (moved) {
+    [dialog setFrameOrigin:origin];
+  }
+  bool attached = dialog.parentWindow == parent;
+  if (!attached) {
+    if (dialog.parentWindow) {
+      [dialog.parentWindow removeChildWindow:dialog];
+    }
+    [parent addChildWindow:dialog ordered:NSWindowAbove];
+  }
+  if (moved || !attached) {
+    LOG(WARNING) << "ARKT: tab-modal dialog attached window "
+                 << dialog.windowNumber << " parent " << parent.windowNumber
+                 << " frame " << FrameString(dialog.frame) << " host view "
+                 << FrameString(host);
+  }
+}
+
+void ArktModalDialogHost::Detach(views::Widget* widget) {
+  NSWindow* dialog = widget->GetNativeWindow().GetNativeNSWindow();
+  NSWindow* parent = dialog.parentWindow;
+  if (!parent) {
+    return;
+  }
+  [parent removeChildWindow:dialog];
+  LOG(WARNING) << "ARKT: tab-modal dialog detached window "
+               << dialog.windowNumber << " parent " << parent.windowNumber;
 }
 
 // ArktStubLocationBar ---------------------------------------------------------

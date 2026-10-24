@@ -38,6 +38,8 @@ void ArktExtensionsContainer::HideActivePopup() {
 
 void ArktExtensionsContainer::CloseExtensionsMenuIfOpen() {
   if (menu_) {
+    LOG(WARNING) << "ARKT: extensions container close menu (showing="
+                 << menu_->IsShowing() << ")";
     menu_->CloseIfOpen();
   }
 }
@@ -65,6 +67,8 @@ void ArktExtensionsContainer::ToggleExtensionsMenu() {
   if (!menu_) {
     return;
   }
+  LOG(WARNING) << "ARKT: extensions container toggle menu (showing="
+               << menu_->IsShowing() << ")";
   if (menu_->IsShowing()) {
     menu_->CloseIfOpen();
     return;

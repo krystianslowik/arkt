@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
@@ -15,6 +16,8 @@
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_observer.h"
 
 class BrowserWindowInterface;
 
@@ -60,9 +63,18 @@ class ArktExclusiveAccessContext : public ExclusiveAccessContext {
   const raw_ptr<ArktBrowserWindow> window_;
 };
 
-// Tab-modal dialogs are positioned against the card: top centre, at most the
-// card's size.
-class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost {
+// Tab-modal dialogs are positioned against the card or, in host mode, the
+// tab's container: top centre, at most its size.
+//
+// The host view is a plain NSView, not inside a views::Widget, so Chromium
+// neither parents nor positions the dialog widget (GetModalDialogBounds needs
+// a host widget). The host does both: it claims the dialog widget when the
+// dialog's managers register as observers, and while the dialog is visible
+// keeps it a child window of the host view's window, top-centred on the view.
+// Hidden dialogs (another tab active) are detached, as Chromium's bridge does
+// for its own child windows.
+class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost,
+                            public views::WidgetObserver {
  public:
   // `view` is asked for the host view on every call: the tab's view, or the
   // host's card as fallback, can change while a dialog is up (week-3 plan,
@@ -80,9 +92,24 @@ class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost {
   void RemoveObserver(web_modal::ModalDialogHostObserver* observer) override;
   void NotifyPositionRequiresUpdate() override;
 
+  // views::WidgetObserver:
+  void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
+  void OnWidgetBoundsChanged(views::Widget* widget,
+                             const gfx::Rect& new_bounds) override;
+  void OnWidgetDestroying(views::Widget* widget) override;
+
  private:
+  // Starts tracking tab-modal dialog widgets that no host has claimed yet.
+  void ClaimNewDialogs();
+  // Makes `widget` a child window of the host view's window, top-centred on
+  // the view. A no-op while the view is not in a visible window.
+  void Attach(views::Widget* widget);
+  void Detach(views::Widget* widget);
+
   NSView* (^view_)(void);
   base::ObserverList<web_modal::ModalDialogHostObserver> observers_;
+  // Claimed dialog widgets, observed until they are destroyed.
+  std::vector<raw_ptr<views::Widget>> dialogs_;
 };
 
 // Arkt has no omnibox. Non-null so the callers that dereference

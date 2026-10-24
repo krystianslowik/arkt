@@ -31,10 +31,10 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | 0003 | Arkt keychain item name (W8) | exists | 1 (`keychain_password_mac.mm`) | 0 |
 | 0004 | `BrowserWindow` factory hook for Arkt (W5a) | exists | 2 (`browser_window_factory.cc`, `frame/BUILD.gn`) | 0 |
 | 0005 | Tolerate a non-`BrowserView` window in tab features (W5b) | exists | 1 (`sad_tab_controller.cc`) | 0 |
-| 0006 | Tolerate a non-`BrowserView` window in dialogs (W5b, W7) | exists | 3 (`bubble_anchor_util_views.cc`, `exclusive_access_permission_prompt.cc`, `extension_install_ui_desktop.cc`) | 0 |
+| 0006 | Tolerate a non-`BrowserView` window in dialogs (W5b, W7; RTL anchor #250) | exists | 3 (`bubble_anchor_util_views.cc`, `exclusive_access_permission_prompt.cc`, `extension_install_ui_desktop.cc`) | 0 |
 | 0007 | Extension dialogs as native sheets on Arkt windows (#244) | exists | 4 (`extension_install_dialog_view.cc`, `extension_dialog_utils_views.cc`, their two `BUILD.gn`) | 0 |
 
-Current totals (after #244): 7 patch files, 17 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 17 files changed, 74 insertions, 5 deletions). Seam patches (W5b, W7, #244): 3 patch files, 8 upstream files, 0 hot-file hunks, no header. Week 2 ended at 6 patch files and 13 upstream files.
+Current totals (after #250): 7 patch files, 17 upstream files, 0 hot-file hunks (`git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 17 files changed, 76 insertions, 5 deletions; #244 ended at 74 insertions). Seam patches (W5b, W7, #244): 3 patch files, 8 upstream files, 0 hot-file hunks, no header. Week 2 ended at 6 patch files and 13 upstream files.
 
 ## W0
 
@@ -1777,4 +1777,80 @@ gesture: `tab list rows 3`), 13 (AX Edit > Find > Find...: `stub FindBar::Show`)
   (the hint is still skipped without a `BrowserView`).
 - The request (justification) and parent-permission install prompts still use Chrome's Views dialog.
 - Arc parity of the Return key (PARITY(NEEDS-RUNTIME-CHECK) above); the Web Store "Switch to Chrome" banner is #9.
+
+## #250: tab-modal attachment and dialog leftovers
+
+Date 2026-10-24. Branch `engine/250-dialog-leftovers`. Patch 0006 amended (RTL anchor); `.patches` unchanged (7 files),
+0007 re-exported unchanged; `$CR` branch `arkt` at `8910b992e4` (0006 `e254f81930`). Build: `nice -n 10 autoninja -C
+out/Spike -j 4 chrome`, `The build has finished successfully.`, 0 `FAILED:`; `gn check out/Spike '//arkt/*'`: `Header
+dependency check OK` (new dependency `//ui/views`). `/` had 8.0 GiB free and swap 8.7 GB used of 10 GB before the build
+and the runs. Every run: fresh profile `w250-*`, CDP ports 9481, 9483, 9484, `--use-mock-keychain`, one GUI run at a
+time, stopped by its PID; fixture pages from a loopback server.
+
+### What changed
+
+- **Tab-modal attachment** (`ArktModalDialogHost`, overlay only). The dialog host view is a plain `NSView`, not inside
+  a `views::Widget`, so Chromium neither parents the dialog widget nor positions it (`GetModalDialogBounds` returns an
+  empty rect and `UpdateModalDialogPosition` only resizes). The host now claims the dialog widget when the dialog
+  registers as its observer (`CreateWebModalDialogViews`, then `ShowDialogWithManager`): a child-modal widget with no
+  parent widget that is not shown yet and that no other host has claimed. While the dialog is visible the host keeps
+  it a child window of the host view's window (`addChildWindow:ordered:`), top-centred on the view: the tab's stable
+  container in host mode, the card on the placeholder host. It follows size changes of the dialog, window resizes
+  and container frame changes (`NotifyPositionRequiresUpdate`); a window move needs nothing (child windows follow).
+  A hidden dialog (another tab active) is removed from the parent's child windows, as Chromium's bridge does for its
+  own children, and attached again when shown. No added animation: Views fades the dialog in on first show and does
+  not re-animate on tab switches.
+- **Menu rules.** As in Chrome, a tab-modal dialog blocks its tab (`TabStripModel::SetTabBlocked`), and the command
+  controller disables the tab's commands (Find). The "key window is modal" rule (`NSApp.modalWindow` or an attached
+  sheet) covers app-modal dialogs and window sheets (file chooser, extension install and uninstall sheets); Chrome's
+  `keyWindowIsModal` does the same. Comment updated.
+- **Patch 0006 RTL anchor.** `GetPageInfoAnchorRect` without a `BrowserView` anchors at the window's top-right corner
+  minus `kNoToolbarLeftOffset` in RTL UI (`base::i18n::IsRTL()`), top-left plus the offset otherwise, as
+  `GetMirroredXInView` does for a `BrowserView`. Two more lines in 0006 (`base/i18n/rtl.h`).
+- **Extensions container callers.** The placeholder's Extensions button now calls
+  `ExtensionsContainer::ToggleExtensionsMenu` (as Chrome's Extensions toolbar button does) instead of showing the menu
+  directly. The action delegate's `CloseExtensionsMenuIfOpen` (run by `ExtensionActionViewModel::CloseMenuTask` after
+  every user action) goes through the window's `ExtensionsContainer::CloseExtensionsMenuIfOpen` when the menu is that
+  container's menu, as Chrome's toolbar action views do; the week-1 controller's menu, which has no container, still
+  closes itself. Both container methods log.
+- **Pinned-by-default hint: intentional gap.** Chrome shows it as a feature-promo bubble on the Views toolbar
+  (`ExtensionsToolbarDesktop::ShowPinnedByDefaultIPH`); Arkt windows have no toolbar, and patch 0006 keeps skipping it.
+  Whether ShellUI shows its own hint is in #260.
+- **Pinned, grouped and split tab events: not added.** They need new event kinds in the facade header, which stays
+  frozen this week; nothing consumes them yet (#260).
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `alert` on a placeholder window (`w250-p1`, window 900x700 at 40,60) | `tab-modal dialog claimed window 95472 host window 95464`, `attached window 95472 parent 95464 frame 356,955 448x144 host view 230,419 700x680`: horizontally centred on the card (both centres at x 580), top edge on the card's top edge. AX: the dialog window at 356,70, the card's top at window y 70; title `127.0.0.1:9482 says`, the message, `OK` |
+| Find while the alert is up | AX (frontmost): Edit > Find > Find... disabled, File > New Tab enabled; after the alert: Find enabled |
+| Tab switch | `chrome.tabs.create({active:true})`: the dialog window is gone from the window list; back to the tab: `attached ... parent 95464` at the same frame, AX position unchanged |
+| Window resize with the dialog up | `chrome.windows.update` to 100,80 1100x720: `attached ... frame 516,935 448x144 host view 290,379 900x700`, centred again (x 740), AX 516,90 |
+| AX dismissal | AXPress `OK`: `tab-modal dialog detached window 95484 parent 95464`, the page runs again |
+| Embedder window, tab container (`--arkt-facade-selftest --arkt-engine-test-api`, `w250-host2`) | `confirm`: `attached window 95533 parent 95529 frame 346,606 448x144 host view 120,150 900x600`: on the self-test's tab container (below its 32 pt title bar), centred |
+| `answerDialog` through the test API | from another tab, `arkt-selftest answer <tab> accept`: `facade answerDialog accept=yes answered=yes`, `tab-modal dialog detached` |
+| Parent window closed with a dialog up | `chrome.windows.remove`: `windowClosed`, `native window destroyed`, no window left, process alive |
+| Key window modal: sheet | dialog-probe `uninstallSelf({showConfirmDialog:true})`: `dialog sheet shown ExtensionUninstallDialog`; AX: File > New Tab and Find disabled; AXPress `Cancel`: `uninstall canceled by user`, both enabled again |
+| Key window modal: app-modal | beforeunload on a tab closed by `chrome.tabs.remove`: "Leave site?" (`AXDialog`, Cancel, Leave) is app-modal by Chromium's design (`TabModalDialogManager::RunBeforeUnloadDialog`) and not attached to the tab; New Tab and Find disabled while it is up; AXPress `Cancel` keeps the tab |
+| Container toggle | AXPress `Extensions`: `extensions container toggle menu (showing=0)`, `extensions menu shown 3 items`; a second AXPress while the menu is open: `toggle menu (showing=1)`, `extensions menu closed` |
+| Container close from an action | Extensions menu, Down, Return: `TriggerPopup ... by_user=1`, `extensions menu closed`, `extensions container close menu (showing=0)`, `popup loaded` |
+| RTL anchor | Compiled, not exercised: its remaining consumer is the permission prompt, and a notification or geolocation request on an Arkt window shows no prompt at all (the request stays pending, no window appears). Both are in #260 |
+| Stability | 0 `FATAL`/`Check failed`/`Received signal` in every run |
+
+AX notes: the JavaScript dialog window reports subrole `AXUnknown` (role `AXWindow`, title `127.0.0.1:9482 says`), the
+app-modal beforeunload dialog `AXDialog`. Window-only screenshots kept locally under the profiles' `shots/`.
+
+Regression rows (`w250-reg`, port 9484, one launch, `--arkt-trace-visibility`, `action-probe`, `tabs-probe`): W5b 1
+(census `normal=1 arkt=1 views=0`), 2 (navigate to the fixture's `b.html`, `visible`), 3 (`probe.create()`: `tab list
+rows 2`, `b.html` still `visible`), 5 (`probe.window()`: `normal=2 arkt=2 views=0`), 6 (`tab event removed`), 7 (all
+windows closed: census 0/0/0, process alive, gone after `kill`), 8 (`window.open` with a gesture: `tab list rows 3`),
+13 (AX Edit > Find > Find...: `stub FindBar::Show`); W5c Step 3 (`tabs.update` swaps `visibilityState` both ways); W6
+(`openPopup` `ok`, popup loaded, `popup hide (active tab changed)`, second window). 0 `FATAL`/`Check failed`.
+
+### Left open (#260)
+
+- Permission prompts show nothing on Arkt windows; the RTL anchor runtime check waits for them.
+- Pinned-by-default hint in ShellUI (decision); pinned, group and split tab events.
+- beforeunload as a sheet would need a patch (Chromium keeps it app-modal on purpose).
 
