@@ -272,6 +272,16 @@ public final class SidebarContainerView: NSView {
   public let archiveButton = NSButton(frame: .zero)
   public let newTabButton = NSButton(frame: .zero)
   public let spaceDots = SpaceDotsView(frame: .zero)
+  /// The Extensions control, left of New Tab; nil for an engine without extensions (week-3 Decision 10).
+  public var extensionsButton: ExtensionsButton? {
+    didSet {
+      guard extensionsButton !== oldValue else { return }
+      oldValue?.removeFromSuperview()
+      if let extensionsButton { bottomBar.addSubview(extensionsButton) }
+      applyButtonImages()
+      needsLayout = true
+    }
+  }
   public let topBarHeight: CGFloat
 
   public private(set) var currentPage: SpacePageView?
@@ -353,6 +363,8 @@ public final class SidebarContainerView: NSView {
       button.image = SymbolImageCache.shared.symbol(symbol, box: SidebarMetrics.bottomBarIconSize, color: color,
                                                     scale: shellBackingScale)
     }
+    extensionsButton?.image = SymbolImageCache.shared.symbol(
+      ExtensionsButton.symbolName, box: SidebarMetrics.bottomBarIconSize, color: color, scale: shellBackingScale)
   }
 
   public override func viewDidChangeBackingProperties() {
@@ -381,8 +393,13 @@ public final class SidebarContainerView: NSView {
     let buttonY = ((bottomHeight - buttonSize) / 2).rounded()
     archiveButton.frame = NSRect(x: padding, y: buttonY, width: buttonSize, height: buttonSize)
     newTabButton.frame = NSRect(x: width - padding - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
+    var trailing = newTabButton.frame.minX
+    if let extensionsButton {
+      extensionsButton.frame = NSRect(x: trailing - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
+      trailing = extensionsButton.frame.minX
+    }
     let dotsX = archiveButton.frame.maxX
-    spaceDots.frame = NSRect(x: dotsX, y: 0, width: max(0, newTabButton.frame.minX - dotsX), height: bottomHeight)
+    spaceDots.frame = NSRect(x: dotsX, y: 0, width: max(0, trailing - dotsX), height: bottomHeight)
   }
 
   /// Trackpad swipes starting over the Favorites grid, bottom bar, or other sidebar chrome outside the outline page

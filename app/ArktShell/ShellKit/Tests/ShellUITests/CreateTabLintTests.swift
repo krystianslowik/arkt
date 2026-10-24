@@ -14,10 +14,6 @@ struct CreateTabLintTests {
   /// parentheses (`createTab(url: URL(string: s))`).
   static let windowlessCall = #"createTab\(\s*url:(?:[^()]|\([^()]*\))*\)"#
 
-  /// Call sites W3-7 moves to `createTab(url:in:)` (`ShellWindowController.openEngineTab`). Any other call fails
-  /// now; these are a known issue until W3-7 lands, and the test fails once they are gone so the list is emptied.
-  static let knownUntilW37: Set<String> = ["Window/ShellWindowController.swift"]
-
   static func windowlessCalls(in source: String) -> [String] {
     let regex = try? NSRegularExpression(pattern: windowlessCall)
     let range = NSRange(source.startIndex..., in: source)
@@ -54,15 +50,8 @@ struct CreateTabLintTests {
     #expect(FileManager.default.fileExists(atPath: Self.shellUI.appending(path: "Window").path))
   }
 
-  @Test func noNewWindowlessCreateTabCalls() throws {
-    let unexpected = try Self.offendingFiles().filter { !Self.knownUntilW37.contains($0.key) }
-    #expect(unexpected.isEmpty, "use createTab(url:in:): \(unexpected)")
-  }
-
-  @Test func knownCallSitesMoveInW37() throws {
-    let known = try Self.offendingFiles().filter { Self.knownUntilW37.contains($0.key) }
-    withKnownIssue("W3-7 moves ShellWindowController.openEngineTab to createTab(url:in:)") {
-      #expect(known.isEmpty, "window-less createTab(url:) calls: \(known)")
-    }
+  @Test func noWindowlessCreateTabCalls() throws {
+    let offending = try Self.offendingFiles()
+    #expect(offending.isEmpty, "use createTab(url:in:): \(offending)")
   }
 }

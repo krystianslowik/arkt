@@ -35,6 +35,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private var commandBarPrewarmed = false
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7).
   public internal(set) var currentTab: TabID?
+  /// What the engine sees of this window: the window, the card, the command and close seams.
+  public let engineHost: ShellEngineHost
+  /// The engine window this shell window hosts: created on the first tab (week-3 decision 4); nil again once the
+  /// engine reports it closed.
+  public internal(set) var engineWindow: EngineWindowID?
+  /// Events of the engine window itself.
+  var windowObservation: EngineObservation?
+  /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
+  public internal(set) var extensionsButton: ExtensionsButton?
   /// The engine reported a favicon for a sidebar node (nil: cleared); the app persists it. Called for favicons
   /// caught up from the snapshot when a tab is created and for later `.faviconChanged` events.
   public var onFaviconChanged: (@MainActor (NodeID, Data?) -> Void)?
@@ -86,7 +95,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.commandBar = CommandBarController(parent: window)
     self.toasts = ToastPresenter()
     self.toolbarSetting = toolbarSetting
+    self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
+    engineHost.controller = self
+    window.commandHost = engineHost
     let toastView = ToastView(frame: .zero)
     toastView.presenter = toasts
     root.card.toastView = toastView
@@ -117,6 +129,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
     wireAddressBars()
     wireSplit()
+    wireExtensions()
     observation = engine.observe { [weak self] event in self?.handle(event) }
     // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
@@ -446,10 +459,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The engine tab of `node`, created on first use. Every engine tab the window creates comes from here, so the
   /// sidebar's loaded state (Favorite X, #82) stays exact: created pages are marked loaded, and `.tabClosed` calls
   /// `deactivate(node:)` (#156 review).
+  ///
+  /// The first one creates this window's engine window (week-3 decision 4), and every tab lands in that window
+  /// (the `in:` form of `createTab`), so with two windows a tab never opens in the other one.
   func openEngineTab(for node: NodeID) -> TabID? {
     if let existing = tabsByNode[node] { return existing }
     guard case .tab(_, let url, _)? = sidebar.node(node) else { return nil }
-    let tab = engine.createTab(url: url)
+    let tab = engine.createTab(url: url, in: ensureEngineWindow())
     tabsByNode[node] = tab
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)
@@ -539,6 +555,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     if let scale = window?.backingScaleFactor { SymbolImageCache.shared.prewarm(scale: scale) }   // cache hits if warm
   }
   public func windowDidDeminiaturize(_ notification: Notification) { reapplyTrafficLights() }
+  /// The close button and Close Window (`performClose:`): with an engine window the engine decides
+  /// (`onCloseRequested`): it closes the tabs, unload prompts first, and the window closes on its `.windowClosed`; a
+  /// cancelled prompt keeps it open. Without one (no tab was ever shown) the window closes as before.
+  public func windowShouldClose(_ sender: NSWindow) -> Bool {
+    guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
+    request()
+    return false
+  }
+
   /// The shown tabs, every pane of a split, stop being visible (decision 10). The command bar's display link retains
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
