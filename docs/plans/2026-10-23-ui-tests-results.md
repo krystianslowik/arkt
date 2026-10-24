@@ -658,6 +658,8 @@ Base: `origin/main` at `12202c5`, branch `chore/173-ui-tests-u8`.
 ### Verification
 
 Source typecheck with `swiftc -typecheck` against XCTest (the machine was under load, load average above 20, so no
-local UI run). UI run results: see the PR's "UI tests (informative)" job.
+local UI run). CI "UI tests (informative)" on `d9a9145` (macos-26, scale 3, 10 m 55 s): pass, all 4 `ToolbarTests` passed
+beside the existing 14 tests. The context menu item "Show Toolbar" shares its title with the View menu item, so the
+test clicks the hittable match.
 
 Known issues used: #269 (outline rows).
