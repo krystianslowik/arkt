@@ -130,6 +130,8 @@ private final class FailingSpaceSidebar: SidebarSource {
   func addSpace(title: String, after space: SpaceID?) throws -> SpaceID { throw CocoaError(.featureUnsupported) }
   func renameSpace(_ id: SpaceID, to title: String) { base.renameSpace(id, to: title) }
   func moveSpace(_ id: SpaceID, to index: Int) { base.moveSpace(id, to: index) }
+  func setIcon(_ id: SpaceID, to icon: SpaceIconInfo?) { base.setIcon(id, to: icon) }
+  func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo) { base.setTheme(id, to: theme) }
   func updateTab(_ id: NodeID, url: URL?, title: String?) { base.updateTab(id, url: url, title: title) }
   func addToSplit(_ pane: SplitPaneSource, target: NodeID, at index: Int, orientation: SplitOrientation) throws
     -> (split: NodeID, pane: NodeID)

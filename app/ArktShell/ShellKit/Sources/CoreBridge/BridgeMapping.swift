@@ -53,7 +53,28 @@ enum BridgeMapping {
   }
 
   static func spaceInfo(_ space: SidebarModel.Space) -> SidebarSpaceInfo {
-    SidebarSpaceInfo(id: space.id, title: space.title, profile: space.profile, theme: theme(space.theme))
+    SidebarSpaceInfo(
+      id: space.id, title: space.title, profile: space.profile, theme: theme(space.theme), icon: icon(space.icon))
+  }
+
+  static func icon(_ icon: SidebarModel.SpaceIcon?) -> SpaceIconInfo? {
+    icon.map { SpaceIconInfo(symbol: $0.symbol) }
+  }
+
+  static func modelIcon(_ icon: SpaceIconInfo?) -> SidebarModel.SpaceIcon? {
+    icon.map { SidebarModel.SpaceIcon(symbol: $0.symbol) }
+  }
+
+  /// Colors are stored as components. `theme(_:)` reads them back as sRGB, and `noiseFactor` is not stored: a theme
+  /// with no texture and sRGB colors round-trips equal, which is what the header menu's checkmark compares.
+  static func modelTheme(_ theme: SpaceThemeInfo) -> SidebarModel.SpaceTheme {
+    SidebarModel.SpaceTheme(
+      baseColors: theme.baseColors.map(modelColor), overlayColors: theme.overlayColors.map(modelColor),
+      texture: theme.texture, isDark: theme.isDark)
+  }
+
+  static func modelColor(_ color: ShellUI.RGBA) -> SidebarModel.RGBA {
+    SidebarModel.RGBA(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
   }
 
   static func theme(_ theme: SidebarModel.SpaceTheme?) -> SpaceThemeInfo {

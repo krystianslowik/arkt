@@ -102,9 +102,38 @@ struct SpaceEditingContractTests {
     source.renameSpace(b, to: "B")
     source.moveSpace(b, to: 0)
     source.renameSpace(b, to: "B")                    // unchanged: no save
+    source.setIcon(b, to: SpaceIconInfo(symbol: "star"))
+    source.setTheme(b, to: Self.persistedTheme)
+    source.setIcon(b, to: SpaceIconInfo(symbol: "star"))   // unchanged: no save
+    source.setTheme(b, to: Self.persistedTheme)            // unchanged: no save
 
-    #expect(saved.count == 3)
+    #expect(saved.count == 5)
     #expect(saved.last?.spaceOrder == [b, a])
     #expect(saved.last?.spaces[b]?.title == "B")
+    #expect(saved.last?.spaces[b]?.icon == SidebarModel.SpaceIcon(symbol: "star"))
+    #expect(saved.last?.spaces[b]?.theme?.isDark == true)
+  }
+
+  /// sRGB, no texture: `BridgeMapping` reads that back as the same `SpaceThemeInfo` (the menu checkmark).
+  private static let persistedTheme = SpaceThemeInfo(
+    baseColors: [.srgb(hex: 0x3A4158), .srgb(hex: 0x1C2030)], isDark: true)
+
+  @Test(arguments: SourceKind.allCases)
+  func setIconAndThemeEmitSpaceChangedAndRoundTrip(kind: SourceKind) throws {
+    let fixture = try Fixture(kind)
+    let id = fixture.ids[1]
+    fixture.source.setIcon(id, to: SpaceIconInfo(symbol: "star"))
+    fixture.source.setTheme(id, to: Self.persistedTheme)
+    fixture.source.setIcon(id, to: SpaceIconInfo(symbol: "star"))
+    fixture.source.setTheme(id, to: Self.persistedTheme)
+    fixture.source.setIcon(SpaceID(), to: SpaceIconInfo(symbol: "bolt"))
+    fixture.source.setTheme(SpaceID(), to: Self.persistedTheme)
+    #expect(fixture.source.space(id)?.icon == SpaceIconInfo(symbol: "star"))
+    #expect(fixture.source.space(id)?.theme == Self.persistedTheme)
+    #expect(fixture.changes == [.spaceChanged(id), .spaceChanged(id)])
+
+    fixture.source.setIcon(id, to: nil)
+    #expect(fixture.source.space(id)?.icon == nil)
+    #expect(fixture.changes == [.spaceChanged(id), .spaceChanged(id), .spaceChanged(id)])
   }
 }

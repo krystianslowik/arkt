@@ -49,7 +49,7 @@ final class SpaceListChangeTests: XCTestCase {
     XCTAssertEqual(controller.view.spaceDots.titles, ["New", "Other"])
     XCTAssertEqual(changed, [[space, other]])
 
-    stub.setTheme(SpaceThemeInfo(baseColors: [], isDark: true), of: space)
+    stub.setTheme(space, to: SpaceThemeInfo(baseColors: [], isDark: true))
     XCTAssertEqual(controller.currentPage?.flavor, .dark)
     XCTAssertEqual(controller.view.flavor, .dark)
     XCTAssertEqual(changed.count, 2)

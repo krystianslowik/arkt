@@ -60,9 +60,16 @@ public final class StubSidebar: SidebarSource {
     hub.emit(.spaceChanged(id))
   }
 
-  /// Replaces a Space's theme. Emits `.spaceChanged`.
-  public func setTheme(_ theme: SpaceThemeInfo, of id: SpaceID) {
-    guard spaces[id] != nil else { return }
+  /// Sets a Space's icon. Emits `.spaceChanged` when it changed.
+  public func setIcon(_ id: SpaceID, to icon: SpaceIconInfo?) {
+    guard let current = spaces[id], current.icon != icon else { return }
+    spaces[id]?.icon = icon
+    hub.emit(.spaceChanged(id))
+  }
+
+  /// Replaces a Space's theme. Emits `.spaceChanged` when it changed.
+  public func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo) {
+    guard let current = spaces[id], current.theme != theme else { return }
     spaces[id]?.theme = theme
     hub.emit(.spaceChanged(id))
   }

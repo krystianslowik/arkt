@@ -46,14 +46,22 @@ public struct SpaceThemeInfo: Equatable, Sendable {
   }
 }
 
+/// A Space's dock icon (BH-034): an SF Symbol name such as "star". Nil draws the dot.
+public struct SpaceIconInfo: Equatable, Sendable {
+  public var symbol: String
+
+  public init(symbol: String) { self.symbol = symbol }
+}
+
 public struct SidebarSpaceInfo: Equatable, Sendable {
   public var id: SpaceID
   public var title: String
   public var profile: String
   public var theme: SpaceThemeInfo
+  public var icon: SpaceIconInfo?
 
-  public init(id: SpaceID, title: String, profile: String, theme: SpaceThemeInfo) {
-    self.id = id; self.title = title; self.profile = profile; self.theme = theme
+  public init(id: SpaceID, title: String, profile: String, theme: SpaceThemeInfo, icon: SpaceIconInfo? = nil) {
+    self.id = id; self.title = title; self.profile = profile; self.theme = theme; self.icon = icon
   }
 }
 
@@ -141,6 +149,11 @@ public protocol SidebarSource: AnyObject {
   /// Moves a Space so that it lands at `index`, measured before it is removed, clamped (BH-039). Emits `.spaceMoved`
   /// when the order changed; an unknown id is ignored.
   func moveSpace(_ id: SpaceID, to index: Int)
+  /// Sets a Space's icon (BH-034). Nil clears it. Emits `.spaceChanged` when it changed; an unknown id or the same
+  /// icon is ignored.
+  func setIcon(_ id: SpaceID, to icon: SpaceIconInfo?)
+  /// Sets a Space's theme (BH-034). Emits `.spaceChanged` when it changed; an unknown id or the same theme is ignored.
+  func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo)
   func updateTab(_ id: NodeID, url: URL?, title: String?)
 
   // Split writes (BH-115, BH-116, BH-120). Each applies as one step: observers get its changes once, and a throw
@@ -185,7 +198,7 @@ public enum SidebarChange: Hashable, Sendable {
   case spaceRemoved(SpaceID)
   /// A Space changed its place in `spaceOrder` relative to the others (not just shifted by an add or a removal).
   case spaceMoved(SpaceID)
-  /// A Space's title, profile or theme changed.
+  /// A Space's title, profile, theme or icon changed.
   case spaceChanged(SpaceID)
 }
 
