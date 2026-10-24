@@ -12,7 +12,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-2 | Facade header and its Swift module | DONE (#246) | see "W3-2" below |
 | W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | DONE | **GATE PASS** with recorded deviations (readiness queue for Chromium-created windows, quit-start seam, CDP keep-alive); see "W3-3" below |
 | W3-4 | Host mode for ShellUI windows | DONE | embedder hosts own Arkt windows, `createBrowserWithHost:`, request kinds from the call site, self-test embedder; all acceptance rows pass on `Chromium.app`; see "W3-4" below |
-| W3-5 | Tab facade | TODO | |
+| W3-5 | Tab facade | W3-5a DONE, W3-5b TODO | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state; see "W3-5a" below. W3-5b (history, duplicate, extension actions, test API, context menu re-measure) follows |
 | W3-6 | `ChromiumEngineKit` over the facade | TODO | |
 | W3-7 | The shell as engine host, composition root (Swift lane) | TODO | |
 | W3-8 | Main menu inventory and owner decision | TODO | |
@@ -35,6 +35,174 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-5a: Tab facade, correctness part
+
+Date 2026-10-24. Branch `engine/33-w3-5-tab-facade` off `main` at `39d0f5d`. Split per the plan's time-box: W3-5a
+(this section) takes the correctness items; W3-5b takes history and duplicate, extension actions for embedder windows,
+the test API and the page context menu re-measure. `$CR` branch `arkt` at `e4a2ca5cca` (0001-0007) before and after:
+no patch. Overlay only; the facade header, `app/` and `project.yml` are unchanged. `/` had 9.2 GiB free and swap 8.7 GB
+used of 10 GB before each build.
+
+### What landed
+
+- **Pending handles** (W3-3 review, must fix). A client `createTab` deferred inside a nested loop marks its handle
+  pending; `navigate`, `reload`, `goBack`, `goForward`, `goToHistoryOffset`, `activate` and `close` on a pending handle
+  queue behind the insert and run, in order, right after it. `close` on a pending handle answers `held` (`isClosing`
+  yes) and ends with `TabClosed(client)`. If the window is gone when the deferred insert runs, the handle gets a
+  terminal `TabClosed(windowClosing)` (ChromiumEngine announced it at `createTab`, Decision 4) and its queue is dropped.
+  `createBrowser(host:)` inside a nested loop still creates at once (W3-4 deviation, kept: a deferred creation could
+  not return the handle).
+- **Close modes** (Decision 11). `.skipUnloadHandlers` sets `UnloadController::set_force_skip_warning_user_on_close`
+  for the one `CloseWebContentsAt` call (RAII, restored after; the flag is browser-wide). `wouldHoldClose` is
+  `NeedToFireBeforeUnloadOrUnloadEvents()` or `UnloadController::ShouldRunUnloadListenerBeforeClosing` (attached
+  DevTools, a custom confirmation), which is TabStripModel's own test.
+- **CloseCancelled**. W3-4's `beforeUnloadFired:` reset covers a cancelled single-tab client close (verified below). New:
+  a held close the engine started (`chrome.tabs.remove`, `window.close()`), which TabStripModel marks with
+  `TabCloseTypesData`, reports `CloseCancelled` too; the facade removes the stale marker Chromium leaves after a cancel.
+  `isClosing` is true while the facade's own close or such a marked close is pending.
+- **Close reasons** (Decision 12). Order: `client` (the facade closed it), `appTerminating` (quit started), then a
+  window close (`closing_all()`): `extension` when `chrome.windows.remove` asked, else `windowClosing`; a single tab
+  the facade did not close: `extension` while an extension's `tabs.remove` call is in flight, else `page`.
+  **Deviation from Decision 12:** in 156 `chrome.tabs.remove` calls `WebContents::Close()` (`tabs_api.cc:3340`), which
+  ends in `WebContentsDelegate::CloseContents` exactly as `window.close()` does (`RequestClose` ->
+  `ClosePageIgnoringUnloadEvents` -> `WebContentsImpl::Close`), so "CloseContents ran" cannot tell them apart. The
+  patch-free signal is the extension function's keepalive: `ProcessManager` records an `Activity::API_FUNCTION` keepalive
+  named `tabs.remove` / `windows.remove` from before the function runs until it responds (`tabs.remove` responds only
+  after `WebContentsDestroyed`, so a held and later accepted close still reads it). `arkt_extension_calls.{h,cc}` reads
+  it (`GetServiceWorkerKeepaliveDataForRecords`, `GetLazyKeepaliveActivities`). `chrome.windows.remove` responds at
+  once, so `ArktBrowserWindow::Close()` reads it synchronously and keeps the answer for that close
+  (`IsClosedByExtension`). Gaps: calls from extension pages that hold no keepalive (popups, options pages, MV2
+  persistent background pages) report `page`; Chromium's own Close Tab command (Cmd-W through Chromium's menu) reports
+  `page`; an unrelated `tabs.remove` in flight while a page calls `window.close()` would report `extension`.
+- **Stable containers** (Decision 6). Each handle owns an `ArktTabContainerView` (`arkt/browser`, so the window code can
+  recognise it) for its whole life. In an embedder host's window the current contents view is its only subview; on a
+  contents replacement the subview is swapped. The placeholder host keeps mounting contents views in its card itself,
+  so there the container stays empty; a held window moved to the embedder's host at replay fills its containers
+  through `AdoptHeldBrowser`. `DialogHostViewFor` (dialog host, `GetContentsSize`) follows the tab's container when it
+  is mounted in the window. `GetWebContentsModalDialogHostFor` gives a per-tab host only to this window's tabs (#255
+  review, low).
+- **Events**. `TabMoved` for an index move (`kMoved`) and for a move between windows (same handle, same container);
+  `TabReplaced` on `kReplaced`; per-tab `URLChanged`, `TitleChanged`, `LoadingChanged`, `HistoryChanged`,
+  `FaviconChanged` from a `WebContentsObserver` and a `FaviconDriverObserver` (16 DIP icon, PNG at 2x when available),
+  each only when its value changed. Order: Chromium starts loading a browser-initiated navigation before
+  `DidStartNavigation`; the pending URL is already visible then, so `DidStartLoading` reports the URL first (rule 2).
+  A commit to another host clears the favicon (when there was one) before the load ends (rule 6). `TabCreated` carries
+  the opener (`TabStripModel::GetOpenerOfTabAt`); a tab inserted while loading or with history reports both right
+  after `TabCreated`. Audible state is not reported: the frozen header has no event kind for it.
+- **Closed handle** keeps its last session id (W3-4 logged `tab=-1` for closed tabs).
+- **Held windows** (#255 review). While the show is held, Maximize, Minimize, Restore and entering fullscreen are
+  recorded (last wins) and applied after the replayed show; bounds set while held are applied again at release (after
+  `ReplaceHost`). A held window with no recorded state takes the initial show state from its create params
+  (`chrome.windows.create({state})` on Mac asks only through them). A window shown at once still ignores the initial
+  show state (known gap, unchanged).
+- **Request classification** (#255 review). `kLastAndUrlsStartupPref` -> `startupURL`, `kSessionRestore` and
+  `kDeskTemplate` -> `reopen`, named before the bounds check.
+- **UI thread**: `DCHECK_CURRENTLY_ON(BrowserThread::UI)` on every facade entry point (tab, browser and engine
+  protocols). `out/Spike` has `dcheck_always_on = false`, so these were compiled, not exercised.
+- **Self-test embedder**: logs every event kind; a page title `arkt-selftest <command>` (set over CDP) runs a facade
+  call on its tab: `close honour|skip`, `close-other`, `state`, `navigate`, `reload [<session id>]`, `activate`,
+  `devtools`, `pending` (the pending-handle check).
+
+`gn check out/Spike '//arkt/*'`: `Header dependency check OK` (new dependencies `//chrome/browser/ui:unload_controller`,
+`//components/favicon/{content,core}`, `//ui/gfx/codec`, `//skia`, `//chrome/app:command_ids`,
+`//chrome/browser/ui:browser_init_state`; no `nogncheck` added). Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome`,
+two compile fixes, then `The build has finished successfully.`
+
+### Acceptance (self-test embedder, `Chromium.app`)
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| W5c sequence: `tabCreated` with `origin=engine`, `activeTabChanged`, visibility when the self-test mounts containers | PASS | run 1 |
+| Navigation logs url, loading start, title, loading end in that order | PASS (after the `DidStartLoading` fix) | run 2 |
+| Host change logs the favicon clear before load end | PASS | runs 1, 2 |
+| `chrome://crash` then reload keeps the same container | PASS | runs 1, 2 |
+| `onbeforeunload` page (user gesture): `held`, dialog shown, removal only after accept, `closeCancelled` after cancel | PASS (dialog not on the container, below) | run 1 |
+| `.skipUnloadHandlers` closes at once | PASS | run 1 |
+| Unload-only page: held or not, how long | recorded: not held | run 1 |
+| DevTools-attached tab: held, when it completes | recorded: held, 4 ms | run 1 |
+| `chrome.tabs.remove` logs `extension`; `window.close()` logs `page` | PASS | run 1 |
+| Pending handle: close/navigate/activate queued behind the insert | PASS | run 1 |
+| `chrome.windows.remove` reports `extension`; close button `windowClosing` | PASS | run 1 |
+| Held window state and bounds applied at replay | PASS | runs 2, 3 |
+| Stand-in Engine app (placeholder host with the facade present) unchanged | PASS | run 4 |
+| Action list and action-probe popup | W3-5b | |
+
+**Run 1** (`--no-startup-window --arkt-facade-selftest --arkt-facade-selftest-url=<loopback a.html>
+--arkt-trace-visibility`, `tabs-probe`, profile `$PROF/w3-5-run1`, port 9461). Fixture pages from a loopback HTTP server
+on two host names (`127.0.0.1`, `localhost`), each with its own favicon. `ARKT` prefixes shortened.
+
+- W5c: `chrome.tabs.create` from the probe -> `tabCreated ... origin=engine active=yes`, `mounted ... subviews=1`,
+  `activeTabChanged`; CDP `visibilityState`: new tab `visible`, previous tab `hidden`.
+- Host change (`navigate http://localhost:8461/b.html` on a `127.0.0.1` page with a favicon): `historyChanged
+  back=yes`, `faviconChanged png=none`, `titleChanged Page B`, `loadingChanged no`, `faviconChanged png=118 bytes`.
+  (This first build logged loading before the URL; fixed and re-checked in run 2.)
+- Held close: `onbeforeunload` set with `cdp.mjs --user-gesture` (`hasBeenActive` true); `state` showed
+  `wouldHoldClose=yes`; `close honour` -> `result=held isClosing=yes`; AX showed an `AXDialog` window "Leave site?"
+  (Cancel, Leave). AX Cancel (after the frontmost check): `facade close cancelled`, `closeCancelled ... isClosing=no`,
+  the tab stays (`state closing=no`). Again, AX Leave after 11 s: `tab closed ... reason client`, `tabClosed ...
+  reason=client after 11557 ms`. The dialog is a separate window at the screen position Chromium gives an unpositioned
+  dialog (W3-4 note: `GetModalDialogBounds` returns an empty rect without a Views host), not over the tab's container;
+  the window-only screenshot of the host window shows the page only. Positioning stays open for W3-9 or later.
+- Skip: same page setup, `close skip` -> `tab closed ... reason client`, `result=closed`, no dialog.
+- Unload-only page (`addEventListener("unload", ...)` sending a beacon): `wouldHoldClose=no`, `close honour` ->
+  `result=closed` at once; the fixture server got no beacon. In 156 a page with only an `unload` handler does not hold
+  a close here (`NeedToFireBeforeUnloadOrUnloadEvents()` false), and the handler did not reach the network.
+- DevTools: `devtools` (IDC_DEV_TOOLS through the host) opened an undocked DevTools window (`views=1`); `state
+  wouldHoldClose=yes`; `close honour` -> `result=held`, then `tabClosed ... reason=client after 4 ms`; DevTools closed
+  with it (`views=0`).
+- Reasons: `chrome.tabs.remove(id)` -> `reason extension`; a tab opened by a link click with a user gesture
+  (`tabCreated ... opener=<opener tab>`, `state opener=<id>`) calling `window.close()` -> `reason page`; an
+  extension-started held close (`tabs.remove` on a `beforeunload` page): AX Cancel -> `closeCancelled ...
+  isClosing=no`; again with Leave -> `reason extension`.
+- Moves and windows: `chrome.windows.create` (bounds) -> provider window; `chrome.tabs.move` to it -> `tabMoved
+  window=<new>`, the same container pointer before and after; `chrome.windows.remove` -> `native window close by
+  chrome.windows.remove`, both tabs `reason extension`, `windowClosed`. Another window's close button (AX) -> `reason
+  windowClosing`.
+- Crash: `navigate chrome://crash` (renderer crashed), recovery by a navigation: same container pointer.
+- Pending: `pending` -> `createTab deferred (... run loop mode NSEventTrackingRunLoopMode)`, `session id -1`, menu
+  closed, `navigate queued behind the insert`, `activate queued ...`, `close queued ...`, `pending close result=held
+  isClosing=yes`, then `createTab inserted`, `running 3 call(s) queued behind the insert`, `tab closed ... reason
+  client`, one batch `TabCreated,LoadingChanged,URLChanged,ActiveTabChanged,TabClosed,ActiveTabChanged`.
+- `TabReplaced` was not triggered: `chrome.tabs.discard` discards in place in 156 (no `kReplaced`), and prerender
+  activation keeps the WebContents. The path is implemented (rebind, container swap, event) and unexercised.
+- 0 `FATAL`/`Check failed`.
+
+**Run 2** (`--arkt-facade-selftest=hold`, port 9462, profile `$PROF/w3-5-run2`). Before ready, `chrome.windows.create`
+with bounds 600x400 and `chrome.windows.update` to 320,260 650x420: `native window bounds deferred (show held)`;
+after ready: `host replaced (Placeholder -> SelfTest)`, `native window held bounds applied 320,260 650x420`;
+`chrome.windows.get` -> `[320,260,650,420,"normal"]`. The replayed window's tab was mounted from its container
+(`subviews=1`), the placeholder-to-embedder path. Navigation after the fix: one batch `URLChanged,LoadingChanged`, then
+`HistoryChanged,FaviconChanged(none)`, `TitleChanged`, `LoadingChanged(no)`, `FaviconChanged(118 bytes)`. Crash then
+`reload <session id>` from another tab (facade `reload`): same container pointer, `url`, `loading yes`, `loading no`.
+0 `FATAL`/`Check failed`.
+
+**Run 3** (hold, port 9463, profile `$PROF/w3-5-run3`): `chrome.windows.create({state: "maximized"})` before ready ->
+held; after replay `native window held maximize applied`; `chrome.windows.get` -> `"maximized"`. Fullscreen and
+minimized were not run (they would take over a Space or the Dock on a shared screen); they use the same path.
+
+**Run 4** (Engine app from `$EMB`, the W3-3 stand-in, no CDP port, a `data:` URL argument; `libchrome_dll.dylib`
+re-cloned next to the bundle, the only changed dylib): the stand-in's host is unusable, so the placeholder host is
+kept; the window-only screenshot shows the page in the placeholder's card (the container stays empty there, as
+designed). Quit through the menu (AX): `quit started`, `engineWillBeginTerminating`, `tab closed ... reason
+appTerminating`, `native window destroyed`, `app terminating`, `engineWillTerminate`, keep-alive released, process
+exited. 0 `FATAL`/`Check failed`.
+
+All processes were stopped by PID; the fixture server was stopped. Screenshots kept locally.
+
+### Carried items
+
+Closed here: pending-handle queue; CloseCancelled after a cancelled held close (client and engine-started); page and
+extension reasons and the `chrome.windows.remove` split; close modes; stable containers in the dialog host and the
+self-test mount; `TabReplaced`, `TabMoved`, per-tab state events; closed handle's session id; held-window state and
+bounds; request classification; per-tab dialog hosts only for own tabs; `createBrowser(host:)` in a nested loop
+confirmed as created at once; UI-thread DCHECKs.
+
+Open for W3-5b: history entries and `duplicate` (rules 9, 10), extension actions for embedder windows
+(`extensionActions(in:)`, `runExtensionAction`, `ExtensionActionsChanged`), the test API (`evaluateScript`,
+`answerDialog`), and the page context menu re-measure (still blocked: `RenderViewContextMenuMacCocoa::Show` returns
+without a Views widget). Open beyond W3-5: tab-modal dialog positioning on the container; audible state (no header
+event); a page's `NEW_WINDOW` window still reports `reopen`; initial show state for windows shown at once.
 
 ## W3-4: Host mode for ShellUI windows
 
