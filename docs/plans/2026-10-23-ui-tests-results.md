@@ -663,3 +663,77 @@ beside the existing 14 tests. The context menu item "Show Toolbar" shares its ti
 test clicks the hittable match.
 
 Known issues used: #269 (outline rows).
+
+## U11: Command bar keys (#176)
+
+Base: `origin/main` at `46f3729`, branch `chore/176-command-bar-keys`.
+
+### What was done
+
+- `UITests/CommandBarKeyTests.swift`: the plan's 5 tests.
+- `UITests/Harness/Shell.swift`: `commitSelectedRow` presses Return (or Cmd-Return / Opt-Return) on the selected
+  `commandBar.row` and returns false without pressing when that row's value is `Search`. `selectCommandBarRow` moves
+  with Down and does not press Enter. Row queries stay on the results table (`commandBar.results`); a whole-app
+  `descendants` query also walks the web view and stalls inside a wait.
+- The three KB-085 tests are marked `PARITY(NEEDS-RUNTIME-CHECK RT-08)`. They assert Arkt's current [I] default.
+- Sidebar checks go through `waitForOutlineRows` (#269). Command bar rows do not: see Verification.
+
+### Tests
+
+| Test | Parity | Run time |
+|---|---|---|
+| `test_KB085_downWrapsFromLastToFirst` | KB-085, NEEDS-RUNTIME-CHECK RT-08 | 20.799 s, failed |
+| `test_BH104_BH110_switchToTabRow` | BH-104, BH-110 | 188.061 s, failed |
+| `test_KB085_cmdEnterOpensURLInNewTab` | KB-085, NEEDS-RUNTIME-CHECK RT-08 | 20.624 s, failed |
+| `test_KB085_optEnterOpensURLInNewTab` | KB-085, NEEDS-RUNTIME-CHECK RT-08 | 20.517 s, failed |
+| `test_E_noSearchCommitted` | none | 20.373 s, failed |
+
+### Verification
+
+`cd app/ArktShell && xcodegen generate`, then:
+
+```zsh
+nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
+  -resultBundlePath build/ui-1792869775.xcresult -collect-test-diagnostics never \
+  -parallel-testing-enabled NO -only-testing:ArktShellUITests/CommandBarKeyTests -jobs 2 test
+```
+
+5 tests executed, 5 failed, 0 passed. `** TEST FAILED **`, exit 65. Testing took 274 s. The "Executed 0 tests" lines
+in the log are empty runner restarts after each case, not the class total. `xcodebuild` lists the five cases above as
+failing.
+
+Every case failed at `CommandBarKeyTests.openTabs` (`CommandBarKeyTests.swift:110`): timed out after 10.0 s waiting
+for the selected row's value `Open` on `/p/alpha`, summary `no command bar rows`. The command bar root, field and
+results table are in the tree, and the field holds the loopback page URL. The results table has no row children, so
+the Open row that is on screen is not an `XCUIElement`. The same gap as #269, for the command bar table. #283 adds
+the legacy attribute bridge on `CommandBarTableView` in `CommandBarView.swift`; this change does not edit that file
+or `OutlineDiagnosticTests.swift`. The five tests keep their assertions, so they exercise wrap, Switch to Tab,
+Cmd-Enter and Opt-Enter once those rows are exposed. `test_E_noSearchCommitted` did not reach `commitSelectedRow`.
+
+`test_BH104_BH110_switchToTabRow` recorded the failure at about 19 s and the case is 188 s because the runner then
+restarted ("Restarting after unexpected exit") before the next case. The other four tore down within about a second
+of the same timeout.
+
+TDD: the first `build-for-testing` failed (`Shell` had no `commitSelectedRow` / `selectCommandBarRow` /
+`selectedCommandBarRow` / `commandBarRowSummary`). The helper landed after that. The UI run above is with the helper.
+
+Source check (the CI grep, from `app/ArktShell/UITests`): `UI test sources OK`, exit 0. No sleeps. No http(s) literal
+other than `http://127.0.0.1` and `https://example.com` in `Harness/ArcFixture.swift`.
+
+Pure tests on the same tree, `nice -n 20 swift test -j 2`: `app/ArktCore` exit 0, Swift Testing 355 tests in four runs
+(94 + 100 + 63 + 98), 0 failures. `app/ArktShell/ShellKit` with `--skip ShellKitGUITests` exit 0, 545 tests
+(212 + 33 + 28 + 4 + 48 + 185 + 23 + 12), 0 failures. The 28-test run is the four isolation suites, including
+`CoreIsolationTests` and `WebKitIsolationTests`.
+
+### Deviations
+
+- The plan names `Shell.commitSelectedRow()`. The harness also adds the row query and `selectCommandBarRow`, so a
+  test can move onto a row without pressing Enter, and every Enter in the class goes through the guard.
+- The recorded run queried `tableRows` on the command bar element. After that run the query was narrowed to
+  `app.tables[commandBar.results].tableRows`. The failure snapshot already shows that table with no children, so both
+  queries are empty. Not re-run: the GUI lock was in use, and the snapshot already answers the narrower query.
+- BH-110 in the plan's steps is the Switch to Tab commit (bar closes, `Fixture alpha` stays selected, row count
+  unchanged), not a separate sidebar-click check. The test follows those steps.
+
+Known issues: #269 (command bar rows are also absent out of process here; the sidebar waits were not reached), #283
+(open; owns the attribute bridge this task does not copy).
