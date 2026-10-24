@@ -19,7 +19,7 @@ Rules. `$REPO` is the engine worktree `arkt-wt/engine` on branch `engine-week2`.
 | W7 | Web Store install on the native window | DONE | uBO Lite installed on the native window (`views=0`), actions 1 -> 2, popup through the menu; post-install dialog crash on close fixed in patch 0006; see "W7" below |
 | W8 | Keychain: mock in tests, "Arkt Safe Storage" in the product (finding 5) | DONE (one maintainer launch after W10) | patch 0003; release bundle names its item "Arkt Safe Storage"; maintainer keeps the old "Chromium Safe Storage" item; see "W8" below |
 | W9 | Native window as default; try dropping patch 0002 | DONE (0002 kept) | `ArktBrowserWindow` is the default, `--arkt-views-window` keeps the week-1 path; W5b matrix 17/17, W5c Step 3 and W6 Steps 3-4 pass with no switch; W7 not re-run (see below); dropping 0002 blanks a tab moved in from a Views popup window and the week-1 path, so it stays; patch set unchanged; see "W9" below |
-| W10 | Release bundle rebuild, re-sign, final smoke, housekeeping | TODO | |
+| W10 | Release bundle rebuild, re-sign, final smoke, housekeeping | DONE (W7 Step 3 and the unmocked launch are the maintainer's) | incremental `out/Arkt` build from `main` 87518a2, 0 failed; re-signed (same identity as W2), `/Applications/Arkt.app` replaced; smoke on the default native window passes (`views=0`, `probe.create()` row, menu dump, popup, second window, `chrome://extensions`, keychain string, `ChromeMain`, UA and brands); W7 re-run reached the install prompt with `views=0`, accepting it was not permitted in this session; `/` had 5.0 GiB free at the start, not 8 GiB; see "W10" below |
 | WE | Embedding spike (lane C) | DONE: GO (framework copied into the app bundle) | see below; branch `spike/embedding` |
 
 ## Patch budget (design target: fewer than 30 patch files)
@@ -1580,3 +1580,112 @@ DevTools windows on Arkt windows too) and the week-1 path is deleted.
 Unchanged: 6 patch files, 13 upstream files, 0 hot-file hunks. `wc -l < engine/patches/chromium/.patches` = 6 =
 `git -C $CR rev-list --count 156.0.8078.48..arkt`; `git -C $CR diff --stat 156.0.8078.48..arkt -- | tail -1`: 13 files
 changed, 57 insertions, 5 deletions; hot-file hunks 0. No `.patches` change.
+
+## W10: Release bundle rebuild, re-sign, final smoke
+
+Date 2026-10-24. Branch `engine/22-release-rebuild`, issue #22. Overlay: `$REPO` at `main` 87518a2 (its `engine/` tree
+equals W9's 63f794a), `readlink $CR/arkt` = `arkt-wt/engine/engine/arkt`. `$CR` branch `arkt` at `baeb143765`
+(0001-0006, all exported).
+
+### Disk and memory (the 8 GiB criterion was not met)
+
+`/` had 5.0 GiB free when the build started, not the 8 GiB the plan and #22 ask for. The internal disk was full from
+other work on the machine (a file-sync daemon was writing to it), and freeing space there is not this task's to do.
+The build went ahead anyway because its output is on the Chromium disk and the change was small (W9's switch). A
+30 s monitor would stop siso (`kill -STOP` on its recorded PID) when `/` fell under 5 GiB or swap used passed 9.5 GB.
+
+| Time | `/` available | swap used (`sysctl vm.swapusage`) | Build |
+|---|---|---|---|
+| 01:57 | 5.0 GiB | 8891.31M of 10240.00M | not started |
+| 01:58:19 | 5.0 GiB | 8891.31M | started |
+| 01:59:27 | 4.99 GiB (5233688 KiB) | 8891.31M | paused by the monitor; the `Arkt Framework` link already running finished on its own |
+| 02:01:01 | 5.8 GiB (about 1.5 GB of unrelated scratch builds on `/` removed, not by this task) | 8891.31M | resumed (`kill -CONT`), stop line lowered to 4.5 GiB |
+| 02:01:06 | 5.8 GiB | 8891.31M | finished |
+| after install | 6.5 GiB | 8867.31M | - |
+
+Swap did not grow at all (`-j 4`, quiet machine). Nothing was deleted by this task.
+
+### Build
+
+`cd $CR && nice -n 10 autoninja -C out/Arkt -j 4 chrome > $CHROMIUM_ROOT/build-w10.log 2>&1`: `The build has finished
+successfully.`, `grep -c FAILED:` = 0. Wall time 2 min 47 s, of which about 1 min 35 s paused: the overlay recompile
+(`arkt_browser_main_extra_parts.o`, `arkt_browser_window.o`) and the `Arkt Framework` relink. The new framework
+carries `arkt-views-window` and no longer `arkt-native-window` (`grep -a -o`), so it is W9's default.
+`third_party/siso/cipd/siso ninja -n` printed `0 steps` beforehand although the source was newer than its object:
+the siso dry run is not a guide to incremental size.
+
+### Re-sign and install
+
+`ditto $REL/Arkt.app $CHROMIUM_ROOT/stage-w10/Arkt.app`, then the `engine/README.md` "Sign and install (out/Arkt)"
+block unchanged, with the same Apple Development identity as W2 (the only code-signing identity listed, passed by
+hash; the team identifier of the new signature equals the W2 install's). `Helpers` held the same 11 entries as W1/W2;
+all signed. Per part: every helper and tool `flags=0x10000(runtime)`, `allow-jit` only on the four Renderer and GPU
+helpers.
+
+    codesign --verify --deep --strict --verbose=2 Arkt.app -> valid on disk, satisfies its Designated Requirement
+    codesign -dv Arkt.app -> Identifier=com.arkt.Arkt, CodeDirectory ... flags=0x10000(runtime)
+
+Replace: no process ran from `/Applications/Arkt.app`; `codesign -dv /Applications/Arkt.app` printed
+`Identifier=com.arkt.Arkt` (the W2 install); then `rm -rf /Applications/Arkt.app && ditto
+$CHROMIUM_ROOT/stage-w10/Arkt.app /Applications/Arkt.app`. The signed stage copy stays as the rollback (on the
+Chromium disk, not on `/`).
+
+    codesign --verify --deep --strict --verbose=2 /Applications/Arkt.app -> valid on disk, satisfies its Designated Requirement
+    spctl --assess --type execute -vv /Applications/Arkt.app            -> rejected (not notarized, #125)
+    du -sh /Applications/Arkt.app                                        -> 539M
+    nm -gU ".../Arkt Framework.framework/Arkt Framework" | grep -c ' T _ChromeMain' -> 1
+    grep -a -o -E "(Arkt|Chromium|Chrome) Safe Storage" ".../Versions/Current/Arkt Framework" | sort | uniq -c
+       1 Arkt Safe Storage
+    find /Applications/Arkt.app -type f -perm +111 -print0 | xargs -0 grep -l -a -E "(Chromium|Chrome) Safe Storage"
+                                                                         # no output
+
+### Smoke from /Applications (default path, no window switch)
+
+No other Arkt, Chromium or `ArktShell` run on the machine (checked with `ps`). Profile
+`$CHROMIUM_ROOT/profiles/w10-smoke` (fresh), `--use-mock-keychain --no-first-run --no-default-browser-check
+--enable-logging=stderr --remote-debugging-port=9401`, both probe extensions, `--arkt-extensions-menu-dump`,
+`https://example.com`, no `--user-agent`. Stopped by its PID; `ps -p` confirmed gone.
+
+| Check | Result |
+|---|---|
+| Native window by default | `ARKT: native window factory registered`, `native window created`, census `normal=1 arkt=1 views=0`, `in-process hook alive`, `key window` naming our window |
+| Page renders | `document.title` `"Example Domain"`, `visibilityState` `visible`; window-only screenshot `$PROF/shots/w10-smoke.png` shows the page in the card and the tab list |
+| Extensions menu (`--arkt-extensions-menu-dump`) | `toolbar actions 2`, `menu item 0 Arkt action probe enabled=1`, `menu item 1 Arkt tabs probe enabled=0` |
+| W6 identity | `ARKT tabs.query windows=814893290` = session id `814893290` = `windows.getAll` `[[814893290,"normal",1]]` |
+| `probe.create()` (W5b row 3, W5c) | `tab event inserted ... index 1`, `tab list rows 2 selected 0`; example.com stays `visible`; second row in the screenshot |
+| `chrome.action.openPopup()` (W6) | `"ok"`, `TriggerPopup ... by_user=0`, `popup loaded` |
+| `probe.window()` (W5b row 5, W6) | census `normal=2 arkt=2 views=0`; `windows.getAll` `[[814893290,"normal",2],[814893293,"normal",1]]` |
+| Extensions page | `--navigate chrome://extensions`, then `chrome://extensions/`, `Extensions`, `extensions-manager` present |
+| Web identity | UA `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36`; `brands` and `fullVersionList` brands `["Not:A-Brand","Chromium"]`; no `Arkt` |
+| Stability | alive 10 s after the last driver; 0 `FATAL`/`Check failed`/`Received signal` lines, also after the stop |
+
+### W7 re-run on the default path (carried from #21)
+
+Profile `$CHROMIUM_ROOT/profiles/w10-cws` (fresh), port 9402, `action-probe`, `--arkt-extensions-menu-dump`, the uBO
+Lite detail page, no window switch.
+
+- Census `normal=1 arkt=1 views=0`; the Google consent interstitial (`consent.google.com`, "Before you continue")
+  came up and was rejected over CDP (`Reject all`, `--user-gesture`); the detail page loaded.
+- "Add to Chrome" pressed with `cdp.mjs --user-gesture`: the prompt `Add "uBlock Origin Lite"?` came up as a separate
+  window at 676,258 448x196, the same place as in W7; census still `views=0`.
+- Accepting it (AXPress on `Add extension` after the frontmost and window-1 checks) was not permitted in this session,
+  so the run was stopped by its PID before the install: `toolbar actions 1` throughout, 0 `FATAL`/`Check failed`.
+  Steps 1-2 pass on the default path; Step 3 (install, actions 1 -> 2, popup through the menu) is the maintainer's.
+
+### Housekeeping
+
+- Every process this task started was stopped by its PID (two Arkt runs); `ps -axo pid,command | grep -E
+  "out/Spike|out/Arkt|/Applications/Arkt.app"` lists nothing. The build and the monitor exited on their own.
+- Profiles `w10-smoke` and `w10-cws` stay under `$CHROMIUM_ROOT/profiles`; `$IPROF` was not touched.
+- Patch counts match: `wc -l < engine/patches/chromium/.patches` = 6 = `git -C $CR rev-list --count
+  156.0.8078.48..arkt`; `git -C $CR diff --stat 156.0.8078.48..arkt | tail -1`: 13 files changed, 57 insertions, 5
+  deletions; hot-file hunks 0. The patch budget table above is final for week 2.
+
+### Open items
+
+- Maintainer, with the rebuilt `/Applications/Arkt.app`: the unmocked launch from W8 ("Needs the maintainer"), and
+  W7 Step 3 (accept the prompt, check the menu lists uBlock Origin Lite, open its popup) on the default path.
+- 1Password (#23) stays blocked on a Developer ID signature (#125); the Apple Development signature cannot pass
+  1Password's browser check.
+- Week-3 items already listed under W5b, W5c, W6, W7 and W9 (dialogs as free windows, find bar, download UI, patch
+  0002 kept).
