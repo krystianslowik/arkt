@@ -108,4 +108,27 @@ typedef NS_ENUM(NSInteger, ArktDialogSheetDefault) {
 @property(nonatomic, readonly) BOOL checkboxChecked;
 @end
 
+// Arkt's colors and controls, shared with the other engine-drawn surfaces
+// (infobars, Task W3-10). The colors follow the appearance they are drawn in.
+namespace arkt {
+NSColor* SheetSurfaceColor();
+NSColor* SheetPrimaryTextColor();
+NSColor* SheetSecondaryTextColor();
+NSColor* SheetDividerColor();
+NSColor* SheetAccentTextColor();
+}  // namespace arkt
+
+// A filled, rounded push button in Arkt's colors (mustard with graphite text
+// when `accent`, a neutral fill otherwise). The title stays the button's
+// title, so VoiceOver reads it as usual.
+@interface ArktSheetButton : NSButton
+@property(nonatomic) BOOL accent;
+- (instancetype)initWithTitle:(NSString*)title accent:(BOOL)accent;
+@end
+
+// A borderless text button in the accent text color, read as a link.
+@interface ArktSheetLinkButton : NSButton
+- (instancetype)initWithTitle:(NSString*)title;
+@end
+
 #endif  // ARKT_BROWSER_ARKT_DIALOG_SHEET_H_
