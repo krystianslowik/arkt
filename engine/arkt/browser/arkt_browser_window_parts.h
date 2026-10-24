@@ -64,7 +64,10 @@ class ArktExclusiveAccessContext : public ExclusiveAccessContext {
 // card's size.
 class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost {
  public:
-  explicit ArktModalDialogHost(NSView* card);
+  // `view` is asked for the host view on every call: the tab's view, or the
+  // host's card as fallback, can change while a dialog is up (week-3 plan,
+  // Decision 6).
+  explicit ArktModalDialogHost(NSView* (^view)(void));
   ArktModalDialogHost(const ArktModalDialogHost&) = delete;
   ArktModalDialogHost& operator=(const ArktModalDialogHost&) = delete;
   ~ArktModalDialogHost() override;
@@ -78,7 +81,7 @@ class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost {
   void NotifyPositionRequiresUpdate() override;
 
  private:
-  NSView* __weak card_;
+  NSView* (^view_)(void);
   base::ObserverList<web_modal::ModalDialogHostObserver> observers_;
 };
 

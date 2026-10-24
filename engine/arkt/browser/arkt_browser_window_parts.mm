@@ -53,6 +53,10 @@ void ArktExclusiveAccessContext::EnterFullscreen(
   if (IsFullscreen()) {
     return;
   }
+  if (window_->IsShowHeld()) {
+    LOG(WARNING) << "ARKT: enter fullscreen ignored (window show held)";
+    return;
+  }
   LOG(WARNING) << "ARKT: enter fullscreen";
   [window_->host().window toggleFullScreen:nil];
 }
@@ -98,7 +102,8 @@ bool ArktExclusiveAccessContext::CanUserExitFullscreen() const {
 
 // ArktModalDialogHost ---------------------------------------------------------
 
-ArktModalDialogHost::ArktModalDialogHost(NSView* card) : card_(card) {}
+ArktModalDialogHost::ArktModalDialogHost(NSView* (^view)(void))
+    : view_([view copy]) {}
 
 ArktModalDialogHost::~ArktModalDialogHost() {
   for (auto& observer : observers_) {
@@ -107,18 +112,20 @@ ArktModalDialogHost::~ArktModalDialogHost() {
 }
 
 gfx::NativeView ArktModalDialogHost::GetHostView() const {
-  return gfx::NativeView(card_);
+  return gfx::NativeView(view_());
 }
 
 gfx::Point ArktModalDialogHost::GetDialogPosition(const gfx::Size& size) {
+  NSView* view = view_();
   return gfx::Point(
-      std::max(0, (static_cast<int>(NSWidth(card_.bounds)) - size.width()) / 2),
+      std::max(0, (static_cast<int>(NSWidth(view.bounds)) - size.width()) / 2),
       0);
 }
 
 gfx::Size ArktModalDialogHost::GetMaximumDialogSize() {
-  return gfx::Size(static_cast<int>(NSWidth(card_.bounds)),
-                   static_cast<int>(NSHeight(card_.bounds)));
+  NSView* view = view_();
+  return gfx::Size(static_cast<int>(NSWidth(view.bounds)),
+                   static_cast<int>(NSHeight(view.bounds)));
 }
 
 void ArktModalDialogHost::AddObserver(

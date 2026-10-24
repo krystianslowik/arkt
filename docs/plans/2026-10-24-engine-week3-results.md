@@ -11,7 +11,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-1 | `EngineAPI` additions, harness drivers, contract rules 11-16 (Swift lane) | TODO | |
 | W3-2 | Facade header and its Swift module | DONE (#246) | see "W3-2" below |
 | W3-3 | Engine configuration, readiness and quit seams, re-entrancy gate (GATE) | DONE | **GATE PASS** with recorded deviations (readiness queue for Chromium-created windows, quit-start seam, CDP keep-alive); see "W3-3" below |
-| W3-4 | Host mode for ShellUI windows | TODO | |
+| W3-4 | Host mode for ShellUI windows | DONE | embedder hosts own Arkt windows, `createBrowserWithHost:`, request kinds from the call site, self-test embedder; all acceptance rows pass on `Chromium.app`; see "W3-4" below |
 | W3-5 | Tab facade | TODO | |
 | W3-6 | `ChromiumEngineKit` over the facade | TODO | |
 | W3-7 | The shell as engine host, composition root (Swift lane) | TODO | |
@@ -35,6 +35,205 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-4: Host mode for ShellUI windows
+
+Date 2026-10-24. Branch `engine/33-w3-4-host-mode` off `main` at `f3d9e0b`. `$CR` branch `arkt` at `e4a2ca5cca`
+(0001-0007) before and after: no patch. Overlay only; no `app/` or `project.yml` change. `/` had 9.5 GiB free and swap
+8.7 GB used of 10 GB before each build and run.
+
+### What landed
+
+- **Factory: embedder host first** (`arkt_browser_main_extra_parts.mm`). The window factory asks
+  `HostForArktBrowserWindow` before it builds the window: the host passed to `createBrowserWithHost:`, or, once the
+  embedder is ready, its answer to `-hostForEngineWindowRequest:`. A nil answer, or a host without `window`,
+  `cardView`, `setCloseRequested:`, `setValidateCommand:` or `setExecuteCommand:` (or with a nil window or card), keeps
+  the placeholder host and logs why. Only placeholder windows get the sidebar Extensions menu.
+- **Host mode** (`arkt_browser_window.{h,mm}`). `host_mode()` is true for every host that is not the placeholder:
+  no auto-mount (Decision 6; the colour provider is still set on activation); `GetContentsSize` and the window's
+  dialog host follow the active tab's view when the embedder has mounted it in the window, the card otherwise; one
+  `ArktModalDialogHost` per tab (`GetWebContentsModalDialogHostFor`), resolved per call (its tab's view, the card as
+  fallback), dropped when the tab leaves; `activateTab` and `tabListChanged:` only when the host responds to them
+  (#246 review). Until W3-5's stable containers a tab's container is its contents view (one function,
+  `DialogHostViewFor`). `closeRequested` closes the `Browser` as before.
+- **Held windows** (W3-3 review). The pending show is `none`, `show` or `showInactive`; a held `ShowInactive` is
+  replayed as `ShowInactive`. While held, `Minimize`, `Maximize`, `Restore` and entering fullscreen are ignored and
+  logged. At replay the window moves to the embedder's host (`ReplaceHost`: the old host's blocks and observers are
+  removed, its window ordered out, the placeholder's Extensions menu dropped, tab dialog hosts rebuilt) and is then
+  shown. A held window is not listed and not announced (`WindowOpened`) until replay has given it the embedder's host.
+  After `embedderFailed`, a window Chromium creates is held and closed (it was shown with the placeholder host).
+- **Request kinds from the call site** (`arkt_embedder.mm`), no patch. The factory reads the `Browser`'s create params
+  (`BrowserInitState`, built before the window, `browser.cc:291` and `:315`); the kind is stored with the queued
+  request instead of being guessed from the first tab at replay:
+
+  | Signal | Kind |
+  |---|---|
+  | the seam's own creation (startup URL replay, debug reopen) | as named there |
+  | `creation_source == kStartupCreator` (startup creator, also a URL opened by another app) | `startupURL` |
+  | a show state or bounds in the params (`chrome.windows.create` always sets `kNormal`, `tabs_api.cc:189-190`) | `extension` |
+  | default params (Dock reopen, New Window, and a page's `NEW_WINDOW` navigation) | `reopen` |
+
+  `bounds` carries the requested frame when given. Gaps: a page's `NEW_WINDOW` window (shift-click, `noopener` with
+  `NEW_WINDOW` disposition) reports `reopen`: its params are the same as reopen's and no signal tells them apart
+  without a patch (`kind=page` is unused this week); `opener` is nil for every kind; `initialURL` is known only for
+  the seam's own creations (the tab is added after the window exists).
+- **Facade** (`arkt_engine_facade.{h,mm}`). `createBrowserWithHost:` creates a `TYPE_NORMAL` `Browser` for the initial
+  profile synchronously (`CHECK`s the profile, the host, and that the factory took it), does not show it (the shell
+  owns the window) and returns the handle adopted inside construction. `ArktBrowserHandle.host` follows the window's
+  current host. Close reasons for windows: a tab removed while its tab strip closes all tabs (`closing_all()`: host
+  close button, `close`, Close Window, `chrome.windows.remove`) reports `windowClosing`; quitting keeps
+  `appTerminating`; a client close keeps `client`. `CloseCancelled`: each tab handle observes its contents
+  (`WebContentsObserver::BeforeUnloadFired(false)`) while its own close or its window's close is pending, resets
+  `isClosing` and records `CloseCancelled`. Checked here for a window close; the same path should cover a cancelled
+  single-tab `close(mode:)` (the W3-3 review item "never reset"), which W3-5 verifies. `DCHECK_CURRENTLY_ON(UI)`
+  on `embedderReady`, `embedderFailed`, `createBrowser` and every deferred mutator.
+- **Self-test embedder** (`arkt_selftest_embedder.{h,mm}`), used only when `--arkt-facade-selftest` is present and no
+  `ArktShellEmbedder` class exists. It conforms to `ArktEngineEmbedder`, supplies plain `NSWindow` hosts (the close
+  button calls `closeRequested`), opens one shell-initiated window after ready (`createBrowserWithHost:`, then a tab),
+  mounts each window's active tab in its card, and logs every event as `ARKT selftest <event>`. Values: none (ready at
+  once), `hold` (ready after 5 s), `fail` (`embedderFailed` after 5 s).
+
+`gn check out/Spike '//arkt/*'`: `Header dependency check OK` (new dependency `//chrome/browser/ui:browser_init_state`,
+a separate target, no `nogncheck`). Build: `nice -n 10 autoninja -C out/Spike -j 4 chrome`, one include fix, then
+`The build has finished successfully.`
+
+### Acceptance
+
+| Criterion | Result | Evidence |
+|---|---|---|
+| Shell-initiated window opens: `windowOpened`, census `normal=1 arkt=1 views=0` | PASS | run 1 |
+| `chrome.windows.create` from the tabs probe asks the provider with `kind=extension`, opens a second host window (`normal=2 arkt=2 views=0`) | PASS | run 1 |
+| Closing a host window closes its `Browser`: `windowClosed`, tabs closed with `windowClosing`, `native window destroyed` | PASS | run 1 (close button through AX; also `chrome.windows.remove`) |
+| Dock-style reopen lands in a provider window with `kind=reopen` | PASS | run 1 (a real reopen Apple event), run 2 (debug reopen before ready) |
+| CDP `chrome.windows.getAll` ids equal the facade's window ids | PASS | run 1 |
+| Without the switch the W3-0 rows still pass (W6 Step 3, W5c Step 3; the plan says "W5b rows") | PASS | run 4 |
+
+**Run 1** (`Chromium.app`, `--no-startup-window --arkt-facade-selftest`, `tabs-probe`, profile `$PROF/w3-4-run1`, port
+9451). `ARKT:` prefixes shortened:
+
+```
+embedder class ArktShellEmbedder absent
+self-test embedder in use (--arkt-facade-selftest)
+selftest embedderReady
+window host from createBrowser(host:) ArktSelfTestWindowHost window session id 235937695
+native window created (embedder host ArktSelfTestWindowHost)
+browsers normal=1 arkt=1 views=0
+facade batch 3 event(s) WindowOpened,TabCreated,ActiveTabChanged
+selftest windowOpened window=235937695 host=ArktSelfTestWindowHost
+selftest tabCreated window=235937695 tab=235937696 origin=client active=yes url=data:text/html,...
+selftest windows ids=235937695
+tabs.query windows=235937695                                  (tabs-probe)
+```
+
+`chrome.windows.create({url, left: 300, top: 200, width: 700, height: 500})` from the probe's worker answered
+`[235937697,"normal",1]`:
+
+```
+selftest host requested kind=extension url=none bounds={{300, 469}, {700, 500}} opener=-1
+host asked kind=extension (show state or bounds given (chrome.windows.create)) window session id 235937697 bounds 300,200 700x500 answered ArktSelfTestWindowHost
+browsers normal=2 arkt=2 views=0
+selftest tabCreated window=235937697 tab=235937698 origin=engine active=yes
+selftest windows ids=235937695,235937697
+```
+
+`chrome.windows.getAll` -> `[[235937695,"normal",1],[235937697,"normal",1]]`, the facade's ids. Window-only
+screenshots of both pages show the mounted contents (`$PROF/shots/w3-4-shell-window.png`, `-ext-window.png`, kept
+locally). Close button of the extension window (AX, after the frontmost check): `selftest close button`, `browsers
+normal=1`, batch `TabClosed,WindowClosed`, `tabClosed ... reason=windowClosing`, `windowClosed window=235937697`,
+`native window destroyed`.
+
+Held window close: `onbeforeunload` set with a user gesture on the shell window, close button: Chromium's "Leave
+site?" dialog; AX `Cancel`: `facade close cancelled session id 235937696`, batch `CloseCancelled`, the window stays, no
+`WindowClosed`. Handler cleared, close button again: `windowClosing`, `WindowClosed`, census `normal=0`. Then, with no
+window, `open -a` on the running `Chromium.app` (the reopen Apple event, `applicationShouldHandleReopen:` ->
+`CreateBrowser`): `host asked kind=reopen (default params ...)`, `native window created (embedder host ...)`,
+`tabCreated ... url=chrome://newtab/`. `chrome.windows.remove` of that window: `reason=windowClosing` (Decision 12
+lists `chrome.windows.remove` under `extension`; W3-5 owns the split). 0 `FATAL`/`Check failed`.
+
+**Run 2** (`--arkt-facade-selftest=hold --arkt-debug-reopen-before-ready`, a `data:` URL argument, and
+`chrome.windows.create({focused: false})` from the probe before ready; profile `$PROF/w3-4-run2b`, port 9453):
+
+```
+window request queued kind=startupURL url=data:text/html,...
+debug reopen (chrome::NewEmptyWindow) before ready
+window request queued kind=reopen (seam call site) window session id 2127451843 (window held hidden)
+native window show held
+window request queued kind=extension (show state or bounds given (chrome.windows.create)) window session id 2127451845 (window held hidden)
+native window show inactive held
+selftest embedderReady
+embedderReady (3 queued request(s))
+window host from createBrowser(host:) ArktSelfTestWindowHost window session id 2127451847
+host asked kind=startupURL (seam call site) window session id 2127451849 answered ArktSelfTestWindowHost
+host asked kind=reopen (seam call site) window session id 2127451843 answered ArktSelfTestWindowHost
+native window host replaced (ArktPlaceholderWindowHost -> ArktSelfTestWindowHost) session id 2127451843
+window number 95276
+host asked kind=extension (...) window session id 2127451845 bounds 222,104 1400x900 answered ArktSelfTestWindowHost
+native window host replaced (ArktPlaceholderWindowHost -> ArktSelfTestWindowHost) session id 2127451845
+window number 95277 (shown inactive)
+facade batch 10 event(s) WindowOpened,TabCreated,ActiveTabChanged,WindowOpened,TabCreated,ActiveTabChanged,WindowOpened,TabCreated,WindowOpened,TabCreated
+```
+
+The held windows are announced only after replay, with the self-test host. On the replaced window (2127451843): a
+JavaScript `alert` (tab-modal) showed and was dismissed through AX; `requestFullscreen` with a user gesture logged
+`enter fullscreen` and `exitFullscreen` `exit fullscreen` on the new host window; the close button closed it
+(`windowClosing`, `native window destroyed`). 0 `FATAL`/`Check failed`. A first attempt of this run (`w3-4-run2`)
+polled the probe's worker over CDP before it had started; that evaluation hit a renderer `CHECK` in
+`WorkerGlobalScope::Url` (`worker_global_scope.cc:190`, the extension renderer, not the browser process); the rerun
+waits until `chrome.windows` exists. That attempt also showed held windows announced with the placeholder host before
+ready, which is why they are now announced at replay.
+
+**Run 3** (`--arkt-facade-selftest=fail --arkt-debug-reopen-before-ready`, a URL argument, no port):
+`embedderFailed (dropping 2 queued request(s))`, the held reopen window destroyed; then `open -a` (reopen):
+`window after embedderFailed held and closed`, `native window show held`, `native window destroyed`; no window
+visible. 0 `FATAL`/`Check failed`.
+
+**Run 4** (no switch; `Chromium.app` with `--arkt-trace-visibility`, `action-probe`, `tabs-probe`,
+`https://example.com`, port 9454): `embedder class ArktShellEmbedder absent`, `native window created (placeholder
+host ...)`, census `normal=1 arkt=1 views=0`. W6 Step 3: `native window session id 1467694354` = `tabs.query
+windows=1467694354` = `windows.getAll` `[[1467694354,"normal",1]]`. W5c Step 3 over CDP: `probe.create()` ->
+`"visible"` (`tab list rows 2`), activate about:blank -> `"hidden"`, back -> `"visible"`, with matching `visibility`
+and `native window mounted tab` lines. `probe.window()` then removing every window: `normal=2`, then 0, two `native
+window destroyed`. 0 `FATAL`/`Check failed`.
+
+**Run 5** (Engine app from `$EMB`, the W3-3 stand-in, no CDP port; `libchrome_dll.dylib` re-cloned next to the
+bundle, the only changed dylib; the framework binary and the app are unchanged): the stand-in's
+`ArktShellStandInWindowHost` has only `window` and `cardView`, so both replayed requests log `answered
+ArktShellStandInWindowHost; unusable (no setCloseRequested:), placeholder host kept` and the windows show with the
+placeholder host, as in W3-3. Quit through the menu (AX): `quit started`, `engineWillBeginTerminating`, two `native
+window destroyed`, `app terminating`, `engineWillTerminate`, `lifetime keep-alive released (embedder flushed)`, the
+process exited. 0 `FATAL`/`Check failed`/unrecognized selector.
+
+### Notes
+
+- Dialog placement: `GetModalDialogBounds` (`constrained_window_views.cc:104-112`) needs a Views widget for the host
+  view and returns an empty rect for a plain `NSView`, so Arkt's tab-modal dialogs open where Chromium places an
+  unpositioned dialog, with the placeholder host as with an embedder host (week-2 behaviour, unchanged here). The
+  dialog host now names the tab's view; placing the dialog on it is W3-5 (containers) or W3-9.
+- `createBrowser(host:)` inside a nested run loop creates the `Browser` at once and logs it: a deferred creation could
+  not return the handle (Decision 3 lists `createBrowser` among the deferred mutators).
+- `UnloadController::CancelWindowClose` also sends `chrome::OnClosingAllBrowsers(false)` for a cancelled window close
+  outside a quit; the quit seam ignores it (no quit started), as run 1 shows (no `quit cancelled`).
+- `TabClosed` events log `tab=-1` in the self-test: the handle's session id is read from its contents, which are gone
+  when the batch arrives. W3-5's handle keeps the last value.
+
+### What W3-5 needs
+
+- Stable containers (Decision 6) replace "a tab's container is its contents view" in `DialogHostViewFor` and the
+  self-test's `mountTab:`; the dialog host then follows the container.
+- `TabReplaced` (the handle already re-observes the new contents on `kReplaced`), `TabMoved`, per-tab state events.
+- Close reasons `page` / `extension` for single tabs, and whether `chrome.windows.remove` reports `extension`
+  (today `windowClosing`, from `closing_all()`).
+- The W3-3 review items still open: closes, navigation and activation of a pending handle queue behind its insert;
+  re-measure the page context menu.
+- `sessionId` of a closed handle (last value instead of -1).
+
+### Dependencies on #33 (Swift lane)
+
+- The stand-in host (`App/Engine/FacadeStandIn.swift`) has no `closeRequested`, `validateCommand`, `executeCommand`, so
+  the Engine app keeps placeholder hosts until W3-6/W3-9 replace the stand-in with the typed embedder in
+  `ChromiumEngineKit` and W3-7's `ShellWindowController` becomes an `EngineWindowHosting` (`ArktWindowHost` through
+  `ChromiumEngine`). No Swift was changed here.
+- W3-1's `EngineWindowRequest.kind` should expect `.reopen` for page-initiated normal windows this week.
 
 ## W3-3: Engine configuration, readiness and quit seams, re-entrancy gate
 

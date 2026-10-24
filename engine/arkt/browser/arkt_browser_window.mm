@@ -8,6 +8,7 @@
 #include "arkt/browser/arkt_browser_window_parts.h"
 #include "arkt/browser/arkt_extensions_bridge.h"
 #include "arkt/browser/arkt_extensions_container.h"
+#include "arkt/browser/arkt_extensions_menu.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
 #include "base/apple/foundation_util.h"
 #include "base/check.h"
@@ -243,6 +244,7 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
                                      id<ArktWindowHost> host)
     : browser_(browser),
       host_(host),
+      host_mode_(![host isKindOfClass:[ArktPlaceholderWindowHost class]]),
       notification_tokens_([[NSMutableArray alloc] init]),
       trace_visibility_(base::CommandLine::ForCurrentProcess()->HasSwitch(
           kTraceVisibilitySwitch)) {
@@ -255,7 +257,10 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
   // ExclusiveAccessManager from GetExclusiveAccessContext()).
   exclusive_access_context_ =
       std::make_unique<ArktExclusiveAccessContext>(this);
-  modal_dialog_host_ = std::make_unique<ArktModalDialogHost>(host_.cardView);
+  base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
+  modal_dialog_host_ = std::make_unique<ArktModalDialogHost>(^NSView* {
+    return weak ? weak->DialogHostViewFor(nullptr) : nil;
+  });
   location_bar_ = std::make_unique<ArktStubLocationBar>(browser_);
   side_panel_ui_ = std::make_unique<ArktSidePanelUI>(browser_);
   // BrowserWindowFeatures creates the NTP footer controller for BrowserView
@@ -278,8 +283,40 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
           browser_->GetUnownedUserDataHost(), *extensions_container_);
 
   browser_->GetTabStripModel()->AddObserver(this);
+  BindHost();
+  LOG(WARNING) << "ARKT: native window created ("
+               << (host_mode_ ? "embedder host " : "placeholder host ")
+               << base::SysNSStringToUTF8(NSStringFromClass([host_ class]))
+               << ")";
+  LOG(WARNING) << "ARKT: native window session id "
+               << browser_->GetSessionID().id();
+}
 
-  // `this` outlives the tokens: the destructor removes them first.
+ArktBrowserWindow::~ArktBrowserWindow() {
+  // As WebUIBrowserWindow does: features that reach into the window go first.
+  browser_->GetFeatures().TearDownPreBrowserWindowDestruction();
+
+  browser_->GetTabStripModel()->RemoveObserver(this);
+  UnbindHost();
+
+  if (new_tab_footer_controller_) {
+    new_tab_footer_controller_->TearDown();
+    new_tab_footer_controller_.reset();
+  }
+  scoped_extensions_container_.reset();
+  extensions_container_.reset();
+  side_panel_ui_.reset();
+  location_bar_.reset();
+  tab_modal_dialog_hosts_.clear();
+  modal_dialog_host_.reset();
+  exclusive_access_context_.reset();
+  LiveWindows().erase(this);
+  host_ = nil;
+  LOG(WARNING) << "ARKT: native window destroyed";
+}
+
+void ArktBrowserWindow::BindHost() {
+  // `this` outlives the tokens: UnbindHost removes them first.
   NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
   NSWindow* window = host_.window;
   [notification_tokens_
@@ -318,6 +355,8 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
                                     OnFullscreenChanged();
                                   }]];
   }
+  // Dialog positions follow the card, and in host mode the tab views the
+  // embedder lays out inside the window.
   [notification_tokens_
       addObject:[center addObserverForName:NSViewFrameDidChangeNotification
                                     object:host_.cardView
@@ -325,6 +364,15 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
                                 usingBlock:^(NSNotification*) {
                                   OnCardResized();
                                 }]];
+  if (host_mode_) {
+    [notification_tokens_
+        addObject:[center addObserverForName:NSWindowDidResizeNotification
+                                      object:window
+                                       queue:nil
+                                  usingBlock:^(NSNotification*) {
+                                    OnCardResized();
+                                  }]];
+  }
 
   base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
   host_.closeRequested = ^{
@@ -337,7 +385,7 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
            IsCommandEnabledInWindow(weak->browser_, weak->host_.window,
                                     static_cast<int>(command));
   };
-  if ([host_ isKindOfClass:[ArktPlaceholderWindowHost class]]) {
+  if (!host_mode_) {
     static_cast<ArktPlaceholderWindowHost*>(host_).validateItem =
         ^BOOL(id<NSValidatedUserInterfaceItem> item) {
           return weak && ValidateCommandItem(weak->browser_,
@@ -351,50 +399,85 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
           static_cast<WindowOpenDisposition>(disposition));
     }
   };
-  host_.activateTab = ^(int32_t tab_id) {
-    if (weak) {
-      weak->ActivateTab(tab_id);
+  // Optional in the facade header: placeholder host only (#246 review).
+  if ([host_ respondsToSelector:@selector(setActivateTab:)]) {
+    host_.activateTab = ^(int32_t tab_id) {
+      if (weak) {
+        weak->ActivateTab(tab_id);
+      }
+    };
+  }
+  if (!host_mode_) {
+    // The placeholder's card shows the active tab.
+    TabStripModel* model = browser_->GetTabStripModel();
+    if (content::WebContents* active = model->GetActiveWebContents()) {
+      Mount(active);
     }
-  };
-  LOG(WARNING) << "ARKT: native window created";
-  LOG(WARNING) << "ARKT: native window session id "
-               << browser_->GetSessionID().id();
+  }
 }
 
-ArktBrowserWindow::~ArktBrowserWindow() {
-  // As WebUIBrowserWindow does: features that reach into the window go first.
-  browser_->GetFeatures().TearDownPreBrowserWindowDestruction();
-
+void ArktBrowserWindow::UnbindHost() {
   for (id token in notification_tokens_) {
     [NSNotificationCenter.defaultCenter removeObserver:token];
   }
   [notification_tokens_ removeAllObjects];
-  browser_->GetTabStripModel()->RemoveObserver(this);
   if (mounted_) {
     Unmount(mounted_);
   }
   host_.closeRequested = nil;
   host_.validateCommand = nil;
-  if ([host_ isKindOfClass:[ArktPlaceholderWindowHost class]]) {
+  if (!host_mode_) {
     static_cast<ArktPlaceholderWindowHost*>(host_).validateItem = nil;
   }
   host_.executeCommand = nil;
-  host_.activateTab = nil;
-  [host_.window orderOut:nil];
-
-  if (new_tab_footer_controller_) {
-    new_tab_footer_controller_->TearDown();
-    new_tab_footer_controller_.reset();
+  if ([host_ respondsToSelector:@selector(setActivateTab:)]) {
+    host_.activateTab = nil;
   }
-  scoped_extensions_container_.reset();
-  extensions_container_.reset();
-  side_panel_ui_.reset();
-  location_bar_.reset();
-  modal_dialog_host_.reset();
-  exclusive_access_context_.reset();
-  LiveWindows().erase(this);
-  host_ = nil;
-  LOG(WARNING) << "ARKT: native window destroyed";
+  [host_.window orderOut:nil];
+}
+
+void ArktBrowserWindow::ReplaceHost(id<ArktWindowHost> host) {
+  CHECK(host.window);
+  CHECK(host.cardView);
+  if (host == host_) {
+    return;
+  }
+  NSString* old_class = NSStringFromClass([host_ class]);
+  UnbindHost();
+  // The placeholder's sidebar Extensions menu belongs to the old host.
+  extensions_container_->SetMenu(nullptr);
+  // Dialog hosts of the old views go; tab-modal dialogs that are up are told
+  // the host is going (OnHostDestroying) and the next ones use the new host.
+  tab_modal_dialog_hosts_.clear();
+  host_ = host;
+  host_mode_ = ![host isKindOfClass:[ArktPlaceholderWindowHost class]];
+  BindHost();
+  modal_dialog_host_->NotifyPositionRequiresUpdate();
+  LOG(WARNING) << "ARKT: native window host replaced ("
+               << base::SysNSStringToUTF8(old_class) << " -> "
+               << base::SysNSStringToUTF8(NSStringFromClass([host_ class]))
+               << ") session id " << browser_->GetSessionID().id();
+}
+
+bool ArktBrowserWindow::IsAttemptingToClose() const {
+  return UnloadController::From(browser_)->is_attempting_to_close_browser();
+}
+
+NSView* ArktBrowserWindow::DialogHostViewFor(
+    content::WebContents* contents) const {
+  if (host_mode_) {
+    if (!contents) {
+      contents = browser_->GetTabStripModel()->GetActiveWebContents();
+    }
+    // Until the tab facade's stable containers (Task W3-5), a tab's
+    // container is its contents view.
+    NSView* view =
+        contents ? contents->GetNativeView().GetNativeNSView() : nil;
+    if (view && view.window == host_.window) {
+      return view;
+    }
+  }
+  return host_.cardView;
 }
 
 // static
@@ -447,6 +530,9 @@ void ArktBrowserWindow::Unmount(content::WebContents* contents) {
 
 void ArktBrowserWindow::OnCardResized() {
   modal_dialog_host_->NotifyPositionRequiresUpdate();
+  for (auto& [contents, host] : tab_modal_dialog_hosts_) {
+    host->NotifyPositionRequiresUpdate();
+  }
 }
 
 void ArktBrowserWindow::OnFullscreenChanged() {
@@ -502,16 +588,25 @@ void ArktBrowserWindow::HoldShow() {
 
 void ArktBrowserWindow::ReleaseHeldShow() {
   show_held_ = false;
-  if (show_pending_) {
-    show_pending_ = false;
-    Show();
+  PendingShow pending = show_pending_;
+  show_pending_ = PendingShow::kNone;
+  switch (pending) {
+    case PendingShow::kNone:
+      break;
+    case PendingShow::kShow:
+      Show();
+      break;
+    case PendingShow::kShowInactive:
+      // An inactive request stays inactive (W3-3 review).
+      ShowInactive();
+      break;
   }
 }
 
 void ArktBrowserWindow::Show() {
   if (show_held_) {
-    show_pending_ = true;
-    LOG(WARNING) << "ARKT: native window show held (embedder not ready)";
+    show_pending_ = PendingShow::kShow;
+    LOG(WARNING) << "ARKT: native window show held";
     return;
   }
   // Activation is asynchronous on Mac; the Browser must be the last active one
@@ -541,10 +636,16 @@ bool ArktBrowserWindow::IsVisible() const {
 
 void ArktBrowserWindow::ShowInactive() {
   if (show_held_) {
-    show_pending_ = true;
+    // A held Show() wins over a later inactive one.
+    if (show_pending_ == PendingShow::kNone) {
+      show_pending_ = PendingShow::kShowInactive;
+    }
+    LOG(WARNING) << "ARKT: native window show inactive held";
     return;
   }
   [host_.window orderFront:nil];
+  LOG(WARNING) << "ARKT: window number " << host_.window.windowNumber
+               << " (shown inactive)";
 }
 
 void ArktBrowserWindow::Close() {
@@ -575,7 +676,7 @@ void ArktBrowserWindow::Close() {
 
 void ArktBrowserWindow::Activate() {
   if (show_held_) {
-    show_pending_ = true;
+    show_pending_ = PendingShow::kShow;
     return;
   }
   BrowserActiveStateManager::From(browser_)->DidBecomeActive();
@@ -590,16 +691,28 @@ void ArktBrowserWindow::Deactivate() {
 }
 
 void ArktBrowserWindow::Maximize() {
+  if (show_held_) {
+    LOG(WARNING) << "ARKT: native window maximize ignored (show held)";
+    return;
+  }
   if (!host_.window.isZoomed) {
     [host_.window zoom:nil];
   }
 }
 
 void ArktBrowserWindow::Minimize() {
+  if (show_held_) {
+    LOG(WARNING) << "ARKT: native window minimize ignored (show held)";
+    return;
+  }
   [host_.window miniaturize:nil];
 }
 
 void ArktBrowserWindow::Restore() {
+  if (show_held_) {
+    LOG(WARNING) << "ARKT: native window restore ignored (show held)";
+    return;
+  }
   NSWindow* window = host_.window;
   if (window.isMiniaturized) {
     [window deminiaturize:nil];
@@ -645,7 +758,7 @@ bool ArktBrowserWindow::IsVisibleOnScreen() const {
 }
 
 gfx::Size ArktBrowserWindow::GetContentsSize() const {
-  NSRect bounds = host_.cardView.bounds;
+  NSRect bounds = DialogHostViewFor(nullptr).bounds;
   return gfx::Size(static_cast<int>(NSWidth(bounds)),
                    static_cast<int>(NSHeight(bounds)));
 }
@@ -694,12 +807,16 @@ void ArktBrowserWindow::OnActiveTabChanged(content::WebContents* old_contents,
                                            int reason) {
   // Tabs of a non-Views window have no Widget to take colours from.
   new_contents->SetColorProviderSource(this);
-  Mount(new_contents);
+  // Embedder hosts mount tab views themselves (Decision 6).
+  if (!host_mode_) {
+    Mount(new_contents);
+  }
 }
 
 void ArktBrowserWindow::OnTabDetached(content::WebContents* contents,
                                       bool was_active) {
   Unmount(contents);
+  tab_modal_dialog_hosts_.erase(contents);
 }
 
 ArktTabEvent* ArktBrowserWindow::EntryEvent(ArktTabEventKind kind,
@@ -744,6 +861,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
         CHECK_GE(removed.index, 0);
         CHECK_LT(static_cast<size_t>(removed.index), entries_.size());
         entries_.erase(entries_.begin() + removed.index);
+        tab_modal_dialog_hosts_.erase(removed.contents);
         [events
             addObject:[[ArktTabEvent alloc] initWithKind:ArktTabEventKindRemoved
                                                    tabId:TabId(removed.contents)
@@ -774,6 +892,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
       const TabStripModelChange::Replace* replace = change.GetReplace();
       CHECK_GE(replace->index, 0);
       CHECK_LT(static_cast<size_t>(replace->index), entries_.size());
+      tab_modal_dialog_hosts_.erase(replace->old_contents);
       [events
           addObject:EntryEvent(ArktTabEventKindUpdated, replace->new_contents,
                                replace->index, TabId(replace->old_contents))];
@@ -804,7 +923,8 @@ void ArktBrowserWindow::OnTabStripModelChanged(
                                  tabId:TabId(selection.new_contents)
                                  index:tab_strip_model->active_index()]];
   }
-  if (events.count) {
+  // Optional in the facade header: placeholder host only (#246 review).
+  if (events.count && [host_ respondsToSelector:@selector(tabListChanged:)]) {
     [host_ tabListChanged:events];
   }
   if (trace_visibility_ &&
@@ -826,8 +946,11 @@ void ArktBrowserWindow::OnTabChangedAt(tabs::TabInterface* tab,
       entry.url == contents->GetVisibleURL()) {
     return;
   }
-  [host_ tabListChanged:@[ EntryEvent(ArktTabEventKindUpdated, contents, index,
-                                      -1) ]];
+  ArktTabEvent* event =
+      EntryEvent(ArktTabEventKindUpdated, contents, index, -1);
+  if ([host_ respondsToSelector:@selector(tabListChanged:)]) {
+    [host_ tabListChanged:@[ event ]];
+  }
 }
 
 bool ArktBrowserWindow::ActivateTab(int32_t tab_id) {
@@ -950,7 +1073,19 @@ ArktBrowserWindow::GetWebContentsModalDialogHost() {
 web_modal::WebContentsModalDialogHost*
 ArktBrowserWindow::GetWebContentsModalDialogHostFor(
     content::WebContents* web_contents) {
-  return modal_dialog_host_.get();
+  if (!host_mode_ || !web_contents) {
+    return modal_dialog_host_.get();
+  }
+  // In host mode a tab-modal dialog belongs to its tab's view (Decision 6).
+  std::unique_ptr<ArktModalDialogHost>& host =
+      tab_modal_dialog_hosts_[web_contents];
+  if (!host) {
+    base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
+    host = std::make_unique<ArktModalDialogHost>(^NSView* {
+      return weak ? weak->DialogHostViewFor(web_contents) : nil;
+    });
+  }
+  return host.get();
 }
 
 std::unique_ptr<FindBar> ArktBrowserWindow::CreateFindBar() {

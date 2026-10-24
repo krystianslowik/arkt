@@ -11,7 +11,8 @@ source_set("api") {
 # The embedder seam (Task W3-3): finds the Swift embedder through the
 # Objective-C runtime, owns the readiness queue, the quit seams, the lifetime
 # keep-alive and the nesting guard, and vends the facade objects. Without an
-# embedder class in the process (the GN-built Chromium.app) it does nothing.
+# embedder class in the process (the GN-built Chromium.app) it does nothing,
+# unless --arkt-facade-selftest selects the built-in self-test embedder.
 source_set("embedder") {
   sources = [
     "arkt_embedder.h",
@@ -20,6 +21,8 @@ source_set("embedder") {
     "arkt_engine_facade.mm",
     "arkt_reentrancy_probe.h",
     "arkt_reentrancy_probe.mm",
+    "arkt_selftest_embedder.h",
+    "arkt_selftest_embedder.mm",
   ]
   public_deps = [ ":api" ]
   deps = [
@@ -29,6 +32,7 @@ source_set("embedder") {
     "//chrome/browser/lifetime:termination_notification",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/tab_list",
+    "//chrome/browser/ui:browser_init_state",
     "//chrome/browser/ui:browser_commands",
     "//chrome/browser/ui/browser_window",
     "//chrome/browser/ui/browser_window:create_browser_window",
