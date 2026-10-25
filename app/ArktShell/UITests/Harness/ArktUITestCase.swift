@@ -27,11 +27,9 @@ class ArktUITestCase: XCTestCase {
     continueAfterFailure = false
   }
 
-  /// Waits for a condition that needs sidebar outline rows, which are missing from the accessibility tree on the macOS
-  /// 26 runner (#269). Only this wait is an expected failure, and non-strict: it passes where the rows are exposed
-  /// (macOS 27) and is reported as an expected failure where they are not. Any other failure in the test still fails
-  /// it, and the checks after this call still run. Returns whether the condition held, so the caller can skip the
-  /// assertions that need the rows.
+  /// Waits for a condition on the sidebar outline rows (`app.outlineRows`). The outline publishes one proxy element
+  /// per displayed row (#269), so this is an ordinary wait: a timeout fails the test. Returns whether the condition
+  /// held.
   @discardableResult
   func waitForOutlineRows(
     _ what: @autoclosure () -> String,
@@ -40,18 +38,7 @@ class ArktUITestCase: XCTestCase {
     line: UInt = #line,
     _ condition: @escaping @MainActor () -> Bool
   ) -> Bool {
-    let options = XCTExpectedFailure.Options()
-    options.isStrict = false
-    // A failure inside the expected-failure block must not end the test: the checks after it still have to run.
-    let previous = continueAfterFailure
-    continueAfterFailure = true
-    defer { continueAfterFailure = previous }
-    let description = what()
-    var held = false
-    XCTExpectFailure("Outline rows are not in the out-of-process accessibility tree on macOS 26 (#269)", options: options) {
-      held = Waits.until(description, timeout: timeout, file: file, line: line, condition)
-    }
-    return held
+    Waits.until(what(), timeout: timeout, file: file, line: line, condition)
   }
 
   /// The test's loopback page server, started on first use and stopped in tear-down. Tests type only its URLs

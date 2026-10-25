@@ -7,9 +7,8 @@ import XCTest
 /// loopback URL or `Fixture`. What a Search row does on Enter is covered in process (`CommandBarTests`), where the
 /// search URL is observed without being loaded.
 ///
-/// Sidebar rows are not in the accessibility tree on the macOS 26 runner (#269). Every test proves its behavior
-/// without them (URL bars, Back state, the fixture server's request log); the row checks are one combined
-/// `waitForOutlineRows` per test, so a test waits out that timeout at most once.
+/// Every test proves its behavior from the URL bars, Back state and the fixture server's request log first; the
+/// sidebar row checks are one combined `waitForOutlineRows` per test.
 final class CommandBarKeyTests: ArktUITestCase {
   private static let pages = ["alpha", "beta", "gamma"]
   /// Query that matches the three open tabs and adds one search row. Never committed.
@@ -46,7 +45,7 @@ final class CommandBarKeyTests: ArktUITestCase {
   /// BH-104 / BH-110: a "Switch to Tab" result shows the open tab instead of loading it again. Shown from gamma, the
   /// alpha row switches: the Toolbar's URL bar shows alpha's address and the fixture server sees no second request
   /// for it. The Toolbar is turned on because the sidebar URL bar shows the host only, the same for every fixture
-  /// page. The sidebar rows (#269) are one combined check at the end.
+  /// page. The sidebar rows are one combined check at the end.
   func test_BH104_BH110_switchToTabRow() async throws {
     let (server, app) = try await launchWithThreeTabs()
     let urlBar = showToolbarURLBar(in: app)
@@ -146,7 +145,7 @@ final class CommandBarKeyTests: ArktUITestCase {
   /// With the Toolbar on, from gamma: Cmd-L and Return navigate gamma in place to epsilon, so that tab has Back
   /// history. Cmd-L again (prefilled with epsilon), a new address, then Cmd-Return or Opt-Return. A new tab shows
   /// delta with Back disabled, where in-place navigation would have left Back enabled; switching back to the
-  /// epsilon tab finds its Back history intact and loads nothing again. The sidebar rows (#269) are one combined
+  /// epsilon tab finds its Back history intact and loads nothing again. The sidebar rows are one combined
   /// check at the end.
   private func openEditedURLInNewTab(
     modifiers: XCUIElement.KeyModifierFlags, server: FixtureServer, app: XCUIApplication

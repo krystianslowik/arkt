@@ -31,7 +31,7 @@ public final class SpacePageView: NSView, NSTextFieldDelegate {
   public let editButton = HoverCloseButton(frame: .zero)
   /// BH-038: the header "..." menu (icon, theme, disabled Profile). Shown with the edit button.
   public let optionsButton = HoverCloseButton(frame: .zero)
-  public let scrollView = SidebarScrollView(frame: .zero)
+  public let scrollView: SidebarScrollView
   public let outlineController: SidebarOutlineController
   /// The title field is open for editing.
   public private(set) var isRenaming = false
@@ -69,7 +69,9 @@ public final class SpacePageView: NSView, NSTextFieldDelegate {
   public init(source: any SidebarSource, spaceID: SpaceID) {
     self.spaceID = spaceID
     self.source = source
-    self.outlineController = SidebarOutlineController(source: source, spaceID: spaceID)
+    let scrollView = SidebarScrollView(frame: .zero)
+    self.scrollView = scrollView
+    self.outlineController = SidebarOutlineController(source: source, spaceID: spaceID, hostedIn: scrollView)
     super.init(frame: .zero)
     let info = source.space(spaceID)
     titleLabel.stringValue = info?.title ?? ""
@@ -96,7 +98,6 @@ public final class SpacePageView: NSView, NSTextFieldDelegate {
     optionsButton.setAccessibilityLabel("Space Options")
     optionsButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.spaceOptions)
     scrollView.autoresizingMask = []
-    scrollView.documentView = outlineController.outlineView
     addSubview(renameFill)
     addSubview(titleLabel)
     addSubview(editButton)
@@ -106,7 +107,18 @@ public final class SpacePageView: NSView, NSTextFieldDelegate {
     setAccessibilityRole(.group)
     setAccessibilityIdentifier(AXID.Sidebar.page)
     setAccessibilityLabel(titleLabel.stringValue)
+    outlineView.axProxyRows.setParent(self)
     setFlavor(info?.theme.flavor ?? .light)
+  }
+
+  /// The header, then the proxy outline (`sidebar.outline`, #269) in place of the scroll view that holds the real
+  /// outline: `NSOutlineView` does not publish its rows out of process.
+  public override func accessibilityChildren() -> [Any]? {
+    let children = (super.accessibilityChildren() ?? []).filter { child in
+      let view = (child as? NSView) ?? (child as? NSCell)?.controlView
+      return !(view?.isDescendant(of: scrollView) ?? false)
+    }
+    return scrollView.isHidden ? children : children + [outlineView.axProxyRows.element]
   }
 
   /// Applies the Space's current title and flavor after a Space change; unchanged fields cost nothing. An open title

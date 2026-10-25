@@ -845,3 +845,25 @@ nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests \
 `Check UI test sources` on `app/ArktShell/UITests`: `UI test sources OK`.
 
 Known issues used: #269 (outline rows), #26 (swipe phase).
+
+## #269: Sidebar outline rows out of process
+
+### What was done
+
+- Root cause: `NSOutlineView` (like `NSTableView`) answers `AXChildren` / `AXRows` out of process from its own
+  internals. The overrides that returned the realized row views answered in-process callers only, so on the
+  macos-26 runner XCUITest saw an `Outline` with no children. A diagnostic run on the runner showed the command bar
+  table (same override pattern) with no rows either.
+- The Space page lists a proxy outline (`sidebar.outline`, `AXProxyRows`, shared with U11) in place of the scroll
+  view: one proxy row per displayed row, read from the model on every query (identifier, label, `Closing` value,
+  disclosure level, expanded state, selection from the row state, VoiceOver actions, the realized cell as child).
+- `waitForOutlineRows` is a plain `Waits.until`; the #269 `XCTExpectFailure` wrapper is removed.
+
+### Verification
+
+- CI run 40206251471 (`0da8044`, macos-26, Xcode 26.6): UI tests 22 passed, 0 failed, among them
+  `LaunchTests.test_E_seededLaunchShowsImportedSpaces` and `LoopbackPageTests.test_E_loopbackPageLoadsInTheEngine`,
+  with every row wait plain.
+- One expected failure, scoped to one assertion: the order check of `test_KB001_BH100_cmdTOpensURLInNewTodayTab`.
+  Cmd-T appends to Today; the plan above expects the top and the spec leaves it open (BH-079, CF-27). Tracked in
+  #293.
