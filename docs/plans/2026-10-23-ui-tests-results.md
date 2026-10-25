@@ -799,11 +799,22 @@ Base: `origin/main` at `46f3729`, branch `chore/177-space-switching`. Same machi
   The test is now `XCTSkip("GS-001: XCUITest scroll has no gesture phases; manual check in #26")`.
 - `UITests/parity-deferred.txt` (new): GS-001 and BH-040, both manual in #26. No Debug-only scripted swipe path.
   `SpacePagerView.swift` was not edited.
-- Deviation: `test_BH036_switchingBackRestoresLastActiveTab` skips with `#269` when the Today row is not in the
-  accessibility tree, instead of `waitForOutlineRows`. On this machine the expected-failure path returned and then
-  left the app's event loop unmonitorable (the test still "passed" after 193 s, and after 435 s on a repeat). The
-  skip finishes in the row timeout. The restore assertion itself did not run here; it runs when the row is exposed.
+- Deviation: `test_BH036_switchingBackRestoresLastActiveTab` skips with `#269` while no outline row is in the
+  accessibility tree, instead of `waitForOutlineRows`. The skip happened on this macOS 27 machine too: the Today row
+  was not exposed (#269), and `waitForOutlineRows`'s expected-failure path returned and then left the app's event loop
+  unmonitorable (the test still "passed" after 193 s, and after 435 s on a repeat). The skip finishes in the row
+  timeout. If outline rows are exposed but the chosen row is missing, the test fails instead of skipping. The restore
+  assertion itself did not run here; it runs unchanged once #269 exposes the rows.
 - Cmd-Opt arrows also check that a further arrow at either end stays put. Wrap is #98 and is not asserted.
+- Keys that must change nothing (Ctrl-9 with two Spaces, a further arrow at either end) are each followed by a key
+  that does switch (Cmd-Opt-Right after Ctrl-9; the opposite arrow after an end arrow), and the test waits for that
+  switch before asserting. Menu key equivalents run in order, every switch goes through `SpacePagerView.go(to:)`
+  (which stops a running settle), and the arrows count from the target of a running switch, so a late switch from the
+  no-op key cannot land after the check. No fixed waits.
+- Precondition, not handled by the harness: Ctrl-1 and Ctrl-2 must not be bound to Mission Control's "Switch to
+  Desktop 1" / "Switch to Desktop 2" (System Settings > Keyboard > Keyboard Shortcuts > Mission Control) on the Mac
+  running the tests; where they are, the system takes the key and the Ctrl-N waits time out. The tests do not change
+  OS settings.
 
 ### Tests
 
@@ -814,6 +825,9 @@ Base: `origin/main` at `46f3729`, branch `chore/177-space-switching`. Same machi
 | `test_BH035_spaceDotClickSelectsSpace` | BH-035 | passed (11.1 s) |
 | `test_BH036_switchingBackRestoresLastActiveTab` | BH-036 | skipped, #269 (17.1 s) |
 | `test_GS001_twoFingerSwipeMovesSpace` | GS-001, BH-040 | skipped, #26 (0.2 s) |
+
+These results are from the run before the sync points and the narrower BH-036 skip were added; that revision has not
+been rerun on a Mac yet.
 
 ### Verification
 

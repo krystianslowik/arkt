@@ -2,8 +2,18 @@ import XCTest
 
 /// Space switching by Ctrl-1..9, Cmd-Opt arrows and Space dots, plus the two-finger swipe probe (plan U12).
 ///
-/// Outline rows are not in the out-of-process accessibility tree (#269). The last-active tab check skips in that
-/// case; the Space dots and `sidebar.page` do not need the rows.
+/// Outline rows are not in the out-of-process accessibility tree (#269). The last-active tab check skips while no
+/// outline row is exposed; the Space dots and `sidebar.page` do not need the rows.
+///
+/// Precondition (not set by the harness): the Mac running these tests must not bind Ctrl-1 or Ctrl-2 to Mission
+/// Control's "Switch to Desktop 1" / "Switch to Desktop 2" (System Settings > Keyboard > Keyboard Shortcuts > Mission
+/// Control). Where they are on, the system takes the key before the app sees it and the Ctrl-N waits time out. The
+/// tests do not change OS settings.
+///
+/// A key that must change nothing is followed by a key that does change the Space, and the test waits for that
+/// change before checking. Menu key equivalents run in order, every switch goes through `SpacePagerView.go(to:)`
+/// (which stops a running settle), and the arrows count from the Space a running switch heads to; so once the
+/// follow-up's Space is selected, the no-op key has been handled and no switch it might have started is pending.
 final class SpaceSwitchTests: ArktUITestCase {
   /// Seeded fixture (`StorableSidebar-synthetic.json`): Alpha, then Beta.
   private let firstSpaceTitle = "Alpha"
@@ -32,12 +42,15 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitForSelected(spacePage(app, title: firstSpaceTitle)))
     XCTAssertFalse(second.isSelected)
 
-    // Two Spaces: Ctrl-9 is out of range and changes nothing.
+    // Two Spaces: Ctrl-9 is out of range and changes nothing. Sync point: Cmd-Opt-Right, which from Alpha (the
+    // Space Ctrl-9 must leave current) lands on Beta.
     typeKey("9", modifiers: .control, in: app)
-    XCTAssertTrue(first.isSelected)
-    XCTAssertFalse(second.isSelected)
-    XCTAssertTrue(spacePage(app, title: firstSpaceTitle).isSelected)
-    XCTAssertEqual(Shell.spaceDots(app).count, 2)
+    typeKey(.rightArrow, modifiers: [.command, .option], in: app)
+    XCTAssertTrue(waitForSelected(second))
+    XCTAssertTrue(waitForSelected(spacePage(app, title: secondSpaceTitle)))
+    XCTAssertFalse(first.isSelected)
+    XCTAssertFalse(spacePage(app, title: firstSpaceTitle).isSelected)
+    XCTAssertEqual(Shell.spaceDots(app).count, ArcFixture.expected.spaces)
   }
 
   /// Wrap at the ends is #98 and is not asserted. A further arrow at either end stays put.
@@ -49,19 +62,24 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitForSelected(spaceDot(app, index: 1)))
     XCTAssertTrue(waitForSelected(spacePage(app, title: secondSpaceTitle)))
 
+    // At the last Space a further Right stays put. Sync point: one Left, which lands on Alpha. The arrows count from
+    // the target, so a Right that pushed the target past Beta would leave Beta current here.
     typeKey(.rightArrow, modifiers: [.command, .option], in: app)
-    XCTAssertTrue(spaceDot(app, index: 1).isSelected)
-    XCTAssertFalse(spaceDot(app, index: 0).isSelected)
-    XCTAssertTrue(spacePage(app, title: secondSpaceTitle).isSelected)
-
     typeKey(.leftArrow, modifiers: [.command, .option], in: app)
     XCTAssertTrue(waitForSelected(spaceDot(app, index: 0)))
     XCTAssertTrue(waitForSelected(spacePage(app, title: firstSpaceTitle)))
-
-    typeKey(.leftArrow, modifiers: [.command, .option], in: app)
-    XCTAssertTrue(spaceDot(app, index: 0).isSelected)
     XCTAssertFalse(spaceDot(app, index: 1).isSelected)
-    XCTAssertTrue(spacePage(app, title: firstSpaceTitle).isSelected)
+    XCTAssertFalse(spacePage(app, title: secondSpaceTitle).isSelected)
+
+    // At the first Space a further Left stays put. Sync point: one Right, which lands on Beta. A Left that pushed the
+    // target below Alpha would leave Alpha current here.
+    typeKey(.leftArrow, modifiers: [.command, .option], in: app)
+    typeKey(.rightArrow, modifiers: [.command, .option], in: app)
+    XCTAssertTrue(waitForSelected(spaceDot(app, index: 1)))
+    XCTAssertTrue(waitForSelected(spacePage(app, title: secondSpaceTitle)))
+    XCTAssertFalse(spaceDot(app, index: 0).isSelected)
+    XCTAssertFalse(spacePage(app, title: firstSpaceTitle).isSelected)
+    XCTAssertEqual(Shell.spaceDots(app).count, ArcFixture.expected.spaces)
   }
 
   func test_BH035_spaceDotClickSelectsSpace() async throws {
@@ -81,9 +99,14 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitForSelected(spacePage(app, title: firstSpaceTitle)))
 
     let row = Shell.todayRow(app, label: chosenTabTitle)
-    // Missing rows are #269. An expected failure on this wait left the app's event loop unmonitorable, so skip.
-    guard rowAppears(row) else {
-      throw XCTSkip("#269: outline rows are not in the out-of-process accessibility tree")
+    // Not `waitForOutlineRows`: on the U12 machine (macOS 27) its expected-failure path returned and then left the
+    // app's event loop unmonitorable (results, U12). Skip only while no outline row is exposed at all (#269); once
+    // rows are exposed this test runs unchanged, and a missing chosen row fails.
+    if !rowAppears(row) {
+      guard app.outlineRows.count > 0 else {
+        throw XCTSkip("#269: sidebar outline rows are not exposed out-of-process; BH-036 needs the Today row")
+      }
+      XCTAssertTrue(waitFor(row))
     }
     XCTAssertFalse(row.isSelected, "the chosen row must not already be the restored tab")
     row.click()
@@ -115,8 +138,8 @@ final class SpaceSwitchTests: ArktUITestCase {
     return app
   }
 
-  /// True when `row` appears before the scaled default timeout. Does not record a failure: a missing row is #269,
-  /// and the caller skips.
+  /// True when `row` appears before the scaled default timeout. Does not record a failure: the caller tells #269 (no
+  /// outline row exposed) from a missing row.
   private func rowAppears(_ row: XCUIElement) -> Bool {
     let predicate = NSPredicate { _, _ in MainActor.assumeIsolated { row.exists } }
     let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
