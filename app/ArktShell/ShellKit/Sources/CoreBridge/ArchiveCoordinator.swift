@@ -24,7 +24,11 @@ import Synchronization
 ///
 /// `flush()` is for termination: it stops a retry wait, waits for a write in flight, then sends the outbox in order
 /// until it is empty or an add fails, bounded by `flushTimeout`. A remove that fails during the flush is dropped (a
-/// harmless duplicate in the archive), so it cannot hold back an add queued behind it at quit.
+/// harmless duplicate in the archive), so it cannot hold back an add queued behind it at quit. `flushBlocking()` sends
+/// the same outbox for a quit whose main thread never runs again (SIGTERM, #298).
+///
+/// Every store call runs off the main actor and starts only after the previous one returned, so the store sees the
+/// operations in outbox order, also when `flushBlocking` sends while a write is in flight.
 ///
 /// Crash and quit durability (#213): `archive` and `removeSpace` enqueue their entries into the outbox before
 /// `source.onDidChange` fires, and `flushPendingAdds()` gates `SidebarAutosaver.beforeSave` so the on-disk sidebar
@@ -80,6 +84,8 @@ public final class ArchiveCoordinator {
   /// Ids this coordinator may have left in the store: sent in an add, or named by a remove that failed. A
   /// successful remove takes them out. Restoring a pending entry whose id is not here needs no store remove.
   private var mayBeStored: Set<NodeID> = []
+  /// The last store call submitted; the next one waits for it.
+  private var storeCall: Task<Bool, Never>?
   /// The one write loop (or flush attempt) in progress.
   private var writer: Task<Void, Never>?
   private var consecutiveFailures = 0
@@ -208,6 +214,56 @@ public final class ArchiveCoordinator {
     return written && outbox.isEmpty
   }
 
+  /// `flush()` for a quit whose main thread never runs a main-actor job again (#298: Chromium's SIGTERM path blocks the
+  /// main thread right after the quit-start seam, then exits). Sends a snapshot of the whole outbox in order (leading
+  /// adds as one batch; a failed remove is dropped, a failed add stops) after the store call in flight, and blocks the
+  /// calling thread until it is done or `flushTimeout` passes. Returns true when every add was written.
+  ///
+  /// The outbox is cleared only when no writer exists; otherwise the writer sends the same operations again once the
+  /// main actor runs (a quit that was cancelled), which leaves the store as it is: each id ends as its last operation.
+  @discardableResult
+  public func flushBlocking() -> Bool {
+    guard !outbox.isEmpty else { return true }
+    let operations = outbox
+    for operation in operations {
+      switch operation {
+      case .add(let items): mayBeStored.formUnion(items.map(\.id))
+      case .remove(let ids): mayBeStored.formUnion(ids)  // it may fail: a later restore then removes again
+      }
+    }
+    let call = submit { store in await Self.send(operations, to: store) }
+    let sent = BlockingFlush.run(timeout: flushTimeout) { await call.value } ?? false
+    if sent, writer == nil {
+      outbox.removeAll()
+      onPendingItemsChange?()
+    }
+    return sent
+  }
+
+  /// Sends `operations` in order for `flushBlocking`. Returns false at the first add that fails.
+  nonisolated private static func send(_ operations: [Operation], to store: any ArchiveStoring) async -> Bool {
+    var index = operations.startIndex
+    while index < operations.endIndex {
+      if case .remove(let ids) = operations[index] {
+        try? await store.remove(ids)  // dropped on failure, as in `flush`
+        index += 1
+        continue
+      }
+      var batch: [ArchivedItem] = []
+      while index < operations.endIndex, case .add(let items) = operations[index] {
+        batch += items
+        index += 1
+      }
+      guard !batch.isEmpty else { continue }
+      do {
+        _ = try await store.add(batch, onConflict: .replace)
+      } catch {
+        return false
+      }
+    }
+    return true
+  }
+
   // MARK: - Writer
 
   private func startWriter(delayFirst: Bool) {
@@ -258,8 +314,7 @@ public final class ArchiveCoordinator {
     let leading = outbox.prefix { if case .add = $0 { true } else { false } }.count
     let batch = pendingItems(inFirst: leading)
     mayBeStored.formUnion(batch.map(\.id))
-    let store = self.store
-    let written = await Task { () -> Bool in
+    let written = await submit { store in
       do {
         _ = try await store.add(batch, onConflict: .replace)
         return true
@@ -285,8 +340,7 @@ public final class ArchiveCoordinator {
   /// `.replace` add overwrites the entry); the rest stay at the head for a retry after a backoff, or are dropped too
   /// when `droppingOnFailure`.
   private func sendRemove(_ ids: [NodeID], droppingOnFailure: Bool) async -> Bool {
-    let store = self.store
-    let removed = await Task { () -> Bool in
+    let removed = await submit { store in
       do {
         try await store.remove(ids)
         return true
@@ -309,6 +363,18 @@ public final class ArchiveCoordinator {
     }
     outbox.removeFirst()
     return true
+  }
+
+  /// Starts a store call off the main actor, after the previous one returned. Detached: it must run while the main
+  /// thread is blocked in `flushBlocking`.
+  private func submit(_ operation: @escaping @Sendable (any ArchiveStoring) async -> Bool) -> Task<Bool, Never> {
+    let (store, previous) = (self.store, storeCall)
+    let call = Task.detached { () -> Bool in
+      _ = await previous?.value
+      return await operation(store)
+    }
+    storeCall = call
+    return call
   }
 
   private func recordFailure() -> Bool {

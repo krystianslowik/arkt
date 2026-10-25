@@ -12,6 +12,9 @@ struct ArchiveCoordinatorTests {
   private static let url = URL(string: "https://a.example")!
   /// Distinct from the first backoff (1 s), so the tests can tell the two sleeps apart.
   private static let flushTimeout: Duration = .milliseconds(700)
+  /// For blocking-flush tests that expect the write to land: a wall-clock bound, so it must stay far above how long a
+  /// busy test run can keep the global executor from starting the store call.
+  private static let blockingFlushTimeout: Duration = .seconds(10)
 
   /// A source with one Space ("Work") holding a pinned tab and Today tabs `today` (top first), a store, a sleeper
   /// and the coordinator over them, plus every change and `onDidChange` the source reports.
@@ -29,7 +32,7 @@ struct ArchiveCoordinatorTests {
     var didChangeCount = 0
     private var observation: SidebarObservation?
 
-    init(todayTabs: Int = 2, withSpace: Bool = true) throws {
+    init(todayTabs: Int = 2, withSpace: Bool = true, flushTimeout: Duration = ArchiveCoordinatorTests.flushTimeout) throws {
       let source = ModelSidebarSource(now: { ArchiveCoordinatorTests.now })
       self.source = source
       let clock = TestClock(ArchiveCoordinatorTests.now)
@@ -46,7 +49,7 @@ struct ArchiveCoordinatorTests {
       }
       coordinator = ArchiveCoordinator(
         source: source, store: store, now: { clock.now },
-        flushTimeout: ArchiveCoordinatorTests.flushTimeout, sleep: sleeper.sleep)
+        flushTimeout: flushTimeout, sleep: sleeper.sleep)
       observation = source.observe { [unowned self] in self.changes.append($0) }
       source.onDidChange = { [unowned self] _ in self.didChangeCount += 1 }
     }
@@ -268,6 +271,88 @@ struct ArchiveCoordinatorTests {
     #expect(!harness.coordinator.hasPendingWrites)
     #expect(await harness.store.stored[other.id] == other)
     #expect(await harness.store.removeCalls == [[item.id], [item.id]])
+  }
+
+  // MARK: - Blocking flush (#298: SIGTERM quit start, the main thread blocks right after)
+
+  @Test func flushBlockingWritesTheOutboxWhileTheMainActorWaits() async throws {
+    let harness = try Harness(todayTabs: 2, flushTimeout: Self.blockingFlushTimeout)
+    let items = harness.coordinator.archive([harness.today[0], harness.today[1]], reason: .manual)
+
+    #expect(harness.coordinator.flushBlocking())  // synchronous: the writer task never got the main actor
+    // The first await frees the main actor, so the writer may already have sent its (identical) add; the first call
+    // is still the blocking flush's, since the writer could not start before it returned.
+    let added = await harness.store.addCalls
+    #expect(added.first == .init(ids: items.map(\.id), policy: .replace))
+    #expect(added.allSatisfy { $0 == .init(ids: items.map(\.id), policy: .replace) })
+    #expect(await harness.store.stored.count == 2)
+
+    await harness.drain()  // the writer sends the same add again: a harmless `.replace`
+    #expect(Set(await harness.store.stored.values) == Set(items))
+  }
+
+  @Test func flushBlockingWithNothingPendingReturnsTrue() throws {
+    let harness = try Harness()
+    #expect(harness.coordinator.flushBlocking())
+  }
+
+  @Test func flushBlockingWithAFailingStoreReturnsFalseAndKeepsTheItemPending() async throws {
+    let harness = try Harness()
+    await harness.store.setFailsAdds(true)
+    let items = harness.coordinator.archive([harness.today[0]], reason: .manual)
+
+    #expect(harness.coordinator.flushBlocking() == false)
+    #expect(harness.coordinator.pendingItems == items)
+    #expect(harness.coordinator.hasPendingWrites)
+  }
+
+  @Test func flushBlockingGivesUpAtItsTimeoutWhileTheStoreHangs() async throws {
+    let harness = try Harness()
+    await harness.store.holdAdds()
+    let items = harness.coordinator.archive([harness.today[0]], reason: .manual)
+
+    let start = ContinuousClock.now
+    #expect(harness.coordinator.flushBlocking() == false)
+    #expect(ContinuousClock.now - start < .seconds(3))  // flushTimeout (700 ms), not the store's hang
+    #expect(harness.coordinator.pendingItems == items)
+
+    await harness.store.releaseAdds()
+    await harness.drain()
+    #expect(await harness.store.stored[items[0].id] == items[0])
+  }
+
+  @Test func flushBlockingSendsAfterTheAddInFlight() async throws {
+    let harness = try Harness(todayTabs: 2, flushTimeout: Self.blockingFlushTimeout)
+    await harness.store.holdAdds()
+    let first = harness.coordinator.archive([harness.today[0]], reason: .manual)
+    await eventually { await harness.store.addCalls.count == 1 }  // in flight, held by the store
+    let second = harness.coordinator.archive([harness.today[1]], reason: .auto)
+    let store = harness.store
+    Task.detached {
+      try? await Task.sleep(for: .milliseconds(100))
+      await store.releaseAdds()
+    }
+
+    #expect(harness.coordinator.flushBlocking())
+    // Once the main actor runs again, the writer may send `second` once more after these two.
+    #expect(Array(await harness.store.calls.prefix(2)) == [.add(first.map(\.id)), .add((first + second).map(\.id))])
+    #expect(Set(await harness.store.stored.values) == Set(first + second))
+
+    await harness.drain()
+    #expect(Set(await harness.store.stored.values) == Set(first + second))
+  }
+
+  @Test func flushBlockingDropsAFailingRemoveSoItCannotHoldBackAnAdd() async throws {
+    let harness = try Harness(flushTimeout: Self.blockingFlushTimeout)
+    let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
+    await harness.drain()
+    await harness.store.setFailsRemoves(true)
+    _ = try harness.coordinator.restore(item, fallbackSpace: nil)
+    await eventually { harness.sleeper.parkedDurations == [.seconds(1)] }
+    let other = try #require(harness.coordinator.archive([harness.today[1]], reason: .manual).first)
+
+    #expect(harness.coordinator.flushBlocking())
+    #expect(await harness.store.stored[other.id] == other)
   }
 
   // MARK: - Restore

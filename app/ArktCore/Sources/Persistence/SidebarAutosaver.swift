@@ -23,7 +23,11 @@ public typealias AutosaveSleep = @Sendable (Duration) async throws -> Void
 ///
 /// `flush()` is for app termination: it waits for a write already in flight (never cancels it), then makes exactly one
 /// attempt with the newest value. It is bounded by `flushTimeout` (default 1 s): past it, `flush` returns false and the
-/// write continues in the background, so a stuck disk can delay quitting by at most that long.
+/// write continues in the background, so a stuck disk can delay quitting by at most that long. `flushBlocking()` is the
+/// same write for a quit whose main thread never runs again (SIGTERM, #298).
+///
+/// Every store call runs off the main actor, and each one starts only after the previous one returned, so the stored
+/// sidebar is always the last one submitted, also when `flushBlocking` submits while a write is in flight.
 @MainActor
 public final class SidebarAutosaver {
   nonisolated public static let defaultDelay: Duration = .milliseconds(500)
@@ -46,6 +50,10 @@ public final class SidebarAutosaver {
   private var timer: Task<Void, Never>?
   /// The one write in progress: the debounced write loop or a flush attempt.
   private var writer: Task<Void, Never>?
+  /// The last store call submitted. The next one waits for it, so saves reach the store in submission order.
+  private var storeCall: Task<Result<SaveOutcome, any Error>, Never>?
+  /// Counts submitted store calls; a failed save is not retried when a newer one was submitted after it.
+  private var submissions = 0
   /// True while the write loop sleeps between retries; only then may `flush` cancel it.
   private var isBackingOff = false
   /// Set by `flush`: the write loop stops after its current attempt instead of backing off.
@@ -108,6 +116,37 @@ public final class SidebarAutosaver {
     await FlushRace.run(timeout: flushTimeout, sleep: sleep, attempt: Task { await self.flushNow() })
   }
 
+  /// `flush()` for a quit whose main thread never runs a main-actor job again (#298: Chromium's SIGTERM path blocks the
+  /// main thread right after the quit-start seam, then exits). Submits the newest pending sidebar after the store call
+  /// in flight, if any, and blocks the calling thread until it returns or `flushTimeout` passes. Returns true when
+  /// nothing is left unsaved; false when the save failed or timed out (the sidebar stays pending; a timed-out save may
+  /// still land, and any later save is submitted after it). Does not run `beforeSave`: the caller flushes what must
+  /// reach the disk first (#213: `ArchiveCoordinator.flushBlocking()`).
+  @discardableResult
+  public func flushBlocking() -> Bool {
+    timer?.cancel()
+    timer = nil
+    defer { if pending != nil, timer == nil, writer == nil { armTimer() } }  // a cancelled quit keeps saving
+    guard let sidebar = pending else {
+      guard let inFlight = storeCall else { return true }
+      return BlockingFlush.run(timeout: flushTimeout) { await inFlight.value.isSuccess } ?? false
+    }
+    let call = submitSave(sidebar, at: now()).call
+    switch BlockingFlush.run(timeout: flushTimeout, { await call.value }) {
+    case .success?:
+      pending = nil
+      lastError = nil
+      consecutiveFailures = 0
+      return true
+    case .failure(let error)?:
+      lastError = error
+      consecutiveFailures += 1
+      return false
+    case nil:
+      return false
+    }
+  }
+
   private func flushNow() async -> Bool {
     timer?.cancel()
     timer = nil
@@ -151,17 +190,40 @@ public final class SidebarAutosaver {
     }
     guard let sidebar = pending else { return true }
     pending = nil
-    do {
-      _ = try await store.save(sidebar, at: now())
+    let (call, number) = submitSave(sidebar, at: now())
+    let result = await call.value
+    // `flushBlocking` submitted a newer value after this one: its outcome is the one that counts.
+    guard number == submissions else { return true }
+    switch result {
+    case .success:
       lastError = nil
       consecutiveFailures = 0
       return true
-    } catch {
+    case .failure(let error):
       if pending == nil { pending = sidebar }  // keep the newest value, never an older one
       lastError = error
       consecutiveFailures += 1
       return false
     }
+  }
+
+  /// Starts a store call for `sidebar` off the main actor, after the previous one returned. Detached: it must run while
+  /// the main thread is blocked in `flushBlocking`.
+  private func submitSave(_ sidebar: Sidebar, at date: Date)
+    -> (call: Task<Result<SaveOutcome, any Error>, Never>, number: Int)
+  {
+    let (store, previous) = (self.store, storeCall)
+    let call = Task.detached { () -> Result<SaveOutcome, any Error> in
+      _ = await previous?.value
+      do {
+        return .success(try await store.save(sidebar, at: date))
+      } catch {
+        return .failure(error)
+      }
+    }
+    storeCall = call
+    submissions += 1
+    return (call, submissions)
   }
 
   private func writeOnce() async {
@@ -189,5 +251,11 @@ public final class SidebarAutosaver {
   private func finishWrite() {
     writer = nil
     if pending != nil, timer == nil, !stopRequested { armTimer() }
+  }
+}
+
+extension Result {
+  fileprivate var isSuccess: Bool {
+    if case .success = self { true } else { false }
   }
 }

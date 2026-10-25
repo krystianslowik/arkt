@@ -234,6 +234,111 @@ struct SidebarAutosaverTests {
     #expect(store.started == 2)  // the cancelled loop did not attempt again
   }
 
+  // MARK: - Blocking flush (#298: SIGTERM quit start, the main thread blocks right after)
+
+  func makeBlockingAutosaver(flushTimeout: Duration = .seconds(5)) -> SidebarAutosaver {
+    SidebarAutosaver(
+      store: store, delay: .milliseconds(500), retryDelays: [.seconds(1), .seconds(2)], flushTimeout: flushTimeout,
+      now: { Date(timeIntervalSinceReferenceDate: 0) }, sleep: sleeper.sleep)
+  }
+
+  @Test func flushBlockingWritesThePendingSidebarWhileTheMainActorWaits() async {
+    let saver = makeBlockingAutosaver()
+    let a = TestSidebars.make("a")
+    saver.scheduleSave(a)
+    await waitUntil { sleeper.parkedCount == 1 }
+    #expect(saver.flushBlocking())  // synchronous: the store ran without the main actor
+    #expect(store.saved == [a])
+    #expect(!saver.needsFlush)
+    await waitUntil { sleeper.parkedCount == 0 }  // the debounce timer is cancelled
+    for _ in 0..<100 { await Task.yield() }
+    #expect(store.saved == [a])
+  }
+
+  @Test func flushBlockingWithNothingPendingWritesNothing() {
+    let saver = makeBlockingAutosaver()
+    #expect(saver.flushBlocking())
+    #expect(store.started == 0)
+  }
+
+  @Test func flushBlockingReportsAFailedAttemptAndKeepsTheSidebarPending() {
+    let saver = makeBlockingAutosaver()
+    store.failNext(1)
+    saver.scheduleSave(TestSidebars.make("a"))
+    #expect(saver.flushBlocking() == false)
+    #expect(saver.hasPendingChanges)
+    #expect(saver.lastError != nil)
+  }
+
+  @Test func flushBlockingGivesUpAtItsTimeoutAndTheWriteLandsLater() async {
+    let saver = makeBlockingAutosaver(flushTimeout: .milliseconds(100))
+    store.block()
+    let a = TestSidebars.make("a")
+    saver.scheduleSave(a)
+    let start = ContinuousClock.now
+    #expect(saver.flushBlocking() == false)
+    #expect(ContinuousClock.now - start < .seconds(2))  // bounded: never holds the quit on a stuck disk
+    #expect(saver.hasPendingChanges)
+    store.unblock()
+    await waitUntil { store.saved == [a] }
+  }
+
+  @Test func flushBlockingWritesAfterTheInFlightWriteSoTheNewestLandsLast() async {
+    let saver = makeBlockingAutosaver()
+    store.block()
+    let (a, b) = (TestSidebars.make("a"), TestSidebars.make("b"))
+    saver.scheduleSave(a)
+    await waitUntil { sleeper.parkedCount == 1 }
+    sleeper.resumeNext()
+    await waitUntil { store.started == 1 }  // a is stuck inside the store
+    saver.scheduleSave(b)
+    let held = store
+    Task.detached {
+      try? await Task.sleep(for: .milliseconds(100))
+      held.unblock()
+    }
+    #expect(saver.flushBlocking())
+    #expect(store.saved == [a, b])
+    #expect(store.maxInFlight == 1)
+    await waitUntil { !saver.needsFlush }  // the in-flight write's loop finishes once the main actor runs again
+    for _ in 0..<100 { await Task.yield() }
+    #expect(store.saved == [a, b])
+  }
+
+  @Test func anOlderWriteThatFailsDuringTheBlockingFlushNeverComesBack() async {
+    let saver = makeBlockingAutosaver()
+    store.block()
+    let (a, b) = (TestSidebars.make("a"), TestSidebars.make("b"))
+    saver.scheduleSave(a)
+    await waitUntil { sleeper.parkedCount == 1 }
+    sleeper.resumeNext()
+    await waitUntil { store.started == 1 }
+    saver.scheduleSave(b)
+    let held = store
+    Task.detached {
+      try? await Task.sleep(for: .milliseconds(100))
+      held.unblockFailing()  // a fails; b, submitted after it, succeeds
+    }
+    #expect(saver.flushBlocking())
+    #expect(store.saved == [b])
+    await waitUntil { !saver.needsFlush }
+    #expect(!saver.hasPendingChanges)  // the failed older value was not put back over the newer one
+    for _ in 0..<100 { await Task.yield() }
+    #expect(sleeper.parkedCount == 0)
+    #expect(store.saved == [b])
+  }
+
+  @Test func flushBlockingWritesThroughTheRealStoreOffTheMainThread() async throws {
+    let database = try ArktDatabase.inMemory()
+    let realStore = SidebarStore(database: database)
+    // A wall-clock bound: far above how long a busy test run can keep the global executor from starting the save.
+    let saver = SidebarAutosaver(store: realStore, flushTimeout: .seconds(10), sleep: sleeper.sleep)
+    let sidebar = TestSidebars.make("real")
+    saver.scheduleSave(sidebar)
+    #expect(saver.flushBlocking())  // SidebarStore.save traps if it runs on the main thread
+    #expect(try await realStore.load() == sidebar)
+  }
+
   /// #213: a crash between the archive write and the sidebar save never loses archived items in either order:
   /// (1) when the archive write fails or has not finished yet, `beforeSave` prevents the post-archive sidebar from
   ///     being saved, so a crash leaves the items in `SidebarStore`;

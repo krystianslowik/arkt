@@ -16,7 +16,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-6 | `ChromiumEngineKit` over the facade | DONE | `ChromiumEngine: EngineClient, EngineExtensions` and the typed `ArktShellEmbedder` in `ChromiumEngineKit`; contract rules 1-16 pass against a scripted facade with every driver (24 checks x 2 event orders, none not applicable); ShellKit 509 + 28; see "W3-6" below |
 | W3-7 | The shell as engine host, composition root (Swift lane) | DONE | A, B: `ShellEngineHost`, engine window on the first tab, `createTab(url:in:)`, commands, close button, per-window routing, close reasons, held closes, Extensions control, #241. C, D: `AppComposition` for both engines, `ShellWindowSet` with host-matched provider windows, quit seams, the W3-8 menu in both builds, reserved keys in `ShellWindow`; see "W3-7 C and D" and "W3-7 A and B" below |
 | W3-8 | Main menu inventory and owner decision | DONE (steps 1-3; step 4 after W3-9) | Arkt owns the menu; conditions: a hidden `IDC_BOOKMARKS_MENU` placeholder (without it the first window crashes, measured), no `IDC_FILE_MENU` / `IDC_TAB_MENU` tags, Quit `IDC_EXIT` + `terminate:`; reserved keys in `ShellWindow`; no engine change; see "W3-8" below |
-| W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | DONE except SIGTERM session end (#298, fails) and logout (maintainer check) | contract 16/16 in the app; smoke, startup and quit checks pass; 120 Hz gate holds (0 % over 8.6 ms); #9 holds; seven fixes, gaps #298-#301; see "W3-9" below |
+| W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | DONE except logout (maintainer check); SIGTERM session end fixed by #298 | contract 16/16 in the app; smoke, startup and quit checks pass; 120 Hz gate holds (0 % over 8.6 ms); #9 holds; seven fixes, gaps #298-#301; see "W3-9" below |
 | W3-10 | Infobars, or a recorded gap | DONE | native rows on the tab container for every confirm infobar (every confirm type on Mac, triggered from `chrome://infobar-internals`), `--no-sandbox` acceptance passes; tab sharing and sign-in QR (own Views) recorded in #122; no patch; see "W3-10" below |
 | W3-11 | Self-contained bundle with the release framework | TODO | before the engine bundle ships, strip or gate the test-only code W3-9 links into the Engine app: `EngineAPITestSupport` (`InMemoryEngine`, `EngineContract`), the contract runner and its loopback server (`--arkt-engine-contract` skips the shell session for any launch that passes it), next to the `ARKT_*` overrides (W3-7 C and D) |
 | W3-12 | Results, patch budget, issue updates, housekeeping | TODO | |
@@ -194,7 +194,7 @@ ARKT_CONTRACT exit 0
 |---|---|---|
 | Cmd-Q (after fix 5) | PASS | `quit started`, `engineWillBeginTerminating`, `app terminating`, `engineWillTerminate`, `termination flush succeeded true`, process exited; the stored snapshot (unchanged since launch: `saved_at` the same before the quit) then had the new row, every earlier row unchanged, the shown split's `lastActiveAt` stamped |
 | Quit Apple event (Dock Quit) | PASS | the same seam lines; the pending row stored |
-| `kill -TERM` (session end) | FAIL, #298 | `quit started`, `engineWillBeginTerminating`, then the process is gone: `chrome::SessionEnding()` ends with `TerminateCurrentProcessImmediately`, no `engineWillTerminate`; the pending row lost |
+| `kill -TERM` (session end) | FAIL, then PASS after #298 | before: `quit started`, `engineWillBeginTerminating`, then the process is gone: `chrome::SessionEnding()` ends with `TerminateCurrentProcessImmediately`, no `engineWillTerminate`; the pending row lost. After #298 (the shell writes at quit start while the main thread waits): `quit-start flush succeeded true` 8 ms after `engineWillBeginTerminating`, the process exits, the stored snapshot has the new row and `saved_at` is the quit time |
 | Logout | maintainer check | |
 
 ### Web identity (#9)
@@ -232,7 +232,7 @@ Gate (at most 1 % over 8.6 ms) holds: 0 %.
 Unexplained, recorded: in the startup-probe run the probe's page went on to `/p/StartupProbe-next` with a `LINK`
 transition (Chromium's history) while no input was sent to the app; not reproduced.
 
-Logout stays a maintainer check. SIGTERM is #298.
+Logout stays a maintainer check. SIGTERM is fixed by #298.
 
 ### Verification
 

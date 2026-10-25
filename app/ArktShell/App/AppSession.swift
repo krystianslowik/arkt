@@ -376,6 +376,14 @@ final class AppSession {
     return sidebar && archived
   }
 
+  /// `flush()` for a quit whose main thread never runs again (#298: Chromium's SIGTERM path blocks the main thread
+  /// right after the quit-start seam, then exits). Archive outbox first (#213), then the sidebar, each bounded by its
+  /// flush timeout while this thread waits; favicons are skipped (the engine fetches them again).
+  func flushBlocking() -> Bool {
+    let archived = archive.flushBlocking()
+    return archived && autosaver.flushBlocking()
+  }
+
   static let faviconFlushTimeout: Duration = .seconds(1)
 
   private static func wait(for task: Task<Void, Never>, atMost timeout: Duration) async {
