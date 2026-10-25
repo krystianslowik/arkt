@@ -60,14 +60,23 @@ public final class ShellWindow: NSWindow {
     let width = shown ? min(frame.width, offset.x + max(sidebarWidth, buttonsExtent)) : 0
     let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
     if container.frame != containerFrame { container.frame = containerFrame }
+    var unhid = false
     for (index, kind) in kinds.enumerated() {
       guard let button = standardWindowButton(kind) else { continue }
-      if button.isHidden == shown { button.isHidden = !shown }
+      if button.isHidden == shown {
+        button.isHidden = !shown
+        unhid = unhid || shown
+      }
       if button.alphaValue != alpha, shown { button.alphaValue = alpha }
       let x = offset.x + origin.x + CGFloat(index) * metrics.trafficLightSpacing
       let y = titlebar.bounds.height - offset.y - origin.y - button.frame.height   // titlebar view is not flipped
       let target = NSPoint(x: x, y: y)
       if button.frame.origin != target { button.setFrameOrigin(target) }
+    }
+    // Showing the buttons again makes AppKit put them back at its own titlebar positions in a later pass of a key
+    // window; place them once more after it.
+    if unhid {
+      DispatchQueue.main.async { [weak self] in self?.layoutTrafficLights(sidebarWidth: sidebarWidth) }
     }
   }
 
