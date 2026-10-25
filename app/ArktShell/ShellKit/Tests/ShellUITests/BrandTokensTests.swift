@@ -57,6 +57,69 @@ struct BrandTokensTests {
     #expect(ratio >= Contrast.minimumText)
   }
 
+  // MARK: - First-run text tokens (onboarding spec, section 5)
+
+  @Test(arguments: flavors)
+  func brandTextReadsOnBrandSurface(flavor: ThemeFlavor) {
+    let surface = BrandTokens.surfaceBrand.resolve(flavor)
+    for token in [BrandTokens.brandTextPrimary, BrandTokens.brandTextSecondary, BrandTokens.brandTextSecondaryContrast] {
+      #expect(Contrast.ratio(token.resolve(flavor), surface) >= Contrast.minimumText)
+    }
+  }
+
+  /// The spec's table: primary 15.06:1, secondary 5.62 / 8.06. The spec lists 10.1 / 12.9 for the contrast variant;
+  /// its hex values measure 9.99 / 12.58, still above AAA (7:1).
+  @Test func brandTextRatiosMatchTheSpec() {
+    func ratio(_ token: TokenPair, _ flavor: ThemeFlavor) -> Double {
+      Contrast.ratio(token.resolve(flavor), BrandTokens.surfaceBrand.resolve(flavor))
+    }
+    #expect(abs(ratio(BrandTokens.brandTextPrimary, .light) - 15.06) < 0.05)
+    #expect(abs(ratio(BrandTokens.brandTextPrimary, .dark) - 15.06) < 0.05)
+    #expect(abs(ratio(BrandTokens.brandTextSecondary, .light) - 5.62) < 0.05)
+    #expect(abs(ratio(BrandTokens.brandTextSecondary, .dark) - 8.06) < 0.05)
+    #expect(abs(ratio(BrandTokens.brandTextSecondaryContrast, .light) - 9.99) < 0.05)
+    #expect(abs(ratio(BrandTokens.brandTextSecondaryContrast, .dark) - 12.58) < 0.05)
+  }
+
+  /// Increase Contrast must raise every secondary level, never lower it.
+  @Test(arguments: flavors)
+  func contrastVariantsAreStronger(flavor: ThemeFlavor) {
+    let surface = BrandTokens.surfaceBrand.resolve(flavor)
+    #expect(Contrast.ratio(BrandTokens.brandTextSecondaryContrast.resolve(flavor), surface)
+            > Contrast.ratio(BrandTokens.brandTextSecondary.resolve(flavor), surface))
+    #expect(BrandTokens.brandHairlineContrast.resolve(flavor).alpha > BrandTokens.brandHairline.resolve(flavor).alpha)
+  }
+
+  /// `brandHairlineContrast` is the Increase Contrast edge of the glass button and the option pill: 3:1 against the
+  /// surface it is drawn on, after compositing.
+  @Test(arguments: flavors)
+  func contrastHairlineStandsOutFromBrandSurface(flavor: ThemeFlavor) {
+    let surface = BrandTokens.surfaceBrand.resolve(flavor)
+    let edge = BrandTokens.composite(BrandTokens.brandHairlineContrast.resolve(flavor), over: surface)
+    #expect(Contrast.ratio(edge, surface) >= Contrast.minimumNonText)
+  }
+
+  @Test func translucentBrandTokensUseThePalette() {
+    let p = BrandTokens.Palette.self
+    #expect(BrandTokens.brandTextPrimary == TokenPair(light: p.graphite, dark: p.porcelain))
+    #expect(BrandTokens.brandTextSecondary == TokenPair(light: .srgb(hex: 0x62655F), dark: .srgb(hex: 0xB6BAB3)))
+    #expect(BrandTokens.brandTextSecondaryContrast
+            == TokenPair(light: .srgb(hex: 0x3D403B), dark: .srgb(hex: 0xE3E6DF)))
+    #expect(BrandTokens.brandHairline == TokenPair(light: .srgb(hex: 0x202321, alpha: 0.12),
+                                                   dark: .srgb(hex: 0xFAF9F5, alpha: 0.12)))
+    #expect(BrandTokens.brandHairlineContrast == TokenPair(light: .srgb(hex: 0x202321, alpha: 0.50),
+                                                           dark: .srgb(hex: 0xFAF9F5, alpha: 0.50)))
+    #expect(BrandTokens.brandControlFill == TokenPair(light: .srgb(hex: 0x202321, alpha: 0.05),
+                                                      dark: .srgb(hex: 0xFAF9F5, alpha: 0.06)))
+    #expect(BrandTokens.brandControlFillPressed == TokenPair(light: .srgb(hex: 0x202321, alpha: 0.10),
+                                                             dark: .srgb(hex: 0xFAF9F5, alpha: 0.12)))
+  }
+
+  @Test func compositeIsSourceOver() {
+    let half = BrandTokens.composite(.srgb(hex: 0x000000, alpha: 0.5), over: .srgb(hex: 0xFFFFFF))
+    #expect(abs(half.red - 0.5) < 1e-9 && half.alpha == 1)
+  }
+
   // MARK: - UI component pairs: WCAG 2.x non-text contrast, 3:1
 
   @Test(arguments: flavors)

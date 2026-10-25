@@ -30,8 +30,23 @@ struct SpringMathTests {
   }
 
   @Test func presetNamesMatchArcTagOrder() {
-    #expect(SpringPreset.allCases.map(\.rawValue) ==
+    #expect(SpringPreset.arcPresets.map(\.rawValue) ==
             ["firm", "firmSlow", "firmExtraSlow", "firmFast", "springy", "springyFast", "springyExtraFast"])
+  }
+
+  /// Arkt's own presets follow Arc's, so Arc's tag order stays a prefix of `allCases`.
+  @Test func arktPresetsFollowArcs() {
+    #expect(SpringPreset.allCases == SpringPreset.arcPresets + [.gather])
+  }
+
+  /// `gather` (onboarding spec, section 7.3): particle formations, damping 0.88 and response 0.8 s.
+  @Test func gatherIsTheFormationSpring() {
+    let p = SpringPreset.gather.parameters
+    #expect(p.dampingRatio == 0.88)
+    #expect(p.response == 0.80)
+    #expect(p.mass == 1)
+    #expect(abs(p.stiffness - 61.69) < 0.01, "stiffness \(p.stiffness)")
+    #expect(abs(p.damping - 13.82) < 0.01, "damping \(p.damping)")
   }
 
   /// Preset table plus the CASpringAnimation values the conversion derives (mass 1).
@@ -57,7 +72,7 @@ struct SpringMathTests {
     #expect(abs(p.damping - expected.damping) < 0.01, "\(expected.0) damping \(p.damping)")
   }
 
-  @Test func arcTableCoversEveryPreset() {
-    #expect(Self.arcPresets.map(\.0) == SpringPreset.allCases)
+  @Test func arcTableCoversEveryArcPreset() {
+    #expect(Self.arcPresets.map(\.0) == SpringPreset.arcPresets)
   }
 }
