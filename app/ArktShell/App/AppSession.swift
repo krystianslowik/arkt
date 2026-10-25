@@ -7,8 +7,8 @@ import ShellUI
 import SidebarModel
 import os
 
-/// Composition root: the one place that owns the database, the autosaver, backups and the window. Only the app
-/// target imports `Persistence`.
+/// The open data: the database, the autosaver, backups and the browser windows. `AppComposition` builds it once the
+/// data folder loaded. Only the app target imports `Persistence`.
 @MainActor
 final class AppSession {
   static let log = Logger(subsystem: "dev.arkt.shell", category: "session")
@@ -19,10 +19,10 @@ final class AppSession {
   let database: ArktDatabase
   let source: ModelSidebarSource
   let autosaver: SidebarAutosaver
-  /// The browser window. Replaced by a new one when the user reopens the app after closing it (#241); a closed
-  /// controller is never shown again.
-  private(set) var window: ShellWindowController
-  private let engine: any EngineClient
+  /// Every browser window: the launch window, New Window, a Dock reopen after the last one closed (#241), and the
+  /// windows the engine asks for (Chromium: a Dock reopen, `chrome.windows.create`, a startup URL). A closed window is
+  /// never shown again.
+  let windows: ShellWindowSet
   /// One instance for every window, so Show / Hide Toolbar reaches all of them.
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
   let archiveStore: ArchiveStore
@@ -49,16 +49,18 @@ final class AppSession {
   /// cannot race the launch backup.
   private(set) var lastBackup: Task<Void, Never>?
 
-  init(state: LaunchState, location: DatabaseLocation, engine: any EngineClient, faviconStore: FaviconStore?) {
+  /// `hostLookup` pairs the engine's own windows with the windows built for them (`ChromiumEngine.host(of:)`); nil
+  /// for an engine that never asks for a window (FakeEngine).
+  init(state: LaunchState, location: DatabaseLocation, engine: any EngineClient, faviconStore: FaviconStore?,
+       hostLookup: ShellWindowSet.HostLookup? = nil) {
     self.location = location
     self.database = state.database
     let source = ModelSidebarSource(sidebar: state.sidebar ?? SidebarModel.Sidebar())
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
-    self.engine = engine
-    self.window = ShellWindowController(engine: engine, sidebar: source,
-                                        toolbarSetting: toolbarSetting)
+    self.windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
+                                  hostLookup: hostLookup)
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
     self.archiveStore = archiveStore
@@ -79,22 +81,20 @@ final class AppSession {
       autosaver.scheduleSave(sidebar)                 // every model change
       changedSinceBackup = true
     }
+    windows.configure = { [weak self] controller in self?.wire(controller) }
   }
 
-  func start(outcome: OpenOutcome) {
-    startFavicons(prune: outcome == .opened)          // before the window can create engine tabs
-    wire(window)
-    window.window?.center()
-    window.showWindow(nil)
-    refreshArcImportAvailability()
-    startAutoArchive()
-    if let notice = Self.notice(for: outcome) {
+  /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine
+  /// calls it after `embedderReady`, when the windows it queued exist).
+  func start(outcome: OpenOutcome, defersWindows: Bool = false) {
+    startFavicons(prune: outcome == .opened)          // before a window can create engine tabs
+    launchNotice = Self.notice(for: outcome)
+    if let notice = launchNotice {
       // The notice case only: `OpenOutcome` carries file names, which never go to the log.
       Self.log.notice("launch outcome \(String(describing: notice), privacy: .public)")
-      window.toasts.show(notice.toast) { [location] in
-        NSWorkspace.shared.activateFileViewerSelecting([location.directory])
-      }
     }
+    if !defersWindows { finishLaunch(opensWindow: true) }
+    refreshArcImportAvailability()
     switch outcome {
     case .opened, .restoredFromBackup: backUp()
     case .created, .recreatedEmpty: break           // nothing to back up; never seed (decision 3)
@@ -110,41 +110,53 @@ final class AppSession {
     #endif
   }
 
-  /// The app's hooks on a browser window: the first one at launch, and each window a reopen builds (#241).
+  /// The recovery notice of this launch; shown in the launch window.
+  private var launchNotice: RecoveryNotice?
+
+  /// Opens the launch window (with the launch's recovery notice), then starts auto-archive, so its first pass sees
+  /// the shown tab. The Chromium engine passes false when the windows it queued before ready (a startup URL, an
+  /// extension's `chrome.windows.create`) opened one already.
+  func finishLaunch(opensWindow: Bool) {
+    let window = opensWindow ? windows.openWindow() : windows.primary
+    if let notice = launchNotice, let window {
+      launchNotice = nil
+      window.toasts.show(notice.toast) { [location] in
+        NSWorkspace.shared.activateFileViewerSelecting([location.directory])
+      }
+    }
+    startAutoArchive()
+  }
+
+  /// The app's hooks on every browser window, before it is shown. Its stored favicons load off the main actor
+  /// (each window has its own sidebar views); ids the engine reports meanwhile keep the newer one (#91).
   private func wire(_ window: ShellWindowController) {
     window.onImportFromArc = { [weak self] in self?.importFromArc() }
     window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
     window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
     window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
-    window.onFaviconChanged = { [weak faviconWriter] id, data in faviconWriter?.record(data, for: id) }
+    window.onFaviconChanged = { [weak self] id, data in self?.faviconWriter?.record(data, for: id) }
     window.isArcImportAvailable = isArcImportAvailable
-  }
-
-  /// Dock reopen with no browser window (#241: closing the last window keeps the app running): fronts the window,
-  /// or builds a new one when it was closed. Its stored favicons load again off the main actor.
-  func reopenWindow() {
-    guard window.isClosed else {
-      window.showWindow(nil)
-      return
-    }
-    let reopened = ShellWindowController(engine: engine, sidebar: source, toolbarSetting: toolbarSetting)
-    window = reopened
-    wire(reopened)
-    reopened.window?.center()
-    reopened.showWindow(nil)
     guard let writer = faviconWriter else { return }
     let load = writer.loadStored(Set(source.sidebar.nodes.keys))
-    Task { [weak reopened] in
+    Task { [weak window] in
       let loaded = await load.value
-      reopened?.sidebarController.setFavicons(loaded)
+      window?.sidebarController.setFavicons(loaded)
     }
   }
 
-  /// The browser window for app-level feedback (the import summary, restore and import toasts): built again first
-  /// when the user closed it (#241), so the feedback is never shown in a closed window.
+  /// Dock reopen without a browser window on screen (#241: closing the last window keeps the app running), FakeEngine
+  /// only (Chromium sends a `.reopen` window request instead): fronts the primary window, or builds a new one.
+  func reopenWindow() { windows.reopen() }
+
+  /// Every open window shows `batch` (imported or restored favicons).
+  private func setFavicons(_ batch: [NodeID: Data]) {
+    for window in windows.controllers { window.sidebarController.setFavicons(batch) }
+  }
+
+  /// The browser window for app-level feedback (the import summary, restore and import toasts): the primary one, built
+  /// again first when every window closed (#241), so the feedback is never shown in a closed window.
   private func shownWindow() -> ShellWindowController {
-    if window.isClosed { reopenWindow() }
-    return window
+    windows.primary ?? windows.openWindow()
   }
 
   /// E5d: the visible tab is exempt (BH-076 media-playing tabs join once the engine reports audio state), each
@@ -153,14 +165,16 @@ final class AppSession {
   private func startAutoArchive() {
     // A tab whose close a leave-site prompt would hold is skipped too, and retried on the next pass (week-3
     // Decision 11).
-    autoArchive.exempt = { [weak self] in
-      guard let window = self?.window else { return [] }
-      return window.sidebarController.resolver.visible.union(window.nodesHoldingClose)
-    }
+    autoArchive.exempt = { [weak self] in self?.windows.autoArchiveExempt ?? [] }   // every window's
     autoArchive.onArchived = { [weak self] archived in
-      self?.window.toasts.show(Toast(text: ToastText.autoArchived(archived.count)))
+      self?.windows.primary?.toasts.show(Toast(text: ToastText.autoArchived(archived.count)))
     }
     importer.onAutoArchiveClockReset = { [weak self] date in self?.autoArchive.clockDidReset(to: date) }
+    resumeAutoArchive()
+  }
+
+  /// Starts the timer (at launch, and again after a cancelled quit stopped it).
+  private func resumeAutoArchive() {
     Task { [autoArchive] in
       do { try await autoArchive.start() } catch {
         Self.log.error("auto-archive unavailable \(String(describing: type(of: error)), privacy: .public)")
@@ -206,13 +220,7 @@ final class AppSession {
       guard let kept = await FaviconRetention.keptIDs(sidebar: ids, archive: archiveStore) else { return }
       await store.prune(keeping: kept)
     } : nil
-    let writer = FaviconWriter(store: store, after: pruning)
-    faviconWriter = writer
-    let launchLoad = writer.loadStored(ids)
-    Task { [weak self] in
-      let loaded = await launchLoad.value
-      self?.window.sidebarController.setFavicons(loaded)
-    }
+    faviconWriter = FaviconWriter(store: store, after: pruning)   // each window loads the stored ones (`wire`)
   }
 
   // MARK: - Archive window (E5c)
@@ -227,7 +235,7 @@ final class AppSession {
     }
     let model = ArchiveListModel(source: source, store: archiveStore, coordinator: archive)
     // The source Space wins; when it is gone the item lands in the Space on screen (BH-157 routing comes later).
-    model.currentSpaceProvider = { [weak self] in self?.window.currentSpace }
+    model.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     model.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text)) }
     let controller = ArchiveWindowController(dataSource: model)
@@ -239,16 +247,17 @@ final class AppSession {
   /// back from the favicon folder (the sidebar dropped them when the item left); ids the engine reports meanwhile
   /// keep the newer one (#91).
   private func didRestore(_ restored: RestoredItem, toast text: String) {
-    shownWindow().toasts.show(Toast(text: text, actionTitle: "View")) { [weak self] in
-      guard let self else { return }
-      self.window.showWindow(nil)
-      self.window.activate(node: restored.nodeID)
+    let window = shownWindow()
+    window.toasts.show(Toast(text: text, actionTitle: "View")) { [weak window] in
+      guard let window, !window.isClosed else { return }
+      window.showWindow(nil)
+      window.activate(node: restored.nodeID)
     }
     guard let writer = faviconWriter, let snapshot = source.sidebar.snapshot(of: restored.nodeID) else { return }
     let load = writer.loadStored(Set(FaviconRetention.ids(in: snapshot)))
     Task { [weak self] in
       let loaded = await load.value
-      self?.window.sidebarController.setFavicons(loaded)
+      self?.setFavicons(loaded)
     }
   }
 
@@ -267,7 +276,7 @@ final class AppSession {
       self.availabilityCheck = nil
       if self.isArcImportAvailable != available {
         self.isArcImportAvailable = available
-        self.window.isArcImportAvailable = available
+        for window in self.windows.controllers { window.isArcImportAvailable = available }
       }
     }
   }
@@ -289,7 +298,7 @@ final class AppSession {
     do {
       let outcome = try await importer.run(arcFiles)
       faviconWriter?.save(outcome.favicons)
-      window.sidebarController.setFavicons(outcome.favicons)
+      setFavicons(outcome.favicons)
       let summary = outcome.summary
       // Counts only, never titles, URLs or paths.
       let (spaces, existing, removed) = (summary.spaces, summary.existingSpaces, summary.previouslyImportedSpaces)
@@ -334,10 +343,17 @@ final class AppSession {
     autosaver.needsFlush || archive.hasPendingWrites || (faviconWriter?.needsFlush ?? false)
   }
 
-  /// Runs before the termination flush: stops the auto-archive timer, then stamps visible tabs (decision 10).
+  /// Runs before the termination flush: stops the auto-archive timer, then stamps every window's visible tabs
+  /// (decision 10).
   func prepareForTermination() {
     autoArchive.stop()  // stop first: no auto-archive pass may run between the sidebar write and the outbox write
-    source.markInactive(window.visibleNodes, at: .now)
+    source.markInactive(windows.visibleNodes, at: .now)
+  }
+
+  /// The quit was cancelled (Chromium: a held leave-site prompt, or the user): auto-archive runs again. The visible
+  /// tabs keep the stamp `prepareForTermination` wrote; they are stamped again when they stop being visible.
+  func terminationCancelled() {
+    resumeAutoArchive()
   }
 
   /// Writes what is pending: the archive outbox first (#213: the on-disk sidebar never gets ahead of the archive
@@ -388,7 +404,7 @@ extension AppSession {
         archive = "failed"
       }
       // The recovery notice is the only toast a launch shows; persistent means the toast is up (decision 4).
-      let toast = self.window.toasts.current.map { $0.isPersistent ? "persistent" : "timed" } ?? "none"
+      let toast = self.windows.primary?.toasts.current.map { $0.isPersistent ? "persistent" : "timed" } ?? "none"
       let counts = Self.smokeCounts(self.source.sidebar)
       let imported: (added: String, existing: String, archiveAdded: String) = switch (phase, summary) {
       case (.verify, _): ("-", "-", "-")
