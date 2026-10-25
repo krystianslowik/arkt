@@ -46,7 +46,7 @@ final class RecordingStore: SidebarSaving, Sendable {
     var maxInFlight = 0
     var failuresLeft = 0
     var blocked = false
-    var waiting: [CheckedContinuation<Void, Never>] = []
+    var waiting: [CheckedContinuation<Bool, Never>] = []
   }
 
   private let state = Mutex(State())
@@ -58,13 +58,18 @@ final class RecordingStore: SidebarSaving, Sendable {
   func failNext(_ count: Int) { state.withLock { $0.failuresLeft = count } }
   func block() { state.withLock { $0.blocked = true } }
 
-  func unblock() {
-    let waiting = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+  func unblock() { release(failing: false) }
+
+  /// Releases the held saves and makes each of them throw; later saves are not affected.
+  func unblockFailing() { release(failing: true) }
+
+  private func release(failing: Bool) {
+    let waiting = state.withLock { state -> [CheckedContinuation<Bool, Never>] in
       state.blocked = false
       defer { state.waiting = [] }
       return state.waiting
     }
-    for continuation in waiting { continuation.resume() }
+    for continuation in waiting { continuation.resume(returning: failing) }
   }
 
   func save(_ sidebar: Sidebar, at date: Date) async throws -> SaveOutcome {
@@ -79,18 +84,19 @@ final class RecordingStore: SidebarSaving, Sendable {
       state.inFlight += 1
       state.maxInFlight = max(state.maxInFlight, state.inFlight)
     }
-    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+    let failHeld = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
       let wait = state.withLock { state -> Bool in
         guard state.blocked else { return false }
         state.waiting.append(continuation)
         return true
       }
-      if !wait { continuation.resume() }
+      if !wait { continuation.resume(returning: false) }
     }
     state.withLock { state in
       state.inFlight -= 1
-      state.saved.append(sidebar)
+      if !failHeld { state.saved.append(sidebar) }
     }
+    if failHeld { throw InjectedFailure() }
     return .written
   }
 }

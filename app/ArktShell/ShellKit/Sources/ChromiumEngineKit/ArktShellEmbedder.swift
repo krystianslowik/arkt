@@ -16,7 +16,9 @@ public protocol ChromiumEmbedderDelegate: AnyObject {
   /// A host for a window the engine creates on its own (Chromium is inside `Browser` construction). Build the window
   /// and return its host; never call the engine before the window's `.windowOpened`.
   func host(for request: EngineWindowRequest, in engine: ChromiumEngine) -> any EngineWindowHosting
-  /// Quit started; the windows still exist (stamp visible tabs).
+  /// Quit started; the windows still exist (stamp visible tabs). On SIGTERM (session end) this is the last call: the
+  /// engine then blocks the main thread and exits without `engineWillTerminate`, so write what must survive here,
+  /// synchronously (#298).
   func engineWillBeginTerminating()
   /// The quit was cancelled (a held `beforeunload`, or the user).
   func engineDidCancelTerminating()
