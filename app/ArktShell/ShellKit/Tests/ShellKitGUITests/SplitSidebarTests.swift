@@ -72,14 +72,15 @@ final class SplitSidebarTests: XCTestCase {
     func children(_ location: SidebarLocation) -> [UUID] { source.children(of: location) }
   }
 
-  /// The context menus a Ctrl-click asked for, by item titles after the menu's delegate filled them.
+  /// The context menus a Ctrl-click asked for: the clicked row, and the item titles after the menu's delegate
+  /// filled them (nil when `menu(for:)` gave no menu).
   @MainActor
   private final class ContextMenuRecorder {
-    var shown: [[String]] = []
+    var requests: [(row: Int, titles: [String]?)] = []
 
-    func record(_ menu: NSMenu) {
-      menu.delegate?.menuNeedsUpdate?(menu)
-      shown.append(menu.items.map(\.title))
+    func record(_ menu: NSMenu?, clickedRow: Int) {
+      if let menu { menu.delegate?.menuNeedsUpdate?(menu) }
+      requests.append((clickedRow, menu?.items.map(\.title)))
     }
   }
 
@@ -338,19 +339,30 @@ final class SplitSidebarTests: XCTestCase {
     defer { harness.controller.close() }
     let (window, view) = try shownOutline(harness, current: world.today[0])
     let recorder = ContextMenuRecorder()
-    view.presentContextMenu = { menu, _, _ in recorder.record(menu) }
-    let splitPoint = try windowPoint(of: world.split, in: harness, view)
-    let tabPoint = try windowPoint(of: world.today[1], in: harness, view)
+    view.presentContextMenu = { [unowned view] menu, _, _ in recorder.record(menu, clickedRow: view.clickedRow) }
+    let presses = [(world.split, ["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"]),
+                   (world.today[1], [String]())]
 
-    // Each press is released, as a real click is. Without the up, the second press never reached the outline on CI.
-    for point in [splitPoint, tabPoint] {
-      window.sendEvent(try mouseEvent(.leftMouseDown, at: point, [.control], in: window))
+    for (index, (node, titles)) in presses.enumerated() {
+      let row = try harness.row(node)
+      let point = try windowPoint(of: node, in: harness, view)
+      let down = try mouseEvent(.leftMouseDown, at: point, [.control], in: window)
+      XCTAssertEqual(down.clickCount, 1, "press \(index) is a single click")
+      window.sendEvent(down)
       window.sendEvent(try mouseEvent(.leftMouseUp, at: point, [.control], in: window))
+      XCTAssertEqual(recorder.requests.count, index + 1, "press \(index) reached the outline and asked for a menu")
+      guard recorder.requests.count == index + 1 else { continue }
+      XCTAssertEqual(recorder.requests[index].row, row, "press \(index) asked for its own row's menu")
+      XCTAssertEqual(recorder.requests[index].titles, titles, "press \(index) got its row's menu (nil: no menu)")
     }
+    // The same press straight into the outline, for comparison with the window's delivery above.
+    let tabPoint = try windowPoint(of: world.today[1], in: harness, view)
+    let tabRow = try harness.row(world.today[1])
+    view.mouseDown(with: try mouseEvent(.leftMouseDown, at: tabPoint, [.control], in: window))
+    let direct = recorder.requests.last
+    XCTAssertEqual(direct?.row, tabRow, "a direct press asks for its row's menu")
+    XCTAssertEqual(direct?.titles ?? nil, [String](), "and gets the empty menu a right-click gets")
 
-    XCTAssertEqual(recorder.shown,
-                   [["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"], []],
-                   "the split row's menu, then the plain tab row's empty one")
     XCTAssertEqual(harness.current, world.today[0], "a Ctrl-click does not activate the row")
     XCTAssertNotNil(harness.source.node(world.split))
     XCTAssertEqual(view.clickModifiers, [])
