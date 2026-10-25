@@ -75,7 +75,7 @@ of the table.
 | Panel surface | `toastSurface` | ShellTokens |
 | Panel corners | 12, continuous | as the alerts overlay |
 | Panel shadow | `overlayShadow` (0.5 pt edge, 18/48 and 3/10 drop) | AlertTokens |
-| Sidebar keyboard focus ring | 2 pt, 2 pt outset, on the row | `BrandTokens.focusRing` |
+| Sidebar keyboard focus ring | The system focus ring on the row (`NSView.focusRingType = .default`, drawn in `NSColor.keyboardFocusIndicatorColor`, following the user's accent color). Mustard is never a stroke | AppKit |
 | Sidebar overflow pill | 24 high, `toastSurface`, `toastShadow`, chevron plus count ("3 more above"), centered on the sidebar's top or bottom edge for 3 s | proposed `ShellTokens.switcherOverflowPill`; PARITY(NEEDS-RUNTIME-CHECK) |
 
 New tokens this design adds: `switcherOverflowPill` reuses `toastSurface` and `toastShadow`, so no new colors at
@@ -158,7 +158,7 @@ is proposed, PARITY(NEEDS-RUNTIME-CHECK).
 ### Ctrl-Space and the sidebar keyboard focus hand-off (BH-019, BH-020, KB-036)
 
 Ctrl-Space reveals the current tab — scrolling the sidebar and opening a closed folder if the tab sits inside one —
-and moves keyboard focus to that row, shown with the `focusRing`. This is a real focus hand-off: the page loses
+and moves keyboard focus to that row, shown with the system focus ring. This is a real focus hand-off: the page loses
 focus, the sidebar becomes the key view. From there, the assumed behavior (open question 4, RT-13):
 
 - Up / Down move the focus row through the list; Left / Right move across the Favorites grid.
@@ -300,7 +300,7 @@ maintainer — the prototype and the flows above assume the answer on the left, 
 
 ## Screenshot index
 
-All in `design/tab-switcher/screens/`, 2560 x 1600 (1280 x 800 pt at 2x), quantized to 256 colors to stay under
-400 KB. Titles and URLs are synthetic.
+All in `design/tab-switcher/screens/`, 2560 x 1600 (1280 x 800 pt at 2x), saved as full-color PNG (no palette
+quantization, so shadows stay smooth), each under 400 KB. Titles and URLs are synthetic.
 
 States, light and dark: `switcher-first-open`, `switcher-mid-cycle`, `switcher-single-row`, `sidebar-focus`.

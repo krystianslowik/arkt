@@ -17,7 +17,7 @@
 :root {
   /* BrandTokens */
   --accent: #E9B520; --on-accent: #202321;
-  --focus: #202321;                   /* focusRing */
+  --focus: rgba(0,103,244,0.50);      /* system keyboard focus ring (NSColor.keyboardFocusIndicatorColor, Blue accent) */
   /* ShellTokens */
   --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
   --text-2: rgba(0,0,0,0.64);                                    /* secondaryText */
@@ -40,7 +40,7 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --focus: #E9B520;
+  --focus: rgba(26,145,255,0.55);
   --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
   --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
   --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
@@ -98,8 +98,8 @@ body.shot .win { width: 100vw; height: 100vh; max-width: none; border-radius: 0;
 .srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
 .srow b { width: 16px; height: 16px; border-radius: 4px; flex: none; display: block; }
 .srow span { overflow: hidden; text-overflow: ellipsis; }
-.srow.kbfocus { box-shadow: 0 0 0 2px var(--focus); }
-.srow.cur.kbfocus { box-shadow: 0 0 0 2px var(--focus), 0 1px 2px rgba(0,0,0,0.08); }
+.srow.kbfocus { box-shadow: 0 0 0 3px var(--focus); }
+.srow.cur.kbfocus { box-shadow: 0 0 0 3px var(--focus), 0 1px 2px rgba(0,0,0,0.08); }
 .sdiv { height: 1px; margin: 8px 8px; background: var(--divider); }
 .sbottom { position: absolute; left: 10px; right: 10px; bottom: 10px; height: 28px; display: flex; justify-content: center;
   align-items: center; gap: 8px; }
