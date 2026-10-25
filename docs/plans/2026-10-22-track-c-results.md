@@ -1253,3 +1253,42 @@ Deviations from the plan:
 - The icon picker lives on the header "..." menu (symbols, then "Emoji..."); Arc's own picker was not measured.
 - The header draws no Space icon next to the title; the spec does not place one there (BH-038 names the edit icon and
   the "..." menu only). Icons show in the dock.
+
+## Sidebar: hide, hover reveal and edge gestures (#102) (2026-10-25)
+
+Spec section 2.1 (BH-001 to BH-006), KB-017, GS-017, GS-018.
+
+- **Cmd-S (KB-017, BH-001).** View > Hide Sidebar / Show Sidebar (first in the View menu, Cmd-S) calls
+  `ShellWindowController.toggleSidebarVisibility(_:)`. Not `toggleSidebar:`: `NSWindow` answers that selector itself
+  (disabled) ahead of its controller in the responder chain, so the item never reached the controller in the app
+  (`testMenuActionReachesTheControllerThroughTheResponderChain`). Instant, no animation (a keyboard action). Not a
+  reserved key: a page that handles Cmd-S keeps it.
+- **Edge drag (BH-002, BH-003, GS-017).** `ShellLayout.resolveDrag`: a proposed width below `sidebarHideWidth` (75 pt,
+  PARITY(NEEDS-RUNTIME-CHECK RT-10)) hides the sidebar; between it and the minimum the sidebar stays at its minimum, and
+  dragging back right in the same drag shows it again. Double-click on the edge resets the width (existing, now tested).
+- **Hover reveal (BH-004, GS-018).** The sidebar column now lives in `SidebarOverlayView`, above the card and split.
+  Docked it is the plain column. Hidden it keeps its width (no row relayout) and becomes a floating card inset
+  `sidebarOverlayInset` (10 pt) from the window's edges, with its own mirror of the Space theme, the card's hairline
+  border and a `sidebarOverlayShadow`. An 8 pt strip at the window's left edge reveals it after 100 ms; it slides back
+  250 ms after the pointer leaves it (not while a mouse button is held). Delay, inset and edge width are
+  PARITY(NEEDS-RUNTIME-CHECK RT-10). Motion: `SpringDriver` on the overlay's display link drives one offset; per frame
+  only the overlay layer's transform (pixel-aligned) and opacity change. Reveal `SpringPreset.firm`, conceal
+  `.firmFast`; turning around mid-flight continues from the presented offset and velocity. Reduce Motion fades in place.
+  The traffic lights hide with the sidebar and fade in with the overlay; the titlebar container is zero wide while the
+  sidebar is hidden, so the page's top-left corner stays clickable.
+- **BH-005** (a brief Option press shows the sidebar) is not implemented: expected absent in Arc 1.168, RT-11.
+- **BH-006.** A new tab (Cmd-T, an engine-created tab, a background history tab, a duplicate) or a new Space while
+  hidden shows the existing toast "New Tab Created" / "New Space Created" with a "Show Sidebar" button. What a click on
+  Arc's toast does is not recorded (PARITY(NEEDS-RUNTIME-CHECK BH-006)). New Space while hidden opens no rename field.
+- **State.** Per window, in memory, like the sidebar width (neither is persisted across launches; there is no
+  per-window store yet).
+
+Frame-time gate (`SidebarHideTests.testRevealPacing`, 1200 x 800 window, InMemoryEngine, two reveal and conceal rounds,
+120 Hz display, M-series 10 cores): 7 measurable runs. 5 runs (load1 5.5 to 8.6) were clean: 20 sessions, reveal 44 to 45
+frames and conceal 27 frames, 0 frames over 8.6 ms, max and p99 8.33 ms. 2 runs at load1 about 8 (other builds on the
+machine) had 1 to 2 late frames (16.8 to 20.8 ms) in the second reveal; in the same minutes the existing pager gate
+(`space-key`) failed the same way once at load1 9.3 and then passed 3 of 3. Runs above load1 10 were NOT-MEASURABLE.
+
+Tests (after rebasing on main with #312 and #324): ShellKit unit 612 (599 + 13 new), ShellKitGUITests 538 (515 + 23 new:
+22 in `SidebarHideTests`, 1 in `MainMenuKeyEquivalentTests`); `WindowChromeTests.testResizeHandleClampsSidebarWidth` now
+drags to 100 pt (10 pt hides). ArktCore is not touched.
