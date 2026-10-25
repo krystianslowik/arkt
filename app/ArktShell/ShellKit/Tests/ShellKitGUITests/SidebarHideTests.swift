@@ -27,7 +27,7 @@ final class SidebarHideTests: XCTestCase {
   override func tearDown() async throws { controller.close() }
 
   private func menuItem() -> NSMenuItem {
-    NSMenuItem(title: "Hide Sidebar", action: #selector(ShellWindowController.toggleSidebar(_:)), keyEquivalent: "s")
+    NSMenuItem(title: "Hide Sidebar", action: #selector(ShellWindowController.toggleSidebarVisibility(_:)), keyEquivalent: "s")
   }
 
   private func waitForSettle(_ what: String, _ body: () -> Void) async {
@@ -42,7 +42,7 @@ final class SidebarHideTests: XCTestCase {
 
   func testToggleHidesTheSidebarAndTheCardTakesTheFullWidth() throws {
     XCTAssertTrue(controller.isSidebarVisible)
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     XCTAssertFalse(controller.isSidebarVisible)
     XCTAssertEqual(root.card.frame, CGRect(x: 10, y: 10, width: 1180, height: 780))
@@ -50,7 +50,7 @@ final class SidebarHideTests: XCTestCase {
     XCTAssertEqual(root.effectiveSidebarWidth, 0)
     XCTAssertEqual(root.sidebarContainer.frame.width, 190, "the sidebar keeps its width: no row relayout")
 
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     XCTAssertTrue(controller.isSidebarVisible)
     XCTAssertEqual(root.card.frame.minX, 190)
@@ -62,15 +62,25 @@ final class SidebarHideTests: XCTestCase {
     let item = menuItem()
     XCTAssertTrue(controller.validateMenuItem(item))
     XCTAssertEqual(item.title, "Hide Sidebar")
-    controller.toggleSidebar(item)
+    controller.toggleSidebarVisibility(item)
     XCTAssertTrue(controller.validateMenuItem(item))
     XCTAssertEqual(item.title, "Show Sidebar")
   }
 
+  /// The menu item has a nil target: the action must reach this controller through the window's responder chain.
+  /// `NSWindow` itself answers `toggleSidebar:` (disabled), which is why the action has its own name.
+  func testMenuActionReachesTheControllerThroughTheResponderChain() throws {
+    let window = try XCTUnwrap(controller.window)
+    let action = #selector(ShellWindowController.toggleSidebarVisibility(_:))
+    XCTAssertFalse(NSWindow.instancesRespond(to: action), "the window must not take the action first")
+    XCTAssertTrue(window.tryToPerform(action, with: nil))
+    XCTAssertFalse(controller.isSidebarVisible)
+  }
+
   func testToggleDoesNotAnimate() {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     XCTAssertFalse(overlay.isAnimating, "a keyboard toggle is instant")
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     XCTAssertFalse(overlay.isAnimating)
     XCTAssertTrue(overlay.layer?.affineTransform().isIdentity ?? false)
   }
@@ -78,7 +88,7 @@ final class SidebarHideTests: XCTestCase {
   func testHiddenStateIsPerWindow() throws {
     let other = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     defer { other.close() }
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     XCTAssertFalse(controller.isSidebarVisible)
     XCTAssertTrue(other.isSidebarVisible, "each window keeps its own sidebar state")
   }
@@ -117,7 +127,7 @@ final class SidebarHideTests: XCTestCase {
   // MARK: Hover reveal (BH-004, GS-018)
 
   func testPointerAtTheLeftEdgeRevealsAnOverlayAboveTheContent() async throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     await waitForSettle("revealed") { self.root.pointerReachedRevealEdge() }
     XCTAssertTrue(overlay.isRevealed)
@@ -137,7 +147,7 @@ final class SidebarHideTests: XCTestCase {
   }
 
   func testOverlayHidesWhenThePointerLeaves() async throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     await waitForSettle("revealed") { self.overlay.reveal() }
     await waitForSettle("concealed") { self.overlay.pointerLeft() }
     XCTAssertFalse(overlay.isRevealed)
@@ -146,7 +156,7 @@ final class SidebarHideTests: XCTestCase {
   }
 
   func testOverlayStaysWhileTheButtonIsHeldOrThePointerCameBack() async throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     await waitForSettle("revealed") { self.overlay.reveal() }
     overlay.mouseButtonsDown = { true }
     overlay.pointerLeft()
@@ -163,7 +173,7 @@ final class SidebarHideTests: XCTestCase {
     root.pointerReachedRevealEdge()
     try await Task.sleep(for: .milliseconds(30))
     XCTAssertFalse(overlay.isRevealed)
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     overlay.mouseButtonsDown = { true }       // the edge drag that hid it is still going
     root.pointerReachedRevealEdge()
     try await Task.sleep(for: .milliseconds(30))
@@ -171,7 +181,7 @@ final class SidebarHideTests: XCTestCase {
   }
 
   func testLeavingTheEdgeBeforeTheDelayCancelsTheReveal() async throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     overlay.revealDelay = .milliseconds(80)
     root.pointerReachedRevealEdge()
     root.pointerLeftRevealEdge()
@@ -181,7 +191,7 @@ final class SidebarHideTests: XCTestCase {
   }
 
   func testRevealIsInterruptibleWithoutAJump() async throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     overlay.reduceMotionForTesting = false
     overlay.reveal()
     // Let a few frames run, then turn around mid-flight.
@@ -196,7 +206,7 @@ final class SidebarHideTests: XCTestCase {
   }
 
   func testReduceMotionFadesInPlace() async throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     overlay.reduceMotionForTesting = true
     overlay.reveal()
     XCTAssertEqual(overlay.layer?.affineTransform().tx ?? -1, 0, "no slide under Reduce Motion")
@@ -207,9 +217,9 @@ final class SidebarHideTests: XCTestCase {
   }
 
   func testCmdSWhileRevealedDocksAtOnce() async throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     await waitForSettle("revealed") { self.overlay.reveal() }
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     XCTAssertTrue(controller.isSidebarVisible)
     XCTAssertFalse(overlay.isAnimating)
@@ -220,7 +230,7 @@ final class SidebarHideTests: XCTestCase {
   func testTrafficLightsHideWithTheSidebarAndComeBackWithTheOverlay() async throws {
     let window = try XCTUnwrap(controller.window as? ShellWindow)
     let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     XCTAssertTrue(close.isHidden, "no traffic lights over the page")
     await waitForSettle("revealed") { self.overlay.reveal() }
@@ -231,11 +241,22 @@ final class SidebarHideTests: XCTestCase {
     let inset = ShellMetrics.standard.sidebarOverlayInset
     XCTAssertEqual(inWindow.minX, inset + 12, accuracy: 0.5, "inside the overlay, where they sit in the sidebar")
     XCTAssertEqual(window.frame.height - inWindow.maxY, inset + 16, accuracy: 0.5)
+    // Docked again, every button is back at its place in the sidebar.
+    controller.toggleSidebarVisibility(nil)
+    root.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))           // AppKit's own titlebar pass after the buttons show
+    for (index, kind) in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].enumerated() {
+      let button = try XCTUnwrap(window.standardWindowButton(kind))
+      let frame = button.convert(button.bounds, to: nil)
+      XCTAssertFalse(button.isHidden)
+      XCTAssertEqual(frame.minX, 12 + CGFloat(index) * 23, accuracy: 0.5, "\(kind)")
+      XCTAssertEqual(window.frame.height - frame.maxY, 16, accuracy: 0.5, "\(kind)")
+    }
   }
 
   func testHiddenSidebarLeavesThePageTopLeftCornerClickable() throws {
     let window = try XCTUnwrap(controller.window as? ShellWindow)
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     let frameView = try XCTUnwrap(root.superview)              // NSThemeFrame, hosts the titlebar container too
     let pointInWindow = NSPoint(x: 30, y: window.frame.height - 24)   // where the close button sits when docked
@@ -244,7 +265,7 @@ final class SidebarHideTests: XCTestCase {
   }
 
   func testOverlayFollowsTheSpaceThemeAndHasItsOwnChrome() async throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     XCTAssertEqual(overlay.backdrop.themes, root.themeBackground.themes)
     root.themeBackground.setPosition(1)
@@ -254,7 +275,7 @@ final class SidebarHideTests: XCTestCase {
     XCTAssertEqual(overlay.clip.layer?.masksToBounds, true)
     XCTAssertEqual(overlay.clip.layer?.cornerRadius, ShellMetrics.standard.cardCornerRadius)
     XCTAssertGreaterThan(overlay.layer?.shadowOpacity ?? 0, 0)
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     XCTAssertTrue(overlay.backdrop.isHidden, "docked, the root's theme shows through as before")
     XCTAssertEqual(overlay.layer?.shadowOpacity, 0)
     XCTAssertEqual(overlay.clip.layer?.cornerRadius, 0)
@@ -263,7 +284,7 @@ final class SidebarHideTests: XCTestCase {
   // MARK: Toasts while hidden (BH-006)
 
   func testNewTabWhileHiddenShowsAToastThatShowsTheSidebar() throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     controller.open(try XCTUnwrap(URL(string: "https://example.com/")), inNewTab: true)
     XCTAssertEqual(controller.toasts.current?.text, "New Tab Created")
     XCTAssertNotNil(controller.toasts.current?.actionTitle)
@@ -277,7 +298,7 @@ final class SidebarHideTests: XCTestCase {
   }
 
   func testNewSpaceWhileHiddenShowsAToastAndOpensNoHiddenRenameField() throws {
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     controller.newSpace(nil)
     XCTAssertEqual(controller.toasts.current?.text, "New Space Created")
     XCTAssertFalse(controller.window?.firstResponder is NSText, "no rename field typed into out of sight")
@@ -287,7 +308,7 @@ final class SidebarHideTests: XCTestCase {
 
   func testRevealPacing() async throws {
     try PacingEnvironment.skipIfNotMeasurable(screen: controller.window?.screen)
-    controller.toggleSidebar(nil)
+    controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     overlay.reduceMotionForTesting = false
     // Warm the window up the way the pager gate does: a few on-time frames before measuring.

@@ -19,7 +19,10 @@ extension ShellWindowController {
 
   /// Cmd-S (KB-017, BH-001) and View > Show / Hide Sidebar: hides or shows this window's sidebar at once. Not a reserved
   /// key: a page that handles Cmd-S itself (an editor's Save) keeps it, as with any menu key.
-  @objc public func toggleSidebar(_ sender: Any?) {
+  ///
+  /// Not named `toggleSidebar:`: `NSWindow` implements that selector (and disables it), and the window comes before its
+  /// controller in the responder chain, so the menu item would never reach this method.
+  @objc public func toggleSidebarVisibility(_ sender: Any?) {
     rootView.sidebarVisible.toggle()
   }
 
@@ -50,7 +53,7 @@ extension ShellWindowController {
 
   /// Titles View > Show / Hide Sidebar; nil for any other item.
   func validateSidebarMenuItem(_ menuItem: NSMenuItem) -> Bool? {
-    guard menuItem.action == #selector(toggleSidebar(_:)) else { return nil }
+    guard menuItem.action == #selector(toggleSidebarVisibility(_:)) else { return nil }
     menuItem.title = Self.sidebarMenuTitle(isVisible: isSidebarVisible)
     return true
   }
