@@ -1,16 +1,61 @@
 import AppKit
 
+/// The Archive list. Its rows reach accessibility clients through `axProxyRows` (one `AXProxyRow` per archived item):
+/// `NSTableView` publishes neither its row views nor overridden children out of process, so XCUITest's `tableRows`
+/// query on `archive.table` and VoiceOver row navigation would see no rows otherwise. `ArchiveContentView` lists the
+/// proxy table element in place of the scroll view; the controller supplies each row's label and value from its rows,
+/// so no row view is created for accessibility.
 @MainActor
 final class ArchiveTableView: NSTableView {
+  let axProxyRows: AXProxyRows
+
+  override init(frame frameRect: NSRect) {
+    axProxyRows = AXProxyRows(identifier: AXID.Archive.table)
+    super.init(frame: frameRect)
+    axProxyRows.attach(to: self)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override func reloadData() {
+    super.reloadData()
+    axProxyRows.invalidate()
+  }
+
+  override func selectRowIndexes(_ indexes: IndexSet, byExtendingSelection extend: Bool) {
+    super.selectRowIndexes(indexes, byExtendingSelection: extend)
+    axProxyRows.selectionDidChange()
+  }
+}
+
+/// The Archive window's content: the list, Restore, Load More and the footer. For accessibility it lists the proxy
+/// table (`AXProxyRows.element`, identifier `archive.table`) in place of the scroll view that holds the real table.
+@MainActor
+final class ArchiveContentView: NSView {
+  let table: ArchiveTableView
+  private let scrollView: NSScrollView
+
+  init(frame: NSRect, table: ArchiveTableView, scrollView: NSScrollView) {
+    self.table = table
+    self.scrollView = scrollView
+    super.init(frame: frame)
+    // A group of its own, so the listed children are this view's answer rather than an ignored view's expansion.
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
+    table.axProxyRows.setParent(self)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
   override func accessibilityChildren() -> [Any]? {
-    NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
+    let children = (super.accessibilityChildren() ?? []).filter { child in
+      let view = (child as? NSView) ?? (child as? NSCell)?.controlView
+      return !(view.map { $0 === scrollView || $0.isDescendant(of: scrollView) } ?? false)
+    }
+    return children + [table.axProxyRows.element]
   }
-
-  override func accessibilityRows() -> [any NSAccessibilityRow]? {
-    (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) }
-  }
-
-  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
 }
 
 @MainActor
@@ -54,7 +99,8 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   private static let barHeight: CGFloat = 44
   private static let margin: CGFloat = 12
 
-  public let tableView: NSTableView = ArchiveTableView()
+  private let archiveTable = ArchiveTableView(frame: .zero)
+  public var tableView: NSTableView { archiveTable }
   public let restoreButton = NSButton(title: "Restore", target: nil, action: nil)
   public let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
   /// "N items could not be read", or the load failure; hidden when there is nothing to say.
@@ -77,6 +123,14 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     window.setAccessibilityIdentifier(AXID.Archive.window)
     super.init(window: window)
     buildContent(in: window)
+    // Accessibility rows read `rows`, not row views: one announcement per item (title, then place, date and reason,
+    // as the cell reads it, #91), and nothing is built for a row that was never laid out.
+    archiveTable.axProxyRows.content = { [weak self] row in
+      guard let self, rows.indices.contains(row) else { return nil }
+      let item = rows[row]
+      return AXProxyRowContent(identifier: AXID.Archive.row, label: item.title,
+                               value: "\(item.detail), \(item.reason)")
+    }
     dataSource.onChange = { [weak self] in self?.dataSourceDidChange() }
   }
 
@@ -187,9 +241,6 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   // MARK: Layout
 
   private func buildContent(in window: NSWindow) {
-    let content = NSView(frame: NSRect(origin: .zero, size: Self.contentSize))
-    content.autoresizingMask = [.width, .height]
-
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("item"))
     column.resizingMask = .autoresizingMask
     tableView.addTableColumn(column)
@@ -203,10 +254,12 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     tableView.delegate = self
     tableView.target = self
     tableView.doubleAction = #selector(rowDoubleClicked(_:))
-    tableView.setAccessibilityIdentifier(AXID.Archive.table)
 
     let scroll = NSScrollView(frame: NSRect(
       x: 0, y: Self.barHeight, width: Self.contentSize.width, height: Self.contentSize.height - Self.barHeight))
+    let content = ArchiveContentView(frame: NSRect(origin: .zero, size: Self.contentSize), table: archiveTable,
+                                     scrollView: scroll)
+    content.autoresizingMask = [.width, .height]
     scroll.autoresizingMask = [.width, .height]
     scroll.hasVerticalScroller = true
     scroll.documentView = tableView

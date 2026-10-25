@@ -2,8 +2,8 @@ import XCTest
 
 /// Space switching by Ctrl-1..9, Cmd-Opt arrows and Space dots, plus the two-finger swipe probe (plan U12).
 ///
-/// Outline rows are not in the out-of-process accessibility tree (#269). The last-active tab check skips while no
-/// outline row is exposed; the Space dots and `sidebar.page` do not need the rows.
+/// The last-active tab check reads the Today row through the proxy outline (#269); the Space dots and
+/// `sidebar.page` do not need the rows.
 ///
 /// Precondition (not set by the harness): the Mac running these tests must not bind Ctrl-1 or Ctrl-2 to Mission
 /// Control's "Switch to Desktop 1" / "Switch to Desktop 2" (System Settings > Keyboard > Keyboard Shortcuts > Mission
@@ -101,15 +101,7 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitForSelected(spacePage(app, title: firstSpaceTitle)))
 
     let row = Shell.todayRow(app, label: chosenTabTitle)
-    // Not `waitForOutlineRows`: on the U12 machine (macOS 27) its expected-failure path returned and then left the
-    // app's event loop unmonitorable (results, U12). Skip only while no outline row is exposed at all (#269); once
-    // rows are exposed this test runs unchanged, and a missing chosen row fails.
-    if !rowAppears(row) {
-      guard app.outlineRows.count > 0 else {
-        throw XCTSkip("#269: sidebar outline rows are not exposed out-of-process; BH-036 needs the Today row")
-      }
-      XCTAssertTrue(waitFor(row))
-    }
+    XCTAssertTrue(waitForOutlineRows("\(row) to exist") { row.exists })
     XCTAssertFalse(row.isSelected, "the chosen row must not already be the restored tab")
     row.click()
     XCTAssertTrue(waitForSelected(row))
@@ -138,14 +130,6 @@ final class SpaceSwitchTests: ArktUITestCase {
     let dots = Shell.spaceDots(app)
     XCTAssertTrue(Waits.until("2 Space dots") { dots.count == ArcFixture.expected.spaces })
     return app
-  }
-
-  /// True when `row` appears before the scaled default timeout. Does not record a failure: the caller tells #269 (no
-  /// outline row exposed) from a missing row.
-  private func rowAppears(_ row: XCUIElement) -> Bool {
-    let predicate = NSPredicate { _, _ in MainActor.assumeIsolated { row.exists } }
-    let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-    return XCTWaiter().wait(for: [expectation], timeout: Waits.scaled(nil)) == .completed
   }
 
   private func spaceDot(_ app: XCUIApplication, index: Int) -> XCUIElement {

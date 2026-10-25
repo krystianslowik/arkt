@@ -54,6 +54,13 @@ final class RowCloseButtonTests: XCTestCase {
       return try XCTUnwrap(outline.rowView(atRow: row, makeIfNecessary: true) as? SidebarRowView)
     }
 
+    /// The row's accessibility element: the outline's proxy for it (#269).
+    func proxy(_ id: UUID) throws -> AXProxyRow {
+      let outline = try XCTUnwrap(controller.sidebarController.view.currentOutline)
+      let row = try XCTUnwrap(outlineController?.row(for: id))
+      return try XCTUnwrap(outline.axProxyRows.rowElement(forRow: row))
+    }
+
     func cell(_ id: UUID) throws -> SidebarTabCellView {
       let outline = try XCTUnwrap(controller.sidebarController.view.currentOutline)
       outline.layoutSubtreeIfNeeded()
@@ -149,7 +156,7 @@ final class RowCloseButtonTests: XCTestCase {
     row.isHovered = true
     XCTAssertFalse(cell.isCloseButtonShown)
     XCTAssertTrue(cell.closeButton.isHidden)
-    XCTAssertEqual(row.accessibilityCustomActions() ?? [], [])
+    XCTAssertEqual(try harness.proxy(world.folder).accessibilityCustomActions() ?? [], [])
     harness.controller.close()
   }
 
@@ -471,12 +478,12 @@ final class RowCloseButtonTests: XCTestCase {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     harness.controller.activate(node: world.today[0])
-    let pinnedActions = try XCTUnwrap(harness.rowView(world.pinned).accessibilityCustomActions())
+    let pinnedActions = try XCTUnwrap(harness.proxy(world.pinned).accessibilityCustomActions())
     XCTAssertEqual(pinnedActions.map(\.name), ["Close"])
-    let todayActions = try XCTUnwrap(harness.rowView(world.today[1]).accessibilityCustomActions())
+    let todayActions = try XCTUnwrap(harness.proxy(world.today[1]).accessibilityCustomActions())
     XCTAssertEqual(todayActions.map(\.name), ["Archive"])
 
-    XCTAssertTrue(todayActions[0].handler?() ?? false)
+    XCTAssertTrue(todayActions[0].performForTesting())
 
     XCTAssertEqual(harness.archived, [[world.today[1]]])
     XCTAssertEqual(harness.controller.sidebarController.current, world.today[0])

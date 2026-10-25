@@ -101,6 +101,41 @@ final class ArchiveWindowTests: XCTestCase {
     }
   }
 
+  /// Accessibility rows come from the loaded page through `AXProxyRows`, not from row views: the window content
+  /// lists the proxy `archive.table` in place of the scroll view, every row of a page taller than the window is
+  /// listed with its title and its place, date and reason, and the far row gets no row view. (How the proxy table
+  /// answers the legacy attributes is `AXProxyRowsTests`' subject.)
+  func testAccessibilityRowsComeFromThePageWithoutRowViews() async throws {
+    let source = StubArchiveSource()
+    source.pages = [ArchiveListPage(rows: Self.rows(250), unreadable: 0, mayHaveMore: true)]
+    let controller = makeWindow(source)
+    await controller.reload()
+    let table = try XCTUnwrap(controller.tableView as? ArchiveTableView)
+    let element = table.axProxyRows.element
+    let content = try XCTUnwrap(controller.window?.contentView)
+
+    let listed = content.accessibilityChildren() ?? []
+    XCTAssertTrue(listed.contains { ($0 as AnyObject) === element }, "the content lists the proxy table")
+    XCTAssertFalse(listed.contains { ($0 as AnyObject) === table.enclosingScrollView }, "not the scroll view")
+    XCTAssertEqual(element.accessibilityIdentifier(), AXID.Archive.table)
+    XCTAssertEqual(element.accessibilityRole(), .table)
+
+    let rows = try XCTUnwrap(element.accessibilityRows())
+    XCTAssertEqual(rows.count, 250)
+    let last = try XCTUnwrap(rows.last as? AXProxyRow)
+    XCTAssertEqual(last.accessibilityIdentifier(), AXID.Archive.row)
+    XCTAssertEqual(last.accessibilityLabel(), "Item 249")
+    XCTAssertEqual(last.accessibilityValue() as? String, "a.example - Work - 1 hour ago, Closed")
+    XCTAssertNil(table.rowView(atRow: 249, makeIfNecessary: false), "no row view is built for accessibility")
+    XCTAssertNil(element.accessibilityValue(), "the table value is not a test-only count string")
+
+    source.pages = [ArchiveListPage(rows: Self.rows(3, from: 10), unreadable: 0, mayHaveMore: false)]
+    await controller.reload()
+    let reloaded = try XCTUnwrap(element.accessibilityRows())
+    XCTAssertEqual(reloaded.compactMap { ($0 as? AXProxyRow)?.accessibilityLabel() },
+                   ["Item 10", "Item 11", "Item 12"])
+  }
+
   func testFooterAndLoadMoreHiddenWhenNothingIsMissing() async throws {
     let source = StubArchiveSource()
     source.pages = [ArchiveListPage(rows: Self.rows(2), unreadable: 0, mayHaveMore: false)]

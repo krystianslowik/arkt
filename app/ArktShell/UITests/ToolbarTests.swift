@@ -3,8 +3,7 @@ import XCTest
 /// The Toolbar toggle, its menu title, the sidebar URL bar context menu, persistence in the defaults suite and
 /// Back / Forward state (plan U8). Cmd-[ and Cmd-] (KB-031, KB-032) are deferred to #119.
 ///
-/// Sidebar rows are not in the accessibility tree on the macOS 26 runner (#269); row assertions go through
-/// `waitForOutlineRows`.
+/// Row assertions go through `waitForOutlineRows`.
 final class ToolbarTests: ArktUITestCase {
   func test_KB018_BH032_cmdShiftDTogglesToolbar() async throws {
     let server = try await fixtureServer()

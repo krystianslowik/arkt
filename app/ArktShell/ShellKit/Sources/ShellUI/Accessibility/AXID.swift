@@ -66,6 +66,8 @@ public enum AXID {
     public static let spaceOptions = "sidebar.spaceOptions"
     /// The menu that button opens: Icon, Theme, and a disabled Profile.
     public static let spaceMenu = "sidebar.spaceMenu"
+    /// The current Space page's outline of pinned and Today rows (a proxy element, #269).
+    public static let outline = "sidebar.outline"
     /// Label: row title. Selected: row state is `current`.
     public static let rowPinned = "sidebar.row.pinned"
     /// Label: row title. Selected: row state is `current`.
