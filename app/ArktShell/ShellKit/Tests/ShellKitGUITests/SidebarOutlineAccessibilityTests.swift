@@ -130,7 +130,8 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
       XCTAssertEqual(row.accessibilityIndex(), index)
       XCTAssertTrue((row.accessibilityParent() as? AXProxyTable) === element)
       if index == dividerRow {
-        XCTAssertEqual(row.accessibilityRole(), .splitter, "the divider is not counted as a row")
+        XCTAssertEqual(row.accessibilityRole(), .group, "the divider is a plain separator group, no splitter (#297)")
+        XCTAssertFalse(row.isAccessibilityElement(), "VoiceOver skips the divider (#297)")
         XCTAssertNil(row.accessibilitySubrole())
       } else {
         XCTAssertEqual(row.accessibilityRole(), .row)
@@ -235,8 +236,8 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     let fixture = try makeFixture(sidebar)
     let outline = fixture.outline
     let element = fixture.element
-    // A page realizes every row when it is built (see `SidebarOutlineController.init`). A tab added afterwards
-    // lands at the end of Today, about 12,700 pt below a page under 800 pt tall, so its row gets no row view.
+    // A built page realizes only the rows near its visible rect (#297), and a tab added afterwards lands at the
+    // end of Today, about 12,700 pt below a page under 800 pt tall; either way its row gets no row view.
     let lastTitle = "Added Later"
     let lastNode = sidebar.addTab(url: URL(string: "https://example.com/added-later")!, title: lastTitle,
                                   in: .today(space))
@@ -272,6 +273,82 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     let visible = try proxyRows(element, .visibleRows)
     let range = outline.rows(in: outline.visibleRect)
     XCTAssertEqual(visible.map { $0.accessibilityIndex() }, Array(range.location..<(range.location + range.length)))
+  }
+
+  // MARK: #297
+
+  /// A row reload (title, favicon, Closing) does not change which item a row shows: the proxy elements survive,
+  /// so the element a VoiceOver user is on does not drop out of its parent's children.
+  func testARowReloadKeepsTheProxyElements() throws {
+    let fixture = try makeFixture()
+    let tab = fixture.sidebar.children(of: .today(fixture.space))[0]
+    let before = try proxyRows(fixture.element)
+    fixture.outlineController.reload(node: tab)
+    let after = try proxyRows(fixture.element)
+    XCTAssertEqual(before.count, after.count)
+    for (old, new) in zip(before, after) {
+      XCTAssertTrue(old === new, "a row reload keeps the proxy element")
+    }
+  }
+
+  /// Insert, remove, expand and collapse post rowCountChanged / rowExpanded / rowCollapsed; a row's reload posts
+  /// titleChanged and valueChanged, so a client that caches the tree is told to refresh (#297).
+  func testStructuralChangesAndRowReloadsPostNotifications() throws {
+    let fixture = try makeFixture()
+    let proxies = fixture.outline.axProxyRows
+    proxies.postedNotificationsForTesting = []
+
+    let folderID = try folder(fixture)
+    let folderRow = fixture.outlineController.row(for: folderID)
+    let folderItem = try XCTUnwrap(fixture.outline.item(atRow: folderRow))
+    fixture.outline.collapseItem(folderItem)
+    fixture.outline.expandItem(folderItem)
+    let posted = proxies.postedNotificationsForTesting ?? []
+    XCTAssertTrue(posted.contains { $0.0 == .rowCollapsed && $0.1 == folderRow },
+                  "collapse posts rowCollapsed for the folder's row")
+    XCTAssertTrue(posted.contains { $0.0 == .rowExpanded && $0.1 == folderRow },
+                  "expand posts rowExpanded for the folder's row")
+
+    _ = fixture.sidebar.addTab(url: URL(string: "https://example.com/synthetic-notify")!,
+                               title: "Synthetic Notify", in: .today(fixture.space))
+    XCTAssertTrue((proxies.postedNotificationsForTesting ?? []).contains { $0.0 == .rowCountChanged },
+                  "an insert posts rowCountChanged")
+
+    proxies.postedNotificationsForTesting = []
+    let tab = fixture.sidebar.children(of: .today(fixture.space))[0]
+    let tabRow = fixture.outlineController.row(for: tab)
+    fixture.outlineController.reload(node: tab)
+    let reloaded = (proxies.postedNotificationsForTesting ?? []).filter { $0.1 == tabRow }.map(\.0)
+    XCTAssertTrue(reloaded.contains(.titleChanged), "a row reload posts titleChanged")
+    XCTAssertTrue(reloaded.contains(.valueChanged), "a row reload posts valueChanged (Closing)")
+  }
+
+  /// #297: a built page realizes only the rows near its visible rect; the rest are realized as they scroll in.
+  func testBuildingAPageRealizesOnlyRowsNearTheVisibleRect() throws {
+    let sidebar = StubSidebar()
+    let space = sidebar.addSpace(title: "Big")
+    for index in 0..<200 {
+      _ = sidebar.addTab(url: URL(string: "https://example.com/\(index)")!, title: "Tab \(index)",
+                         in: .today(space))
+    }
+    let fixture = try makeFixture(sidebar)
+    XCTAssertNotNil(fixture.outline.rowView(atRow: 1, makeIfNecessary: false),
+                    "a row near the visible rect is realized")
+    XCTAssertNil(fixture.outline.rowView(atRow: 150, makeIfNecessary: false),
+                 "a row far past the visible rect is not realized up front")
+  }
+
+  /// #297: pages realize their visible rows when they are laid out (window open, a new Space), while parked:
+  /// a Space switch shows built rows instead of paying the realization cost in its showing frame.
+  func testBuiltPagesConstructTheirVisibleRowsWhileParked() throws {
+    let fixture = try makeFixture()
+    let pager = fixture.controller.view.pager
+    for (index, page) in pager.pages.enumerated() where index != pager.index {
+      let page = try XCTUnwrap(page as? SpacePageView)
+      XCTAssertTrue(page.isHidden, "page \(index) is parked")
+      XCTAssertNotNil(page.outlineView.rowView(atRow: 1, makeIfNecessary: false),
+                      "parked page \(index) has its visible rows built")
+    }
   }
 
   // MARK: Cells
