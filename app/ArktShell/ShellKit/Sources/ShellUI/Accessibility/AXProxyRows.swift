@@ -32,6 +32,9 @@ private func onMainThread<T: Sendable>(
 /// overridden children (#269), so the container view lists this element in place of the scroll view that holds the
 /// real table. It keeps its rows, because accessibility clients hold elements by identity between queries, and
 /// rebuilds them when `AXProxyRows.invalidate()` marked them stale or the row count changed.
+///
+/// The row getters keep the `[Any]?` signatures `NSAccessibilityElement` inherits from the `NSAccessibility`
+/// protocol; the element's role comes from `setAccessibilityRole`, not from a role protocol conformance.
 final class AXProxyTable: NSAccessibilityElement {
   fileprivate weak var source: AXProxyRows?
   fileprivate weak var parentView: NSView?
@@ -71,12 +74,12 @@ final class AXProxyTable: NSAccessibilityElement {
 
   override func accessibilityChildren() -> [Any]? { currentRows() }
 
-  override func accessibilityRows() -> [any NSAccessibilityRow]? { currentRows() }
+  override func accessibilityRows() -> [Any]? { currentRows() }
 
   override func accessibilityRowCount() -> Int { currentRows().count }
 
   /// The rows that intersect the table's visible rectangle (geometry only; no row view is built).
-  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? {
+  override func accessibilityVisibleRows() -> [Any]? {
     let rows = currentRows()
     let visible = onMainThread(source, default: 0..<0) { $0.visibleRowRange }
     let lower = min(max(visible.lowerBound, 0), rows.count)
@@ -84,7 +87,7 @@ final class AXProxyTable: NSAccessibilityElement {
     return Array(rows[lower..<upper])
   }
 
-  override func accessibilitySelectedRows() -> [any NSAccessibilityRow]? {
+  override func accessibilitySelectedRows() -> [Any]? {
     let selected = onMainThread(source, default: IndexSet()) { $0.selectedRowIndexes }
     return currentRows().filter { selected.contains($0.accessibilityIndex()) }
   }
