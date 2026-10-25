@@ -153,6 +153,27 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertEqual(grid.collectionView.numberOfItems(inSection: 0), titles.count)
     XCTAssertTrue(grid.collectionView.preparedContentRect.contains(grid.collectionView.bounds),
                   "prepared \(grid.collectionView.preparedContentRect) bounds \(grid.collectionView.bounds)")
+    // DIAGNOSTIC (temporary, review follow-up): collection view state when the tiles are checked, then after a run
+    // loop turn, then after an explicit reload and layout.
+    func state(_ when: String) -> String {
+      let cv = grid.collectionView
+      let first = cv.collectionViewLayout?.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame
+      return "\(when): frame \(cv.frame) visible \(cv.visibleRect) prepared \(cv.preparedContentRect) "
+        + "visibleItems \(cv.visibleItems().count) paths \(cv.indexPathsForVisibleItems().count) "
+        + "content \(cv.collectionViewLayout?.collectionViewContentSize ?? .zero) item0 \(String(describing: first)) "
+        + "subviews \(cv.subviews.count) item(at:0) \(cv.item(at: IndexPath(item: 0, section: 0)) != nil) "
+        + "needsLayout \(cv.needsLayout)"
+    }
+    var report = [state("checked")]
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+    controller.view.layoutSubtreeIfNeeded()
+    report.append(state("after run loop"))
+    grid.collectionView.reloadData()
+    grid.collectionView.layoutSubtreeIfNeeded()
+    report.append(state("after reload"))
+    print("FAVORITES-DIAG " + report.joined(separator: " || "))
+    XCTAssertTrue(report.isEmpty, report.joined(separator: " || "))
+
     for (id, title) in zip(ids, titles) {
       let tile = try XCTUnwrap(grid.tile(for: id), "no tile for \(title)")
       XCTAssertEqual(tile.accessibilityLabel(), title)
