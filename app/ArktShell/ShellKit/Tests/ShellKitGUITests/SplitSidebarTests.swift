@@ -72,23 +72,14 @@ final class SplitSidebarTests: XCTestCase {
     func children(_ location: SidebarLocation) -> [UUID] { source.children(of: location) }
   }
 
-  /// Stands in as the outline menu's delegate: fills it through the real delegate, records the items of each menu
-  /// that opens, and dismisses it once its tracking loop runs.
+  /// The context menus a Ctrl-click asked for, by item titles after the menu's delegate filled them.
   @MainActor
-  private final class ContextMenuRecorder: NSObject, NSMenuDelegate {
-    let filler: (any NSMenuDelegate)?
-    var opened: [[String]] = []
+  private final class ContextMenuRecorder {
+    var shown: [[String]] = []
 
-    init(filling menu: NSMenu) {
-      filler = menu.delegate
-      super.init()
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) { filler?.menuNeedsUpdate?(menu) }
-
-    func menuWillOpen(_ menu: NSMenu) {
-      opened.append(menu.items.map(\.title))
-      menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 0, inModes: [.eventTracking])
+    func record(_ menu: NSMenu) {
+      menu.delegate?.menuNeedsUpdate?(menu)
+      shown.append(menu.items.map(\.title))
     }
   }
 
@@ -300,6 +291,7 @@ final class SplitSidebarTests: XCTestCase {
   func testOptClickMouseDownOnASplitRowSeparatesIt() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
     let (window, view) = try shownOutline(harness, current: world.panes[0])
     let point = try windowPoint(of: world.split, in: harness, view)
     window.postEvent(try mouseEvent(.leftMouseUp, at: point, [.option], in: window), atStart: true)
@@ -315,54 +307,50 @@ final class SplitSidebarTests: XCTestCase {
       harness.split.isHidden && harness.controller.rootView.card.contentView === harness.page(world.panes[0])
     }
     XCTAssertEqual(harness.current, world.panes[0])
-    harness.controller.close()
   }
 
-  /// A press on a tab row that moves past the drag threshold starts a drag of that tab; the table sends no row
-  /// action, so the tab is not activated (#277).
-  func testDraggingATabRowDoesNotActivateIt() throws {
+  /// A drag that the table starts on a tab row shows the drop overlay and does not activate the tab, at its start or
+  /// its end (#277). The table decides drag versus click and sends no row action for a drag; this covers the
+  /// controller's side of that seam.
+  func testATabRowDragDoesNotActivateTheTab() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
-    let (window, view) = try shownOutline(harness, current: world.today[0])
-    let point = try windowPoint(of: world.today[1], in: harness, view)
-    for dx in [4.0, 12.0, 24.0, 40.0] {
-      NSApp.postEvent(try mouseEvent(.leftMouseDragged, at: NSPoint(x: point.x + dx, y: point.y), in: window),
-                      atStart: false)
-    }
-    NSApp.postEvent(try mouseEvent(.leftMouseUp, at: NSPoint(x: point.x + 40, y: point.y), in: window), atStart: false)
-
-    view.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: window))
-
+    defer { harness.controller.close() }
+    harness.controller.activate(node: world.today[0])
+    let outline = try harness.outline()
     func overlayIsUp() -> Bool { harness.controller.rootView.subviews.contains { $0 is SplitDropOverlayView } }
-    XCTAssertTrue(overlayIsUp(), "the press became a drag (the drop overlay is up)")
+
+    outline.draggingSessionWillBegin(items: [outline.item(for: world.today[1])])
+    XCTAssertTrue(overlayIsUp(), "the drag shows the drop overlay")
     XCTAssertEqual(harness.current, world.today[0], "a drag does not activate the dragged tab")
-    waitUntil("the drag to end") { !overlayIsUp() }
+    outline.draggingSessionEnded()
+
+    XCTAssertFalse(overlayIsUp())
     XCTAssertEqual(harness.current, world.today[0], "nor does the end of the drag")
-    window.discardEvents(matching: [.leftMouseDragged, .leftMouseUp], before: nil)
-    harness.controller.close()
   }
 
-  /// Ctrl-click on a split row opens its context menu, as a right-click does, and does not also activate the row
-  /// (#277). The window delivers it, as AppKit does; the menu is dismissed as soon as its tracking loop runs.
-  func testCtrlClickOnASplitRowOpensItsMenuWithoutActivatingIt() throws {
+  /// Ctrl-click is a secondary click (#277): on a split row it asks for the row's context menu, as a right-click
+  /// does; on a plain tab row, which has no menu items, it does nothing. Neither activates the row. The window
+  /// delivers the mouse-down, as AppKit does.
+  func testCtrlClickShowsTheRowMenuAndDoesNotActivateTheRow() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
     let (window, view) = try shownOutline(harness, current: world.today[0])
-    let point = try windowPoint(of: world.split, in: harness, view)
-    let menu = try XCTUnwrap(view.menu)
-    let recorder = ContextMenuRecorder(filling: menu)
-    menu.delegate = recorder
-    defer { menu.delegate = recorder.filler }
-    NSApp.postEvent(try mouseEvent(.leftMouseUp, at: point, [.control], in: window), atStart: false)
+    let recorder = ContextMenuRecorder()
+    view.presentContextMenu = { menu, _, _ in recorder.record(menu) }
+    let splitPoint = try windowPoint(of: world.split, in: harness, view)
+    let tabPoint = try windowPoint(of: world.today[1], in: harness, view)
 
-    window.sendEvent(try mouseEvent(.leftMouseDown, at: point, [.control], in: window))
-    window.discardEvents(matching: [.leftMouseUp], before: nil)
+    window.sendEvent(try mouseEvent(.leftMouseDown, at: splitPoint, [.control], in: window))
+    window.sendEvent(try mouseEvent(.leftMouseDown, at: tabPoint, [.control], in: window))
 
-    XCTAssertEqual(recorder.opened, [["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"]],
-                   "the split row's context menu opened once")
+    XCTAssertEqual(recorder.shown,
+                   [["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"], []],
+                   "the split row's menu, then the plain tab row's empty one")
     XCTAssertEqual(harness.current, world.today[0], "a Ctrl-click does not activate the row")
     XCTAssertNotNil(harness.source.node(world.split))
-    harness.controller.close()
+    XCTAssertEqual(view.clickModifiers, [])
   }
 
   func testPlainClickOnASplitRowActivatesIt() throws {

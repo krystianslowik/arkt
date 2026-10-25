@@ -58,8 +58,20 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     super.reloadData()
   }
 
+  /// Shows the context menu of a Ctrl-click; tests replace it to record the menu instead of tracking it.
+  var presentContextMenu: @MainActor (NSMenu, NSEvent, NSView) -> Void = { menu, event, view in
+    NSMenu.popUpContextMenu(menu, with: event, for: view)
+  }
+
   public override func mouseDown(with event: NSEvent) {
-    clickModifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    // A Ctrl-click is a secondary click: the row's context menu, as a right-click shows, never the click action.
+    // Left to the table, it sends the row action with Control set, which activates the row (#277).
+    if modifiers.contains(.control) {
+      if let menu = menu(for: event) { presentContextMenu(menu, event, self) }
+      return
+    }
+    clickModifiers = modifiers
     defer { clickModifiers = [] }
     let row = self.row(at: convert(event.locationInWindow, from: nil))
     let rowView = row >= 0 ? self.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView : nil
