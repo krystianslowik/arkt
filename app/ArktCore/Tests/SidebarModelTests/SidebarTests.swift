@@ -24,6 +24,30 @@ struct SidebarTests {
     return (sidebar, space, ids)
   }
 
+  // MARK: - Indexed insertion (#293)
+
+  /// Cmd-T opens on top (BH-079, maintainer decision on #293): a tab added at index 0 lands before its
+  /// siblings; no index appends, as before.
+  @Test func aTabAddedAtIndexZeroLandsOnTop() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let a = try sidebar.addTab(url: url, title: "A", in: .today(space))
+    let b = try sidebar.addTab(url: url, title: "B", in: .today(space))
+    #expect(sidebar.children(of: .today(space)) == [a, b])
+    let c = try sidebar.addTab(url: url, title: "C", in: .today(space), at: 0)
+    #expect(sidebar.children(of: .today(space)) == [c, a, b])
+  }
+
+  @Test func anOutOfRangeInsertIndexIsClamped() throws {
+    var sidebar = Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let a = try sidebar.addTab(url: url, title: "A", in: .today(space))
+    let b = try sidebar.addTab(url: url, title: "B", in: .today(space), at: 99)
+    #expect(sidebar.children(of: .today(space)) == [a, b])
+    let c = try sidebar.addTab(url: url, title: "C", in: .today(space), at: -3)
+    #expect(sidebar.children(of: .today(space)) == [c, a, b])
+  }
+
   // MARK: - Structure
 
   @Test func spacesKeepInsertionOrder() {

@@ -159,7 +159,8 @@ public protocol SidebarSource: AnyObject {
   /// The location that holds `id` (Track B: `Node.parent`).
   func parent(of id: NodeID) -> SidebarLocation?
   /// Throws when the model refuses the location (unknown Space, too deep). `StubSidebar` never throws.
-  @discardableResult func addTab(url: URL, title: String, in location: SidebarLocation) throws -> NodeID
+  /// `index` is the position in the location's child order, clamped; nil appends (BH-079: Cmd-T passes 0).
+  @discardableResult func addTab(url: URL, title: String, in location: SidebarLocation, at index: Int?) throws -> NodeID
   /// A new Space for this source's default profile, appended to `spaceOrder`. Emits `.spaceAdded`.
   @discardableResult func addSpace(title: String) throws -> SpaceID
   /// New Space (BH-037): a Space for the default profile inserted directly after `space`; nil or an unknown Space
@@ -257,6 +258,12 @@ public final class SidebarChangeHub {
 }
 
 extension SidebarSource {
+  /// Appending add, the common case; positional inserts name `index`.
+  @discardableResult
+  public func addTab(url: URL, title: String, in location: SidebarLocation) throws -> NodeID {
+    try addTab(url: url, title: title, in: location, at: nil)
+  }
+
   /// The top-level section (`.favorites`, `.pinned`, `.today`) holding `id`, through folders and splits.
   public func section(containing id: NodeID) -> SidebarLocation? {
     var location = parent(of: id)

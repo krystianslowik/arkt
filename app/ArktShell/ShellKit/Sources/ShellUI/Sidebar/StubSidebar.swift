@@ -149,9 +149,9 @@ public final class StubSidebar: SidebarSource {
   }
 
   @discardableResult
-  public func addTab(url: URL, title: String, in location: SidebarLocation) -> NodeID {
+  public func addTab(url: URL, title: String, in location: SidebarLocation, at index: Int? = nil) -> NodeID {
     let id = NodeID()
-    insert(.tab(id: id, url: url, title: title), id: id, in: location)
+    insert(.tab(id: id, url: url, title: title), id: id, in: location, at: index)
     return id
   }
 
@@ -180,9 +180,15 @@ public final class StubSidebar: SidebarSource {
     hub.emit(.node(id))
   }
 
-  private func insert(_ info: SidebarNodeInfo, id: NodeID, in location: SidebarLocation) {
+  private func insert(_ info: SidebarNodeInfo, id: NodeID, in location: SidebarLocation, at index: Int? = nil) {
     nodes[id] = Node(info: info, parent: location)
-    childOrder[location, default: []].append(id)
+    var siblings = childOrder[location, default: []]
+    if let index {
+      siblings.insert(id, at: min(max(index, 0), siblings.count))
+    } else {
+      siblings.append(id)
+    }
+    childOrder[location] = siblings
     hub.emit(.structure(location))
   }
 }

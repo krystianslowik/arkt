@@ -489,7 +489,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       // Cmd-T with no Space creates the Space first, then the tab (decision 3) [I].
       guard let space = sidebarController.currentSpace ?? createSpace() else { return }
       do {
-        let node = try sidebar.addTab(url: url, title: url.host() ?? url.absoluteString, in: .today(space))
+        // New Today tabs go on top (BH-079, decision on #293).
+        let node = try sidebar.addTab(url: url, title: url.host() ?? url.absoluteString, in: .today(space), at: 0)
         activate(node: node)
       } catch {
         onError?(.addTab, error)

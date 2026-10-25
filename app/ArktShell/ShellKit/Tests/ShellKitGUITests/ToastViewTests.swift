@@ -123,8 +123,8 @@ private final class FailingSpaceSidebar: SidebarSource {
   func children(of location: SidebarLocation) -> [NodeID] { base.children(of: location) }
   func node(_ id: NodeID) -> SidebarNodeInfo? { base.node(id) }
   func parent(of id: NodeID) -> SidebarLocation? { base.parent(of: id) }
-  func addTab(url: URL, title: String, in location: SidebarLocation) throws -> NodeID {
-    base.addTab(url: url, title: title, in: location)
+  func addTab(url: URL, title: String, in location: SidebarLocation, at index: Int?) throws -> NodeID {
+    base.addTab(url: url, title: title, in: location, at: index)
   }
   func addSpace(title: String) throws -> SpaceID { throw CocoaError(.featureUnsupported) }
   func addSpace(title: String, after space: SpaceID?) throws -> SpaceID { throw CocoaError(.featureUnsupported) }

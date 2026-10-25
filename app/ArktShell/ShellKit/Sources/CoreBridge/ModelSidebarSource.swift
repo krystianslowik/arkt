@@ -47,12 +47,14 @@ public final class ModelSidebarSource: SidebarSource {
   // MARK: - SidebarSource (writes)
 
   /// A new tab whose idle clock starts now (`lastActiveAt == createdAt`). Throws the model's `SidebarError`.
+  /// `index` is the position in the location's child order, clamped; nil appends.
   @discardableResult
-  public func addTab(url: URL, title: String, in location: SidebarLocation) throws -> UUID {
+  public func addTab(url: URL, title: String, in location: SidebarLocation, at index: Int? = nil) throws -> UUID {
     let createdAt = now()
     return try mutate {
       try $0.addTab(
-        url: url, title: title, lastActiveAt: createdAt, in: BridgeMapping.location(location), createdAt: createdAt)
+        url: url, title: title, lastActiveAt: createdAt, in: BridgeMapping.location(location), at: index,
+        createdAt: createdAt)
     }
   }
 
