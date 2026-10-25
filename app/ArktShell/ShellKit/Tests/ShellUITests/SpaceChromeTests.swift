@@ -205,8 +205,7 @@ struct ThemeCrossfadeTests {
     #expect(controlPoint(animation.timingFunction, at: 1) == (0.42, 0))
     #expect(controlPoint(animation.timingFunction, at: 2) == (0.58, 1))
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.paper.baseColors.map(\.cgColor)))
-    try await Task.sleep(for: .milliseconds(500))
-    #expect(view.crossfadeAnimationForTesting == nil)
+    #expect(await settled(view, timeout: 5))
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.dusk.baseColors.map(\.cgColor)))
   }
 
@@ -254,6 +253,17 @@ struct ThemeCrossfadeTests {
 
   private func stops(_ colors: [CGColor]) -> [[CGFloat]] {
     colors.map { color in (color.components ?? []).map { ($0 * 1000).rounded() / 1000 } }
+  }
+
+  /// Polls once a millisecond until the crossfade has settled (its animation removed), so the check waits on the
+  /// condition rather than a fixed interval.
+  private func settled(_ view: ThemeBackgroundView, timeout: Double) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while view.crossfadeAnimationForTesting != nil {
+      if Date() > deadline { return false }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return true
   }
 
   /// CAMediaTimingFunction has no name getter; the curve is identified by its two control points. A missing

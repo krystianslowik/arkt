@@ -105,7 +105,7 @@ enum BridgeMapping {
     case .sRGB:
       return SidebarModel.RGBA(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
     case .displayP3:
-      if let c = convert(color.cgColor) {
+      if let c = convert(color.cgColor), c.count == 4 {
         return SidebarModel.RGBA(red: Double(c[0]), green: Double(c[1]), blue: Double(c[2]), alpha: Double(c[3]))
       }
       logger.fault("Display P3 color failed to convert to extended sRGB; storing clamped components")

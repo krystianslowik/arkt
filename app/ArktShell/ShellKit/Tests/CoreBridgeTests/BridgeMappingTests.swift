@@ -26,4 +26,10 @@ struct BridgeMappingColorTests {
     let converted = BridgeMapping.modelColor(color, convert: { _ in nil })
     #expect(converted == SidebarModel.RGBA(red: 1, green: 0, blue: 0.5, alpha: 1))
   }
+
+  @Test func aConverterReturningTooFewComponentsFallsBackToClamped() {
+    let color = ShellUI.RGBA(red: 1.2, green: -0.3, blue: 0.5, alpha: 2, space: .displayP3)
+    let converted = BridgeMapping.modelColor(color, convert: { _ in [0.5] })
+    #expect(converted == SidebarModel.RGBA(red: 1, green: 0, blue: 0.5, alpha: 1))
+  }
 }
