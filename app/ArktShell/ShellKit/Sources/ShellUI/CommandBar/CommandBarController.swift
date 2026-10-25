@@ -78,6 +78,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.table.delegate = self
     barView.table.target = self
     barView.table.action = #selector(rowClicked(_:))
+    // Accessibility rows read the results, not row views: a row never laid out still has its title and caption.
+    barView.table.axProxyRows.content = { [weak self] row in
+      guard let self, results.indices.contains(row) else { return nil }
+      return AXProxyRowContent(identifier: AXID.CommandBar.row, label: results[row].title,
+                               value: results[row].accessibilityCaption)
+    }
     barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
     for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification,

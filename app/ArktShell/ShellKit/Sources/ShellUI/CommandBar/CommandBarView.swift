@@ -1,16 +1,60 @@
 import AppKit
 
+/// The results table. It exposes one `AXProxyRow` per result (`AXProxyRows`): `NSTableRowView` is dropped from the
+/// out-of-process accessibility tree, so XCUITest's `tableRows` query on `commandBar.results` and VoiceOver row
+/// navigation would see no rows otherwise. The controller supplies each row's label and value from its results.
 @MainActor
 final class CommandBarTableView: NSTableView {
-  override func accessibilityChildren() -> [Any]? {
-    NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
+  nonisolated let axProxyRows: AXProxyRows
+
+  override init(frame frameRect: NSRect) {
+    axProxyRows = AXProxyRows()
+    super.init(frame: frameRect)
+    axProxyRows.attach(to: self)
   }
 
-  override func accessibilityRows() -> [any NSAccessibilityRow]? {
-    (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) }
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override func reloadData() {
+    super.reloadData()
+    axProxyRows.invalidate()
   }
 
-  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
+  override func accessibilityChildren() -> [Any]? { axProxyRows.rows }
+
+  override func accessibilityRows() -> [any NSAccessibilityRow]? { axProxyRows.rows }
+
+  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { axProxyRows.visibleRows }
+
+  override func accessibilitySelectedRows() -> [any NSAccessibilityRow]? { axProxyRows.selectedRows }
+
+  override func accessibilityRowCount() -> Int { axProxyRows.rows.count }
+
+  // Legacy entry points. Out-of-process clients read `AXChildren`, `AXRows` and `AXChildrenInNavigationOrder`
+  // through these, and `NSTableView` answers them from its row views without calling the overrides above. They are
+  // `nonisolated` because the SDK declares them on `NSObject`; `AXProxyRows` explains the main-thread handling.
+  // Marked deprecated like the methods they override, so the `super` calls do not warn.
+
+  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
+  override nonisolated func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
+    if let value = axProxyRows.attributeValue(attribute) { return value }
+    return super.accessibilityAttributeValue(attribute)
+  }
+
+  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
+  override nonisolated func accessibilityArrayAttributeCount(_ attribute: NSAccessibility.Attribute) -> Int {
+    if let count = axProxyRows.arrayAttributeCount(attribute) { return count }
+    return super.accessibilityArrayAttributeCount(attribute)
+  }
+
+  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
+  override nonisolated func accessibilityArrayAttributeValues(
+    _ attribute: NSAccessibility.Attribute, index: Int, maxCount: Int
+  ) -> [Any] {
+    if let values = axProxyRows.arrayAttributeValues(attribute, index: index, maxCount: maxCount) { return values }
+    return super.accessibilityArrayAttributeValues(attribute, index: index, maxCount: maxCount)
+  }
 }
 
 /// Root view of the command bar: input row, divider, results table. Frames are set in `layout()`.
@@ -19,7 +63,7 @@ final class CommandBarView: NSView {
   let field = NSTextField()
   let divider = NSView()
   let scrollView = NSScrollView()
-  let table: NSTableView = CommandBarTableView()
+  let table = CommandBarTableView(frame: .zero)
 
   override var isFlipped: Bool { true }
 
