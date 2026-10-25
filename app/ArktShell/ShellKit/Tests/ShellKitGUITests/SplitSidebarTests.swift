@@ -268,8 +268,33 @@ final class SplitSidebarTests: XCTestCase {
     window.postEvent(down, atStart: true)
     let currentDown = try XCTUnwrap(window.nextEvent(matching: .leftMouseDown, until: .distantPast,
                                                      inMode: .default, dequeue: true))
+    // TEMPORARY diagnostic for #277.
+    let spy = ForwardingSpy()
+    harness.controller.onError = { mutation, error in spy.errors.append("\(mutation): \(error)") }
+    spy.view = view
+    spy.target = view.target
+    spy.action = view.action
+    let outline = try harness.outline()
+    let splitID = world.split
+    let source = harness.source
+    spy.probe = {
+      let id = (view.item(atRow: splitRow) as? OutlineItem)?.nodeID
+      return "split=\(source.node(splitID) != nil) rowIsSplit=\(id == splitID) "
+        + "targetIsOutline=\(view.target === outline) rows=\(view.numberOfRows)"
+    }
+    view.target = spy
+    view.action = #selector(ForwardingSpy.clicked(_:))
+    print("DIAG277 real env pressedButtons=\(NSEvent.pressedMouseButtons) active=\(NSApp.isActive) "
+      + "key=\(window.isKeyWindow) frame=\(window.frame) targetWasOutline=\(spy.target === outline) "
+      + "probe=[\(spy.probe())]")
 
     view.mouseDown(with: currentDown)
+
+    let upLeft = NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast, inMode: .default, dequeue: false)
+    print("DIAG277 real during=\(spy.records) upStillQueued=\(upLeft != nil) errors=\(spy.errors) "
+      + "probe=[\(spy.probe())]")
+    view.target = spy.target
+    view.action = spy.action
 
     XCTAssertEqual(view.clickModifiers, [], "clickModifiers is cleared when mouseDown returns")
     XCTAssertNil(harness.source.node(world.split))
@@ -282,10 +307,14 @@ final class SplitSidebarTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// TEMPORARY diagnostic for #277: prints how NSTableView tracking handles a synthesized Opt-click on CI.
-  @MainActor private final class ClickSpy: NSObject {
+  /// TEMPORARY diagnostic for #277: records each row action and forwards it to the outline's real target.
+  @MainActor private final class ForwardingSpy: NSObject {
     var records: [String] = []
     weak var view: SidebarOutlineView?
+    weak var target: AnyObject?
+    var action: Selector?
+    var errors: [String] = []
+    var probe: @MainActor () -> String = { "" }
     @objc func clicked(_ sender: Any?) {
       var current = "nil"
       if let event = NSApp.currentEvent {
@@ -294,89 +323,11 @@ final class SplitSidebarTests: XCTestCase {
       }
       let row = view?.clickedRow ?? -9
       let mods = view?.clickModifiers.rawValue ?? 0
-      records.append("row=\(row) clickMods=\(mods) current=\(current)")
+      let before = probe()
+      let sent = action.map { NSApp.sendAction($0, to: target, from: sender) } ?? false
+      records.append("row=\(row) clickMods=\(mods) current=\(current) before=[\(before)] sent=\(sent) "
+        + "after=[\(probe())]")
     }
-  }
-
-  func testZZDiagnoseOptClickTracking() throws {
-    let world = try Self.makeWorld()
-    let harness = Harness(world.sidebar)
-    harness.controller.showWindow(nil)
-    let window = try XCTUnwrap(harness.controller.window)
-    harness.controller.activate(node: world.panes[0])
-    let view = try harness.outline().outlineView
-    window.contentView?.layoutSubtreeIfNeeded()
-    view.layoutSubtreeIfNeeded()
-    _ = window.makeFirstResponder(view)
-    let spy = ClickSpy()
-    spy.view = view
-    let savedTarget = view.target
-    let savedAction = view.action
-    view.target = spy
-    view.action = #selector(ClickSpy.clicked(_:))
-    let splitRow = try harness.row(world.split)
-    let rect = view.rect(ofRow: splitRow)
-    let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
-    func log(_ text: String) { print("DIAG277 \(text)") }
-    log("env pressedButtons=\(NSEvent.pressedMouseButtons) mods=\(NSEvent.modifierFlags.rawValue) "
-      + "active=\(NSApp.isActive) key=\(window.isKeyWindow) visible=\(window.isVisible) frame=\(window.frame) "
-      + "pointer=\(NSEvent.mouseLocation) clickScreen=\(window.convertPoint(toScreen: point)) "
-      + "row=\(splitRow) hit=\(view.row(at: view.convert(point, from: nil)))")
-    func events(_ flags: NSEvent.ModifierFlags) throws -> (NSEvent, NSEvent) {
-      let now = ProcessInfo.processInfo.systemUptime
-      let down = try XCTUnwrap(NSEvent.mouseEvent(
-        with: .leftMouseDown, location: point, modifierFlags: flags, timestamp: now,
-        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
-      let up = try XCTUnwrap(NSEvent.mouseEvent(
-        with: .leftMouseUp, location: point, modifierFlags: flags, timestamp: now,
-        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
-      return (down, up)
-    }
-    func finish(_ name: String) {
-      let during = spy.records
-      let upLeft = NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast, inMode: .default, dequeue: false)
-      log("\(name) during=\(during) upStillQueued=\(upLeft != nil)")
-      spy.records = []
-      RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-      log("\(name) late=\(spy.records)")
-      spy.records = []
-      window.discardEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged], before: nil)
-    }
-    for trial in 0..<4 {
-      do {
-        let (down, up) = try events(.option)
-        window.postEvent(up, atStart: true)
-        window.postEvent(down, atStart: true)
-        let dq = try XCTUnwrap(window.nextEvent(matching: .leftMouseDown, until: .distantPast, inMode: .default,
-                                                dequeue: true))
-        log("dequeued#\(trial) same=\(dq === down) mods=\(dq.modifierFlags.rawValue) "
-          + "origMods=\(down.modifierFlags.rawValue) cg=\(dq.cgEvent?.flags.rawValue ?? 0) "
-          + "loc=\(dq.locationInWindow) ts=\(dq.timestamp)")
-        view.mouseDown(with: dq)
-        finish("dequeued#\(trial)")
-      }
-      do {
-        let (down, up) = try events(.option)
-        window.postEvent(up, atStart: true)
-        view.mouseDown(with: down)
-        finish("direct#\(trial)")
-      }
-      do {
-        let (down, up) = try events(.option)
-        NSApp.postEvent(up, atStart: false)
-        view.mouseDown(with: down)
-        finish("directAppend#\(trial)")
-      }
-      do {
-        let (down, up) = try events(.option)
-        window.postEvent(up, atStart: true)
-        window.sendEvent(down)
-        finish("sendEvent#\(trial)")
-      }
-    }
-    view.target = savedTarget
-    view.action = savedAction
-    harness.controller.close()
   }
 
   func testPlainClickOnASplitRowActivatesIt() throws {
