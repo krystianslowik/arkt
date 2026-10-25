@@ -771,27 +771,63 @@ not), #283 (open; its `CommandBarView.swift` bridge was not copied).
 
 ## U13: Import from Arc (#178)
 
-Base: `origin/main` at `46f3729`, branch `chore/178-arc-import-ui`.
+Base: `origin/main` at `46f3729`, branch `chore/178-arc-import-ui`. Lands after #289: it merges
+`chore/176-command-bar-keys` for the shared `AXProxyRows` bridge.
 
 ### What was done
 
-- `UITests/ArcImportTests.swift`: the plan's 5 tests. Every test checks the Arc copy it launched against (the rendered copy's SHA-256, or an empty directory when Import must stay disabled).
-- Deviation: out-of-process clients see no `archive.row` children and no `archive.footer` (the footer stays `hidden`). The count text is the `archive.table` accessibility value `rows N`. That matches the plan's "assert the count text, not the titles". A polling loop of `archive.row` wedges XCTest, so these tests never query rows, cells, or the footer.
-- `ArchiveWindowController` sets `rows N` when a page is applied. Legacy AX attributes are read through `MainActor.assumeIsolated` and one `nonisolated(unsafe)` local, the same shape as the command-bar exposure. No `@unchecked Sendable`. Row views are not tiled inside an out-of-process accessibility callback.
-- Favorite tiles use that legacy attribute path, so `favorites.tile` is visible out of process. Space-dot queries are unchanged.
+- `UITests/ArcImportTests.swift`: the plan's 5 tests. Every test checks the Arc copy it launched against (the rendered
+  copy's SHA-256, or an empty directory when Import must stay disabled). Each import checks the summary sheet's
+  counts of what it wrote (`ArcImportSummary.lines`, read from the sheet's static text) before pressing OK.
+- Archive counts are the number of `archive.row` rows under `archive.table` (`tableRows`, scoped to the Archive
+  window). Favorite tiles are `favorites.tile` buttons under the `favorites.grid` group, not a whole-app
+  `descendants` query (that walks the web view and can stall a wait, #289).
+- Menus are opened once and acted on: one click on File (or Window), a wait until the item is hittable in the open
+  menu, then a click or Escape. Nothing is clicked or typed inside a wait predicate. No fixed waits.
 
 ### Tests
 
-| Test | Parity | Result | Duration |
-|---|---|---|---|
-| `test_E_importFromEmptyState` | none (E4c / E6) | pass | 16.752 s |
-| `test_E_importFromFileMenu` | none | pass | 15.650 s |
-| `test_E_reimportIsIdempotent` | none | pass | 26.519 s |
-| `test_E_importMenuDisabledWithoutArcData` | none | pass | 8.573 s |
-| `test_BH045_BH034_importedSpacesShareFavorites` | BH-045, BH-034 | pass | 12.010 s |
+| Test | Parity | What it asserts |
+|---|---|---|
+| `test_E_importFromEmptyState` | none (E4c / E6) | sheet: 2 Spaces, 2 favorites added, 7 new archived items; 2 dots, 2 tiles, 7 Archive rows |
+| `test_E_importFromFileMenu` | none | menu enabled once the empty state offered the import; same sheet counts; 3 dots |
+| `test_E_reimportIsIdempotent` | none | second sheet: 0 new Spaces, 0 favorites added, 0 new archived items; 2 dots, 2 tiles; the Archive, first opened after the re-import, lists 7 rows |
+| `test_E_importMenuDisabledWithoutArcData` | none | menu item disabled, no empty-state import button, Arc directory still empty |
+| `test_BH045_BH034_importedSpacesShareFavorites` | BH-045, BH-034 | the same tile labels after Ctrl-2 selects Space 2 |
+
+The re-import test opens the Archive window for the first time after the re-import. The window keeps its rows while
+hidden and `show()` reloads asynchronously, so a window opened before the re-import would show the old count until
+the reload lands and a count wait could pass on stale rows. A window created after the re-import applies one page
+with the count after both imports: a duplicated archive shows 14 rows, never 7.
+
+The disabled-menu test has no positive sync for the availability check. Availability starts false and the check can
+only set it true when `StorableSidebar.json` exists, and the test asserts the Arc directory is empty, so the menu
+state it reads is the same before and after the check. The previous inverted 2 s wait is removed (the plan allows a
+fixed wait only in U14 test 5).
 
 ### Verification
 
-Local `xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build -jobs 2`: `build-for-testing`, then `test-without-building` with `-only-testing:ArktShellUITests/ArcImportTests`, `-parallel-testing-enabled NO`, `-collect-test-diagnostics never`. `** TEST EXECUTE SUCCEEDED **`. 5 tests, 0 failures, 79.504 s, on macOS 27.0 (arm64). Result bundle: `app/ArktShell/build/ui-u13-1792879044.xcresult`.
+The first version of this pull request passed locally (5 tests, 0 failures, 79.504 s, macOS 27.0 arm64, bundle
+`app/ArktShell/build/ui-u13-1792879044.xcresult`). That run predates the changes below; CI on the new head commit
+(`UI tests (informative)`, `ShellKit GUI tests (informative)`) has the current results. The pure suites were run by
+CI on every push: on `215fa3e`, `ArktCore tests`, `ShellKit tests`, `Isolation greps` and `App build (Debug)`
+passed. `ShellKit GUI tests (informative)` failed there only in
+`SplitSidebarTests.testOptClickMouseDownOnASplitRowSeparatesIt` (#277), which this change does not touch.
 
-Known issues used: none.
+### Deviations
+
+Production changes the plan did not list:
+
+- `ShellUI/Archive/ArchiveWindowController.swift`: `ArchiveTableView` publishes its rows through the shared
+  `AXProxyRows` (#289) with content from the loaded page: label = title, value = "place and date, reason" (what the
+  cell reads, #91). No row view is built for accessibility, and the table has no accessibility value (an earlier
+  revision set a test-only `rows N` and created every row view on every reload; both are gone).
+- `ShellUI/Sidebar/FavoritesGridView.swift`: product fix. A Favorites batch insert while the collection view had no
+  size (an empty grid is 0 pt tall, so an Arc import into an empty profile hits it) left `item(at:)` nil after the
+  grid was sized: no tiles until something reloaded the grid. Changes that arrive while the grid has no size are now
+  deferred to one `reloadData` when `layout()` first gives the collection view a size. In-process test:
+  `SidebarViewTests.testFavoritesAddedWhileTheGridHasNoSizeGetTiles`. The collection view's accessibility children
+  read the existing tile views only (no reload or layout from an accessibility callback).
+- In-process test for the Archive rows: `ArchiveWindowTests.testAccessibilityRowsComeFromThePageWithoutRowViews`.
+
+Known issues used: #277 (unrelated GUI-test flake on the earlier head).
