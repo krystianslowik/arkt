@@ -663,3 +663,123 @@ beside the existing 14 tests. The context menu item "Show Toolbar" shares its ti
 test clicks the hittable match.
 
 Known issues used: #269 (outline rows).
+
+## U11: Command bar keys (#176)
+
+Base: `origin/main` at `46f3729`, branch `chore/176-command-bar-keys`.
+
+### What was done
+
+- `UITests/CommandBarKeyTests.swift`: four of the plan's five tests (see Deviations).
+- `UITests/Harness/Shell.swift`: `commitSelectedRow` presses Return (or Cmd-Return / Opt-Return) on the selected
+  `commandBar.row` and returns false without pressing when that row's value is `Search`. `selectCommandBarRow` moves
+  with Down and does not press Enter. Row queries stay on the results table (`commandBar.results`); a whole-app
+  `descendants` query also walks the web view and stalls inside a wait.
+- `ShellUI/Accessibility/AXProxyRows.swift` (new, shared): `AXProxyRows` publishes the table as one
+  `AXProxyTable` element (role table, identifier `commandBar.results`) with one `AXProxyRow` child per row.
+  `NSTableRowView` never shows up as a child of `commandBar.results` for XCUITest, so
+  `app.tables["commandBar.results"].tableRows.matching(identifier: "commandBar.row")` was empty while the Open row
+  was on screen; `NSTableView` answers out of process from its own internals (#269). `CommandBarView` lists the
+  proxy table in place of the scroll view that holds the real table. Each
+  proxy computes its label, value and identifier from the model for its row index, its selection from the table
+  and its frame in screen coordinates when asked; nothing creates a row view or forces layout. Proxies keep their
+  identity between queries and are rebuilt on `reloadData` and when the row count changes. The proxies subclass
+  `NSAccessibilityElement`, whose getters the SDK leaves nonisolated: they read main-actor state only on the main
+  thread, through `MainActor.assumeIsolated` with `Sendable` results, and fall back to an empty answer off it. No
+  legacy `accessibilityAttributeValue` override, no `nonisolated(unsafe)`, no `@unchecked Sendable`. Each proxy's
+  `accessibilityChildren()` is empty so a snapshot does not walk from the row back into the table. The Archive table
+  (#292) and the sidebar outline (#283, #269) reuse this helper and land after this pull request.
+- `CommandBarView.swift`: `CommandBarTableView` owns the `AXProxyRows` and reports reloads and selection changes;
+  `CommandBarView` lists its element. `CommandBarController` supplies the row content from its results.
+- The three KB-085 tests are marked `PARITY(NEEDS-RUNTIME-CHECK RT-08)`. They assert Arkt's current [I] default.
+- Sidebar checks go through `waitForOutlineRows` (#269). Command bar rows are selected directly.
+
+### Tests
+
+| Test | Parity | Run time |
+|---|---|---|
+| `test_KB085_downWrapsFromLastToFirst` | KB-085, NEEDS-RUNTIME-CHECK RT-08 | 76.570 s, passed |
+| `test_BH104_BH110_switchToTabRow` | BH-104, BH-110 | 78.482 s, passed |
+| `test_KB085_cmdEnterOpensURLInNewTab` | KB-085, NEEDS-RUNTIME-CHECK RT-08 | 83.557 s, passed |
+| `test_KB085_optEnterOpensURLInNewTab` | KB-085, NEEDS-RUNTIME-CHECK RT-08 | 83.857 s, passed |
+
+### Verification
+
+The first local class run (bundle `ui-1792869775`) executed 5 and failed 5. Each case timed out after 10.0 s at
+`CommandBarKeyTests.swift:110` with summary `no command bar rows`. After the exposure above, from `app/ArktShell`:
+
+```zsh
+nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
+  -resultBundlePath build/ui-1792875051.xcresult -collect-test-diagnostics never \
+  -parallel-testing-enabled NO -only-testing:ArktShellUITests/CommandBarKeyTests -jobs 2 test-without-building
+```
+
+5 tests executed, 0 failed. `** TEST EXECUTE SUCCEEDED **`, exit 0.
+
+`Executed 5 tests, with 0 failures (0 unexpected) in 404.914 (404.916) seconds`
+
+`test_E_noSearchCommitted` selected the Search row and `commitSelectedRow` returned false without pressing Return:
+the bar stayed open and no search was committed. Each case still records the #269 expected failure on
+`sidebar.row.today`. That expected failure is not a product failure of these five tests.
+
+TDD: the first `build-for-testing` failed (`Shell` had no `commitSelectedRow` / `selectCommandBarRow` /
+`selectedCommandBarRow` / `commandBarRowSummary`). The helper landed before either UI run. The passing run is the
+exposure above.
+
+Source check (the CI grep, from `app/ArktShell/UITests`): `UI test sources OK`, exit 0. No sleeps. No http(s) literal
+other than `http://127.0.0.1` and `https://example.com` in `Harness/ArcFixture.swift`.
+
+Pure tests, recorded before the `CommandBarView.swift` exposure and not re-run after it, `nice -n 20 swift test -j 2`:
+`app/ArktCore` exit 0, Swift Testing 355 tests in four runs (94 + 100 + 63 + 98), 0 failures.
+`app/ArktShell/ShellKit` with `--skip ShellKitGUITests` exit 0, 545 tests
+(212 + 33 + 28 + 4 + 48 + 185 + 23 + 12), 0 failures. The 28-test run is the four isolation suites, including
+`CoreIsolationTests` and `WebKitIsolationTests`. `ShellKitGUITests` (including `AccessibilityIdentifierTests`) was
+not re-run; the in-process walk of `accessibilityChildren()` now sees the proxy rows.
+
+### Deviations
+
+- The plan names `Shell.commitSelectedRow()`. The harness also adds the row query and `selectCommandBarRow`, so a
+  test can move onto a row without pressing Enter, and every Enter in the class goes through the guard.
+- The passing run uses `app.tables["commandBar.results"].tableRows.matching(identifier: "commandBar.row")`.
+- Row exposure is in `CommandBarView.swift`. A Swift extension cannot override `NSTableView`'s accessibility methods.
+  #283's diff was not copied. Sidebar and archive outline rows were not changed.
+- The plan's fifth test, `test_E_noSearchCommitted`, is removed: it only exercised the UITests-target guard in
+  `commitSelectedRow` (a real search would leave loopback), not app behavior. What Enter does on a Search row is
+  asserted in process by `CommandBarTests.testArrowKeysMoveSelectionAndEnterSearches`, and the wrap test asserts
+  that landing on the Search row commits nothing.
+- BH-110 in the plan's steps is the Switch to Tab commit (bar closes, `Fixture alpha` stays selected, row count
+  unchanged), not a separate sidebar-click check. The test follows those steps.
+
+Known issues: #269 (sidebar outline rows are still missing out of process; the command bar rows in this class are
+not), #283 (open; its `CommandBarView.swift` bridge was not copied).
+
+### Review follow-up
+
+- Bridge redesign above (`AXProxyRows`): the `MainThreadAX` helper and its `nonisolated(unsafe)` local are gone.
+  Labels no longer depend on a row view existing, and frames are no longer captured at publish time.
+- The removed `@objc accessibilityChildrenInNavigationOrder()` claimed the method is not overridable; it is a
+  requirement of the `NSAccessibility` protocol since macOS 10.13. With the proxy table in place of the real table,
+  no table override is needed for it.
+- A first version kept the proxies under the real `NSTableView` behind nonisolated legacy
+  `accessibilityAttributeValue` overrides. It did not compile: `MainActor.assumeIsolated` requires a `Sendable`
+  result (`T: Sendable` in the Swift 6.2 and 6.3 standard library), and the proxy array is not `Sendable`
+  (`NSAccessibilityElement` is neither `Sendable` nor main-actor isolated). The cached elements cannot leave
+  main-actor state for a nonisolated caller without an unsafe annotation, so the bridge moved out of the table.
+- Accessibility hit tests at a row's point still return the real table's views, not the proxy row.
+  `accessibilityHitTest(_:)` comes from the nonisolated `NSAccessibility` protocol, and returning a cached proxy
+  from it would need the same non-Sendable crossing. XCUITest's queries and key presses do not use it; VoiceOver's
+  mouse tracking does. Follow-up if needed.
+- In-process tests, `ShellKitGUITests/AXProxyRowsTests.swift`: rows beyond the visible range report the model's
+  labels and build no row view; frames are the row's screen rectangle and follow a moved window and the moved
+  command bar panel; `reloadData` publishes fresh proxies; children are flat leaves parented to the proxy table and
+  follow selection; the command bar lists the proxy table instead of the scroll view.
+- UI tests assert the named behavior without sidebar rows (#269): Switch to Tab shows alpha's address in the
+  Toolbar's URL bar (the sidebar URL bar shows the host only, the same for every fixture page) with no second
+  `/p/alpha` request; Cmd-Return and Opt-Return open delta in a new tab whose Back button is disabled, while the
+  previous tab (navigated in place gamma -> epsilon) keeps Back enabled and is not loaded again. The Cmd-L prefill check runs in every case. Sidebar row checks are one combined
+  `waitForOutlineRows` per test (none in the wrap test), so a test waits out the #269 timeout at most once; the run
+  before this change spent 829 s on the class because every row wait timed out.
+- Run times in the table above predate this follow-up. On CI at `ad7e157` (macos-26 runner, wait scale 3): wrap
+  52 s, Cmd-Return 108 s, Opt-Return 106 s (each including the one 30 s #269 row wait), Switch to Tab 215 s (it
+  failed there on the sidebar URL bar, fixed since). Most of the remaining time is launch plus typing three loopback
+  addresses into the command bar; #269 removes the 30 s row wait.

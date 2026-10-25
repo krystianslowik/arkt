@@ -1,16 +1,31 @@
 import AppKit
 
+/// The results table. Its rows reach accessibility clients through `axProxyRows`: `NSTableView` publishes neither
+/// its row views nor overridden children out of process, so XCUITest's `tableRows` query on `commandBar.results` and
+/// VoiceOver row navigation would see no rows otherwise. `CommandBarView` lists the proxy table element in place of
+/// the scroll view; the controller supplies each row's label and value from its results.
 @MainActor
 final class CommandBarTableView: NSTableView {
-  override func accessibilityChildren() -> [Any]? {
-    NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
+  let axProxyRows: AXProxyRows
+
+  override init(frame frameRect: NSRect) {
+    axProxyRows = AXProxyRows(identifier: AXID.CommandBar.results)
+    super.init(frame: frameRect)
+    axProxyRows.attach(to: self)
   }
 
-  override func accessibilityRows() -> [any NSAccessibilityRow]? {
-    (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) }
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override func reloadData() {
+    super.reloadData()
+    axProxyRows.invalidate()
   }
 
-  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
+  override func selectRowIndexes(_ indexes: IndexSet, byExtendingSelection extend: Bool) {
+    super.selectRowIndexes(indexes, byExtendingSelection: extend)
+    axProxyRows.selectionDidChange()
+  }
 }
 
 /// Root view of the command bar: input row, divider, results table. Frames are set in `layout()`.
@@ -19,7 +34,7 @@ final class CommandBarView: NSView {
   let field = NSTextField()
   let divider = NSView()
   let scrollView = NSScrollView()
-  let table: NSTableView = CommandBarTableView()
+  let table = CommandBarTableView(frame: .zero)
 
   override var isFlipped: Bool { true }
 
@@ -67,7 +82,7 @@ final class CommandBarView: NSView {
     table.backgroundColor = .clear
     table.refusesFirstResponder = true            // the field keeps focus; arrows are routed by the controller
     table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-    table.setAccessibilityIdentifier(AXID.CommandBar.results)
+    table.axProxyRows.setParent(self)        // the results reach accessibility as `commandBar.results` (proxy)
 
     // One tracking area for the life of the view (never per show): pointer moves select the row under them.
     table.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
@@ -88,6 +103,16 @@ final class CommandBarView: NSView {
   /// Called with the result row under the pointer when it moves over one [I]. Only moves select, so a pointer
   /// that already rests where the bar appears does not change the selection.
   var onHoverRow: ((Int) -> Void)?
+
+  /// The input field and, while results show, the proxy results table in place of the scroll view that holds the
+  /// real table (`AXProxyRows`).
+  override func accessibilityChildren() -> [Any]? {
+    let children = (super.accessibilityChildren() ?? []).filter { child in
+      let view = (child as? NSView) ?? (child as? NSCell)?.controlView
+      return !(view?.isDescendant(of: scrollView) ?? false)
+    }
+    return scrollView.isHidden ? children : children + [table.axProxyRows.element]
+  }
 
   override func mouseMoved(with event: NSEvent) {
     let point = table.convert(event.locationInWindow, from: nil)
