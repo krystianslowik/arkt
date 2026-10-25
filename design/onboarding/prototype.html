@@ -224,7 +224,7 @@ h1 {
 }
 .btn-p:active { background: var(--mustard-shade); transform: scale(0.97); }
 .btn-s:active { transform: scale(0.97); }
-.btn-p[disabled] { opacity: 0.6; cursor: default; transform: none; }
+.btn-p[disabled], .btn-s[disabled] { opacity: 0.5; cursor: default; transform: none; }
 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .btn-p:focus-visible, .btn-s:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 body.rm .btn-p:active, body.rm .btn-s:active { transform: none; }
@@ -702,12 +702,15 @@ body.rt .cmdbar { background: #1C1C20; }
   function renderSidebar() {
     const imported = state.path === "import" && (state.importState === "imported");
     const landed = state.done;
-    const favs = imported ? ["M", "C", "G", "N", "F", "S"] : [];
-    $("#sbFavs").innerHTML = (imported ? favs : ["", "", ""]).map(l => `<div class="sb-fav">${l ? `<span class="tile">${l}</span>` : ""}</div>`).join("");
+    const favs = imported ? ["M", "C", "G"] : [];
+    const noFavs = landed && !imported;   // a fresh Space has no Favorites: the Space title moves up
+    $("#sbFavs").innerHTML = noFavs ? "" : (imported ? favs : ["", "", ""]).map(l => `<div class="sb-fav">${l ? `<span class="tile">${l}</span>` : ""}</div>`).join("");
+    $("#sbSpace").style.top = noFavs ? "78px" : "";
+    $("#sbList").style.top = noFavs ? "114px" : "";
     $("#sbSpace").textContent = imported ? "Personal" : (state.name.trim() || "Space 1");
     const pinned = imported
       ? [{ l: "M", t: "Mail" }, { l: "C", t: "Calendar" }, { l: "D", t: "Docs" }]
-      : [{ skel: 1, w: 92 }, { skel: 1, w: 70 }];
+      : (landed ? [] : [{ skel: 1, w: 92 }, { skel: 1, w: 70 }]);
     const today = landed ? [{ l: "N", t: "New Tab", current: true }] : [];
     $("#sbList").innerHTML = pinned.map(rowHTML).join("") +
       `<div class="divider"></div>` +
@@ -1022,7 +1025,7 @@ body.rt .cmdbar { background: #1C1C20; }
         const cs = getComputedStyle(inEl);
         if (!inEl.getAnimations().length && cs.opacity === "1" && outEl) { inEl.style.opacity = "0"; }
         if (outEl && !inEl.getAnimations().length) inEl.style.transform = opt.reduceMotion ? "none" : `translateX(${24 * dir}px)`;
-        animate(inEl, { opacity: "1", transform: "none" }, opt.reduceMotion ? fade(200) : "firm", outEl ? 40 : 0);
+        animate(inEl, { opacity: "1", transform: "none" }, opt.reduceMotion ? fade(200) : "firm", outEl ? 70 : 0);
       } else { inEl.style.opacity = "1"; inEl.style.transform = "none"; }
     }
     moveDot(prevIdx);
@@ -1064,6 +1067,9 @@ body.rt .cmdbar { background: #1C1C20; }
     // Ghost sidebar items appear as the field uncovers them, 30 ms apart.
     const items = [$(".sb-url"), ...$$(".sb-fav"), $("#sbSpace"), ...$$(".row", $("#sbList")), $(".sb-dock")];
     items.forEach((el, i) => { el.style.opacity = "0"; animate(el, { opacity: "" }, fade(240), 120 + i * 30); });
+    // The card underneath is the same surface, so the field dissolves over the last part of the fold and the first
+    // step (already entering inside the card) shows through without a pop.
+    field.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: EASE_OUT, delay: 200, fill: "forwards" });
     a.onfinish = () => { field.classList.add("gone"); field.style.clipPath = ""; };
     setTimeout(() => showStep(first, 1), 140);
   }
