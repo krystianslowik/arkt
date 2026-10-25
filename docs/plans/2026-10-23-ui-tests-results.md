@@ -774,9 +774,9 @@ not), #283 (open; its `CommandBarView.swift` bridge was not copied).
   command bar panel; `reloadData` publishes fresh proxies; children are flat leaves parented to the proxy table and
   follow selection; the command bar lists the proxy table instead of the scroll view.
 - UI tests assert the named behavior without sidebar rows (#269): Switch to Tab shows alpha's address in the
-  Toolbar's URL bar (the sidebar URL bar shows the host only) with no second `/p/alpha` request; Cmd-Return and Opt-Return open delta in a new tab whose Back
-  button is disabled, while the previous tab (navigated in place gamma -> epsilon) keeps Back enabled and is not
-  loaded again. The Cmd-L prefill check runs in every case. Sidebar row checks are one combined
+  Toolbar's URL bar (the sidebar URL bar shows the host only, the same for every fixture page) with no second
+  `/p/alpha` request; Cmd-Return and Opt-Return open delta in a new tab whose Back button is disabled, while the
+  previous tab (navigated in place gamma -> epsilon) keeps Back enabled and is not loaded again. The Cmd-L prefill check runs in every case. Sidebar row checks are one combined
   `waitForOutlineRows` per test (none in the wrap test), so a test waits out the #269 timeout at most once; the run
   before this change spent 829 s on the class because every row wait timed out.
 - Run times in the table above predate this follow-up. On CI at `ad7e157` (macos-26 runner, wait scale 3): wrap
