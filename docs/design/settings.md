@@ -223,7 +223,7 @@ stays mustard with a graphite glyph. Increase Contrast: group borders and separa
   opacity with `isEnabled = false`, caption ending "Not available yet.", VoiceOver reads the control as dimmed. The
   first build enables General (default browser, startup if
   window restoration exists), Appearance (Toolbar, full URL), Shortcuts (read-only list) and Advanced (Import from Arc,
-  data folder). Each later feature adds its row and its UI test.
+  data folder) rows; the rest are disabled. Each later feature enables its row and adds its UI test.
 
 ## 9. Parity notes
 
