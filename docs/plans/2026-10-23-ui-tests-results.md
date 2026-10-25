@@ -672,97 +672,93 @@ this change.
 ### What was done
 
 - `scripts/ui-tests/parity-report.sh` reads the spec with `grep -oE '^\| (KB|BH|GS)-[0-9]{3} '` (346 rows), the test
-  results from `xcrun xcresulttool get test-results tests`, and `app/ArktShell/UITests/parity-deferred.txt`
-  (`ID<TAB>reason<TAB>#issue`). It prints counts per section (1.x, 2.x, 3) and status, then the five slowest tests
-  (name, the Test Case `duration` string, and `durationInSeconds`), then the failing rows, the deferred rows with
-  issue links, and NEEDS-RUNTIME-CHECK rows that pass ("passing [I]"). Exit status is non-zero only for malformed
-  input. A test with no numeric duration is left out of the slowest list. A Test Case duration wins over its runs;
-  otherwise the longest Test Case Run is kept.
-- Precedence: any `Failed` test fails the row; every naming test `Passed` passes the row, including a row still listed
-  in the deferred file; a deferred-file row that is not fully passing is deferred; skipped tests and expected failures
-  are deferred; a mix of passes and skips or expected failures is deferred, because passing requires every naming test
-  to pass. Anything else with no test is not covered.
-- Deferred file, 25 starter rows: KB-031 and KB-032 (#119); GS-001 and BH-040 (#26; U12 has not landed on this branch);
-  BH-087 (#111); BH-069 (#85); the U15 split rows KB-070 to KB-075, BH-115, BH-116, BH-117, BH-120, BH-121, BH-122,
-  BH-123, BH-125, BH-128, GS-010, GS-011, GS-032, GS-033 (#54 to #58, matching the U15 test table; GS-010 is #57).
-  BH-118, BH-119, BH-124, BH-126 and BH-127 stay not covered.
-- `.github/workflows/swift-tests.yml`: after the UI test step, if the job was not cancelled, the script appends the
-  report to the job summary and `parity-report.md` is uploaded with the `.xcresult`. On failure, attachments are
-  exported and uploaded. `continue-on-error` stays, and `ui-tests` stays out of the gate.
+  results from `xcrun xcresulttool get test-results tests`, and `app/ArktShell/UITests/parity-deferred.txt`. It
+  prints counts per section (1.x, 2.x, 3) and status, the rows with a deferred part, the five slowest tests (name, the
+  `duration` string and `durationInSeconds`), then the failing rows, the deferred rows with issue links, and
+  NEEDS-RUNTIME-CHECK rows that pass ("passing [I]"). `jq` is taken from `PATH`; without it the script says so.
+- Deferred file format: `ID<TAB>reason<TAB>#issue` defers the whole row; `ID (part)<TAB>reason<TAB>#issue` defers one
+  part of it. The spec has no sub-ids and the plan names parts in the U9 mapping ("BH-087 (part)", "BH-087 (search)"),
+  so the part lives in the deferred file rather than in a split spec row (which would change the spec's 346 rows). A
+  row with a deferred part is classified by its tests as usual and its part is always listed under Deferred with the
+  row's own result, so a passing U9 test for the restore half of BH-087 cannot hide #111.
+- Precedence: any `Failed` observation fails the row; every naming test `Passed` passes the row, including a row whose
+  whole line is still in the deferred file; a whole deferred-file row that is not fully passing is deferred; skipped
+  tests and expected failures are deferred; a mix of passes and skips or expected failures is deferred, because
+  passing requires every naming test to pass. Anything else with no test is not covered.
+- Observations: every leaf `Test Case Run` or `Repetition` node under a Test Case (a run node with no run node below
+  it) is one observation with its own result, so one failed iteration fails the row; a case with no run nodes is one
+  observation. The slowest list keeps one duration per test: the longest single leaf run, else the case value, so
+  repetitions are never added up.
+- Issue links come only from skip and expected-failure reasons: in the CI bundle (Xcode 26.6) an "Expected Failure"
+  test carries one `Failure Message` node per matched `XCTExpectFailure`, named by its reason, and no "Expected
+  Failure" node. The issue is the reason's leading `#N:` or its final `#N` / `(#N)` (the plan's `XCTSkip("#111: ...")`,
+  `XCTSkip("flaky: #NNN")`, "manual check in #26", and the harness's "... (#269)"). Failure text of a failed test and
+  the test name are never read, so a `#N` quoted in an assertion is not linked as the row's issue.
+- Exit status: non-zero only on malformed input. That includes test names that cite a row id the spec does not have
+  (for example `KB850`): the report is still printed, those ids are listed under "Unknown row ids" and on stderr, and
+  the script exits 1. The informative job then shows red while `continue-on-error` keeps it out of the run's result,
+  as the plan defines for this job; the upload step still runs (`!cancelled()`). Failing rows never fail the script.
+  A failed `xcresulttool` call prints its stderr. A skipped or expected-failure test whose reason names no issue gets
+  a note on stderr with its nodes.
+- Deferred file, 25 rows: KB-031 and KB-032 (#119); GS-001 and BH-040 (#26: U12's swipe probe failed because
+  XCUITest's scroll has gesture phase 0, recorded in U12, #177, not merged yet); BH-087 search part only (#111);
+  BH-069 (#85); the U15 split rows KB-070 to KB-075, BH-115, BH-116, BH-117, BH-120, BH-121, BH-122, BH-123, BH-125,
+  BH-128, GS-010, GS-011, GS-032, GS-033 (#54 to #58, matching the U15 test table; GS-010 is #57). BH-118, BH-119,
+  BH-124, BH-126 and BH-127 stay not covered.
+- `.github/workflows/swift-tests.yml`, `ui-tests` job: a first step runs `scripts/ui-tests/parity-report-test.sh`;
+  after the UI test step, if the job was not cancelled, the report goes to the job summary, the job log and
+  `parity-report.md`, which is uploaded with the `.xcresult`. On failure, attachments are exported and uploaded.
+  `continue-on-error` stays, and `ui-tests` stays out of the gate.
 
-### Classifier run
+### Script tests
 
-No UI suite xcresult. Both swift slots and the GUI lock were already held, so this check did not build or launch the
-app. The script was run against the real spec and the real deferred file. `xcrun xcresulttool get test-results tests`
-was given a JSON document in schema 0.4.0 (`Test Case` nodes; one row also nested a `Test Case Run`) instead of a
-bundle from `xcodebuild`.
+`scripts/ui-tests/parity-report-test.sh` runs the script on synthetic fixtures in
+`scripts/ui-tests/parity-report-fixtures/` (an 11-row spec, a deferred file with two partial rows and one whole row, and
+three bundles) with a stub `xcrun` on `PATH`. It checks: the counts; a passing row with a deferred part listed under
+Deferred with result `passing` and its issue; issues from a leading `#N:`, `flaky: #N`, "manual check in #N" and the
+harness's `(#269)`, and none from a failed test's message or from mid-text `#N`; a failed repetition failing its row and
+the slowest list using one repetition, not the case sum; unknown ids in the report and on stderr with a non-zero exit;
+`xcresulttool` stderr on failure; the missing-`jq` message; and deferred-file errors for a row deferred both whole and
+in part, or an empty part. Run locally (zsh 5.9, jq 1.7): all checks passed; against the pre-change script: 25 failures.
+CI step "Parity report script tests" passed on macOS 26.
 
-Fixture cases: `test_KB001_BH100_passes` Passed; `test_KB084_passes` Passed; `test_KB018_fails` Failed;
-`test_KB002_BH101_skipped` Skipped (`#172`); `test_KB070_BH116_skipped` Skipped; `test_KB030_expected` Expected Failure;
-`test_KB004_passes` Passed and `test_KB004_skipped` Skipped; `test_BH032_passes` Passed and `test_BH032_fails` Failed;
-`test_GS042_passes` Passed; `test_E_infra` Passed (no row).
+### CI run
 
-Command: `scripts/ui-tests/parity-report.sh <fixture> docs/spec/arc-parity-spec.md app/ArktShell/UITests/parity-deferred.txt`
+Run 40191934579, job `UI tests (informative)` at `59e9cc8` on the `macos-26` runner, Xcode 26.6: `** TEST SUCCEEDED **`,
+18 tests, 0 failures, `Executed 18 tests ... in 521.438 (521.466) seconds`; xcodebuild reports 527.640 s for testing.
+The `xcodebuild test` step (build and test) took 10 min 28 s (12:16:35 to 12:27:03 UTC), the job 10 min 56 s.
 
-Exit code 0 (the two failing rows do not fail the script).
+Report from that run (job log, step "Parity report", exit 0), counts:
 
-| Section | Passing | Failing | Deferred | Not covered | Total |
-|---|---:|---:|---:|---:|---:|
-| 1.1 Tabs, windows, sidebar, navigation (global) | 1 | 1 | 5 | 36 | 43 |
-| 1.2 App, page, tools | 0 | 0 | 0 | 26 | 26 |
-| 1.3 Split View | 0 | 0 | 6 | 0 | 6 |
-| 1.4 Peek, Little Arc, command bar, PiP | 1 | 0 | 0 | 13 | 14 |
-| 2.1 Sidebar | 0 | 1 | 0 | 32 | 33 |
-| 2.2 Spaces | 0 | 0 | 1 | 10 | 11 |
-| 2.3 Favorites | 0 | 0 | 0 | 9 | 9 |
-| 2.4 Pinned tabs | 0 | 0 | 1 | 16 | 17 |
-| 2.5 Today and Archive | 0 | 0 | 1 | 18 | 19 |
-| 2.6 Folders | 0 | 0 | 0 | 10 | 10 |
-| 2.7 Command bar | 1 | 0 | 1 | 13 | 15 |
-| 2.8 Split View | 0 | 0 | 9 | 5 | 14 |
-| 2.9 Little Arc | 0 | 0 | 0 | 15 | 15 |
-| 2.10 Peek | 0 | 0 | 0 | 11 | 11 |
-| 2.11 Air Traffic Control | 0 | 0 | 0 | 7 | 7 |
-| 2.12 Links and clicks | 0 | 0 | 0 | 8 | 8 |
-| 2.13 Windows, Incognito, Profiles | 0 | 0 | 0 | 10 | 10 |
-| 2.14 Downloads and Library | 0 | 0 | 0 | 3 | 3 |
-| 2.15 Media and Picture in Picture | 0 | 0 | 0 | 7 | 7 |
-| 2.16 Toasts and notifications | 0 | 0 | 0 | 8 | 8 |
-| 2.17 Settings and shortcut system | 0 | 0 | 0 | 16 | 16 |
-| 3. Mouse, trackpad and modifier-click gestures | 1 | 0 | 5 | 38 | 44 |
-| Total | 4 | 2 | 29 | 311 | 346 |
+| Status | Rows |
+|---|---:|
+| Passing | 6 (KB-003, KB-018, KB-084, BH-031, BH-103, GS-042) |
+| Failing | 0 |
+| Deferred | 31: the 24 whole rows of the file, and KB-001, KB-002, KB-004, BH-032, BH-100 to BH-102 (#269) |
+| Not covered | 309 (BH-087 among them; its search part is listed as deferred, #111) |
+| Total | 346 |
 
-Passing is KB-001, BH-100, KB-084, GS-042. Failing is KB-018, and BH-032 (one pass and one fail). Deferred adds KB-002,
-BH-101 (skip only), KB-030 (expected failure) and KB-004 (pass and skip) to the 25 file rows. Passing [I] is KB-084
-only. A second run that also passed `test_KB031_passes` reported 5 passing, 2 failing, 28 deferred, 311 not covered:
-KB-031 left the deferred list.
+Passing [I]: KB-084. No unknown row ids.
 
-Malformed input exits non-zero: missing arguments, missing spec, a spec status other than CONFIRMED / SINGLE-SOURCE /
-NEEDS-RUNTIME-CHECK, a deferred id that is not a spec row, a duplicate deferred id, a reason containing `|`, an issue
-that is not `#N`, and a deferred line with the wrong number of fields. An empty deferred file is accepted and still
-fails later when the xcresult cannot be read.
-
-The full UI suite was not run. `/tmp/arkt-gui-lock` was held, so this check did not start a second `xcodebuild`. CI
-wall time is still unmeasured.
-
-Slowest five and the only measured elapsed time come from a completed partial bundle another issue already wrote:
-`177-space-switching/app/ArktShell/build/ui-1792868138.xcresult` (`ArktShellUITests/SpaceSwitchTests`, five tests).
-`xcrun xcresulttool` 25115, schema 0.4.0. Each Test Case node has `duration` (string) and `durationInSeconds` (number).
-Observed Test Case keys: `children`, `duration`, `durationInSeconds`, `name`, `nodeIdentifier`, `nodeIdentifierURL`,
-`nodeType`, `result`. That bundle has no Test Case Run nodes. `get test-results summary` reports `startTime`
-1792868139.378 and `finishTime` 1792868456.992, an elapsed 317.614 seconds for this SpaceSwitchTests run.
-
-Command: `scripts/ui-tests/parity-report.sh <SpaceSwitchTests xcresult> docs/spec/arc-parity-spec.md app/ArktShell/UITests/parity-deferred.txt`
-
-Exit code 0. The script printed these five lines after the status table:
+Slowest five, as printed:
 
 ```
-`test_BH036_switchingBackRestoresLastActiveTab()` 3m 13s (193.8715180158615s)
-`test_KB035_BH041_ctrlNumberGoesToSpace()` 1m 16s (76.50147294998169s)
-`test_KB033_KB034_cmdOptArrowsMoveBetweenSpaces()` 16s (16.32246494293213s)
-`test_BH035_spaceDotClickSelectsSpace()` 13s (13.301324009895325s)
-`test_GS001_twoFingerSwipeMovesSpace()` 10s (10.702916026115417s)
+`test_BH032_backForwardEnabledFollowsHistory()` 1m 29s (89.2746160030365s)
+`test_KB002_BH101_cmdLEditedEnterNavigatesCurrentTab()` 1m 19s (79.13402307033539s)
+`test_KB001_BH100_cmdTOpensURLInNewTodayTab()` 1m 18s (78.18275904655457s)
+`test_KB004_BH102_cmdLUneditedEnterReloads()` 48s (48.44455802440643s)
+`test_E_cmdTWithNoSpaceCreatesSpaceThenTab()` 47s (47.1280460357666s)
 ```
+
+The four slowest each include one or two 30 s outline-row waits that end as the #269 expected failure. The earlier
+run at `d2e7c47` (run 40125570080) had the same 18 tests in 530.369 s and the same five slowest tests (KB-001 and
+KB-002 in the other order).
+
+The bundle had no `Test Case Run` or `Repetition` nodes (one iteration). How xcresulttool nests runs from
+`-test-iterations` or `-run-tests-until-failure` was not seen in a real bundle; the leaf-run handling follows the node
+types `Test Case Run` and `Repetition` and is covered by the fixture only. Skip reasons were not seen either (the suite
+has no skipped test yet); they are read from `Failure Message` nodes the same way. Local suite wall time was not
+measured.
 
 Promotion still waits on 10 green `UI tests (informative)` runs on `main`, one local
 `-test-iterations 20 -run-tests-until-failure` run with no failure, and a maintainer decision in #161.
@@ -770,8 +766,10 @@ Promotion still waits on 10 green `UI tests (informative)` runs on `main`, one l
 ### Deviations from the plan
 
 - Step 6 is not done: `continue-on-error` is unchanged, the job is not in the gate, and CONTRIBUTING.md is not edited.
-- The classifier counts above were checked with a schema fixture. The slowest five were printed by re-running the
-  script on `177-space-switching`'s completed `ui-1792868138.xcresult`. The full UI suite was not run.
+- Wall time and the slowest five come from CI only; no local full-suite run.
 - A mix of passed and skipped or expected-failure tests is deferred. The plan states passing as every test passed, and
   deferred as only skipped tests or a deferred-file row; the mix is neither passing nor failing.
-- GS-001 and BH-040 are in the starter file even though U12's probe is not on this branch.
+- The deferred file supports one part of a row (`BH-087 (search)`), which the plan's `ID<TAB>reason<TAB>#issue` format
+  does not spell out; the plan's U9 mapping and step 1 ("BH-087 search") name the part.
+- Test names citing a row id outside the spec count as malformed input and exit 1 after the report is printed.
+- GS-001 and BH-040 are in the deferred file before U12 merges; U12's probe failed as the plan describes.
