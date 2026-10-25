@@ -250,6 +250,61 @@ Logout stays a maintainer check. SIGTERM is fixed by #298.
 - Patch budget: `wc -l < engine/patches/chromium/.patches` 7, `git -C $CR rev-list --count 156.0.8078.48..HEAD` 7; no file
   outside `engine/arkt` changed in the engine.
 
+## #299: Dock reopen without a New Tab row, startupURL for a URL from another app
+
+Date 2026-10-25. Branch `fix/299-reopen-newtab` off `main` at `3a4b050`. Overlay and Swift only: no patch, `.patches`
+unchanged (7). `nice -n 10 autoninja -C out/Spike -j 6 chrome`: `The build has finished successfully.`;
+`gn check out/Spike '//arkt/*'`: `Header dependency check OK`; only `libchrome_dll.dylib` changed and was re-cloned into
+`$EMB`; the Engine app built with `xcodebuild -scheme ArktShell -configuration Engine CONFIGURATION_BUILD_DIR=$EMB`.
+`out/Arkt` not rebuilt.
+
+### Root causes
+
+1. **New Tab row.** A Dock reopen with no window runs `AppController` `CreateBrowser` -> `chrome::NewEmptyWindow`, which
+   adds Chromium's New Tab page (`chrome://newtab/`) to the new `Browser`. `ChromiumEngine` listed it like any engine tab,
+   so the shell made a Today row. Closing it is not enough: a `Browser` closes with its last tab, and the shell window
+   with it. The first Dock reopen of a session can also take `AppController`'s session restore attempt, then
+   `StartupBrowserCreator` (`kStartupCreator`, so `kind=startupURL`), with the same New Tab page.
+2. **Kind of a URL from another app.** The W3-4 table names `kStartupCreator` for it; Chromium 156 does not use it.
+   `-application:openURLs:` (or, at a cold launch, the URLs it queued, from `-applicationDidFinishLaunching:`) ends in
+   `OpenStartupTabsInBrowserWithProfile`, which builds the window with default params
+   (`CreateBrowserWindow(BrowserWindowCreateParams(profile, true))`, `app_controller_mac.mm`), the same params as a
+   Dock reopen's, so the factory reported `reopen`. The Apple event is not current while the window is built (checked
+   on a warm `open -a <app> <url>`: no event), so it cannot be told from a reopen at construction without a patch.
+
+### What changed
+
+- `ChromiumEngine` (`ChromiumEngine+NewTabPage.swift`): in a `.reopen` or `.startupURL` window, a first tab that is the
+  New Tab page, or has no page yet, is kept out of the tables: not listed, not announced, its events dropped. The shell
+  adopts the window with no tabs and shows an empty window. The page keeps the `Browser` open until another tab joins
+  the window (the first tab the user opens, or an extension's), then closes with `.skipUnloadHandlers` and no event. If
+  it navigates to another page (Show All History with no window opens there), it is listed then, with that URL, as the
+  window's active tab. Other kinds (`chrome.windows.create`) are unchanged.
+- `arkt_embedder.mm`: a window with default params that was held before readiness is looked at again at replay
+  (`ReclassifyHeld`): no page can open a window before readiness and a Dock reopen gets the New Tab page, so a held
+  window that already shows a page reports `startupURL` with that URL. After readiness the request is answered inside
+  construction, before the window has a tab, so a URL from another app sent to the running app still reports `reopen`;
+  with the change above it still gets exactly one Today row.
+
+### Checks (Engine app, profile `$PROF/299-try`, scratch `ARKT_*` folders and defaults suite, loopback pages)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Dock reopen with no window | PASS | Close Window (menu, by PID), `browsers normal=0`; `open -a <app>`: `host asked kind=reopen (default params ...)`, `facade batch 4 event(s) WindowOpened,TabCreated,LoadingChanged,ActiveTabChanged`, one shown shell window with an empty card, no Today row (stored snapshot unchanged) |
+| First Dock reopen of the session (startup path) | PASS | `host asked kind=startupURL (startup browser creator)`, empty window, no Today row |
+| URL from another app before readiness | PASS | the GURL event sent to the process before readiness: `window request queued kind=reopen (default params ...) (window held hidden)`, `embedderReady (1 queued request(s))`, `host asked kind=startupURL (default params, held before ready with a page (URL from another application))`, `launch finished (1 window(s) from queued requests)`; one window, one Today row with the page's URL |
+| URL from another app, running app, no window | PASS (kind stays `reopen`) | `open -a <app> <url>`: one window, one Today row "Alpha", the page shown |
+| Cold `open -a <app> <url>` through LaunchServices | maintainer check | a rebuilt ad-hoc bundle on the Chromium disk asks for removable-volume access first; the runs above launched the executable from a terminal that has it, and sent the GURL event to the process by PID |
+
+Found on the way: the window and row of a URL opened at a cold launch with no Space yet (first run) show an empty card
+and no selected row; with a Space the page is shown. Not changed here.
+
+### Verification
+
+- ShellKit `swift test --skip ShellKitGUITests`: 607 tests, all pass, on `main` at `5117b90` (599 there + 8 new `ChromiumEngineScriptTests`). GUI tests not
+  run (no ShellUI change). ArktCore `swift test`: 378, all pass.
+- Patch budget: `.patches` 7; no file outside `engine/arkt` changed in the engine.
+
 ## W3-7 C and D: start, quit and the main menu
 
 Date 2026-10-25. Branch `engine/33-w3-7cd-start-quit-menu` off `main` (rebased onto `46f3729`), Swift lane. Swift only:
