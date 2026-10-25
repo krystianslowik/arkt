@@ -31,6 +31,14 @@ public final class SidebarController {
   public var onNodeDragEnded: (@MainActor () -> Void)?
   /// The "+" button in the bottom bar.
   public var onNewTab: (@MainActor () -> Void)?
+  /// GS-035 (BH-108): the + button clicked in its "Paste and Go" state (hovered with Cmd held). The window
+  /// opens the URL in a new tab.
+  public var onPasteAndGo: (@MainActor (URL) -> Void)?
+  /// The clipboard read behind GS-035; nil provider: the + button never offers Paste and Go.
+  public var clipboardURLProvider: (@MainActor () -> URL?)?
+  /// The current Space changed (swipe settle, `showSpace`, an activation crossing Spaces); the command bar
+  /// refreshes its suggestions on it (BH-111).
+  public var onCurrentSpaceChanged: (@MainActor (SpaceID) -> Void)?
   /// The pane to focus when a split row is activated (decision 7: the split's last focused pane). Nil, or a node
   /// that is not a pane of that split: its first pane.
   public var preferredPane: (@MainActor (NodeID) -> NodeID?)?
@@ -78,7 +86,8 @@ public final class SidebarController {
     view.spaceDots.onSelect = { [weak self] index in self?.goToSpace(at: index) }
     view.pager.onPosition = { [weak self] position in self?.pagerMoved(to: position) }
     view.pager.onSettle = { [weak self] index in self?.pagerSettled(on: index) }
-    buttonTarget.onNewTab = { [weak self] in self?.onNewTab?() }
+    buttonTarget.onNewTab = { [weak self] in self?.newTabClicked() }
+    view.onNewTabHover = { [weak self] hovered in self?.newTabHoverChanged(hovered) }
     view.newTabButton.target = buttonTarget
     view.newTabButton.action = #selector(ButtonTarget.newTab(_:))
     observation = source.observe { [weak self] change in self?.apply(change) }
@@ -150,6 +159,43 @@ public final class SidebarController {
     view.setCurrent(page: page)
     view.setFlavor(info.theme.flavor)
     view.spaceDots.selectedIndex = index
+    if changed { onCurrentSpaceChanged?(id) }        // BH-111
+  }
+
+  // MARK: New Tab button (GS-035)
+
+  private var newTabHovered = false
+  private var newTabFlagsMonitor: Any?
+
+  /// The + button's click: in the GS-035 state (hovered with Cmd held, a URL on the clipboard) it pastes and
+  /// goes; otherwise it is the plain New Tab.
+  private func newTabClicked() {
+    if view.newTabOffersPasteAndGo, let url = clipboardURLProvider?() { onPasteAndGo?(url) } else { onNewTab?() }
+  }
+
+  /// Cmd presses and releases while the pointer rests on the + button toggle its GS-035 state.
+  private func newTabHoverChanged(_ hovered: Bool) {
+    newTabHovered = hovered
+    if hovered, newTabFlagsMonitor == nil {
+      newTabFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+        MainActor.assumeIsolated { self?.refreshNewTabButton() }
+        return event
+      }
+    } else if !hovered, let monitor = newTabFlagsMonitor {
+      NSEvent.removeMonitor(monitor)
+      newTabFlagsMonitor = nil
+    }
+    refreshNewTabButton()
+  }
+
+  private func refreshNewTabButton() {
+    updateNewTabButton(hovered: newTabHovered,
+                       commandHeld: NSEvent.modifierFlags.contains(.command))
+  }
+
+  /// GS-035: the + button offers "Paste and Go" while hovered with Cmd held and a URL on the clipboard.
+  func updateNewTabButton(hovered: Bool, commandHeld: Bool) {
+    view.newTabOffersPasteAndGo = hovered && commandHeld && clipboardURLProvider?() != nil
   }
 
   private func pagerMoved(to position: CGFloat) {

@@ -746,4 +746,61 @@ final class SidebarReviewTests: XCTestCase {
     XCTAssertEqual(seen, [.structure(.today(sidebar.spaceOrder[0]))])
     observation.cancel()
   }
+
+  // MARK: - GS-035: hovering "+ New Tab" with Cmd held offers Paste and Go (BH-108)
+
+  func testNewTabButtonDefaultsToPlainNewTab() throws {
+    let controller = makeSidebar(.sample())
+    XCTAssertEqual(controller.view.newTabButton.accessibilityLabel(), "New Tab")
+    XCTAssertFalse(controller.view.newTabOffersPasteAndGo)
+  }
+
+  func testHoverWithCmdAndAClipboardURLOffersPasteAndGo() throws {
+    let controller = makeSidebar(.sample())
+    controller.clipboardURLProvider = { URL(string: "https://clip.example") }
+    controller.updateNewTabButton(hovered: true, commandHeld: true)
+    XCTAssertTrue(controller.view.newTabOffersPasteAndGo)
+    XCTAssertEqual(controller.view.newTabButton.accessibilityLabel(), "Paste and Go")
+    XCTAssertEqual(controller.view.newTabButton.toolTip, "Paste and Go")
+  }
+
+  func testNoCmdOrNoClipboardURLKeepsPlainNewTab() throws {
+    let controller = makeSidebar(.sample())
+    controller.clipboardURLProvider = { URL(string: "https://clip.example") }
+    controller.updateNewTabButton(hovered: true, commandHeld: false)
+    XCTAssertFalse(controller.view.newTabOffersPasteAndGo)
+    controller.updateNewTabButton(hovered: true, commandHeld: true)
+    XCTAssertTrue(controller.view.newTabOffersPasteAndGo)
+    controller.clipboardURLProvider = { nil as URL? }
+    controller.updateNewTabButton(hovered: true, commandHeld: true)
+    XCTAssertFalse(controller.view.newTabOffersPasteAndGo)
+    controller.updateNewTabButton(hovered: false, commandHeld: false)
+    XCTAssertEqual(controller.view.newTabButton.accessibilityLabel(), "New Tab")
+  }
+
+  func testClickInPasteAndGoStateOpensTheClipboardURL() throws {
+    let controller = makeSidebar(.sample())
+    var pasted: URL?
+    var newTabbed = false
+    controller.clipboardURLProvider = { URL(string: "https://clip.example/x") }
+    controller.onPasteAndGo = { pasted = $0 }
+    controller.onNewTab = { newTabbed = true }
+    controller.updateNewTabButton(hovered: true, commandHeld: true)
+    controller.view.newTabButton.performClick(nil)
+    XCTAssertEqual(pasted?.absoluteString, "https://clip.example/x")
+    XCTAssertFalse(newTabbed)
+  }
+
+  func testClickInPlainStateOpensTheCommandBar() throws {
+    let controller = makeSidebar(.sample())
+    var pasted: URL?
+    var newTabbed = false
+    controller.clipboardURLProvider = { URL(string: "https://clip.example/x") }
+    controller.onPasteAndGo = { pasted = $0 }
+    controller.onNewTab = { newTabbed = true }
+    controller.updateNewTabButton(hovered: true, commandHeld: false)
+    controller.view.newTabButton.performClick(nil)
+    XCTAssertTrue(newTabbed)
+    XCTAssertNil(pasted)
+  }
 }

@@ -453,7 +453,7 @@ public final class SidebarContainerView: NSView {
     self.favorites = FavoritesGridView(source: source, profile: profile)
     self.topBarHeight = topBarHeight
     super.init(frame: NSRect(x: 0, y: 0, width: ShellMetrics.standard.sidebarDefaultWidth, height: 800))
-    for (button, symbol, label) in Self.bottomButtons(archiveButton, newTabButton) {
+    for (button, symbol, label) in bottomButtons(archiveButton, newTabButton) {
       button.image = SymbolImageCache.shared.symbol(
         symbol, box: SidebarMetrics.bottomBarIconSize, color: ShellTokens.sidebarForeground.resolve(flavor),
         scale: shellBackingScale)
@@ -468,6 +468,11 @@ public final class SidebarContainerView: NSView {
     bottomBar.addSubview(spaceDots)
     urlBar.setAccessibilityIdentifier(AXID.Sidebar.urlBar)
     newTabButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.newTab)
+    // GS-035: hovering "+ New Tab" (with Cmd held and a URL on the clipboard) offers "Paste and Go".
+    newTabButton.addTrackingArea(NSTrackingArea(rect: .zero,
+                                                options: [.mouseEnteredAndExited, .activeInKeyWindow,
+                                                          .inVisibleRect],
+                                                owner: self, userInfo: nil))
     for view in [dragSurface, topBar, urlBar, favorites, pager, bottomBar] {
       view.autoresizingMask = []
       addSubview(view)
@@ -513,14 +518,34 @@ public final class SidebarContainerView: NSView {
     applyButtonImages()
   }
 
-  private static func bottomButtons(_ archive: NSButton, _ newTab: NSButton) -> [(NSButton, String, String)] {
-    [(archive, "archivebox", "Archive"), (newTab, "plus", "New Tab")]
+  private func bottomButtons(_ archive: NSButton, _ newTab: NSButton) -> [(NSButton, String, String)] {
+    [(archive, "archivebox", "Archive"),
+     (newTab, newTabOffersPasteAndGo ? "doc.on.clipboard" : "plus",
+      newTabOffersPasteAndGo ? "Paste and Go" : "New Tab")]
   }
+
+  /// GS-035 (BH-108): the bottom bar's + button offers "Paste and Go" while hovered with Cmd held and a URL on
+  /// the clipboard. Set by the controller; swaps the symbol, tooltip and accessibility label.
+  public var newTabOffersPasteAndGo = false {
+    didSet {
+      guard newTabOffersPasteAndGo != oldValue else { return }
+      let label = newTabOffersPasteAndGo ? "Paste and Go" : "New Tab"
+      newTabButton.setAccessibilityLabel(label)
+      newTabButton.toolTip = newTabOffersPasteAndGo ? label : nil
+      applyButtonImages()
+    }
+  }
+
+  /// Hover on the + button (the tracking area installed in `init`); the controller decides the GS-035 state.
+  public var onNewTabHover: ((Bool) -> Void)?
+
+  public override func mouseEntered(with event: NSEvent) { onNewTabHover?(true) }
+  public override func mouseExited(with event: NSEvent) { onNewTabHover?(false) }
 
   /// Bottom-bar symbols as cached bitmaps in the chrome flavor's foreground (no template tinting).
   private func applyButtonImages() {
     let color = ShellTokens.sidebarForeground.resolve(flavor)
-    for (button, symbol, _) in Self.bottomButtons(archiveButton, newTabButton) {
+    for (button, symbol, _) in bottomButtons(archiveButton, newTabButton) {
       button.image = SymbolImageCache.shared.symbol(symbol, box: SidebarMetrics.bottomBarIconSize, color: color,
                                                     scale: shellBackingScale)
     }
