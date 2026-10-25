@@ -2327,60 +2327,6 @@ new rules are renumbered 11-16 (W3-1, W3-6 and W3-9 updated; the runner's target
 
 ## W3-9 follow-up: empty Spaces and sidebar titles (#301)
 
-Scope: items 1 and 2 of #301, checked in the FakeEngine Debug shell with synthetic data. Item 3 (the stale
-tooltip window after closing shell windows) remains engine-only and is deferred in #301. The Chromium build still
-needs the same empty-Space and title smoke checks; this follow-up does not close the issue.
-
-Root causes and changes:
-
-- A Space switch activated a restorable tab when one existed, but never cleared the previous page when none existed.
-  `SidebarController` now reports that transition; the window clears selection, mounted plain/split content,
-  visibility and both address bars. Loaded tabs and per-Space focus survive the round trip.
-- Activation reports are reconciled against the engine's authoritative current selection instead of inferring
-  acknowledgements from tab IDs. `EngineClient.latestActiveTab(in:)` defaults to the immediate state used by
-  FakeEngine and InMemoryEngine; Chromium reads the existing live browser-handle getter without changing its
-  event-backed `activeTab(in:)` or snapshot semantics. Genuine later activations still work. Held archive completions
-  restore a successor only while their originating Space remains selected, including after the archive callback returns.
-- The truncating title label's intrinsic width omitted its text cell inset. Header layout now measures the complete
-  cell, still reserving room for both hover controls. Short names fit at 200, 240 and 320 points; long names still
-  truncate. Layout remains frame-based.
-- Eleven GUI regressions cover plain and split restoration, folder-only Spaces, current-tab navigation from an empty
-  Space, short titles before/during hover, widening after a narrow layout and long-title control placement. One
-  delayed activation test checks both the old acknowledgement and genuine later activations; a held-close test
-  checks that archiving cannot switch back to the old Space. Two ordering tests cover dropped/duplicate activation
-  reports and older genuine events preceding shell requests; another covers post-close agreement. Six unit tests
-  cover the default query and Chromium's live-versus-cached selection, including closed and unmapped handles.
-  One end-to-end regression uses the Debug app, a throwaway profile and loopback pages.
-
-Verification (two build jobs, lower scheduling priority):
-
-- Red before implementation: `swift test -j 2 --filter 'EmptySpaceContentTests|SpaceHeaderLayoutTests'` ran 6 tests,
-  with 3 failures and 29 assertion failures. The strengthened title-only assertions then ran 3 tests with 2 failures
-  and 13 assertion failures. After implementation all 6 passed.
-- Focused GUI run (`EmptySpaceContentTests|SpaceHeaderLayoutTests|EmptyStateTests|SpaceEditingTests|SpaceListChangeTests|SplitWindowTests|SpacePagerTests|DeleteSpaceTests`):
-  92 passed.
-- Review added two delayed-event regressions: an old activation acknowledgement and a held close completion each
-  switched away from the empty Space. Before their fixes, `swift test -j 2 --filter EmptySpaceContentTests` ran
-  5 tests with 2 failing tests and 16 assertion failures.
-- After the delayed-event fixes, the focused empty-Space, engine-hosting, close-tab and split-window run passed all
-  48 tests; `EngineTabRoutingTests` passed all 17 tests.
-- The additional activation-order regressions failed first: 2 tests, 19 assertion failures. After reconciliation,
-  the combined empty-Space, engine-hosting, engine-routing, close-tab and split-window run passed all 67 tests.
-- The expanded ordering test exposed ID-only acknowledgement matching: 7 GUI tests ran, with 1 failing test and
-  16 assertion failures. The query tests first failed compilation on the missing API. The authoritative-state fix
-  then passed 149 targeted tests (68 GUI, 49 EngineAPI, 32 ChromiumEngineKit).
-- Initial non-GUI baseline, `cd app/ArktShell/ShellKit && nice -n 20 swift test -j 2 --skip ShellKitGUITests`: 582 passed.
-- `cd app/ArktCore && nice -n 20 swift test -j 2`: 368 passed (103 + 102 + 65 + 98), unchanged.
-
-The original FakeEngine Debug app also reproduced both visible symptoms in the end-to-end scenario: Space 2's
-sidebar was empty, its title read `Spac...`, and the old loopback page remained mounted. The expected disappearance
-wait expired; XCTest then stalled in failure symbolication (`XCTFail` / `XCTSourceCodeContext` /
-`CoreSymbolicationDT`), so the test runner and app were stopped by their exact PIDs. The result records that interrupted
-run, not a clean assertion report. Its window-only screenshot was retained as
-[`before-empty-space.png`](../screenshots/issue-301/before-empty-space.png). The package-level red tests above completed normally.
-
-## W3-9 follow-up: empty Spaces and sidebar titles (#301)
-
 Items 1 and 2 of #301, fixed and checked in the FakeEngine build. Item 3 (the stale tooltip window after closing the
 shell windows) is engine-only and stays open in #301. The Chromium build still needs the same two smoke checks.
 

@@ -91,7 +91,6 @@ final class EmptySpaceContentTests: XCTestCase {
     controller.onTabHidden = { hidden.append($0) }
 
     controller.newSpace(nil)
-    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
 
     XCTAssertNotEqual(controller.currentSpace, first)
     assertEmptyContent(controller)
