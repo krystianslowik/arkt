@@ -114,11 +114,6 @@ final class CommandBarView: NSView {
     return scrollView.isHidden ? children : children + [table.axProxyRows.element]
   }
 
-  override func accessibilityHitTest(_ point: NSPoint) -> Any? {
-    if !scrollView.isHidden, let hit = table.axProxyRows.hitTest(point) { return hit }
-    return super.accessibilityHitTest(point)
-  }
-
   override func mouseMoved(with event: NSEvent) {
     let point = table.convert(event.locationInWindow, from: nil)
     guard table.visibleRect.contains(point) else { return }   // a row scrolled out of view is not under the pointer
