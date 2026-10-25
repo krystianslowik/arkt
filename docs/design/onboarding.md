@@ -36,13 +36,14 @@ the system font) were rejected as generic. Three directions were then drawn from
 | # | Question | Decision |
 |---|---|---|
 | 1 | Live count before import, or import then show? | **Live count before importing**, from a read-only counting pass |
-| 2 | Make it yours after an import? | **Yes.** It applies to the first imported Space and starts on a selected "From Arc" swatch |
+| 2 | Make it yours after an import? | **Yes.** It applies to the first imported Space and starts on a selected "Imported" swatch |
 | 3 | Name 1Password in the extensions step? | **No.** "Your password manager's extension" |
 | 4 | Tour length | **Five tips.** Command-L is folded into the first |
 | 5 | Default first-Space theme | **Dune** |
 | 6 | Should Skip setup confirm? | **Yes.** Confirming drops any theme preview |
 | 7 | First-launch window size | **At least 1000 x 680 pt**, clamped to the screen's visible frame |
 | 8 | Look and experience | **Hero**: every step is the arkt.dev hero. Window-wide brand field, Avenir Next at the website's scale, the website's pill buttons, one particle field as the stage |
+| 9 | Arc in the product | **The word "Arc" never appears in the product's UI** (onboarding copy, swatch names, alerts, menu items, accessibility labels and announcements), and no visual depicts Arc. The copy speaks of "your browser data" and "your other browser". This spec and engineering text still name Arc as the data source |
 
 Changes the Hero layout makes to the earlier spec, for review:
 
@@ -60,7 +61,7 @@ Changes the Hero layout makes to the earlier spec, for review:
 The first minute in Arkt should look like the website people saw before installing. The window opens as the
 arkt.dev hero: porcelain (or graphite) from edge to edge, one particle field, and one centred message at the
 website's scale. Every step is that hero again. The shape above the words is the step's subject, made of motes from
-real things: the mark sampled from its artwork, the live counts of your Arc sidebar, your first Space in its theme,
+real things: the mark sampled from its artwork, the live counts of the browser data being brought over, your first Space in its theme,
 the keys and gestures being taught. Controls are few and quiet: one mustard pill, one glass pill, and small text
 links at the window's edge.
 
@@ -79,7 +80,7 @@ flowchart TD
   A -->|yes| I[Import: counting, then ready]
   A -->|no| T[Make it yours]
   A -->|still checking| I
-  I -->|Import from Arc| P[Importing]
+  I -->|Import| P[Importing]
   P -->|done| D1[Imported]
   P -->|failed| E[Import failed]
   E -->|Try again| P
@@ -101,7 +102,7 @@ flowchart TD
 | Arc found (Arc's sidebar file exists) | Import is shown and starts counting at once |
 | Arc not found | Import is left out; Make it yours is the first step ("1 of 5", no Back) |
 | Arc check still running when Welcome is left | Import is shown counting; if the check then says "no Arc", it is replaced by Make it yours with a normal step change |
-| Import path | Make it yours applies to the first imported Space, starts on "From Arc", the name placeholder is that Space's name, Skip keeps the Arc look |
+| Import path | Make it yours applies to the first imported Space, starts on "Imported", the name placeholder is that Space's name, Skip keeps the imported look |
 | Start fresh, or failed then Start fresh | Make it yours starts on Dune |
 | Arkt is already the default browser | Default browser is left out |
 | Skip setup (footer, any step) or Escape on Welcome | Asks first (section 6.9). Confirm drops a theme preview. With no import: a fresh "Space 1" in Dune. After an import: no Space is added. During an import: no Space is added; the import finishes, then the browser opens on the first imported Space (or a fresh "Space 1" if it fails) |
@@ -247,14 +248,16 @@ also real text for accessibility (drawn transparent over the field, visible with
 
 | State | Eyebrow | Title | Note | Buttons |
 |---|---|---|---|---|
-| Counting | Looking at Arc on this Mac | Bring it all across. | Arc stays as it is. | Start fresh, Import from Arc (disabled). Numbers rise as the pass finds items |
-| Ready | Found in Arc on this Mac | Bring it all across. | Arc stays as it is. | Start fresh, **Import from Arc** |
-| Importing | Importing from Arc | Bringing it across. | Arc stays as it is. | Start fresh (disabled), Importing... (disabled). Each category's number turns mustard and its label gets a tick as it lands, in the importer's real order |
-| Imported | From Arc | Your Arc setup is here. | All of it came over. Arc stays as it is. Plus "{n} items couldn't be imported." only when some were skipped | **Continue**. Every label ticked |
-| Failed | Arc on this Mac | Couldn't import from Arc. | Arkt couldn't read Arc's data. Try again, or import later from File > Import from Arc. | Start fresh, **Try again**. The numbers scatter into a loose cloud and the labels hide |
+| Counting | Looking for your browser data | Bring your stuff over. | Your other browser stays as it is. | Start fresh, Import (disabled). Numbers rise as the pass finds items |
+| Ready | We found your browser data | Bring your stuff over. | Your other browser stays as it is. | Start fresh, **Import** |
+| Importing | Importing your browser data | Bringing it over. | Your other browser stays as it is. | Start fresh (disabled), Importing... (disabled). Each category's number turns mustard and its label gets a tick as it lands, in the importer's real order |
+| Imported | Imported | Your setup is here. | All of it came over. Your other browser stays as it is. Plus "{n} items couldn't be imported." only when some were skipped | **Continue**. Every label ticked |
+| Failed | Your browser data | Couldn't import your data. | Arkt couldn't read it. Try again, or import later from File > Import Browser Data. | Start fresh, **Try again**. The numbers scatter into a loose cloud and the labels hide |
 
 Counts only: no Space names, titles, URLs or paths. The first-run import shows Imported instead of the
-File > Import from Arc summary alert; the menu command keeps its alert. Back is hidden while importing.
+File > Import Browser Data summary alert; the menu command keeps its alert. The menu item, its alert and every
+other UI string name no browser: the existing "Import from Arc" menu item is renamed "Import Browser Data..."
+(decision 9). Back is hidden while importing.
 
 ### 6.3 Make it yours
 
@@ -265,9 +268,9 @@ File > Import from Arc summary alert; the menu command keeps its alert. Back is 
 | Eyebrow | Your first Space |
 | Shape | A true-colour preview of the Space (340 x 196, radius 14): the theme gradient, the sidebar with three Favorites, the Space title and rows, a page. Around it, the field outlines the preview and rises in the margins in the theme's colours (formation `theme`). The window takes a faint wash of the gradient (22 % light, 16 % dark, 12 % with Reduce Transparency) |
 | Name | The headline is the Space name: a text field at display size, placeholder "Space 1" (import path: the imported Space's name), 40 characters at most. A 120 pt hairline under it turns mustard and widens to 180 when focused. Typing updates the preview's title live |
-| Lede | Fresh: "Pick a look. You can change it later." Import: "It keeps its look from Arc. Pick another if you like." |
-| Theme | Six round swatches, 40 pt, 12 apart (Dune, Mist, Paper, Sage, Blossom, Indigo); on the import path a seventh, "From Arc", comes first with a small badge. Selected: a 2 pt `focusRing` ring 5 pt outside. Radio group, arrow keys move the selection. The theme's name sits under the row |
-| Appearance | Segmented pill "Light" / "Dark" beside the swatches: track `brandControlFill`, thumb `surfaceBrand` with a hairline. Starts at the system appearance. Disabled (40 %) while "From Arc" is selected |
+| Lede | Fresh: "Pick a look. You can change it later." Import: "It keeps the look it came with. Pick another if you like." |
+| Theme | Six round swatches, 40 pt, 12 apart (Dune, Mist, Paper, Sage, Blossom, Indigo); on the import path a seventh, "Imported" (the imported Space's own gradient), comes first with a small badge. Selected: a 2 pt `focusRing` ring 5 pt outside. Radio group, arrow keys move the selection. The theme's name sits under the row |
+| Appearance | Segmented pill "Light" / "Dark" beside the swatches: track `brandControlFill`, thumb `surfaceBrand` with a hairline. Starts at the system appearance. Disabled (40 %) while "Imported" is selected |
 | Buttons | Skip, **Continue** |
 
 Choosing a swatch or appearance repaints the preview at once, re-tints the field from the pressed swatch outward
@@ -346,7 +349,7 @@ An `NSAlert` run as a sheet on the onboarding window, informational style, with 
 | | |
 |---|---|
 | Message | Skip setup? |
-| Informative text | You can set things up later with Help > Welcome to Arkt. Import from Arc stays in the File menu. |
+| Informative text | You can set things up later with Help > Welcome to Arkt. You can import your browser data later from the File menu. |
 | Buttons | **Skip setup** (default, Return), Cancel (Escape) |
 
 Cancel returns to the same step with focus where it was. Step-level secondary actions never ask.
@@ -507,7 +510,7 @@ Reading order: eyebrow, title, lede, controls, secondary, primary, then Back, pr
 | Welcome and Done stage | image | "Arkt" |
 | Count | static text | "37 pinned tabs"; while counting "Pinned tabs, counting"; after import "37 pinned tabs, imported" |
 | Space name | text field | "Name", placeholder read as "Space 1" |
-| Swatch | radio button | "Dune", "Mist"... "From Arc" |
+| Swatch | radio button | "Dune", "Mist"... "Imported" |
 | Appearance | radio group | "Light", "Dark" |
 | Web Store option | checkbox | "Open the Chrome Web Store when setup ends" |
 | Tip 1, 2 stage | image | "Command T, Command L", "Command W" |
@@ -515,13 +518,13 @@ Reading order: eyebrow, title, lede, controls, secondary, primary, then Back, pr
 | Sheet | alert (system) | "Skip setup?", the informative text, "Skip setup", "Cancel" |
 
 Announcements: when counts arrive ("Found 4 Spaces, 37 pinned tabs, 12 Favorites and 9 folders."), when the import
-starts ("Importing from Arc."), when it ends ("Imported from Arc." or the failure title), and at the end ("Setup
+starts ("Importing your browser data."), when it ends ("Import finished." or the failure title), and at the end ("Setup
 finished. The command bar is open."). Identifiers in `AXID.Onboarding`: root, each step, each button.
 
 ## 12. Help > Welcome to Arkt
 
 "Welcome to Arkt" is the first item of the Help menu; no shortcut. Re-entry runs the same flow over the frontmost
-window: the brand field covers the window (the page is not unloaded), Import says "Arkt adds what's new in Arc.
+window: the brand field covers the window (the page is not unloaded), Import says "Arkt adds what's new.
 Spaces already in Arkt stay as they are." and then shows Imported, Make it yours edits the current Space (Skip
 restores it), Default browser is left out when Arkt is already the default, and Done reads "You're all set." /
 "Nothing else changed." / **Back to browsing**, returning to the open tab with no new tab and no command bar.
@@ -562,6 +565,9 @@ restores it), Default browser is left out when Arkt is already the default, and 
 8. **Engine-only step**: a build-configuration check for Extensions.
 9. **Window frame**: at least 1000 x 680 pt, clamped to the visible frame, full-size content view.
 10. **Particle layer** per section 7.4, and the `gather` spring preset.
+11. **No browser names in UI copy** (decision 9): rename File > Import from Arc to "Import Browser Data...", and
+    word its summary alert, errors and accessibility strings without naming Arc. Code identifiers such as
+    `ArcImportCoordinator` stay as they are.
 
 ## 16. Screenshots
 

@@ -187,8 +187,8 @@
     <div class="actions in" style="--d: 420"><button class="button" type="button" data-primary data-act="start">Get started</button></div>
   </section>
 
-  <section class="step" data-step="import" aria-label="Bring your Arc setup">
-    <p class="eyebrow in" id="impEyebrow">Found in Arc on this Mac</p>
+  <section class="step" data-step="import" aria-label="Bring your stuff over">
+    <p class="eyebrow in" id="impEyebrow">We found your browser data</p>
     <div class="count" aria-live="polite">
       <div class="group big" data-k="pinned"><span class="cd-num num" data-k="pinned">37</span><span class="cd-label in" style="--d: 500"><span class="tick"></span>pinned tabs</span></div>
       <div class="rest">
@@ -197,11 +197,11 @@
         <div class="group" data-k="folders"><span class="cd-num num" data-k="folders">9</span><span class="cd-label in" style="--d: 640"><span class="tick"></span>folders</span></div>
       </div>
     </div>
-    <h1 class="t display halo" id="impTitle">Bring it all across.</h1>
-    <p class="note halo in" id="impNote" style="--d: 420">Arc stays as it is.</p>
+    <h1 class="t display halo" id="impTitle">Bring your stuff over.</h1>
+    <p class="note halo in" id="impNote" style="--d: 420">Your other browser stays as it is.</p>
     <div class="actions in" style="--d: 520">
       <button class="button ghost" type="button" data-secondary data-act="fresh" id="impFresh">Start fresh</button>
-      <button class="button" type="button" data-primary data-act="import" id="impGo">Import from Arc</button>
+      <button class="button" type="button" data-primary data-act="import" id="impGo">Import</button>
     </div>
   </section>
 
@@ -295,7 +295,7 @@
 <div class="sheet" role="alertdialog" aria-modal="true" aria-labelledby="skipT" aria-describedby="skipD">
   <img src="../../brand/logos/01-mustard-on-white.png" alt="">
   <h2 id="skipT">Skip setup?</h2>
-  <p id="skipD">You can set things up later with Help &gt; Welcome to Arkt. Import from Arc stays in the File menu.</p>
+  <p id="skipD">You can set things up later with Help &gt; Welcome to Arkt. You can import your browser data later from the File menu.</p>
   <div class="sb"><button type="button" data-act="skip-cancel">Cancel</button><button type="button" class="default" data-act="skip-confirm">Skip setup</button></div>
 </div>
 
@@ -337,7 +337,7 @@
     sage: ['Sage', ['#e6ede3', '#c4d3c0'], ['#2f3b33', '#171e1a']],
     blossom: ['Blossom', ['#f2eae4', '#f29bbb'], ['#4a2a3a', '#1f1520']],
     indigo: ['Indigo', ['#e4e2f4', '#c9c3e8'], ['#2d4468', '#120f2e']],
-    arc: ['From Arc', ['#f2eae4', '#f29bbb'], ['#f2eae4', '#f29bbb']],
+    arc: ['Imported', ['#f2eae4', '#f29bbb'], ['#f2eae4', '#f29bbb']],
   };
   const S = {
     arc: q.get('arc') !== '0', isDefault: q.get('default') === '1',
@@ -577,11 +577,11 @@
     S.imp = state;
     impEl.classList.toggle('import-failed', state === 'failed');
     const copy = {
-      counting: ['Looking at Arc on this Mac', 'Bring it all across.', 'Arc stays as it is.', 'Import from Arc', true, false, 'Start fresh'],
-      ready: ['Found in Arc on this Mac', 'Bring it all across.', 'Arc stays as it is.', 'Import from Arc', false, false, 'Start fresh'],
-      importing: ['Importing from Arc', 'Bringing it across.', 'Arc stays as it is.', 'Importing...', true, true, 'Start fresh'],
-      imported: ['From Arc', 'Your Arc setup is here.', 'All of it came over. Arc stays as it is.', 'Continue', false, null, ''],
-      failed: ['Arc on this Mac', 'Couldn’t import from Arc.', 'Arkt couldn’t read Arc’s data. Try again, or import later from File > Import from Arc.', 'Try again', false, false, 'Start fresh'],
+      counting: ['Looking for your browser data', 'Bring your stuff over.', 'Your other browser stays as it is.', 'Import', true, false, 'Start fresh'],
+      ready: ['We found your browser data', 'Bring your stuff over.', 'Your other browser stays as it is.', 'Import', false, false, 'Start fresh'],
+      importing: ['Importing your browser data', 'Bringing it over.', 'Your other browser stays as it is.', 'Importing...', true, true, 'Start fresh'],
+      imported: ['Imported', 'Your setup is here.', 'All of it came over. Your other browser stays as it is.', 'Continue', false, null, ''],
+      failed: ['Your browser data', 'Couldn’t import your data.', 'Arkt couldn’t read it. Try again, or import later from File > Import Browser Data.', 'Try again', false, false, 'Start fresh'],
     }[state];
     [imp.eyebrow.textContent, imp.title.textContent, imp.note.textContent, imp.go.textContent] = copy;
     imp.go.disabled = copy[4];
@@ -642,7 +642,7 @@
   function enterTheme() {
     if (!S.opened) S.opened = { theme: S.theme, look: S.look, name: S.name };
     nameEl.placeholder = S.imported ? 'Personal' : 'Space 1';
-    document.getElementById('themeLede').textContent = S.imported ? 'It keeps its look from Arc. Pick another if you like.' : 'Pick a look. You can change it later.';
+    document.getElementById('themeLede').textContent = S.imported ? 'It keeps the look it came with. Pick another if you like.' : 'Pick a look. You can change it later.';
     buildSwatches(); applyTheme(); ripple = null; field.form(F.theme);
   }
   function pick(id, from) {
