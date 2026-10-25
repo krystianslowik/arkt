@@ -19,12 +19,18 @@ final class EngineContractRunner {
   static let switchName = "--arkt-engine-contract"
 
   /// `--arkt-engine-contract=<check>,<check>` runs only the named checks (diagnostics); the plain switch runs all.
-  static var selectedChecks: [ContractCheck] {
+  /// A name that is not a check, or an empty list, is an error: a typo must never run nothing and pass.
+  static func selectedChecks() throws -> [ContractCheck] {
     guard let argument = CommandLine.arguments.first(where: { $0.hasPrefix(switchName + "=") }) else {
       return ContractCheck.allCases
     }
-    let names = Set(argument.dropFirst(switchName.count + 1).split(separator: ",").map(String.init))
-    return ContractCheck.allCases.filter { names.contains($0.rawValue) }
+    let names = argument.dropFirst(switchName.count + 1).split(separator: ",").map(String.init)
+    let unknown = names.filter { ContractCheck(rawValue: $0) == nil }
+    guard unknown.isEmpty, !names.isEmpty else {
+      throw RunnerError("\(switchName)= names no check" + (unknown.isEmpty ? "" : ": unknown \(unknown.joined(separator: ", "))"))
+    }
+    let selected = Set(names)
+    return ContractCheck.allCases.filter { selected.contains($0.rawValue) }
   }
 
   static let tabsProbeName = "Arkt tabs probe"
@@ -56,8 +62,9 @@ final class EngineContractRunner {
 
   private static func run() async -> Int32 {
     do {
+      let checks = try selectedChecks()
       let runner = try await prepare()
-      return await runner.runAll()
+      return await runner.runAll(checks)
     } catch {
       print("ARKT_CONTRACT setup failed: \(error)")
       return 2
@@ -91,10 +98,9 @@ final class EngineContractRunner {
 
   // MARK: Checks
 
-  private func runAll() async -> Int32 {
+  private func runAll(_ checks: [ContractCheck]) async -> Int32 {
     let harness = makeHarness()
     var failedRules: Set<Int> = []
-    let checks = Self.selectedChecks
     for check in checks {
       shellLog("contract check \(check.rawValue) started")
       let started = ContinuousClock.now
@@ -110,8 +116,8 @@ final class EngineContractRunner {
         failedRules.insert(check.rule)
       }
       await cleanUp()
-      let ms = (ContinuousClock.now - started).components.seconds * 1000
-        + (ContinuousClock.now - started).components.attoseconds / 1_000_000_000_000_000
+      let elapsed = started.duration(to: .now).components
+      let ms = elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000
       print("ARKT_CONTRACT rule \(check.rule) \(check.rawValue) \(outcome) (\(ms) ms)")
     }
     let rules = Set(checks.map(\.rule)).sorted()
@@ -131,7 +137,12 @@ final class EngineContractRunner {
       for window in engine.windowIDs { engine.closeWindow(window) }
     }
     let engines = self.engines
-    try? await EngineContract.waitUntil(timeout: .seconds(5)) { engines.allSatisfy(\.windowIDs.isEmpty) }
+    do {
+      try await EngineContract.waitUntil(timeout: .seconds(5)) { engines.allSatisfy(\.windowIDs.isEmpty) }
+    } catch {
+      let left = engines.reduce(0) { $0 + $1.windowIDs.count }
+      print("ARKT_CONTRACT cleanup: \(left) window(s) still open after 5 s; the next check starts anyway")
+    }
     for host in hosts { host.window.orderOut(nil) }
     self.engines = []
     hosts = []

@@ -36,7 +36,9 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
 
   /// A tab created without a URL loads Chromium's `about:blank` first. Its load start arrives before the first
   /// navigation's URL and its commit after it, so the shell would see loading before the URL (contract rule 2) and
-  /// the URL fall back to `about:blank` for a moment (W3-9 contract runner, run 1).
+  /// the URL fall back to `about:blank` for a moment (W3-9 contract runner, run 1). A tab whose first navigation is to
+  /// `about:blank` itself, or fails before another URL is reported, stays `.blank`: its loading events stay unreported
+  /// until a URL other than `about:blank` arrives.
   enum InitialBlank {
     /// Only the initial `about:blank` so far: its URL and loading events are not reported.
     case blank

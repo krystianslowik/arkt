@@ -179,6 +179,25 @@ struct ChromiumEngineScriptTests {
     #expect(recorder.events(for: id).last == .tabClosed(id, reason: .client))
   }
 
+  /// The real facade closes under `ScopedSkipUnloadHandlers` even while the window close shows the tab's leave-site
+  /// dialog (#302 review).
+  @Test func skipUnloadHandlersClosesATabShowingTheWindowCloseDialog() async throws {
+    let (engine, window, _) = makeEngine()
+    let recorder = EventRecorder(engine)
+    let id = engine.createTab(url: URL(string: "arkt-test://page.test/Held")!, in: window)
+    let tab = try scriptedTab(engine, id)
+    tab.finishLoad()
+    _ = try await engine.evaluateScript("window.onbeforeunload = () => true", in: id, userGesture: true)
+    try await delivered()
+    engine.closeWindow(window)
+    try await delivered()
+    #expect(tab.dialog != nil && engine.snapshot(of: id)?.isClosing == true)
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+    try await delivered()
+    #expect(engine.snapshot(of: id) == nil)
+    #expect(recorder.events(for: id).last == .tabClosed(id, reason: .client))
+  }
+
   // MARK: Nested run loops (Decision 3)
 
   @Test func deferredCallsQueueBehindTheInsert() async throws {
