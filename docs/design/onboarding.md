@@ -9,6 +9,7 @@ Status: design. Nothing here is implemented yet.
 ## Contents
 
 - [Decisions (maintainer, 2026-10-25)](#decisions-maintainer-2026-10-25)
+- [Particle field](#particle-field) (the hero of the flow; native Metal spec)
 1. [Idea](#1-idea)
 2. [Flow](#2-flow)
 3. [Shared layout](#3-shared-layout)
@@ -52,6 +53,13 @@ Answers to the seven open questions of the first draft. The rest of this documen
 - Idle progress dots at full `brandControlBorder`, which is darkened to #80837C / #868A82 so it keeps 3:1 on the
   card and on the hover and pressed fills (sections 3, 4).
 
+### Particle field (maintainer request, 2026-10-25)
+
+The first version read as too simple. The brand particle field from arkt.dev is now the hero of every step: a cloud
+gathers into the mark on Welcome, Arc data streams in mustard into the sidebar on Import, the field re-tints with the
+chosen theme, each tour tip is drawn in particles, and the field folds onto the card as the first page appears. See
+[Particle field](#particle-field). Everything decided and reviewed above stays as it is.
+
 ## 1. Idea
 
 Onboarding happens inside the real browser window, not in a separate wizard window. The window is already there,
@@ -68,6 +76,11 @@ first page will later appear.
   icon update the sidebar title and the dock as you type.
 - **Done is the browser.** The last step does not close a window. The card turns into the first tab's page and the
   command bar opens, ready for an address.
+
+- **The particle field carries it all.** One field of about twenty thousand motes lives between the card surface and
+  its content. Every step is a shape made of it, built from real things (the mark's own pixels, the Arc sidebar's
+  data, the theme's gradient, the keys and gestures being taught), and the motes keep moving inside each shape. It is
+  the same system as the website's, so the app's first minute looks like the brand people saw before installing.
 
 Everything else stays quiet: one centered column, system type, the brand's porcelain and graphite, mustard only on the
 primary button. Motion is reserved for moments that explain something (the fold, the step direction, the import
@@ -239,7 +252,7 @@ sentences, the lowercase name only as the wordmark artwork.
 | | |
 |---|---|
 | Surface | Full-window `surfaceBrand` field above the sidebar and card, with grain at about half the theme grain opacity. Traffic lights stay visible above it |
-| Mark | `01-mustard-on-white.png` in light, `02-mustard-on-graphite.png` in dark, 112 x 112 pt, centered (clear space well above a quarter of the icon). Raster, scaled proportionally, no shadow or effect |
+| Mark | A 112 x 112 pt frame, centered (clear space well above a quarter of the icon). The mark appears only as particles sampled from `01-mustard-on-white.png` (formation `mark`). Without the particle layer it is the raster PNG (`01` light, `02` dark), scaled proportionally, no shadow or effect. The frame keeps the accessibility label "Arkt" either way |
 | Wordmark | `wordmark-graphite.png` in light, `wordmark-ivory.png` in dark, 90 x 38 pt (the 180 x 76 px source at 2x), 32 below the mark |
 | Descriptor | "A native macOS browser." SF Pro Display Regular 17/22, `brandTextSecondary`, 16 below the wordmark |
 | Primary | "Get started", 48 below the descriptor |
@@ -354,6 +367,9 @@ through tips before leaving the tour. A matching area of the ghost sidebar is hi
 | 4 | Split the view | Drag a tab from the sidebar onto the page to see two tabs side by side. | Mini window: a tab chip travels from the sidebar to the page, a drop zone shows, the page splits | Pinned rows | GS-011, BH-117 |
 | 5 | Keep Favorites close | Drag a tab to the top of the sidebar to make it a Favorite. | Mini window: a tab chip travels up into the Favorites row | Favorites | GS-008, BH-047 |
 
+With the particle layer, each tip's illustration is its particle formation (`tour1` to `tour5`, see
+[Particle field](#particle-field)); the key caps and mini-window demos below are the fallback without it.
+
 Key caps: 64 high, min 64 wide, radius 14, SF Pro Display Medium 28, `brandControlFill` with a hairline border and a
 3 pt hairline bottom edge. Key glyphs are the Command symbol and the letter, drawn as text, not images. Mini window:
 280 x 152, radius 12, a 72 wide sidebar strip and a page inset 4; the moving chip is an `accent` fill.
@@ -367,7 +383,7 @@ pinned, which the tip does not need to explain.
 
 | | |
 |---|---|
-| Mark | The app icon at 64 pt, 32 above the title |
+| Mark | A 64 pt mark frame, 32 above the title, drawn as particles (formation `doneMark`); the PNG icon without the particle layer |
 | Title | You're all set |
 | Body | Your Space is ready. To see this again, choose Help > Welcome to Arkt. |
 | Buttons | **Start browsing** |
@@ -422,8 +438,8 @@ ease-in.
 
 | ID | Trigger | What moves | Spec | Interruptible |
 |---|---|---|---|---|
-| M1 Welcome reveal | Window first shown | Mark: opacity 0 to 1, translateY 8 to 0, scale 0.92 to 1. Wordmark: mask wipe left to right plus opacity. Descriptor: opacity, translateY 6 to 0. Button and Skip setup: opacity | Mark `springy` at +120 ms; wordmark 420 ms `EASE_OUT` at +300 ms; descriptor `firmSlow` at +440 ms; button and corner link 240 ms `EASE_OUT` at +560 ms. All settled by about 900 ms | Yes: Return or a click at any moment jumps every element to its end value and starts M2 |
-| M2 Fold | Get started | The field's mask from the window bounds (radius 0) to the card frame (radius 10). Welcome content: opacity 1 to 0, scale 1 to 0.97. The field itself: opacity 1 to 0 in the last part. Ghost sidebar items: opacity 0 to 0.55, 30 ms apart. First step: enters as M3 | Mask `firmSlow` at +60 ms; content `firmFast`; field opacity 200 ms `EASE_OUT` at +200 ms; sidebar items 240 ms `EASE_OUT` from +120 ms; first step starts at +140 ms. About 520 ms total | Yes: a second press of Return lands the first step at once (mask and opacities snap to end) |
+| M1 Welcome reveal | Window first shown | Mark: a loose cloud gathers into it (P1). Wordmark: mask wipe left to right plus opacity. Descriptor: opacity, translateY 6 to 0. Button and Skip setup: opacity | Mark: P1, landed by about 1.8 s; wordmark 420 ms `EASE_OUT` at +1200 ms; descriptor `firmSlow` at +1340 ms; button and corner link 240 ms `EASE_OUT` at +1460 ms. Without the particle layer: the mark fades and scales in (`springy`, opacity 0 to 1, translateY 8 to 0, scale 0.92 to 1, at +120 ms) and the type follows 900 ms earlier | Yes: Return or a click at any moment jumps the type to its end value and starts M2; the particles keep travelling and retarget |
+| M2 Fold | Get started | The field's mask from the window bounds (radius 0) to the card frame (radius 10). Welcome content: opacity 1 to 0, scale 1 to 0.97. The field itself: opacity 1 to 0 in the last part. Ghost sidebar items: opacity 0 to 0.55, 30 ms apart. First step: enters as M3. Particles: the mark streams into the first step's formation (P2) | Mask `firmSlow` at +60 ms; content `firmFast`; field opacity 200 ms `EASE_OUT` at +200 ms; sidebar items 240 ms `EASE_OUT` from +120 ms; first step starts at +140 ms. About 520 ms total | Yes: a second press of Return lands the first step at once (mask and opacities snap to end) |
 | M3 Step forward | Continue, Skip, Next, Right arrow (to a step already visited) | Outgoing column: opacity 1 to 0, translateX 0 to -24. Incoming column: opacity 0 to 1, translateX +24 to 0. Progress dot: translateX to the new slot | Outgoing `firmFast`; incoming `firm` at +70 ms; dot `springyFast` | Yes: a new navigation retargets from the presented values (the in-flight incoming column becomes the outgoing one from where it is) |
 | M4 Step back | Back, Left arrow | Mirror of M3 (outgoing to +24, incoming from -24) | Same as M3 | Same as M3 |
 | M5 Tip change | Next or Back inside the tour | Illustration, title and body: as M3 at 16 pt, 30 ms stagger on the way in. Highlight: the old one opacity to 0 and scale to 0.97, the new one opacity to 1, scale 0.97 to 1 | Out `firmFast`, in `firm`; highlight in `firmSlow`, out `firmFast`. Each highlight is its own layer at its target's frame, so nothing resizes | Yes |
@@ -433,7 +449,7 @@ ease-in.
 | M9 Sidebar fills | Import finished | Imported Favorites and rows: opacity 0 to 1, translateY 6 to 0 | `firm`, 30 ms apart, the first 12 items only; the rest appear without motion | n/a |
 | M10 Key cap press | Tips 1 and 2 appear | Each key: translateY 0 to 2 and scale 0.96 over 90 ms `EASE_OUT`, then back with `springyFast`; second key 70 ms after the first | Plays once per tip, 260 ms after the tip appears | n/a |
 | M11 Tour demos | Tips 3 to 5 appear | Swipe: finger dots fade in and slide 24 (360 ms `EASE_IN_OUT`), the sidebar pages over (`springy`). Split: chip travels 800 ms `EASE_IN_OUT`, drop zone fades in, then the page splits (200 ms fades). Favorite: chip travels 700 ms `EASE_IN_OUT` up into the Favorites row, the tile pops in with `springyFast` from scale 0.9 | Each demo plays twice, then rests on its end frame. They never loop forever | Leaving the tip stops the demo at once |
-| M12 Finish | Start browsing, Skip setup | Card content: opacity to 0. Page surface: opacity 0 to 1. Ghost content: opacity 0.55 to 1. Command bar: its own normal presentation | Content 160 ms `EASE_OUT`; page 240 ms `EASE_OUT` at +80 ms; command bar after the page settles (+320 ms). Skip setup uses the same path, no extra flourish | n/a |
+| M12 Finish | Start browsing, Skip setup | Card content: opacity to 0. Particles: fold onto the card's edge (P9). Page surface: opacity 0 to 1 over them. Ghost content: opacity 0.55 to 1. Command bar: its own normal presentation | Content 160 ms `EASE_OUT`; P9 from 0; page 240 ms `EASE_OUT` at +650 ms (+80 ms without the particle layer); particle fade from +900 ms; command bar at +900 ms (+320 ms without). Skip setup uses the same path, no extra flourish | n/a |
 | M13 Press | Any button or swatch | Scale to 0.97 (swatches 0.95, icons 0.94) on press, back on release, together with the pressed fill | 160 ms `EASE_OUT` (the existing press feel); no hover motion, only fill color | Yes |
 | M14 Skip setup confirmation | Skip setup, Escape on Welcome | The system sheet animation of `NSAlert`; nothing custom. The prototype approximates it with opacity and a 0.97 scale on `firm` | System | System |
 
@@ -446,7 +462,7 @@ once-per-install flow, not a 100-times-a-day shortcut, and the motion is what sh
 
 | ID | Reduce Motion variant |
 |---|---|
-| M1 | Every element fades in together, 250 ms `EASE_OUT`; no scale, no translation, no wipe |
+| M1 | Every element fades in together, 250 ms `EASE_OUT`; no scale, no translation, no wipe. The particle mark appears in place (P-RM below) |
 | M2 | The field crossfades out (240 ms `EASE_OUT`) over the card and sidebar, which are already in place; no mask animation |
 | M3, M4, M5 | Crossfade only: outgoing 200 ms, incoming 200 ms `EASE_OUT`; no translation. The progress dot jumps |
 | M6 | The theme snaps (what `ThemeBackgroundView` already does under Reduce Motion); the swatch ring fades without scaling; the thumb jumps |
@@ -454,6 +470,7 @@ once-per-install flow, not a 100-times-a-day shortcut, and the motion is what sh
 | M9 | Fades only, no translateY |
 | M10 | No key press |
 | M11 | No demo motion; each demo shows its end frame (the split page, the new Favorite, the second Space page) |
+| P1 to P10 | See "Reduce Motion" in [Particle field](#particle-field): shapes still change with each step, nothing travels on its own |
 | M12 | Unchanged (it is already fades only) |
 | M13 | No press scale. The pressed fill still changes: `accentPressed` on the primary button, `brandControlFillPressed` on secondary buttons, Back and Skip setup, the selected-state fill on swatches and icons |
 
@@ -486,6 +503,155 @@ grows to 3 pt.
   pacing checks can cover them.
 - Retarget, never restart: a new transition reads the presentation layer's current value as its `fromValue`.
 - No blur, no shadow-path animation, no `CIFilter` during transitions.
+- The particle field is the one exception to "layer opacity and transform only": it is a single Metal layer whose
+  contents the GPU redraws each frame within its own budget ([Particle field](#particle-field)); it never causes view
+  layout or text rendering.
+
+## Particle field
+
+The brand particle field from the website (arkt.dev: `design/website.md`, "Particles"; `docs/landing-design.md`,
+"Particle system"; `src/scripts/world.js`) is the hero of the onboarding. Same rules: one field carries the whole
+flow, every step is a shape made of it, shapes come from real things, motes keep moving inside each shape, the logo
+appears only as particles sampled pixel by pixel from the approved PNG (never redrawn), mustard sparks, additive glow
+for mustard in dark, and with Reduce Motion shapes still change but nothing travels on its own.
+
+### Layering
+
+From back to front: Space theme background, sidebar, card surface (`surfaceBrand`), Welcome field surface (while it is
+shown), **particle layer** (whole window), card content (titles, controls), Welcome content, traffic lights, sheets.
+The particle layer therefore passes over the sidebar and the card surface but never over text or controls. It never
+receives events, focus or accessibility (section "Accessibility" below).
+
+### Stages
+
+Each step reserves a place in its column for its shape, so particles never sit behind text:
+
+| Step | Stage | Size |
+|---|---|---|
+| Welcome | The mark frame | 112 x 112 pt |
+| Import, Default browser, Extensions | A stage at the top of the column, 24 above the title | 440 x 160 pt (compact: 96 high, 16 above the title) |
+| Make it yours | No stage: the field rises in the margins of the card and over the sidebar, clear of the 440 column (plus 40 pt) | n/a |
+| Tour | The illustration area | 440 x 152 pt (compact 120) |
+| You're all set | The mark frame | 64 x 64 pt |
+| Finish | The card's edge | the card frame, radius 10 |
+
+Shapes stretch beyond their stage where the story needs it: the import stream flows out of the card into the
+sidebar, the archive tip's stream lands on the sidebar's Archive button, the default-browser stream enters from the
+left edge of the window.
+
+### Formations
+
+Particle count N = 20,480 (Apple Silicon), 8,192 (fallback tier, below). Each formation assigns every particle a
+target, a mode and a color; lanes of the particle index (index mod 20) split a formation into parts, as on the
+website. Colors: ink is `brandTextPrimary` over the card and `ShellTokens.primaryText` over the sidebar; mustard is
+`accent`; theme colors come from the selected Space theme.
+
+| Formation | Shape (from real things) | Parts (share of N) | Modes |
+|---|---|---|---|
+| `cloud` | A loose cloud over the whole window, invisible at first | all | static |
+| `mark` (Welcome) | The mark, 66 % of the frame height, each mote taking the position and color of a pixel of `01-mustard-on-white.png` (kept: alpha above 200 and saturation above 70, sampled at 140 px) | mark 65 %, mustard orbit sparks 10 %, faint rising field 25 % | logo shimmer, orbit, rising |
+| `lines` (Import: counting, failed) | A sketch of the Arc sidebar in the stage: panel outline, three Favorites, eight rows | sketch 60 %, mustard sparks 10 %, field 30 % | static |
+| `flow` (Import: ready and importing) | The website's chapter 2: the sketch, and motes leaving it along arcs into the real sidebar (Favorites tiles, Space title, pinned rows, Space dots), mustard in flight, settling in sidebar ink | sketch 50 %, stream 30 %, field 20 % | static, flow (rate 0.12 per second when ready, 0.45 while importing) |
+| `landed` (Import: imported) | A faint trace on the imported rows and tiles, a few mustard sparks | trace 25 %, sparks 5 %, field 20 %, rest parked (alpha 0) | static, shimmer |
+| `theme` (Make it yours) | A rising field in the selected theme's gradient (darkened 38 % over light themes, lightened 50 % over dark), in the card margins and over the sidebar | theme field 40 %, mustard sparks 5 %, rest parked | rising |
+| `def` (Default browser) | A small particle mark with a mustard stream arriving from the left edge of the window (links from other apps) | mark 45 %, stream 15 %, field 40 % | logo, flow |
+| `ext` (Extensions) | A small particle mark inside three tilted rings of clusters, a third of them mustard (the website's extension rings) | mark 25 %, rings 60 %, field 15 % | logo, orbit |
+| `tour1` | Key caps Command-T and Command-L: rounded outlines plus glyphs sampled from San Francisco | caps 70 %, field 30 % | static |
+| `tour2` | Key caps Command-W, and a stream from them into the sidebar's Archive button | caps 70 %, stream 10 %, field 20 % | static, flow |
+| `tour3` | Three Space rooms (outline, three Favorites, four rows) in Dune, Mist and Blossom, paging over twice, then resting on the second | rooms 80 %, field 20 % | pan |
+| `tour4` | A window with a sidebar strip and the page split into two panes; a mustard chip flows from a row into the right pane | window 65 %, stream 15 %, field 20 % | static, flow |
+| `tour5` | A window whose third Favorite tile fills in mustard as a chip flows up into it from a row | window 65 %, stream 15 %, field 20 % | static, logo, flow |
+| `doneMark` | The mark in the 64 pt frame, with sparks | as `mark` | logo, orbit, rising |
+| `card` (Finish) | The card's edge, mustard sparks along it, a faint fill | edge 60 %, sparks 15 %, fill 25 % | static, shimmer |
+
+Shapes are measured from the live layout when their step appears (counts, tip text and compact layout change the
+column), at the views' resting positions, not their in-flight transforms.
+
+### Motion
+
+Every particle has a position, a velocity and a color. Each frame it moves toward its current target on
+`SpringPreset.firmExtraSlow` (damping 0.9, response 1.25 s), with curl-like turbulence proportional to its distance
+from the target, so travel swirls and arrival is calm. When it arrives (within 1.2 pt, slower than 20 pt/s) it locks
+to the target, and the target itself moves (shimmer, rising, orbit, flow, pan). A new formation does not restart
+anything: each particle switches target at `seed x 0.55 s` after the change and springs on from where it is, carrying
+its velocity. This makes every change interruptible.
+
+| ID | Trigger | What moves | Spec |
+|---|---|---|---|
+| P1 Gather | Welcome shown | `cloud` to `mark`: the cloud fades in (alpha toward target, rate 4/s) while it gathers | firmExtraSlow, stagger 0.55 s; mark readable at about 1.2 s, landed by about 1.8 s |
+| P2 Fold | Get started | `mark` to the first step's formation, while M2 runs | firmExtraSlow, stagger 0.55 s |
+| P3 Step change | Any step change (M3, M4) | Previous formation to the new one; turbulence while travelling | firmExtraSlow, stagger 0.55 s; the column's own M3/M4 runs on top |
+| P4 Import stream | Import ready, importing | Motes wait at the sketch (35 % of a cycle), then travel a Bezier arc to their sidebar target, mustard until the last 20 % of the path | Rate 0.12/s when ready, 0.45/s while importing; each mote's rate varies 0.7x to 1.3x |
+| P5 Landed | Import finished (M9) | Stream to `landed` | firmExtraSlow |
+| P6 Re-tint | Swatch or appearance change (M6) | A ring expands from the pressed swatch at 900 pt/s; inside it motes take the new theme colors, and the ring pushes them outward by up to 22 pt as it passes | Ring falloff 70 pt, decays over 1.2 s; the window background's 0.28 s crossfade runs at the same time |
+| P7 Tip change | Tour Next, Back (M5) | Tip formation to the next | firmExtraSlow, stagger 0.55 s |
+| P8 Room paging | Tip 3 shown | Rooms pan one room left at +1.4 s, again at +3.0 s, back to the second at +4.6 s | Pan eases at 4/s (exponential) |
+| P9 Finish | Start browsing, Skip setup | Current formation to `card`; the page fades in over it at +650 ms; the field fades out from +900 ms (6/s); the layer stops and is removed | firmExtraSlow |
+| P10 Idle | While a step rests | Shimmer (0.35 to 0.9 pt), rising field (6 to 20 pt/s), orbits (0.1 to 0.3 rad/s), flows | Continuous; paused per the rules below |
+
+### Reduce Motion, Reduce Transparency, Increase Contrast
+
+- **Reduce Motion:** shapes still change with every step; nothing travels. On a change each particle disappears from
+  the old shape and reappears in place in the new one (alpha from 0, rate 9/s), at `seed x 0.3 s`, so the shapes
+  cross-dissolve in about half a second. The animation clock stops: no shimmer, rising, orbit, flow or paging
+  (streams show a frozen frame of their path, the tour rooms rest on the second room). No ripple; the re-tint is a
+  0.28 s crossfade. The welcome mark appears in place. Frames are rendered only while something changes.
+- **Reduce Transparency:** no additive blending in dark, the faint rising background field is not drawn (the theme
+  step's field is its formation and stays), formation particles draw at least at 60 % alpha and 15 % larger, no grain.
+- **Increase Contrast:** formation particles draw at least at 80 % alpha; on light surfaces mustard sparks use
+  `foldShadow` (#A96E12, 4.4:1 on porcelain) instead of mustard.
+
+### Native implementation (Metal)
+
+- **Layer:** a layer-backed `NSView` hosting a `CAMetalLayer` (or an `MTKView` with `isPaused = true` and manual
+  draws), framed to the window's content bounds, inserted above the card surface layer and below the card content
+  view. `pixelFormat .bgra8Unorm`, `framebufferOnly = true`, `isOpaque = false`, `contentsScale` = the window's
+  backing scale (1x and 2x).
+- **Data:** formations in `MTLBuffer`s (per particle: float4 target and mode, float4 parameters, float4 color; 48
+  bytes x N x 15 formations, about 15 MB at N = 20,480), built off the main thread from layout rects when a step
+  appears; only the shown formation is rebuilt. State in two ping-pong buffers (position and arrived flag, velocity
+  and formation index, color).
+- **Per frame:** one compute kernel (one thread per particle, threadgroups of 256) evaluates the target (mode math
+  as in the prototype's simulation shader), integrates the spring with the frame's real `dt` (clamped to 1/30 s), and
+  writes the next state; then one draw of N point sprites (or instanced 2 x 2 quads), soft round disc in the fragment
+  function, alpha blending in light, additive in dark.
+- **Timing:** driven by the window screen's `CADisplayLink` (`NSView.displayLink(target:selector:)`), preferred
+  frame rate range 80 to 120 Hz, preferred 120. Uniforms only from the CPU per frame.
+- **Budget (Apple Silicon, 2x, 120 Hz):** N = 20,480; GPU time at most 1.0 ms per frame on M1 (compute about 0.1 ms,
+  draw about 0.4 ms), CPU at most 0.3 ms per frame for the display-link callback. `ShellSignposts` intervals around
+  each frame and Metal System Trace verify it; the existing frame-pacing probe must show no new hitches.
+- **Fallback tier:** N = 8,192 at 60 Hz when `ProcessInfo.isLowPowerModeEnabled`, when the thermal state is serious or
+  critical, on Intel GPUs, or when the measured GPU time exceeds 2 ms for 30 consecutive frames.
+- **No particle layer:** if Metal is unavailable or setup fails, the flow works unchanged without it: the raster mark
+  on Welcome and Done, the key caps and demos of the first draft in the tour (section 5.6), no stage space reserved.
+- **Pause:** no frames while the window is occluded (`occlusionState` without `.visible`), miniaturized, the app is
+  hidden, or with Reduce Motion once a change has settled. The layer and its buffers are released when the flow
+  ends (P9) and rebuilt by Help > Welcome to Arkt.
+- **Mark samples:** sampled once from the asset catalog's `01-mustard-on-white` image at 140 px (alpha above 200,
+  saturation above 70; about 6,600 samples), cached for the session. Never a vector redraw.
+- **Layout changes:** window resize and the compact layout rebuild the current formation; particles spring to the new
+  targets.
+
+### Accessibility
+
+The particle view is not an accessibility element and has no children (`setAccessibilityElement(false)`, hidden from
+the tree), never accepts first responder, and returns nil from `hitTest`, so it never steals clicks, focus or
+VoiceOver. Every fact a shape shows is also text: the counts list, the step titles and bodies, and an accessibility
+label on the stage of tip 1 and 2 ("Command T, Command L", "Command W"). VoiceOver users get the same flow with or
+without the particles.
+
+### Screens and keyframes
+
+| # | What it shows | Light | Dark |
+|---|---|---|---|
+| 22a | Welcome gather (P1) at 0.5 s | [22a-particles-welcome-gather-500ms-light.png](../../design/onboarding/screens/22a-particles-welcome-gather-500ms-light.png) | |
+| 22b | Welcome gather (P1) at 1.2 s | [22b-particles-welcome-gather-1200ms-light.png](../../design/onboarding/screens/22b-particles-welcome-gather-1200ms-light.png) | [22b-particles-welcome-gather-1200ms-dark.png](../../design/onboarding/screens/22b-particles-welcome-gather-1200ms-dark.png) |
+| 23 | Fold (M2 with P2) at 350 ms | [23-particles-fold-350ms-light.png](../../design/onboarding/screens/23-particles-fold-350ms-light.png) | |
+| 24 | Import stream (P4) 1.6 s into the import | [24-particles-import-stream-light.png](../../design/onboarding/screens/24-particles-import-stream-light.png) | [24-particles-import-stream-dark.png](../../design/onboarding/screens/24-particles-import-stream-dark.png) |
+| 25 | Re-tint ripple (P6) 300 ms after picking Sage | [25-particles-theme-ripple-300ms-light.png](../../design/onboarding/screens/25-particles-theme-ripple-300ms-light.png) | |
+| 26 | Finish (P9) at 600 ms, the field folding onto the card | [26-particles-finish-600ms-light.png](../../design/onboarding/screens/26-particles-finish-600ms-light.png) | [26-particles-finish-600ms-dark.png](../../design/onboarding/screens/26-particles-finish-600ms-dark.png) |
+
+The settled step screenshots in section 14 (01 to 15, 17 to 21) all show the particle field.
 
 ## 7. Keyboard
 
@@ -600,6 +766,8 @@ Arc's onboarding was not inspected for this design. Known rows:
 6. **Help menu item** and an `AppCommands` action that starts the flow on the key window.
 7. **Engine-only step.** The extensions step needs a build-configuration check (Chromium engine vs WKWebView shell).
 8. **Window frame.** The first-run window frame is at least 1000 x 680 pt, clamped to the screen's visible frame.
+9. **Particle layer.** A Metal particle view in ShellUI (compute kernel, point draw, formation builder, mark sampler,
+   display-link driver, fallback tier), per [Particle field](#particle-field).
 
 ## 13. Open questions (resolved)
 
@@ -640,11 +808,12 @@ Rendered from the prototype with the project's Chromium build in headless mode, 
 | 18 | Tour 1 with Reduce Transparency (opaque highlight, no grain) | [18-tour-1-reduce-transparency-light.png](../../design/onboarding/screens/18-tour-1-reduce-transparency-light.png) | [18-tour-1-reduce-transparency-dark.png](../../design/onboarding/screens/18-tour-1-reduce-transparency-dark.png) |
 | 19a | Fold (M2) paused at about 160 ms | [19-motion-a-fold-160ms-light.png](../../design/onboarding/screens/19-motion-a-fold-160ms-light.png) | [19-motion-a-fold-160ms-dark.png](../../design/onboarding/screens/19-motion-a-fold-160ms-dark.png) |
 | 19b | Fold (M2) paused at about 320 ms | [19-motion-b-fold-320ms-light.png](../../design/onboarding/screens/19-motion-b-fold-320ms-light.png) | [19-motion-b-fold-320ms-dark.png](../../design/onboarding/screens/19-motion-b-fold-320ms-dark.png) |
-| 19c | Step forward (M3) paused at about 100 ms | [19-motion-c-step-100ms-light.png](../../design/onboarding/screens/19-motion-c-step-100ms-light.png) | [19-motion-c-step-100ms-dark.png](../../design/onboarding/screens/19-motion-c-step-100ms-dark.png) |
+| 19c | Step forward (M3, with P3) paused at about 100 ms | [19-motion-c-step-100ms-light.png](../../design/onboarding/screens/19-motion-c-step-100ms-light.png) | [19-motion-c-step-100ms-dark.png](../../design/onboarding/screens/19-motion-c-step-100ms-dark.png) |
 | 20 | Make it yours after an import ("From Arc" swatch selected, Appearance disabled) | [20-theme-after-import-light.png](../../design/onboarding/screens/20-theme-after-import-light.png) | [20-theme-after-import-dark.png](../../design/onboarding/screens/20-theme-after-import-dark.png) |
 | 21 | Make it yours, compact layout (window 1000 x 620 pt) | [21-theme-compact-light.png](../../design/onboarding/screens/21-theme-compact-light.png) | [21-theme-compact-dark.png](../../design/onboarding/screens/21-theme-compact-dark.png) |
 
-Reduce Motion end states are identical to the ones above (section 6.2), so they are not duplicated.
+Reduce Motion end states are identical to the ones above (section 6.2), so they are not duplicated. Particle
+keyframes are listed in [Particle field](#particle-field). 16 (the browser) is unchanged: the field has gone by then.
 
 ## 15. Prototype
 
@@ -662,3 +831,7 @@ It has no network access and no dependencies.
   unlike `SpringDriver`, they do not carry velocity.
 - Stand-ins: icons are simple SVG drawings in place of SF Symbols; the grain is a generated noise tile; Arc data is
   sample counts; the system default-browser prompt is not shown.
+- The particle field is WebGL2 (a float-texture simulation pass and a point draw) standing in for the Metal layer.
+  The mark samples are embedded in the file (sampled from `01-mustard-on-white.png` at 140 px) because a page opened
+  from `file://` may not read image pixels. Without WebGL2 the prototype falls back to the raster marks and the CSS
+  demos. `?manual=1` freezes the particle clock so `window.__particles.advance(seconds)` can step it for keyframes.

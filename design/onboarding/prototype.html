@@ -1637,7 +1637,7 @@ body.rt .cmdbar { background: #1C1C20; }
       precision highp float; precision highp int; precision highp sampler2D;
       uniform sampler2D uPos, uVel, uCol, uFP, uFA, uFC;
       uniform int uK0, uK1;
-      uniform float uSwitchT, uClock, uT, uDt, uStill, uReduce, uStagger, uFlowRate, uPan, uFade, uThDark, uThSwitch;
+      uniform float uSwitchT, uClock, uT, uDt, uStill, uReduce, uStagger, uFlowRate, uPan, uFade, uThDark, uThSwitch, uRT;
       uniform vec4 uBurst;
       uniform vec2 uView, uSpring;
       uniform vec3 uInk, uSbInk, uAccent, uThA, uThB, uThA0, uThB0;
@@ -1702,6 +1702,8 @@ body.rt .cmdbar { background: #1C1C20; }
           float focus = 1.0 - smoothstep(0.2, 1.0, abs(A.x - uPan));
           col.a *= mix(0.22, 1.0, focus) * step(A.z, p.x) * step(p.x, A.w);
         }
+        // Reduce Transparency: no background field; formation particles at least 60 % alpha.
+        if (uRT > 0.5) { if (mode > 0.5 && mode < 1.5 && k != ${FM.theme}) col.a = 0.0; else if (col.a > 0.01) col.a = max(col.a, 0.6); }
         col.a *= uFade;
       }
       void main() {
@@ -1814,7 +1816,7 @@ body.rt .cmdbar { background: #1C1C20; }
       const f1 = (n, v) => gl.uniform1f(U(sim, n), v);
       f1("uSwitchT", switchT); f1("uClock", clock); f1("uT", still ? 7.3 : animT); f1("uDt", dt);
       f1("uStill", still ? 1 : 0); f1("uReduce", opt.reduceMotion ? 1 : 0); f1("uStagger", opt.reduceMotion ? 0.3 : 0.55);
-      f1("uFlowRate", flowRate); f1("uPan", pan); f1("uFade", fade); f1("uThDark", thDark); f1("uThSwitch", thSwitch);
+      f1("uFlowRate", flowRate); f1("uPan", pan); f1("uFade", fade); f1("uThDark", thDark); f1("uThSwitch", thSwitch); f1("uRT", opt.reduceTransparency ? 1 : 0);
       gl.uniform4f(U(sim, "uBurst"), burst[0], burst[1], opt.reduceMotion ? 0 : burst[2], burst[3]);
       gl.uniform2f(U(sim, "uView"), W, H); gl.uniform2f(U(sim, "uSpring"), SPRING[0], SPRING[1]);
       const v3 = (n, v) => gl.uniform3f(U(sim, n), v[0], v[1], v[2]);
