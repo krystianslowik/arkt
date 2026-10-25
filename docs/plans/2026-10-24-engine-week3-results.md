@@ -701,13 +701,13 @@ command" means a `commandDispatch:` item, nil target, `tag` = the `EngineCommand
 | Show Archive | - | `AppDelegate.showArchive:`, nil target | composition root's menu target | none | no |
 | *add* New Window | Cmd-N | - | shell (`ShellWindowController` first, then `createWindow(host:)`, decision 4); the host claims `IDC_NEW_WINDOW` (34000) | claimed | yes |
 | *add* Close Window | Shift-Cmd-W | - | shell: `performClose:` on `ShellWindow` -> `onCloseRequested` | none (`performClose:`) | yes |
-| *add* Reload / Force Reload / Stop | Cmd-R / Shift-Cmd-R / Cmd-. | - | page command | `.reload`; 33007 and 33006 (no constant yet) | no |
+| *add* Reload / Force Reload / Stop | Cmd-R / Shift-Cmd-R / Cmd-. | - | page command | `.reload`, `.reloadBypassingCache`, `.stop` (named in #272) | no |
 | *add* Back / Forward | Cmd-[ / Cmd-] | - | page command (Cmd-Left / Cmd-Right are not menu keys: a menu item would steal them from text fields; gap below) | `.back`, `.forward` | no |
-| *add* Find / Find Next / Find Previous | Cmd-F / Cmd-G / Shift-Cmd-G | - | page command (find bar is #134; until then Chromium's) | `.find`; 37001, 37002 (no constants yet) | no |
+| *add* Find / Find Next / Find Previous | Cmd-F / Cmd-G / Shift-Cmd-G | - | page command (find bar is #134; until then Chromium's) | `.find`, `.findNext`, `.findPrevious` (named in #272) | no |
 | *add* Jump to Selection | Cmd-J | - | `centerSelectionInVisibleArea:`, nil target (the page view) | none | no |
 | *add* Actual Size / Zoom In / Zoom Out | Cmd-0 / Cmd-+ / Cmd-- | - | page command | `.zoomReset`, `.zoomIn`, `.zoomOut` | no |
 | *add* Save Page As / Print | Shift-Cmd-S (Arc) / Cmd-P | - | page command | `.savePage`, `.print` | no |
-| *add* View Source / Developer Tools / Inspect Elements / JavaScript Console | Opt-Cmd-U / I / C / J | - | page command | `.viewSource`, `.devTools`; 40023, 40005 (no constants yet) | no |
+| *add* View Source / Developer Tools / Inspect Elements / JavaScript Console | Opt-Cmd-U / I / C / J | - | page command | `.viewSource`, `.devTools`, `.inspect`, `.console` (named in #272) | no |
 | *add* History / Downloads | Cmd-Y / Shift-Cmd-J | - | page command | `.history`, `.downloads` | no |
 | *add* Enter Full Screen | Ctrl-Cmd-F | - | `toggleFullScreen:`, nil target (window) | none | no |
 | *add* Minimize / Zoom / Bring All to Front | Cmd-M / - / - | - | `performMiniaturize:` / `performZoom:` nil target; `arrangeInFront:` to `NSApp` | none | no |
@@ -736,8 +736,8 @@ handled this week. So the engine needs no change for reserved keys, and `PreHand
 above, all on the shell side. Gaps recorded for later (not menu blockers): Cmd-Left / Cmd-Right as Back / Forward
 (KB-031, KB-032) after the page declines them would need `ArktBrowserWindow::HandleKeyboardEvent` to run
 `DelayedWebContentsCommandForKeyEvent`'s commands (overlay only, needs a key-input check); the six `EngineCommand`
-constants named "no constant yet" above go into `EngineAPI` by a pull request both lanes approve (W3-1 froze it), and
-until then W3-7 uses `EngineCommand(rawValue:)` with the values listed.
+constants named above went into `EngineAPI` with #272 (the frozen-API change both lanes approve; W3-1 froze it), so
+nothing uses `EngineCommand(rawValue:)` for them anymore.
 
 ### The probe (`--arkt-menu-probe`)
 

@@ -12,6 +12,10 @@ public struct EngineCommand: RawRepresentable, Hashable, Sendable, CustomStringC
   public static let forward = EngineCommand(rawValue: 33001)
   /// `IDC_RELOAD`
   public static let reload = EngineCommand(rawValue: 33002)
+  /// `IDC_STOP`
+  public static let stop = EngineCommand(rawValue: 33006)
+  /// `IDC_RELOAD_BYPASSING_CACHE`
+  public static let reloadBypassingCache = EngineCommand(rawValue: 33007)
   /// `IDC_CLOSE_WINDOW`
   public static let closeWindow = EngineCommand(rawValue: 34012)
   /// `IDC_NEW_TAB`
@@ -28,6 +32,10 @@ public struct EngineCommand: RawRepresentable, Hashable, Sendable, CustomStringC
   public static let savePage = EngineCommand(rawValue: 35004)
   /// `IDC_FIND`
   public static let find = EngineCommand(rawValue: 37000)
+  /// `IDC_FIND_NEXT`
+  public static let findNext = EngineCommand(rawValue: 37001)
+  /// `IDC_FIND_PREVIOUS`
+  public static let findPrevious = EngineCommand(rawValue: 37002)
   /// `IDC_ZOOM_PLUS`
   public static let zoomIn = EngineCommand(rawValue: 38001)
   /// `IDC_ZOOM_NORMAL`
@@ -36,15 +44,20 @@ public struct EngineCommand: RawRepresentable, Hashable, Sendable, CustomStringC
   public static let zoomOut = EngineCommand(rawValue: 38003)
   /// `IDC_DEV_TOOLS` (the id the Mac main menu uses for Developer Tools, not `IDC_DEV_TOOLS_TOGGLE`)
   public static let devTools = EngineCommand(rawValue: 40004)
+  /// `IDC_DEV_TOOLS_CONSOLE`
+  public static let console = EngineCommand(rawValue: 40005)
   /// `IDC_SHOW_HISTORY`
   public static let history = EngineCommand(rawValue: 40010)
   /// `IDC_SHOW_DOWNLOADS`
   public static let downloads = EngineCommand(rawValue: 40012)
+  /// `IDC_DEV_TOOLS_INSPECT`
+  public static let inspect = EngineCommand(rawValue: 40023)
 
   /// Every named constant, for the id check and for hosts that claim by table.
   public static let all: [EngineCommand] = [
-    .back, .forward, .reload, .closeWindow, .newTab, .closeTab, .exit, .viewSource, .print, .savePage, .find,
-    .zoomIn, .zoomReset, .zoomOut, .devTools, .history, .downloads,
+    .back, .forward, .reload, .stop, .reloadBypassingCache, .closeWindow, .newTab, .closeTab, .exit, .viewSource,
+    .print, .savePage, .find, .findNext, .findPrevious, .zoomIn, .zoomReset, .zoomOut, .devTools, .console, .history,
+    .downloads, .inspect,
   ]
 }
 

@@ -260,9 +260,10 @@ final class MainMenuInventoryTests: XCTestCase {
     XCTAssertEqual(dispatching.count, expected.count, "no other commandDispatch: item")
   }
 
-  /// The ids without an `EngineCommand` constant (#272) and `IDC_NEW_WINDOW` match `chrome_command_ids.h`.
+  /// `IDC_NEW_WINDOW`, the one id the menu and host use that has no `EngineCommand` constant, matches
+  /// `chrome_command_ids.h`.
   func testPendingCommandIdsMatchChromium() {
-    XCTAssertEqual(PendingEngineCommands.all.map(\.rawValue), [34000, 33006, 33007, 37001, 37002, 40023, 40005])
+    XCTAssertEqual(PendingEngineCommands.all.map(\.rawValue), [34000])
   }
 
   // MARK: Shell items (step 4)

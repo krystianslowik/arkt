@@ -94,13 +94,15 @@ struct InMemoryEngineWindowTests {
   }
 
   @Test func commandConstantsMatchChromiumIDs() {
-    // chrome/app/chrome_command_ids.h at 156.0.8078.48 (week-3 results, W3-0 step 5).
+    // chrome/app/chrome_command_ids.h at 156.0.8078.48 (week-3 results, W3-0 step 5; the six of #272 added there).
     let expected: [EngineCommand: Int] = [
-      .back: 33000, .forward: 33001, .reload: 33002, .closeWindow: 34012, .newTab: 34014, .closeTab: 34015,
-      .exit: 34031, .viewSource: 35002, .print: 35003, .savePage: 35004, .find: 37000, .zoomIn: 38001,
-      .zoomReset: 38002, .zoomOut: 38003, .devTools: 40004, .history: 40010, .downloads: 40012,
+      .back: 33000, .forward: 33001, .reload: 33002, .stop: 33006, .reloadBypassingCache: 33007,
+      .closeWindow: 34012, .newTab: 34014, .closeTab: 34015, .exit: 34031, .viewSource: 35002, .print: 35003,
+      .savePage: 35004, .find: 37000, .findNext: 37001, .findPrevious: 37002, .zoomIn: 38001, .zoomReset: 38002,
+      .zoomOut: 38003, .devTools: 40004, .console: 40005, .history: 40010, .downloads: 40012, .inspect: 40023,
     ]
     #expect(Set(EngineCommand.all) == Set(expected.keys))
+    #expect(Set(EngineCommand.all).count == EngineCommand.all.count, "command ids are unique")
     for (command, value) in expected { #expect(command.rawValue == value, "\(command)") }
     #expect([EngineDisposition.currentTab, .newForegroundTab, .newBackgroundTab, .newWindow].map(\.rawValue)
               == [1, 3, 4, 6])

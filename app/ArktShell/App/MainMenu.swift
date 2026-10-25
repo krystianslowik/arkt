@@ -112,8 +112,8 @@ enum MainMenu {
   private static func editItems() -> [NSMenuItem] {
     let find = submenu(title: "Find", items: [
       page("Find...", .find, "f"),                                                         // KB-058
-      page("Find Next", PendingEngineCommands.findNext, "g"),                              // KB-059
-      page("Find Previous", PendingEngineCommands.findPrevious, "g", [.command, .shift]),  // KB-059
+      page("Find Next", .findNext, "g"),                                                   // KB-059
+      page("Find Previous", .findPrevious, "g", [.command, .shift]),                       // KB-059
       .separator(),
       item("Jump to Selection", #selector(NSResponder.centerSelectionInVisibleArea(_:)), "j"),   // KB-058
     ])
@@ -136,17 +136,17 @@ enum MainMenu {
     let developer = submenu(title: "Developer", items: [                                   // KB-049, KB-050
       page("View Source", .viewSource, "u", [.command, .option]),
       page("Developer Tools", .devTools, "i", [.command, .option]),
-      page("Inspect Elements", PendingEngineCommands.inspect, "c", [.command, .option]),
-      page("JavaScript Console", PendingEngineCommands.console, "j", [.command, .option]),
+      page("Inspect Elements", .inspect, "c", [.command, .option]),
+      page("JavaScript Console", .console, "j", [.command, .option]),
     ])
     return [
       item("Show Toolbar", #selector(ShellWindowController.toggleToolbar(_:)), "D"),
       .separator(),
     ] + SplitMenu.items() + [
       .separator(),
-      page("Stop", PendingEngineCommands.stop, "."),                                       // KB-054
+      page("Stop", .stop, "."),                                                            // KB-054
       page("Reload This Page", .reload, "r"),                                              // KB-056
-      page("Force Reload This Page", PendingEngineCommands.reloadBypassingCache, "r", [.command, .shift]),
+      page("Force Reload This Page", .reloadBypassingCache, "r", [.command, .shift]),
       .separator(),
       page("Actual Size", .zoomReset, "0"),                                                // KB-057
       page("Zoom In", .zoomIn, "+"),
