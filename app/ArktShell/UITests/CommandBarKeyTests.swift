@@ -44,12 +44,13 @@ final class CommandBarKeyTests: ArktUITestCase {
   }
 
   /// BH-104 / BH-110: a "Switch to Tab" result shows the open tab instead of loading it again. Shown from gamma, the
-  /// alpha row switches: the sidebar URL bar shows alpha's address and the fixture server sees no second request for
-  /// it. The sidebar rows (#269) are one combined check at the end.
+  /// alpha row switches: the Toolbar's URL bar shows alpha's address and the fixture server sees no second request
+  /// for it. The Toolbar is turned on because the sidebar URL bar shows the host only, the same for every fixture
+  /// page. The sidebar rows (#269) are one combined check at the end.
   func test_BH104_BH110_switchToTabRow() async throws {
     let (server, app) = try await launchWithThreeTabs()
-    let urlBar = Shell.element(app, AXID.Sidebar.urlBar)
-    XCTAssertTrue(Waits.until("sidebar URL bar shows /p/gamma") { Self.value(of: urlBar).contains("/p/gamma") })
+    let urlBar = showToolbarURLBar(in: app)
+    XCTAssertTrue(Waits.until("toolbar URL bar shows /p/gamma") { Self.value(of: urlBar).contains("/p/gamma") })
     let alphaLoads = Self.requests(server, "alpha")
     XCTAssertGreaterThanOrEqual(alphaLoads, 1, "alpha loaded when its tab opened: \(server.requestedPaths)")
     showFixtureResults(in: app)
@@ -59,7 +60,7 @@ final class CommandBarKeyTests: ArktUITestCase {
     XCTAssertTrue(Shell.commitSelectedRow(app))
     XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
 
-    XCTAssertTrue(Waits.until("sidebar URL bar shows /p/alpha after Switch to Tab") {
+    XCTAssertTrue(Waits.until("toolbar URL bar shows /p/alpha after Switch to Tab") {
       Self.value(of: urlBar).contains("/p/alpha")
     })
     XCTAssertEqual(Self.requests(server, "alpha"), alphaLoads,
@@ -134,6 +135,14 @@ final class CommandBarKeyTests: ArktUITestCase {
 
   private static func value(of element: XCUIElement) -> String { (element.value as? String) ?? "" }
 
+  /// Cmd-Shift-D turns the Toolbar on (a fresh sandbox starts with it off) and returns its URL bar, whose value is the
+  /// shown tab's full address.
+  private func showToolbarURLBar(in app: XCUIApplication) -> XCUIElement {
+    app.typeKey("d", modifierFlags: [.command, .shift])
+    XCTAssertTrue(waitFor(Shell.element(app, AXID.Toolbar.root)))
+    return Shell.element(app, AXID.Toolbar.urlBar)
+  }
+
   /// With the Toolbar on, from gamma: Cmd-L and Return navigate gamma in place to epsilon, so that tab has Back
   /// history. Cmd-L again (prefilled with epsilon), a new address, then Cmd-Return or Opt-Return. A new tab shows
   /// delta with Back disabled, where in-place navigation would have left Back enabled; switching back to the
@@ -142,10 +151,8 @@ final class CommandBarKeyTests: ArktUITestCase {
   private func openEditedURLInNewTab(
     modifiers: XCUIElement.KeyModifierFlags, server: FixtureServer, app: XCUIApplication
   ) throws {
-    app.typeKey("d", modifierFlags: [.command, .shift])
-    XCTAssertTrue(waitFor(Shell.element(app, AXID.Toolbar.root)))
+    let urlBar = showToolbarURLBar(in: app)
     let back = app.buttons[AXID.Toolbar.back]
-    let urlBar = Shell.element(app, AXID.Toolbar.urlBar)
     XCTAssertTrue(Waits.until("toolbar URL bar shows /p/gamma") { Self.value(of: urlBar).contains("/p/gamma") })
     XCTAssertTrue(waitForEnabled(back, false), "gamma opened in a new tab has no Back history")
 
