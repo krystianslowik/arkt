@@ -141,7 +141,7 @@ enum MainMenu {
       page("JavaScript Console", .console, "j", [.command, .option]),
     ])
     return [
-      item("Hide Sidebar", #selector(ShellWindowController.toggleSidebar(_:)), "s"),
+      item("Hide Sidebar", #selector(ShellWindowController.toggleSidebarVisibility(_:)), "s"),
       item("Show Toolbar", #selector(ShellWindowController.toggleToolbar(_:)), "D"),
       .separator(),
     ] + SplitMenu.items() + [

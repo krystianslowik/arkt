@@ -48,7 +48,7 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     let view = try XCTUnwrap(MainMenu.make(commands: AppCommands()).menu.items.first { $0.title == "View" }?.submenu)
     let item = try XCTUnwrap(view.items.first)
     XCTAssertEqual(item.title, "Hide Sidebar")
-    XCTAssertEqual(item.action, #selector(ShellWindowController.toggleSidebar(_:)))
+    XCTAssertEqual(item.action, #selector(ShellWindowController.toggleSidebarVisibility(_:)))
     XCTAssertEqual(item.keyEquivalent, "s")
     XCTAssertEqual(item.keyEquivalentModifierMask, [.command])
     XCTAssertNil(item.target, "reaches the main window's controller through the responder chain")
