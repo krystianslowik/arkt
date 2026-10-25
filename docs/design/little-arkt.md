@@ -10,7 +10,7 @@ move it into a Space with "Open in". Popup windows from pages and extensions use
   Personal" promotes it, the chevron opens the Space chooser, and Cmd-O, Cmd-Opt-O and Cmd-W work.
 - Screenshots: [`design/little-arkt/screens/`](../../design/little-arkt/screens/), light and dark, 2x, rendered
   headless with the project's Chromium build. The index is at the end of this document.
-- Implementation issue: linked from #28 (status:ready once this design is merged).
+- Implementation issue: #314.
 
 ## Look
 

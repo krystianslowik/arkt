@@ -10,7 +10,7 @@ a Today tab, or added to a Split View with the page it came from.
   Cmd-Z work.
 - Screenshots: [`design/peek/screens/`](../../design/peek/screens/), light and dark, 2x, rendered headless with the
   project's Chromium build. The index is at the end of this document.
-- Implementation issue: linked from #29 (status:ready once this design is merged).
+- Implementation issue: #313.
 
 ## Look
 
