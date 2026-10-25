@@ -38,8 +38,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public internal(set) var currentTab: TabID? {
     didSet {
       guard let tab = currentTab, tab != oldValue else { return }
-      engine.activateTab(tab)
-      engineActiveTab = tab
+      activateEngineTab(tab)
     }
   }
   /// What the engine sees of this window: the window, the card, the command and close seams.
@@ -53,7 +52,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Archives waiting for their tabs to close (week-3 Decision 11): the node to archive, the tabs still open, and
   /// whether it held the current tab when Cmd-W was pressed.
   var pendingArchives: [NodeID: PendingArchive] = [:]
-  /// The engine's active tab of this window as last asked for or reported.
+  /// The last requested or accepted engine selection, also captured when an empty Space supersedes queued events.
   var engineActiveTab: TabID?
   /// The engine's active tab closed while the window still had tabs: the engine's own pick of the next active tab is
   /// not followed (the shell picks the successor), it is answered with the shell's current tab. In-process engines
@@ -147,6 +146,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     window.contentView = root
     window.delegate = self
     sidebarController.onActivate = { [weak self] node in self?.show(node: node) }
+    sidebarController.onEmptySpace = { [weak self] in self?.showEmptySpace() }
     sidebarController.onClose = { [weak self] node in self?.close(node: node) }       // hover X (GS-043)
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
     commandBar.onOpen = { [weak self] url, target in
@@ -428,7 +428,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
         return
       }
       // Registered before the first close: an unheld close reports `.tabClosed` before `closeTab` returns.
-      pendingArchives[node] = PendingArchive(tabs: Set(open), heldCurrent: holdsCurrent)
+      pendingArchives[node] = PendingArchive(tabs: Set(open), heldCurrent: holdsCurrent,
+                                             space: sidebar.spaceID(containing: node))
       for tab in open { engine.closeTab(tab, mode: .honourUnloadHandlers) }
     case .pinned?, .favorites?:
       for tab in open {
@@ -443,10 +444,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Archives `node` now. When it held the current tab and nothing became current meanwhile, the nearest sibling
   /// (resolved while the node is still in place) becomes current.
   func archive(_ node: NodeID, heldCurrent: Bool) {
-    let next = heldCurrent ? successor(of: node) : nil
+    let space = sidebar.spaceID(containing: node)
+    let next = heldCurrent && space == currentSpace ? successor(of: node) : nil
     onArchive?([node])
     guard sidebar.node(node) == nil else { return }
-    if let next, sidebar.node(next) != nil, currentTab == nil { activate(node: next) }
+    if let next, sidebar.node(next) != nil, currentTab == nil, currentSpace == space { activate(node: next) }
   }
 
   /// The tab to show after `node` leaves: the first tab of the nearest sibling below, else above. With no such sibling
@@ -567,6 +569,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     guard let node = nodeByTab[event.tabID] else {
       if case .tabCreated(let tab) = event { engineDidCreateTab(tab) }
       if case .activeTabChanged(let tab) = event {      // a tab without a row took it
+        guard let engineWindow, engine.latestActiveTab(in: engineWindow) == tab else { return }
         engineActiveTab = tab
         expectsEngineReactivation = false
       }

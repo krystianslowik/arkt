@@ -195,9 +195,18 @@ public protocol EngineClient: AnyObject {
   func activateTab(_ id: TabID)
   /// The window's active tab; nil when the window has no tabs or is unknown.
   func activeTab(in window: EngineWindowID) -> TabID?
+  /// The engine's latest active tab, including changes whose events have not arrived yet. A read only: never
+  /// adopts tabs or emits events. Nil for an unknown window, no active tab, or a live tab not mapped by this client.
+  /// Batched engines override this query; `activeTab(in:)` and snapshots retain their event-consistent semantics.
+  func latestActiveTab(in window: EngineWindowID) -> TabID?
   /// Window events (`.windowOpened`, `.windowClosed`, `.extensionActionsChanged`), through the same FIFO as `observe`.
   func observeWindows(_ handler: @escaping @MainActor (EngineWindowEvent) -> Void) -> EngineObservation
   /// Per-window routing: only the events of tabs that were in `window` when the event was emitted, including their
   /// `.tabCreated` (engine-origin ones too) and `.tabClosed`. Events of window-less tabs reach only `observe`.
   func observe(window: EngineWindowID, _ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation
+}
+
+extension EngineClient {
+  /// Immediate-state engines already expose the latest selection through `activeTab(in:)`.
+  public func latestActiveTab(in window: EngineWindowID) -> TabID? { activeTab(in: window) }
 }

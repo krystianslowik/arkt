@@ -7,6 +7,8 @@ struct PendingArchive {
   var tabs: Set<TabID>
   /// The node held the current tab when the close was asked for; its successor becomes current afterwards.
   let heldCurrent: Bool
+  /// The Space the close started in; a held close cannot restore a successor in another selected Space.
+  let space: SpaceID?
 }
 
 // MARK: - Engine window
@@ -119,15 +121,35 @@ extension ShellWindowController {
   /// How long after its active tab closed an engine activation is taken for the engine's own pick. [I]
   static let reactivationGrace: TimeInterval = 1
 
+  /// Remember the request before calling: events can arrive synchronously. Always forward, even when a cached
+  /// selection agrees; the native selection may already differ and activation also carries focus semantics.
+  func activateEngineTab(_ tab: TabID) {
+    engineActiveTab = tab
+    engine.activateTab(tab)
+  }
+
   /// The engine made `tab` its active tab. The shell follows (an extension's `chrome.tabs.update`, an engine tab
   /// opened in the foreground), except for the engine's own pick after the current tab closed: the shell has chosen
   /// the successor, and the engine is told again.
   func engineDidActivate(_ tab: TabID, node: NodeID) {
+    guard let engineWindow, engine.latestActiveTab(in: engineWindow) == tab else { return }
+    if tab == engineActiveTab {
+      // An in-process engine can still report its automatic successor after this acknowledgement in the same
+      // delivery. Retire the expectation after delivery, rather than swallowing a later activation for a full grace
+      // period. Duplicate reports must not reopen a page after the user selected an empty Space.
+      if expectsEngineReactivation {
+        let generation = reactivationGeneration
+        DispatchQueue.main.async { [weak self] in
+          guard let self, self.reactivationGeneration == generation, self.engineActiveTab == tab else { return }
+          self.expectsEngineReactivation = false
+        }
+      }
+      return
+    }
     engineActiveTab = tab
-    guard tab != currentTab else { return }
     if expectsEngineReactivation {
       expectsEngineReactivation = false
-      if let currentTab { engine.activateTab(currentTab) }
+      if let currentTab { activateEngineTab(currentTab) }
       return
     }
     activate(node: node)
@@ -144,7 +166,7 @@ extension ShellWindowController {
     // An unheld close of the current tab has run the engine's reactivation already when `closeTab` returns
     // (in-process engines); nothing more will come.
     if expectsEngineReactivation, let engineWindow, let engineActiveTab,
-       engine.activeTab(in: engineWindow) == engineActiveTab {
+       engine.latestActiveTab(in: engineWindow) == engineActiveTab {
       expectsEngineReactivation = false
     }
   }
@@ -174,7 +196,9 @@ extension ShellWindowController {
       return true
     }
     pendingArchives[target] = nil
-    if sidebar.node(target) != nil { archive(target, heldCurrent: pending.heldCurrent) }   // gone: nothing to archive
+    if sidebar.node(target) != nil {                 // gone: nothing to archive
+      archive(target, heldCurrent: pending.heldCurrent && pending.space == currentSpace)
+    }
     return true
   }
 

@@ -15,6 +15,8 @@ public final class SidebarController {
 
   /// A tab became current (fires on every activation, including re-activating the current tab).
   public var onActivate: (@MainActor (NodeID) -> Void)?
+  /// A different Space has no tab to restore. The window detaches its pages without closing their engine tabs.
+  public var onEmptySpace: (@MainActor () -> Void)?
   /// A row's hover close (X) button or VoiceOver close action (GS-043); the window closes the node as Cmd-W does.
   /// A pane row's X goes to `onRemovePane` instead (BH-121).
   public var onClose: (@MainActor (NodeID) -> Void)?
@@ -135,7 +137,15 @@ public final class SidebarController {
 
   private func commit(space id: SpaceID, info: SidebarSpaceInfo, index: Int) {
     guard let page = pages[id] else { return }
+    let changed = currentSpace != id
     currentSpace = id
+    if changed, tabToRestore(in: id) == nil {
+      previous = current
+      current = nil
+      visible = []
+      applyRowStates()
+      onEmptySpace?()
+    }
     page.outlineController.setRowStates(resolver)
     view.setCurrent(page: page)
     view.setFlavor(info.theme.flavor)
