@@ -5,8 +5,9 @@ import XCTest
 
 /// The proxy-row accessibility bridge (`AXProxyRows`) as an out-of-process client reaches it: through the legacy
 /// `accessibilityAttributeValue` / `accessibilityArrayAttribute*` entry points, which is how the accessibility server
-/// queries a table. The test methods are marked deprecated because they call those deprecated entry points on
-/// purpose.
+/// queries an element. `NSAccessibilityElement` and `NSView` answer those from the overridden protocol getters, and
+/// these tests check that the answers are the proxies'. The test methods are marked deprecated because they call
+/// those deprecated entry points on purpose.
 @MainActor
 final class AXProxyRowsTests: XCTestCase {
   override func setUp() async throws {
@@ -25,13 +26,20 @@ final class AXProxyRowsTests: XCTestCase {
     }
   }
 
+  @MainActor
   private struct Fixture {
     let window: NSWindow
+    let scroll: NSScrollView
     let table: CommandBarTableView
     let source: Source
+    var element: AXProxyTable { table.axProxyRows.element }
   }
 
   private static let rowHeight: CGFloat = 50
+  /// Legacy attribute names, spelled out so the test does not depend on SDK constant names.
+  private static let axIdentifier = NSAccessibility.Attribute(rawValue: "AXIdentifier")
+  private static let axDescription = NSAccessibility.Attribute(rawValue: "AXDescription")
+  private static let axIndex = NSAccessibility.Attribute(rawValue: "AXIndex")
 
   /// `rowCount` rows of 50 pt in a 200 pt tall scroll view, so only the first few rows can be on screen.
   private func makeFixture(rowCount: Int) -> Fixture {
@@ -53,17 +61,18 @@ final class AXProxyRowsTests: XCTestCase {
       guard source.titles.indices.contains(row) else { return nil }
       return AXProxyRowContent(identifier: "test.row", label: source.titles[row], value: "Caption \(row)")
     }
+    table.axProxyRows.setParent(scroll)
     scroll.documentView = table
     window.contentView = scroll
     table.reloadData()
     scroll.layoutSubtreeIfNeeded()
-    return Fixture(window: window, table: table, source: source)
+    return Fixture(window: window, scroll: scroll, table: table, source: source)
   }
 
   @available(macOS, deprecated: 10.10, message: "Calls the legacy accessibility entry points")
-  private func legacyRows(_ table: NSTableView, _ attribute: NSAccessibility.Attribute = .children,
+  private func legacyRows(_ element: AXProxyTable, _ attribute: NSAccessibility.Attribute = .children,
                           file: StaticString = #filePath, line: UInt = #line) throws -> [AXProxyRow] {
-    let value = try XCTUnwrap(table.accessibilityAttributeValue(attribute) as? [Any], file: file, line: line)
+    let value = try XCTUnwrap(element.accessibilityAttributeValue(attribute) as? [Any], file: file, line: line)
     return try value.map { try XCTUnwrap($0 as? AXProxyRow, file: file, line: line) }
   }
 
@@ -73,17 +82,19 @@ final class AXProxyRowsTests: XCTestCase {
     let table = fixture.table
     XCTAssertNil(table.rowView(atRow: 39, makeIfNecessary: false), "precondition: row 39 is beyond the visible rows")
 
-    let rows = try legacyRows(table)
+    let element = fixture.element
+    XCTAssertEqual(element.accessibilityAttributeValue(.role) as? String, NSAccessibility.Role.table.rawValue)
+    XCTAssertEqual(element.accessibilityAttributeValue(Self.axIdentifier) as? String, AXID.CommandBar.results)
+    let rows = try legacyRows(element)
     XCTAssertEqual(rows.count, 40)
-    XCTAssertEqual(table.accessibilityArrayAttributeCount(.children), 40)
-    XCTAssertEqual((table.accessibilityAttributeValue(.rowCount) as? NSNumber)?.intValue, 40)
+    XCTAssertEqual(element.accessibilityArrayAttributeCount(.children), 40)
     for (index, row) in rows.enumerated() {
-      XCTAssertEqual(row.accessibilityRole(), .row)
-      XCTAssertEqual(row.accessibilityIdentifier(), "test.row")
-      XCTAssertEqual(row.accessibilityLabel(), "Synthetic Row \(index)")
-      XCTAssertEqual(row.accessibilityValue() as? String, "Caption \(index)")
-      XCTAssertEqual(row.accessibilityIndex(), index)
-      XCTAssertTrue(row.isAccessibilityElement())
+      XCTAssertEqual(row.accessibilityAttributeValue(.role) as? String, NSAccessibility.Role.row.rawValue)
+      XCTAssertEqual(row.accessibilityAttributeValue(Self.axIdentifier) as? String, "test.row")
+      XCTAssertEqual(row.accessibilityAttributeValue(Self.axDescription) as? String, "Synthetic Row \(index)")
+      XCTAssertEqual(row.accessibilityAttributeValue(.value) as? String, "Caption \(index)")
+      XCTAssertEqual((row.accessibilityAttributeValue(Self.axIndex) as? NSNumber)?.intValue, index)
+      XCTAssertFalse(row.accessibilityIsIgnored())
     }
     for index in [20, 30, 39] {
       _ = rows[index].accessibilityFrame()
@@ -97,7 +108,7 @@ final class AXProxyRowsTests: XCTestCase {
   func testFramesAreScreenRectsOfTheRowAndFollowAMovedWindow() throws {
     let fixture = makeFixture(rowCount: 40)
     let table = fixture.table
-    let rows = try legacyRows(table)
+    let rows = try legacyRows(fixture.element)
     func expected(_ row: Int) -> NSRect {
       fixture.window.convertToScreen(table.convert(table.rect(ofRow: row), to: nil))
     }
@@ -106,6 +117,8 @@ final class AXProxyRowsTests: XCTestCase {
       XCTAssertEqual(rows[index].accessibilityFrame(), expected(index))
       XCTAssertEqual(rows[index].accessibilityFrame().height, Self.rowHeight, accuracy: 0.5)
     }
+    XCTAssertEqual(fixture.element.accessibilityFrame(),
+                   fixture.window.convertToScreen(fixture.scroll.convert(fixture.scroll.bounds, to: nil)))
     let before = rows[30].accessibilityFrame()
     let origin = fixture.window.frame.origin
     fixture.window.setFrameOrigin(NSPoint(x: origin.x + 120, y: origin.y + 80))
@@ -121,20 +134,20 @@ final class AXProxyRowsTests: XCTestCase {
   func testReloadDataReplacesTheProxiesWithTheNewRows() throws {
     let fixture = makeFixture(rowCount: 5)
     let table = fixture.table
-    let old = try legacyRows(table)
+    let old = try legacyRows(fixture.element)
     XCTAssertEqual(old.count, 5)
-    XCTAssertTrue(try legacyRows(table)[0] === old[0], "unchanged rows keep their elements between queries")
+    XCTAssertTrue(try legacyRows(fixture.element)[0] === old[0], "unchanged rows keep their elements between queries")
 
     fixture.source.titles = ["Synthetic Other A", "Synthetic Other B", "Synthetic Other C", "Synthetic Other D",
                              "Synthetic Other E"]
     table.reloadData()
-    let sameCount = try legacyRows(table)
+    let sameCount = try legacyRows(fixture.element)
     XCTAssertEqual(sameCount.map { $0.accessibilityLabel() }, fixture.source.titles)
     XCTAssertFalse(sameCount[0] === old[0], "a reload publishes fresh elements")
 
     fixture.source.titles = ["Synthetic Only"]
     table.reloadData()
-    let shrunk = try legacyRows(table)
+    let shrunk = try legacyRows(fixture.element)
     XCTAssertEqual(shrunk.map { $0.accessibilityLabel() }, ["Synthetic Only"])
     XCTAssertNil(old[3].accessibilityLabel(), "an element for a row that is gone reports nothing")
     fixture.window.close()
@@ -144,33 +157,32 @@ final class AXProxyRowsTests: XCTestCase {
   func testChildrenAreFlatLeavesParentedToTheTableAndFollowSelection() throws {
     let fixture = makeFixture(rowCount: 40)
     let table = fixture.table
-    let rows = try legacyRows(table)
+    let element = fixture.element
+    let rows = try legacyRows(element)
     for row in rows {
-      XCTAssertEqual(row.accessibilityChildren()?.count, 0, "a proxy row has no children")
-      XCTAssertTrue((row.accessibilityParent() as? NSTableView) === table)
+      XCTAssertEqual(row.accessibilityArrayAttributeCount(.children), 0, "a proxy row has no children")
+      XCTAssertTrue((row.accessibilityAttributeValue(.parent) as? AXProxyTable) === element)
     }
-    XCTAssertTrue(try legacyRows(table, .rows).elementsEqual(rows) { $0 === $1 })
-    XCTAssertTrue(try legacyRows(table, NSAccessibility.Attribute(rawValue: "AXChildrenInNavigationOrder"))
-      .elementsEqual(rows) { $0 === $1 })
-    XCTAssertTrue((table.accessibilityChildren() ?? []).elementsEqual(rows) { $0 as AnyObject === $1 })
+    XCTAssertTrue((element.accessibilityAttributeValue(.parent) as? NSScrollView) === fixture.scroll)
+    XCTAssertTrue(try legacyRows(element, .rows).elementsEqual(rows) { $0 === $1 })
 
-    let tail = table.accessibilityArrayAttributeValues(.children, index: 38, maxCount: 10)
+    let tail = element.accessibilityArrayAttributeValues(.children, index: 38, maxCount: 10)
     XCTAssertEqual(tail.count, 2)
     XCTAssertTrue((tail.first as? AXProxyRow) === rows[38])
-    XCTAssertTrue(table.accessibilityArrayAttributeValues(.children, index: 40, maxCount: 1).isEmpty)
 
     table.selectRowIndexes([30], byExtendingSelection: false)
-    XCTAssertTrue(try legacyRows(table, .selectedRows).elementsEqual([rows[30]]) { $0 === $1 })
+    XCTAssertTrue(try legacyRows(element, .selectedRows).elementsEqual([rows[30]]) { $0 === $1 })
     XCTAssertEqual(rows.map { $0.isAccessibilitySelected() }, (0..<40).map { $0 == 30 })
     table.selectRowIndexes([2], byExtendingSelection: false)
-    XCTAssertTrue(rows[2].isAccessibilitySelected())
-    XCTAssertFalse(rows[30].isAccessibilitySelected())
+    XCTAssertEqual(rows[2].accessibilityAttributeValue(.selected) as? Bool, true)
+    XCTAssertEqual(rows[30].accessibilityAttributeValue(.selected) as? Bool, false)
     fixture.window.close()
   }
 
-  /// The real command bar: labels come from its results, frames follow the panel, a new query republishes.
+  /// The real command bar: the bar lists the proxy table instead of the scroll view, labels come from its results,
+  /// frames follow the panel, and a new query republishes.
   @available(macOS, deprecated: 10.10, message: "Calls the legacy accessibility entry points")
-  func testCommandBarRowsFollowResultsAndThePanel() throws {
+  func testCommandBarListsTheProxyTableWhoseRowsFollowResultsAndThePanel() throws {
     let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample(),
                                            toolbarSetting: .ephemeral())
     controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 800), display: false)
@@ -178,15 +190,22 @@ final class AXProxyRowsTests: XCTestCase {
     bar.prewarm()
     controller.newTab(nil)
     bar.setQueryForTesting("example.com")
-    let table = bar.barView.table
+    bar.barView.layoutSubtreeIfNeeded()
+    let element = bar.barView.table.axProxyRows.element
 
-    let rows = try legacyRows(table)
+    let barChildren = try XCTUnwrap(bar.barView.accessibilityAttributeValue(.children) as? [Any])
+    XCTAssertEqual(barChildren.filter { ($0 as? AXProxyTable) === element }.count, 1, "the bar lists the proxy table")
+    XCTAssertFalse(barChildren.contains { $0 as? NSView === bar.barView.scrollView }, "and not the scroll view")
+    XCTAssertTrue((element.accessibilityAttributeValue(.parent) as? CommandBarView) === bar.barView)
+
+    let rows = try legacyRows(element)
     XCTAssertGreaterThanOrEqual(rows.count, 2)
     XCTAssertEqual(rows.map { $0.accessibilityLabel() }, bar.results.map(\.title))
     XCTAssertEqual(rows.map { $0.accessibilityValue() as? String }, bar.results.map(\.accessibilityCaption))
     XCTAssertEqual(rows.map { $0.accessibilityIdentifier() }, Array(repeating: AXID.CommandBar.row, count: rows.count))
 
     let before = rows[0].accessibilityFrame()
+    XCTAssertTrue(bar.barView.accessibilityHitTest(NSPoint(x: before.midX, y: before.midY)) as? AXProxyRow === rows[0])
     let origin = bar.panel.frame.origin
     bar.panel.setFrameOrigin(NSPoint(x: origin.x + 40, y: origin.y - 30))
     let after = rows[0].accessibilityFrame()
@@ -194,7 +213,7 @@ final class AXProxyRowsTests: XCTestCase {
     XCTAssertEqual(after.minY - before.minY, -30, accuracy: 0.5)
 
     bar.setQueryForTesting("example.org/synthetic")
-    let requeried = try legacyRows(table)
+    let requeried = try legacyRows(element)
     XCTAssertEqual(requeried.map { $0.accessibilityLabel() }, bar.results.map(\.title))
     XCTAssertEqual(requeried.first?.accessibilityLabel(), "example.org/synthetic")
 
