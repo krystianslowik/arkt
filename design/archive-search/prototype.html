@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt Archive Search and Filters</title>
+<!--
+  Arkt Archive search, filters, Clear Archive and the education banner prototype (#111). Single file, no network.
+  States are addressable by hash: #<state>[&dark][&shot]
+    state: search | filtered | no-results | filters | clear | cleared | banner | command-bar
+    dark: dark appearance   shot: hide the prototype controls and render at rest
+  1 CSS px = 1 pt. Colors are the ShellTokens / BrandTokens values; new tokens are named in
+  design/archive-search/archive-search.md. Everyday chrome: the system font at sidebar density.
+-->
+<style>
+:root {
+  /* BrandTokens */
+  --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
+  --accent-text: #8A5A0E;             /* accentText */
+  --surface: #FAF9F5;                 /* surfaceBrand */
+  /* System focus ring (NSColor.keyboardFocusIndicatorColor, Blue accent). Mustard is never a stroke. */
+  --focus: rgba(0,103,244,0.50);
+  /* ShellTokens */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
+  --text-2: rgba(0,0,0,0.64);                                    /* secondaryText */
+  --fg: rgba(0,0,0,0.48);                                        /* sidebarForeground (icons only) */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --row-cur: rgba(255,255,255,0.85);                             /* tabCurrent */
+  --row-cur-shadow: 0 1px 2px rgba(0,0,0,0.10), 0 0 0 0.5px rgba(0,0,0,0.06);  /* tabCurrentShadow */
+  --list-field: color(display-p3 0.0549 0.0588 0.0627 / 0.035);  /* ArchiveTokens.listField */
+  /* AlertTokens (alerts-sheets-toasts design) */
+  --destructive: #B3261E;             /* destructiveText */
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
+  --toast: rgba(255,255,255,0.96);
+  --toast-text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);
+  --toast-shadow: 0 0 0 0.5px rgba(0,0,0,0.10), 0 8px 24px rgba(0,0,0,0.16), 0 1px 3px rgba(0,0,0,0.08);
+  /* Native NSMenu imitation (same values as the tab context menus prototype) */
+  --menu: rgba(247,247,249,0.97);
+  --menu-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 10px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.08);
+  --menu-hi: #0A64E1;
+  --menu-sep: rgba(0,0,0,0.10);
+  /* Command bar (ShellTokens.commandBar*, always dark) */
+  --cb-surface: color(display-p3 0.1098 0.1098 0.1255 / 0.98);
+  --cb-text: rgba(255,255,255,0.80);
+  --cb-text-2: rgba(255,255,255,0.33);
+  --cb-divider: rgba(255,255,255,0.10);
+  --cb-row: rgba(255,255,255,0.10);
+  --cb-border: rgba(255,255,255,0.10);
+  /* Window context (prototype only) */
+  --desktop: #C9CDD2;
+  --win-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
+  --theme-a: #F2F0EE; --theme-b: #E4E1DD;
+  --page: #FFFFFF; --page-ink: rgba(0,0,0,0.10); --page-ink-2: rgba(0,0,0,0.18);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #202321;
+  --accent-text: #E9B520;
+  --focus: rgba(26,145,255,0.55);
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76); --fg: rgba(255,255,255,0.57);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --divider: rgba(255,255,255,0.075);
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20);
+  --row-cur-shadow: none;
+  --list-field: color(display-p3 0 0 0 / 0.14);
+  --destructive: #FFAAA2;
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
+  --toast: color(display-p3 0.1098 0.1098 0.1255 / 0.96);
+  --toast-text: rgba(255,255,255,0.85);
+  --toast-shadow: 0 0 0 0.5px rgba(255,255,255,0.14), 0 8px 24px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.30);
+  --menu: rgba(45,45,48,0.97);
+  --menu-shadow: 0 0 0 0.5px rgba(255,255,255,0.16), 0 10px 32px rgba(0,0,0,0.50), 0 2px 8px rgba(0,0,0,0.30);
+  --menu-sep: rgba(255,255,255,0.12);
+  --desktop: #2C3036;
+  --win-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
+  --theme-a: #3A3B44; --theme-b: #24252B;
+  --page: #1E1F22; --page-ink: rgba(255,255,255,0.10); --page-ink-2: rgba(255,255,255,0.22);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--desktop);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color: var(--text); -webkit-font-smoothing: antialiased;
+  display: grid; place-items: center; padding: 36px; overflow: hidden;
+}
+button { font: inherit; color: inherit; }
+
+/* ---------- Buttons: the brand's pills, at chrome size ---------- */
+.pill { all: unset; box-sizing: border-box; height: 28px; min-width: 76px; padding: 0 16px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; white-space: nowrap; cursor: default;
+  background: var(--fill-hover); color: var(--text); transition: transform 160ms var(--ease-out), background-color 120ms ease; }
+.pill.small { height: 24px; min-width: 0; padding: 0 12px; border-radius: 12px; font-size: 12px; line-height: 24px; }
+.pill.primary { background: var(--accent); color: var(--on-accent); }
+.pill.destructive { color: var(--destructive); }
+.pill[disabled], .pill.primary[disabled] { background: var(--fill); color: var(--text); opacity: 0.4; }
+.pill:not([disabled]):active { transform: scale(0.97); }
+@media (hover: hover) and (pointer: fine) {
+  .pill:not([disabled]):hover { background: var(--fill); }
+  .pill.primary:not([disabled]):hover { background: var(--accent-highlight); }
+}
+.pill:focus-visible, .quiet:focus-visible, .iconbtn:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--focus); }
+.quiet { all: unset; font-size: 12px; color: var(--text-2); cursor: default; border-radius: 4px; padding: 2px 4px; margin: 0 -4px; }
+.quiet.destructive { color: var(--destructive); }
+@media (hover: hover) and (pointer: fine) { .quiet:hover { color: var(--text); } .quiet.destructive:hover { color: var(--destructive); text-decoration: underline; text-underline-offset: 2px; } }
+
+/* ---------- The Archive window ---------- */
+.archwin { width: 600px; height: 508px; border-radius: 12px; overflow: hidden; position: relative;
+  background: var(--surface); box-shadow: var(--win-shadow); display: flex; flex-direction: column; }
+
+/* Unified title bar: traffic lights, title, search, filter. No separate header bar. */
+.tbar { flex: none; height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 0; }
+.lights { flex: none; display: flex; gap: 8px; padding: 0 12px 0 20px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.wintitle { flex: none; font-size: 13px; font-weight: 600; color: var(--text); margin-right: 8px; }
+.search { flex: 1; height: 32px; border-radius: 9px; background: var(--fill);
+  display: flex; align-items: center; gap: 7px; padding: 0 8px 0 10px; color: var(--fg); }
+.search.focused { box-shadow: 0 0 0 3.5px var(--focus); }
+.search svg { flex: none; }
+.search .q { flex: 1; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; }
+.search .q::after { content: ""; display: inline-block; width: 1px; height: 15px; background: var(--text); vertical-align: -3px; margin-left: 1px; }
+.search .ph { flex: 1; font-size: 13px; color: var(--text-2); }
+.search .clear { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--fg); }
+.iconbtn { all: unset; width: 32px; height: 32px; flex: none; border-radius: 9px; display: grid; place-items: center; color: var(--fg); position: relative; }
+@media (hover: hover) and (pointer: fine) { .iconbtn:hover { background: var(--fill); } }
+.iconbtn.on { color: var(--text); background: var(--fill-hover); }
+
+/* Filter chips: capsules tinted with the Space's own color */
+.chips { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 12px 10px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 5px 0 10px; border-radius: 12px;
+  background: var(--fill-hover); font-size: 12px; font-weight: 500; color: var(--text); }
+.chip.space { background: color-mix(in srgb, var(--c) 16%, transparent); }
+.chip .d { width: 7px; height: 7px; border-radius: 50%; background: var(--c); flex: none; }
+.chip .g { color: var(--fg); flex: none; display: grid; place-items: center; }
+.chip .x { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; color: var(--fg); }
+@media (hover: hover) and (pointer: fine) { .chip .x:hover { background: var(--fill-hover); color: var(--text); } }
+.chips .quiet { margin-left: 6px; }
+
+/* Education banner */
+.banner { flex: none; margin: 0 12px 10px; border-radius: 12px; background: var(--fill);
+  padding: 12px; display: flex; gap: 12px; align-items: flex-start; }
+.banner .bico { width: 32px; height: 32px; flex: none; border-radius: 9px; background: var(--fill-hover); display: grid; place-items: center; color: var(--text); }
+.banner .btext { flex: 1; font-size: 12px; line-height: 1.4; color: var(--text); }
+.banner .btext b { font-weight: 600; }
+.banner .btext .bsub { color: var(--text-2); margin-top: 1px; }
+.banner .bacts { display: flex; gap: 14px; align-items: center; margin-top: 10px; }
+
+/* The list: a recessed field, rows exactly like sidebar rows */
+.list { flex: 1; position: relative; overflow: hidden; margin: 0 8px; padding: 4px 0; border-radius: 10px; background: var(--list-field); }
+.a-row { height: 34px; margin: 0 4px 3px; border-radius: 9px; display: flex; align-items: center; gap: 0; padding: 0 9px 0 10px; position: relative; }
+.a-row.sel { background: var(--row-cur); box-shadow: var(--row-cur-shadow); }
+.a-row.hov { background: var(--fill); }
+.a-row .fv { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; color: #fff; margin-right: 8px; }
+.a-row .fv.folder { background: none; color: var(--fg); }
+.a-row .chev { width: 12px; flex: none; color: var(--fg); margin: 0 4px 0 -2px; display: grid; place-items: center; }
+.a-row.child { margin-left: 22px; }
+.a-row .t { flex: 1; min-width: 0; font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a-row .t .n { color: var(--text-2); font-weight: 400; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.a-row .meta { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-left: 16px; }
+.a-row .meta .sd { width: 7px; height: 7px; border-radius: 50%; flex: none; margin: 0 1.5px; }
+.a-row .meta .la { width: 10px; height: 10px; flex: none; color: var(--fg); display: grid; place-items: center; }
+.a-row .meta time { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; width: 58px; }
+.mark { background: color(display-p3 0.9137 0.7098 0.1255 / 0.35); border-radius: 3px; padding: 0 1px; margin: 0 -1px; }
+
+/* Auto-load row: replaces Load More */
+.loading { height: 30px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--fill-hover); border-top-color: var(--fg); }
+
+/* Empty / no-results */
+.empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 4px; text-align: center; padding-bottom: 12px; }
+.empty .eico { width: 44px; height: 44px; border-radius: 12px; background: var(--fill); display: grid; place-items: center; color: var(--fg); margin-bottom: 8px; }
+.empty .et { font-size: 15px; font-weight: 600; color: var(--text); }
+.empty .ed { font-size: 12px; color: var(--text-2); max-width: 300px; }
+
+/* Footer: one primary, quiet everything else */
+.ftr { flex: none; height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 12px 0 16px; }
+.ftr .fmsg { font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ftr .sp { flex: 1; }
+
+/* Filter menu (native NSMenu imitation) */
+.menu { position: absolute; right: 10px; top: 46px; min-width: 224px; padding: 5px; border-radius: 8px; background: var(--menu);
+  box-shadow: var(--menu-shadow); z-index: 6; color: var(--text); }
+.menu .mi { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 12px 0 6px; border-radius: 5px; font-size: 13px; white-space: nowrap; }
+.menu .mi.hd { font-size: 11px; font-weight: 600; color: var(--text-2); padding-left: 12px; height: 20px; }
+.menu .mi.hov { background: var(--menu-hi); color: #fff; }
+.menu .mi .ck { width: 14px; flex: none; display: grid; place-items: center; }
+.menu .mi .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.menu .mi .ic { width: 12px; flex: none; display: grid; place-items: center; opacity: 0.7; }
+.menu .msep { height: 1px; margin: 5px 12px; background: var(--menu-sep); }
+
+/* Window sheet (shared dialog design): hangs from the bottom of the title bar */
+.sheet-host { position: absolute; left: 0; right: 0; top: 52px; display: flex; justify-content: center; z-index: 5; pointer-events: none; }
+.dlg { pointer-events: auto; width: 400px; background: var(--surface); color: var(--text); padding: 20px; border-radius: 0 0 14px 14px; box-shadow: var(--overlay-shadow); }
+.dlg .ttl { font-size: 15px; font-weight: 600; line-height: 1.3; }
+.dlg p { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-2); }
+.dlg .foot { display: flex; align-items: center; gap: 8px; margin-top: 20px; justify-content: flex-end; }
+
+/* Toast (shared toast design), 16 above the footer's top edge */
+.toast-host { position: absolute; left: 0; right: 0; bottom: 68px; display: flex; justify-content: center; z-index: 7; pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; height: 36px; border-radius: 18px;
+  background: var(--toast); box-shadow: var(--toast-shadow); padding: 0 16px 0 12px; gap: 8px;
+  font-size: 13px; font-weight: 500; color: var(--toast-text); }
+.toast .g { width: 16px; height: 16px; display: grid; place-items: center; opacity: 0.72; }
+
+/* ---------- Browser window context (for the command bar state) ---------- */
+.win { width: 1000px; height: 640px; max-width: 100%; border-radius: 12px; position: relative; overflow: hidden;
+  background: linear-gradient(165deg, var(--theme-a), var(--theme-b)); box-shadow: var(--win-shadow); }
+.win .lights { position: absolute; top: 16px; left: 0; padding: 0 0 0 12px; gap: 8px; }
+.sidebar { position: absolute; left: 0; top: 0; bottom: 0; width: 190px; padding: 44px 10px 10px; }
+.urlpill { height: 34px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; padding: 0 10px; color: var(--text-2); font-size: 13px; margin-bottom: 12px; }
+.stitle { font-weight: 600; font-size: 13px; color: var(--text-2); padding: 0 8px 6px; }
+.srow { height: 34px; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 0 9px; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; }
+.srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.srow b { width: 16px; height: 16px; border-radius: 4px; flex: none; display: block; }
+.sdiv { height: 1px; margin: 8px 8px; background: var(--divider); }
+.card { position: absolute; left: 190px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; overflow: hidden; background: var(--page);
+  box-shadow: 0 0 0 1px var(--divider), 0 1px 4px rgba(0,0,0,0.10); }
+.pg { position: absolute; inset: 0; padding: 56px 72px; }
+.pg i { display: block; height: 10px; border-radius: 5px; background: var(--page-ink); margin-bottom: 14px; }
+.pg i.h { height: 26px; width: 52%; border-radius: 7px; background: var(--page-ink-2); margin-bottom: 26px; }
+.pg i.img { height: 150px; border-radius: 10px; margin: 26px 0; }
+.cb { position: absolute; left: 50%; top: 118px; transform: translateX(-50%); width: 620px; border-radius: 12px;
+  background: var(--cb-surface); box-shadow: 0 0 0 0.5px var(--cb-border), 0 24px 64px rgba(0,0,0,0.45), 0 4px 14px rgba(0,0,0,0.25);
+  color: var(--cb-text); overflow: hidden; }
+.cb .in { height: 60px; display: flex; align-items: center; gap: 10px; padding: 0 18px; font-size: 20px; border-bottom: 1px solid var(--cb-divider); }
+.cb .in .caret { width: 2px; height: 24px; background: var(--cb-text); border-radius: 1px; }
+.cb .in svg { opacity: 0.5; flex: none; }
+.cb .rows { padding: 6px; }
+.cb .crow { height: 50px; border-radius: 8px; display: flex; align-items: center; gap: 12px; padding: 0 12px; }
+.cb .crow.sel { background: var(--cb-row); }
+.cb .crow .fav { width: 24px; height: 24px; flex: none; border-radius: 6px; display: grid; place-items: center;
+  color: #fff; font-size: 11px; font-weight: 700; }
+.cb .crow .ct { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cb .crow .ct1 { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb .crow .ct2 { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cb-text-2); white-space: nowrap; }
+.cb .crow .ct2 i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+.cb .crow .hint { flex: none; font-size: 12px; color: var(--cb-text-2); }
+.cb .crow .hint.archive { color: var(--cb-text); display: inline-flex; align-items: center; gap: 6px; }   /* commandBarText: mustard is never text */
+
+/* ---------- Prototype controls ---------- */
+#pctl { position: fixed; left: 12px; bottom: 12px; z-index: 20; display: flex; gap: 6px; align-items: center;
+  background: rgba(127,127,127,0.14); backdrop-filter: blur(12px); padding: 6px 8px; border-radius: 9px; font-size: 11px; }
+#pctl select, #pctl button { font: inherit; color: inherit; background: rgba(127,127,127,0.18); border: 0; border-radius: 6px; padding: 3px 7px; }
+#pctl button[aria-pressed="true"] { background: rgba(127,127,127,0.40); }
+:root[data-shot] #pctl { display: none; }
+@media (prefers-reduced-motion: reduce) { .pill { transition: none; } }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="pctl">
+  <select id="pState" aria-label="State"></select>
+  <button id="pDark" aria-pressed="false">Dark</button>
+</div>
+<script>
+const G = {
+  magnify: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="6" cy="6" r="4.4"/><path d="m9.4 9.4 3 3"/></svg>',
+  xcircle: '<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6.2" fill="currentColor"/><path d="m5 5 4 4M9 5 5 9" stroke="var(--surface)" stroke-width="1.3" stroke-linecap="round"/></svg>',
+  filter: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11M4.75 8h6.5M7 11.5h2"/></svg>',
+  check: '<svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m1.5 5.4 2.4 2.4 4.6-5.2"/></svg>',
+  xmark: '<svg width="8" height="8" viewBox="0 0 8 8"><path d="m1.5 1.5 5 5M6.5 1.5l-5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  archivebox: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.6" y="2.2" width="12.8" height="3.4" rx="1"/><path d="M2.8 5.6v6.2a2 2 0 0 0 2 2h6.4a2 2 0 0 0 2-2V5.6M6.3 8.4h3.4"/></svg>',
+  archiveboxBig: '<svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1.6" y="2.2" width="12.8" height="3.4" rx="1"/><path d="M2.8 5.6v6.2a2 2 0 0 0 2 2h6.4a2 2 0 0 0 2-2V5.6M6.3 8.4h3.4"/></svg>',
+  magnifyBig: '<svg width="22" height="22" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="6" cy="6" r="4.4"/><path d="m9.4 9.4 3 3"/></svg>',
+  folder: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2 4.5a1.2 1.2 0 0 1 1.2-1.2h3.3l1.4 1.8h4.9A1.2 1.2 0 0 1 14 6.3v5.5a1.2 1.2 0 0 1-1.2 1.2H3.2A1.2 1.2 0 0 1 2 11.8z"/></svg>',
+  chevDown: '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 3.8 2.5 2.5 2.5-2.5"/></svg>',
+  little: '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1.5" width="8" height="7" rx="2"/></svg>',
+  clockArrow: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 6A4.5 4.5 0 1 1 9 2.6"/><path d="M9.6 1v1.9H7.7"/><path d="M6 3.8V6l1.5 1"/></svg>',
+  xsquare: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.2" y="1.2" width="9.6" height="9.6" rx="2.4"/><path d="m4.3 4.3 3.4 3.4M7.7 4.3 4.3 7.7"/></svg>',
+};
+
+/* Space colors: the Space's theme color, the same dots the tab switcher shows. */
+const SPACES = { Work: '#3E7BFA', Personal: '#E9B520', Dev: '#8E5CF5' };
+/* Synthetic archive data (example.com hosts only). [title, letter, favicon color, space, time, folderCount?] */
+const ALL = [
+  ['Field guide to lichens', 'F', '#2F9E6E', 'Work', '12m'],
+  ['Quarterly planning notes', 'Q', '#3E7BFA', 'Work', '3h'],
+  ['Research', '', '', 'Work', 'Yesterday', 4],
+  ['Release checklist', 'R', '#E0714F', 'Dev', 'Mon'],
+  ['Museum tickets for March', 'M', '#3AAFA9', 'Little Arkt', 'Mon'],
+  ['Sourdough starter ratios', 'S', '#C2569B', 'Personal', '24 Sep'],
+  ['Expense report template', 'E', '#5B7AA6', 'Work', '22 Sep'],
+  ['Trail map, north ridge', 'T', '#7C8A6E', 'Personal', '19 Sep'],
+];
+function hl(s, q) {
+  return q ? s.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig'), '<span class="mark">$1</span>') : s;
+}
+function row([t, letter, color, sp, when, count], o = {}) {
+  const fv = count ? `${o.open ? `<span class="chev">${G.chevDown}</span>` : ''}<span class="fv folder">${G.folder}</span>`
+                   : `<span class="fv" style="background:${color}">${letter}</span>`;
+  const place = sp === 'Little Arkt' ? `<span class="la" title="Little Arkt">${G.little}</span>` : `<span class="sd" style="background:${SPACES[sp]}" title="${sp}"></span>`;
+  return `<div class="a-row${o.sel ? ' sel' : ''}${o.hov ? ' hov' : ''}${o.child ? ' child' : ''}" role="row" aria-selected="${!!o.sel}">
+    ${fv}<span class="t">${hl(t, o.q)}${count ? `<span class="n">${count}</span>` : ''}</span>
+    ${o.child ? '' : `<span class="meta">${place}<time>${when}</time></span>`}
+  </div>`;
+}
+
+function searchField(q, focused) {
+  return `<div class="search${focused ? ' focused' : ''}" role="search">${G.magnify}${q ? `<span class="q">${q}</span><span class="clear" aria-label="Clear search">${G.xcircle}</span>` : '<span class="ph">Search Archive</span>'}</div>`;
+}
+function filterButton(on) {
+  return `<button class="iconbtn${on ? ' on' : ''}" aria-label="Filter" aria-haspopup="menu" aria-expanded="${on}">${G.filter}</button>`;
+}
+function spaceChip(name) {
+  return `<span class="chip space" style="--c:${SPACES[name]}"><span class="d"></span>${name}<span class="x" role="button" aria-label="Remove filter ${name}">${G.xmark}</span></span>`;
+}
+function typeChip(name, glyph) {
+  return `<span class="chip"><span class="g">${glyph}</span>${name}<span class="x" role="button" aria-label="Remove filter ${name}">${G.xmark}</span></span>`;
+}
+function archWindow(o) {
+  return `<div class="archwin" role="dialog" aria-label="Archive">
+    <div class="tbar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><div class="wintitle">Archive</div>${searchField(o.q || '', o.focused)}${filterButton(o.filterOn)}</div>
+    ${o.chips ? `<div class="chips" aria-label="Active filters">${o.chips}<button class="quiet">Clear Filters</button></div>` : ''}
+    ${o.banner || ''}
+    <div class="list" role="table" aria-label="Archived items">${o.rows || ''}${o.empty || ''}</div>
+    <div class="ftr">
+      <button class="quiet destructive"${o.clearDisabled ? ' disabled style="opacity:0.4"' : ''}>Clear Archive&hellip;</button>
+      <span class="sp"></span>
+      <span class="fmsg">${o.fmsg || ''}</span>
+      <button class="pill primary"${o.restoreDisabled ? ' disabled' : ''}>Restore</button>
+    </div>
+    ${o.sheet ? `<div class="sheet-host">${o.sheet}</div>` : ''}
+    ${o.toast ? `<div class="toast-host">${o.toast}</div>` : ''}
+    ${o.menu || ''}
+  </div>`;
+}
+
+function menu() {
+  const mi = (label, ck, sw, hov, ic) => `<div class="mi${hov ? ' hov' : ''}" role="menuitemradio" aria-checked="${!!ck}"><span class="ck">${ck ? G.check : ''}</span>${sw ? `<span class="sw" style="background:${sw}"></span>` : ''}${ic ? `<span class="ic">${ic}</span>` : ''}${label}</div>`;
+  return `<div class="menu" role="menu" aria-label="Archive filters">
+    <div class="mi hd">Space</div>
+    ${mi('Everywhere', false)}
+    ${mi('Work', true, SPACES.Work)}
+    ${mi('Personal', false, SPACES.Personal, true)}
+    ${mi('Dev', false, SPACES.Dev)}
+    ${mi('Little Arkt', false, null, false, G.little)}
+    <div class="msep"></div>
+    <div class="mi hd">Close Type</div>
+    ${mi('Closed and Auto Archived', false)}
+    ${mi('Closed', true)}
+    ${mi('Auto Archived', false)}
+  </div>`;
+}
+function dlg(o) {
+  return `<div class="dlg" role="alertdialog" aria-modal="true" aria-labelledby="dlg-t" aria-describedby="dlg-b">
+    <div class="ttl" id="dlg-t">${o.title}</div>
+    <div id="dlg-b">${(o.paras || []).map(t => `<p>${t}</p>`).join('')}</div>
+    <div class="foot"><button class="pill">Cancel</button><button class="pill destructive">Clear Archive</button></div>
+  </div>`;
+}
+const BANNER = `<div class="banner" role="status">
+  <span class="bico" aria-hidden="true">${G.archivebox}</span>
+  <div class="btext"><b>Arkt archives Today tabs you haven&rsquo;t used in the past 12 hours.</b><div class="bsub">Restored tabs return to their Space. Change this in Settings &gt; Spaces.</div><div class="bacts"><button class="pill small">Got It</button><button class="quiet">Open Settings</button></div></div>
+</div>`;
+const TOAST_CLEARED = `<div class="toast" role="status"><span class="g" aria-hidden="true">${G.archivebox}</span>The Archive has been cleared.</div>`;
+
+function browser(inner) {
+  const fav = ['#4285F4', '#E01E5A', '#0F9D58', '#202321'];
+  const rows = [['#5B7AA6', 'Q4 planning'], ['#E9B520', 'Design review notes'], ['#2E5FD8', 'Inbox']];
+  const today = [['#E56B4F', 'Field guide to lichens', true], ['#7C8A6E', 'Trail map, north ridge'], ['#8E6BBF', 'Weekend recipes']];
+  return `<div class="win" role="application" aria-label="Arkt window">
+    <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+    <nav class="sidebar" aria-label="Sidebar">
+      <div class="urlpill">fieldguide.example</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px">${fav.map(c => `<i style="height:38px;border-radius:9px;background:var(--fill);display:grid;place-items:center"><b style="width:16px;height:16px;border-radius:4px;display:block;background:${c}"></b></i>`).join('')}</div>
+      <div class="stitle">Work</div>
+      ${rows.map(([c, t]) => `<div class="srow"><b style="background:${c}"></b>${t}</div>`).join('')}
+      <div class="sdiv"></div>
+      ${today.map(([c, t, cur]) => `<div class="srow${cur ? ' cur' : ''}"><b style="background:${c}"></b>${t}</div>`).join('')}
+    </nav>
+    <main class="card" aria-label="Page"><div class="pg"><i class="h"></i><i></i><i></i><i style="width:84%"></i><i class="img"></i><i></i><i style="width:66%"></i><i></i></div></main>
+    ${inner}
+  </div>`;
+}
+function commandBar() {
+  const crow = (init, t, s, hint, hintCls, sel) => `<div class="crow${sel ? ' sel' : ''}"><span class="fav" style="background:${init[1]}">${init[0]}</span><span class="ct"><span class="ct1">${t}</span><span class="ct2">${s}</span></span><span class="hint${hintCls ? ' ' + hintCls : ''}">${hint}</span></div>`;
+  return browser(`<div class="cb" role="dialog" aria-label="Command bar">
+    <div class="in"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7.6" cy="7.6" r="5.4"/><path d="m12.2 12.2 3.4 3.4"/></svg>expense<span class="caret"></span></div>
+    <div class="rows">
+      ${crow(['E', '#5B7AA6'], 'Expense report template', `sheets.example<i style="background:${SPACES.Work}"></i>Work, archived 22 Sep`, G.archivebox + 'Restore from Archive', 'archive', true)}
+      ${crow(['G', '#3E7BFA'], 'expense', 'Search Google', 'Search', false)}
+    </div>
+  </div>`);
+}
+
+const STATES = {
+  /* Empty search: the full list, focus on the table (the second row is selected), more pages auto-load. */
+  'search': () => archWindow({
+    rows: ALL.map((r, i) => row(r, { sel: i === 1 })).join('') + '<div class="loading"><span class="spin"></span>Loading more</div>',
+    fmsg: '42 items',
+  }),
+  /* A live filtered search: two tabs match their titles, one folder matches through a child, shown open. */
+  'filtered': () => archWindow({
+    q: 'report', focused: true,
+    rows: row(['Quarterly report draft', 'Q', '#3E7BFA', 'Work', '3h'], { q: 'report' }) +
+          row(['Research', '', '', 'Work', 'Yesterday', 4], { open: true }) +
+          row(['Q3 report outline', 'D', '#2F9E6E', 'Work', ''], { q: 'report', child: true }) +
+          row(['Expense report template', 'E', '#5B7AA6', 'Work', '22 Sep'], { q: 'report', sel: true }),
+    fmsg: '3 results',
+  }),
+  /* No matches. */
+  'no-results': () => archWindow({
+    q: 'zebra', focused: true,
+    empty: `<div class="empty"><span class="eico">${G.magnifyBig}</span><span class="et">No Results</span><span class="ed">Nothing in the Archive matches &ldquo;zebra&rdquo;.</span></div>`,
+    fmsg: '', restoreDisabled: true,
+  }),
+  /* The filter menu open with an active combination; the chips show what is on. */
+  'filters': () => archWindow({
+    filterOn: true,
+    chips: spaceChip('Work') + typeChip('Closed', G.xsquare),
+    rows: [ALL[0], ALL[2], ALL[6]].map((r, i) => row(r, { sel: i === 0 })).join(''),
+    fmsg: '3 of 42 items',
+    menu: menu(),
+  }),
+  /* Clear Archive confirmation: a window sheet on the Archive window. */
+  'clear': () => archWindow({
+    rows: ALL.map((r, i) => row(r, { sel: i === 1 })).join(''),
+    fmsg: '42 items',
+    sheet: dlg({ title: 'Clear the Archive?', paras: ['All 42 archived items are permanently deleted. This cannot be undone.'] }),
+  }),
+  /* After Clear Archive: the empty state and the confirmation toast. */
+  'cleared': () => archWindow({
+    empty: `<div class="empty"><span class="eico">${G.archiveboxBig}</span><span class="et">No Archived Tabs</span><span class="ed">Tabs you close appear here, ready to restore.</span></div>`,
+    clearDisabled: true, restoreDisabled: true,
+    toast: TOAST_CLEARED,
+  }),
+  /* The one-time auto-archive education banner. */
+  'banner': () => archWindow({
+    banner: BANNER,
+    rows: ALL.slice(0, 6).map((r, i) => row(r, { sel: i === 0 })).join(''),
+    fmsg: '42 items',
+  }),
+  /* An archived match in the command bar (BH-087, BH-104). */
+  'command-bar': () => commandBar(),
+};
+
+const stage = document.getElementById('stage');
+function show(state) { stage.innerHTML = (STATES[state] || STATES['search'])(); }
+function flags() { const parts = location.hash.slice(1).split('&'); return { state: parts[0] || 'search', set: new Set(parts.slice(1)) }; }
+function applyHash() {
+  const { state, set } = flags(), root = document.documentElement;
+  root.dataset.theme = set.has('dark') ? 'dark' : 'light';
+  set.has('shot') ? root.setAttribute('data-shot', '') : root.removeAttribute('data-shot');
+  document.getElementById('pState').value = state;
+  document.getElementById('pDark').setAttribute('aria-pressed', set.has('dark'));
+  show(state);
+}
+const sel = document.getElementById('pState');
+Object.keys(STATES).forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
+sel.onchange = () => { const { set } = flags(); location.hash = [sel.value, ...set].join('&'); };
+document.getElementById('pDark').onclick = () => { const { state, set } = flags(); set.has('dark') ? set.delete('dark') : set.add('dark'); location.hash = [state, ...set].join('&'); };
+window.addEventListener('hashchange', applyHash);
+applyHash();
+</script>
+</body>
+</html>
