@@ -51,6 +51,13 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
     let browser: any ArktBrowserHandle
     let adapter: WindowHostAdapter
     var activeTab: TabID?
+    /// A Dock reopen's or startup window until its first tab arrives: a New Tab page as that tab is kept as
+    /// `newTabPage`.
+    var keepsNewTabPage = false
+    /// Chromium's New Tab page in a Dock reopen's or startup window (#299), neither listed nor announced: the shell shows an
+    /// empty window. It keeps the `Browser` open (a `Browser` closes with its last tab) until another tab joins the
+    /// window, then closes; a navigation away from it lists it (`ChromiumEngine+NewTabPage`).
+    var newTabPage: (any ArktTabHandle)?
   }
 
   let facade: any ArktEngine
@@ -68,7 +75,13 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   var windows: [EngineWindowID: WindowRecord] = [:]
   var windowByBrowser: [ObjectIdentifier: EngineWindowID] = [:]
   /// Hosts handed out by `host(for:)`, waiting for the facade's `WindowOpened` with that host.
-  var pendingHosts: [ObjectIdentifier: (id: EngineWindowID, adapter: WindowHostAdapter)] = [:]
+  var pendingHosts: [ObjectIdentifier: PendingHost] = [:]
+  struct PendingHost {
+    let id: EngineWindowID
+    let adapter: WindowHostAdapter
+    let kind: EngineWindowRequestKind
+  }
+
   /// The window that last got `createWindow`, `createTab(url:in:)` or an activation (contract rule 15).
   var recentWindow: EngineWindowID?
 
@@ -110,6 +123,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
       tabs[id]?.initialBlank = .blank
       tabs[id]?.snapshot.isLoading = false
     }
+    closeNewTabPage(in: window)
     return id
   }
 
@@ -232,8 +246,10 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
     guard let provider = windowHostProvider else {
       preconditionFailure("ChromiumEngine has no windowHostProvider for an engine window request")
     }
-    let adapter = WindowHostAdapter(host: provider(engineRequest(from: request)))
-    pendingHosts[ObjectIdentifier(adapter)] = (EngineWindowID(), adapter)
+    let engineRequest = engineRequest(from: request)
+    let adapter = WindowHostAdapter(host: provider(engineRequest))
+    pendingHosts[ObjectIdentifier(adapter)] = PendingHost(id: EngineWindowID(), adapter: adapter,
+                                                          kind: engineRequest.kind)
     return adapter
   }
 

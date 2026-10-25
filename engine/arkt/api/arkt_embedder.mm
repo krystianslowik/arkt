@@ -114,7 +114,17 @@ struct RequestFields {
   gfx::Rect bounds;
   // How the kind was found, for logs.
   const char* source = "";
+  // Default params: Dock reopen, New Window, a page's NEW_WINDOW, or a URL
+  // opened by another application (#299).
+  bool default_params = false;
 };
+
+// Chromium's New Tab page or the initial about:blank: no page of its own.
+bool IsEmptyPage(const GURL& url) {
+  return !url.is_valid() || url.IsAboutBlank() ||
+         (url.SchemeIs("chrome") &&
+          (url.host() == "newtab" || url.host() == "new-tab-page"));
+}
 
 // Every selector of ArktEngineEmbedder. The stand-in Swift class (Task W3-3)
 // does not import the header, so it implements them without declaring the
@@ -389,8 +399,10 @@ class Embedder : public FacadeDelegate {
   // by another application; the last-and-URLs startup preference), session
   // restore and desk templates, and chrome.windows.create (it always sets a show
   // state and usually bounds, tabs_api.cc:189-190) from the rest, which have
-  // default params: Dock reopen and New Window, and a page's NEW_WINDOW
-  // navigation, which cannot be told apart without a patch.
+  // default params: Dock reopen and New Window, a page's NEW_WINDOW
+  // navigation and a URL opened by another application, which cannot be told
+  // apart without a patch (a held window is looked at again at replay,
+  // ReclassifyHeld).
   RequestFields ClassifyRequest(BrowserWindowInterface* browser) const {
     RequestFields fields;
     const BrowserInitState* init = BrowserInitState::From(browser);
@@ -438,6 +450,7 @@ class Embedder : public FacadeDelegate {
     } else {
       fields.kind = ArktWindowRequestKindReopen;
       fields.source = "default params (reopen, New Window, page NEW_WINDOW)";
+      fields.default_params = true;
     }
     return fields;
   }
@@ -448,7 +461,9 @@ class Embedder : public FacadeDelegate {
     for (QueuedRequest& request : queue) {
       if (request.window) {
         base::WeakPtr<ArktBrowserWindow> window = request.window;
-        id<ArktWindowHost> host = AskHost(request.fields, window->browser());
+        id<ArktWindowHost> host =
+            AskHost(ReclassifyHeld(request.fields, window->browser()),
+                    window->browser());
         // The embedder may have closed it from inside the call; it must not.
         if (!window) {
           continue;
@@ -476,6 +491,34 @@ class Embedder : public FacadeDelegate {
       chrome::AddTabAt(browser, request.fields.url, -1, true);
       browser->GetWindow()->Show();
     }
+  }
+
+  // A window with default params held before readiness: no page has a window
+  // to open one from yet and a Dock reopen gets the New Tab page, so a window
+  // that already shows a page of its own was opened for a URL from another
+  // application (AppController's -application:openURLs:, at a cold launch
+  // from -applicationDidFinishLaunching:). It reports startupURL, as the
+  // W3-4 table expects for that case (#299). After readiness the request is
+  // answered inside construction, before the window has a tab, and stays
+  // reopen.
+  static RequestFields ReclassifyHeld(RequestFields fields,
+                                      BrowserWindowInterface* browser) {
+    if (!fields.default_params) {
+      return fields;
+    }
+    TabStripModel* model = browser->GetTabStripModel();
+    for (int index = 0; index < model->count(); ++index) {
+      const GURL& url = model->GetWebContentsAt(index)->GetVisibleURL();
+      if (!IsEmptyPage(url)) {
+        fields.kind = ArktWindowRequestKindStartupURL;
+        fields.url = url;
+        fields.source =
+            "default params, held before ready with a page (URL from another "
+            "application)";
+        return fields;
+      }
+    }
+    return fields;
   }
 
   // Asks the embedder for a host. Returns nil (the placeholder host stays)
