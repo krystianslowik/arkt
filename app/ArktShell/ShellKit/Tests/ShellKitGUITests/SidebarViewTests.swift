@@ -130,6 +130,7 @@ final class SidebarViewTests: XCTestCase {
   /// its collection view has no size. A batch insert there left `item(at:)` nil after the grid was sized: no tiles,
   /// and accessibility clients saw none. Once the window lays out, every Favorite has a tile and the grid's
   /// accessibility children are those tiles, in order, with their titles.
+  @available(macOS, deprecated: 10.10, message: "Calls the legacy accessibility entry points")
   func testFavoritesAddedWhileTheGridHasNoSizeGetTiles() throws {
     let sidebar = StubSidebar()
     sidebar.addSpace(title: "Work")
@@ -153,9 +154,15 @@ final class SidebarViewTests: XCTestCase {
       XCTAssertEqual(tile.accessibilityLabel(), title)
       XCTAssertGreaterThan(tile.frame.width, 0)
     }
-    let children = (grid.collectionView.accessibilityChildren() ?? []).compactMap { $0 as? NSAccessibilityProtocol }
+    let children = (grid.accessibilityChildren() ?? []).compactMap { $0 as? NSAccessibilityProtocol }
     XCTAssertEqual(children.map { $0.accessibilityLabel() }, titles)
     XCTAssertEqual(Set(children.map { $0.accessibilityIdentifier() }), [AXID.Favorites.tile])
+    for child in children {
+      XCTAssertTrue((child.accessibilityParent() as? NSView) === grid, "tile parent is the grid")
+    }
+    // The legacy attribute out-of-process clients read: the same tiles.
+    let legacy = try XCTUnwrap(grid.accessibilityAttributeValue(.children) as? [Any])
+    XCTAssertEqual(legacy.compactMap { ($0 as? NSAccessibilityProtocol)?.accessibilityLabel() }, titles)
   }
 
   func testContainerLayout() throws {

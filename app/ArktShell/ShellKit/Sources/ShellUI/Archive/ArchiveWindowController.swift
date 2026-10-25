@@ -1,14 +1,16 @@
 import AppKit
 
-/// The Archive list. It exposes one `AXProxyRow` per archived item (`AXProxyRows`): `NSTableRowView` is dropped from
-/// the out-of-process accessibility tree, so XCUITest's `tableRows` query and VoiceOver row navigation would see no
-/// rows otherwise. The controller supplies each row's label and value from its rows; no row view is created for it.
+/// The Archive list. Its rows reach accessibility clients through `axProxyRows` (one `AXProxyRow` per archived item):
+/// `NSTableView` publishes neither its row views nor overridden children out of process, so XCUITest's `tableRows`
+/// query on `archive.table` and VoiceOver row navigation would see no rows otherwise. `ArchiveContentView` lists the
+/// proxy table element in place of the scroll view; the controller supplies each row's label and value from its rows,
+/// so no row view is created for accessibility.
 @MainActor
 final class ArchiveTableView: NSTableView {
-  nonisolated let axProxyRows: AXProxyRows
+  let axProxyRows: AXProxyRows
 
   override init(frame frameRect: NSRect) {
-    axProxyRows = AXProxyRows()
+    axProxyRows = AXProxyRows(identifier: AXID.Archive.table)
     super.init(frame: frameRect)
     axProxyRows.attach(to: self)
   }
@@ -21,37 +23,43 @@ final class ArchiveTableView: NSTableView {
     axProxyRows.invalidate()
   }
 
-  override func accessibilityChildren() -> [Any]? { axProxyRows.rows }
+  override func selectRowIndexes(_ indexes: IndexSet, byExtendingSelection extend: Bool) {
+    super.selectRowIndexes(indexes, byExtendingSelection: extend)
+    axProxyRows.selectionDidChange()
+  }
+}
 
-  override func accessibilityRows() -> [any NSAccessibilityRow]? { axProxyRows.rows }
+/// The Archive window's content: the list, Restore, Load More and the footer. For accessibility it lists the proxy
+/// table (`AXProxyRows.element`, identifier `archive.table`) in place of the scroll view that holds the real table.
+@MainActor
+final class ArchiveContentView: NSView {
+  let table: ArchiveTableView
+  private let scrollView: NSScrollView
 
-  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { axProxyRows.visibleRows }
-
-  override func accessibilitySelectedRows() -> [any NSAccessibilityRow]? { axProxyRows.selectedRows }
-
-  override func accessibilityRowCount() -> Int { axProxyRows.rows.count }
-
-  // Legacy entry points, as in `CommandBarTableView`: out-of-process clients read rows through these, and
-  // `NSTableView` answers them from its row views without calling the overrides above.
-
-  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
-  override nonisolated func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
-    if let value = axProxyRows.attributeValue(attribute) { return value }
-    return super.accessibilityAttributeValue(attribute)
+  init(frame: NSRect, table: ArchiveTableView, scrollView: NSScrollView) {
+    self.table = table
+    self.scrollView = scrollView
+    super.init(frame: frame)
+    // A group of its own, so the listed children are this view's answer rather than an ignored view's expansion.
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
+    table.axProxyRows.setParent(self)
   }
 
-  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
-  override nonisolated func accessibilityArrayAttributeCount(_ attribute: NSAccessibility.Attribute) -> Int {
-    if let count = axProxyRows.arrayAttributeCount(attribute) { return count }
-    return super.accessibilityArrayAttributeCount(attribute)
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override func accessibilityChildren() -> [Any]? {
+    let children = (super.accessibilityChildren() ?? []).filter { child in
+      let view = (child as? NSView) ?? (child as? NSCell)?.controlView
+      return !(view.map { $0 === scrollView || $0.isDescendant(of: scrollView) } ?? false)
+    }
+    return children + [table.axProxyRows.element]
   }
 
-  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
-  override nonisolated func accessibilityArrayAttributeValues(
-    _ attribute: NSAccessibility.Attribute, index: Int, maxCount: Int
-  ) -> [Any] {
-    if let values = axProxyRows.arrayAttributeValues(attribute, index: index, maxCount: maxCount) { return values }
-    return super.accessibilityArrayAttributeValues(attribute, index: index, maxCount: maxCount)
+  override func accessibilityHitTest(_ point: NSPoint) -> Any? {
+    if let hit = table.axProxyRows.hitTest(point) { return hit }
+    return super.accessibilityHitTest(point)
   }
 }
 
@@ -238,8 +246,6 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   // MARK: Layout
 
   private func buildContent(in window: NSWindow) {
-    let content = NSView(frame: NSRect(origin: .zero, size: Self.contentSize))
-    content.autoresizingMask = [.width, .height]
 
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("item"))
     column.resizingMask = .autoresizingMask
@@ -254,10 +260,12 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     tableView.delegate = self
     tableView.target = self
     tableView.doubleAction = #selector(rowDoubleClicked(_:))
-    tableView.setAccessibilityIdentifier(AXID.Archive.table)
 
     let scroll = NSScrollView(frame: NSRect(
       x: 0, y: Self.barHeight, width: Self.contentSize.width, height: Self.contentSize.height - Self.barHeight))
+    let content = ArchiveContentView(frame: NSRect(origin: .zero, size: Self.contentSize), table: archiveTable,
+                                     scrollView: scroll)
+    content.autoresizingMask = [.width, .height]
     scroll.autoresizingMask = [.width, .height]
     scroll.hasVerticalScroller = true
     scroll.documentView = tableView

@@ -828,14 +828,20 @@ Production changes the plan did not list:
 
 - `ShellUI/Archive/ArchiveWindowController.swift`: `ArchiveTableView` publishes its rows through the shared
   `AXProxyRows` (#289) with content from the loaded page: label = title, value = "place and date, reason" (what the
-  cell reads, #91). No row view is built for accessibility, and the table has no accessibility value (an earlier
-  revision set a test-only `rows N` and created every row view on every reload; both are gone).
+  cell reads, #91). A new `ArchiveContentView` (a group) lists the proxy `archive.table` in place of the scroll view
+  that holds the real table, as `CommandBarView` does. No row view is built for accessibility, and the table has no
+  accessibility value (an earlier revision set a test-only `rows N`, created every row view on every reload and
+  bridged legacy attributes through a `nonisolated(unsafe)` local; all three are gone).
 - `ShellUI/Sidebar/FavoritesGridView.swift`: product fix. A Favorites batch insert while the collection view had no
   size (an empty grid is 0 pt tall, so an Arc import into an empty profile hits it) left `item(at:)` nil after the
   grid was sized: no tiles until something reloaded the grid. Changes that arrive while the grid has no size are now
   deferred to one `reloadData` when `layout()` first gives the collection view a size. In-process test:
-  `SidebarViewTests.testFavoritesAddedWhileTheGridHasNoSizeGetTiles`. The collection view's accessibility children
-  read the existing tile views only (no reload or layout from an accessibility callback).
+  `SidebarViewTests.testFavoritesAddedWhileTheGridHasNoSizeGetTiles`.
+- Same file, accessibility: `NSCollectionView`, like `NSTableView`, answers children out of process from its own
+  internals, so the collection view is no longer an accessibility element and the `favorites.grid` group (a plain
+  view) lists the existing tile views itself; the tiles report the grid as their parent. This is #289's pattern
+  (the container lists the elements); the tiles are real views (close button, Close action), so no proxy and no
+  change to `AXProxyRows.swift` is needed. Nothing creates an item, reloads or lays out from an accessibility call.
 - In-process test for the Archive rows: `ArchiveWindowTests.testAccessibilityRowsComeFromThePageWithoutRowViews`.
 
 Known issues used: #277 (unrelated GUI-test flake on the earlier head).

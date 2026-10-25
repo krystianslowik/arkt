@@ -193,16 +193,17 @@ final class FavoritesCollectionView: NSCollectionView {
   override func moveDown(_ sender: Any?) { onMoveCommand?(0, 1) }
   override func moveUp(_ sender: Any?) { onMoveCommand?(0, -1) }
 
-  /// The tile views of the items that exist, in item order. Reads only: an accessibility query never creates an
-  /// item, reloads or lays out (doing so from an out-of-process client's callback re-enters layout while the client
-  /// waits, and it times out). The grid keeps every Favorite realized once it has a size (`FavoritesGridView.layout`).
+  /// Not an accessibility element: `NSCollectionView`, like `NSTableView`, answers its children out of process from
+  /// its own internals rather than from overridden children, so `FavoritesGridView` (a plain view, whose overridden
+  /// children AppKit does publish) lists the tiles itself and the tiles report the grid as their parent.
+  override func isAccessibilityElement() -> Bool { false }
+
+  /// The tile views of the items that exist, in item order. Reads only: never creates an item, reloads or lays out
+  /// (doing so from an out-of-process client's accessibility callback re-enters layout while the client waits, and
+  /// it times out). The grid keeps every Favorite realized once it has a size (`FavoritesGridView.layout`).
   func tileViews() -> [NSView] {
     guard numberOfSections > 0 else { return [] }
     return (0..<numberOfItems(inSection: 0)).compactMap { item(at: IndexPath(item: $0, section: 0))?.view }
-  }
-
-  override func accessibilityChildren() -> [Any]? {
-    NSAccessibility.unignoredChildren(from: tileViews())
   }
 }
 
@@ -281,6 +282,16 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityIdentifier(AXID.Favorites.grid)
+  }
+
+  /// The Favorite tiles, in order, as this group's children (the tiles report the group as their parent, since the
+  /// collection view between them is not an accessibility element). Read from the items that exist; see
+  /// `FavoritesCollectionView.tileViews()`.
+  public override func accessibilityChildren() -> [Any]? {
+    guard let favoritesCollectionView = collectionView as? FavoritesCollectionView else {
+      return super.accessibilityChildren()
+    }
+    return NSAccessibility.unignoredChildren(from: favoritesCollectionView.tileViews())
   }
 
   @available(*, unavailable)
