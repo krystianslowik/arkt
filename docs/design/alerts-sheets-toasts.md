@@ -27,7 +27,7 @@ same values, copied into the engine as the existing comments already do.
 | Sidebar mutation errors | transient toasts ("Couldn't add the tab.", "Cannot Add New Pane", ...) | toast / error | as `toast-error` |
 | Restore done | toast "Tab restored to Work. Click to view." + View | toast / notice with action | `toast-restored` |
 | Auto-archive | toast "Auto archived 3 tabs" | toast / undo | as `toast-undo` |
-| Archive (Cmd-W, Clear) | no toast today | toast / undo (new) | `toast-undo` |
+| Archive of several tabs (Clear, Archive Below, multi-selection) | no toast today | toast / undo (new) | `toast-undo` |
 | Recovery | persistent toast with Show Files, one line, truncates at 480 pt | toast / persistent, multi-line | `toast-recovery` |
 | Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn) | `ext-install`, `ext-remove` |
 | Permission prompts | engine `ArktDialogSheet` as an anchored panel, fade-in 0.14 s | dialog / anchored panel (engine-drawn) | `permission` |
@@ -83,9 +83,8 @@ Escape is Cancel, so a stray Return never deletes anything.
    content card (or the focused split pane), so the prompt points at the page that asked. Never steals focus from a
    text field on the page unless the user clicks it; Escape answers Never Allow only when the panel is key.
 3. **App-modal alert** (`NSApp.runModal(for:)` on a centered panel): launch failure before any window exists. Icon is
-   the app icon at 56 pt with a mustard caution badge (24 pt plate, 18 pt glyph) on its trailing-bottom corner; the
-   title stacks under the icon, as in system alerts. The badge overlaps the mark's clear space (design/brand/README.md); this follows the
-   system alert convention on purpose and is open question 5. Runs from the same run-loop callout `askAfterLaunchFailure` uses
+   the plain app icon at 56 pt, no badge, with the brand clear space kept (decision 5); the title stacks under the
+   icon, as in system alerts. Runs from the same run-loop callout `askAfterLaunchFailure` uses
    today (never from inside a main-actor job, week-3 Decision 3).
 
 Delete Space moves from `NSAlert` to the shared sheet. What is lost: `NSAlert`'s free accessibility and the system
@@ -145,7 +144,7 @@ does today; a transient toast over a persistent one hides it only while it is up
 
 | Toast | Text |
 |---|---|
-| Archive (Cmd-W on a Today tab, Clear, Archive Below) | Archived 1 tab / Archived 3 tabs |
+| Archive of several tabs (Clear, Archive Below, multi-selection Cmd-W) | Archived 3 tabs (never shown for one tab, decision 3) |
 | Auto-archive | Auto archived 3 tabs (BH-085, unchanged) |
 | Restore | Tab restored to Work / Folder restored to Work / Split View restored to Favorites; action View |
 | Restore failed | Couldn't restore from the Archive. |
@@ -197,7 +196,7 @@ comment naming each token. Changes for this pass:
 | Toast action press | occasional | feedback | scale 0.96, 0.12 s | same |
 | Dialog button press | occasional | feedback | scale 0.97, 0.12 s | same |
 | Infobar | occasional | none | page moves once, row fades 0.14 s (unchanged) | instant |
-| Toast from a keyboard action (Cmd-W archive) | frequent | confirmation | the toast still enters (it reports, it is not the action), but repeated archives within its lifetime update the text in place ("Archived 2 tabs") without re-entering | text swap |
+| Single Cmd-W archive | frequent | none | no toast (decision 3); Cmd-Z undoes it | none |
 
 Transform and opacity only, driven on the layer (`SpringDriver` for springs, `CABasicAnimation` for the short fades),
 never `alphaValue` mixed with `layer.opacity` (the rule in `ToastView`). Layout never animates. Every spring is
@@ -209,8 +208,8 @@ are already opaque.
 ## 8. Light and dark
 
 Dialogs: porcelain / graphite surface, `primaryText` and `secondaryText`, mustard primary in both. Toasts follow the
-Space theme's flavor (a light toast over a light theme, dark over dark), not the system appearance, as today. The
-caution badge is mustard with a graphite glyph in both appearances. Increase Contrast: dialog edges use `cardBorder`;
+Space theme's flavor (a light toast over a light theme, dark over dark), not the system appearance, as today
+(decision 2). Increase Contrast: dialog edges use `cardBorder`;
 the toast hairline goes to 20 %.
 
 ## 9. Keyboard and VoiceOver
@@ -233,20 +232,20 @@ the toast hairline goes to 20 %.
 - BH-190: toasts use the Space theme's flavor and sit over the pane they concern in a split. Kept.
 - BH-085, BH-086 copy kept; "Click to view." dropped next to a View button (PARITY(NEEDS-RUNTIME-CHECK)).
 - Archive undo toast: Arc's undo is Cmd-Z / Cmd-Shift-T (KB-010, KB-011, BH-074); whether Arc shows a toast for a
-  manual archive is PARITY(NEEDS-RUNTIME-CHECK). Arkt shows one, because archiving is silent otherwise.
+  manual archive is PARITY(NEEDS-RUNTIME-CHECK). Arkt shows one only when several tabs go at once (decision 3).
 - Toast duration: Arc's is unknown (BH-192); Arkt uses 4 s, 6 s for undo.
 - Delete Space confirmation: Arc's dialog copy and buttons were not inspected; PARITY(NEEDS-RUNTIME-CHECK).
 - Permission prompts and extension dialogs keep Chromium's strings and answers.
 
-## 11. Open questions for the maintainer
+## 11. Decisions (maintainer, 2026-10-25)
 
-1. Delete Space: move from `NSAlert` to the shared Arkt sheet (designed), or keep the system alert?
-2. Toasts: keep following the Space theme's flavor (designed, BH-190), or follow the system appearance?
-3. Should a manual archive (Cmd-W on a Today tab) show the undo toast every time, or only for Clear and Archive Below
-   (several tabs at once)?
-4. Launch failure: is "Show Data Folder" in the alert wanted, or should the data folder stay out of sight?
-5. The caution badge on the app icon breaks the mark's clear-space rule: accept it as the system convention, or show
-   the caution glyph beside an untouched icon?
+1. Delete Space uses the **shared Arkt sheet** (not `NSAlert`).
+2. Toasts **follow the Space theme's flavor** (BH-190), not the system appearance.
+3. The undo toast shows **only when several tabs are archived at once** (Clear, Archive Below, a multi-selection
+   Cmd-W, an auto-archive pass). A single Cmd-W archive shows no toast; Cmd-Z still undoes it.
+4. The launch-failure alert **gets "Show Data Folder"**.
+5. The caution badge on the app icon is **not accepted**: the launch alerts show the plain app icon with its clear
+   space intact; the critical style is carried by the title and the copy.
 
 ## 12. Screenshots
 

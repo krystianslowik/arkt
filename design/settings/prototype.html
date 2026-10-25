@@ -10,6 +10,7 @@
     state: general | general-default | spaces | appearance | shortcuts | shortcuts-recording |
            shortcuts-conflict | extensions | extensions-empty | privacy | advanced
     dark: dark appearance   rm: Reduce Motion   rt: Reduce Transparency   shot: hide the prototype controls
+    today: rows whose feature is not built yet are shown disabled (decision 4); without it, the target state
   1 CSS px = 1 pt. Colors are the ShellTokens / BrandTokens values; new tokens are named in docs/design/settings.md.
 -->
 <style>
@@ -67,6 +68,10 @@
   color-scheme: dark;
 }
 :root[data-rt] { --chrome-material: var(--surface); }
+/* Rows whose feature is not built yet: shown, disabled (maintainer decision 4) */
+.row.planned .lbl > div:first-child { color: var(--text-2); }
+.row.planned > :not(.lbl) { opacity: 0.42; pointer-events: none; }
+.row.planned .later { color: var(--text-2); }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -318,8 +323,13 @@ const pop = t => `<button class="pop" aria-haspopup="menu">${t}</button>`;
 const btn = (t, k = '') => `<button class="btn ${k}">${t}</button>`;
 const keys = ks => `<span class="keys" aria-label="${ks.join(' ')}">${ks.map(k => `<span class="key">${k}</span>`).join('')}</span>`;
 const chev = '<svg class="chev" viewBox="0 0 7 12" aria-hidden="true"><path d="M1.5 1.5 5.5 6l-4 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const row = (label, cap, ctl, extra = '') => `<div class="row ${extra}"><div class="lbl"><div>${label}</div>${cap ? `<div class="cap">${cap}</div>` : ''}</div>${ctl || ''}</div>`;
-const lead = (glyph, label, cap, ctl, extra = '') => `<div class="row indent ${extra}">${glyph}<div class="lbl"><div>${label}</div>${cap ? `<div class="cap">${cap}</div>` : ''}</div>${ctl || ''}</div>`;
+/* What issue #307 builds first; with &today every other row is disabled. */
+const BUILT = new Set(['Show Toolbar', 'Show the full URL', 'Import from Arc', 'Arkt\u2019s data folder', 'Arkt is not your default browser', 'Arkt is your default browser']);
+let TODAY = false;
+const later = (label, cap, extra) => /planned/.test(extra) || (TODAY && label && !BUILT.has(label) && !/^<span class="keys"/.test(label) && !/^(New Tab|Open Command Bar|Archive Tab|Show or Hide|Next Space|Previous Space|Copy URL)/.test(label));
+const capOf = (cap, off) => off ? `${cap ? cap + ' ' : ''}<span class="later">Not available yet.</span>` : cap;
+const row = (label, cap, ctl, extra = '') => { const off = later(label, cap, extra); cap = capOf(cap, off); if (off) { extra += ' planned'; ctl = (ctl || '').replace(/<button /g, '<button disabled aria-disabled="true" '); } return `<div class="row ${extra}"><div class="lbl"><div>${label}</div>${cap ? `<div class="cap">${cap}</div>` : ''}</div>${ctl || ''}</div>`; };
+const lead = (glyph, label, cap, ctl, extra = '') => { const off = later(label, cap, extra); cap = capOf(cap, off); if (off) { extra += ' planned'; ctl = (ctl || '').replace(/<button /g, '<button disabled aria-disabled="true" '); } return `<div class="row indent ${extra}">${glyph}<div class="lbl"><div>${label}</div>${cap ? `<div class="cap">${cap}</div>` : ''}</div>${ctl || ''}</div>`; };
 const sec = (h, rows, note) => `<div class="section">${h ? `<h2>${h}</h2>` : ''}<div class="group">${rows.join('')}</div>${note ? `<p class="note">${note}</p>` : ''}</div>`;
 const check = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6.5" fill="var(--accent)"/><path d="M4 7.2 6 9.1l4-4.3" fill="none" stroke="#202321" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const markTile = '<span class="appicon" role="img" aria-label="Arkt"></span>';
@@ -342,7 +352,7 @@ function general(isDefault) {
       row('Shift-click a link to open it in a Peek', '', tg(true)),
     ]),
     sec('Updates', [
-      row('Update Arkt automatically', 'Arkt checks for updates once a day and installs them when you quit.', tg(true)),
+      row('Update Arkt automatically', 'Arkt checks for updates once a day and installs them when you quit.', tg(false), 'planned'),   /* decision 6: disabled until the release work */
     ]),
   ].join('');
 }
@@ -548,6 +558,7 @@ function applyHash() {
   set.has('rm') ? root.setAttribute('data-rm', '') : root.removeAttribute('data-rm');
   set.has('rt') ? root.setAttribute('data-rt', '') : root.removeAttribute('data-rt');
   set.has('shot') ? root.setAttribute('data-shot', '') : root.removeAttribute('data-shot');
+  TODAY = set.has('today');
   document.getElementById('pDark').setAttribute('aria-pressed', set.has('dark'));
   document.getElementById('pRM').setAttribute('aria-pressed', set.has('rm'));
   document.getElementById('pRT').setAttribute('aria-pressed', set.has('rt'));

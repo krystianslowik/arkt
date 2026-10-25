@@ -31,7 +31,7 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | General | Warn before quitting | toggle | `shouldWarnBeforeQuitting` | off | planned | BH-177, RT-30 |
 | General | Open a Peek for links to other sites | toggle | `modalEnabled` | on | planned | BH-144, BH-056 |
 | General | Shift-click a link to open it in a Peek | toggle | `disableShiftClickToOpenLinksInModal` (inverted) | on | planned | BH-145 |
-| General | Update Arkt automatically | toggle | `shouldAutomaticallyUpdate` | on | planned (#128 release) | BH-213 |
+| General | Update Arkt automatically | toggle, disabled until the release work (decision 6) | `shouldAutomaticallyUpdate` | off | planned (#128 release) | BH-213 |
 | Spaces | Profile per Space | popup per Space row | model (Space -> profile) | Default | planned | BH-034 |
 | Spaces | Space name, icon, theme | not here: edited in the sidebar header | model | n/a | exists (#287) | BH-038 |
 | Spaces | Archive Today tabs after | popup: 1 hour, 6 hours, 12 hours, 24 hours, 7 days, 30 days, Never | `autoArchiveTimeThresholdsPerProfile` | 12 hours | planned (policy exists, fixed at 12 h) | BH-080, BH-081, BH-083 |
@@ -78,11 +78,11 @@ and translate exceptions (they live in the page's site controls).
   First open: General, centered on the screen of the key browser window.
 - **Close**: the close button and Cmd-W close it. Arkt's File menu maps Cmd-W to Archive Tab; while Settings is
   key the item would otherwise be disabled (its `closeTab:` action targets the first responder), so
-  `SettingsWindowController` implements `closeTab:` as `close()` and validates the item's title to "Close Window". Escape does not close the window, as in System Settings; inside a
-  shortcut recorder Escape cancels the recording. PARITY(NEEDS-RUNTIME-CHECK): Arc has `escKeyClosesSettingsEnabled`
-  as a feature flag, its default is unknown.
+  `SettingsWindowController` implements `closeTab:` as `close()` and validates the item's title to "Close Window". Escape closes the window too (decision 2); inside a shortcut recorder
+  Escape cancels the recording and leaves the window open. PARITY(NEEDS-RUNTIME-CHECK): Arc has
+  `escKeyClosesSettingsEnabled` as a feature flag, its default is unknown.
 - **Pane keys**: Cmd-1 to Cmd-7 select panes. KB-020 gives Cmd-1 to Cmd-8 to Go to Sidebar Item; those menu items
-  must validate false while Settings is key (the Cmd-W pattern), so the keys reach the Settings window.
+  must validate false while Settings is key (the Cmd-W pattern), so the keys reach the Settings window (decision 1).
 - **Changes apply at once**; there is no Save or Cancel. Every value is observed by every window (the
   `ToolbarSetting` pattern: one shared store, weak observers).
 - **Deep links**: other surfaces open a pane directly: the "Edit the shortcut" toast (BH-195) opens Shortcuts with the
@@ -103,6 +103,7 @@ States designed (each is a prototype hash and a screenshot pair):
 | `extensions-empty` | no extensions: an invitation to the Chrome Web Store |
 | `privacy` | tracking, site permissions with disclosures, data |
 | `advanced` | downloads, pages, data (Import from Arc, data folder), reset |
+| `general-today`, `appearance-today` | the first build: rows whose feature is not built yet are shown disabled with "Not available yet." (decision 4) |
 
 Default browser: "Make Default" calls `NSWorkspace.setDefaultApplication(at:toOpenURLsWithScheme:)` for `http`; macOS
 then shows its own confirmation, which Arkt does not draw. The row updates when the app becomes active again
@@ -217,8 +218,10 @@ stays mustard with a graphite glyph. Increase Contrast: group borders and separa
   `ARKT_DEFAULTS_SUITE` override keeps working), weak observers. `ToolbarSetting` becomes two keys of it without
   changing its defaults keys, so existing users keep their values.
 - Engine-backed rows go through a preferences bridge (plain values, like the extension list in Decision 10). Until it
-  exists those rows are not shown, rather than shown disabled.
-- Planned rows are not shown until their feature works. The first build ships General (default browser, startup if
+  exists those rows are shown disabled.
+- Planned rows are shown disabled until their feature works (decision 4): label in `secondaryText`, control at 42 %
+  opacity with `isEnabled = false`, caption ending "Not available yet.", VoiceOver reads the control as dimmed. The
+  first build enables General (default browser, startup if
   window restoration exists), Appearance (Toolbar, full URL), Shortcuts (read-only list) and Advanced (Import from Arc,
   data folder). Each later feature adds its row and its UI test.
 
@@ -230,7 +233,7 @@ stays mustard with a graphite glyph. Increase Contrast: group borders and separa
   to; Chromium's extension, privacy and permission settings get native panes instead of chrome://settings.
 - Out of scope, not offered: Arc Max toggles (OS-02), Boosts (OS-05), Easels and Notes (OS-04), sync (OS-07), App
   Icon referrals (BH-205), Twitter and WhatsApp badges (BH-051). Arc's "Allow websites to get your theme data" is kept (Privacy).
-  Native ad blocking (BH-206) is an open question, not designed.
+  Native ad blocking (BH-206) is not offered now (decision 3).
 - Defaults marked unknown in section 4 of the spec are PARITY(NEEDS-RUNTIME-CHECK RT-30); the defaults chosen here
   (warn before quitting off, restore windows on, Peek on) are Arkt's until RT-30 is run.
 - Shortcut priority labels: Arc's three modes (BH-200) are named "Arkt first", "Website first", "Press twice for Arkt".
@@ -238,18 +241,21 @@ stays mustard with a graphite glyph. Increase Contrast: group borders and separa
 - Copy uses "Arkt" with a capital A, as every in-app string does today; the lowercase rule in
   `design/brand/README.md` applies to the wordmark and lockups.
 
-## 10. Open questions for the maintainer
+## 10. Decisions (maintainer, 2026-10-25)
 
-1. Cmd-1 to Cmd-7 for panes while Settings is key (designed; it shadows KB-020 there), or no pane keys?
-2. Escape in Settings: do nothing (System Settings, designed) or close the window (Arc flag)?
-3. Native ad and tracker blocking (BH-206): offer it, rely on extensions, or leave it out?
-4. Ship planned rows hidden (designed) or visible and disabled with "Coming later"?
-5. Window width 680: fine, or match System Settings (715)?
-6. Should "Update Arkt automatically" wait for the release work (#128) or ship as a stub?
+1. Cmd-1 to Cmd-7 switch Settings panes while Settings is key: **yes**. Go to Sidebar Item (KB-020) validates false
+   while Settings is key.
+2. Escape closes Settings: **yes** (inside a shortcut recorder, Escape cancels the recording first).
+3. Native ad and tracker blocking (BH-206): **not offered now**; no row.
+4. Rows for features not built yet: **shown disabled**, not hidden. Label in `secondaryText`, control at 42 % and not
+   enabled, the caption ends with "Not available yet." (prototype flag `&today`, screenshots `general-today`,
+   `appearance-today`).
+5. Window width: **680 pt**.
+6. "Update Arkt automatically": **not before the release work** (#128); shown disabled per decision 4, off.
 
 ## 11. Screenshots
 
 Rendered at 2x with the project's Chromium in headless mode from the prototype (`--window-size=760,<window height +
 80>`, `--force-device-scale-factor=2`, hash `#<state>[&dark]&shot`), into `design/settings/screens/<state>-<light|dark>.png`:
 general, general-default, spaces, appearance, shortcuts, shortcuts-recording, shortcuts-conflict, extensions,
-extensions-empty, privacy, advanced (22 files).
+extensions-empty, privacy, advanced, plus general-today and appearance-today (disabled rows, hash `&today`) (26 files).
