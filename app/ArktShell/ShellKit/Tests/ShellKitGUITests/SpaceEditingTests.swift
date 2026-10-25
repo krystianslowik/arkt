@@ -1,6 +1,7 @@
 import AppKit
 import CoreBridge
 import EngineAPITestSupport
+import Motion
 import SidebarModel
 import XCTest
 @testable import ShellUI
@@ -48,10 +49,25 @@ final class SpaceEditingTests: XCTestCase {
     NSMenuItem(title: "", action: action, keyEquivalent: "")
   }
 
-  private static func mouse(_ type: NSEvent.EventType, at point: NSPoint, window: NSWindow?) throws -> NSEvent {
+  private static func mouse(_ type: NSEvent.EventType, at point: NSPoint, window: NSWindow?,
+                             timestamp: TimeInterval = 0) throws -> NSEvent {
     try XCTUnwrap(NSEvent.mouseEvent(
-      with: type, location: point, modifierFlags: [], timestamp: 0, windowNumber: window?.windowNumber ?? 0,
+      with: type, location: point, modifierFlags: [], timestamp: timestamp, windowNumber: window?.windowNumber ?? 0,
       context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+  }
+
+  /// Down on the page's title, drags through `steps` (x offsets in points from the press, 1/120 s apart), and returns
+  /// the press point in window coordinates. Leaves the button down.
+  private static func pressAndDrag(_ page: SpacePageView, window: NSWindow?, through steps: [CGFloat]) throws
+    -> NSPoint {
+    let start = page.convert(NSPoint(x: page.titleLabel.frame.midX, y: page.titleLabel.frame.midY), to: nil)
+    page.mouseDown(with: try mouse(.leftMouseDown, at: start, window: window))
+    for (index, dx) in steps.enumerated() {
+      let point = NSPoint(x: start.x + dx, y: start.y)
+      page.mouseDragged(with: try mouse(.leftMouseDragged, at: point, window: window,
+                                        timestamp: Double(index + 1) / 120))
+    }
+    return start
   }
 
   // MARK: - New Space
@@ -205,7 +221,16 @@ final class SpaceEditingTests: XCTestCase {
       windowNumber: event.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     page.mouseUp(with: up)
     XCTAssertTrue(page.isRenaming)
-    XCTAssertEqual(page.titleLabel.toolTip, "Drag to Reorder Space")
+    XCTAssertNil(page.titleLabel.toolTip, "no reorder tip while typing")
+    XCTAssertFalse(page.showsHeaderToolTipForTesting)
+    page.layout()
+    XCTAssertFalse(page.showsHeaderToolTipForTesting, "a layout while renaming does not bring it back")
+
+    try harness.editor(page).insertNewline(nil)
+    XCTAssertFalse(page.isRenaming)
+    page.layout()
+    XCTAssertEqual(page.titleLabel.toolTip, SpacePageView.reorderToolTip)
+    XCTAssertTrue(page.showsHeaderToolTipForTesting)
     harness.controller.close()
   }
 
@@ -258,7 +283,7 @@ final class SpaceEditingTests: XCTestCase {
     let profile = try XCTUnwrap(menu.item(withTitle: "Profile"))
     XCTAssertFalse(profile.isEnabled)
     XCTAssertNil(profile.action)
-    XCTAssertEqual(menu.item(withTitle: "Theme")?.submenu?.items.map(\.title), ["Paper", "Dusk"])
+    XCTAssertEqual(menu.item(withTitle: "Theme")?.submenu?.items.map(\.title), ["Default", "Paper", "Dusk"])
 
     let dusk = try XCTUnwrap(menu.item(withTitle: "Theme")?.submenu?.item(withTitle: "Dusk"))
     page.pickTheme(dusk)
@@ -275,36 +300,101 @@ final class SpaceEditingTests: XCTestCase {
     let star = try XCTUnwrap(menu.item(withTitle: "Icon")?.submenu?.item(withTitle: "Star"))
     page.pickIcon(star)
     let dots = harness.controller.sidebarController.view.spaceDots
-    XCTAssertEqual(dots.icons, ["star"])
-    XCTAssertEqual(harness.source.sidebar.spaces[harness.ids[0]]?.icon?.symbol, "star")
+    XCTAssertEqual(dots.icons, [.symbol("star")])
+    XCTAssertEqual(harness.source.sidebar.spaces[harness.ids[0]]?.icon, .symbol("star"))
     XCTAssertEqual(harness.saves, 2)
     harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
     dots.updateLayer()
     let mark = try XCTUnwrap(dots.markForTesting(0))
-    XCTAssertTrue(mark.hasContents)
+    XCTAssertTrue(mark.showsImage)
     XCTAssertEqual(mark.width, SidebarMetrics.spaceIconSize)
+
+    // D1: an emoji, built from scalars; anything but one emoji writes nothing.
+    XCTAssertFalse(page.setEmojiIcon("1"))
+    XCTAssertEqual(harness.saves, 2)
+    XCTAssertTrue(page.setEmojiIcon("\u{1F680}"))
+    XCTAssertEqual(harness.source.sidebar.spaces[harness.ids[0]]?.icon, .emoji("\u{1F680}"))
+    XCTAssertEqual(dots.icons, [.emoji("\u{1F680}")])
+    XCTAssertEqual(harness.saves, 3)
+    XCTAssertEqual(dots.markForTesting(0)?.mark, .emoji("\u{1F680}"))
+
+    // D2: Default clears the stored theme; the window draws the bridge default.
+    let themes = try XCTUnwrap(page.makeOptionsMenu().item(withTitle: "Theme")?.submenu)
+    page.pickTheme(try XCTUnwrap(themes.item(withTitle: "Default")))
+    XCTAssertNil(harness.source.sidebar.spaces[harness.ids[0]]?.theme)
+    XCTAssertEqual(harness.source.space(harness.ids[0])?.theme, .bridgeDefault)
+    XCTAssertEqual(harness.saves, 4)
     harness.controller.close()
+  }
+
+  /// The "Emoji..." sheet enables Set Icon only for exactly one emoji.
+  func testEmojiPromptEnablesSetOnlyForOneEmoji() {
+    let prompt = SpaceEmojiPrompt(current: nil)
+    XCTAssertFalse(prompt.canSet)
+    for (text, valid) in [("\u{1F680}", true), ("7", false), ("\u{1F680}\u{1F680}", false), ("\u{2764}\u{FE0F}", true)] {
+      prompt.field.stringValue = text
+      prompt.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: prompt.field))
+      XCTAssertEqual(prompt.canSet, valid, "\(text.unicodeScalars.map(\.value))")
+    }
+    XCTAssertTrue(SpaceEmojiPrompt(current: "\u{1F680}").canSet, "an emoji icon opens with it filled in")
   }
 
   func testHeaderDragReordersAndCtrlNFollowsTheNewOrder() throws {
     let harness = Harness(["A", "B", "C"])
     let page = try XCTUnwrap(harness.page(harness.ids[0]))
+    page.headerSettle = SpringDriver(reduceMotion: { true })
     harness.controller.sidebarController.showSpace(harness.ids[0])
     harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
-    let start = page.convert(NSPoint(x: page.titleLabel.frame.midX, y: page.titleLabel.frame.midY), to: nil)
-    let down = try Self.mouse(.leftMouseDown, at: start, window: harness.controller.window)
-    page.mouseDown(with: down)
-    let moved = NSPoint(x: start.x + SidebarMetrics.spaceDotSize + SidebarMetrics.spaceDotSpacing, y: start.y)
-    let up = try Self.mouse(.leftMouseUp, at: moved, window: harness.controller.window)
+    let rest = page.titleLabel.frame.minX
+    let pitch = SpaceHeaderDrag.pitch(headerWidth: page.bounds.width)
+    XCTAssertGreaterThan(pitch, 100, "one slot is the header's width, not the dock's dot pitch")
+    let dockPitch = SidebarMetrics.spaceDotSize + SidebarMetrics.spaceDotSpacing
+    let start = try Self.pressAndDrag(page, window: harness.controller.window,
+                                      through: [dockPitch, pitch / 4, pitch * 0.6])
+    XCTAssertEqual(harness.titles, ["A", "B", "C"], "nothing moves until the release")
+    XCTAssertEqual(page.titleLabel.frame.minX, rest + (pitch * 0.6).rounded(), accuracy: 1, "the title follows 1:1")
+    let up = try Self.mouse(.leftMouseUp, at: NSPoint(x: start.x + pitch * 0.6, y: start.y),
+                            window: harness.controller.window)
     page.mouseUp(with: up)
 
     XCTAssertEqual(harness.titles, ["B", "A", "C"])
+    XCTAssertEqual(page.headerDragOffset, 0, "Reduce Motion: the title is home at once")
+    XCTAssertEqual(page.titleLabel.frame.minX, rest)
     XCTAssertEqual(harness.controller.currentSpace, harness.ids[0])
     XCTAssertEqual(harness.saves, 1, "the new order is persisted through the autosave hook")
     harness.controller.sidebarController.goToSpace(at: 0)
     waitUntil("the first Space is the one the drag moved in front") {
       harness.controller.currentSpace == harness.ids[1]
     }
+    harness.controller.close()
+  }
+
+  /// A drag short of half a header width moves nothing; the title springs home and a new press catches it mid-way,
+  /// from where it is drawn (interruptible), then follows the pointer from there.
+  func testHeaderDragBelowHalfAPageSpringsBackAndCanBeCaught() throws {
+    let harness = Harness(["A", "B"])
+    let page = try XCTUnwrap(harness.page(harness.ids[0]))
+    page.headerSettle = SpringDriver(now: { 0 }, reduceMotion: { false })
+    harness.controller.sidebarController.showSpace(harness.ids[0])
+    harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    let rest = page.titleLabel.frame.minX
+    let window = harness.controller.window
+    let start = try Self.pressAndDrag(page, window: window, through: [10, 20, 30])
+    XCTAssertEqual(page.titleLabel.frame.minX, rest + 30)
+    XCTAssertTrue(page.editButton.isHidden, "the hover buttons step aside during a drag")
+    page.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: start.x + 30, y: start.y), window: window))
+    XCTAssertEqual(harness.titles, ["A", "B"])
+    XCTAssertEqual(harness.saves, 0)
+    XCTAssertTrue(page.headerSettle.isRunning, "springs home")
+
+    page.mouseDown(with: try Self.mouse(.leftMouseDown, at: start, window: window))
+    XCTAssertFalse(page.headerSettle.isRunning, "the press stops the spring")
+    XCTAssertEqual(page.headerDragOffset, 30, accuracy: 0.001, "caught where it was drawn")
+    page.mouseDragged(with: try Self.mouse(.leftMouseDragged, at: NSPoint(x: start.x + 2, y: start.y), window: window))
+    XCTAssertEqual(page.headerDragOffset, 32, accuracy: 0.001, "and dragged on from there, past no threshold")
+    page.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: start.x + 2, y: start.y), window: window))
+    XCTAssertFalse(page.isRenaming, "a caught title is a drag, not a click")
+    page.headerSettle.stop()
     harness.controller.close()
   }
 

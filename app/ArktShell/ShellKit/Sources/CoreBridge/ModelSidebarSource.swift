@@ -83,8 +83,8 @@ public final class ModelSidebarSource: SidebarSource {
     mutate { $0.setIcon(id, to: BridgeMapping.modelIcon(icon)) }
   }
 
-  public func setTheme(_ id: UUID, to theme: SpaceThemeInfo) {
-    mutate { $0.setTheme(id, to: BridgeMapping.modelTheme(theme)) }
+  public func setTheme(_ id: UUID, to theme: SpaceThemeInfo?) {
+    mutate { $0.setTheme(id, to: theme.map(BridgeMapping.modelTheme)) }
   }
 
   /// Engine-driven title / URL changes. Unknown or non-tab ids are ignored, like `StubSidebar`.

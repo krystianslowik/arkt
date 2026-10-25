@@ -42,7 +42,9 @@ public enum SidebarMetrics {
   public static let spaceDotSpacing: CGFloat = 17.5      // Arc 1.168: 21.5 pt center pitch minus the dot
   /// SF Symbol drawn in the dot's slot (BH-034). The slot pitch stays `spaceDotSize + spaceDotSpacing`.
   public static let spaceIconSize: CGFloat = 16
-  /// A header press shorter than this is a click; a longer one reorders (BH-039).
+  /// An emoji icon's font size, so its glyph fits `spaceIconSize`. TODO(measure): Arc's dock emoji.
+  public static let spaceEmojiFontSize: CGFloat = 13
+  /// A header press shorter than this is a click; a longer one drags the title (BH-039).
   public static let spaceHeaderDragThreshold: CGFloat = 6
   // URL bar under the traffic lights (BH-031), shown while the Toolbar is off. The titlebar container that hosts the
   // traffic lights ends at the strip (ShellWindow.layoutTrafficLights), so it never takes the bar's clicks.

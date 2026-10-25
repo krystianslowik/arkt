@@ -137,7 +137,7 @@ struct SidebarDiffTests {
     reprofiled.profile = "Work"
     #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([reprofiled, b])) == [.spaceChanged(a.id)])
     var reiconed = a
-    reiconed.icon = SpaceIcon(symbol: "star")
+    reiconed.icon = .symbol("star")
     #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([reiconed, b])) == [.spaceChanged(a.id)])
   }
 

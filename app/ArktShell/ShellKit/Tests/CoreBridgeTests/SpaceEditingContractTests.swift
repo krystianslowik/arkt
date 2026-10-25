@@ -1,4 +1,5 @@
 import CoreBridge
+import CoreGraphics
 import Foundation
 import ShellUI
 import SidebarModel
@@ -102,16 +103,21 @@ struct SpaceEditingContractTests {
     source.renameSpace(b, to: "B")
     source.moveSpace(b, to: 0)
     source.renameSpace(b, to: "B")                    // unchanged: no save
-    source.setIcon(b, to: SpaceIconInfo(symbol: "star"))
+    source.setIcon(b, to: .symbol("star"))
     source.setTheme(b, to: Self.persistedTheme)
-    source.setIcon(b, to: SpaceIconInfo(symbol: "star"))   // unchanged: no save
+    source.setIcon(b, to: .symbol("star"))   // unchanged: no save
     source.setTheme(b, to: Self.persistedTheme)            // unchanged: no save
 
     #expect(saved.count == 5)
     #expect(saved.last?.spaceOrder == [b, a])
     #expect(saved.last?.spaces[b]?.title == "B")
-    #expect(saved.last?.spaces[b]?.icon == SidebarModel.SpaceIcon(symbol: "star"))
+    #expect(saved.last?.spaces[b]?.icon == SidebarModel.SpaceIcon.symbol("star"))
     #expect(saved.last?.spaces[b]?.theme?.isDark == true)
+
+    source.setTheme(b, to: nil)                             // Default (D2): saved as no theme
+    source.setTheme(b, to: nil)                             // unchanged: no save
+    #expect(saved.count == 6)
+    #expect(saved.last?.spaces[b]?.theme == nil)
   }
 
   /// sRGB, no texture: `BridgeMapping` reads that back as the same `SpaceThemeInfo` (the menu checkmark).
@@ -122,18 +128,64 @@ struct SpaceEditingContractTests {
   func setIconAndThemeEmitSpaceChangedAndRoundTrip(kind: SourceKind) throws {
     let fixture = try Fixture(kind)
     let id = fixture.ids[1]
-    fixture.source.setIcon(id, to: SpaceIconInfo(symbol: "star"))
+    fixture.source.setIcon(id, to: .symbol("star"))
     fixture.source.setTheme(id, to: Self.persistedTheme)
-    fixture.source.setIcon(id, to: SpaceIconInfo(symbol: "star"))
+    fixture.source.setIcon(id, to: .symbol("star"))
     fixture.source.setTheme(id, to: Self.persistedTheme)
-    fixture.source.setIcon(SpaceID(), to: SpaceIconInfo(symbol: "bolt"))
+    fixture.source.setIcon(SpaceID(), to: .symbol("bolt"))
     fixture.source.setTheme(SpaceID(), to: Self.persistedTheme)
-    #expect(fixture.source.space(id)?.icon == SpaceIconInfo(symbol: "star"))
+    #expect(fixture.source.space(id)?.icon == .symbol("star"))
     #expect(fixture.source.space(id)?.theme == Self.persistedTheme)
     #expect(fixture.changes == [.spaceChanged(id), .spaceChanged(id)])
 
     fixture.source.setIcon(id, to: nil)
     #expect(fixture.source.space(id)?.icon == nil)
     #expect(fixture.changes == [.spaceChanged(id), .spaceChanged(id), .spaceChanged(id)])
+
+    let rocket = SpaceIconInfo.emoji("\u{1F680}")
+    fixture.source.setIcon(id, to: rocket)
+    #expect(fixture.source.space(id)?.icon == rocket)
+    #expect(fixture.changes.count == 4)
+  }
+
+  /// D2 on #279: "Default" clears the Space's theme; the Space then draws the source's default and says so.
+  @Test(arguments: SourceKind.allCases)
+  func setThemeToNilGoesBackToTheDefaultTheme(kind: SourceKind) throws {
+    let fixture = try Fixture(kind)
+    let id = fixture.ids[1]
+    let defaultTheme = try #require(fixture.source.space(id)?.theme)
+    #expect(fixture.source.space(id)?.usesDefaultTheme == true, "a new Space has no theme of its own")
+    fixture.source.setTheme(id, to: nil)
+    #expect(fixture.changes.isEmpty, "already the default")
+
+    fixture.source.setTheme(id, to: Self.persistedTheme)
+    #expect(fixture.source.space(id)?.usesDefaultTheme == false)
+    fixture.source.setTheme(id, to: nil)
+    #expect(fixture.source.space(id)?.usesDefaultTheme == true)
+    #expect(fixture.source.space(id)?.theme == defaultTheme)
+    #expect(fixture.changes == [.spaceChanged(id), .spaceChanged(id)])
+    fixture.source.setTheme(SpaceID(), to: nil)
+    #expect(fixture.changes.count == 2)
+  }
+
+  /// The model stores sRGB components. A Display P3 color is converted, so it reads back as the same color (#287
+  /// review): copying the P3 components into sRGB would shift it.
+  @Test func aDisplayP3ThemeColorIsStoredAsTheSameColorInSRGB() throws {
+    let source = ModelSidebarSource()
+    let id = try source.addSpace(title: "A")
+    let p3 = ShellUI.RGBA.p3(hex: 0x3D7BD9, alpha: 1)
+    source.setTheme(id, to: SpaceThemeInfo(baseColors: [p3, .p3(hex: 0xF2F0EE, alpha: 1)], isDark: false))
+    let stored = try #require(source.sidebar.spaces[id]?.theme?.baseColors.first)
+    #expect(abs(stored.red - p3.red) > 0.01, "converted, not copied")
+
+    let readBack = try #require(source.space(id)?.theme.baseColors.first)
+    let space = try #require(CGColorSpace(name: CGColorSpace.displayP3))
+    let original = try #require(p3.cgColor.converted(to: space, intent: .relativeColorimetric, options: nil)?.components)
+    let extended = try #require(CGColorSpace(name: CGColorSpace.extendedSRGB))
+    let readColor = try #require(CGColor(
+      colorSpace: extended, components: [readBack.red, readBack.green, readBack.blue, readBack.alpha].map { CGFloat($0) }))
+    let roundTripped = try #require(readColor.converted(to: space, intent: .relativeColorimetric, options: nil)?.components)
+    #expect(original.count == roundTripped.count)
+    for (want, got) in zip(original, roundTripped) { #expect(abs(want - got) < 0.001) }
   }
 }

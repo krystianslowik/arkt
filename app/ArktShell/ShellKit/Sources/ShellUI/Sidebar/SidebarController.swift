@@ -185,7 +185,7 @@ public final class SidebarController {
     for id in pagedSpaces { pages[id]?.refresh(from: source.space(id)) }
     pagedFlavors = pagedSpaces.map { source.space($0)?.theme.flavor ?? .light }
     view.spaceDots.titles = pagedSpaces.map { source.space($0)?.title ?? "" }
-    view.spaceDots.icons = pagedSpaces.map { source.space($0)?.icon?.symbol }
+    view.spaceDots.icons = pagedSpaces.map { source.space($0)?.icon }
     if let id = currentSpace, let info = source.space(id) { view.setFlavor(info.theme.flavor) }
     noteCurrentTheme()
     if notify { onSpacesChanged?(pagedSpaces) }

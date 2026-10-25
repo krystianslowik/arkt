@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import ShellUI
 import SidebarModel
@@ -54,27 +55,54 @@ enum BridgeMapping {
 
   static func spaceInfo(_ space: SidebarModel.Space) -> SidebarSpaceInfo {
     SidebarSpaceInfo(
-      id: space.id, title: space.title, profile: space.profile, theme: theme(space.theme), icon: icon(space.icon))
+      id: space.id, title: space.title, profile: space.profile, theme: theme(space.theme),
+      usesDefaultTheme: usesDefaultTheme(space.theme), icon: icon(space.icon))
+  }
+
+  /// `theme(_:)` draws `bridgeDefault` for these.
+  static func usesDefaultTheme(_ theme: SidebarModel.SpaceTheme?) -> Bool {
+    theme?.baseColors.isEmpty ?? true
   }
 
   static func icon(_ icon: SidebarModel.SpaceIcon?) -> SpaceIconInfo? {
-    icon.map { SpaceIconInfo(symbol: $0.symbol) }
+    switch icon {
+    case nil: nil
+    case .symbol(let name): .symbol(name)
+    case .emoji(let emoji): .emoji(emoji)
+    }
   }
 
   static func modelIcon(_ icon: SpaceIconInfo?) -> SidebarModel.SpaceIcon? {
-    icon.map { SidebarModel.SpaceIcon(symbol: $0.symbol) }
+    switch icon {
+    case nil: nil
+    case .symbol(let name): .symbol(name)
+    case .emoji(let emoji): .emoji(emoji)
+    }
   }
 
-  /// Colors are stored as components. `theme(_:)` reads them back as sRGB, and `noiseFactor` is not stored: a theme
-  /// with no texture and sRGB colors round-trips equal, which is what the header menu's checkmark compares.
+  /// Colors are stored as sRGB components (`modelColor`). `theme(_:)` reads them back as sRGB, and `noiseFactor` is
+  /// not stored: a theme with no texture and sRGB colors round-trips equal, which is what the header menu's checkmark
+  /// compares.
   static func modelTheme(_ theme: SpaceThemeInfo) -> SidebarModel.SpaceTheme {
     SidebarModel.SpaceTheme(
       baseColors: theme.baseColors.map(modelColor), overlayColors: theme.overlayColors.map(modelColor),
       texture: theme.texture, isDark: theme.isDark)
   }
 
+  /// The model stores sRGB components and `rgba(_:)` reads them back as sRGB, so a Display P3 color is converted, not
+  /// copied: copying P3 components would read back as a different (less saturated) color. Extended sRGB keeps a P3
+  /// color outside the sRGB gamut as components outside 0...1, which Arc's stored themes also use.
   static func modelColor(_ color: ShellUI.RGBA) -> SidebarModel.RGBA {
-    SidebarModel.RGBA(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
+    switch color.space {
+    case .sRGB:
+      return SidebarModel.RGBA(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
+    case .displayP3:
+      guard let extendedSRGB = CGColorSpace(name: CGColorSpace.extendedSRGB),
+            let converted = color.cgColor.converted(to: extendedSRGB, intent: .relativeColorimetric, options: nil),
+            let c = converted.components, c.count == 4
+      else { preconditionFailure("Display P3 always converts to extended sRGB") }
+      return SidebarModel.RGBA(red: Double(c[0]), green: Double(c[1]), blue: Double(c[2]), alpha: Double(c[3]))
+    }
   }
 
   static func theme(_ theme: SidebarModel.SpaceTheme?) -> SpaceThemeInfo {

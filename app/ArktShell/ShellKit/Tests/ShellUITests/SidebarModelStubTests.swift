@@ -135,9 +135,9 @@ struct SidebarModelStubTests {
     var changes: [SidebarChange] = []
     let observation = stub.observe { changes.append($0) }
     stub.renameSpace(a, to: "A2")
-    stub.setIcon(a, to: SpaceIconInfo(symbol: "star"))
+    stub.setIcon(a, to: .symbol("star"))
     stub.setTheme(a, to: SpaceThemeInfo(baseColors: [], isDark: true))
-    stub.setIcon(a, to: SpaceIconInfo(symbol: "star"))          // unchanged: no event
+    stub.setIcon(a, to: .symbol("star"))          // unchanged: no event
     stub.moveSpace(b, to: 0)
     stub.removeSpace(a)
     #expect(changes == [.spaceChanged(a), .spaceChanged(a), .spaceChanged(a), .spaceMoved(b), .spaceRemoved(a)])
