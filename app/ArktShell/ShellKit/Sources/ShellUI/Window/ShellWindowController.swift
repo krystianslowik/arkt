@@ -112,7 +112,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// gets its window through `adopt(engineWindow:)`.
   public init(engine: any EngineClient, sidebar: any SidebarSource,
               metrics: ShellMetrics = .standard, toolbarSetting: ToolbarSetting = .ephemeral(),
-              opensFirstTab: Bool = true) {
+              commandBarSettings: CommandBarSettings = .ephemeral(), opensFirstTab: Bool = true) {
     let window = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800))
     // Symbol bitmaps at the shell window's scale, before the first row or button draws. A later scale change
     // re-renders the views' glyphs (viewDidChangeBackingProperties) and prewarms again below.
@@ -161,6 +161,22 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
     commandBar.onSwitch = { [weak self] node in self?.activate(node: node) }
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
+    // #112: settings, Paste and Go (BH-108, GS-035), Spaces as results (BH-104), action search (BH-106),
+    // site-search aliases (BH-107) and the Space-switch refresh (BH-111).
+    commandBar.settings = commandBarSettings
+    commandBar.clipboardURLProvider = { CommandBarController.pasteboardURL(NSPasteboard.general) }
+    commandBar.spacesProvider = { [weak self] in
+      guard let self else { return [] }
+      return self.sidebarController.spaces.compactMap { id in
+        self.sidebar.space(id).map { CommandBarResults.Space(id: id, title: $0.title) }
+      }
+    }
+    commandBar.onSwitchSpace = { [weak self] id in self?.sidebarController.showSpace(id) }
+    commandBar.actionsProvider = { [weak self] in self?.commandBarActions() ?? [] }
+    commandBar.onAction = { [weak self] id in self?.runCommandBarAction(id) }
+    sidebarController.onCurrentSpaceChanged = { [weak self] _ in self?.commandBar.refreshSuggestions() }
+    sidebarController.clipboardURLProvider = { CommandBarController.pasteboardURL(NSPasteboard.general) }
+    sidebarController.onPasteAndGo = { [weak self] url in self?.open(url, inNewTab: true) }
     wireAddressBars()
     wireSplit()
     wireExtensions()                        // tab and window events start with the engine window (attach)
@@ -502,9 +518,34 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
   }
 
+  /// BH-104: open tabs of every Space of this profile, the current Space first (so the BH-111 refresh reorders).
   private func openTabs() -> [CommandBarResults.OpenTab] {
-    guard let space = sidebarController.currentSpace else { return [] }
-    return CommandBarResults.openTabs(in: sidebar, space: space)
+    let spaces = sidebarController.spaces
+    guard let current = sidebarController.currentSpace else {
+      return CommandBarResults.openTabs(in: sidebar, spaces: spaces)
+    }
+    return CommandBarResults.openTabs(in: sidebar,
+                                      spaces: [current] + spaces.filter { space in space != current })
+  }
+
+  /// The action search's verbs (BH-106); ids are handled in `runCommandBarAction`.
+  private func commandBarActions() -> [CommandBarAction] {
+    [
+      CommandBarAction(id: "newSpace", title: "New Space"),
+      CommandBarAction(id: "nextSpace", title: "Next Space"),
+      CommandBarAction(id: "previousSpace", title: "Previous Space"),
+      CommandBarAction(id: "toggleToolbar", title: ToolbarSetting.menuTitle(isVisible: toolbarSetting.isVisible)),
+    ]
+  }
+
+  private func runCommandBarAction(_ id: String) {
+    switch id {
+    case "newSpace": newSpace(nil)
+    case "nextSpace": sidebarController.nextSpace()
+    case "previousSpace": sidebarController.previousSpace()
+    case "toggleToolbar": toggleToolbar(nil)
+    default: break
+    }
   }
 
   /// Shows `node` in the content area: a pane shows its whole split (`showSplit`), anything else the single card.

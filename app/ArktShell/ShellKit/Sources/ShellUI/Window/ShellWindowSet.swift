@@ -20,6 +20,7 @@ public final class ShellWindowSet {
   public let engine: any EngineClient
   public let sidebar: any SidebarSource
   public let toolbarSetting: ToolbarSetting
+  public let commandBarSettings: CommandBarSettings
   /// The app's hooks on a new window (archive, stamps, favicons, import); runs before the window is shown.
   public var configure: (@MainActor (ShellWindowController) -> Void)?
 
@@ -35,10 +36,11 @@ public final class ShellWindowSet {
   /// `hostLookup` is needed only for an engine that asks for windows of its own (a host provider); FakeEngine never
   /// does.
   public init(engine: any EngineClient, sidebar: any SidebarSource, toolbarSetting: ToolbarSetting = .ephemeral(),
-              hostLookup: HostLookup? = nil) {
+              commandBarSettings: CommandBarSettings = .ephemeral(), hostLookup: HostLookup? = nil) {
     self.engine = engine
     self.sidebar = sidebar
     self.toolbarSetting = toolbarSetting
+    self.commandBarSettings = commandBarSettings
     self.hostLookup = hostLookup
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
@@ -158,7 +160,7 @@ public final class ShellWindowSet {
 
   private func make(opensFirstTab: Bool) -> ShellWindowController {
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
-                                           opensFirstTab: opensFirstTab)
+                                           commandBarSettings: commandBarSettings, opensFirstTab: opensFirstTab)
     controller.onNewWindow = { [weak self] in self?.openWindow(opensFirstTab: false) }
     windows.append(controller)
     trackMain(controller)
