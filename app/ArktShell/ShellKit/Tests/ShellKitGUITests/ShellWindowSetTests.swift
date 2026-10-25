@@ -115,11 +115,13 @@ final class ShellWindowSetTests: XCTestCase {
     XCTAssertNotEqual(source.section(containing: node), .today(world.space))
   }
 
-  /// A request with bounds gets them.
+  /// A request with bounds gets them (a frame inside the screen, which AppKit keeps when the window is shown).
   func testARequestedFrameIsApplied() throws {
     let (set, engine, _, _) = try makeSet()
     _ = set.openWindow()
-    let bounds = CGRect(x: 120, y: 140, width: 900, height: 640)
+    let visible = try XCTUnwrap(NSScreen.main?.visibleFrame)
+    let bounds = CGRect(x: visible.minX + 40, y: visible.minY + 40,
+                        width: min(900, visible.width - 80), height: min(640, visible.height - 80)).integral
 
     let id = try XCTUnwrap(engine.openEngineWindow(EngineWindowRequest(
       kind: .extension, bounds: bounds, profile: EngineProfileID("default"))))
