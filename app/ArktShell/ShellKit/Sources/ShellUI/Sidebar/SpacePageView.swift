@@ -201,9 +201,11 @@ public final class SpacePageView: NSView, NSTextFieldDelegate {
     let textHeight = ceil(titleLabel.intrinsicContentSize.height)
     let gap = SidebarMetrics.spaceEditButtonGap
     let reserved = isRenaming ? 0 : button + gap + button + gap
+    // A truncating label's intrinsic width can omit the cell's text inset. Measure the whole cell so short titles fit.
     let textWidth = isRenaming
       ? available
-      : min(ceil(titleLabel.intrinsicContentSize.width), max(0, available - reserved))
+      : min(ceil(titleLabel.cell?.cellSize.width ?? titleLabel.intrinsicContentSize.width),
+            max(0, available - reserved))
     let textY = ((header - textHeight) / 2).rounded()
     let rest = NSRect(x: titleX, y: textY, width: textWidth, height: textHeight)
     titleLabel.frame = rest.offsetBy(dx: titleOffset(headerDragOffset), dy: 0)

@@ -58,6 +58,16 @@ extension ShellWindowController {
 // MARK: - New, rename, reorder (#106)
 
 extension ShellWindowController {
+  /// A Space without a restorable tab shows a blank card. Keep loaded pages and per-Space focus for the return trip.
+  func showEmptySpace() {
+    engineActiveTab = engineWindow.flatMap { engine.latestActiveTab(in: $0) }
+    hideSplit()
+    currentTab = nil
+    rootView.card.setContent(nil)
+    setShown([])
+    refreshAddress()
+  }
+
   /// New Space (BH-037; Spaces menu, empty state, the "+" button's menu): "Space N" right after the current Space,
   /// shown at once (a direct response to a command, so the pager jumps) with its title open for editing (decision on
   /// #106).

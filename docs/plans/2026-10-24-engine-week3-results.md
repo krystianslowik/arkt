@@ -2324,3 +2324,27 @@ The conformance tests reference no engine class; the only `Arkt` class symbol is
 
 Plan: contract rules 9 and 10 now exist on `main` (#81, pull request #238: history and `duplicateTab`), so the plan's
 new rules are renumbered 11-16 (W3-1, W3-6 and W3-9 updated; the runner's target is 16/16), in a separate commit.
+
+## W3-9 follow-up: empty Spaces and sidebar titles (#301)
+
+Items 1 and 2 of #301, fixed and checked in the FakeEngine build. Item 3 (the stale tooltip window after closing the
+shell windows) is engine-only and stays open in #301. The Chromium build still needs the same two smoke checks.
+
+- Empty Space: a Space switch activated a restorable tab when one existed but never cleared the previous page when
+  none did. `SidebarController.onEmptySpace` now reports that transition and the window clears selection, mounted
+  plain or split content and the address bars. Loaded tabs and per-Space focus survive the round trip.
+- Late engine events: after the switch, an older activation report or a held archive close could reopen the departed
+  Space. Activations are checked against `EngineClient.latestActiveTab(in:)` (default: `activeTab(in:)`; Chromium reads
+  the live browser selection, its event-backed `activeTab(in:)` and snapshots are unchanged), and a held close
+  restores a successor only while its Space is still selected.
+- Space title: the truncating label's intrinsic width omitted the cell's text inset, so "Space 1" showed as "Spac...".
+  The header now measures the whole cell and still reserves room for the hover controls. Layout stays frame-based.
+
+Verification:
+
+- Red first: with the old `SpacePageView` the title test fails (expansion tooltip rect 50 x 16 instead of empty);
+  without `onEmptySpace` the empty-Space tests fail; the `latestActiveTab` tests failed to compile before the API existed.
+- `cd app/ArktShell/ShellKit && swift test --skip ShellKitGUITests`: 588 passed.
+- `swift test --filter ShellKitGUITests`: 511 run, 5 skipped (FakeEngine lacks those contract drivers), 0 failures.
+- `app/ArktCore` is untouched. `xcodebuild` Debug build of `ArktShell` and `build-for-testing` of `ArktShellUITests`
+  succeed. The new XCUITest (`SpaceSwitchTests`) was compiled, not run.

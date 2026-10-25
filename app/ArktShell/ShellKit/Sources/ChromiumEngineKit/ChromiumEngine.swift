@@ -13,6 +13,7 @@ import EngineAPI
 /// - `snapshot(of:)`, `tabIDs`, `activeTab(in:)` and `windowIDs` read tables kept current from facade events, so a
 ///   snapshot agrees with the last event a handler saw. Three values have no facade event and are read from the tab
 ///   handle when asked: `isClosing`, `wouldHoldClose` and the back and forward entries of `history(of:)`.
+/// - `latestActiveTab(in:)` reads the browser's live selection without advancing those tables or adopting a handle.
 ///
 /// Instance scoping: an instance lists only the windows it created (`createWindow(host:)`) or was handed through its
 /// `windowHostProvider`, and only their tabs. Several instances over one facade (the in-app contract runner) never
@@ -193,6 +194,11 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   }
 
   public func activeTab(in window: EngineWindowID) -> TabID? { windows[window]?.activeTab }
+
+  public func latestActiveTab(in window: EngineWindowID) -> TabID? {
+    guard let handle = windows[window]?.browser.activeTab else { return nil }
+    return tabByHandle[ObjectIdentifier(handle)]
+  }
 
   /// The host of a listed window.
   public func host(of window: EngineWindowID) -> (any EngineWindowHosting)? { windows[window]?.adapter.host }

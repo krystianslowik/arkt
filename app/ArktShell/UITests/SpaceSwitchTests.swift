@@ -114,6 +114,85 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitForSelected(row))
   }
 
+  /// #301: a newly created, empty Space clears the content card without losing the previous Space's live tab.
+  @MainActor
+  func test_E_issue301_newEmptySpaceClearsContentAndRestoresLiveTab() async throws {
+    let server = try await fixtureServer()
+    let app = try launch(try Sandbox())
+    try createFirstSpace(in: app)
+    XCTAssertTrue(waitFor(spaceDot(app, index: 0), label: "Space 1"))
+    XCTAssertTrue(Shell.openInNewTab(server.page("alpha"), in: app))
+
+    let alpha = Shell.todayRow(app, label: FixtureServer.title(ofPage: "alpha"))
+    XCTAssertTrue(waitForOutlineRows("the original tab to be selected") { alpha.exists && alpha.isSelected })
+    XCTAssertTrue(Waits.until("the loopback page to load") { server.requestedPaths.contains("/p/alpha") })
+    let window = shellWindow(of: app)
+    let webView = window.webViews.firstMatch
+    let next = webView.links["Next"]
+    // Establish the web accessibility query before using its absence to detect stale content.
+    XCTAssertTrue(waitFor(webView))
+    XCTAssertTrue(Waits.until("the fixture link to be interactive") { next.exists && next.isHittable })
+    let initialLoads = server.requestedPaths.filter { $0 == "/p/alpha" }.count
+
+    app.menuBars.menuBarItems["Spaces"].click()
+    let newSpace = app.menuBars.menuItems["New Space"]
+    XCTAssertTrue(waitFor(newSpace))
+    newSpace.click()
+    XCTAssertTrue(Waits.until("two Space dots") { Shell.spaceDots(app).count == 2 })
+    XCTAssertTrue(waitFor(spaceDot(app, index: 1), label: "Space 2"))
+    XCTAssertTrue(waitForSelected(spaceDot(app, index: 1)))
+    app.typeKey(.return, modifierFlags: [])
+    XCTAssertTrue(waitForSelected(spacePage(app, title: "Space 2")))
+    XCTAssertTrue(waitUntilGone(spacePage(app, title: "Space 1")))
+    attachSpaceWindow(app, title: "Space 2", name: "issue-301-empty-space-header")
+    XCTAssertTrue(waitUntilGone(webView), "an empty Space must not show the previous Space's web content")
+    XCTAssertFalse(next.exists)
+    XCTAssertEqual(Shell.todayRows(app).count, 0)
+
+    spaceDot(app, index: 0).click()
+    XCTAssertTrue(waitForSelected(spacePage(app, title: "Space 1")))
+    XCTAssertTrue(waitUntilGone(spacePage(app, title: "Space 2")))
+    XCTAssertTrue(waitForSelected(alpha))
+    XCTAssertTrue(Waits.until("the original fixture link to return") { next.exists && next.isHittable })
+    XCTAssertEqual(Shell.todayRows(app).count, 1)
+    XCTAssertEqual(server.requestedPaths.filter { $0 == "/p/alpha" }.count, initialLoads,
+                   "restoring the live tab must not reload it")
+    attachSpaceWindow(app, title: "Space 1", name: "issue-301-restored-populated-space")
+
+    // Repeat through the keyboard path without relying on system-reserved Ctrl-number shortcuts.
+    typeKey(.rightArrow, modifiers: [.command, .option], in: app)
+    XCTAssertTrue(waitForSelected(spacePage(app, title: "Space 2")))
+    XCTAssertTrue(waitUntilGone(spacePage(app, title: "Space 1")))
+    XCTAssertTrue(waitUntilGone(webView))
+    XCTAssertFalse(next.exists)
+    typeKey(.leftArrow, modifiers: [.command, .option], in: app)
+    XCTAssertTrue(waitForSelected(spacePage(app, title: "Space 1")))
+    XCTAssertTrue(waitForSelected(alpha))
+    XCTAssertTrue(Waits.until("the restored fixture link to be interactive") { next.exists && next.isHittable })
+    XCTAssertEqual(server.requestedPaths.filter { $0 == "/p/alpha" }.count, initialLoads)
+
+    // A real link navigation distinguishes a live restored tab from a leftover content snapshot.
+    next.click()
+    XCTAssertTrue(Waits.until("the restored tab to follow its loopback link") {
+      server.requestedPaths.contains("/p/alpha-next")
+    })
+    let navigated = Shell.todayRow(app, label: FixtureServer.title(ofPage: "alpha-next"))
+    XCTAssertTrue(waitForSelected(navigated))
+    XCTAssertEqual(Shell.todayRows(app).count, 1, "the restored tab navigates without creating another tab")
+  }
+
+  private func attachSpaceWindow(_ app: XCUIApplication, title: String, name: String) {
+    let header = spacePage(app, title: title).descendants(matching: .any)[AXID.Sidebar.spaceTitle]
+    XCTAssertTrue(waitFor(header))
+    header.hover()
+    XCTAssertTrue(waitFor(app.buttons[AXID.Sidebar.spaceRename]))
+    XCTAssertTrue(waitFor(app.buttons[AXID.Sidebar.spaceOptions]))
+    let attachment = XCTAttachment(screenshot: shellWindow(of: app).screenshot())
+    attachment.name = name
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
   /// Probe result: `sidebar.page.scroll(byDeltaX: -400, deltaY: 0)` left the Alpha dot selected. The synthesized
   /// scroll's gesture phase was 0, and `SpacePagerView.scrollWheel` ignores an event with an empty phase.
   func test_GS001_twoFingerSwipeMovesSpace() throws {
