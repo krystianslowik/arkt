@@ -689,6 +689,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     removePaneMouseMonitor()
     commandBar.invalidate()
     pager.stopInteraction()        // a closed window's views keep their display links
+    window?.contentView?.removeToolTipsInSubtree()   // a tool tip shown at the close goes with the window (#301)
   }
 }
 
