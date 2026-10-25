@@ -1,0 +1,1238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt onboarding prototype</title>
+<!--
+  Review prototype for the first-run flow (issue 303). The app is native AppKit; this file only shows layout, copy
+  and motion. Spec: docs/design/onboarding.md.
+
+  URL parameters
+    ?appearance=light|dark   system appearance (default: follows the browser)
+    ?motion=reduce           Reduce Motion
+    ?transparency=reduce     Reduce Transparency
+    ?arc=0                   Arc is not installed (the import step is left out)
+    ?still=1                 no entrance motion; every step renders at its settled end state
+    ?shot=1                  hide the review bar; the window fills the viewport (screenshots)
+  Hash: #welcome #import #importing #imported #import-failed #theme #default #extensions
+        #tour-1 ... #tour-6 #done #browser
+-->
+<style>
+:root {
+  /* BrandTokens.Palette */
+  --mustard: #E9B520;
+  --mustard-highlight: #F3CA3D;
+  --mustard-shade: #DCA319;
+  --porcelain: #FAF9F5;
+  --graphite: #202321;
+  --accent-text-on-light: #8A5A0E;
+
+  /* Spacing scale (brand-tokens.json) */
+  --s1: 8px; --s2: 16px; --s3: 24px; --s4: 32px; --s5: 48px; --s6: 64px;
+
+  /* ShellMetrics / SidebarMetrics */
+  --sidebar-w: 190px;
+  --card-inset: 10px;
+  --card-radius: 10px;
+  --row-pitch: 41px;
+  --row-h: 34px;
+  --row-radius: 9px;
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Light appearance: BrandTokens light values, ShellTokens light values */
+body {
+  --surface-brand: var(--porcelain);
+  --text-primary: var(--graphite);
+  --text-secondary: #62655F;            /* proposed brandTextSecondary light, 5.62:1 on porcelain */
+  --hairline: #DEDED5;                  /* proposed brandHairline light, decorative */
+  --control-border: #8C8F88;            /* proposed brandControlBorder light, 3.11:1 on porcelain */
+  --control-fill: rgba(32, 35, 33, 0.05);
+  --control-fill-hover: rgba(32, 35, 33, 0.09);
+  --accent-text: var(--accent-text-on-light);
+  --focus-ring: var(--graphite);
+  --on-accent: var(--graphite);
+  --page-surface: #FFFFFF;              /* ShellTokens.toolbarSurface light */
+  --card-border: rgba(0, 0, 0, 0.10);   /* ShellTokens.cardBorder light */
+  --card-shadow: 0 0 0 0.5px rgba(0,0,0,.10), 0 1px 3px rgba(0, 0, 0, 0.20); /* cardShadow light */
+  --desk: #D9D8D2;
+  --review-bg: rgba(250, 249, 245, 0.92);
+}
+body[data-appearance="dark"] {
+  --surface-brand: var(--graphite);
+  --text-primary: var(--porcelain);
+  --text-secondary: #B6BAB3;            /* proposed brandTextSecondary dark, 8.06:1 on graphite */
+  --hairline: rgba(255, 255, 255, 0.10);
+  --control-border: #6E726B;            /* 3.23:1 on graphite */
+  --control-fill: rgba(250, 249, 245, 0.06);
+  --control-fill-hover: rgba(250, 249, 245, 0.10);
+  --accent-text: var(--mustard);
+  --focus-ring: var(--mustard);
+  --page-surface: #1C1C20;              /* ShellTokens.toolbarSurface dark */
+  --card-border: rgba(255, 255, 255, 0.20);
+  --card-shadow: 0 0 0 0.5px rgba(255,255,255,.20);
+  --desk: #121413;
+  --review-bg: rgba(32, 35, 33, 0.92);
+}
+
+/* Space theme chrome (ShellTokens), driven by the Space theme's isDark, not by system appearance */
+.win {
+  --sb-primary: rgba(14, 15, 16, 0.90);
+  --sb-secondary: rgba(0, 0, 0, 0.64);
+  --sb-foreground: rgba(0, 0, 0, 0.48);
+  --sb-item: rgba(14, 15, 16, 0.05);
+  --sb-item-hover: rgba(14, 15, 16, 0.10);
+  --sb-current: rgba(255, 255, 255, 0.85);
+  --sb-divider: rgba(14, 15, 16, 0.10);
+}
+.win.theme-dark {
+  --sb-primary: rgba(255, 255, 255, 0.84);
+  --sb-secondary: rgba(255, 255, 255, 0.76);
+  --sb-foreground: rgba(255, 255, 255, 0.57);
+  --sb-item: rgba(250, 251, 255, 0.10);
+  --sb-item-hover: rgba(250, 251, 255, 0.15);
+  --sb-current: rgba(250, 251, 255, 0.20);
+  --sb-divider: rgba(255, 255, 255, 0.075);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--desk);
+  color: var(--text-primary);
+  font: 13px/18px var(--font);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; }
+
+/* ---------- Review bar (not part of the design) ---------- */
+.review {
+  position: fixed; inset: 0 0 auto 0; z-index: 50;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 8px 16px; background: var(--review-bg);
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12px; color: var(--text-secondary);
+}
+.review .label { margin-right: 4px; color: var(--text-primary); font-weight: 600; }
+.review button, .review select {
+  height: 24px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--control-border);
+  background: transparent; color: var(--text-primary); font: 12px var(--font); cursor: pointer;
+}
+.review button[aria-pressed="true"] { background: var(--mustard); color: var(--graphite); border-color: var(--mustard); }
+.review .spacer { flex: 1; }
+body.shot .review { display: none; }
+
+/* ---------- Window ---------- */
+.desk { position: absolute; inset: 41px 0 0 0; display: grid; place-items: center; }
+body.shot .desk { inset: 0; }
+.win {
+  position: relative; width: min(1120px, calc(100vw - 32px)); height: min(720px, calc(100vh - 73px));
+  border-radius: 10px; overflow: hidden; isolation: isolate;
+  box-shadow: 0 0 0 0.5px rgba(0,0,0,.35), 0 24px 64px rgba(0,0,0,.28);
+}
+body.shot .win { width: 100vw; height: 100vh; border-radius: 0; box-shadow: none; }
+
+.theme-layer { position: absolute; inset: 0; z-index: 0; }
+.grain {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none; mix-blend-mode: soft-light; opacity: 0.08;
+  background-size: 155px 155px;  /* ShellTokens.themeGrainTile */
+}
+body.rt .grain { display: none; }
+
+.traffic { position: absolute; z-index: 40; left: 14px; top: 18px; display: flex; gap: 11px; }
+.traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,.18); }
+.traffic i:nth-child(1) { background: #FF5F57; } .traffic i:nth-child(2) { background: #FEBC2E; } .traffic i:nth-child(3) { background: #28C840; }
+
+/* ---------- Sidebar (Toolbar-off layout) ---------- */
+.sidebar { position: absolute; z-index: 1; left: 0; top: 0; bottom: 0; width: var(--sidebar-w); color: var(--sb-primary); }
+.sidebar.inert { pointer-events: none; }
+.sb-url { position: absolute; left: 8px; right: 8px; top: 40px; height: 30px; border-radius: 9px; background: var(--sb-item); }
+.sb-url span { position: absolute; left: 10px; top: 7px; font-size: 13px; color: var(--sb-secondary); }
+.sb-favs { position: absolute; left: 8px; right: 8px; top: 78px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.sb-fav { height: 46px; border-radius: 10px; background: var(--sb-item); display: grid; place-items: center; }
+.tile { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--sb-primary); background: rgba(14,15,16,.10); }
+.win.theme-dark .tile { background: rgba(14,15,16,.15); }
+.sb-space { position: absolute; left: 16px; right: 16px; top: 132px; height: 36px; line-height: 36px; font-size: 12px; font-weight: 600; color: var(--sb-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-list { position: absolute; left: 8px; right: 8px; top: 168px; }
+.row { position: relative; height: var(--row-pitch); }
+.row .bg { position: absolute; inset: 3.5px 0; border-radius: var(--row-radius); }
+.row.current .bg { background: var(--sb-current); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.win.theme-dark .row.current .bg { box-shadow: none; }
+.row .tile { position: absolute; left: 8px; top: 10.5px; }
+.row .title { position: absolute; left: 34px; right: 9px; top: 11px; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .skel { position: absolute; left: 10px; top: 13px; height: 14px; border-radius: 4px; background: var(--sb-item-hover); }
+.row .skel.icon { width: 16px; }
+.row .skel.text { left: 34px; }
+.divider { height: 25px; position: relative; }
+.divider::after { content: ""; position: absolute; left: 8px; right: 8px; top: 12px; height: 1px; background: var(--sb-divider); }
+.row.newtab .title { color: var(--sb-secondary); font-weight: 500; }
+.row.newtab svg { position: absolute; left: 10px; top: 12.5px; color: var(--sb-foreground); }
+.sb-dock { position: absolute; left: 0; right: 0; bottom: 0; height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; color: var(--sb-foreground); }
+.sb-dock .btn { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; }
+.sb-dots { display: flex; gap: 17.5px; align-items: center; }
+.sb-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--sb-foreground); display: block; }
+.sb-dots i.on { background: var(--sb-primary); }
+.sb-dots svg { display: block; color: var(--sb-primary); }
+
+/* Ghost: the sidebar is present but quiet during setup */
+.sidebar .ghostable { transition: opacity 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+.sidebar.ghost .ghostable { opacity: 0.55; }
+
+/* Tour highlights: one per target, crossfaded */
+.hl { position: absolute; z-index: 0; border-radius: 10px; background: rgba(233, 181, 32, 0.28); opacity: 0; pointer-events: none; }
+.win.theme-dark .hl { background: rgba(233, 181, 32, 0.20); }
+body.rt .hl { background: #F1DE9F; }
+body.rt .win.theme-dark .hl { background: #6A5A26; }
+
+/* ---------- Content card ---------- */
+.card {
+  position: absolute; z-index: 2; left: calc(var(--sidebar-w) + var(--card-inset)); top: var(--card-inset);
+  right: var(--card-inset); bottom: var(--card-inset); border-radius: var(--card-radius);
+  background: var(--surface-brand); box-shadow: var(--card-shadow); overflow: hidden;
+}
+.stage { position: absolute; inset: 0; }
+.step {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 64px 32px 72px; visibility: hidden; opacity: 0;
+}
+.step.active { visibility: visible; opacity: 1; }
+.col { width: 440px; max-width: 100%; display: flex; flex-direction: column; align-items: center; text-align: center; }
+h1 {
+  margin: 0; font: 600 28px/34px var(--font-display); letter-spacing: -0.012em; color: var(--text-primary);
+  text-wrap: balance;
+}
+.body { margin: 8px 0 0; font-size: 15px; line-height: 22px; color: var(--text-secondary); text-wrap: pretty; max-width: 400px; }
+.note { margin: 16px 0 0; font-size: 13px; line-height: 18px; color: var(--text-secondary); }
+.controls { margin-top: 32px; width: 100%; }
+.actions { margin-top: 32px; display: flex; gap: 12px; justify-content: center; }
+
+.btn-p, .btn-s {
+  height: 32px; min-width: 120px; padding: 0 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 120ms ease;
+  border: 0; outline: none;
+}
+.btn-p { background: var(--mustard); color: var(--on-accent); }
+.btn-s { background: transparent; color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--control-border); }
+@media (hover: hover) and (pointer: fine) {
+  .btn-p:hover { background: var(--mustard-highlight); }
+  .btn-s:hover { background: var(--control-fill); }
+}
+.btn-p:active { background: var(--mustard-shade); transform: scale(0.97); }
+.btn-s:active { transform: scale(0.97); }
+.btn-p[disabled] { opacity: 0.6; cursor: default; transform: none; }
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.btn-p:focus-visible, .btn-s:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+body.rm .btn-p:active, body.rm .btn-s:active { transform: none; }
+
+.link {
+  position: absolute; z-index: 5; top: 16px; height: 28px; padding: 0 10px; border-radius: 7px; border: 0;
+  background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) { .link:hover { background: var(--control-fill); color: var(--text-primary); } }
+.link.skip { right: 16px; }
+.link.back { left: 16px; display: flex; align-items: center; gap: 2px; padding-left: 6px; }
+.link[hidden] { display: none; }
+
+/* Progress dots */
+.dots { position: absolute; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; gap: 8px; height: 6px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--control-border); display: block; opacity: 0.6; }
+.dots .ind { position: absolute; left: 0; top: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--text-primary); }
+.dots[hidden] { display: none; }
+
+/* Import counts */
+.counts { width: 100%; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--hairline); text-align: left; }
+.count { display: flex; align-items: center; height: 44px; padding: 0 16px; font-size: 14px; }
+.count + .count { border-top: 1px solid var(--hairline); }
+.count .name { flex: 1; }
+.count .num { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 24px; text-align: right; }
+.count .num.pending { color: var(--text-secondary); font-weight: 400; }
+.count .state { width: 16px; height: 16px; margin-left: 12px; display: grid; place-items: center; }
+.check { color: var(--text-primary); opacity: 0; transform: scale(0.8); }
+.check.on { opacity: 1; transform: scale(1); }
+.spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--hairline); border-top-color: var(--text-secondary); animation: spin 700ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+body.rm .spin { animation-duration: 1400ms; }
+
+/* Theme picker */
+.field-label { display: block; text-align: left; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 0 0 8px; }
+.group + .group { margin-top: 24px; }
+.swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.sw {
+  position: relative; aspect-ratio: 1; border-radius: 12px; border: 0; padding: 0; cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+body[data-appearance="dark"] .sw { box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.sw:active { transform: scale(0.95); }
+body.rm .sw:active { transform: none; }
+.sw::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 15px; box-shadow: 0 0 0 2px var(--focus-ring);
+  opacity: 0; transform: scale(0.92); transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.sw[aria-checked="true"]::after { opacity: 1; transform: scale(1); }
+body.rm .sw::after { transform: none; }
+.sw:focus-visible { outline: none; }
+.sw:focus-visible::after { opacity: 1; transform: scale(1); box-shadow: 0 0 0 2px var(--focus-ring), 0 0 0 4px var(--surface-brand), 0 0 0 5px var(--focus-ring); }
+.seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--control-fill); position: relative; }
+.seg button { position: relative; z-index: 1; height: 28px; min-width: 72px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; font-weight: 500; cursor: pointer; color: var(--text-secondary); }
+.seg button[aria-checked="true"] { color: var(--text-primary); }
+.seg .thumb { position: absolute; z-index: 0; top: 2px; left: 2px; width: 72px; height: 28px; border-radius: 6px; background: var(--surface-brand); box-shadow: 0 0 0 0.5px var(--card-border), 0 1px 2px rgba(0,0,0,.12); }
+.row2 { display: flex; gap: 16px; align-items: flex-start; }
+.row2 .grow { flex: 1; }
+.input {
+  width: 100%; height: 32px; border-radius: 8px; border: 0; padding: 0 12px; font: 14px var(--font);
+  color: var(--text-primary); background: var(--control-fill); box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.input::placeholder { color: var(--text-secondary); }
+.input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.icons { display: flex; gap: 4px; justify-content: space-between; }
+.ic {
+  width: 36px; height: 32px; border-radius: 8px; border: 0; background: transparent; display: grid; place-items: center;
+  cursor: pointer; color: var(--text-secondary); transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.ic:active { transform: scale(0.94); }
+body.rm .ic:active { transform: none; }
+.ic[aria-checked="true"] { background: var(--control-fill-hover); color: var(--text-primary); box-shadow: inset 0 0 0 1.5px var(--focus-ring); }
+@media (hover: hover) and (pointer: fine) { .ic:hover { background: var(--control-fill); } }
+
+/* Option row (checkbox) */
+.option { display: flex; align-items: center; gap: 12px; text-align: left; padding: 12px 16px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--hairline); cursor: pointer; }
+.option + .option { margin-top: 8px; }
+.option input { width: 16px; height: 16px; margin: 0; accent-color: var(--mustard); }
+.option b { display: block; font-size: 14px; font-weight: 600; }
+.option span { display: block; font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+
+/* Welcome field (brand surface that folds into the card) */
+.field {
+  position: absolute; z-index: 30; inset: 0; background: var(--surface-brand);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.field .grain { opacity: 0.05; }
+.field.gone { display: none; }
+.mark { width: 112px; height: 112px; display: block; }
+.wordmark { width: 90px; height: 38px; display: block; margin-top: 32px; }
+.descriptor { margin: 16px 0 0; font: 400 17px/22px var(--font-display); color: var(--text-secondary); }
+.field .actions { margin-top: 48px; }
+.field .link.skip { top: 16px; }
+
+/* Tour */
+.demo { width: 440px; height: 152px; position: relative; margin-bottom: 32px; }
+.keys { position: absolute; inset: 0; display: flex; gap: 12px; align-items: center; justify-content: center; }
+.key {
+  min-width: 64px; height: 64px; padding: 0 16px; border-radius: 14px; display: grid; place-items: center;
+  font: 500 28px/1 var(--font-display); color: var(--text-primary); background: var(--control-fill);
+  box-shadow: inset 0 0 0 1px var(--hairline), inset 0 -3px 0 var(--hairline);
+}
+.mini { position: absolute; left: 50%; top: 0; width: 280px; height: 152px; margin-left: -140px; border-radius: 12px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--hairline); background: var(--control-fill); }
+.mini .msb { position: absolute; left: 0; top: 0; bottom: 0; width: 72px; }
+.mini .mcard { position: absolute; left: 76px; top: 4px; right: 4px; bottom: 4px; border-radius: 6px; background: var(--page-surface); box-shadow: 0 0 0 0.5px var(--card-border); overflow: hidden; }
+.mini .mrow { position: absolute; left: 6px; width: 60px; height: 14px; border-radius: 4px; background: var(--control-fill-hover); }
+.mini .mrow.hot { background: var(--mustard); }
+.mini .mfav { position: absolute; top: 8px; width: 18px; height: 14px; border-radius: 4px; background: var(--control-fill-hover); }
+.mini .split { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--card-border); opacity: 0; }
+.mini .zone { position: absolute; inset: 6px; border-radius: 5px; background: rgba(233,181,32,.22); opacity: 0; }
+.mini .pane { position: absolute; top: 0; bottom: 0; width: 50%; display: grid; place-items: center; font-size: 10px; color: var(--text-secondary); }
+.mini .track { position: absolute; left: 0; top: 0; bottom: 0; width: 216px; display: flex; }
+.mini .page { width: 72px; height: 100%; position: relative; }
+.mini .pdots { position: absolute; left: 0; width: 72px; bottom: 8px; display: flex; gap: 6px; justify-content: center; }
+.mini .pdots i { width: 4px; height: 4px; border-radius: 50%; background: var(--control-border); display: block; }
+.mini .pdots i.on { background: var(--text-primary); }
+.fingers { position: absolute; left: 30px; top: 58px; display: flex; gap: 6px; opacity: 0; }
+.fingers i { width: 14px; height: 14px; border-radius: 50%; background: rgba(32,35,33,.28); display: block; }
+body[data-appearance="dark"] .fingers i { background: rgba(250,249,245,.35); }
+.tipcount { margin-top: 16px; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+/* Done mark */
+.done-mark { width: 64px; height: 64px; margin-bottom: 32px; display: block; }
+
+/* Landing (browser) state */
+.page { position: absolute; inset: 0; background: var(--page-surface); opacity: 0; pointer-events: none; }
+.page.on { opacity: 1; pointer-events: auto; }
+.cmdbar {
+  position: absolute; z-index: 35; left: 50%; width: 766px; max-width: calc(100% - 48px); height: 60px; transform: translateX(-50%);
+  border-radius: 12px; background: rgba(28, 28, 32, 0.98); box-shadow: 0 0 0 1px rgba(255,255,255,.10), 0 16px 48px rgba(0,0,0,.35);
+  display: flex; align-items: center; padding-left: 20px; font-size: 20px; color: rgba(255,255,255,.33); opacity: 0; pointer-events: none;
+}
+.cmdbar.on { opacity: 1; }
+body.rt .cmdbar { background: #1C1C20; }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<header class="review" aria-label="Review controls">
+  <span class="label">Onboarding prototype</span>
+  <select id="r-step" aria-label="Jump to step"></select>
+  <button id="r-appearance" type="button" aria-pressed="false">Dark</button>
+  <button id="r-motion" type="button" aria-pressed="false">Reduce Motion</button>
+  <button id="r-transparency" type="button" aria-pressed="false">Reduce Transparency</button>
+  <button id="r-arc" type="button" aria-pressed="true">Arc on this Mac</button>
+  <span class="spacer"></span>
+  <button id="r-replay" type="button">Replay from start</button>
+  <span>Keys: Return, Escape, Left, Right</span>
+</header>
+
+<div class="desk">
+  <div class="win" id="win">
+    <div class="theme-layer" id="themeA"></div>
+    <div class="theme-layer" id="themeB" style="opacity:0"></div>
+    <div class="grain" id="grain"></div>
+    <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+
+    <aside class="sidebar ghost inert" id="sidebar" aria-hidden="true">
+      <div class="hl" data-hl="url" style="left:4px;top:36px;width:182px;height:38px"></div>
+      <div class="hl" data-hl="favs" style="left:4px;top:74px;width:182px;height:54px"></div>
+      <div class="hl" data-hl="newtab" style="left:4px;top:0;width:182px;height:41px"></div>
+      <div class="hl" data-hl="archive" style="left:4px;bottom:5px;width:40px;height:40px"></div>
+      <div class="hl" data-hl="dots" style="left:52px;bottom:5px;width:86px;height:40px"></div>
+      <div class="hl" data-hl="rows" style="left:4px;top:164px;width:182px;height:90px"></div>
+
+      <div class="sb-url ghostable"><span id="sbUrl"></span></div>
+      <div class="sb-favs ghostable" id="sbFavs"></div>
+      <div class="sb-space ghostable" id="sbSpace">Space 1</div>
+      <div class="sb-list ghostable" id="sbList"></div>
+      <div class="sb-dock ghostable">
+        <span class="btn"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2" y="3" width="12" height="3.5" rx="1"/><path d="M3 6.5v6a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-6M6.5 9h3"/></svg></span>
+        <span class="sb-dots" id="sbDots"></span>
+        <span class="btn"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></span>
+      </div>
+    </aside>
+
+    <main class="card" id="card">
+      <div class="page" id="page" aria-hidden="true"></div>
+      <button class="link back" id="back" type="button" hidden aria-label="Back">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 2.5 4 6l3.5 3.5"/></svg>Back
+      </button>
+      <button class="link skip" id="skipAll" type="button">Skip setup</button>
+
+      <div class="stage" id="stage">
+
+        <!-- Import: Arc found -->
+        <section class="step" data-step="import" role="group" aria-labelledby="t-import">
+          <div class="col">
+            <h1 id="t-import">Bring your Arc setup</h1>
+            <p class="body" id="b-import">Arkt found Arc on this Mac. Your Spaces, pinned tabs, Favorites and folders can come over. Arc stays as it is.</p>
+            <div class="controls">
+              <div class="counts" role="list" aria-label="What will come over" id="counts"></div>
+            </div>
+            <p class="note" id="importNote" hidden></p>
+            <div class="actions" id="importActions">
+              <button class="btn-s" type="button" data-act="fresh">Start fresh</button>
+              <button class="btn-p" type="button" data-act="import" data-default>Import from Arc</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Theme -->
+        <section class="step" data-step="theme" role="group" aria-labelledby="t-theme">
+          <div class="col">
+            <h1 id="t-theme">Make it yours</h1>
+            <p class="body">Pick a look for your first Space. You can change it later.</p>
+            <div class="controls">
+              <div class="group">
+                <span class="field-label" id="l-theme">Theme</span>
+                <div class="swatches" role="radiogroup" aria-labelledby="l-theme" id="swatches"></div>
+              </div>
+              <div class="group row2">
+                <div>
+                  <span class="field-label" id="l-mode">Appearance</span>
+                  <div class="seg" role="radiogroup" aria-labelledby="l-mode" id="seg">
+                    <span class="thumb" id="segThumb"></span>
+                    <button type="button" role="radio" data-mode="light">Light</button>
+                    <button type="button" role="radio" data-mode="dark">Dark</button>
+                  </div>
+                </div>
+                <div class="grow">
+                  <label class="field-label" for="spaceName">Name</label>
+                  <input class="input" id="spaceName" type="text" placeholder="Space 1" maxlength="40" autocomplete="off" spellcheck="false">
+                </div>
+              </div>
+              <div class="group">
+                <span class="field-label" id="l-icon">Icon</span>
+                <div class="icons" role="radiogroup" aria-labelledby="l-icon" id="icons"></div>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn-s" type="button" data-act="skip">Skip</button>
+              <button class="btn-p" type="button" data-act="next" data-default>Continue</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Default browser -->
+        <section class="step" data-step="default" role="group" aria-labelledby="t-default">
+          <div class="col">
+            <h1 id="t-default">Make Arkt your default browser?</h1>
+            <p class="body" id="b-default">Links you open in other apps will open in Arkt. macOS asks you to confirm, and you can change it later in System Settings.</p>
+            <div class="actions">
+              <button class="btn-s" type="button" data-act="skip">Not now</button>
+              <button class="btn-p" type="button" data-act="makeDefault" data-default>Make default</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Extensions and passwords -->
+        <section class="step" data-step="extensions" role="group" aria-labelledby="t-ext">
+          <div class="col">
+            <h1 id="t-ext">Extensions and passwords</h1>
+            <p class="body">Arkt installs extensions from the Chrome Web Store. Your password manager's extension is there too.</p>
+            <div class="controls">
+              <label class="option">
+                <input type="checkbox" id="openStore">
+                <div><b>Open the Chrome Web Store</b><span>It opens in a tab when setup ends.</span></div>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="btn-s" type="button" data-act="skip">Skip</button>
+              <button class="btn-p" type="button" data-act="next" data-default>Continue</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tour -->
+        <section class="step" data-step="tour" role="group" aria-labelledby="t-tour" aria-describedby="b-tour">
+          <div class="col">
+            <div class="demo" id="demo" aria-hidden="true"></div>
+            <h1 id="t-tour"></h1>
+            <p class="body" id="b-tour"></p>
+            <div class="tipcount" id="tipCount"></div>
+            <div class="actions">
+              <button class="btn-s" type="button" data-act="skip">Skip tour</button>
+              <button class="btn-p" type="button" data-act="nextTip" data-default id="tipNext">Next</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Done -->
+        <section class="step" data-step="done" role="group" aria-labelledby="t-done">
+          <div class="col">
+            <img class="done-mark" id="doneMark" alt="" src="../brand/logos/01-mustard-on-white.png">
+            <h1 id="t-done">You're all set</h1>
+            <p class="body" id="b-done">Your Space is ready. To see this again, choose Help &gt; Welcome to Arkt.</p>
+            <div class="actions">
+              <button class="btn-p" type="button" data-act="finish" data-default>Start browsing</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="dots" id="dots" aria-hidden="true"></div>
+    </main>
+
+    <div class="cmdbar" id="cmdbar" aria-hidden="true">Search or Enter URL...</div>
+
+    <!-- Welcome: a full-window brand field that folds into the content card -->
+    <section class="field" id="field" role="group" aria-labelledby="t-welcome">
+      <div class="grain" id="fieldGrain"></div>
+      <button class="link skip" type="button" data-act="skipAll">Skip setup</button>
+      <img class="mark" id="mark" alt="Arkt" src="../brand/logos/01-mustard-on-white.png">
+      <img class="wordmark" id="wordmark" alt="" aria-hidden="true" src="../brand/logos/wordmark-graphite.png">
+      <h1 class="sr" id="t-welcome">Welcome to Arkt</h1>
+      <p class="descriptor" id="descriptor">A native macOS browser.</p>
+      <div class="actions" id="welcomeActions">
+        <button class="btn-p" type="button" data-act="start" data-default>Get started</button>
+      </div>
+    </section>
+
+    <div class="sr" aria-live="polite" id="live"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---------- Parameters ----------
+  const q = new URLSearchParams(location.search);
+  const prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const prefersReduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const opt = {
+    appearance: q.get("appearance") || (prefersDark ? "dark" : "light"),
+    reduceMotion: q.get("motion") === "reduce" || prefersReduce,
+    reduceTransparency: q.get("transparency") === "reduce",
+    arc: q.get("arc") !== "0",
+    still: q.get("still") === "1",
+    shot: q.get("shot") === "1",
+  };
+
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+
+  // ---------- Springs: Motion/SpringPreset, solved like SpringParameters.swift ----------
+  const PRESETS = {
+    firm: [0.90, 0.25], firmSlow: [0.90, 0.35], firmExtraSlow: [0.90, 1.25], firmFast: [0.95, 0.15],
+    springy: [0.63, 0.28], springyFast: [0.80, 0.18], springyExtraFast: [0.80, 0.08],
+  };
+  const springCache = {};
+  // Unit step from rest. w0 = 2 pi / response, decay = zeta * w0. Settles when the envelope stays below 0.001.
+  function spring(name) {
+    if (springCache[name]) return springCache[name];
+    const [z, r] = PRESETS[name];
+    const w0 = 2 * Math.PI / r, a = z * w0, wd = w0 * Math.sqrt(1 - z * z);
+    const env = Math.sqrt(1 + (a / wd) ** 2);
+    const settle = Math.log(1000 * env) / a;
+    const n = 64, pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = settle * i / n;
+      const x = i === n ? 1 : 1 - Math.exp(-a * t) * (Math.cos(wd * t) + (a / wd) * Math.sin(wd * t));
+      pts.push(x.toFixed(4));
+    }
+    return (springCache[name] = { easing: `linear(${pts.join(", ")})`, duration: Math.round(settle * 1000) });
+  }
+  const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
+  const EASE_IN_OUT = "cubic-bezier(0.77, 0, 0.175, 1)";
+
+  // Interruptible animate: starts from the element's current presented value, so a retarget never jumps.
+  function animate(el, to, how, delay = 0) {
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    const from = {};
+    for (const k of Object.keys(to)) from[k] = k === "clipPath" ? cs.clipPath : cs[k];
+    el.getAnimations().forEach(a => a.cancel());
+    Object.assign(el.style, to);
+    if (opt.still) return null;
+    const spec = typeof how === "string" ? spring(how) : how;
+    return el.animate([from, to], { duration: spec.duration, easing: spec.easing, delay, fill: "backwards" });
+  }
+  const fade = (ms) => ({ duration: ms, easing: EASE_OUT });
+
+  // ---------- Themes (proposed first-Space set; light and dark gradient per family) ----------
+  const THEMES = [
+    { id: "mist",    name: "Mist",    light: ["#E0F2FB", "#C5C6E2"], dark: ["#3A4158", "#1C2030"] },
+    { id: "paper",   name: "Paper",   light: ["#F4F1EA", "#E4DDD2"], dark: ["#3A3631", "#211F1C"] },
+    { id: "sage",    name: "Sage",    light: ["#E6EDE3", "#C4D3C0"], dark: ["#2F3B33", "#171E1A"] },
+    { id: "dune",    name: "Dune",    light: ["#F7EED2", "#EBD592"], dark: ["#3D3420", "#1E1A10"] },
+    { id: "blossom", name: "Blossom", light: ["#F2EAE4", "#F29BBB"], dark: ["#4A2A3A", "#1F1520"] },
+    { id: "indigo",  name: "Indigo",  light: ["#E4E2F4", "#C9C3E8"], dark: ["#2D4468", "#120F2E"] },
+  ];
+  const ICONS = {
+    none: '<circle cx="9" cy="9" r="2" fill="currentColor" stroke="none"/>',
+    star: '<path d="M9 2.5l1.9 4 4.3.5-3.2 2.9.9 4.3L9 12l-3.9 2.2.9-4.3L2.8 7l4.3-.5z"/>',
+    bookmark: '<path d="M5 2.5h8v13l-4-3-4 3z"/>',
+    folder: '<path d="M2.5 5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>',
+    heart: '<path d="M9 15S2.5 11 2.5 6.8A3.3 3.3 0 0 1 9 5.2a3.3 3.3 0 0 1 6.5 1.6C15.5 11 9 15 9 15z"/>',
+    bolt: '<path d="M10 2 4 10h4.5L8 16l6-8H9.5z"/>',
+    book: '<path d="M3 3.5h4.5A1.5 1.5 0 0 1 9 5v10a1.5 1.5 0 0 0-1.5-1.5H3zM15 3.5h-4.5A1.5 1.5 0 0 0 9 5v10a1.5 1.5 0 0 1 1.5-1.5H15z"/>',
+    globe: '<circle cx="9" cy="9" r="6.5"/><path d="M2.5 9h13M9 2.5c2 2 2 11 0 13M9 2.5c-2 2-2 11 0 13"/>',
+    person: '<circle cx="9" cy="6" r="3"/><path d="M3.5 15.5c.7-3 3-4.5 5.5-4.5s4.8 1.5 5.5 4.5"/>',
+  };
+  const ICON_NAMES = { none: "None", star: "Star", bookmark: "Bookmark", folder: "Folder", heart: "Heart", bolt: "Bolt", book: "Book", globe: "Globe", person: "Person" };
+  const svgIcon = (k, size = 18) => `<svg width="${size}" height="${size}" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round">${ICONS[k]}</svg>`;
+
+  // Sample Arc data (the real step shows counts only)
+  const ARC = { spaces: 4, pinned: 37, favorites: 12, folders: 9 };
+  const COUNT_ROWS = [["spaces", "Spaces"], ["pinned", "Pinned tabs"], ["favorites", "Favorites"], ["folders", "Folders"]];
+
+  // ---------- State ----------
+  const state = {
+    step: "welcome", importState: "scanning", path: null, // path: "import" | "fresh" | null
+    theme: "mist", mode: opt.appearance, icon: "none", name: "", tip: 0, done: false,
+  };
+
+  function flow() {
+    const f = ["welcome"];
+    if (opt.arc) f.push("import");
+    if (state.path !== "import") f.push("theme");
+    f.push("default", "extensions", "tour", "done");
+    return f;
+  }
+
+  // ---------- Appearance ----------
+  const body = document.body;
+  function applyAppearance() {
+    body.dataset.appearance = opt.appearance;
+    body.classList.toggle("rm", opt.reduceMotion);
+    body.classList.toggle("rt", opt.reduceTransparency);
+    body.classList.toggle("shot", opt.shot);
+    const dark = opt.appearance === "dark";
+    $("#mark").src = dark ? "../brand/logos/02-mustard-on-graphite.png" : "../brand/logos/01-mustard-on-white.png";
+    $("#doneMark").src = $("#mark").src;
+    $("#wordmark").src = dark ? "../brand/logos/wordmark-ivory.png" : "../brand/logos/wordmark-graphite.png";
+    $("#r-appearance").setAttribute("aria-pressed", String(dark));
+    $("#r-motion").setAttribute("aria-pressed", String(opt.reduceMotion));
+    $("#r-transparency").setAttribute("aria-pressed", String(opt.reduceTransparency));
+    $("#r-arc").setAttribute("aria-pressed", String(opt.arc));
+  }
+
+  // Grain: deterministic monochrome noise tile (stand-in for GrainTexture).
+  (function makeGrain() {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const g = c.getContext("2d"), img = g.createImageData(128, 128);
+    let s = 0x9E3779B9 >>> 0;
+    for (let i = 0; i < img.data.length; i += 4) {
+      s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0;
+      const v = s >>> 24; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    const url = `url(${c.toDataURL()})`;
+    $("#grain").style.backgroundImage = url; $("#fieldGrain").style.backgroundImage = url;
+  })();
+
+  // ---------- Space theme background (ThemeBackgroundView: 0.28 s crossfade, snaps under Reduce Motion) ----------
+  let themeFront = $("#themeA"), themeBack = $("#themeB");
+  function gradient() {
+    const t = THEMES.find(x => x.id === state.theme);
+    const [a, b] = t[state.mode];
+    return `linear-gradient(135deg, ${a}, ${b})`;
+  }
+  function applyTheme(crossfade) {
+    const g = gradient();
+    $("#win").classList.toggle("theme-dark", state.mode === "dark");
+    if (!crossfade || opt.reduceMotion || opt.still) {
+      themeFront.style.background = g; themeBack.style.opacity = 0; themeBack.getAnimations().forEach(a => a.cancel());
+      return;
+    }
+    themeBack.style.background = g;
+    themeBack.getAnimations().forEach(a => a.cancel());
+    const anim = themeBack.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 280, easing: "ease" });
+    themeBack.style.opacity = 1;
+    anim.onfinish = () => { [themeFront, themeBack] = [themeBack, themeFront]; themeBack.style.opacity = 0; };
+  }
+
+  // ---------- Sidebar ----------
+  function rowHTML(r) {
+    if (r.skel) return `<div class="row"><div class="bg"></div><span class="skel icon"></span><span class="skel text" style="width:${r.w}px"></span></div>`;
+    return `<div class="row${r.current ? " current" : ""}"><div class="bg"></div><span class="tile">${r.l}</span><span class="title">${r.t}</span></div>`;
+  }
+  function renderSidebar() {
+    const imported = state.path === "import" && (state.importState === "imported");
+    const landed = state.done;
+    const favs = imported ? ["M", "C", "G", "N", "F", "S"] : [];
+    $("#sbFavs").innerHTML = (imported ? favs : ["", "", ""]).map(l => `<div class="sb-fav">${l ? `<span class="tile">${l}</span>` : ""}</div>`).join("");
+    $("#sbSpace").textContent = imported ? "Personal" : (state.name.trim() || "Space 1");
+    const pinned = imported
+      ? [{ l: "M", t: "Mail" }, { l: "C", t: "Calendar" }, { l: "D", t: "Docs" }]
+      : [{ skel: 1, w: 92 }, { skel: 1, w: 70 }];
+    const today = landed ? [{ l: "N", t: "New Tab", current: true }] : [];
+    $("#sbList").innerHTML = pinned.map(rowHTML).join("") +
+      `<div class="divider"></div>` +
+      `<div class="row newtab" id="newtabRow"><div class="bg"></div><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg><span class="title">New Tab</span></div>` +
+      today.map(rowHTML).join("");
+    const nSpaces = imported ? ARC.spaces : 1;
+    const icon = imported ? "none" : state.icon;
+    $("#sbDots").innerHTML = Array.from({ length: nSpaces }, (_, i) =>
+      i === 0 && icon !== "none" ? svgIcon(icon, 16) : `<i class="${i === 0 ? "on" : ""}"></i>`).join("");
+    $("#sbUrl").textContent = landed ? "" : "";
+    // Tour highlight for the New Tab row follows its position
+    const nt = $("#newtabRow");
+    if (nt) $('[data-hl="newtab"]').style.top = (168 + nt.offsetTop - 0) + "px";
+    $("#sidebar").classList.toggle("ghost", !landed && !imported);
+  }
+
+  // ---------- Import step ----------
+  function renderCounts() {
+    const s = state.importState;
+    $("#counts").innerHTML = COUNT_ROWS.map(([k, label], i) => {
+      const pending = s === "scanning";
+      const num = pending ? "-" : ARC[k];
+      let st = "";
+      if (s === "importing") st = i < importProgress ? checkSVG(true) : `<span class="spin" aria-hidden="true"></span>`;
+      if (s === "imported") st = checkSVG(true);
+      const a11y = pending ? `${label}, counting` : `${label}, ${num}${s === "imported" ? ", imported" : ""}`;
+      return `<div class="count" role="listitem" aria-label="${a11y}"><span class="name" aria-hidden="true">${label}</span><span class="num${pending ? " pending" : ""}" aria-hidden="true">${num}</span><span class="state" aria-hidden="true">${st}</span></div>`;
+    }).join("");
+    const title = $("#t-import"), bodyEl = $("#b-import"), note = $("#importNote"), acts = $("#importActions");
+    if (s === "failed") {
+      title.textContent = "Couldn't import from Arc";
+      bodyEl.textContent = "Arkt couldn't read Arc's data. Try again, or import later from File > Import from Arc.";
+      $("#counts").parentElement.hidden = true;
+      acts.innerHTML = `<button class="btn-s" type="button" data-act="fresh">Start fresh</button><button class="btn-p" type="button" data-act="import" data-default>Try again</button>`;
+    } else if (s === "imported") {
+      title.textContent = "Your Arc setup is here";
+      bodyEl.textContent = `${ARC.spaces} Spaces, ${ARC.pinned} pinned tabs, ${ARC.favorites} Favorites and ${ARC.folders} folders came over.`;
+      $("#counts").parentElement.hidden = false;
+      note.hidden = false; note.textContent = "3 items couldn't be imported.";
+      acts.innerHTML = `<button class="btn-p" type="button" data-act="next" data-default>Continue</button>`;
+    } else {
+      title.textContent = "Bring your Arc setup";
+      bodyEl.textContent = "Arkt found Arc on this Mac. Your Spaces, pinned tabs, Favorites and folders can come over. Arc stays as it is.";
+      $("#counts").parentElement.hidden = false;
+      note.hidden = true;
+      const busy = s === "importing";
+      acts.innerHTML = `<button class="btn-s" type="button" data-act="fresh"${busy ? " disabled" : ""}>Start fresh</button><button class="btn-p" type="button" data-act="import" data-default${busy || s === "scanning" ? " disabled" : ""}>${busy ? "Importing..." : "Import from Arc"}</button>`;
+    }
+  }
+  const checkSVG = () => `<svg class="check on" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5 6.5 11.5 12.5 4.5"/></svg>`;
+  let importProgress = 0, importTimer = null;
+
+  function scanArc() {
+    state.importState = "scanning"; renderCounts();
+    if (opt.still) { state.importState = "ready"; renderCounts(); return; }
+    clearTimeout(importTimer);
+    importTimer = setTimeout(() => {
+      state.importState = "ready"; renderCounts();
+      // Numbers arrive with a short fade, staggered 40 ms (no rolling digits).
+      $$(".count .num", $("#counts")).forEach((n, i) => animate(n, { opacity: "1" }, fade(opt.reduceMotion ? 200 : 160), i * 40));
+      say(`Found ${ARC.spaces} Spaces, ${ARC.pinned} pinned tabs, ${ARC.favorites} Favorites and ${ARC.folders} folders.`);
+      focusDefault();
+    }, 700);
+  }
+  function runImport() {
+    state.path = "import"; state.importState = "importing"; importProgress = 0; renderCounts(); renderDots();
+    say("Importing from Arc.");
+    const tick = () => {
+      importProgress++;
+      renderCounts();
+      const checks = $$(".check", $("#counts"));
+      const c = checks[importProgress - 1];
+      if (c && !opt.still) animate(c, { opacity: "1", transform: "scale(1)" }, opt.reduceMotion ? fade(200) : "springyFast");
+      if (importProgress < COUNT_ROWS.length) importTimer = setTimeout(tick, 380);
+      else importTimer = setTimeout(() => {
+        state.importState = "imported"; renderCounts(); renderSidebar(); staggerSidebar();
+        say("Imported from Arc. Continue to the next step.");
+        setHash("imported"); focusDefault();
+      }, 300);
+    };
+    importTimer = setTimeout(tick, 380);
+  }
+  function staggerSidebar() {
+    if (opt.still) return;
+    const items = [...$$(".sb-fav"), ...$$(".row", $("#sbList"))].slice(0, 12);
+    items.forEach((el, i) => {
+      el.style.opacity = "0"; el.style.transform = opt.reduceMotion ? "none" : "translateY(6px)";
+      animate(el, { opacity: "1", transform: "none" }, opt.reduceMotion ? fade(200) : "firm", i * 30);
+    });
+  }
+
+  // ---------- Theme step ----------
+  function renderThemePicker() {
+    $("#swatches").innerHTML = THEMES.map(t => {
+      const [a, b] = t[state.mode];
+      const on = t.id === state.theme;
+      return `<button type="button" class="sw" role="radio" aria-checked="${on}" aria-label="${t.name}" tabindex="${on ? 0 : -1}" data-theme="${t.id}" style="background:linear-gradient(135deg, ${a}, ${b})"></button>`;
+    }).join("");
+    $$("#seg button").forEach(b => {
+      const on = b.dataset.mode === state.mode;
+      b.setAttribute("aria-checked", on); b.tabIndex = on ? 0 : -1;
+    });
+    $("#icons").innerHTML = Object.keys(ICONS).map(k => {
+      const on = k === state.icon;
+      return `<button type="button" class="ic" role="radio" aria-checked="${on}" aria-label="${ICON_NAMES[k]}" tabindex="${on ? 0 : -1}" data-icon="${k}">${svgIcon(k)}</button>`;
+    }).join("");
+  }
+  function moveSegThumb(animateIt) {
+    const x = state.mode === "dark" ? 72 : 0;
+    const t = $("#segThumb");
+    if (animateIt && !opt.reduceMotion) animate(t, { transform: `translateX(${x}px)` }, "springyFast");
+    else { t.getAnimations().forEach(a => a.cancel()); t.style.transform = `translateX(${x}px)`; }
+  }
+
+  // ---------- Tour ----------
+  const TIPS = [
+    { title: "Open a tab", body: "Press Command-T, then search or type an address.", keys: ["⌘", "T"], hl: "newtab", label: "Command T" },
+    { title: "Go to the address", body: "Press Command-L to edit the address of the current tab.", keys: ["⌘", "L"], hl: "url", label: "Command L" },
+    { title: "Close by archiving", body: "Command-W closes a tab and keeps it in the Archive, so you can find it again.", keys: ["⌘", "W"], hl: "archive", label: "Command W" },
+    { title: "Switch Spaces", body: "Swipe left or right with two fingers on the sidebar to move between Spaces.", demo: "swipe", hl: "dots" },
+    { title: "Split the view", body: "Drag a tab from the sidebar onto the page to see two tabs side by side.", demo: "split", hl: "rows" },
+    { title: "Keep Favorites close", body: "Drag a tab to the top of the sidebar to make it a Favorite.", demo: "favorite", hl: "favs" },
+  ];
+  let demoTimers = [];
+  function clearDemo() { demoTimers.forEach(clearTimeout); demoTimers = []; $$("#demo *").forEach(e => e.getAnimations().forEach(a => a.cancel())); }
+
+  function renderTip(dir) {
+    const tip = TIPS[state.tip];
+    const col = $('[data-step="tour"] .col');
+    const swap = () => {
+      $("#t-tour").textContent = tip.title;
+      $("#b-tour").textContent = tip.body;
+      $("#tipCount").textContent = `${state.tip + 1} of ${TIPS.length}`;
+      $("#tipNext").textContent = state.tip === TIPS.length - 1 ? "Done" : "Next";
+      buildDemo(tip);
+      highlight(tip.hl);
+    };
+    if (!dir || opt.still) { swap(); return; }
+    // Text and demo cross over like a step change, at a shorter distance (16 pt).
+    const parts = [$("#demo"), $("#t-tour"), $("#b-tour")];
+    const out = opt.reduceMotion ? { opacity: "0" } : { opacity: "0", transform: `translateX(${-16 * dir}px)` };
+    parts.forEach(p => animate(p, out, opt.reduceMotion ? fade(120) : "firmFast"));
+    setTimeout(() => {
+      swap();
+      parts.forEach((p, i) => {
+        p.getAnimations().forEach(a => a.cancel());
+        p.style.opacity = "0"; p.style.transform = opt.reduceMotion ? "none" : `translateX(${16 * dir}px)`;
+        animate(p, { opacity: "1", transform: "none" }, opt.reduceMotion ? fade(200) : "firm", i * 30);
+      });
+    }, opt.reduceMotion ? 120 : 110);
+  }
+
+  function highlight(id) {
+    $$(".hl").forEach(h => {
+      const on = h.dataset.hl === id;
+      const target = on ? { opacity: "1", transform: "scale(1)" } : { opacity: "0", transform: opt.reduceMotion ? "scale(1)" : "scale(0.97)" };
+      if (opt.still) { h.style.opacity = target.opacity; h.style.transform = "none"; return; }
+      animate(h, target, opt.reduceMotion ? fade(200) : (on ? "firmSlow" : "firmFast"));
+    });
+  }
+  function clearHighlights() { $$(".hl").forEach(h => animate(h, { opacity: "0" }, fade(160))); }
+
+  function buildDemo(tip) {
+    clearDemo();
+    const d = $("#demo");
+    if (tip.keys) {
+      d.innerHTML = `<div class="keys" role="img" aria-label="${tip.label}">${tip.keys.map(k => `<span class="key">${k}</span>`).join("")}</div>`;
+      if (!opt.still && !opt.reduceMotion) {
+        // One press, once, as the tip appears: the keys dip 2 pt and spring back.
+        $$(".key", d).forEach((k, i) => demoTimers.push(setTimeout(() => {
+          k.animate([{ transform: "none" }, { transform: "translateY(2px) scale(0.96)" }], { duration: 90, easing: EASE_OUT, fill: "forwards" })
+            .onfinish = () => animate(k, { transform: "none" }, "springyFast");
+        }, 260 + i * 70)));
+      }
+      return;
+    }
+    if (tip.demo === "swipe") {
+      d.innerHTML = `<div class="mini"><div class="msb" style="overflow:hidden"><div class="track" id="trk">${[0, 1, 2].map(p =>
+        `<div class="page">${[0, 1, 2].map(r => `<span class="mrow" style="top:${30 + r * 20}px;width:${[52, 40, 46][(r + p) % 3]}px"></span>`).join("")}</div>`).join("")}</div>
+        <div class="pdots" id="pd"><i class="on"></i><i></i><i></i></div></div>
+        <div class="mcard"></div><div class="fingers" id="fg"><i></i><i></i></div></div>`;
+      const trk = $("#trk", d), fg = $("#fg", d);
+      const setDot = n => $$("#pd i", d).forEach((x, i) => x.classList.toggle("on", i === n));
+      if (opt.still || opt.reduceMotion) { setDot(1); trk.style.transform = "translateX(-72px)"; fg.style.opacity = opt.reduceMotion ? "0" : "0"; return; }
+      const cycle = (n) => {
+        if (n >= 2) return;
+        const to = -(n + 1) * 72;
+        fg.style.transform = "translateX(0)";
+        demoTimers.push(setTimeout(() => {
+          animate(fg, { opacity: "1" }, fade(150));
+          fg.animate([{ transform: "translateX(0)" }, { transform: "translateX(-24px)" }], { duration: 360, easing: EASE_IN_OUT, fill: "forwards" });
+          animate(trk, { transform: `translateX(${to}px)` }, "springy", 120);
+          demoTimers.push(setTimeout(() => setDot(n + 1), 260));
+          demoTimers.push(setTimeout(() => animate(fg, { opacity: "0" }, fade(150)), 420));
+          demoTimers.push(setTimeout(() => cycle(n + 1), 1300));
+        }, 500));
+      };
+      cycle(0);
+      return;
+    }
+    if (tip.demo === "split") {
+      d.innerHTML = `<div class="mini"><div class="msb">${[0, 1, 2].map(r => `<span class="mrow" style="top:${30 + r * 20}px;width:${[52, 40, 46][r]}px"></span>`).join("")}
+        <span class="mrow hot" id="chip" style="top:50px;width:40px;z-index:3"></span></div>
+        <div class="mcard"><div class="zone" id="zone"></div><div class="split" id="spl"></div>
+        <div class="pane" id="pl" style="left:0;opacity:0">Tab 1</div><div class="pane" id="pr" style="left:50%;opacity:0">Tab 2</div></div></div>`;
+      const chip = $("#chip", d), zone = $("#zone", d), spl = $("#spl", d);
+      const end = () => { chip.style.opacity = "0"; spl.style.opacity = "1"; $("#pl", d).style.opacity = "1"; $("#pr", d).style.opacity = "1"; };
+      if (opt.still || opt.reduceMotion) { end(); return; }
+      const run = (n) => {
+        chip.style.opacity = "1"; chip.style.transform = "none"; zone.style.opacity = "0"; spl.style.opacity = "0";
+        $("#pl", d).style.opacity = "0"; $("#pr", d).style.opacity = "0";
+        demoTimers.push(setTimeout(() => {
+          chip.animate([{ transform: "none" }, { transform: "translate(118px, 6px) scale(1.05)" }], { duration: 800, easing: EASE_IN_OUT, fill: "forwards" });
+          demoTimers.push(setTimeout(() => animate(zone, { opacity: "1" }, fade(160)), 450));
+          demoTimers.push(setTimeout(() => {
+            chip.getAnimations().forEach(a => a.cancel()); chip.style.opacity = "0";
+            animate(zone, { opacity: "0" }, fade(200));
+            animate(spl, { opacity: "1" }, fade(200));
+            animate($("#pl", d), { opacity: "1" }, fade(200)); animate($("#pr", d), { opacity: "1" }, fade(200), 60);
+            if (n < 1) demoTimers.push(setTimeout(() => run(n + 1), 1600));
+          }, 880));
+        }, 450));
+      };
+      run(0);
+      return;
+    }
+    if (tip.demo === "favorite") {
+      d.innerHTML = `<div class="mini"><div class="msb">${[0, 1, 2].map(i => `<span class="mfav" id="f${i}" style="left:${6 + i * 21}px;${i === 2 ? "opacity:0" : ""}"></span>`).join("")}
+        ${[0, 1, 2].map(r => `<span class="mrow" style="top:${40 + r * 20}px;width:${[52, 40, 46][r]}px;${r === 1 ? "opacity:0" : ""}"></span>`).join("")}
+        <span class="mrow hot" id="chip" style="top:60px;width:40px;z-index:3"></span></div><div class="mcard"></div></div>`;
+      const chip = $("#chip", d), f2 = $("#f2", d);
+      const end = () => { chip.style.opacity = "0"; f2.style.opacity = "1"; f2.style.background = "var(--mustard)"; };
+      if (opt.still || opt.reduceMotion) { end(); return; }
+      const run = (n) => {
+        chip.style.opacity = "1"; f2.style.opacity = "0"; f2.style.background = "";
+        demoTimers.push(setTimeout(() => {
+          chip.animate([{ transform: "none" }, { transform: "translate(0px, -52px) scale(0.45, 1)" }], { duration: 700, easing: EASE_IN_OUT, fill: "forwards" });
+          demoTimers.push(setTimeout(() => {
+            chip.getAnimations().forEach(a => a.cancel()); chip.style.opacity = "0";
+            f2.style.background = "var(--mustard)";
+            f2.style.transform = "scale(0.9)";
+            animate(f2, { opacity: "1", transform: "none" }, "springyFast");
+            if (n < 1) demoTimers.push(setTimeout(() => run(n + 1), 1600));
+          }, 720));
+        }, 450));
+      };
+      run(0);
+    }
+  }
+
+  // ---------- Progress dots ----------
+  function renderDots() {
+    const f = flow().filter(s => s !== "welcome");
+    const dots = $("#dots");
+    const idx = f.indexOf(state.step);
+    dots.hidden = idx < 0 || state.done;
+    dots.innerHTML = f.map(() => "<i></i>").join("") + `<span class="ind" id="ind"></span>`;
+    const ind = $("#ind");
+    if (ind) ind.style.transform = `translateX(${Math.max(idx, 0) * 14}px)`;
+    dots.dataset.idx = idx;
+  }
+  function moveDot(prevIdx) {
+    const f = flow().filter(s => s !== "welcome");
+    const idx = f.indexOf(state.step);
+    const dots = $("#dots");
+    dots.hidden = idx < 0 || state.done;
+    dots.innerHTML = f.map(() => "<i></i>").join("") + `<span class="ind" id="ind"></span>`;
+    const ind = $("#ind");
+    ind.style.transform = `translateX(${Math.max(prevIdx, 0) * 14}px)`;
+    if (opt.reduceMotion || opt.still || prevIdx < 0) { ind.style.transform = `translateX(${idx * 14}px)`; return; }
+    animate(ind, { transform: `translateX(${idx * 14}px)` }, "springyFast");
+  }
+
+  // ---------- Navigation ----------
+  function setHash(h) { history.replaceState(null, "", location.pathname + location.search + "#" + h); syncSelect(); }
+  function say(t) { const l = $("#live"); l.textContent = ""; setTimeout(() => (l.textContent = t), 30); }
+
+  function stepEl(id) { return $(`.step[data-step="${id}"]`); }
+
+  function focusDefault() {
+    const scope = state.step === "welcome" ? $("#field") : stepEl(state.step);
+    if (!scope) return;
+    const el = scope.querySelector("[data-default]:not([disabled])") || scope.querySelector("button:not([disabled])");
+    if (el) el.focus({ preventScroll: true });
+  }
+
+  function showStep(id, dir) {
+    const prev = state.step;
+    const f = flow().filter(s => s !== "welcome");
+    const prevIdx = f.indexOf(prev);
+    state.step = id;
+    $("#back").hidden = f.indexOf(id) <= 0 || state.done;
+    $("#skipAll").hidden = state.done;
+    if (id === "tour") renderTip(0); else { clearDemo(); clearHighlights(); }
+    if (id === "theme") { renderThemePicker(); moveSegThumb(false); }
+    const outEl = prev !== "welcome" ? stepEl(prev) : null;
+    const inEl = stepEl(id);
+    $$(".step").forEach(s => { if (s !== outEl && s !== inEl) { s.getAnimations().forEach(a => a.cancel()); s.classList.remove("active"); s.style.opacity = ""; s.style.transform = ""; } });
+    if (inEl) inEl.classList.add("active");
+    if (outEl && outEl !== inEl) {
+      // Outgoing: firmFast, 24 pt toward the direction of travel. Incoming: firm, from 24 pt the other side.
+      if (opt.still) { outEl.classList.remove("active"); }
+      else {
+        const a = animate(outEl, opt.reduceMotion ? { opacity: "0" } : { opacity: "0", transform: `translateX(${-24 * dir}px)` }, opt.reduceMotion ? fade(200) : "firmFast");
+        outEl.inert = true;
+        if (a) a.onfinish = () => { if (state.step !== prev) { outEl.classList.remove("active"); outEl.style.transform = ""; } outEl.inert = false; };
+      }
+    }
+    if (inEl) {
+      inEl.inert = false;
+      if (!opt.still && outEl !== inEl) {
+        const cs = getComputedStyle(inEl);
+        if (!inEl.getAnimations().length && cs.opacity === "1" && outEl) { inEl.style.opacity = "0"; }
+        if (outEl && !inEl.getAnimations().length) inEl.style.transform = opt.reduceMotion ? "none" : `translateX(${24 * dir}px)`;
+        animate(inEl, { opacity: "1", transform: "none" }, opt.reduceMotion ? fade(200) : "firm", outEl ? 40 : 0);
+      } else { inEl.style.opacity = "1"; inEl.style.transform = "none"; }
+    }
+    moveDot(prevIdx);
+    setHash(id === "tour" ? `tour-${state.tip + 1}` : (id === "import" && state.importState === "imported" ? "imported" : id));
+    if (!opt.still) setTimeout(focusDefault, 60);
+  }
+
+  function next() {
+    const f = flow();
+    const i = f.indexOf(state.step);
+    if (i < f.length - 1) showStep(f[i + 1], 1);
+  }
+  function back() {
+    const f = flow();
+    const i = f.indexOf(state.step);
+    if (i > 1) {
+      let target = f[i - 1];
+      showStep(target, -1);
+    }
+  }
+
+  // Welcome -> first step: the brand field folds into the content card (clip-path inset, firmSlow).
+  function leaveWelcome() {
+    const field = $("#field");
+    const first = flow()[1];
+    const card = $("#card").getBoundingClientRect(), win = $("#win").getBoundingClientRect();
+    const inset = `inset(${card.top - win.top}px ${win.right - card.right}px ${win.bottom - card.bottom}px ${card.left - win.left}px round 10px)`;
+    $("#sidebar").style.opacity = "1";
+    if (opt.still) { field.classList.add("gone"); showStep(first, 1); return; }
+    const kids = [$("#mark"), $("#wordmark"), $("#descriptor"), $("#welcomeActions"), $(".field .link")];
+    if (opt.reduceMotion) {
+      animate(field, { opacity: "0" }, fade(240)).onfinish = () => field.classList.add("gone");
+      showStep(first, 1);
+      return;
+    }
+    kids.forEach(k => animate(k, { opacity: "0", transform: "scale(0.97)" }, "firmFast"));
+    field.style.clipPath = "inset(0px 0px 0px 0px round 0px)";
+    const a = animate(field, { clipPath: inset }, "firmSlow", 60);
+    // Ghost sidebar items appear as the field uncovers them, 30 ms apart.
+    const items = [$(".sb-url"), ...$$(".sb-fav"), $("#sbSpace"), ...$$(".row", $("#sbList")), $(".sb-dock")];
+    items.forEach((el, i) => { el.style.opacity = "0"; animate(el, { opacity: "" }, fade(240), 120 + i * 30); });
+    a.onfinish = () => { field.classList.add("gone"); field.style.clipPath = ""; };
+    setTimeout(() => showStep(first, 1), 140);
+  }
+
+  function welcomeReveal() {
+    if (opt.still) return;
+    const mark = $("#mark"), word = $("#wordmark"), desc = $("#descriptor"), acts = $("#welcomeActions"), skip = $(".field .link");
+    if (opt.reduceMotion) {
+      [mark, word, desc, acts, skip].forEach(e => { e.style.opacity = "0"; animate(e, { opacity: "1" }, fade(250)); });
+      return;
+    }
+    mark.style.opacity = "0"; mark.style.transform = "translateY(8px) scale(0.92)";
+    animate(mark, { opacity: "1", transform: "none" }, "springy", 120);
+    word.style.clipPath = "inset(0 100% 0 0)"; word.style.opacity = "0";
+    animate(word, { clipPath: "inset(0 0% 0 0)", opacity: "1" }, { duration: 420, easing: EASE_OUT }, 300);
+    desc.style.opacity = "0"; desc.style.transform = "translateY(6px)";
+    animate(desc, { opacity: "1", transform: "none" }, "firmSlow", 440);
+    [acts, skip].forEach(e => { e.style.opacity = "0"; animate(e, { opacity: "1" }, fade(240), 560); });
+  }
+
+  function finish() {
+    state.done = true;
+    if (state.step !== "done") { /* Skip setup: no flourish */ }
+    renderSidebar();
+    $("#sidebar").classList.remove("inert");
+    const page = $("#page"), cmd = $("#cmdbar"), stage = $("#stage");
+    const win = $("#win").getBoundingClientRect();
+    cmd.style.top = Math.round(win.height * 0.34) + "px";
+    $("#dots").hidden = true; $("#back").hidden = true; $("#skipAll").hidden = true;
+    clearHighlights(); clearDemo();
+    if (opt.still) {
+      page.classList.add("on"); cmd.classList.add("on"); stage.style.opacity = "0"; $("#field").classList.add("gone");
+    } else {
+      animate(stage, { opacity: "0" }, fade(160));
+      page.classList.add("on"); page.style.opacity = "0";
+      animate(page, { opacity: "1" }, fade(240), 80);
+      const f = $("#field");
+      if (!f.classList.contains("gone")) animate(f, { opacity: "0" }, fade(200)).onfinish = () => f.classList.add("gone");
+      // The command bar keeps its own presentation (CommandBarPanel); shown here at rest after the page settles.
+      setTimeout(() => cmd.classList.add("on"), 320);
+    }
+    setHash("browser");
+    say("Setup finished. The command bar is open.");
+  }
+
+  // ---------- Events ----------
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act]");
+    if (b && !b.disabled) {
+      const act = b.dataset.act;
+      if (act === "start") leaveWelcome();
+      else if (act === "skipAll") finish();
+      else if (act === "next") next();
+      else if (act === "skip") { if (state.step === "tour") { showStep("done", 1); } else next(); }
+      else if (act === "fresh") { state.path = "fresh"; clearTimeout(importTimer); next(); }
+      else if (act === "import") runImport();
+      else if (act === "makeDefault") { $("#b-default").textContent = "macOS is asking you to confirm. Arkt continues either way."; setTimeout(next, opt.still ? 0 : 900); }
+      else if (act === "nextTip") { if (state.tip < TIPS.length - 1) { state.tip++; renderTip(1); setHash(`tour-${state.tip + 1}`); } else showStep("done", 1); }
+      else if (act === "finish") finish();
+      return;
+    }
+    const sw = e.target.closest(".sw");
+    if (sw) { state.theme = sw.dataset.theme; renderThemePicker(); applyTheme(true); $(`.sw[data-theme="${state.theme}"]`).focus(); return; }
+    const sg = e.target.closest("#seg button");
+    if (sg) { state.mode = sg.dataset.mode; renderThemePicker(); moveSegThumb(true); applyTheme(true); $(`#seg [data-mode="${state.mode}"]`).focus(); return; }
+    const ic = e.target.closest(".ic");
+    if (ic) { state.icon = ic.dataset.icon; renderThemePicker(); renderSidebar(); $(`.ic[data-icon="${state.icon}"]`).focus(); return; }
+  });
+  $("#back").addEventListener("click", () => {
+    if (state.step === "tour" && state.tip > 0) { state.tip--; renderTip(-1); setHash(`tour-${state.tip + 1}`); return; }
+    back();
+  });
+  $("#skipAll").addEventListener("click", finish);
+  $("#spaceName").addEventListener("input", (e) => { state.name = e.target.value; renderSidebar(); });
+
+  // Radio groups: arrow keys move the selection (roving tabindex)
+  function radioKeys(e, sel, attr, apply) {
+    const items = $$(sel); const i = items.indexOf(document.activeElement);
+    if (i < 0) return false;
+    let n = i;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") n = (i + 1) % items.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") n = (i - 1 + items.length) % items.length;
+    else return false;
+    e.preventDefault(); apply(items[n].dataset[attr]); $$(sel)[n].focus(); return true;
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest && e.target.closest(".review")) return;
+    const inText = e.target.tagName === "INPUT" && e.target.type === "text";
+    if (radioKeys(e, ".sw", "theme", v => { state.theme = v; renderThemePicker(); applyTheme(true); })) return;
+    if (radioKeys(e, "#seg button", "mode", v => { state.mode = v; renderThemePicker(); moveSegThumb(true); applyTheme(true); })) return;
+    if (radioKeys(e, ".ic", "icon", v => { state.icon = v; renderThemePicker(); renderSidebar(); })) return;
+    if (state.done) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (state.step === "welcome") return finish();
+      if (state.step === "import" && state.importState === "importing") return; // an import in progress is not cancelled by Escape
+      const skip = stepEl(state.step).querySelector('[data-act="skip"], [data-act="fresh"]');
+      if (skip) skip.click(); else next();
+      return;
+    }
+    if (e.key === "Enter" && !e.metaKey) {
+      const active = document.activeElement;
+      if (active && active.tagName === "BUTTON" && !active.closest(".review")) return; // native button handles Return/Space
+      const scope = state.step === "welcome" ? $("#field") : stepEl(state.step);
+      const d = scope && scope.querySelector("[data-default]:not([disabled])");
+      if (d) { e.preventDefault(); d.click(); }
+      return;
+    }
+    if (inText) return;
+    if (e.key === "ArrowRight" && state.step !== "welcome") {
+      e.preventDefault();
+      if (state.step === "tour") return $("#tipNext").click();
+      if (state.step === "import" && state.importState !== "imported") return;
+      next();
+    }
+    if (e.key === "ArrowLeft" && state.step !== "welcome") { e.preventDefault(); $("#back").hidden || $("#back").click(); }
+  });
+
+  // ---------- Review controls ----------
+  const STEPS = ["welcome", "import", "importing", "imported", "import-failed", "theme", "default", "extensions", "tour-1", "tour-2", "tour-3", "tour-4", "tour-5", "tour-6", "done", "browser"];
+  const sel = $("#r-step");
+  sel.innerHTML = STEPS.map(s => `<option value="${s}">${s}</option>`).join("");
+  function syncSelect() { const h = location.hash.slice(1) || "welcome"; if (STEPS.includes(h)) sel.value = h; }
+  function reload(changes) {
+    const p = new URLSearchParams(location.search);
+    for (const [k, v] of Object.entries(changes)) { if (v == null) p.delete(k); else p.set(k, v); }
+    location.href = location.pathname + "?" + p.toString() + location.hash;
+  }
+  sel.addEventListener("change", () => { location.hash = sel.value; location.reload(); });
+  $("#r-appearance").onclick = () => reload({ appearance: opt.appearance === "dark" ? "light" : "dark" });
+  $("#r-motion").onclick = () => reload({ motion: opt.reduceMotion ? null : "reduce" });
+  $("#r-transparency").onclick = () => reload({ transparency: opt.reduceTransparency ? null : "reduce" });
+  $("#r-arc").onclick = () => reload({ arc: opt.arc ? "0" : null });
+  $("#r-replay").onclick = () => { location.hash = "welcome"; location.reload(); };
+
+  // ---------- Boot: jump straight to a hash, settled ----------
+  function jump(h) {
+    const field = $("#field");
+    if (h === "welcome" || !h) { renderSidebar(); renderDots(); welcomeReveal(); if (!opt.still) setTimeout(focusDefault, 200); if (opt.arc) { scanArc(); } return; }
+    field.classList.add("gone");
+    const wasStill = opt.still; opt.still = true;     // land settled, then restore motion for later interaction
+    if (h.startsWith("import") || h === "importing" || h === "imported") {
+      if (!opt.arc) { opt.arc = true; }
+      if (h === "import") { state.importState = "ready"; }
+      if (h === "importing") { state.path = "import"; state.importState = "importing"; importProgress = 2; }
+      if (h === "imported") { state.path = "import"; state.importState = "imported"; }
+      if (h === "import-failed") { state.importState = "failed"; }
+      renderCounts(); renderSidebar(); showStep("import", 1);
+    } else if (h.startsWith("tour")) {
+      state.path = opt.arc ? "fresh" : null; state.tip = Math.max(0, Math.min(5, (parseInt(h.split("-")[1], 10) || 1) - 1));
+      renderSidebar(); showStep("tour", 1);
+    } else if (h === "browser") {
+      state.path = opt.arc ? "fresh" : null; renderSidebar(); showStep("done", 1); finish();
+    } else if (["theme", "default", "extensions", "done"].includes(h)) {
+      state.path = opt.arc ? "fresh" : null; renderSidebar(); showStep(h, 1);
+    }
+    opt.still = wasStill;
+    setHash(h);
+    if (!opt.still) setTimeout(focusDefault, 60);
+  }
+
+  applyAppearance();
+  applyTheme(false);
+  renderCounts();
+  renderThemePicker();
+  jump(location.hash.slice(1));
+  syncSelect();
+})();
+</script>
+</body>
+</html>
