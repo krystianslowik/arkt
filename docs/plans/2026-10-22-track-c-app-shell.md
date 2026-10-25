@@ -3199,6 +3199,17 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
    Proposal: amend to "more than one refresh interval + 0.25 ms" (8.6 ms at 120 Hz), which is what this track measures.
 5. Default search engine for non-URL command bar input (Google placeholder).
 
+## Decisions
+
+- Space icons (BH-034), decision D1 on [#279](https://github.com/krystianslowik/arkt/issues/279), 2026-10-25: an
+  icon is an SF Symbol or one emoji, settled before sidebar storage format 2 is frozen. Stored as a tagged object,
+  `{"type": "symbol", "symbol": "star"}` or `{"type": "emoji", "emoji": "..."}`; version 1 documents load with every
+  icon nil. The header's Icon menu adds "Emoji...", a sheet with one field opened with the system Character Viewer;
+  only one extended grapheme cluster that presents as an emoji is accepted.
+- Space themes (BH-034), decision D2 on [#279](https://github.com/krystianslowik/arkt/issues/279), 2026-10-25: the
+  header's Theme menu has a "Default" choice that clears the Space's theme (stored as no theme), so the Space draws
+  the bridge default.
+
 ## C3 review follow-ups (deferred)
 
 - Removal and move handling in the sidebar outline that keeps folders' expanded or collapsed state, plus

@@ -17,6 +17,14 @@ public final class SpaceDotsView: NSView {
       for (element, title) in zip(elements, titles) { element.setAccessibilityLabel(title) }
     }
   }
+  /// Icon per Space, parallel to `titles` (BH-034). Nil, or a symbol name AppKit does not know, keeps the dot.
+  public var icons: [SpaceIconInfo?] = [] {
+    didSet {
+      guard icons != oldValue else { return }
+      resolveMarks()
+      applyColors()
+    }
+  }
   public var count: Int { titles.count }
   /// The committed Space. Setting it also moves `position` there.
   public var selectedIndex = 0 {
@@ -43,6 +51,14 @@ public final class SpaceDotsView: NSView {
   private var elements: [SpaceDotElement] = []
   /// Fill weight each dot was last painted with (a swipe repaints only the dots whose weight changes).
   private var paintedWeights: [Double] = []
+  /// What each slot shows, resolved once per `icons` change (an unknown symbol is a dot), never per frame.
+  private var marks: [DockMark] = []
+  /// Mark each layer was last given an image for; nil before the first paint. A swipe frame never re-sets an image.
+  private var paintedMarks: [DockMark?] = []
+  /// Backing scale the images were made for; a change re-sets them.
+  private var paintedScale: CGFloat = 0
+  /// Icon bitmaps per (mark, scale). Symbols are alpha masks, so one bitmap serves both flavors.
+  private var iconImages: [IconImageKey: CGImage] = [:]
   /// Clips the strip to the dock; its mask fades the edges past which dots are hidden.
   private let clipLayer = CALayer()
   private let fadeMask = CAGradientLayer()
@@ -82,6 +98,8 @@ public final class SpaceDotsView: NSView {
     dots = (0..<count).map { _ in CALayer() }
     dots.forEach { stripLayer.addSublayer($0) }
     paintedWeights = []
+    paintedMarks = []
+    resolveMarks()
     elements = (0..<count).map { index in
       let element = SpaceDotElement { [weak self] in self?.onSelect?(index) }
       element.setAccessibilityParent(self)
@@ -107,12 +125,6 @@ public final class SpaceDotsView: NSView {
     CATransaction.setDisableActions(true)
     clipLayer.frame = layer.bounds
     fadeMask.frame = clipLayer.bounds
-    let size = SidebarMetrics.spaceDotSize
-    for (index, dot) in dots.enumerated() {
-      dot.frame = CGRect(x: layout.stripDotMinX(index), y: ((bounds.height - size) / 2).rounded(),
-                         width: size, height: size)
-      dot.cornerRadius = size / 2
-    }
     if layout != placedLayout {
       placedLayout = layout
       scrollOffset = layout.offsetRevealing(Int(position.rounded()), from: scrollOffset)
@@ -171,21 +183,158 @@ public final class SpaceDotsView: NSView {
   /// Weight 1 at the dot under `position`, falling to 0 one dot away.
   func fillWeight(_ index: Int) -> Double { Double(max(0, 1 - abs(position - CGFloat(index)))) }
 
+  /// Paints the dots for the current `position`. A swipe frame (not `force`, marks unchanged) only sets each changed
+  /// dot's fill or opacity: no frame, no image, no rasterization. `force` (layout, flavor, scale) also re-places
+  /// every layer; images are re-set only when a mark or the backing scale changed.
   private func applyColors(force: Bool = false) {
-    if force || paintedWeights.count != dots.count { paintedWeights = Array(repeating: -1, count: dots.count) }
+    let scale = shellBackingScale
+    if paintedWeights.count != dots.count || paintedScale != scale {
+      paintedWeights = Array(repeating: -1, count: dots.count)
+      paintedMarks = Array(repeating: nil, count: dots.count)
+      paintedScale = scale
+    } else if force {
+      paintedWeights = Array(repeating: -1, count: dots.count)
+    }
+    if marks.count != dots.count { resolveMarks() }
     let idle = ShellTokens.sidebarForeground.resolve(flavor)
     let active = ShellTokens.primaryText.resolve(flavor)
+    let layout = dockLayout
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     for (index, dot) in dots.enumerated() {
+      let mark = marks[index]
+      let markChanged = paintedMarks[index] != mark
+      if force || markChanged { place(dot, index: index, mark: mark, layout: layout) }
+      if markChanged {
+        paint(dot, mark: mark, scale: scale)
+        paintedMarks[index] = mark
+      }
       let weight = fillWeight(index)
-      guard weight != paintedWeights[index] else { continue }
+      guard markChanged || weight != paintedWeights[index] else { continue }
       paintedWeights[index] = weight
       repaintCountForTesting += 1
-      dot.backgroundColor = RGBA.mix(idle, active, weight).cgColor
+      switch mark {
+      case .dot, .symbol:
+        // A symbol is the dot's fill seen through the symbol's mask: the same contrast-tuned tokens (#72).
+        dot.backgroundColor = RGBA.mix(idle, active, weight).cgColor
+      case .emoji:
+        dot.opacity = SpaceDockIconPaint.emojiOpacity(weight, flavor: flavor)
+      }
     }
     CATransaction.commit()
   }
+
+  /// What slot `index` shows. `NSImage(systemSymbolName:)` runs here, once per `icons` change.
+  private func resolveMarks() {
+    marks = (0..<count).map { (index: Int) -> DockMark in
+      switch index < icons.count ? icons[index] : nil {
+      case nil: .dot
+      case .symbol(let name)?:
+        NSImage(systemSymbolName: name, accessibilityDescription: nil) == nil ? .dot : .symbol(name)
+      case .emoji(let emoji)?: .emoji(emoji)
+      }
+    }
+  }
+
+  /// The dot is `spaceDotSize` round; an icon is a `spaceIconSize` square on the same center, so the pitch holds.
+  private func place(_ dot: CALayer, index: Int, mark: DockMark, layout: SpaceDockLayout) {
+    let dotSize = SidebarMetrics.spaceDotSize
+    let side = mark == .dot ? dotSize : SidebarMetrics.spaceIconSize
+    let center = layout.stripDotMinX(index) + dotSize / 2
+    let frame = CGRect(x: center - side / 2, y: ((bounds.height - side) / 2).rounded(), width: side, height: side)
+    if dot.frame != frame { dot.frame = frame }
+    dot.mask?.frame = dot.bounds
+  }
+
+  /// Gives the layer its image for `mark`, from `iconImages`. Runs only when the mark or the scale changes.
+  private func paint(_ dot: CALayer, mark: DockMark, scale: CGFloat) {
+    switch mark {
+    case .dot:
+      dot.contents = nil
+      dot.mask = nil
+      dot.opacity = 1
+      dot.cornerRadius = SidebarMetrics.spaceDotSize / 2
+    case .symbol:
+      let mask = CALayer()
+      mask.frame = dot.bounds
+      mask.contents = iconImage(mark, scale: scale)
+      mask.contentsScale = scale
+      mask.contentsGravity = .resizeAspect
+      dot.contents = nil
+      dot.mask = mask
+      dot.opacity = 1
+      dot.cornerRadius = 0
+      iconPaintCountForTesting += 1
+    case .emoji:
+      dot.contents = iconImage(mark, scale: scale)
+      dot.contentsScale = scale
+      dot.contentsGravity = .resizeAspect
+      dot.mask = nil
+      dot.backgroundColor = nil
+      dot.cornerRadius = 0
+      iconPaintCountForTesting += 1
+    }
+  }
+
+  /// One bitmap per (mark, scale), rasterized on first use and then reused by every paint, swipe and window.
+  private func iconImage(_ mark: DockMark, scale: CGFloat) -> CGImage? {
+    let key = IconImageKey(mark: mark, scale: scale)
+    if let image = iconImages[key] { return image }
+    let box = SidebarMetrics.spaceIconSize
+    let image: NSImage
+    switch mark {
+    case .dot: return nil
+    case .symbol(let name):
+      // Opaque black: only the alpha matters to a mask.
+      image = SymbolImageCache.shared.symbol(name, box: box, weight: .medium, color: .black(1), scale: scale)
+    case .emoji(let emoji):
+      image = SymbolImageCache.shared.bitmap(key: "space-emoji:\(emoji)", size: box, scale: scale) { rect in
+        let text = NSAttributedString(
+          string: emoji, attributes: [.font: NSFont.systemFont(ofSize: SidebarMetrics.spaceEmojiFontSize)])
+        let size = text.size()
+        text.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2))
+      }
+    }
+    var rect = NSRect(origin: .zero, size: image.size)
+    guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return nil }
+    iconRasterCountForTesting += 1
+    iconImages[key] = cgImage
+    return cgImage
+  }
+
+  enum DockMark: Hashable {
+    case dot
+    /// Drawn as the layer's mask over the dot's fill.
+    case symbol(String)
+    /// Drawn as the layer's contents, in its own colors.
+    case emoji(String)
+  }
+
+  private struct IconImageKey: Hashable {
+    var mark: DockMark
+    var scale: CGFloat
+  }
+
+  struct SpaceDotMark {
+    var mark: DockMark
+    var width: CGFloat
+    var opacity: Float
+    /// The bitmap shown: the contents for an emoji, the mask for a symbol.
+    var showsImage: Bool
+    var fill: CGColor?
+  }
+
+  func markForTesting(_ index: Int) -> SpaceDotMark? {
+    guard dots.indices.contains(index), marks.indices.contains(index) else { return nil }
+    let dot = dots[index]
+    return SpaceDotMark(mark: marks[index], width: dot.bounds.width, opacity: dot.opacity,
+                        showsImage: dot.contents != nil || dot.mask?.contents != nil, fill: dot.backgroundColor)
+  }
+
+  /// Icon images set on a layer so far (for tests: a swipe frame sets none).
+  private(set) var iconPaintCountForTesting = 0
+  /// Icon bitmaps this view made (cache misses) so far (for tests: a swipe frame makes none).
+  private(set) var iconRasterCountForTesting = 0
 
   /// Number of dot fills set so far (for tests).
   private(set) var repaintCountForTesting = 0
@@ -222,6 +371,18 @@ public final class SpaceDotsView: NSView {
       || event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)
       || (event.phase == [] && event.momentumPhase == [])
     setScrollOffset(ends ? layout.align(next) : next)
+  }
+}
+
+/// How an emoji icon follows the dock's fill weight. An emoji keeps its own colors, so the idle-to-active step is
+/// opacity: idle draws at the idle dot's alpha relative to the active dot's (`sidebarForeground` over `primaryText`,
+/// the contrast-tuned pair of #72), the same step a dot or a symbol takes. TODO(measure): Arc's idle emoji.
+enum SpaceDockIconPaint {
+  static func emojiOpacity(_ weight: Double, flavor: ThemeFlavor) -> Float {
+    let idle = ShellTokens.sidebarForeground.resolve(flavor).alpha
+    let active = ShellTokens.primaryText.resolve(flavor).alpha
+    let rest = active > 0 ? min(idle / active, 1) : 1
+    return Float(rest + (1 - rest) * min(max(weight, 0), 1))
   }
 }
 

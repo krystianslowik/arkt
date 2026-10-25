@@ -35,18 +35,21 @@ public final class StubSidebar: SidebarSource {
     return id
   }
 
-  /// A Space with an empty light theme in the default profile (the `SidebarSource` requirement).
+  /// The stub's default theme: empty and light. A Space without a theme of its own draws it.
+  public static let defaultTheme = SpaceThemeInfo(baseColors: [], isDark: false)
+
+  /// A Space with the default theme in the default profile (the `SidebarSource` requirement).
   @discardableResult
   public func addSpace(title: String) -> SpaceID {
-    addSpace(title: title, theme: SpaceThemeInfo(baseColors: [], isDark: false))
+    addSpace(title: title, after: spaceOrder.last)
   }
 
   /// `addSpace(title:)` inserted directly after `space` (nil or unknown: appended). Emits `.spaceAdded` only.
   @discardableResult
   public func addSpace(title: String, after space: SpaceID?) -> SpaceID {
     let id = SpaceID()
-    spaces[id] = SidebarSpaceInfo(id: id, title: title, profile: "default",
-                                  theme: SpaceThemeInfo(baseColors: [], isDark: false))
+    spaces[id] = SidebarSpaceInfo(id: id, title: title, profile: "default", theme: Self.defaultTheme,
+                                  usesDefaultTheme: true)
     let index = space.flatMap { spaceOrder.firstIndex(of: $0) }.map { $0 + 1 } ?? spaceOrder.count
     spaceOrder.insert(id, at: index)
     hub.emit(.spaceAdded(id))
@@ -60,10 +63,21 @@ public final class StubSidebar: SidebarSource {
     hub.emit(.spaceChanged(id))
   }
 
-  /// Replaces a Space's theme. Emits `.spaceChanged`.
-  public func setTheme(_ theme: SpaceThemeInfo, of id: SpaceID) {
-    guard spaces[id] != nil else { return }
-    spaces[id]?.theme = theme
+  /// Sets a Space's icon. Emits `.spaceChanged` when it changed.
+  public func setIcon(_ id: SpaceID, to icon: SpaceIconInfo?) {
+    guard let current = spaces[id], current.icon != icon else { return }
+    spaces[id]?.icon = icon
+    hub.emit(.spaceChanged(id))
+  }
+
+  /// Replaces a Space's theme; nil goes back to `defaultTheme`. Emits `.spaceChanged` when it changed.
+  public func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo?) {
+    guard let current = spaces[id] else { return }
+    let usesDefault = theme == nil
+    let next = theme ?? Self.defaultTheme
+    guard current.theme != next || current.usesDefaultTheme != usesDefault else { return }
+    spaces[id]?.theme = next
+    spaces[id]?.usesDefaultTheme = usesDefault
     hub.emit(.spaceChanged(id))
   }
 
