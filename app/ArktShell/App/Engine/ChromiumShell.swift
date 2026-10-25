@@ -74,9 +74,15 @@ final class ChromiumShell: ChromiumEmbedderDelegate {
     return composition.host(for: request)
   }
 
+  /// On SIGTERM (logout, shutdown, an update) this is the last main-actor code that runs: `chrome::SessionEnding()`
+  /// blocks the main thread in `EndSession()` right after, then exits without `engineWillTerminate` (#298). So the
+  /// pending writes go to disk here, with this thread waiting at most the flush timeouts. On a Cmd-Q quit the later
+  /// `engineWillTerminate` flush then finds little or nothing left.
   func engineWillBeginTerminating() {
     shellLog("engineWillBeginTerminating")
-    composition.prepareForTermination()
+    composition.prepareForTermination()  // stamps the visible tabs first (decision 10), so the flush carries them
+    let flushed = composition.flushBlocking()
+    shellLog("quit-start flush succeeded \(flushed)")
   }
 
   func engineDidCancelTerminating() {

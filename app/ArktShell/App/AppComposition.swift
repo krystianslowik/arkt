@@ -96,6 +96,10 @@ final class AppComposition {
 
   /// Writes what is pending, bounded by the flush timeouts; true when everything was written.
   func flush() async -> Bool { await session?.flush() ?? true }
+
+  /// Writes the pending sidebar and archive outbox while the calling (main) thread waits, bounded by the flush
+  /// timeouts (#298: the engine's SIGTERM path never runs a main-actor job after quit start).
+  func flushBlocking() -> Bool { session?.flushBlocking() ?? true }
 }
 
 /// What the launch-failure alert says; plain values, so the alert can be built in a run-loop callout.
