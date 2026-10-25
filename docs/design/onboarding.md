@@ -32,12 +32,25 @@ Answers to the seven open questions of the first draft. The rest of this documen
 | # | Question | Decision | Where it lands |
 |---|---|---|---|
 | 1 | Live count before import, or import then show? | **Live count before importing.** The read-only counting pass in `ArcImportCoordinator` is in scope of the implementation issue | Sections 5.2, 12 |
-| 2 | Make it yours after an import? | **Yes, it also appears after an import**, for the first imported Space. It starts on that Space's Arc look with no swatch selected; Skip keeps it | Sections 2, 5.3 |
+| 2 | Make it yours after an import? | **Yes, it also appears after an import**, for the first imported Space. It starts on the "From Arc" swatch (the imported Space's own look), selected; Skip keeps the selection the step opened with | Sections 2, 5.3 |
 | 3 | Name 1Password in the extensions step? | **No.** The copy stays generic ("your password manager's extension") | Section 5.5 |
 | 4 | Tour length | **Five tips.** Command-L is folded into the first tip | Section 5.6 |
 | 5 | Default first-Space theme | **Dune**, the mustard-adjacent family. It is the first swatch and the theme behind the window from the fold on | Sections 3, 4, 5.3 |
 | 6 | Should Skip setup confirm? | **Yes.** Skip setup (and Escape on Welcome) asks first | Section 5.9 |
 | 7 | First-launch window size | **At least 1000 x 680 pt, fitting smaller screens**: on a smaller visible frame the window takes the visible frame and the compact layout applies | Section 3 |
+
+### Revisions after design review (2026-10-25)
+
+- Flow diagram: the tour has 5 tips.
+- Import path theme step: a selected "From Arc" swatch replaces "no swatch selected"; Skip keeps the selection the
+  step opened with (section 5.3).
+- Escape in the Name field ends editing and restores the previous value; a second Escape skips (section 7).
+- Right arrow only returns to steps visited before a Back; arrows inside controls never change the step (section 7).
+- A confirmed Skip setup during or after an import adds no empty Space (section 2).
+- Pressed states for the secondary button, Back and Skip setup; a disabled-button spec; a real pressed fill under
+  Reduce Motion (sections 3, 6.2).
+- Idle progress dots at full `brandControlBorder`, which is darkened to #80837C / #868A82 so it keeps 3:1 on the
+  card and on the hover and pressed fills (sections 3, 4).
 
 ## 1. Idea
 
@@ -83,7 +96,7 @@ flowchart TD
   B -->|no| DB[Default browser]
   B -->|yes| X[Extensions and passwords]
   DB -->|Make default / Not now / Escape| X
-  X -->|Continue / Skip / Escape| TR[The sidebar tour, 6 tips]
+  X -->|Continue / Skip / Escape| TR[The sidebar tour, 5 tips]
   TR -->|Done / Skip tour / Escape| DN[You're all set]
   DN -->|Start browsing| BR[Browser: first Space, new tab, command bar open]
   F --> BR
@@ -96,16 +109,17 @@ Branch rules:
 | Arc found (Arc's sidebar file exists, `AppSession.refreshArcImportAvailability`) | Import step is shown |
 | Arc not found | Import step is left out; Make it yours is the first step; one fewer progress dot |
 | Arc check still running when Welcome is left | Import step is shown in its counting state; if the check then says "no Arc", the step is replaced by Make it yours with a normal forward transition |
-| Import path chosen | Make it yours is shown for the first imported Space. It starts on that Space's Arc look with no swatch selected, the name field shows the imported name as its placeholder, and Skip keeps the Arc look |
+| Import path chosen | Make it yours is shown for the first imported Space. It starts on a selected "From Arc" swatch (the imported Space's own look), the name field shows the imported name as its placeholder, and Skip keeps the Arc look |
 | Start fresh, or import failed and then Start fresh | Make it yours is shown, starting on Dune |
 | Arkt is already the default browser | Default browser step is left out |
-| "Skip setup" (any step) or Escape on Welcome | Asks first (section 5.9). On confirm: a fresh "Space 1" with the Dune theme unless an import already finished, then the browser state. On Cancel: back to the same step, nothing changed |
+| "Skip setup" (any step) or Escape on Welcome | Asks first (section 5.9). On confirm: if no import ran, a fresh "Space 1" with Dune, then the browser state. If an import finished, no Space is added: the browser opens on the first imported Space. If an import is running, no Space is added either: the import finishes, then the browser opens on the first imported Space, or on a fresh "Space 1" if the import fails. On Cancel: back to the same step, nothing changed |
 
 Every step can be skipped: each has a secondary action (Skip, Not now, Start fresh, Skip tour), Escape runs that
 secondary action, and "Skip setup" in the card's top-right corner ends the whole flow from any step after a
-confirmation. An import in
-progress is the only thing Escape does not interrupt; Skip setup during an import lets the import finish in the
-background and then shows the File > Import from Arc summary alert instead of the step.
+confirmation. An import in progress is the only thing Escape does not interrupt. A confirmed Skip setup during an
+import creates no Space: the window shows the browser state with the quiet sidebar, the import finishes, then the
+browser opens on the first imported Space (or on a fresh "Space 1" if the import fails) and the File > Import from Arc
+summary alert appears.
 
 Progress dots count the steps after Welcome for the current branch: Arc found is 6 (import, theme, default,
 extensions, tour, done) on both the import and the fresh path; no Arc is 5; Arkt already default removes one more.
@@ -146,10 +160,11 @@ Reference window for every screenshot: 1120 x 720 pt.
 | Controls block | 32 below the body |
 | Button row | 32 below the controls (or the body), centered, 12 between buttons (same gap as `EmptyStateView`) |
 | Primary button | Height 32, min width 120, padding 16, radius 8, SF Pro Text Semibold 13. Fill `accent`, hover `accentHighlight`, pressed `accentPressed`, label `onAccent`. It is the default button (Return) |
-| Secondary button | Same size, no fill, 1 pt inside border `brandControlBorder`, label `brandTextPrimary`, hover fill `brandControlFill` |
-| Back | Top-left of the card at (16, 16), height 28, chevron 12 plus "Back", 13 pt, `brandTextSecondary`; hidden on the first step after Welcome and on Done |
-| Skip setup | Top-right of the card at 16, height 28, 13 pt, `brandTextSecondary`; hover fill `brandControlFill`, text `brandTextPrimary` |
-| Progress dots | 6 pt dots, 14 pt pitch, centered, 24 above the card bottom; idle `brandControlBorder` at 60 %, current is a separate 6 pt dot in `brandTextPrimary` that moves |
+| Secondary button | Same size, no fill, 1 pt inside border `brandControlBorder`, label `brandTextPrimary`; hover fill `brandControlFill`, pressed fill `brandControlFillPressed` plus the press scale. The border keeps 3:1 on both fills (section 4) |
+| Back | Top-left of the card at (16, 16), height 28, chevron 12 plus "Back", 13 pt, `brandTextSecondary`; hover fill `brandControlFill` and text `brandTextPrimary`, pressed fill `brandControlFillPressed`; hidden on the first step after Welcome and on Done |
+| Skip setup | Top-right of the card at 16, height 28, 13 pt, `brandTextSecondary`; hover fill `brandControlFill` and text `brandTextPrimary`, pressed fill `brandControlFillPressed` |
+| Disabled buttons | "Import from Arc" while counting, "Importing...", and Start fresh while importing: label and fill at 40 % opacity, no hover, no press scale, not the default button |
+| Progress dots | 6 pt dots, 14 pt pitch, centered, 24 above the card bottom; idle dots in `brandControlBorder` at full opacity (3.65:1 light, 4.51:1 dark against `surfaceBrand`, WCAG 1.4.11); the current one is a separate 6 pt dot in `brandTextPrimary` that moves |
 | Focus ring | 2 pt `BrandTokens.focusRing`, 2 pt outside the control (graphite in light, mustard in dark) |
 
 Typography is San Francisco throughout. This is a deliberate choice: Arkt is a native macOS app, the brand guide
@@ -178,18 +193,20 @@ Mustard is never text on porcelain and never a ring on porcelain, as the brand r
 
 ### Proposed `BrandTokens` additions
 
-The brand kit has no secondary text or border colors yet. These come from values already used in
-`design/brand/brand-guide.html`; contrast is WCAG 2.x against `surfaceBrand`.
+The brand kit has no secondary text or border colors yet. Text and hairline values come from
+`design/brand/brand-guide.html`; the control border was darkened from the first draft (#8C8F88 / #6E726B) so it keeps
+3:1 on the hover and pressed fills. Contrast is WCAG 2.x against `surfaceBrand` unless stated.
 
 | Proposed token | Light | Dark | Contrast | Use |
 |---|---|---|---|---|
 | `brandTextPrimary` | #202321 | #FAF9F5 | 15.06:1 | Titles, button labels, counts |
 | `brandTextSecondary` | #62655F | #B6BAB3 | 5.62:1 / 8.06:1 | Body, labels, notes, Back, Skip setup |
 | `brandHairline` | #DEDED5 | white 10 % | decorative | Count list border and dividers, option rows |
-| `brandControlBorder` | #8C8F88 | #6E726B | 3.11:1 / 3.23:1 | Secondary button border, idle dots (WCAG 1.4.11 non-text 3:1) |
+| `brandControlBorder` | #80837C | #868A82 | 3.65:1 / 4.51:1; on the hover fill 3.32 / 3.79; on the pressed fill 3.02 / 3.13 | Secondary button border, idle dots (WCAG 1.4.11 non-text 3:1 in every state) |
 | `brandControlFill` | graphite 5 % | porcelain 6 % | n/a | Hover fill, text field fill, segmented control track, key caps |
+| `brandControlFillPressed` | graphite 10 % | porcelain 12 % | n/a | Pressed fill of secondary buttons, Back and Skip setup (also the only press feedback under Reduce Motion) |
 
-`BrandTokensTests` should cover the four contrast pairs above, like the existing pairs.
+`BrandTokensTests` should cover the contrast pairs above, including the border on the hover and pressed fills.
 
 ### Proposed first-Space themes
 
@@ -267,7 +284,7 @@ it. File > Import from Arc keeps the alert.
 |---|---|
 | Title | Make it yours |
 | Body | Fresh path: "Pick a look for your first Space. You can change it later." Import path: "Your first Space keeps its look from Arc. Pick another if you like. You can change it later." |
-| Theme | Label "Theme" (12 semibold, `brandTextSecondary`, 8 above). Six swatches in a row, 440 wide, 12 apart (about 63 pt square), radius 12, a 1 pt inner hairline. Selected: a 2 pt `focusRing` ring 4 pt outside the swatch. Radio group |
+| Theme | Label "Theme" (12 semibold, `brandTextSecondary`, 8 above). Six swatches in a row on the fresh path (about 63 pt square); seven on the import path, the first being "From Arc" (about 52 pt square); 440 wide, 12 apart, radius 12, a 1 pt inner hairline. Selected: a 2 pt `focusRing` ring 4 pt outside the swatch. Radio group |
 | Appearance | Label "Appearance". Segmented control "Light" / "Dark", track `brandControlFill` radius 8 with 2 pt padding, segments 72 x 28, the thumb is a `surfaceBrand` pill with a hairline. Starts at the system appearance |
 | Name | Label "Name", text field 32 high, radius 8, `brandControlFill`, 1 pt `brandHairline`, 14 pt text, placeholder "Space 1" (the name New Space would give, `SpaceNaming`), 40 characters max. Fills the rest of the row, 16 from the segmented control |
 | Icon | Label "Icon". Nine choices from `SpaceIconCatalog` (None, Star, Bookmark, Folder, Heart, Bolt, Book, Globe, Person) as SF Symbols at 18 pt in 36 x 32 buttons spread over 440. Selected: `brandControlFill` plus a 1.5 pt inner `focusRing` ring |
@@ -277,12 +294,17 @@ it. File > Import from Arc keeps the alert.
 Live preview: choosing a swatch or the appearance repaints the window background behind the card at once
 (`ThemeBackgroundView.replaceThemes(_:crossfade:)`), and the sidebar chrome flips between its light and dark token
 sets with it. Typing a name updates the sidebar's Space title; picking an icon replaces the dock dot with the symbol.
-Fresh path: Dune is selected at the start; Skip keeps Dune, "Space 1" and no icon. Import path: no swatch is
-selected at the start and the window shows the first imported Space's Arc look; the name placeholder is that Space's
-name; Skip keeps the Arc look, name and icon. Continue keeps the choices on both paths.
+Fresh path: Dune is selected at the start. Import path: a first swatch labeled "From Arc" (VoiceOver "From Arc")
+draws the first imported Space's own gradient and is selected at the start, so keyboard focus and VoiceOver land on
+it and the user can always return to the Arc look; the name placeholder is that Space's name. While "From Arc" is
+selected the Appearance control is disabled (40 %) and shows the Arc theme's own light or dark; it applies to the six
+families. Skip keeps the selection, name and icon the step opened with and drops any preview; Continue keeps the
+current choices. Both paths behave the same way.
 
-![Make it yours after an import, light](../../design/onboarding/screens/20-theme-after-import-light.png) The Space itself is created when
-this step is left (Continue or Skip), so Back from the next step returns to the same choices.
+![Make it yours after an import, light](../../design/onboarding/screens/20-theme-after-import-light.png)
+
+The Space itself is created (fresh path) or updated (import path) when this step is left, so Back from the next step
+returns to the same choices.
 
 ### 5.4 Default browser
 
@@ -375,8 +397,8 @@ Skip setup in the card corner, Skip setup on Welcome, and Escape on Welcome ask 
 
 The default is Skip setup because the user has just asked for it; Cancel returns to the same step with focus back on
 the control that opened the alert. The secondary actions of each step (Skip, Not now, Start fresh, Skip tour) do not
-ask: they skip one step, not the setup. During an import, a confirmed Skip setup lets the import finish in the
-background as described in section 2. The prototype draws a stand-in for the sheet.
+ask: they skip one step, not the setup. During or after an import, a confirmed Skip setup never adds an empty
+"Space 1" next to the imported Spaces (section 2). The prototype draws a stand-in for the sheet.
 
 ## 6. Motion
 
@@ -402,7 +424,7 @@ ease-in.
 |---|---|---|---|---|
 | M1 Welcome reveal | Window first shown | Mark: opacity 0 to 1, translateY 8 to 0, scale 0.92 to 1. Wordmark: mask wipe left to right plus opacity. Descriptor: opacity, translateY 6 to 0. Button and Skip setup: opacity | Mark `springy` at +120 ms; wordmark 420 ms `EASE_OUT` at +300 ms; descriptor `firmSlow` at +440 ms; button and corner link 240 ms `EASE_OUT` at +560 ms. All settled by about 900 ms | Yes: Return or a click at any moment jumps every element to its end value and starts M2 |
 | M2 Fold | Get started | The field's mask from the window bounds (radius 0) to the card frame (radius 10). Welcome content: opacity 1 to 0, scale 1 to 0.97. The field itself: opacity 1 to 0 in the last part. Ghost sidebar items: opacity 0 to 0.55, 30 ms apart. First step: enters as M3 | Mask `firmSlow` at +60 ms; content `firmFast`; field opacity 200 ms `EASE_OUT` at +200 ms; sidebar items 240 ms `EASE_OUT` from +120 ms; first step starts at +140 ms. About 520 ms total | Yes: a second press of Return lands the first step at once (mask and opacities snap to end) |
-| M3 Step forward | Continue, Skip, Next, Right arrow | Outgoing column: opacity 1 to 0, translateX 0 to -24. Incoming column: opacity 0 to 1, translateX +24 to 0. Progress dot: translateX to the new slot | Outgoing `firmFast`; incoming `firm` at +70 ms; dot `springyFast` | Yes: a new navigation retargets from the presented values (the in-flight incoming column becomes the outgoing one from where it is) |
+| M3 Step forward | Continue, Skip, Next, Right arrow (to a step already visited) | Outgoing column: opacity 1 to 0, translateX 0 to -24. Incoming column: opacity 0 to 1, translateX +24 to 0. Progress dot: translateX to the new slot | Outgoing `firmFast`; incoming `firm` at +70 ms; dot `springyFast` | Yes: a new navigation retargets from the presented values (the in-flight incoming column becomes the outgoing one from where it is) |
 | M4 Step back | Back, Left arrow | Mirror of M3 (outgoing to +24, incoming from -24) | Same as M3 | Same as M3 |
 | M5 Tip change | Next or Back inside the tour | Illustration, title and body: as M3 at 16 pt, 30 ms stagger on the way in. Highlight: the old one opacity to 0 and scale to 0.97, the new one opacity to 1, scale 0.97 to 1 | Out `firmFast`, in `firm`; highlight in `firmSlow`, out `firmFast`. Each highlight is its own layer at its target's frame, so nothing resizes | Yes |
 | M6 Theme preview | Swatch or appearance change | Window theme: crossfade old to new. Sidebar chrome tokens: switch with the crossfade. Swatch ring: opacity and scale 0.92 to 1. Segmented thumb: translateX | `ThemeBackgroundView` crossfade (0.28 s); ring 160 ms opacity, 220 ms scale `EASE_OUT`; thumb `springyFast` | Yes: `replaceThemes` already cancels an in-flight crossfade |
@@ -412,8 +434,8 @@ ease-in.
 | M10 Key cap press | Tips 1 and 2 appear | Each key: translateY 0 to 2 and scale 0.96 over 90 ms `EASE_OUT`, then back with `springyFast`; second key 70 ms after the first | Plays once per tip, 260 ms after the tip appears | n/a |
 | M11 Tour demos | Tips 3 to 5 appear | Swipe: finger dots fade in and slide 24 (360 ms `EASE_IN_OUT`), the sidebar pages over (`springy`). Split: chip travels 800 ms `EASE_IN_OUT`, drop zone fades in, then the page splits (200 ms fades). Favorite: chip travels 700 ms `EASE_IN_OUT` up into the Favorites row, the tile pops in with `springyFast` from scale 0.9 | Each demo plays twice, then rests on its end frame. They never loop forever | Leaving the tip stops the demo at once |
 | M12 Finish | Start browsing, Skip setup | Card content: opacity to 0. Page surface: opacity 0 to 1. Ghost content: opacity 0.55 to 1. Command bar: its own normal presentation | Content 160 ms `EASE_OUT`; page 240 ms `EASE_OUT` at +80 ms; command bar after the page settles (+320 ms). Skip setup uses the same path, no extra flourish | n/a |
+| M13 Press | Any button or swatch | Scale to 0.97 (swatches 0.95, icons 0.94) on press, back on release, together with the pressed fill | 160 ms `EASE_OUT` (the existing press feel); no hover motion, only fill color | Yes |
 | M14 Skip setup confirmation | Skip setup, Escape on Welcome | The system sheet animation of `NSAlert`; nothing custom. The prototype approximates it with opacity and a 0.97 scale on `firm` | System | System |
-| M13 Press | Any button or swatch | Scale to 0.97 (swatches 0.95, icons 0.94) on press, back on release | 160 ms `EASE_OUT` (the existing press feel); no hover motion, only fill color | Yes |
 
 Keyboard navigation (Return, Escape, arrows) runs the same transitions as clicks. This is deliberate: onboarding is a
 once-per-install flow, not a 100-times-a-day shortcut, and the motion is what shows the direction of travel.
@@ -433,7 +455,7 @@ once-per-install flow, not a 100-times-a-day shortcut, and the motion is what sh
 | M10 | No key press |
 | M11 | No demo motion; each demo shows its end frame (the split page, the new Favorite, the second Space page) |
 | M12 | Unchanged (it is already fades only) |
-| M13 | No press scale; the pressed fill color still changes |
+| M13 | No press scale. The pressed fill still changes: `accentPressed` on the primary button, `brandControlFillPressed` on secondary buttons, Back and Skip setup, the selected-state fill on swatches and icons |
 
 The settled frames are identical with and without Reduce Motion, so the end-state screenshots in section 14 cover
 both.
@@ -449,7 +471,7 @@ Onboarding uses opaque surfaces already (the brand field, the card, the command 
 - ghost sidebar content keeps its 0.55 opacity (it is a state, not a material), but its fills use the opaque blend of
   `sidebarItemHovered` over the theme's first stop.
 
-With Increase Contrast: secondary button borders and the count list border use `brandTextSecondary`; the focus ring
+With Increase Contrast: secondary button borders, idle dots and the count list border use `brandTextSecondary`; the focus ring
 grows to 3 pt.
 
 ### 6.4 120 Hz rules
@@ -470,10 +492,12 @@ grows to 3 pt.
 | Key | Action |
 |---|---|
 | Return | The step's primary button (the default button). In the Name field, Return moves on like Continue |
-| Escape | The step's secondary action: Skip, Not now, Start fresh, Skip tour. On Welcome: asks to Skip setup. During an import: nothing. In the Skip setup alert: Cancel |
+| Escape | The step's secondary action: Skip, Not now, Start fresh, Skip tour. On Welcome: asks to Skip setup. During an import: nothing. In the Skip setup alert: Cancel. In the Name field: see below |
+| Escape in the Name field | Ends editing and restores the value the field had when it got focus; it does not skip. A second Escape runs Skip as usual |
 | Return in the Skip setup alert | Skip setup |
-| Right arrow | Next step, or next tip in the tour. Not in the import step before the import finished. Ignored while a text field has focus |
-| Left arrow | Back, or previous tip. Ignored while a text field has focus |
+| Right arrow | Only returns forward to a step or tip already visited before a Back; it never commits a choice (it is not Continue or Skip). Any other forward move (Continue, Skip, Next) clears that history. Otherwise nothing |
+| Left arrow | Back, or previous tip |
+| Arrows inside controls | While focus is in a text field, a radio group (swatches, icons), the segmented control or the checkbox, both arrows belong to that control and never change the step |
 | Tab, Shift-Tab | Moves focus through the card in reading order (section 8); Skip setup and Back are in the loop |
 | Arrow keys in a radio group | Move the selection in the theme swatches, the appearance control and the icon row (roving focus, one Tab stop per group) |
 | Space | Presses the focused button, toggles the focused checkbox |
@@ -572,7 +596,7 @@ Arc's onboarding was not inspected for this design. Known rows:
    (macOS shows its own confirmation), plus a check of the current default to leave the step out.
 4. **Theme catalog.** Add the six families (light and dark) to `SpaceThemeCatalog`, Dune first and the default for a
    Space created by onboarding, and pass `ShellTokensContrastTests`.
-5. **Brand tokens.** Add the five proposed `BrandTokens` and their contrast tests.
+5. **Brand tokens.** Add the six proposed `BrandTokens` and their contrast tests.
 6. **Help menu item** and an `AppCommands` action that starts the flow on the key window.
 7. **Engine-only step.** The extensions step needs a build-configuration check (Chromium engine vs WKWebView shell).
 8. **Window frame.** The first-run window frame is at least 1000 x 680 pt, clamped to the screen's visible frame.
@@ -584,7 +608,8 @@ The seven questions of the first draft were answered on 2026-10-25; see
 decisions, for review:
 
 - The Skip setup alert's default button is Skip setup, not Cancel (section 5.9).
-- On the import path the theme step starts with no swatch selected, so "keep the Arc look" needs no extra control.
+- On the import path the theme step starts on a selected "From Arc" swatch (changed after design review; the first
+  draft had no selection).
 - The compact layout starts at a card height of 620 pt (section 3).
 
 ## 14. Screenshots
@@ -616,7 +641,7 @@ Rendered from the prototype with the project's Chromium build in headless mode, 
 | 19a | Fold (M2) paused at about 160 ms | [19-motion-a-fold-160ms-light.png](../../design/onboarding/screens/19-motion-a-fold-160ms-light.png) | [19-motion-a-fold-160ms-dark.png](../../design/onboarding/screens/19-motion-a-fold-160ms-dark.png) |
 | 19b | Fold (M2) paused at about 320 ms | [19-motion-b-fold-320ms-light.png](../../design/onboarding/screens/19-motion-b-fold-320ms-light.png) | [19-motion-b-fold-320ms-dark.png](../../design/onboarding/screens/19-motion-b-fold-320ms-dark.png) |
 | 19c | Step forward (M3) paused at about 100 ms | [19-motion-c-step-100ms-light.png](../../design/onboarding/screens/19-motion-c-step-100ms-light.png) | [19-motion-c-step-100ms-dark.png](../../design/onboarding/screens/19-motion-c-step-100ms-dark.png) |
-| 20 | Make it yours after an import (Arc look kept, no swatch selected) | [20-theme-after-import-light.png](../../design/onboarding/screens/20-theme-after-import-light.png) | [20-theme-after-import-dark.png](../../design/onboarding/screens/20-theme-after-import-dark.png) |
+| 20 | Make it yours after an import ("From Arc" swatch selected, Appearance disabled) | [20-theme-after-import-light.png](../../design/onboarding/screens/20-theme-after-import-light.png) | [20-theme-after-import-dark.png](../../design/onboarding/screens/20-theme-after-import-dark.png) |
 | 21 | Make it yours, compact layout (window 1000 x 620 pt) | [21-theme-compact-light.png](../../design/onboarding/screens/21-theme-compact-light.png) | [21-theme-compact-dark.png](../../design/onboarding/screens/21-theme-compact-dark.png) |
 
 Reduce Motion end states are identical to the ones above (section 6.2), so they are not duplicated.
