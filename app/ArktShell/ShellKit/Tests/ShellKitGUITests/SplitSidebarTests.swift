@@ -339,8 +339,8 @@ final class SplitSidebarTests: XCTestCase {
     let observer = NotificationCenter.default.addObserver(
       forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
     ) { note in
+      let menu = note.object as? NSMenu        // NSMenu is main-actor bound, so it crosses; the Notification does not
       MainActor.assumeIsolated {
-        let menu = note.object as? NSMenu
         opened.titles.append(menu?.items.map(\.title) ?? [])
         menu?.cancelTracking()
       }
