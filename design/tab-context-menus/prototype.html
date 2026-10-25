@@ -17,7 +17,8 @@
 :root {
   /* BrandTokens */
   --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
-  --focus: #202321;                   /* focusRing */
+  --focus: rgba(0,103,244,0.50);      /* system keyboard focus ring (NSColor.keyboardFocusIndicatorColor, Blue accent) */
+  --text-sel: #B3D7FF;                /* NSColor.selectedTextBackgroundColor, Blue accent */
   /* ShellTokens */
   --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
   --text-2: rgba(0,0,0,0.64);                                    /* secondaryText */
@@ -41,7 +42,8 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --focus: #E9B520;
+  --focus: rgba(26,145,255,0.55);
+  --text-sel: #3F638B;
   --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
   --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
   --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
@@ -102,9 +104,9 @@ button { font: inherit; color: inherit; }
 .page i.img { height: 150px; border-radius: 10px; margin: 26px 0; }
 
 /* Inline rename field (BH-026): the row keeps its fill, the field takes the title's bounds */
-.srow .field { flex: 1; min-width: 0; background: var(--page); border-radius: 5px; outline: 2px solid var(--focus);
+.srow .field { flex: 1; min-width: 0; background: var(--page); border-radius: 5px; box-shadow: 0 0 0 0.5px var(--card-border), 0 0 0 3.5px var(--focus);
   padding: 1px 4px; font-weight: 500; overflow: hidden; }
-.srow .field .s { background: var(--menu-hi); color: #fff; border-radius: 2px; }
+.srow .field .s { background: var(--text-sel); color: var(--text); }
 
 /* ---------- Context menu (native NSMenu imitation) ---------- */
 .menu { position: absolute; min-width: 224px; padding: 5px; border-radius: 8px; background: var(--menu);

@@ -160,8 +160,10 @@ Right-click any selected row with 2 or more rows selected (BH-028, GS-031 for th
 
 Double-click any tab row (or choose Rename) and the row's title becomes an inline text field, in place: the row
 keeps its fill and favicon, the field takes the title's exact bounds, 13 pt, the current title fully selected,
-white field (graphite in dark) with a 2 pt `focusRing` outline and radius 5. Return commits; Escape cancels and
-restores the title; clicking outside commits (as folder rename does, BH-096; the tab behavior is [I]). The
+white field (graphite in dark), radius 5, with the system focus ring (`focusRingType = .default`, drawn by AppKit
+in `NSColor.keyboardFocusIndicatorColor`, so it follows the user's accent color) and the system text selection
+color. Mustard is never a stroke, so the brand accent does not appear on the field. Return commits; Escape
+cancels and restores the title; clicking outside commits (as folder rename does, BH-096; the tab behavior is [I]). The
 custom title persists (BH-026). Two negative rules stay: pinning a tab never opens the field (BH-064), and
 moving a tab between Spaces never opens it (BH-026). The field is single-line; pasting a newline commits. No
 animation: the field is simply there (menus and text editing do not spring).
@@ -205,9 +207,11 @@ The menus are native `NSMenu`s (`menuNeedsUpdate` from `clickedRow`, as today), 
 corner radius, shadow, item height and key-equivalent column, and light/dark, Increase Contrast and Reduce
 Transparency come free. What this design fixes is structure: item titles and order (section 3), `autoenablesItems
 = false` with explicit enabled rules, key equivalents mirroring the menu bar, and hidden Option-alternates
-where Arc has them. For illustration the prototype draws the menus with these native metrics (pt): item height
-22, font 14, leading inset 12, key column trailing inset 12, separator 1 pt inset 12 with 5 pt above and
-below, min width 220, radius 8, surface white at 0.97 (dark #2D2D30 at 0.97), highlight the system accent,
+where Arc has them. Nothing in the menus is custom-drawn: no custom item views (`NSMenuItem.view` stays nil), no
+attributed titles, no brand colors, fonts or highlight; any item icon is a plain `NSMenuItem.image`. The
+highlight is the system accent, never mustard. For illustration only, the prototype imitates the menus with these
+native metrics (pt): item height 22, font 14, leading inset 12, key column trailing inset 12, separator 1 pt
+inset 12 with 5 pt above and below, min width 220, radius 8, surface white at 0.97 (dark #2D2D30 at 0.97), highlight the system accent,
 disabled text at 0.35.
 
 The sidebar in the prototype reuses the alerts prototype's window chrome: 190 pt sidebar, 34 pt rows with 9 pt
