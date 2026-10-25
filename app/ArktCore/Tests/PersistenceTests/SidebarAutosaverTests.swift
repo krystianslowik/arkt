@@ -331,7 +331,8 @@ struct SidebarAutosaverTests {
   @Test func flushBlockingWritesThroughTheRealStoreOffTheMainThread() async throws {
     let database = try ArktDatabase.inMemory()
     let realStore = SidebarStore(database: database)
-    let saver = SidebarAutosaver(store: realStore, sleep: sleeper.sleep)
+    // A wall-clock bound: far above how long a busy test run can keep the global executor from starting the save.
+    let saver = SidebarAutosaver(store: realStore, flushTimeout: .seconds(10), sleep: sleeper.sleep)
     let sidebar = TestSidebars.make("real")
     saver.scheduleSave(sidebar)
     #expect(saver.flushBlocking())  // SidebarStore.save traps if it runs on the main thread
