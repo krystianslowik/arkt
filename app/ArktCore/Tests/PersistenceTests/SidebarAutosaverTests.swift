@@ -292,10 +292,10 @@ struct SidebarAutosaverTests {
     sleeper.resumeNext()
     await waitUntil { store.started == 1 }  // a is stuck inside the store
     saver.scheduleSave(b)
-    let store = self.store
+    let held = store
     Task.detached {
       try? await Task.sleep(for: .milliseconds(100))
-      store.unblock()
+      held.unblock()
     }
     #expect(saver.flushBlocking())
     #expect(store.saved == [a, b])
@@ -314,10 +314,10 @@ struct SidebarAutosaverTests {
     sleeper.resumeNext()
     await waitUntil { store.started == 1 }
     saver.scheduleSave(b)
-    let store = self.store
+    let held = store
     Task.detached {
       try? await Task.sleep(for: .milliseconds(100))
-      store.unblockFailing()  // a fails; b, submitted after it, succeeds
+      held.unblockFailing()  // a fails; b, submitted after it, succeeds
     }
     #expect(saver.flushBlocking())
     #expect(store.saved == [b])
