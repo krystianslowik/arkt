@@ -264,9 +264,7 @@ final class SpaceEditingTests: XCTestCase {
 
   /// The real Spaces menu: New Space is unbound (KB-043), the others too [I].
   func testTheSpacesMenuHasTheNewItems() throws {
-    let windowsMenu = NSApp.windowsMenu
-    defer { NSApp.windowsMenu = windowsMenu }
-    let spaces = try XCTUnwrap(MainMenu.make().items.first { $0.title == "Spaces" }?.submenu)
+    let spaces = try XCTUnwrap(MainMenu.make(commands: AppCommands()).menu.items.first { $0.title == "Spaces" }?.submenu)
     let expected: [(String, Selector)] = [
       ("New Space", #selector(ShellWindowController.newSpace(_:))),
       ("Rename Space", #selector(ShellWindowController.renameSpace(_:))),

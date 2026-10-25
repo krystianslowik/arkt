@@ -235,8 +235,11 @@ public final class FakeEngine: EngineClient {
     hosts[id] = host
     lastActiveWindow = id
     host.onCloseRequested = { [weak self] in self?.closeWindow(id) }
-    // No engine commands: everything the host does not claim is disabled.
-    host.forward = EngineCommandForwarding(validate: { _ in false }, execute: { _, _ in })
+    // The page commands WKWebView can run on the window's active tab; everything else the host does not claim is
+    // disabled (week-3 plan, W3-7 part D step 3).
+    host.forward = EngineCommandForwarding(
+      validate: { [weak self] command in self?.canExecute(command, in: id) ?? false },
+      execute: { [weak self] command, _ in self?.execute(command, in: id) })
     hub.emit(.windowOpened(id))
     return id
   }
@@ -255,6 +258,46 @@ public final class FakeEngine: EngineClient {
   }
 
   public func activateTab(_ id: TabID) { setActive(id) }
+
+  // MARK: - Page commands
+
+  /// `IDC_STOP` and `IDC_RELOAD_BYPASSING_CACHE`, which `EngineCommand` has no constant for yet (#272).
+  private static let stopCommand = EngineCommand(rawValue: 33006)
+  private static let reloadBypassingCacheCommand = EngineCommand(rawValue: 33007)
+  /// WKWebView's page zoom steps, as Safari's.
+  private static let zoomSteps: [CGFloat] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+  /// Whether `command` runs on `window`'s active tab: reload, stop, back and forward with history, and zoom.
+  func canExecute(_ command: EngineCommand, in window: EngineWindowID) -> Bool {
+    guard let tab = activeTabs[window], let entry = entries[tab] else { return false }
+    switch command {
+    case .reload, Self.reloadBypassingCacheCommand: return true
+    case Self.stopCommand: return entry.snapshot.isLoading
+    case .back: return entry.snapshot.canGoBack
+    case .forward: return entry.snapshot.canGoForward
+    case .zoomIn: return entry.webView.pageZoom < Self.zoomSteps[Self.zoomSteps.count - 1]
+    case .zoomOut: return entry.webView.pageZoom > Self.zoomSteps[0]
+    case .zoomReset: return entry.webView.pageZoom != 1
+    default: return false
+    }
+  }
+
+  func execute(_ command: EngineCommand, in window: EngineWindowID) {
+    guard canExecute(command, in: window), let tab = activeTabs[window], let web = entries[tab]?.webView else {
+      return
+    }
+    switch command {
+    case .reload: web.reload()
+    case Self.reloadBypassingCacheCommand: web.reloadFromOrigin()
+    case Self.stopCommand: web.stopLoading()
+    case .back: goBack(tab)
+    case .forward: goForward(tab)
+    case .zoomIn: web.pageZoom = Self.zoomSteps.first { $0 > web.pageZoom + 0.001 } ?? web.pageZoom
+    case .zoomOut: web.pageZoom = Self.zoomSteps.last { $0 < web.pageZoom - 0.001 } ?? web.pageZoom
+    case .zoomReset: web.pageZoom = 1
+    default: break
+    }
+  }
 
   public func activeTab(in window: EngineWindowID) -> TabID? { activeTabs[window] }
 

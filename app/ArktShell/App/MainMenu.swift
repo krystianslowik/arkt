@@ -1,22 +1,123 @@
 import AppKit
+import EngineAPI
 import ShellUI
 
+/// Arkt's main menu, the same in both builds (week-3 plan, W3-7 part D; week-3 results, W3-8 step 3). Only the
+/// install point differs: the FakeEngine build installs it at launch (`AppDelegate`), the Engine build one turn after
+/// `NSApplicationDidFinishLaunchingNotification`, after Chromium's `AppController` handled it.
+///
+/// Rules from W3-8, which Chromium's menu code depends on:
+/// - App-level items have explicit targets: About, Hide, Hide Others, Show All, Bring All to Front and Quit target
+///   `NSApp`; New Window, Settings, Import from Arc and Show Archive target the composition root's `AppCommands`.
+///   A nil-target app item would reach `AppController` (the engine build's `NSApp.delegate`) and run Chromium's
+///   behaviour.
+/// - Quit is `terminate:` to `NSApp` with tag `IDC_EXIT`, in the first top-level menu (the confirm-to-quit panel looks
+///   for it there).
+/// - No top-level `IDC_FILE_MENU`, `IDC_TAB_MENU` or `IDC_HISTORY_MENU` tag (AppController would rewrite Cmd-W and
+///   Shift-Cmd-W or fill Arkt's menus with Chromium's rows), and a hidden `IDC_BOOKMARKS_MENU` placeholder with an
+///   empty submenu (without it the first window that becomes main crashes the engine).
+/// - Page commands are `commandDispatch:` items with a nil target and the `EngineCommand` id as tag: the key
+///   `ShellWindow` forwards them to its host, which runs the ones the shell claims and passes the rest to the engine.
 @MainActor
 enum MainMenu {
-  static func make() -> NSMenu {
+  /// The menu and the submenus `NSApp` must point at.
+  struct Built {
+    let menu: NSMenu
+    let services: NSMenu
+    let windows: NSMenu
+    let help: NSMenu
+  }
+
+  /// Chromium's tags (`chrome/app/chrome_command_ids.h`; week-3 results, W3-0 step 5 and W3-8).
+  enum Tag {
+    static let exit = EngineCommand.exit.rawValue          // IDC_EXIT, 34031
+    static let bookmarksMenu = 57333                       // IDC_BOOKMARKS_MENU
+  }
+
+  /// Sets the main menu and points `servicesMenu`, `windowsMenu` and `helpMenu` into it. Chromium's values point into
+  /// its own menu after the swap, so all three are set on every install. AppKit keeps the first Services menu it was
+  /// given (a later `servicesMenu` assignment is ignored), so a Services menu that exists already is moved into
+  /// Arkt's App menu instead of replaced.
+  static func install(commands: AppCommands) {
+    let built = make(commands: commands)
+    if let current = NSApp.servicesMenu, current !== built.services,
+       let holder = built.menu.items.first?.submenu?.items.first(where: { $0.submenu === built.services }) {
+      current.supermenu?.items.first { $0.submenu === current }?.submenu = nil
+      holder.submenu = current
+    }
+    NSApp.mainMenu = built.menu
+    NSApp.servicesMenu = built.menu.items.first?.submenu?.items.first { $0.title == "Services" }?.submenu
+    NSApp.windowsMenu = built.windows
+    NSApp.helpMenu = built.help
+  }
+
+  static func make(commands: AppCommands) -> Built {
     let main = NSMenu()
-    main.addItem(submenu(title: "Arkt Shell", items: [
-      item("Quit Arkt Shell", #selector(NSApplication.terminate(_:)), "q"),
-    ]))
-    // Target nil: with the bar key, AppKit still walks the main window's chain to ShellWindowController.
-    main.addItem(submenu(title: "File", items: [
-      item("New Tab", #selector(ShellWindowController.newTab(_:)), "t"),                  // KB-001
-      item("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l"),    // KB-002
-      item("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w"),             // KB-008
+    let services = NSMenu(title: "Services")
+    let windows = NSMenu(title: "Window")
+    let help = NSMenu(title: "Help")
+    main.addItem(submenu(title: "Arkt Shell", items: appItems(commands: commands, services: services)))
+    main.addItem(submenu(title: "File", items: fileItems(commands: commands)))
+    main.addItem(submenu(title: "Edit", items: editItems()))
+    main.addItem(submenu(title: "View", items: viewItems()))
+    main.addItem(submenu(title: "History", items: historyItems()))
+    main.addItem(submenu(title: "Spaces", items: spaceItems()))
+    windowItems(commands: commands).forEach { windows.addItem($0) }
+    main.addItem(holder(for: windows))
+    main.addItem(holder(for: help))
+    main.addItem(bookmarksPlaceholder())
+    return Built(menu: main, services: services, windows: windows, help: help)
+  }
+
+  // MARK: - Menus
+
+  private static func appItems(commands: AppCommands, services: NSMenu) -> [NSMenuItem] {
+    let quit = item("Quit Arkt Shell", #selector(NSApplication.terminate(_:)), "q", target: NSApp)   // KB-069
+    quit.tag = Tag.exit
+    return [
+      item("About Arkt Shell", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),
       .separator(),
-      item("Import from Arc...", #selector(AppDelegate.importFromArc(_:)), "", []),       // E4c, no shortcut
-    ]))
-    main.addItem(submenu(title: "Edit", items: [
+      // KB-066. Disabled until Arkt has a Settings window; it keeps Cmd-, from Chromium's settings page.
+      item("Settings...", #selector(AppCommands.showSettings(_:)), ",", target: commands),
+      .separator(),
+      holder(for: services),
+      .separator(),
+      item("Hide Arkt Shell", #selector(NSApplication.hide(_:)), "h", target: NSApp),                // KB-069
+      item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option],
+           target: NSApp),
+      item("Show All", #selector(NSApplication.unhideAllApplications(_:)), "", [], target: NSApp),
+      .separator(),
+      quit,
+    ]
+  }
+
+  /// Target nil for the window items: with the bar key, AppKit still walks the main window's chain to
+  /// `ShellWindowController` and `ShellWindow`.
+  private static func fileItems(commands: AppCommands) -> [NSMenuItem] {
+    [
+      item("New Tab", #selector(ShellWindowController.newTab(_:)), "t"),                  // KB-001
+      item("New Window", #selector(AppCommands.newWindow(_:)), "n", target: commands),   // KB-005
+      item("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l"),    // KB-002
+      .separator(),
+      item("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w"),             // KB-008
+      item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]), // KB-009
+      .separator(),
+      page("Save Page As...", .savePage, "s", [.command, .shift]),                         // KB-060 (Arc's key)
+      page("Print...", .print, "p"),                                                       // KB-060
+      .separator(),
+      item("Import from Arc...", #selector(AppCommands.importFromArc(_:)), "", [], target: commands),   // E4c
+    ]
+  }
+
+  private static func editItems() -> [NSMenuItem] {
+    let find = submenu(title: "Find", items: [
+      page("Find...", .find, "f"),                                                         // KB-058
+      page("Find Next", PendingEngineCommands.findNext, "g"),                              // KB-059
+      page("Find Previous", PendingEngineCommands.findPrevious, "g", [.command, .shift]),  // KB-059
+      .separator(),
+      item("Jump to Selection", #selector(NSResponder.centerSelectionInVisibleArea(_:)), "j"),   // KB-058
+    ])
+    return [
       item("Undo", Selector(("undo:")), "z"),
       item("Redo", Selector(("redo:")), "Z"),
       .separator(),
@@ -24,14 +125,52 @@ enum MainMenu {
       item("Copy", #selector(NSText.copy(_:)), "c"),
       item("Paste", #selector(NSText.paste(_:)), "v"),
       item("Select All", #selector(NSText.selectAll(_:)), "a"),
-    ]))
-    // KB-018, BH-032: Cmd-Shift-D. ShellWindowController.validateMenuItem titles it Show / Hide Toolbar.
-    // Split View (S5): Arc's four View menu items plus a Split View submenu, built by ShellUI's SplitMenu.
-    main.addItem(submenu(title: "View", items: [
+      .separator(),
+      find,
+    ]
+  }
+
+  /// KB-018, BH-032: Cmd-Shift-D (`ShellWindowController.validateMenuItem` titles it Show / Hide Toolbar). Split View
+  /// (S5): Arc's four View menu items plus a Split View submenu, built by ShellUI's SplitMenu.
+  private static func viewItems() -> [NSMenuItem] {
+    let developer = submenu(title: "Developer", items: [                                   // KB-049, KB-050
+      page("View Source", .viewSource, "u", [.command, .option]),
+      page("Developer Tools", .devTools, "i", [.command, .option]),
+      page("Inspect Elements", PendingEngineCommands.inspect, "c", [.command, .option]),
+      page("JavaScript Console", PendingEngineCommands.console, "j", [.command, .option]),
+    ])
+    return [
       item("Show Toolbar", #selector(ShellWindowController.toggleToolbar(_:)), "D"),
       .separator(),
-    ] + SplitMenu.items()))
-    // KB-033, KB-034 (Cmd-Opt-Right / Left) and KB-035, BH-041 (Ctrl-1 ... Ctrl-9).
+    ] + SplitMenu.items() + [
+      .separator(),
+      page("Stop", PendingEngineCommands.stop, "."),                                       // KB-054
+      page("Reload This Page", .reload, "r"),                                              // KB-056
+      page("Force Reload This Page", PendingEngineCommands.reloadBypassingCache, "r", [.command, .shift]),
+      .separator(),
+      page("Actual Size", .zoomReset, "0"),                                                // KB-057
+      page("Zoom In", .zoomIn, "+"),
+      page("Zoom Out", .zoomOut, "-"),
+      .separator(),
+      item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),   // KB-051
+      .separator(),
+      developer,
+    ]
+  }
+
+  /// No `IDC_HISTORY_MENU` tag: Chromium's HistoryMenuBridge would fill it with its own rows. Cmd-Left and Cmd-Right
+  /// are not menu keys (a menu item would take them from text fields).
+  private static func historyItems() -> [NSMenuItem] {
+    [
+      page("Back", .back, "["),                                                            // KB-031
+      page("Forward", .forward, "]"),                                                      // KB-032
+      .separator(),
+      page("Show All History", .history, "y"),                                             // KB-065
+    ]
+  }
+
+  /// KB-033, KB-034 (Cmd-Opt-Right / Left) and KB-035, BH-041 (Ctrl-1 ... Ctrl-9).
+  private static func spaceItems() -> [NSMenuItem] {
     let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)
     let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
     // #106: New Space is unbound (KB-043); Rename and Move are [I], PARITY(NEEDS-RUNTIME-CHECK): Arc's titles and place.
@@ -45,6 +184,7 @@ enum MainMenu {
       item("Previous Space", #selector(ShellWindowController.previousSpace(_:)), left, [.command, .option]),
       .separator(),
     ]
+    // Submenu tags 0-8: not top level, and far below Chromium's `IDC_` values.
     for n in 1...9 {
       let space = item("Space \(n)", #selector(ShellWindowController.goToSpace(_:)), "\(n)", [.control])
       space.tag = n - 1
@@ -52,29 +192,59 @@ enum MainMenu {
     }
     // #206, decision on #86: asks, then archives the Space's items. PARITY(NEEDS-RUNTIME-CHECK): Arc's title and place.
     spaces += [.separator(), item("Delete Space...", #selector(ShellWindowController.deleteSpace(_:)), "", [])]
-    main.addItem(submenu(title: "Spaces", items: spaces))
-    // KB-043: Show Archive is unbound by default; Cmd-Shift-L stays reserved for the Library (KB-065).
-    let window = submenu(title: "Window", items: [
-      item("Show Archive", #selector(AppDelegate.showArchive(_:)), "", []),
-    ])
-    main.addItem(window)
-    // AppKit lists the open windows (the Archive window among them) in the Window menu.
-    NSApp.windowsMenu = window.submenu
-    return main
+    return spaces
   }
 
+  /// AppKit lists the open windows (the Archive window among them) below these (`NSApp.windowsMenu`).
+  private static func windowItems(commands: AppCommands) -> [NSMenuItem] {
+    [
+      item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),                   // KB-069
+      item("Zoom", #selector(NSWindow.performZoom(_:)), "", []),
+      .separator(),
+      page("Downloads", .downloads, "j", [.command, .shift]),                              // KB-065
+      // KB-043: Show Archive is unbound by default; Cmd-Shift-L stays reserved for the Library (KB-065).
+      item("Show Archive", #selector(AppCommands.showArchive(_:)), "", [], target: commands),
+      .separator(),
+      item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:)), "", [], target: NSApp),
+    ]
+  }
+
+  /// Hidden, with an empty submenu: Chromium's BookmarkMenuBridge takes it over (W3-8, condition 1).
+  private static func bookmarksPlaceholder() -> NSMenuItem {
+    let placeholder = holder(for: NSMenu(title: "Bookmarks"))
+    placeholder.tag = Tag.bookmarksMenu
+    placeholder.isHidden = true
+    return placeholder
+  }
+
+  // MARK: - Items
+
   static func submenu(title: String, items: [NSMenuItem]) -> NSMenuItem {
-    let holder = NSMenuItem(title: title, action: nil, keyEquivalent: "")
     let menu = NSMenu(title: title)
     items.forEach { menu.addItem($0) }
+    return holder(for: menu)
+  }
+
+  /// The item that opens `menu`, titled like it.
+  static func holder(for menu: NSMenu) -> NSMenuItem {
+    let holder = NSMenuItem(title: menu.title, action: nil, keyEquivalent: "")
     holder.submenu = menu
     return holder
   }
 
   static func item(_ title: String, _ action: Selector, _ key: String,
-                   _ modifiers: NSEvent.ModifierFlags = [.command]) -> NSMenuItem {
+                   _ modifiers: NSEvent.ModifierFlags = [.command], target: AnyObject? = nil) -> NSMenuItem {
     let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
     item.keyEquivalentModifierMask = modifiers
+    item.target = target
+    return item
+  }
+
+  /// A page command: `commandDispatch:`, nil target, the command's id as tag.
+  static func page(_ title: String, _ command: EngineCommand, _ key: String,
+                   _ modifiers: NSEvent.ModifierFlags = [.command]) -> NSMenuItem {
+    let item = item(title, #selector(ShellWindow.commandDispatch(_:)), key, modifiers)
+    item.tag = command.rawValue
     return item
   }
 }
