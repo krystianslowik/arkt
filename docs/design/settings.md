@@ -77,10 +77,12 @@ and translate exceptions (they live in the page's site controls).
 - **Remembers** the last pane (`settingsLastPane`) and its frame origin (`NSWindow.setFrameAutosaveName("Settings")`).
   First open: General, centered on the screen of the key browser window.
 - **Close**: the close button and Cmd-W close it. Arkt's File menu maps Cmd-W to Archive Tab; while Settings is
-  key the item validates as Close Window for this window (the window answers `performClose:` before the browser
-  window's `closeTab:` in the responder chain). Escape does not close the window, as in System Settings; inside a
+  key the item would otherwise be disabled (its `closeTab:` action targets the first responder), so
+  `SettingsWindowController` implements `closeTab:` as `close()` and validates the item's title to "Close Window". Escape does not close the window, as in System Settings; inside a
   shortcut recorder Escape cancels the recording. PARITY(NEEDS-RUNTIME-CHECK): Arc has `escKeyClosesSettingsEnabled`
   as a feature flag, its default is unknown.
+- **Pane keys**: Cmd-1 to Cmd-7 select panes. KB-020 gives Cmd-1 to Cmd-8 to Go to Sidebar Item; those menu items
+  must validate false while Settings is key (the Cmd-W pattern), so the keys reach the Settings window.
 - **Changes apply at once**; there is no Save or Cancel. Every value is observed by every window (the
   `ToolbarSetting` pattern: one shared store, weak observers).
 - **Deep links**: other surfaces open a pane directly: the "Edit the shortcut" toast (BH-195) opens Shortcuts with the
@@ -238,11 +240,12 @@ stays mustard with a graphite glyph. Increase Contrast: group borders and separa
 
 ## 10. Open questions for the maintainer
 
-1. Escape in Settings: do nothing (System Settings, designed) or close the window (Arc flag)?
-2. Native ad and tracker blocking (BH-206): offer it, rely on extensions, or leave it out?
-3. Ship planned rows hidden (designed) or visible and disabled with "Coming later"?
-4. Window width 680: fine, or match System Settings (715)?
-5. Should "Update Arkt automatically" wait for the release work (#128) or ship as a stub?
+1. Cmd-1 to Cmd-7 for panes while Settings is key (designed; it shadows KB-020 there), or no pane keys?
+2. Escape in Settings: do nothing (System Settings, designed) or close the window (Arc flag)?
+3. Native ad and tracker blocking (BH-206): offer it, rely on extensions, or leave it out?
+4. Ship planned rows hidden (designed) or visible and disabled with "Coming later"?
+5. Window width 680: fine, or match System Settings (715)?
+6. Should "Update Arkt automatically" wait for the release work (#128) or ship as a stub?
 
 ## 11. Screenshots
 

@@ -84,7 +84,8 @@ Escape is Cancel, so a stray Return never deletes anything.
    text field on the page unless the user clicks it; Escape answers Never Allow only when the panel is key.
 3. **App-modal alert** (`NSApp.runModal(for:)` on a centered panel): launch failure before any window exists. Icon is
    the app icon at 56 pt with a mustard caution badge (24 pt plate, 18 pt glyph) on its trailing-bottom corner; the
-   title stacks under the icon, as in system alerts. Runs from the same run-loop callout `askAfterLaunchFailure` uses
+   title stacks under the icon, as in system alerts. The badge overlaps the mark's clear space (design/brand/README.md); this follows the
+   system alert convention on purpose and is open question 5. Runs from the same run-loop callout `askAfterLaunchFailure` uses
    today (never from inside a main-actor job, week-3 Decision 3).
 
 Delete Space moves from `NSAlert` to the shared sheet. What is lost: `NSAlert`'s free accessibility and the system
@@ -244,6 +245,8 @@ the toast hairline goes to 20 %.
 3. Should a manual archive (Cmd-W on a Today tab) show the undo toast every time, or only for Clear and Archive Below
    (several tabs at once)?
 4. Launch failure: is "Show Data Folder" in the alert wanted, or should the data folder stay out of sight?
+5. The caution badge on the app icon breaks the mark's clear-space rule: accept it as the system convention, or show
+   the caution glyph beside an untouched icon?
 
 ## 12. Screenshots
 
