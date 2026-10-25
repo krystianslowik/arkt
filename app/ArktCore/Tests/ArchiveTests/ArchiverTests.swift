@@ -123,9 +123,11 @@ struct ArchiverTests {
     #expect(world.sidebar.children(of: .split(split)) == [panes[1], panes[2]])
   }
 
-  /// Factors that do not match the pane count are stored as archived and come back unchanged. Showing the split
-  /// normalizes them (`SplitLayout.normalized`, covered by `SplitLayoutTests`); restore does not rewrite the model.
-  @Test func archivedSplitWithMismatchedFactorsRestoresAndNormalizesOnShow() throws {
+  /// Plan S8 step 9, model level: an archived split whose factors do not match its pane count restores at the top of
+  /// Today with its panes in order and its factors exactly as archived; restore does not rewrite them. The
+  /// normalization on show is not asserted here: it is `SplitLayout.normalized` (`SplitLayoutTests`) and, through a
+  /// window, `SplitArchiveTests.testMismatchedFactorsStayStoredAndNormalizeOnShow`.
+  @Test func archivedSplitWithMismatchedFactorsRestoresWithStoredFactors() throws {
     var world = try Self.makeWorld()
     let factors = [0.2, 0.3, 0.5]
     let left = NodeSnapshot(kind: .tab(TabItem(url: Self.url("l"), title: "Left")), createdAt: Self.now)
@@ -147,7 +149,7 @@ struct ArchiverTests {
     }
     #expect(stored.orientation == .vertical)
     #expect(stored.widthFactors == factors)
-    #expect(stored.widthFactors.count != world.sidebar.children(of: .split(split.id)).count)
+    #expect(world.sidebar.children(of: .today(world.work)).first == split.id)
   }
 
   // MARK: Restore

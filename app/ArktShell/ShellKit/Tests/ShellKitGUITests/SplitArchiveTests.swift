@@ -88,6 +88,7 @@ final class SplitArchiveTests: XCTestCase {
     let before = [0.5, 0.25, 0.25]
     let world = try Self.makeWorld(panes: 3, factors: before)
     let harness = Harness(world.sidebar)
+    defer { harness.close() }
     harness.controller.activate(node: world.panes[1])
     let closed = try XCTUnwrap(harness.controller.engineTab(of: world.panes[1]))
     let kept = try XCTUnwrap(harness.controller.engineTab(of: world.panes[2]))
@@ -114,7 +115,9 @@ final class SplitArchiveTests: XCTestCase {
     XCTAssertEqual(harness.splitView.liveFactors[0], expected[0], accuracy: 1e-9)
     XCTAssertEqual(harness.splitView.liveFactors[1], expected[1], accuracy: 1e-9)
     XCTAssertEqual(harness.controller.visibleNodes, [world.panes[0], world.panes[2]])
-    harness.close()
+    XCTAssertEqual(
+      harness.controller.sidebarController.resolver.visible, [world.panes[0], world.panes[2]],
+      "the shrunk split publishes both remaining panes as shown, not only the focused one")
   }
 
   // MARK: Ctrl-Shift-- (CF-18)
@@ -123,6 +126,7 @@ final class SplitArchiveTests: XCTestCase {
   func testCtrlShiftMinusNeverArchives() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
+    defer { harness.close() }
     harness.controller.activate(node: world.panes[0])
     let page = try XCTUnwrap(harness.controller.engineTab(of: world.panes[0]))
 
@@ -135,7 +139,6 @@ final class SplitArchiveTests: XCTestCase {
       harness.source.children(of: .today(world.space)),
       [world.today[0], world.panes[1], world.panes[0], world.today[1]])
     XCTAssertNil(harness.source.node(world.split))
-    harness.close()
   }
 
   // MARK: Visibility (decision 10)
@@ -144,6 +147,7 @@ final class SplitArchiveTests: XCTestCase {
   func testHiddenPanesGetLastActiveAtWhenCardSwitches() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
+    defer { harness.close() }
     let stamp = Date(timeIntervalSinceReferenceDate: 900_000_000)
     harness.controller.onTabHidden = { [unowned harness] id in harness.source.markInactive([id], at: stamp) }
     harness.controller.activate(node: world.panes[0])
@@ -155,15 +159,18 @@ final class SplitArchiveTests: XCTestCase {
     XCTAssertEqual(Self.lastActive(harness.source, world.panes[0]), stamp)
     XCTAssertEqual(Self.lastActive(harness.source, world.panes[1]), stamp)
     XCTAssertNil(Self.lastActive(harness.source, world.today[1]), "the tab now shown is not stamped")
-    harness.close()
   }
 
-  /// Termination stamps every pane the window shows. `AppSession.prepareForTermination` calls
-  /// `source.markInactive(window.visibleNodes, at:)`; the app target has no test bundle, so this asserts that set
-  /// and the stamp. `visibleNodes` is every pane of the shown split.
+  /// Termination, controller side only. This test does NOT exercise `AppSession.prepareForTermination`: that method
+  /// lives in the app target, which has no unit-test bundle (its only test target, `ArktShellUITests`, drives the
+  /// built app out of process), so nothing in ShellKit's test targets can call it. `prepareForTermination` stops the
+  /// auto-archive timer and calls `source.markInactive(window.visibleNodes, at: .now)`; this test asserts the input
+  /// of that call (`visibleNodes` is every pane of the shown split, not only the focused one) and makes the same
+  /// `markInactive` call by hand to check that it stamps each pane.
   func testTerminationStampsAllVisiblePanes() throws {
     let world = try Self.makeWorld(panes: 3)
     let harness = Harness(world.sidebar)
+    defer { harness.close() }
     harness.controller.activate(node: world.panes[1])
     XCTAssertEqual(harness.controller.visibleNodes, Set(world.panes))
 
@@ -173,7 +180,51 @@ final class SplitArchiveTests: XCTestCase {
     for pane in world.panes {
       XCTAssertEqual(Self.lastActive(harness.source, pane), stamp)
     }
-    harness.close()
+  }
+
+  // MARK: Auto-archive (decision 10)
+
+  /// Plan S8 step 4, window side: with a split shown, the set `AppSession.startAutoArchive` hands the timer
+  /// (`resolver.visible` plus `nodesHoldingClose`) holds every shown pane, so a pass with every pane idle past the
+  /// threshold keeps the split. `AutoArchivePolicy` lets any one exempt pane protect the whole split, so the pass
+  /// alone would also keep it if the window published only the focused pane; the set is asserted directly for that.
+  /// Once another tab is shown the panes leave the set and the same pass archives the split.
+  func testAutoArchiveExemptsEveryShownPane() throws {
+    let settings = ArchiveSettings()
+    let threshold = try XCTUnwrap(settings.tabThreshold(forProfile: ArchiveSettings.defaultProfile).interval)
+    let fresh = Self.now.addingTimeInterval(-60)
+    let idle = Self.now.addingTimeInterval(-(threshold + 3600))
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let other = try sidebar.addTab(
+      url: Self.url("t0"), title: "T0", lastActiveAt: fresh, in: .today(space), createdAt: fresh)
+    let split = try sidebar.addSplit(
+      orientation: .horizontal, widthFactors: [1.0 / 3, 1.0 / 3, 1.0 / 3], in: .today(space), createdAt: idle)
+    let panes = try (0..<3).map {
+      try sidebar.addTab(
+        url: Self.url("s\($0)"), title: "S\($0)", lastActiveAt: idle, in: .split(split), createdAt: idle)
+    }
+    let harness = Harness(sidebar)
+    defer { harness.close() }
+    func exempt() -> Set<UUID> {  // as AppSession.startAutoArchive builds it
+      harness.controller.sidebarController.resolver.visible.union(harness.controller.nodesHoldingClose)
+    }
+    func pass() -> [UUID] {
+      harness.coordinator.runAutoArchive(startedAt: .distantPast, settings: settings, exempt: exempt()).map(\.id)
+    }
+
+    harness.controller.activate(node: panes[1])
+
+    XCTAssertEqual(harness.controller.sidebarController.resolver.visible, Set(panes))
+    XCTAssertEqual(exempt(), Set(panes))
+    XCTAssertEqual(pass(), [])
+    XCTAssertEqual(harness.source.children(of: .today(space)), [other, split])
+
+    harness.controller.activate(node: other)
+
+    XCTAssertEqual(exempt(), [other])
+    XCTAssertEqual(pass(), [split])
+    XCTAssertEqual(harness.source.children(of: .today(space)), [other])
   }
 
   // MARK: Restore and relaunch (BH-086)
@@ -183,6 +234,7 @@ final class SplitArchiveTests: XCTestCase {
   func testMismatchedFactorsStayStoredAndNormalizeOnShow() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
+    defer { harness.close() }
     let factors = [0.2, 0.3, 0.5]
     let left = NodeSnapshot(kind: .tab(TabItem(url: Self.url("l"), title: "L")), createdAt: Self.now)
     let right = NodeSnapshot(kind: .tab(TabItem(url: Self.url("r"), title: "R")), createdAt: Self.now)
@@ -202,30 +254,41 @@ final class SplitArchiveTests: XCTestCase {
       return XCTFail("restored split missing")
     }
     XCTAssertEqual(stored.widthFactors, factors, "show does not rewrite the stored factors")
-    harness.close()
   }
 
-  /// Archiving a split root and restoring it puts the same factors and orientation back on screen.
+  /// BH-086: archiving a split root through `ArchiveCoordinator` and restoring it puts the split back at the top of
+  /// Today with its panes in their order. Showing it gives each pane card its own pane's page, with the stored
+  /// factors and orientation, and every pane counts as shown.
   func testRestoredSplitShowsWithItsLayout() throws {
     let factors = [0.25, 0.75]
     let world = try Self.makeWorld(orientation: .vertical, factors: factors)
     let harness = Harness(world.sidebar)
+    defer { harness.close() }
     let item = try XCTUnwrap(harness.coordinator.archive([world.split], reason: .manual).first)
     XCTAssertNil(harness.source.node(world.split))
 
     let restored = try XCTUnwrap(harness.coordinator.restore(item, fallbackSpace: world.space))
 
     XCTAssertEqual(restored.nodeID, world.split)
+    XCTAssertEqual(harness.source.children(of: .today(world.space)), [world.split] + world.today, "top of Today")
+    XCTAssertEqual(harness.source.children(of: .split(world.split)), world.panes)
     harness.controller.activate(node: world.split)
     XCTAssertFalse(harness.splitView.isHidden)
     XCTAssertEqual(harness.splitView.axis, .stacked)
     XCTAssertEqual(harness.splitView.paneCount, 2)
+    let cards = harness.splitView.paneCards
+    XCTAssertEqual(cards.count, world.panes.count)
+    for (index, (card, pane)) in zip(cards, world.panes).enumerated() {
+      let tab = try XCTUnwrap(harness.controller.engineTab(of: pane), "pane \(index) has a page")
+      XCTAssertTrue(card.contentView === harness.engine.contentView(for: tab), "pane card \(index) shows its pane")
+    }
+    XCTAssertEqual(harness.controller.visibleNodes, Set(world.panes))
+    XCTAssertEqual(harness.controller.sidebarController.resolver.visible, Set(world.panes))
     XCTAssertEqual(harness.splitView.liveFactors[0], factors[0], accuracy: 1e-9)
     XCTAssertEqual(harness.splitView.liveFactors[1], factors[1], accuracy: 1e-9)
     let layout = try XCTUnwrap(Self.layout(of: world.split, in: harness.source))
     XCTAssertEqual(layout.orientation, .vertical)
     XCTAssertEqual(layout.widthFactors, factors)
-    harness.close()
   }
 
   /// A divider commit survives encode and decode, and the split shows those factors after the source is rebuilt.
@@ -238,6 +301,7 @@ final class SplitArchiveTests: XCTestCase {
     let restored = ModelSidebarSource(sidebar: decoded, now: { Self.now })
     let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: restored)
     controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 800), display: false)
+    defer { controller.close() }
 
     controller.activate(node: world.panes[0])
 
@@ -251,7 +315,6 @@ final class SplitArchiveTests: XCTestCase {
     XCTAssertEqual(layout.orientation, .vertical)
     XCTAssertEqual(layout.widthFactors[0], 0.25, accuracy: 1e-9)
     XCTAssertEqual(layout.widthFactors[1], 0.75, accuracy: 1e-9)
-    controller.close()
   }
 }
 
