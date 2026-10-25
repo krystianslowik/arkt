@@ -87,15 +87,19 @@ public final class ThemeBackgroundView: WindowDragView {
     let grainTo = Float(newThemes[index].textureOpacity)
     grain.opacity = grainTo
     CATransaction.commit()
-    fade(overlay, from: 0, to: 1, duration: duration)
-    if grainFrom != grainTo { fade(grain, from: grainFrom, to: grainTo, duration: duration) }
     crossfadeActive = true
-    DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+    // The settle is tied to the animations themselves (#296): the completion block runs when they finish (or are
+    // removed, which `cancelCrossfade` guards against via the token), never at a wall-clock deadline.
+    CATransaction.begin()
+    CATransaction.setCompletionBlock { [weak self] in
       MainActor.assumeIsolated {
         guard let self, self.crossfadeToken == token, self.crossfadeActive else { return }
         self.setPosition(self.position)
       }
     }
+    fade(overlay, from: 0, to: 1, duration: duration)
+    if grainFrom != grainTo { fade(grain, from: grainFrom, to: grainTo, duration: duration) }
+    CATransaction.commit()
   }
 
   /// position 1.25 = theme 1 blended 25% toward theme 2. An in-flight theme crossfade stops here.
@@ -142,6 +146,7 @@ public final class ThemeBackgroundView: WindowDragView {
     animation.fromValue = from
     animation.toValue = to
     animation.duration = duration
+    animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
     animation.fillMode = .forwards
     animation.isRemovedOnCompletion = false
     layer.add(animation, forKey: Self.crossfadeKey)

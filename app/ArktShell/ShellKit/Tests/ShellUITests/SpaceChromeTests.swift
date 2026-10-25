@@ -195,6 +195,20 @@ struct ThemeCrossfadeTests {
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.dusk.baseColors.map(\.cgColor)))
   }
 
+  /// #296: the crossfade eases in and out, and the settle onto the new theme is tied to the animation's
+  /// completion (CATransaction), not a wall-clock timer. A view in no window has no render server pacing, so
+  /// the test does not watch the clock: it checks the curve's control points and that the settle happens.
+  @Test func theCrossfadeEasesInAndOutAndSettlesOnCompletion() async throws {
+    let view = background()
+    view.replaceThemes([SpaceThemeCatalog.dusk, SpaceThemeCatalog.paper], crossfade: true)
+    let animation = try #require(view.crossfadeAnimationForTesting)
+    #expect(controlPoint(animation.timingFunction, at: 1) == (0.42, 0))
+    #expect(controlPoint(animation.timingFunction, at: 2) == (0.58, 1))
+    #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.paper.baseColors.map(\.cgColor)))
+    #expect(await settled(view, timeout: 5))
+    #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.dusk.baseColors.map(\.cgColor)))
+  }
+
   @Test func reduceMotionAZeroDurationOrASwipeSnaps() {
     let view = background()
     view.reducesMotion = { true }
@@ -239,6 +253,26 @@ struct ThemeCrossfadeTests {
 
   private func stops(_ colors: [CGColor]) -> [[CGFloat]] {
     colors.map { color in (color.components ?? []).map { ($0 * 1000).rounded() / 1000 } }
+  }
+
+  /// Polls once a millisecond until the crossfade has settled (its animation removed), so the check waits on the
+  /// condition rather than a fixed interval.
+  private func settled(_ view: ThemeBackgroundView, timeout: Double) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while view.crossfadeAnimationForTesting != nil {
+      if Date() > deadline { return false }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return true
+  }
+
+  /// CAMediaTimingFunction has no name getter; the curve is identified by its two control points. A missing
+  /// function reads as (-1, -1), which matches no real control point.
+  private func controlPoint(_ function: CAMediaTimingFunction?, at index: Int) -> (x: Float, y: Float) {
+    guard let function else { return (-1, -1) }
+    var xy: [Float] = [-1, -1]
+    xy.withUnsafeMutableBufferPointer { function.getControlPoint(at: index, values: $0.baseAddress!) }
+    return (xy[0], xy[1])
   }
 }
 
