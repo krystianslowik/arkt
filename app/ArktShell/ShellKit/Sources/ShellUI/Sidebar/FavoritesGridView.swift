@@ -231,8 +231,6 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   private var isTrackingMouse = false
   private var didDragInMouseDown = false
   private var isDragging = false
-  /// Set when the Favorites changed while the collection view had no size; it is reloaded once it has one.
-  private var needsReloadWhenSized = false
 
   private let flowLayout = NSCollectionViewFlowLayout()
   private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
@@ -317,20 +315,6 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       flowLayout.invalidateLayout()
     }
     collectionView.frame = bounds
-    guard !collectionView.bounds.isEmpty else { return }
-    // Favorites that changed while the grid had no size (an empty grid is 0 pt tall, so the first Favorites of an
-    // Arc import arrive that way) were not batch-inserted; load them now that there is room. `reloadData` only
-    // invalidates: the collection view realizes the items in its own layout pass, after this one.
-    if needsReloadWhenSized {
-      needsReloadWhenSized = false
-      collectionView.reloadData()
-    }
-    // The collection view realizes items only inside its prepared content rectangle. A scroll view's clip view
-    // extends that rectangle as it scrolls; this grid has none, so a collection view first laid out at zero size
-    // keeps an empty one and `item(at:)` stays nil after it is sized. Prepare the whole grid (it never scrolls).
-    if !collectionView.preparedContentRect.contains(collectionView.bounds) {
-      collectionView.prepareContent(in: collectionView.bounds)
-    }
   }
 
   // MARK: Hover
@@ -508,11 +492,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     nodeIDs = new
     let difference = new.difference(from: old)
     if difference.isEmpty { return false }
-    // A batch update on a collection view without a size leaves its items unrealized for good (`item(at:)` stays
-    // nil after the grid is sized). Defer to one reload in `layout()` once the grid has a size.
-    if needsReloadWhenSized || collectionView.bounds.isEmpty {
-      needsReloadWhenSized = true
-      needsLayout = true
+    // Without a size (an empty grid is 0 pt tall, so the first Favorites of an Arc import arrive that way) a batch
+    // update leaves the collection view's layout prepared for the old items: its content size stays empty and no
+    // item is realized once the grid is sized. Reload instead, here in the model change and not from `layout()`
+    // (a reload issued during the layout pass did not re-prepare the layout either); the collection view prepares
+    // its layout for every Favorite in its next layout pass, when the grid has its new height.
+    if collectionView.bounds.isEmpty {
+      collectionView.reloadData()
       return FavoritesLayout.height(itemCount: old.count) != FavoritesLayout.height(itemCount: new.count)
     }
     collectionView.performBatchUpdates({

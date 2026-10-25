@@ -837,14 +837,15 @@ Production changes the plan did not list:
   accessibility value (an earlier revision set a test-only `rows N`, created every row view on every reload and
   bridged legacy attributes through a `nonisolated(unsafe)` local; all three are gone).
 - `ShellUI/Sidebar/FavoritesGridView.swift`: product fix. A Favorites batch insert while the collection view had no
-  size (an empty grid is 0 pt tall, so an Arc import into an empty profile hits it) left `item(at:)` nil after the
-  grid was sized: no tiles until something reloaded the grid. Changes that arrive while the grid has no size are now
-  deferred to one `reloadData` when `layout()` first gives the collection view a size, and `layout()` prepares the
-  collection view's content for its whole bounds (`prepareContent(in:)`): the collection view realizes items only
-  inside its prepared content rectangle, which a scroll view's clip view would extend, and this grid has none, so a
-  collection view first laid out at zero size kept an empty one. In-process test:
-  `SidebarViewTests.testFavoritesAddedWhileTheGridHasNoSizeGetTiles` (failed on `14439d7` with "no tile", before the
-  prepared-content step).
+  size (an empty grid is 0 pt tall, so an Arc import into an empty profile hits it) left no tiles after the grid was
+  sized. CI evidence (diagnostic run on `5468834`): after the resize the collection view had the grid's frame, its
+  data source's 4 items and a prepared rect covering its bounds, but its layout's content size was still
+  `(174, 0)`, 0 visible items and `item(at:)` nil, also after a run-loop turn and a second layout pass; a
+  `reloadData` from outside the layout pass fixed it (content `(174, 101)`, 4 visible items). A reload issued from
+  the grid's `layout()` did not (run `c400aa7`). So `apply(structure:)` now reloads the collection view, in the model
+  change, when it has no size, instead of batch-updating it. In-process test:
+  `SidebarViewTests.testFavoritesAddedWhileTheGridHasNoSizeGetTiles` (layout content height, visible items, tiles
+  with titles, grid accessibility children).
 - Same file, accessibility: `NSCollectionView`, like `NSTableView`, answers children out of process from its own
   internals, so the collection view is no longer an accessibility element and the `favorites.grid` group (a plain
   view) lists the existing tile views itself; the tiles report the grid as their parent. This is #289's pattern
