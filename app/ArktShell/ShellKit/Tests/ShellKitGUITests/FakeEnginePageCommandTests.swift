@@ -3,6 +3,7 @@ import EngineAPI
 import EngineAPITestSupport
 import XCTest
 @testable import FakeEngineKit
+import ShellUI
 
 /// W3-7 part D step 3, FakeEngine build: the page commands WKWebView can run are enabled and run on the window's
 /// active tab; the rest (Find, Print, Developer Tools, History, Downloads) stay disabled.
@@ -23,16 +24,22 @@ final class FakeEnginePageCommandTests: XCTestCase {
     engine.activateTab(tab)
 
     XCTAssertTrue(forward.validate(.reload))
-    XCTAssertTrue(forward.validate(EngineCommand(rawValue: 33007)), "Force Reload")
+    XCTAssertTrue(forward.validate(PendingEngineCommands.reloadBypassingCache), "Force Reload")
     XCTAssertTrue(forward.validate(.zoomIn))
     XCTAssertTrue(forward.validate(.zoomOut))
     XCTAssertFalse(forward.validate(.zoomReset), "already at actual size")
     XCTAssertFalse(forward.validate(.back), "no history")
     XCTAssertFalse(forward.validate(.forward))
     for command in [EngineCommand.find, .print, .savePage, .viewSource, .devTools, .history, .downloads,
-                    EngineCommand(rawValue: 37001), EngineCommand(rawValue: 40023)] {
+                    PendingEngineCommands.findNext, PendingEngineCommands.inspect] {
       XCTAssertFalse(forward.validate(command), "\(command)")
     }
+  }
+
+  /// FakeEngine's copies of the #272 ids are the menu's (one source of truth until #272 names them in EngineAPI).
+  func testFakeEnginesPendingIdsMatchTheMenus() {
+    XCTAssertEqual(FakeEngine.stopCommand, PendingEngineCommands.stop)
+    XCTAssertEqual(FakeEngine.reloadBypassingCacheCommand, PendingEngineCommands.reloadBypassingCache)
   }
 
   func testZoomRunsOnTheActiveTab() throws {

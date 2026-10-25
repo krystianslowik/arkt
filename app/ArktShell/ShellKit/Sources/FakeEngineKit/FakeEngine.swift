@@ -261,9 +261,10 @@ public final class FakeEngine: EngineClient {
 
   // MARK: - Page commands
 
-  /// `IDC_STOP` and `IDC_RELOAD_BYPASSING_CACHE`, which `EngineCommand` has no constant for yet (#272).
-  private static let stopCommand = EngineCommand(rawValue: 33006)
-  private static let reloadBypassingCacheCommand = EngineCommand(rawValue: 33007)
+  /// `IDC_STOP` and `IDC_RELOAD_BYPASSING_CACHE`, which `EngineCommand` has no constant for yet (#272). FakeEngineKit
+  /// does not depend on ShellUI, where the menu's copies live (`PendingEngineCommands`); a test keeps them equal.
+  static let stopCommand = EngineCommand(rawValue: 33006)
+  static let reloadBypassingCacheCommand = EngineCommand(rawValue: 33007)
   /// WKWebView's page zoom steps, as Safari's.
   private static let zoomSteps: [CGFloat] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
 
