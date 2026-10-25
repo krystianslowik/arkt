@@ -193,46 +193,16 @@ final class FavoritesCollectionView: NSCollectionView {
   override func moveDown(_ sender: Any?) { onMoveCommand?(0, 1) }
   override func moveUp(_ sender: Any?) { onMoveCommand?(0, -1) }
 
-  /// The grid sets this so an accessibility query can materialize tiles before reading them.
-  var realizeItems: (@MainActor () -> Void)?
+  /// The tile views of the items that exist, in item order. Reads only: an accessibility query never creates an
+  /// item, reloads or lays out (doing so from an out-of-process client's callback re-enters layout while the client
+  /// waits, and it times out). The grid keeps every Favorite realized once it has a size (`FavoritesGridView.layout`).
+  func tileViews() -> [NSView] {
+    guard numberOfSections > 0 else { return [] }
+    return (0..<numberOfItems(inSection: 0)).compactMap { item(at: IndexPath(item: $0, section: 0))?.view }
+  }
 
   override func accessibilityChildren() -> [Any]? {
-    realizeItems?()
-    guard numberOfSections > 0 else { return [] }
-    let items = (0..<numberOfItems(inSection: 0)).compactMap { item(at: IndexPath(item: $0, section: 0))?.view }
-    return NSAccessibility.unignoredChildren(from: items)
-  }
-
-  /// Out-of-process clients read `AXChildren` through the legacy attribute, which `NSCollectionView` does not
-  /// route to `accessibilityChildren()`. The attribute methods are nonisolated; the handoff is main-thread only
-  /// (`assumeIsolated` traps otherwise).
-  private nonisolated func legacyChildren(_ attribute: NSAccessibility.Attribute) -> [Any]? {
-    switch attribute {
-    case .children, NSAccessibility.Attribute(rawValue: "AXChildrenInNavigationOrder"), .visibleChildren:
-      break
-    default:
-      return nil
-    }
-    nonisolated(unsafe) var result: [Any]?
-    MainActor.assumeIsolated { result = accessibilityChildren() }
-    return result
-  }
-
-  nonisolated override func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
-    legacyChildren(attribute) ?? super.accessibilityAttributeValue(attribute)
-  }
-
-  nonisolated override func accessibilityArrayAttributeCount(_ attribute: NSAccessibility.Attribute) -> Int {
-    legacyChildren(attribute)?.count ?? super.accessibilityArrayAttributeCount(attribute)
-  }
-
-  nonisolated override func accessibilityArrayAttributeValues(_ attribute: NSAccessibility.Attribute, index: Int,
-                                                             maxCount: Int) -> [Any] {
-    guard let all = legacyChildren(attribute) else {
-      return super.accessibilityArrayAttributeValues(attribute, index: index, maxCount: maxCount)
-    }
-    guard index >= 0, index < all.count else { return [] }
-    return Array(all[index..<min(all.count, index + maxCount)])
+    NSAccessibility.unignoredChildren(from: tileViews())
   }
 }
 
@@ -260,7 +230,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   private var isTrackingMouse = false
   private var didDragInMouseDown = false
   private var isDragging = false
-  private var realizingTiles = false
+  /// Set when the Favorites changed while the collection view had no size; it is reloaded once it has one.
+  private var needsReloadWhenSized = false
 
   private let flowLayout = NSCollectionViewFlowLayout()
   private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
@@ -302,7 +273,6 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       favoritesCollectionView.onMoveCommand = { [weak self] deltaColumns, deltaRows in
         self?.moveKeyboardFocus(deltaColumns: deltaColumns, deltaRows: deltaRows)
       }
-      favoritesCollectionView.realizeItems = { [weak self] in self?.realizeTilesIfNeeded() }
     }
     collectionView.dataSource = self
     collectionView.delegate = self
@@ -336,21 +306,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       flowLayout.invalidateLayout()
     }
     collectionView.frame = bounds
-    realizeTilesIfNeeded()
-  }
-
-  /// A batch insert before the collection view has a size leaves `item(at:)` nil. Reload once the view has a width
-  /// and any favorite has no realized item.
-  private func realizeTilesIfNeeded() {
-    guard !realizingTiles, !nodeIDs.isEmpty, collectionView.bounds.width > 0 else { return }
-    let missing = nodeIDs.indices.contains { index in
-      collectionView.numberOfSections == 0 || collectionView.item(at: IndexPath(item: index, section: 0)) == nil
+    // Favorites that changed while the grid had no size (an empty grid is 0 pt tall, so the first Favorites of an
+    // Arc import arrive that way) were not batch-inserted; load them now that there is room. `reloadData` only
+    // invalidates: the collection view realizes the items in its own layout pass, after this one.
+    if needsReloadWhenSized, !collectionView.bounds.isEmpty {
+      needsReloadWhenSized = false
+      collectionView.reloadData()
     }
-    guard missing else { return }
-    realizingTiles = true
-    collectionView.reloadData()
-    collectionView.layoutSubtreeIfNeeded()
-    realizingTiles = false
   }
 
   // MARK: Hover
@@ -528,6 +490,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     nodeIDs = new
     let difference = new.difference(from: old)
     if difference.isEmpty { return false }
+    // A batch update on a collection view without a size leaves its items unrealized for good (`item(at:)` stays
+    // nil after the grid is sized). Defer to one reload in `layout()` once the grid has a size.
+    if needsReloadWhenSized || collectionView.bounds.isEmpty {
+      needsReloadWhenSized = true
+      needsLayout = true
+      return FavoritesLayout.height(itemCount: old.count) != FavoritesLayout.height(itemCount: new.count)
+    }
     collectionView.performBatchUpdates({
       var removed = Set<IndexPath>(), inserted = Set<IndexPath>()
       for change in difference {

@@ -126,6 +126,38 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertEqual(controller.view.favorites.frame.height, 46 * 2 + 9)
   }
 
+  /// An empty Favorites grid is 0 pt tall, so the first Favorites (an Arc import into an empty profile) arrive while
+  /// its collection view has no size. A batch insert there left `item(at:)` nil after the grid was sized: no tiles,
+  /// and accessibility clients saw none. Once the window lays out, every Favorite has a tile and the grid's
+  /// accessibility children are those tiles, in order, with their titles.
+  func testFavoritesAddedWhileTheGridHasNoSizeGetTiles() throws {
+    let sidebar = StubSidebar()
+    sidebar.addSpace(title: "Work")
+    let controller = makeSidebar(sidebar)
+    let grid = controller.view.favorites
+    XCTAssertEqual(grid.frame.height, 0, "precondition: an empty grid has no height")
+    XCTAssertTrue(grid.collectionView.bounds.isEmpty, "precondition: the collection view has no size")
+
+    let location = SidebarLocation.favorites(profile: "default")
+    let titles = ["Fixture Alpha", "Fixture Beta", "Fixture Gamma", "Fixture Delta"]
+    let ids = titles.map { title in
+      sidebar.addTab(url: URL(string: "https://\(title.split(separator: " ")[1].lowercased()).example/")!,
+                     title: title, in: location)
+    }
+    controller.view.layoutSubtreeIfNeeded()
+
+    XCTAssertEqual(grid.frame.height, 46 * 2 + 9)
+    XCTAssertFalse(grid.collectionView.bounds.isEmpty)
+    for (id, title) in zip(ids, titles) {
+      let tile = try XCTUnwrap(grid.tile(for: id), "no tile for \(title)")
+      XCTAssertEqual(tile.accessibilityLabel(), title)
+      XCTAssertGreaterThan(tile.frame.width, 0)
+    }
+    let children = (grid.collectionView.accessibilityChildren() ?? []).compactMap { $0 as? NSAccessibilityProtocol }
+    XCTAssertEqual(children.map { $0.accessibilityLabel() }, titles)
+    XCTAssertEqual(Set(children.map { $0.accessibilityIdentifier() }), [AXID.Favorites.tile])
+  }
+
   func testContainerLayout() throws {
     let controller = makeSidebar()
     let view = controller.view
