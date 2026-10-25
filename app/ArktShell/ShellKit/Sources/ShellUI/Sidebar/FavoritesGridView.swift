@@ -317,12 +317,19 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       flowLayout.invalidateLayout()
     }
     collectionView.frame = bounds
+    guard !collectionView.bounds.isEmpty else { return }
     // Favorites that changed while the grid had no size (an empty grid is 0 pt tall, so the first Favorites of an
     // Arc import arrive that way) were not batch-inserted; load them now that there is room. `reloadData` only
     // invalidates: the collection view realizes the items in its own layout pass, after this one.
-    if needsReloadWhenSized, !collectionView.bounds.isEmpty {
+    if needsReloadWhenSized {
       needsReloadWhenSized = false
       collectionView.reloadData()
+    }
+    // The collection view realizes items only inside its prepared content rectangle. A scroll view's clip view
+    // extends that rectangle as it scrolls; this grid has none, so a collection view first laid out at zero size
+    // keeps an empty one and `item(at:)` stays nil after it is sized. Prepare the whole grid (it never scrolls).
+    if !collectionView.preparedContentRect.contains(collectionView.bounds) {
+      collectionView.prepareContent(in: collectionView.bounds)
     }
   }
 

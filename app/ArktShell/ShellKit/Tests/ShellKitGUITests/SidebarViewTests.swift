@@ -130,7 +130,6 @@ final class SidebarViewTests: XCTestCase {
   /// its collection view has no size. A batch insert there left `item(at:)` nil after the grid was sized: no tiles,
   /// and accessibility clients saw none. Once the window lays out, every Favorite has a tile and the grid's
   /// accessibility children are those tiles, in order, with their titles.
-  @available(macOS, deprecated: 10.10, message: "Calls the legacy accessibility entry points")
   func testFavoritesAddedWhileTheGridHasNoSizeGetTiles() throws {
     let sidebar = StubSidebar()
     sidebar.addSpace(title: "Work")
@@ -146,11 +145,14 @@ final class SidebarViewTests: XCTestCase {
                      title: title, in: location)
     }
     controller.view.layoutSubtreeIfNeeded()
-    // A layout pass of the collection view alone did not bring the items back before the fix; only a reload did.
     grid.collectionView.layoutSubtreeIfNeeded()
 
     XCTAssertEqual(grid.frame.height, 46 * 2 + 9)
     XCTAssertFalse(grid.collectionView.bounds.isEmpty)
+    XCTAssertEqual(grid.collectionView.numberOfSections, 1)
+    XCTAssertEqual(grid.collectionView.numberOfItems(inSection: 0), titles.count)
+    XCTAssertTrue(grid.collectionView.preparedContentRect.contains(grid.collectionView.bounds),
+                  "prepared \(grid.collectionView.preparedContentRect) bounds \(grid.collectionView.bounds)")
     for (id, title) in zip(ids, titles) {
       let tile = try XCTUnwrap(grid.tile(for: id), "no tile for \(title)")
       XCTAssertEqual(tile.accessibilityLabel(), title)
@@ -162,9 +164,6 @@ final class SidebarViewTests: XCTestCase {
     for child in children {
       XCTAssertTrue((child.accessibilityParent() as? NSView) === grid, "tile parent is the grid")
     }
-    // The legacy attribute out-of-process clients read: the same tiles.
-    let legacy = try XCTUnwrap(grid.accessibilityAttributeValue(.children) as? [Any])
-    XCTAssertEqual(legacy.compactMap { ($0 as? NSAccessibilityProtocol)?.accessibilityLabel() }, titles)
   }
 
   func testContainerLayout() throws {

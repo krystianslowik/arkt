@@ -103,9 +103,8 @@ final class ArchiveWindowTests: XCTestCase {
 
   /// Accessibility rows come from the loaded page through `AXProxyRows`, not from row views: the window content
   /// lists the proxy `archive.table` in place of the scroll view, every row of a page taller than the window is
-  /// listed with its title and its place, date and reason, the far row gets no row view, and the legacy attributes
-  /// out-of-process clients read give the same rows and count.
-  @available(macOS, deprecated: 10.10, message: "Calls the legacy accessibility entry points")
+  /// listed with its title and its place, date and reason, and the far row gets no row view. (How the proxy table
+  /// answers the legacy attributes is `AXProxyRowsTests`' subject.)
   func testAccessibilityRowsComeFromThePageWithoutRowViews() async throws {
     let source = StubArchiveSource()
     source.pages = [ArchiveListPage(rows: Self.rows(250), unreadable: 0, mayHaveMore: true)]
@@ -128,10 +127,6 @@ final class ArchiveWindowTests: XCTestCase {
     XCTAssertEqual(last.accessibilityLabel(), "Item 249")
     XCTAssertEqual(last.accessibilityValue() as? String, "a.example - Work - 1 hour ago, Closed")
     XCTAssertNil(table.rowView(atRow: 249, makeIfNecessary: false), "no row view is built for accessibility")
-
-    let legacy = try XCTUnwrap(element.accessibilityAttributeValue(.children) as? [Any])
-    XCTAssertEqual(legacy.count, 250)
-    XCTAssertEqual(element.accessibilityArrayAttributeCount(.children), 250)
     XCTAssertNil(element.accessibilityValue(), "the table value is not a test-only count string")
 
     source.pages = [ArchiveListPage(rows: Self.rows(3, from: 10), unreadable: 0, mayHaveMore: false)]

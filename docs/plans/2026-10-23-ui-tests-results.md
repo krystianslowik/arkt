@@ -839,8 +839,12 @@ Production changes the plan did not list:
 - `ShellUI/Sidebar/FavoritesGridView.swift`: product fix. A Favorites batch insert while the collection view had no
   size (an empty grid is 0 pt tall, so an Arc import into an empty profile hits it) left `item(at:)` nil after the
   grid was sized: no tiles until something reloaded the grid. Changes that arrive while the grid has no size are now
-  deferred to one `reloadData` when `layout()` first gives the collection view a size. In-process test:
-  `SidebarViewTests.testFavoritesAddedWhileTheGridHasNoSizeGetTiles`.
+  deferred to one `reloadData` when `layout()` first gives the collection view a size, and `layout()` prepares the
+  collection view's content for its whole bounds (`prepareContent(in:)`): the collection view realizes items only
+  inside its prepared content rectangle, which a scroll view's clip view would extend, and this grid has none, so a
+  collection view first laid out at zero size kept an empty one. In-process test:
+  `SidebarViewTests.testFavoritesAddedWhileTheGridHasNoSizeGetTiles` (failed on `14439d7` with "no tile", before the
+  prepared-content step).
 - Same file, accessibility: `NSCollectionView`, like `NSTableView`, answers children out of process from its own
   internals, so the collection view is no longer an accessibility element and the `favorites.grid` group (a plain
   view) lists the existing tile views itself; the tiles report the grid as their parent. This is #289's pattern
@@ -848,4 +852,8 @@ Production changes the plan did not list:
   change to `AXProxyRows.swift` is needed. Nothing creates an item, reloads or lays out from an accessibility call.
 - In-process test for the Archive rows: `ArchiveWindowTests.testAccessibilityRowsComeFromThePageWithoutRowViews`.
 
-Known issues used: #277 (unrelated GUI-test flake on the earlier head).
+In-process accessibility tests assert through the protocol getters (`accessibilityChildren()`,
+`accessibilityRows()`, ...); the legacy `accessibilityAttributeValue` returns nil in process for these elements, so
+out-of-process proof is the UI tests job.
+
+Known issues used: #277 (unrelated GUI-test flake).
