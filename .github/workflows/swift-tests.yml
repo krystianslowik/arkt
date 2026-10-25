@@ -198,6 +198,10 @@ jobs:
           fi
           (( failed )) && exit 1
           print "UI test sources OK"
+      # The report script against synthetic fixtures, with a stub xcrun: classification, partial deferral, issue
+      # source, repetitions, unknown row ids, xcresulttool errors and jq from PATH.
+      - name: Parity report script tests
+        run: scripts/ui-tests/parity-report-test.sh
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
@@ -228,7 +232,9 @@ jobs:
           xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages -resultBundlePath $RUNNER_TEMP/ui.xcresult \
             -parallel-testing-enabled NO -collect-test-diagnostics never test
-      # Runs after a failed test step too. Failing rows do not fail the script.
+      # Runs after a failed test step too. Failing rows do not fail the script; malformed input does, including a test
+      # name that cites a row id missing from the spec (the report is still written first). The report goes to the
+      # job summary, the artifact and the job log.
       - name: Parity report
         if: ${{ !cancelled() }}
         run: |
@@ -236,7 +242,7 @@ jobs:
             $RUNNER_TEMP/ui.xcresult \
             docs/spec/arc-parity-spec.md \
             app/ArktShell/UITests/parity-deferred.txt \
-            | tee $RUNNER_TEMP/parity-report.md >> $GITHUB_STEP_SUMMARY
+            | tee $RUNNER_TEMP/parity-report.md | tee -a $GITHUB_STEP_SUMMARY
       - name: Upload the result bundle and parity report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
