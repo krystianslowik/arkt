@@ -22,31 +22,50 @@ public final class ShellWindow: NSWindow {
     setAccessibilityIdentifier(AXID.Shell.window)
   }
 
-  /// Moves close/minimize/zoom so the close button's top-left sits at `metrics.trafficLightOrigin`
-  /// (window coordinates, measured from the top-left). AppKit resets these frames on several events;
-  /// ShellRootView.layout() and the window controller call this again each time.
+  /// Where the traffic lights sit (#102): in the docked sidebar's top strip, in the hover-revealed overlay's (at its
+  /// origin, faded with the reveal), or nowhere while the sidebar is hidden, so no buttons float over the page.
+  /// PARITY(NEEDS-RUNTIME-CHECK RT-10): that Arc hides them with the sidebar.
+  public enum TrafficLightPlacement: Equatable, Sendable {
+    case sidebar
+    case overlay(origin: CGPoint, alpha: CGFloat)
+    case hidden
+  }
+
+  /// Set by the root view; applied by `layoutTrafficLights(sidebarWidth:)`.
+  public var trafficLightPlacement = TrafficLightPlacement.sidebar
+
+  /// Moves close/minimize/zoom so the close button's top-left sits at `metrics.trafficLightOrigin` from the top-left
+  /// of the sidebar (window coordinates; the overlay's origin when it is revealed). AppKit resets these frames on
+  /// several events; ShellRootView.layout() and the window controller call this again each time.
   ///
   /// The titlebar container is narrowed to the sidebar so it never sits over (and steals clicks from) the
-  /// content card; it is never narrower than the three buttons, so they stay hit-testable with the
-  /// sidebar hidden.
+  /// content card; it is never narrower than the three buttons, so they stay hit-testable. With the sidebar hidden
+  /// and no overlay out it is zero wide and the buttons are hidden.
   public func layoutTrafficLights(sidebarWidth: CGFloat) {
     guard !styleMask.contains(.fullScreen) else { return }
     let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
     guard let close = standardWindowButton(.closeButton),
           let titlebar = close.superview,                    // NSTitlebarView
           let container = titlebar.superview else { return } // NSTitlebarContainerView
+    let (offset, shown, alpha): (CGPoint, Bool, CGFloat) = switch trafficLightPlacement {
+    case .sidebar: (.zero, true, 1)
+    case .overlay(let origin, let alpha): (origin, true, alpha)
+    case .hidden: (.zero, false, 0)
+    }
     let origin = metrics.trafficLightOrigin
     // As tall as the sidebar's traffic-light strip, so the sidebar URL bar below it keeps its clicks, and never
     // shorter than the buttons' bottom edge, so they stay hit-testable.
-    let height = max(metrics.sidebarTopBarHeight, origin.y + close.frame.height)
+    let height = max(metrics.sidebarTopBarHeight, origin.y + close.frame.height) + offset.y
     let buttonsExtent = origin.x * 2 + CGFloat(kinds.count - 1) * metrics.trafficLightSpacing + close.frame.width
-    let width = min(frame.width, max(sidebarWidth, buttonsExtent))
+    let width = shown ? min(frame.width, offset.x + max(sidebarWidth, buttonsExtent)) : 0
     let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
     if container.frame != containerFrame { container.frame = containerFrame }
     for (index, kind) in kinds.enumerated() {
       guard let button = standardWindowButton(kind) else { continue }
-      let x = origin.x + CGFloat(index) * metrics.trafficLightSpacing
-      let y = titlebar.bounds.height - origin.y - button.frame.height   // titlebar view is not flipped
+      if button.isHidden == shown { button.isHidden = !shown }
+      if button.alphaValue != alpha, shown { button.alphaValue = alpha }
+      let x = offset.x + origin.x + CGFloat(index) * metrics.trafficLightSpacing
+      let y = titlebar.bounds.height - offset.y - origin.y - button.frame.height   // titlebar view is not flipped
       let target = NSPoint(x: x, y: y)
       if button.frame.origin != target { button.setFrameOrigin(target) }
     }

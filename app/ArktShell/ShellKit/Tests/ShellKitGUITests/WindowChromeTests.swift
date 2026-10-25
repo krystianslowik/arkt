@@ -75,9 +75,10 @@ final class WindowChromeTests: XCTestCase {
     root.layoutSubtreeIfNeeded()
     XCTAssertEqual(root.sidebarWidth, ShellMetrics.standard.sidebarMaxWidth)
     XCTAssertEqual(root.card.frame.minX, ShellMetrics.standard.sidebarMaxWidth)
-    root.resizeHandle.onWidthChange?(10)
+    root.resizeHandle.onWidthChange?(100)       // above the hide width (#102, BH-002): clamped, still visible
     root.layoutSubtreeIfNeeded()
     XCTAssertEqual(root.sidebarWidth, ShellMetrics.standard.sidebarMinWidth)
+    XCTAssertTrue(root.sidebarVisible)
   }
 
   func testTitlebarContainerIsNarrowedToSidebar() throws {

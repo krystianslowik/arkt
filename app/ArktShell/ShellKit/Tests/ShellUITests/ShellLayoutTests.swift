@@ -22,7 +22,7 @@ struct ShellLayoutTests {
 
   @Test func hiddenSidebarGivesCardEvenInsets() {
     let layout = ShellLayout.compute(bounds: bounds, sidebarWidth: 190, sidebarVisible: false, metrics: metrics)
-    #expect(layout.sidebarFrame.width == 0)
+    #expect(layout.sidebarFrame.width == 190, "hidden keeps the width for the overlay (#102)")
     #expect(layout.cardFrame == CGRect(x: 10, y: 10, width: 1180, height: 780))
   }
 

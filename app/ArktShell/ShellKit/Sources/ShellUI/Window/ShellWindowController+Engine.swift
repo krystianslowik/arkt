@@ -101,6 +101,7 @@ extension ShellWindowController {
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)
     replay(snapshot, into: node)
+    announceCreation(.tab)                                          // BH-006
   }
 
   /// The row of an engine tab whose first URL is not known yet; the tab's `.urlChanged` replaces it.

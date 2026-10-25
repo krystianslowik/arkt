@@ -18,6 +18,16 @@ public struct ShellMetrics: Sendable, Equatable {
   /// Height of the sidebar strip that hosts the traffic lights (and later back/forward/reload); also the height of
   /// the titlebar container, so it never covers the sidebar URL bar below the strip.
   public var sidebarTopBarHeight: CGFloat
+  /// Dragging the sidebar edge to a proposed width below this hides the sidebar (BH-002, GS-017). Between it and
+  /// `sidebarMinWidth` the sidebar stays at its minimum, so a drag can come back without flicker.
+  /// PARITY(NEEDS-RUNTIME-CHECK RT-10): Arc's threshold.
+  public var sidebarHideWidth: CGFloat = 75
+  /// Gap between the hover-revealed overlay sidebar and the window's top, left and bottom edges (BH-004).
+  /// PARITY(NEEDS-RUNTIME-CHECK RT-10): the card's inset until Arc's overlay is measured.
+  public var sidebarOverlayInset: CGFloat = 10
+  /// Width of the strip at the window's left edge that reveals the hidden sidebar (BH-004, GS-018). It lies inside
+  /// the gutter left of the card. PARITY(NEEDS-RUNTIME-CHECK RT-10).
+  public var sidebarRevealEdgeWidth: CGFloat = 8
 
   /// "Arc 1.168" marks a value from `docs/plans/2026-10-23-arc-measurements.md` (one 2x window, dark, not key,
   /// Toolbar on).
