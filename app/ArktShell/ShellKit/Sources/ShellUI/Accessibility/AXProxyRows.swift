@@ -4,14 +4,30 @@ import AppKit
 /// never copied from a row view, so a row that was never laid out (or was scrolled away and recycled) still has
 /// its real label and value.
 struct AXProxyRowContent: Equatable, Sendable {
+  /// What the element is. A table or outline row is `.row`; a row that only separates groups (the sidebar's
+  /// divider between Pinned and Today) is `.separator`, reported as a splitter so clients do not count it as a row.
+  enum Role: Equatable, Sendable {
+    case row
+    case separator
+  }
+
   var identifier: String
   var label: String
   var value: String?
+  var role: Role
+  /// Outline rows only: the row's depth (0 = top level). Nil for a table row.
+  var disclosureLevel: Int?
+  /// Outline rows only: whether the row's children are shown. Nil for a row that cannot expand.
+  var isExpanded: Bool?
 
-  init(identifier: String, label: String, value: String? = nil) {
+  init(identifier: String, label: String, value: String? = nil, role: Role = .row, disclosureLevel: Int? = nil,
+       isExpanded: Bool? = nil) {
     self.identifier = identifier
     self.label = label
     self.value = value
+    self.role = role
+    self.disclosureLevel = disclosureLevel
+    self.isExpanded = isExpanded
   }
 }
 
@@ -90,7 +106,9 @@ final class AXProxyTable: NSAccessibilityElement {
 
 /// One table row as an accessibility element. Every attribute is computed when asked: identifier, label and value
 /// from the model, selection from the table, the frame from the row's rectangle in screen coordinates at that
-/// moment, so a moved window never leaves a stale frame behind. A proxy is a leaf.
+/// moment, so a moved window never leaves a stale frame behind. A proxy is a leaf unless the owner supplies
+/// `children`. In a proxy table of role `.outline` a row reports the `AXOutlineRow` subrole, its disclosure level and
+/// whether it is expanded.
 final class AXProxyRow: NSAccessibilityElement, NSAccessibilityRow {
   private weak var table: AXProxyTable?
   private let row: Int
@@ -110,6 +128,19 @@ final class AXProxyRow: NSAccessibilityElement, NSAccessibilityRow {
   }
 
   override func isAccessibilityElement() -> Bool { true }
+
+  override func accessibilityRole() -> NSAccessibility.Role? {
+    content?.role == .separator ? .splitter : .row
+  }
+
+  override func accessibilitySubrole() -> NSAccessibility.Subrole? {
+    guard content?.role != .separator, table?.accessibilityRole() == .outline else { return nil }
+    return .outlineRow
+  }
+
+  override func accessibilityDisclosureLevel() -> Int { content?.disclosureLevel ?? 0 }
+
+  override func isAccessibilityDisclosed() -> Bool { content?.isExpanded ?? false }
 
   /// The element protocol requires a non-optional identifier; the inherited getter is optional, so the row
   /// conformance needs this override as its witness.
@@ -133,14 +164,32 @@ final class AXProxyRow: NSAccessibilityElement, NSAccessibilityRow {
 
   override func accessibilityParent() -> Any? { table }
 
-  /// Empty on purpose: the inherited element children would walk back to the table that lists this row, and a
-  /// hierarchy snapshot would recurse.
-  override func accessibilityChildren() -> [Any]? { [] }
+  /// Empty unless the owner supplies `children`. The inherited element children would walk back to the table that
+  /// lists this row, and a hierarchy snapshot would recurse.
+  override func accessibilityChildren() -> [Any]? {
+    let index = self.row
+    return onMainThread(source, default: [NSView]()) { $0.rowChildren(index) }
+  }
+
+  /// Built from the owner's action names; performing one goes back to the owner by name, so no action object (or
+  /// its handler) crosses from the main actor.
+  override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+    let index = self.row
+    let names = onMainThread(source, default: [String]()) { $0.rowActionNames(index) }
+    guard !names.isEmpty else { return nil }
+    return names.map { NSAccessibilityCustomAction(name: $0, target: self, selector: #selector(performAction(_:))) }
+  }
+
+  @objc private func performAction(_ action: NSAccessibilityCustomAction) -> Bool {
+    let index = self.row
+    let name = action.name
+    return onMainThread(source, default: false) { $0.performRowAction(index, name) }
+  }
 }
 
 /// Publishes an `NSTableView`'s rows to accessibility clients through `element`, an `AXProxyTable`. Shared by every
-/// AppKit table or outline that has to expose rows out of process: the command bar results here; the Archive table
-/// (#292) and the sidebar outline (#283, #269) adopt it next.
+/// AppKit table or outline that has to expose rows out of process: the command bar results and the sidebar outline
+/// (#269); the Archive table (#292) adopts it next.
 ///
 /// Wiring:
 /// - the table subclass creates it before `super.init` and calls `attach(to: self)` after; it calls `invalidate()`
@@ -160,6 +209,19 @@ final class AXProxyRows {
 
   /// The model's answer for a row index; nil for an index the model no longer has.
   var content: (@MainActor (Int) -> AXProxyRowContent?)?
+
+  /// Whether a row reports itself selected; nil reads the table's `selectedRowIndexes`. For a table whose rows are
+  /// never selected in AppKit's sense but show a model state instead (the sidebar's current tab).
+  var isSelected: (@MainActor (Int) -> Bool)?
+
+  /// The accessibility children of a row; nil (or empty) makes the proxy a leaf. Must return views of a row view
+  /// that already exists (`rowView(atRow:makeIfNecessary: false)`), never build one; the views should name the row's
+  /// proxy (`rowElement(forRow:)`) as their accessibility parent.
+  var children: (@MainActor (Int) -> [NSView])?
+
+  /// The names of a row's VoiceOver actions, and what performing one does (true: handled).
+  var customActionNames: (@MainActor (Int) -> [String])?
+  var performCustomAction: (@MainActor (Int, String) -> Bool)?
 
   /// The table as clients see it: role `role`, identifier `identifier`, one `AXProxyRow` child per row.
   let element: AXProxyTable
@@ -190,6 +252,13 @@ final class AXProxyRows {
     NSAccessibility.post(element: element, notification: .selectedRowsChanged)
   }
 
+  /// The proxy of one table row (nil for an index the table does not have), for a view that the proxy lists as a
+  /// child and that names the proxy as its parent.
+  func rowElement(forRow row: Int) -> AXProxyRow? {
+    let rows = element.currentRows()
+    return rows.indices.contains(row) ? rows[row] : nil
+  }
+
   // MARK: Answers for the proxies (main actor)
 
   fileprivate var rowCount: Int { table?.numberOfRows ?? 0 }
@@ -200,10 +269,31 @@ final class AXProxyRows {
   }
 
   fileprivate func isRowSelected(_ row: Int) -> Bool {
-    table?.selectedRowIndexes.contains(row) ?? false
+    guard let table, row >= 0, row < table.numberOfRows else { return false }
+    if let isSelected { return isSelected(row) }
+    return table.selectedRowIndexes.contains(row)
   }
 
-  fileprivate var selectedRowIndexes: IndexSet { table?.selectedRowIndexes ?? IndexSet() }
+  fileprivate var selectedRowIndexes: IndexSet {
+    guard let table else { return IndexSet() }
+    guard let isSelected else { return table.selectedRowIndexes }
+    return IndexSet((0..<table.numberOfRows).filter { isSelected($0) })
+  }
+
+  fileprivate func rowChildren(_ row: Int) -> [NSView] {
+    guard let table, row >= 0, row < table.numberOfRows else { return [] }
+    return children?(row) ?? []
+  }
+
+  fileprivate func rowActionNames(_ row: Int) -> [String] {
+    guard let table, row >= 0, row < table.numberOfRows else { return [] }
+    return customActionNames?(row) ?? []
+  }
+
+  fileprivate func performRowAction(_ row: Int, _ name: String) -> Bool {
+    guard let table, row >= 0, row < table.numberOfRows else { return false }
+    return performCustomAction?(row, name) ?? false
+  }
 
   fileprivate var visibleRowRange: Range<Int> {
     guard let table else { return 0..<0 }
