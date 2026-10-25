@@ -1,0 +1,179 @@
+{
+  "testNodes": [
+    {
+      "nodeType": "Test Plan",
+      "name": "ArktShellUITests",
+      "result": "Failed",
+      "children": [
+        {
+          "nodeType": "UI test bundle",
+          "name": "ArktShellUITests",
+          "result": "Failed",
+          "children": [
+            {
+              "nodeType": "Test Suite",
+              "name": "FixtureTests",
+              "result": "Failed",
+              "children": [
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_KB001_passes()",
+                  "result": "Passed",
+                  "duration": "5s",
+                  "durationInSeconds": 5.0
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_KB002_fails()",
+                  "result": "Failed",
+                  "duration": "6s",
+                  "durationInSeconds": 6.0,
+                  "children": [
+                    {
+                      "nodeType": "Failure Message",
+                      "name": "FixtureTests.swift:10: XCTAssertTrue failed - see #999 for context (#998)"
+                    }
+                  ]
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_KB003_expected()",
+                  "result": "Expected Failure",
+                  "duration": "7s",
+                  "durationInSeconds": 7.0,
+                  "children": [
+                    {
+                      "nodeType": "Failure Message",
+                      "name": "Outline rows of #777 are not in the tree (#269)"
+                    }
+                  ]
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_KB004_flaky()",
+                  "result": "Skipped",
+                  "duration": "0s",
+                  "durationInSeconds": 0.1,
+                  "children": [
+                    {
+                      "nodeType": "Failure Message",
+                      "name": "FixtureTests.swift:30: Test skipped - flaky: #42"
+                    }
+                  ]
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_BH001_restorePart()",
+                  "result": "Passed",
+                  "duration": "8s",
+                  "durationInSeconds": 8.0
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_BH002_searchPlaceholder()",
+                  "result": "Skipped",
+                  "duration": "0s",
+                  "durationInSeconds": 0.2,
+                  "children": [
+                    {
+                      "nodeType": "Failure Message",
+                      "name": "#111: Archive search UI not implemented"
+                    }
+                  ]
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_BH004_repeated()",
+                  "result": "Failed",
+                  "duration": "30s",
+                  "durationInSeconds": 30.0,
+                  "children": [
+                    {
+                      "nodeType": "Repetition",
+                      "name": "Repetition 1",
+                      "result": "Passed",
+                      "duration": "10s",
+                      "durationInSeconds": 10.0
+                    },
+                    {
+                      "nodeType": "Repetition",
+                      "name": "Repetition 2",
+                      "result": "Failed",
+                      "duration": "20s",
+                      "durationInSeconds": 20.5,
+                      "children": [
+                        {
+                          "nodeType": "Failure Message",
+                          "name": "FixtureTests.swift:40: failed on the second repetition (#1234)"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_BH005_repeatedOnDevice()",
+                  "result": "Passed",
+                  "duration": "24s",
+                  "durationInSeconds": 24.0,
+                  "children": [
+                    {
+                      "nodeType": "Test Case Run",
+                      "name": "My Mac",
+                      "result": "Passed",
+                      "duration": "24s",
+                      "durationInSeconds": 24.0,
+                      "children": [
+                        {
+                          "nodeType": "Repetition",
+                          "name": "Repetition 1",
+                          "result": "Passed",
+                          "duration": "11s",
+                          "durationInSeconds": 11.0
+                        },
+                        {
+                          "nodeType": "Repetition",
+                          "name": "Repetition 2",
+                          "result": "Passed",
+                          "duration": "13s",
+                          "durationInSeconds": 13.5
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_GS001_passes()",
+                  "result": "Passed",
+                  "duration": "4s",
+                  "durationInSeconds": 4.0
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_GS002_manual()",
+                  "result": "Skipped",
+                  "duration": "0s",
+                  "durationInSeconds": 0.3,
+                  "children": [
+                    {
+                      "nodeType": "Failure Message",
+                      "name": "GS-002: XCUITest scroll has no gesture phases; manual check in #26"
+                    }
+                  ]
+                },
+                {
+                  "nodeType": "Test Case",
+                  "name": "test_E_infra()",
+                  "result": "Passed",
+                  "duration": "1s",
+                  "durationInSeconds": 1.0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "testNodes": [
+    {
+      "nodeType": "Test Suite",
+      "name": "FixtureTests",
+      "result": "Passed",
+      "children": [
+        {
+          "nodeType": "Test Case",
+          "name": "test_KB001_passes()",
+          "result": "Passed",
+          "duration": "5s",
+          "durationInSeconds": 5.0
+        },
+        {
+          "nodeType": "Test Case",
+          "name": "test_KB850_BH001_typo()",
+          "result": "Passed",
+          "duration": "6s",
+          "durationInSeconds": 6.0
+        },
+        {
+          "nodeType": "Test Case",
+          "name": "test_GS777_typo()",
+          "result": "Failed",
+          "duration": "7s",
+          "durationInSeconds": 7.0
+        }
+      ]
+    }
+  ]
+}

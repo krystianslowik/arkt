@@ -1,0 +1,3 @@
+BH-001 (search)	Search UI is not implemented	#111
+BH-002 (search)	Search UI is not implemented	#112
+BH-003	Clearing is not implemented	#85
