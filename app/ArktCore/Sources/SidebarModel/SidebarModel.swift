@@ -267,10 +267,11 @@ public struct Sidebar: Hashable, Sendable {
     customTitle: String? = nil,
     lastActiveAt: Date? = nil,
     in location: Location,
+    at index: Int? = nil,
     createdAt: Date = .now
   ) throws -> NodeID {
     let tab = TabItem(url: url, title: title, customTitle: customTitle, lastActiveAt: lastActiveAt)
-    return try insert(.tab(tab), in: location, createdAt: createdAt)
+    return try insert(.tab(tab), in: location, at: index, createdAt: createdAt)
   }
 
   @discardableResult
@@ -447,12 +448,19 @@ public struct Sidebar: Hashable, Sendable {
     if !isValid { throw SidebarError.invalidDestination(location) }
   }
 
-  mutating func insert(_ kind: NodeKind, in location: Location, createdAt: Date) throws -> NodeID {
+  /// `index` is the position in the location's child order, clamped; nil appends (BH-079: Cmd-T passes 0).
+  mutating func insert(_ kind: NodeKind, in location: Location, at index: Int? = nil, createdAt: Date) throws -> NodeID {
     try validate(location, accepting: kind)
     let node = Node(kind: kind, parent: location, createdAt: createdAt)
     guard depth(ofChildIn: location) <= Self.maximumNestingDepth else { throw SidebarError.nestingTooDeep(node.id) }
     nodes[node.id] = node
-    childOrder[location, default: []].append(node.id)
+    var siblings = childOrder[location, default: []]
+    if let index {
+      siblings.insert(node.id, at: min(max(index, 0), siblings.count))
+    } else {
+      siblings.append(node.id)
+    }
+    childOrder[location] = siblings
     return node.id
   }
 

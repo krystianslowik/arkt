@@ -31,6 +31,20 @@ struct SidebarSourceContractTests {
     _ = observation
   }
 
+  /// Cmd-T opens on top (BH-079, #293): a tab added at index 0 lands before its siblings on both sources.
+  @Test(arguments: SourceKind.allCases)
+  func addTabAtIndexZeroLandsOnTopAndEmitsStructure(kind: SourceKind) throws {
+    let source = kind.make()
+    let space = try source.addSpace(title: "S")
+    let a = try source.addTab(url: Self.urlA, title: "A", in: .today(space))
+    var changes: [SidebarChange] = []
+    let observation = source.observe { changes.append($0) }
+    let b = try source.addTab(url: Self.urlB, title: "B", in: .today(space), at: 0)
+    #expect(source.children(of: .today(space)) == [b, a])
+    #expect(changes == [.structure(.today(space))])
+    _ = observation
+  }
+
   @Test(arguments: SourceKind.allCases)
   func addSpaceAppendsAndEmitsSpaceAdded(kind: SourceKind) throws {
     let source = kind.make()
