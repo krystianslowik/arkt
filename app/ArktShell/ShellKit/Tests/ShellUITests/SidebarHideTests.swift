@@ -46,6 +46,8 @@ struct SidebarHideTests {
     let layout = ShellLayout.compute(bounds: bounds, sidebarWidth: 190, sidebarVisible: false, metrics: metrics)
     #expect(layout.revealEdgeFrame.maxX <= layout.cardFrame.minX)
     #expect(layout.revealEdgeFrame.width > 0)
+    // No gap between the strip and the overlay: the pointer goes from one straight onto the other.
+    #expect(layout.revealEdgeFrame.maxX >= layout.sidebarFrame.minX)
   }
 
   // MARK: Menu (KB-017)

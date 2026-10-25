@@ -25,9 +25,10 @@ public struct ShellMetrics: Sendable, Equatable {
   /// Gap between the hover-revealed overlay sidebar and the window's top, left and bottom edges (BH-004).
   /// PARITY(NEEDS-RUNTIME-CHECK RT-10): the card's inset until Arc's overlay is measured.
   public var sidebarOverlayInset: CGFloat = 10
-  /// Width of the strip at the window's left edge that reveals the hidden sidebar (BH-004, GS-018). It lies inside
-  /// the gutter left of the card. PARITY(NEEDS-RUNTIME-CHECK RT-10).
-  public var sidebarRevealEdgeWidth: CGFloat = 8
+  /// Width of the strip at the window's left edge that reveals the hidden sidebar (BH-004, GS-018). It fills the
+  /// gutter left of the card and reaches the overlay (`sidebarOverlayInset`), so a pointer between the two never
+  /// counts as having left. PARITY(NEEDS-RUNTIME-CHECK RT-10).
+  public var sidebarRevealEdgeWidth: CGFloat = 10
 
   /// "Arc 1.168" marks a value from `docs/plans/2026-10-23-arc-measurements.md` (one 2x window, dark, not key,
   /// Toolbar on).

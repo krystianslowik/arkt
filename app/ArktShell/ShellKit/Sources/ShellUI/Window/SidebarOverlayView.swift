@@ -91,6 +91,10 @@ public final class SidebarOverlayView: NSView {
   public override var wantsUpdateLayer: Bool { true }
 
   var offsetForTesting: CGFloat { offset }
+  /// The scheduled reveal or conceal, if any: tests await it instead of sleeping.
+  var pendingForTesting: Task<Void, Never>? { pending }
+  /// Test hook: called with the offset on every spring frame.
+  var onFrameForTesting: (@MainActor (CGFloat) -> Void)?
 
   private var reducesMotion: Bool {
     reduceMotionForTesting ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -252,8 +256,10 @@ public final class SidebarOverlayView: NSView {
     driver.animate(in: self, from: Double(from), to: Double(target), initialVelocity: velocity,
                    parameters: preset.parameters,
                    onUpdate: { [weak self] value in
-                     self?.offset = CGFloat(value)
-                     self?.present()
+                     guard let self else { return }
+                     self.offset = CGFloat(value)
+                     self.present()
+                     self.onFrameForTesting?(self.offset)
                    },
                    completion: { [weak self] finished in
                      guard let self else { return }

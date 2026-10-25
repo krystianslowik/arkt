@@ -160,32 +160,36 @@ final class SidebarHideTests: XCTestCase {
     await waitForSettle("revealed") { self.overlay.reveal() }
     overlay.mouseButtonsDown = { true }
     overlay.pointerLeft()
-    try await Task.sleep(for: .milliseconds(50))
+    await overlay.pendingForTesting?.value
     XCTAssertTrue(overlay.isRevealed, "a drag out of the overlay keeps it")
+    XCTAssertNotNil(overlay.pendingForTesting, "it checks again when the button may be up")
     overlay.mouseButtonsDown = { false }
     overlay.pointerIsInside = { true }
     overlay.pointerLeft()
-    try await Task.sleep(for: .milliseconds(50))
+    await overlay.pendingForTesting?.value
     XCTAssertTrue(overlay.isRevealed, "the pointer is back inside")
+    XCTAssertNil(overlay.pendingForTesting)
   }
 
   func testEdgeIsIgnoredWhileTheSidebarIsVisibleOrAButtonIsHeld() async throws {
     root.pointerReachedRevealEdge()
-    try await Task.sleep(for: .milliseconds(30))
+    XCTAssertNil(overlay.pendingForTesting, "docked: nothing scheduled")
     XCTAssertFalse(overlay.isRevealed)
     controller.toggleSidebarVisibility(nil)
     overlay.mouseButtonsDown = { true }       // the edge drag that hid it is still going
     root.pointerReachedRevealEdge()
-    try await Task.sleep(for: .milliseconds(30))
+    XCTAssertNil(overlay.pendingForTesting, "button held: nothing scheduled")
     XCTAssertFalse(overlay.isRevealed)
   }
 
   func testLeavingTheEdgeBeforeTheDelayCancelsTheReveal() async throws {
     controller.toggleSidebarVisibility(nil)
-    overlay.revealDelay = .milliseconds(80)
+    overlay.revealDelay = .seconds(60)
     root.pointerReachedRevealEdge()
+    let scheduled = try XCTUnwrap(overlay.pendingForTesting)
     root.pointerLeftRevealEdge()
-    try await Task.sleep(for: .milliseconds(160))
+    XCTAssertNil(overlay.pendingForTesting)
+    await scheduled.value                     // returns at once: cancelled during its delay
     XCTAssertFalse(overlay.isRevealed)
     XCTAssertTrue(overlay.isHidden)
   }
@@ -193,11 +197,19 @@ final class SidebarHideTests: XCTestCase {
   func testRevealIsInterruptibleWithoutAJump() async throws {
     controller.toggleSidebarVisibility(nil)
     overlay.reduceMotionForTesting = false
-    overlay.reveal()
-    // Let a few frames run, then turn around mid-flight.
-    let deadline = Date().addingTimeInterval(1)
-    while overlay.offsetForTesting < -150, Date() < deadline { try await Task.sleep(for: .milliseconds(2)) }
+    let concealed = overlay.offsetForTesting
+    // Turn around mid-flight, on the frame the reveal passes -150 pt.
+    await withCheckedContinuation { (midFlight: CheckedContinuation<Void, Never>) in
+      overlay.onFrameForTesting = { [weak self] offset in
+        guard offset >= -150 else { return }
+        self?.overlay.onFrameForTesting = nil
+        midFlight.resume()
+      }
+      overlay.reveal()
+    }
     let before = overlay.offsetForTesting
+    XCTAssertGreaterThan(before, concealed, "the reveal was under way")
+    XCTAssertLessThan(before, 0, "and not yet at rest")
     overlay.conceal()
     XCTAssertEqual(overlay.offsetForTesting, before, accuracy: 0.001, "the conceal starts where the reveal was")
     XCTAssertTrue(overlay.isAnimating)
@@ -244,7 +256,8 @@ final class SidebarHideTests: XCTestCase {
     // Docked again, every button is back at its place in the sidebar.
     controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
-    try await Task.sleep(for: .milliseconds(100))           // AppKit's own titlebar pass after the buttons show
+    // The buttons are placed again one main-queue turn after they show (AppKit's own titlebar pass): wait that turn.
+    await withCheckedContinuation { (turn: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { turn.resume() } }
     for (index, kind) in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].enumerated() {
       let button = try XCTUnwrap(window.standardWindowButton(kind))
       let frame = button.convert(button.bounds, to: nil)
