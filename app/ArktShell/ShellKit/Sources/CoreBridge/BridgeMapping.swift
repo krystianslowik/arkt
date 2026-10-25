@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 import ShellUI
 import SidebarModel
 
@@ -85,24 +86,41 @@ enum BridgeMapping {
   /// compares.
   static func modelTheme(_ theme: SpaceThemeInfo) -> SidebarModel.SpaceTheme {
     SidebarModel.SpaceTheme(
-      baseColors: theme.baseColors.map(modelColor), overlayColors: theme.overlayColors.map(modelColor),
+      baseColors: theme.baseColors.map { modelColor($0) },
+      overlayColors: theme.overlayColors.map { modelColor($0) },
       texture: theme.texture, isDark: theme.isDark)
   }
+
+  private static let logger = Logger(subsystem: "dev.arkt.shell", category: "bridge")
 
   /// The model stores sRGB components and `rgba(_:)` reads them back as sRGB, so a Display P3 color is converted, not
   /// copied: copying P3 components would read back as a different (less saturated) color. Extended sRGB keeps a P3
   /// color outside the sRGB gamut as components outside 0...1, which Arc's stored themes also use.
-  static func modelColor(_ color: ShellUI.RGBA) -> SidebarModel.RGBA {
+  ///
+  /// A failed conversion never crashes (#296): the components are clamped into 0...1 and stored as they are, and the
+  /// fault is logged. `convert` is injectable so the fault path is testable.
+  static func modelColor(_ color: ShellUI.RGBA,
+                         convert: (CGColor) -> [CGFloat]? = sRGBComponents) -> SidebarModel.RGBA {
     switch color.space {
     case .sRGB:
       return SidebarModel.RGBA(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
     case .displayP3:
-      guard let extendedSRGB = CGColorSpace(name: CGColorSpace.extendedSRGB),
-            let converted = color.cgColor.converted(to: extendedSRGB, intent: .relativeColorimetric, options: nil),
-            let c = converted.components, c.count == 4
-      else { preconditionFailure("Display P3 always converts to extended sRGB") }
-      return SidebarModel.RGBA(red: Double(c[0]), green: Double(c[1]), blue: Double(c[2]), alpha: Double(c[3]))
+      if let c = convert(color.cgColor) {
+        return SidebarModel.RGBA(red: Double(c[0]), green: Double(c[1]), blue: Double(c[2]), alpha: Double(c[3]))
+      }
+      logger.fault("Display P3 color failed to convert to extended sRGB; storing clamped components")
+      return SidebarModel.RGBA(red: color.red.clampedToUnit, green: color.green.clampedToUnit,
+                               blue: color.blue.clampedToUnit, alpha: color.alpha.clampedToUnit)
     }
+  }
+
+  /// Extended sRGB components (red, green, blue, alpha), nil when the color cannot convert.
+  static func sRGBComponents(_ color: CGColor) -> [CGFloat]? {
+    guard let extendedSRGB = CGColorSpace(name: CGColorSpace.extendedSRGB),
+          let converted = color.converted(to: extendedSRGB, intent: .relativeColorimetric, options: nil),
+          let c = converted.components, c.count == 4
+    else { return nil }
+    return c
   }
 
   static func theme(_ theme: SidebarModel.SpaceTheme?) -> SpaceThemeInfo {
@@ -117,6 +135,10 @@ enum BridgeMapping {
   static func rgba(_ color: SidebarModel.RGBA) -> ShellUI.RGBA {
     ShellUI.RGBA(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha, space: .sRGB)
   }
+}
+
+extension Double {
+  fileprivate var clampedToUnit: Double { min(max(self, 0), 1) }
 }
 
 extension SpaceThemeInfo {
