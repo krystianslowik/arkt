@@ -152,12 +152,12 @@ final class ArcImportTests: ArktUITestCase {
     in app: XCUIApplication, requiring lines: [String], file: StaticString = #filePath, line: UInt = #line
   ) {
     let title = Self.importedSheetTitle
-    var host: XCUIElement?
+    var found: XCUIElement?
     XCTAssertTrue(Waits.until("sheet titled \(title)", file: file, line: line) {
-      host = Self.importedSheet(in: app)
-      return host != nil
+      found = Self.importedSheet(in: app)
+      return found != nil
     }, file: file, line: line)
-    guard let host else { return }
+    guard let host = found else { return }
     var shown: [String] = []
     XCTAssertTrue(Waits.until("sheet lines \(lines) (shown: \(shown))", file: file, line: line) {
       shown = host.staticTexts.allElementsBoundByIndex.flatMap { text -> [String] in
