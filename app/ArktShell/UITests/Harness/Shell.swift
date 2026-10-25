@@ -74,6 +74,95 @@ enum Shell {
   static func spaceDots(_ app: XCUIApplication) -> XCUIElementQuery {
     app.buttons.matching(identifier: AXID.Sidebar.spaceDot)
   }
+
+  /// Result rows of the open command bar (`commandBar.row`). Scoped to the results table: a whole-app
+  /// `descendants` query also walks the web view and can stall the test.
+  static func commandBarRows(_ app: XCUIApplication) -> XCUIElementQuery {
+    app.tables[AXID.CommandBar.results].tableRows.matching(identifier: AXID.CommandBar.row)
+  }
+
+  /// Result rows from top to bottom. Screen frames use a top-left origin, so a smaller `minY` is higher.
+  static func commandBarRowsInOrder(_ app: XCUIApplication) -> [XCUIElement] {
+    commandBarRows(app).allElementsBoundByIndex
+      .filter(\.exists)
+      .sorted { lhs, rhs in
+        if lhs.frame.minY != rhs.frame.minY { return lhs.frame.minY < rhs.frame.minY }
+        return lhs.frame.minX < rhs.frame.minX
+      }
+  }
+
+  /// The one selected result row, or nil when selection is missing or ambiguous.
+  static func selectedCommandBarRow(_ app: XCUIApplication) -> XCUIElement? {
+    let selected = commandBarRowsInOrder(app).filter(\.isSelected)
+    guard selected.count == 1 else { return nil }
+    return selected[0]
+  }
+
+  /// Labels, captions and selection, for a failure message. Empty when the bar shows no rows.
+  static func commandBarRowSummary(_ app: XCUIApplication) -> String {
+    let rows = commandBarRowsInOrder(app)
+    if rows.isEmpty { return "no command bar rows" }
+    return rows.map { row in
+      let value = (row.value as? String) ?? String(describing: row.value ?? "nil")
+      return "\(row.label)=\(value)\(row.isSelected ? " selected" : "")"
+    }.joined(separator: " | ")
+  }
+
+  /// Moves Down until the selected row has this label and value. Does not press Enter.
+  @discardableResult
+  static func selectCommandBarRow(
+    _ app: XCUIApplication, label: String, value: String,
+    file: StaticString = #filePath, line: UInt = #line
+  ) -> Bool {
+    let present = Waits.until(
+      "command bar row \(label) value \(value); \(commandBarRowSummary(app))", file: file, line: line
+    ) {
+      commandBarRowsInOrder(app).contains { $0.label == label && ($0.value as? String) == value }
+    }
+    guard present else { return false }
+    let count = max(commandBarRowsInOrder(app).count, 1)
+    for _ in 0..<count {
+      if let selected = selectedCommandBarRow(app),
+         selected.label == label, (selected.value as? String) == value {
+        return true
+      }
+      let before = selectedCommandBarRow(app)?.label
+      app.typeKey(.downArrow, modifierFlags: [])
+      let moved = Waits.until(
+        "selection to leave \(before ?? "none"); \(commandBarRowSummary(app))", file: file, line: line
+      ) {
+        let now = selectedCommandBarRow(app)
+        if now?.label == label, (now?.value as? String) == value { return true }
+        return now?.label != before
+      }
+      if !moved { return false }
+    }
+    XCTFail("could not select \(label) (\(value)); \(commandBarRowSummary(app))", file: file, line: line)
+    return false
+  }
+
+  /// Presses Return (or Cmd-Return / Opt-Return) on the selected result. Refuses a `Search` row: Enter is not
+  /// pressed and this returns false, so a search is never committed. Callers that mean to commit assert true.
+  @discardableResult
+  static func commitSelectedRow(
+    _ app: XCUIApplication,
+    modifiers: XCUIElement.KeyModifierFlags = [],
+    file: StaticString = #filePath,
+    line: UInt = #line
+  ) -> Bool {
+    guard let selected = selectedCommandBarRow(app) else {
+      XCTFail("no selected command bar row; \(commandBarRowSummary(app))", file: file, line: line)
+      return false
+    }
+    guard let caption = selected.value as? String else {
+      XCTFail("selected command bar row has no caption; \(commandBarRowSummary(app))", file: file, line: line)
+      return false
+    }
+    // A Search row would open a search engine. Never press Enter on it (plan U11, Rules: "No network").
+    guard caption != "Search" else { return false }
+    commandBarField(app).typeKey(.return, modifierFlags: modifiers)
+    return true
+  }
 }
 
 extension ArktUITestCase {
