@@ -277,8 +277,12 @@ struct ArchiveCoordinatorTests {
     let items = harness.coordinator.archive([harness.today[0], harness.today[1]], reason: .manual)
 
     #expect(harness.coordinator.flushBlocking())  // synchronous: the writer task never got the main actor
+    // The first await frees the main actor, so the writer may already have sent its (identical) add; the first call
+    // is still the blocking flush's, since the writer could not start before it returned.
+    let added = await harness.store.addCalls
+    #expect(added.first == .init(ids: items.map(\.id), policy: .replace))
+    #expect(added.allSatisfy { $0 == .init(ids: items.map(\.id), policy: .replace) })
     #expect(await harness.store.stored.count == 2)
-    #expect(await harness.store.addCalls == [.init(ids: items.map(\.id), policy: .replace)])
 
     await harness.drain()  // the writer sends the same add again: a harmless `.replace`
     #expect(Set(await harness.store.stored.values) == Set(items))
@@ -327,7 +331,8 @@ struct ArchiveCoordinatorTests {
     }
 
     #expect(harness.coordinator.flushBlocking())
-    #expect(await harness.store.calls == [.add(first.map(\.id)), .add((first + second).map(\.id))])
+    // Once the main actor runs again, the writer may send `second` once more after these two.
+    #expect(Array(await harness.store.calls.prefix(2)) == [.add(first.map(\.id)), .add((first + second).map(\.id))])
     #expect(Set(await harness.store.stored.values) == Set(first + second))
 
     await harness.drain()

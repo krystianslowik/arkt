@@ -17,7 +17,8 @@ public enum BlockingFlush {
     let outcome = Outcome<T>()
     let done = DispatchSemaphore(value: 0)
     // Detached on purpose: a task created on the main actor would inherit it and never start while the caller waits.
-    Task.detached {
+    // A semaphore wait donates no priority, so the task asks for it; awaiting a store call escalates that call too.
+    Task.detached(priority: .high) {
       let result = await operation()
       outcome.value.withLock { $0 = result }
       done.signal()
