@@ -79,7 +79,9 @@ launch (part C's acceptance is the FakeEngine app; the real-engine run is W3-9).
   cancelled at a leave-site prompt leaves the stored sidebar byte-identical (ShellUI cannot read `lastActiveAt` back,
   so deferring replaces restoring). A cancelled quit does not undo `prepareForTermination`'s stamps.
 - **Engine build data:** the Engine configuration builds without `DEBUG`, so it ignored `ARKT_DATA_DIR`; it now
-  accepts the overrides like Debug and Profile. Without them an Engine run opens the real Arkt data folder.
+  accepts the overrides like Debug and Profile (`ArktEnvironmentOverrides` YES). Without them an Engine run opens the
+  real Arkt data folder. **W3-11 must ship the engine bundle from a configuration that does not accept the overrides**
+  (no `ARKT_CHROMIUM_ENGINE`-style condition in `AppEnvironment`, `ArktEnvironmentOverrides` NO).
 
 ### Part D: the menu
 
