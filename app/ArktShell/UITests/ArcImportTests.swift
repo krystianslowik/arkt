@@ -16,7 +16,7 @@ final class ArcImportTests: ArktUITestCase {
     let importButton = app.buttons[AXID.EmptyState.importFromArc]
     XCTAssertTrue(waitFor(importButton))
     importButton.click()
-    dismissImportedSheet(in: app)
+    dismissImportedSheet(in: app, requiring: Self.firstImportLines)
 
     let dots = Shell.spaceDots(app)
     XCTAssertTrue(Waits.until("2 Space dots") { dots.count == ArcFixture.expected.spaces })
@@ -24,7 +24,7 @@ final class ArcImportTests: ArktUITestCase {
     XCTAssertTrue(Waits.until("2 favorite tiles") { tiles.count == ArcFixture.expected.favorites })
 
     showArchive(in: app)
-    XCTAssertTrue(waitForArchiveCount(ArcFixture.expected.archive, in: app))
+    XCTAssertTrue(waitForArchiveRows(ArcFixture.expected.archive, in: app))
     try assertArcCopyUnchanged(checksums, in: sandbox)
   }
 
@@ -33,17 +33,25 @@ final class ArcImportTests: ArktUITestCase {
     let sandbox = try Sandbox()
     let checksums = try ArcFixture.render(into: sandbox.arcDirectory, base: server.base)
     let app = try launch(sandbox)
+    // The empty state shows Import from Arc once the availability check found Arc's sidebar file, so the menu
+    // validates against that answer, not the launch default.
+    XCTAssertTrue(waitFor(app.buttons[AXID.EmptyState.importFromArc]))
     try createFirstSpace(in: app)
 
-    let item = try waitForImportMenu(enabled: true, in: app)
+    let item = openImportMenuItem(in: app)
+    XCTAssertTrue(item.isEnabled, "Import from Arc... is disabled with Arc data present")
     item.click()
-    dismissImportedSheet(in: app)
+    dismissImportedSheet(in: app, requiring: Self.firstImportLines)
 
     let dots = Shell.spaceDots(app)
     XCTAssertTrue(Waits.until("3 Space dots") { dots.count == ArcFixture.expected.spaces + 1 })
     try assertArcCopyUnchanged(checksums, in: sandbox)
   }
 
+  /// The second import writes nothing: its sheet reports 0 new Spaces, 0 Favorites added and 0 new archived items
+  /// (the coordinator's counts of what it wrote), and the sidebar and the Archive still hold the first import's
+  /// counts. The Archive window is first opened after the re-import, so the first page it applies is the count
+  /// after both imports; a stale page from before the re-import cannot satisfy the wait.
   func test_E_reimportIsIdempotent() async throws {
     let server = try await fixtureServer()
     let sandbox = try Sandbox()
@@ -53,51 +61,39 @@ final class ArcImportTests: ArktUITestCase {
     let importButton = app.buttons[AXID.EmptyState.importFromArc]
     XCTAssertTrue(waitFor(importButton))
     importButton.click()
-    dismissImportedSheet(in: app)
+    dismissImportedSheet(in: app, requiring: Self.firstImportLines)
 
     let dots = Shell.spaceDots(app)
     XCTAssertTrue(Waits.until("2 Space dots") { dots.count == ArcFixture.expected.spaces })
     let tiles = favoriteTiles(app)
     XCTAssertTrue(Waits.until("2 favorite tiles") { tiles.count == ArcFixture.expected.favorites })
-    showArchive(in: app)
-    XCTAssertTrue(waitForArchiveCount(ArcFixture.expected.archive, in: app))
-    let spacesBefore = dots.count
-    let favoritesBefore = tiles.count
-    guard let archiveBefore = archiveCount(in: app) else {
-      return XCTFail("archive table value was not rows N")
-    }
-    XCTAssertEqual(archiveBefore, ArcFixture.expected.archive)
 
-    let item = try waitForImportMenu(enabled: true, in: app)
+    let item = openImportMenuItem(in: app)
+    XCTAssertTrue(item.isEnabled, "Import from Arc... is disabled after the first import finished")
     item.click()
-    dismissImportedSheet(in: app)
+    // The sheet appears after the import applied, so the counts read after it are the final ones.
+    dismissImportedSheet(in: app, requiring: ["0 new Spaces", "0 favorites added", "0 new archived items"])
 
-    XCTAssertEqual(dots.count, spacesBefore)
-    XCTAssertEqual(spacesBefore, ArcFixture.expected.spaces)
-    XCTAssertTrue(Waits.until("favorite count unchanged") { tiles.count == favoritesBefore })
-    XCTAssertTrue(waitForArchiveCount(archiveBefore, in: app))
-    XCTAssertEqual(archiveBefore, ArcFixture.expected.archive)
+    XCTAssertEqual(dots.count, ArcFixture.expected.spaces)
+    XCTAssertEqual(tiles.count, ArcFixture.expected.favorites)
+    showArchive(in: app)
+    XCTAssertTrue(waitForArchiveRows(ArcFixture.expected.archive, in: app))
     try assertArcCopyUnchanged(checksums, in: sandbox)
   }
 
+  /// With an empty Arc directory the availability check can only answer false, and the launch default is false,
+  /// so the menu item the app validates is disabled whichever answer it read; the empty state offers no import.
   func test_E_importMenuDisabledWithoutArcData() throws {
     let sandbox = try Sandbox()
     let app = try launch(sandbox)
-    XCTAssertTrue(waitFor(Shell.element(app, AXID.EmptyState.root)))
+    XCTAssertTrue(waitFor(app.buttons[AXID.EmptyState.newSpace]))
 
-    // The availability check is async and the menu returns the cached answer, so a single read can be disabled
-    // before the check finishes. The empty-state button is what that check shows; it must not appear.
-    let importButton = app.buttons[AXID.EmptyState.importFromArc]
-    let appeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-      MainActor.assumeIsolated { importButton.exists }
-    }, object: nil)
-    appeared.isInverted = true
-    let result = XCTWaiter().wait(for: [appeared], timeout: Waits.scaled(2))
-    XCTAssertEqual(result, .completed, "Import from Arc appeared with an empty Arc directory")
-
-    let item = try waitForImportMenu(enabled: false, in: app)
-    XCTAssertFalse(item.isEnabled)
+    let item = openImportMenuItem(in: app)
+    XCTAssertFalse(item.isEnabled, "Import from Arc... is enabled with an empty Arc directory")
     app.typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(Waits.until("File menu closed") { !item.isHittable })
+    XCTAssertFalse(app.buttons[AXID.EmptyState.importFromArc].exists,
+                   "Import from Arc appeared with an empty Arc directory")
     try assertArcCopyUnchanged(nil, in: sandbox)
   }
 
@@ -112,7 +108,7 @@ final class ArcImportTests: ArktUITestCase {
     let importButton = app.buttons[AXID.EmptyState.importFromArc]
     XCTAssertTrue(waitFor(importButton))
     importButton.click()
-    dismissImportedSheet(in: app)
+    dismissImportedSheet(in: app, requiring: Self.firstImportLines)
 
     let tiles = favoriteTiles(app)
     XCTAssertTrue(Waits.until("2 favorite tiles") { tiles.count == ArcFixture.expected.favorites })
@@ -129,45 +125,51 @@ final class ArcImportTests: ArktUITestCase {
 
   // MARK: - Import sheet and menu
 
-  /// File > "Import from Arc...". Reopens the menu while the enabled state is stale: validation returns the cached
-  /// availability, and the check that refreshes it applies on the next validation.
-  func waitForImportMenu(
-    enabled: Bool, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
-  ) throws -> XCUIElement {
+  /// The summary lines a first import into an empty profile shows (`ArcImportSummary.lines`), as line prefixes.
+  static var firstImportLines: [String] {
+    let expected = ArcFixture.expected
+    return ["\(counted(expected.spaces, "Space")), ", "\(counted(expected.favorites, "favorite")) added",
+            "\(expected.archive) new archived \(expected.archive == 1 ? "item" : "items")"]
+  }
+
+  private static func counted(_ value: Int, _ noun: String) -> String { "\(value) \(noun)\(value == 1 ? "" : "s")" }
+
+  /// Opens File once and returns "Import from Arc..." when the open menu shows it. AppKit validated the item as the
+  /// menu opened, so its enabled state is the app's answer at that moment. Callers act on it (click, or Escape).
+  func openImportMenuItem(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
     app.activate()
-    var item = app.menuBars.menuItems[Self.importMenuTitle]
-    // One click per opening. A second click before the menu appears would close it again.
-    var awaitingMenu = false
-    XCTAssertTrue(Waits.until("Import from Arc... isEnabled \(enabled)", file: file, line: line) {
-      item = app.menuBars.menuItems[Self.importMenuTitle]
-      // `exists` can be true while the menu is closed. Only a hittable item has been validated.
-      if item.isHittable {
-        awaitingMenu = false
-        if item.isEnabled == enabled { return true }
-        app.typeKey(.escape, modifierFlags: [])
-        return false
-      }
-      if awaitingMenu || app.menuBars.menuItems["New Tab"].isHittable { return false }
-      app.menuBars.menuBarItems["File"].click()
-      awaitingMenu = true
-      return false
-    }, file: file, line: line)
+    app.menuBars.menuBarItems["File"].click()
+    let item = app.menuBars.menuItems[Self.importMenuTitle]
+    // `exists` can be true while the menu is closed; a hittable item is on screen in the open menu.
+    XCTAssertTrue(Waits.until("File menu shows \(Self.importMenuTitle)", file: file, line: line) { item.isHittable },
+                  file: file, line: line)
     return item
   }
 
-  func dismissImportedSheet(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+  /// Waits for the "Imported from Arc" sheet, checks that its text has a line starting with each of `lines` (the
+  /// coordinator's counts of what this import wrote), and closes it with OK.
+  func dismissImportedSheet(
+    in app: XCUIApplication, requiring lines: [String], file: StaticString = #filePath, line: UInt = #line
+  ) {
     let title = Self.importedSheetTitle
     var host: XCUIElement?
     XCTAssertTrue(Waits.until("sheet titled \(title)", file: file, line: line) {
       host = Self.importedSheet(in: app)
       return host != nil
     }, file: file, line: line)
-    let ok = host?.buttons["OK"] ?? app.buttons["OK"]
+    guard let host else { return }
+    var shown: [String] = []
+    XCTAssertTrue(Waits.until("sheet lines \(lines) (shown: \(shown))", file: file, line: line) {
+      shown = host.staticTexts.allElementsBoundByIndex.flatMap { text -> [String] in
+        let strings = [(text.value as? String) ?? "", text.label]
+        return strings.flatMap { $0.components(separatedBy: "\n") }
+      }
+      return lines.allSatisfy { prefix in shown.contains { $0.hasPrefix(prefix) } }
+    }, file: file, line: line)
+    let ok = host.buttons["OK"]
     XCTAssertTrue(waitFor(ok, file: file, line: line), file: file, line: line)
     ok.click()
-    if let host {
-      XCTAssertTrue(waitUntilGone(host, file: file, line: line), file: file, line: line)
-    }
+    XCTAssertTrue(waitUntilGone(host, file: file, line: line), file: file, line: line)
   }
 
   private static func importedSheet(in app: XCUIApplication) -> XCUIElement? {
@@ -183,8 +185,10 @@ final class ArcImportTests: ArktUITestCase {
 
   // MARK: - Counts
 
+  /// Tiles in the Favorites grid. Scoped to `favorites.grid`: a whole-app `descendants` query also walks the web
+  /// view and can stall a wait (#289).
   func favoriteTiles(_ app: XCUIApplication) -> XCUIElementQuery {
-    app.descendants(matching: .any).matching(identifier: AXID.Favorites.tile)
+    app.groups[AXID.Favorites.grid].buttons.matching(identifier: AXID.Favorites.tile)
   }
 
   func tileLabels(_ tiles: XCUIElementQuery) -> [String] {
@@ -197,45 +201,31 @@ final class ArcImportTests: ArktUITestCase {
     return dots.firstIndex { $0.isSelected }
   }
 
+  /// Window > Show Archive: one click on the menu, one on the item once the open menu shows it.
   func showArchive(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-    if app.menuBars.menuItems[Self.importMenuTitle].exists || app.menuBars.menuItems["Show Archive"].exists {
-      app.typeKey(.escape, modifierFlags: [])
-    }
     app.menuBars.menuBarItems["Window"].click()
     let item = app.menuBars.menuItems["Show Archive"]
-    XCTAssertTrue(waitFor(item, file: file, line: line), file: file, line: line)
+    XCTAssertTrue(Waits.until("Window menu shows Show Archive", file: file, line: line) { item.isHittable },
+                  file: file, line: line)
     item.click()
     XCTAssertTrue(waitFor(app.windows[AXID.Archive.window], file: file, line: line), file: file, line: line)
   }
 
-  /// Count encoded as the archive table accessibility value `rows N`, or nil when the value is not that text.
-  /// Out-of-process clients see no `archive.row` children, so this value is the count text the plan asserts.
-  func archiveCount(in app: XCUIApplication) -> Int? {
-    parsedArchiveCount(archiveTableValue(in: app))
+  /// The Archive's rows (`archive.row`), scoped to its table. The table publishes one proxy row per loaded item
+  /// from the page it applied, so the count is the number of items listed; titles are never read.
+  func archiveRows(_ app: XCUIApplication) -> XCUIElementQuery {
+    app.windows[AXID.Archive.window].tables[AXID.Archive.table].tableRows.matching(identifier: AXID.Archive.row)
   }
 
-  /// `archive.window`'s `archive.table` accessibility value, and nothing else. Polling `archive.row` or
-  /// `archive.footer` from XCTest wedges the runner.
-  private func archiveTableValue(in app: XCUIApplication) -> String {
-    let table = app.windows[AXID.Archive.window].tables[AXID.Archive.table]
-    return (table.value as? String) ?? ""
-  }
-
-  private func parsedArchiveCount(_ value: String) -> Int? {
-    let prefix = "rows "
-    guard value.hasPrefix(prefix) else { return nil }
-    return Int(value.dropFirst(prefix.count))
-  }
-
-  /// Waits until the archive table value is `rows <count>`. Returns whether it matched; a timeout fails the test.
-  func waitForArchiveCount(
+  /// Waits until the Archive lists `count` rows. Returns whether it did; a timeout fails the test.
+  func waitForArchiveRows(
     _ count: Int, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
   ) -> Bool {
-    let table = app.windows[AXID.Archive.window].tables[AXID.Archive.table]
-    var observed = ""
-    return Waits.until("archive table value rows \(count) (saw \(observed))", file: file, line: line) {
-      observed = (table.value as? String) ?? ""
-      return self.parsedArchiveCount(observed) == count
+    let rows = archiveRows(app)
+    var observed = 0
+    return Waits.until("\(count) archive rows (saw \(observed))", file: file, line: line) {
+      observed = rows.count
+      return observed == count
     }
   }
 
