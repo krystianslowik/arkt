@@ -85,7 +85,7 @@ struct SpaceEditingTests {
     var sidebar = Sidebar()
     let theme = SpaceTheme(baseColors: [RGBA(red: 0.1, green: 0.2, blue: 0.3)], isDark: true)
     let id = sidebar.addSpace(title: "Space 1", profile: "work", theme: theme)
-    let icon = SpaceIcon(symbol: "star")
+    let icon = SpaceIcon.symbol("star")
     let next = SpaceTheme(baseColors: [RGBA(red: 0, green: 0, blue: 0)], texture: "grain", isDark: true)
 
     sidebar.setIcon(id, to: icon)
@@ -98,7 +98,7 @@ struct SpaceEditingTests {
   @Test func clearingTheIconAndThemeLeavesTheSpace() {
     var sidebar = Sidebar()
     let id = sidebar.addSpace(title: "A", theme: SpaceTheme(baseColors: [RGBA(red: 1, green: 0, blue: 0)]))
-    sidebar.setIcon(id, to: SpaceIcon(symbol: "star"))
+    sidebar.setIcon(id, to: SpaceIcon.symbol("star"))
     sidebar.setIcon(id, to: nil)
     sidebar.setTheme(id, to: nil)
     #expect(sidebar.spaces[id] == Space(id: id, title: "A"))
@@ -107,7 +107,7 @@ struct SpaceEditingTests {
   @Test func settingTheSameIconOrThemeIsANoOp() {
     var sidebar = Sidebar()
     let theme = SpaceTheme(baseColors: [RGBA(red: 1, green: 1, blue: 1)])
-    let icon = SpaceIcon(symbol: "book")
+    let icon = SpaceIcon.symbol("book")
     let id = sidebar.addSpace(title: "A", theme: theme)
     sidebar.setIcon(id, to: icon)
     let before = sidebar
@@ -122,7 +122,8 @@ struct SpaceEditingTests {
   @Test func iconThemeAndOrderSurviveAStorageRoundTrip() throws {
     var (sidebar, ids) = makeSpaces(["A", "B", "C"])
     let theme = SpaceTheme(baseColors: [RGBA(red: 0.2, green: 0.3, blue: 0.4, alpha: 1)], isDark: true)
-    sidebar.setIcon(ids[0], to: SpaceIcon(symbol: "star"))
+    sidebar.setIcon(ids[0], to: SpaceIcon.symbol("star"))
+    sidebar.setIcon(ids[1], to: .emoji("\u{1F680}"))
     sidebar.setTheme(ids[2], to: theme)
     sidebar.moveSpace(ids[2], to: 0)
 
@@ -130,7 +131,8 @@ struct SpaceEditingTests {
 
     #expect(decoded == sidebar)
     #expect(decoded.spaceOrder == [ids[2], ids[0], ids[1]])
-    #expect(decoded.spaces[ids[0]]?.icon == SpaceIcon(symbol: "star"))
+    #expect(decoded.spaces[ids[0]]?.icon == SpaceIcon.symbol("star"))
+    #expect(decoded.spaces[ids[1]]?.icon == .emoji("\u{1F680}"))
     #expect(decoded.spaces[ids[2]]?.theme == theme)
     let object = try #require(try JSONSerialization.jsonObject(with: SidebarStorageFormat.encode(decoded)) as? [String: Any])
     #expect(object["version"] as? Int == SidebarStorageFormat.currentVersion)

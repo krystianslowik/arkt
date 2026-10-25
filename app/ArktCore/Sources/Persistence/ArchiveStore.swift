@@ -14,6 +14,12 @@ public struct ArchiveStore: Sendable {
   /// Archive retention window (30 days, matching Arc; #100 maintainer decision).
   public static let retentionInterval: TimeInterval = 30 * 24 * 60 * 60
 
+  /// `archived_item.format_version`: the version of the stored `NodeSnapshot` JSON. It is versioned apart from the
+  /// sidebar document (`SidebarStorageFormat.currentVersion`) because a snapshot holds no Space data: sidebar format
+  /// 2 added `Space.icon` and left `NodeSnapshot` unchanged, so archive rows stay at 1 and builds that read only
+  /// version 1 keep reading them. Bump this only when `NodeSnapshot`'s stored shape changes.
+  public static let snapshotFormatVersion = 1
+
   let database: ArktDatabase
 
   public init(database: ArktDatabase) { self.database = database }
@@ -50,7 +56,7 @@ public struct ArchiveStore: Sendable {
         try db.execute(
           sql: sql,
           arguments: [
-            row.id, SidebarStorageFormat.currentVersion, row.reason, row.archivedAt, row.sourceKind,
+            row.id, Self.snapshotFormatVersion, row.reason, row.archivedAt, row.sourceKind,
             row.sourceSpaceID, row.sectionKind, row.sectionProfile, row.title, row.url, row.snapshot,
           ])
         written += db.changesCount
@@ -253,7 +259,7 @@ private struct FetchedRow: Sendable {
 
   func item(_ decoder: JSONDecoder) -> ArchivedItem? {
     guard let id = id.flatMap(UUID.init(uuidString:)),
-      let version = formatVersion, version <= SidebarStorageFormat.currentVersion,
+      let version = formatVersion, version <= ArchiveStore.snapshotFormatVersion,
       let reason = reason.flatMap(ArchiveReason.init(rawValue:)),
       let archivedAt, let body = snapshot,
       let snapshot = try? decoder.decode(NodeSnapshot.self, from: body), snapshot.id == id

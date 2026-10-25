@@ -6,7 +6,7 @@
         "id": "D1000000-0000-4000-8000-0000000000A1",
         "title": "Alpha",
         "profile": "default",
-        "icon": { "symbol": "star" },
+        "icon": { "type": "symbol", "symbol": "star" },
         "theme": {
           "baseColors": [{ "red": 0.2, "green": 0.4, "blue": 0.6, "alpha": 1 }],
           "overlayColors": [],
@@ -58,7 +58,12 @@
       ]
     },
     {
-      "space": { "id": "D1000000-0000-4000-8000-0000000000B1", "title": "Beta", "profile": "work" },
+      "space": {
+        "id": "D1000000-0000-4000-8000-0000000000B1",
+        "title": "Beta",
+        "profile": "work",
+        "icon": { "type": "emoji", "emoji": "\ud83d\ude80" }
+      },
       "pinned": [],
       "today": []
     }

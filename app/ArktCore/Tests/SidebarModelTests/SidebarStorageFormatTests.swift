@@ -102,13 +102,46 @@ struct SidebarStorageFormatTests {
     let fixture = try Self.fixtureData(version: "sidebar-v2")
     let sidebar = try SidebarStorageFormat.decode(fixture)
     let alpha = try #require(UUID(uuidString: "D1000000-0000-4000-8000-0000000000A1"))
-    #expect(sidebar.spaces[alpha]?.icon == SpaceIcon(symbol: "star"))
+    #expect(sidebar.spaces[alpha]?.icon == .symbol("star"))
     let beta = try #require(UUID(uuidString: "D1000000-0000-4000-8000-0000000000B1"))
-    #expect(sidebar.spaces[beta]?.icon == nil)
+    #expect(sidebar.spaces[beta]?.icon == .emoji("\u{1F680}"))
     let reencoded = try SidebarStorageFormat.encode(sidebar)
     let expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? NSDictionary)
     let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
     #expect(actual == expected)
+  }
+
+  /// The stored icon shape is explicit and tagged, like `NodeKind`: one key names the case, one holds its value.
+  @Test func spaceIconEncodesAsATaggedObject() throws {
+    func object(_ icon: SpaceIcon) throws -> NSDictionary {
+      try #require(try JSONSerialization.jsonObject(with: SidebarStorageFormat.makeEncoder().encode(icon)) as? NSDictionary)
+    }
+    #expect(try object(.symbol("star")) == (["type": "symbol", "symbol": "star"] as NSDictionary))
+    #expect(try object(.emoji("\u{1F680}")) == (["type": "emoji", "emoji": "\u{1F680}"] as NSDictionary))
+    for icon in [SpaceIcon.symbol("star"), .emoji("\u{1F468}\u{200D}\u{1F4BB}")] {
+      let data = try SidebarStorageFormat.makeEncoder().encode(icon)
+      #expect(try SidebarStorageFormat.makeDecoder().decode(SpaceIcon.self, from: data) == icon)
+    }
+    let unknown = Data(#"{"type":"sticker","sticker":"x"}"#.utf8)
+    #expect(throws: DecodingError.self) { try SidebarStorageFormat.makeDecoder().decode(SpaceIcon.self, from: unknown) }
+  }
+
+  /// A version 1 document has no icon field. An `icon` key in one is not read, whether it holds a version 2 icon
+  /// or anything else.
+  @Test(arguments: [0, 1])
+  func version1DocumentIgnoresAnIconKey(variant: Int) throws {
+    let icon: Any = if variant == 0 { ["type": "symbol", "symbol": "star"] as [String: String] } else { 42 }
+    let data = try Self.mutatedFixture { json in
+      var spaces = try #require(json["spaces"] as? [[String: Any]])
+      var space = try #require(spaces[0]["space"] as? [String: Any])
+      space["icon"] = icon
+      spaces[0]["space"] = space
+      json["spaces"] = spaces
+    }
+    let sidebar = try SidebarStorageFormat.decode(data)
+    let withoutKey = try SidebarStorageFormat.decode(Self.fixtureData())
+    #expect(sidebar == withoutKey)
+    #expect(sidebar.spaces.values.allSatisfy { $0.icon == nil })
   }
 
   @Test func decodesVersion1Fixture() throws {
