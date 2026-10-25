@@ -202,10 +202,10 @@ one this issue designs. See open question 5.
 | Clear Filters | text link, 12 regular `secondaryText`, hover `primaryText`, 12 after the last chip | new |
 | Banner | margins 0 top (after the title bar or chips) / 12 sides / 10 below, radius 12, `sidebarItemBackground`, no edge, padding 12; icon tile 32 x 32 radius 9 `sidebarItemHovered`, glyph 16 pt `primaryText`; line 1 12 semibold `primaryText`, line 2 12 regular `secondaryText`; actions on their own row 10 below the text, aligned with it: Got It (24 high neutral pill), then the Open Settings text link 14 after it | new |
 | List field | inset 8 from the window sides, radius 10, `ArchiveTokens.listField` (light graphite 3.5 %, dark black 14 %), 4 pt vertical padding | new |
-| Rows | `SidebarMetrics`: 34 high fill in a 37 pt pitch (3 between rows), radius 9 (`rowCornerRadius`), 4 inset from the field's sides; favicon 16 at 10 leading, title 8 after the favicon, 13 medium `primaryText`, tail truncation | SidebarMetrics |
+| Rows | 34 high fill (`rowBackgroundHeight`), radius 9 (`rowCornerRadius`), favicon 16 (`faviconSize`) at 10 leading (`faviconLeading`); 3 between rows, a 37 pt pitch, deliberately tighter than the sidebar's 41 `rowPitch` so a long archive scans faster; 4 inset from the field's sides; title 8 after the favicon, 13 medium `primaryText` (the tab switcher's row title, one step below the sidebar's 14 `titleFontSize` to suit a list window), tail truncation | SidebarMetrics, adapted |
 | Row states | selected `tabCurrent` + `tabCurrentShadow`; hover `sidebarItemBackground`; no hairlines between rows | ShellTokens |
 | Folder row | `folder` glyph 16 pt `sidebarForeground` in the favicon slot, then the title and its tab count (13 regular `secondaryText`, 6 after the title); when opened by a search match, the sidebar's 10 pt disclosure chevron leads and matching children follow indented 22 (`indentationPerLevel` plus the chevron) without trailing metadata | SidebarMetrics |
-| Trailing metadata | 16 after the title: the Space's 7 pt color dot (Little Arkt: its 10 pt window glyph in `sidebarForeground`), 8 gap, then the relative time in a 58 pt left-aligned column, 12 regular `secondaryText`, tabular figures; 9 from the fill's trailing edge (`titleTrailing`) | new |
+| Trailing metadata | 16 after the title: the Space's 7 pt color dot in the Space's theme color (`SpaceThemeInfo.baseColors`, first stop, the same color as the tab switcher's Space chip, BH-011; a Space on the default theme shows `sidebarForeground`; Little Arkt: its 10 pt window glyph in `sidebarForeground`), 8 gap, then the relative time in a 58 pt left-aligned column, 12 regular `secondaryText`, tabular figures; 9 from the fill's trailing edge (`titleTrailing`) | new |
 | Relative time | under an hour "12m"; under a day "3h"; the day before "Yesterday"; within a week the weekday ("Mon"); otherwise day and month ("22 Sep"), plus the year when not the current one | new; `Date.FormatStyle` per locale |
 | Match highlight | `accent` at 35 % fill, 3 pt radius, 1 pt padding, title only | new `ArchiveTokens.matchHighlight` |
 | Auto-load row | 30 high, centered 12 pt spinner (`NSProgressIndicator`, small) and "Loading more" 12 `secondaryText`; shown while the next page loads | new |
@@ -220,9 +220,9 @@ one this issue designs. See open question 5.
 New tokens: `ArchiveTokens.matchHighlight` (accent 35 %), `ArchiveTokens.listField` (light `#0E0F10` at 3.5 %,
 dark black at 14 %) and `ArchiveTokens.chipTintAlpha` (0.16). Everything else reuses ShellTokens, SidebarMetrics,
 BrandTokens and AlertTokens. Contrast: `destructiveText` reaches 5.59:1 (light) and 6.44:1 (dark) on the neutral
-fill, and stays above 4.5:1 on the bare surface; `primaryText` on a Space-tinted chip stays above 4.5:1 for every
-shipped Space color at 16 %; `onAccent` on `accent` is 8.4:1. `ShellTokensContrastTests` gains the chip and
-list-field pairs.
+fill and must stay above 4.5:1 on the bare surface; `onAccent` on `accent` is 8.4:1. Not yet measured, so
+`ShellTokensContrastTests` must add them: `primaryText` on a Space-tinted chip (each Space color at 16 %) and on the
+list field, both at 4.5:1.
 
 ## 10. Motion spec
 
