@@ -43,8 +43,8 @@
                   "durationInSeconds": 7.0,
                   "children": [
                     {
-                      "nodeType": "Expected Failure",
-                      "name": "FixtureTests.swift:20: failed - timed out waiting for row 3 of #777Reason: (Outline rows are not in the tree (#269))"
+                      "nodeType": "Failure Message",
+                      "name": "Outline rows of #777 are not in the tree (#269)"
                     }
                   ]
                 },
@@ -76,7 +76,7 @@
                   "durationInSeconds": 0.2,
                   "children": [
                     {
-                      "nodeType": "Skip Message",
+                      "nodeType": "Failure Message",
                       "name": "#111: Archive search UI not implemented"
                     }
                   ]
@@ -157,7 +157,7 @@
                   "durationInSeconds": 0.3,
                   "children": [
                     {
-                      "nodeType": "Skip Message",
+                      "nodeType": "Failure Message",
                       "name": "GS-002: XCUITest scroll has no gesture phases; manual check in #26"
                     }
                   ]

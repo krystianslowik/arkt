@@ -148,12 +148,12 @@ def is_run:
   .nodeType == "Test Case Run" or .nodeType == "Repetition";
 def has_run_below:
   [ .children[]? | walk_objects | select(is_run) ] | length > 0;
-# Skip and expected-failure reasons only. A Failure Message counts only for a skipped observation, where it carries
-# the skip reason; the failure text of a failed test is never a reason.
+# Skip and expected-failure reasons only. xcresulttool (Xcode 26.6, CI) gives an "Expected Failure" test one
+# "Failure Message" node per matched XCTExpectFailure, named by its reason ("... (#269)"); a skip reason is taken the
+# same way. The failure text of a failed test is never a reason.
 def reasons_in($result):
   [ walk_objects
-    | select(.nodeType == "Expected Failure" or .nodeType == "Skip Message"
-        or ($result == "Skipped" and .nodeType == "Failure Message"))
+    | select(($result == "Skipped" or $result == "Expected Failure") and .nodeType == "Failure Message")
     | (.name // empty), (.details // empty)
   ];
 if type != "object" or (.testNodes | type? != "array") then
@@ -250,10 +250,10 @@ def issue_link($issue):
     | "[\($issue)](https://github.com/krystianslowik/arkt/issues/\($n))"
   end;
 
-# The issue of one skip or expected-failure reason. Only the reason is read: for an expected failure, the text after
-# XCTest's "Reason: " (the assertion text before it can quote any issue); for a skip, the text after "Test skipped - ".
-# The issue is the reason's leading "#N:" (`XCTSkip("#111: ...")`, `XCTExpectFailure("#106: ...")`) or its final
-# "#N" / "(#N)" (`XCTSkip("flaky: #42")`, "... manual check in #26", the harness's "... (#269)").
+# The issue of one skip or expected-failure reason: its leading "#N:" (`XCTSkip("#111: ...")`,
+# `XCTExpectFailure("#106: ...")`) or its final "#N" / "(#N)" (`XCTSkip("flaky: #42")`, "... manual check in #26",
+# the harness's "... (#269)"). An issue in the middle of the text is not one. If the text carries XCTest's console
+# framing ("<file>.swift:<line>: ", "Test skipped - ", or assertion text before "Reason: "), only the reason is read.
 def issue_of_reason:
   split("Reason: ") | last
   | split("Test skipped - ") | last
