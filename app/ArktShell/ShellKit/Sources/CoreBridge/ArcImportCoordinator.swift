@@ -56,7 +56,7 @@ public struct ArcImportSummary: Equatable, Sendable {
       lines.append([count(spaces, "Space"), count(tabs, "tab"), count(folders, "folder"), count(splits, "split")]
         .joined(separator: ", "))
     } else if existingSpaces > 0, previouslyImportedSpaces == 0 {
-      lines.append("0 new Spaces: all \(count(existingSpaces, "Space")) from Arc are already in Arkt")
+      lines.append("0 new Spaces: all \(count(existingSpaces, "Space")) are already in Arkt")
     } else {
       lines.append("0 Spaces imported")
     }
@@ -67,7 +67,7 @@ public struct ArcImportSummary: Equatable, Sendable {
       lines.append("\(count(previouslyImportedSpaces, "Space")) imported before and removed in Arkt not restored")
     }
     if otherProfileSpaces > 0 {
-      lines.append("\(count(otherProfileSpaces, "Space")) from other Arc profiles added to the default profile")
+      lines.append("\(count(otherProfileSpaces, "Space")) from other profiles added to the default profile")
     }
     var favoritesLine = "\(count(favorites, "favorite")) added"
     if duplicateFavorites > 0 { favoritesLine += ", \(duplicateFavorites) already in Arkt" }

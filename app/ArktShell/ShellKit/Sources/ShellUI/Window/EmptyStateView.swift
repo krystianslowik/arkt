@@ -6,7 +6,7 @@ import AppKit
 @MainActor
 final class EmptyStateView: NSView {
   static let heading = "Welcome to Arkt"                                                  // [I] open question 3
-  static let body = "Bring your Spaces, pinned tabs and Archive over from Arc, or start fresh."
+  static let body = "Bring your Spaces, pinned tabs and Archive over, or start fresh."
   private static let panelWidth: CGFloat = 420
   private static let headingSpacing: CGFloat = 8
   private static let buttonsSpacing: CGFloat = 20
@@ -14,7 +14,7 @@ final class EmptyStateView: NSView {
 
   let headingLabel = NSTextField(labelWithString: EmptyStateView.heading)
   let bodyLabel = NSTextField(wrappingLabelWithString: EmptyStateView.body)
-  let importButton = NSButton(title: "Import from Arc", target: nil, action: nil)
+  let importButton = NSButton(title: "Import", target: nil, action: nil)
   let newSpaceButton = NSButton(title: "New Space", target: nil, action: nil)
 
   var onImport: (@MainActor () -> Void)?

@@ -4,8 +4,8 @@ import XCTest
 /// row titles. Every test checks the Arc copy it launched against: a rendered copy's SHA-256, or the empty
 /// directory when the menu must stay disabled.
 final class ArcImportTests: ArktUITestCase {
-  private static let importMenuTitle = "Import from Arc..."
-  private static let importedSheetTitle = "Imported from Arc"
+  private static let importMenuTitle = "Import Browser Data..."
+  private static let importedSheetTitle = "Import complete"
 
   func test_E_importFromEmptyState() async throws {
     let server = try await fixtureServer()

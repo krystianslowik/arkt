@@ -373,7 +373,7 @@ struct ArcImportCoordinatorTests {
       for text in ArcFixtureFolder.userStrings { #expect(!line.contains(text), "\(line)") }
     }
     #expect(first.lines.first == "2 Spaces, 7 tabs, 1 folder, 1 split")
-    #expect(second.lines.first == "0 new Spaces: all 2 Spaces from Arc are already in Arkt")
+    #expect(second.lines.first == "0 new Spaces: all 2 Spaces are already in Arkt")
   }
 
   @Test func availabilityIsAnExistenceCheck() async throws {

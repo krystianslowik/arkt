@@ -271,6 +271,8 @@ comment (a fix, or a reason not to) before merging.
 
 - **Shell: zsh.** Commands in docs and scripts are written for zsh.
 - **No emojis** anywhere: sources, comments, logs, fixtures, commit messages, issues and pull requests.
+- **No "Arc" in user-facing copy**: menus, toasts, alerts, empty states and accessibility labels say "browser
+  data" instead; code identifiers, file paths, doc comments and logs may still name Arc as the data source.
 - **Swift 6** language mode with complete concurrency checking, macOS 15 deployment target. No `@unchecked Sendable`
   or `nonisolated(unsafe)` in production code.
 - **TDD.** Write the test first, run it and watch it fail (a compile error counts), implement, run it again. Pure
