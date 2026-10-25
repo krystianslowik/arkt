@@ -87,7 +87,7 @@ Branch rules:
 Every step can be skipped: each has a secondary action (Skip, Not now, Start fresh, Skip tour), Escape runs that
 secondary action, and "Skip setup" in the card's top-right corner ends the whole flow from any step. An import in
 progress is the only thing Escape does not interrupt; Skip setup during an import lets the import finish in the
-background and shows the existing summary toast path instead of the step.
+background and then shows the File > Import from Arc summary alert instead of the step.
 
 Progress dots count the steps after Welcome for the current branch: Arc found and fresh is 6 (import, theme, default,
 extensions, tour, done); Arc found and imported is 5; no Arc is 5; Arkt already default removes one more.
