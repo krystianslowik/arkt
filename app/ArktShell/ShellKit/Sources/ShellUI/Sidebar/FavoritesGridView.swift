@@ -193,9 +193,17 @@ final class FavoritesCollectionView: NSCollectionView {
   override func moveDown(_ sender: Any?) { onMoveCommand?(0, 1) }
   override func moveUp(_ sender: Any?) { onMoveCommand?(0, -1) }
 
-  override func accessibilityChildren() -> [Any]? {
-    let items = (0..<numberOfItems(inSection: 0)).compactMap { item(at: IndexPath(item: $0, section: 0))?.view }
-    return NSAccessibility.unignoredChildren(from: items)
+  /// Not an accessibility element: `NSCollectionView`, like `NSTableView`, answers its children out of process from
+  /// its own internals rather than from overridden children, so `FavoritesGridView` (a plain view, whose overridden
+  /// children AppKit does publish) lists the tiles itself and the tiles report the grid as their parent.
+  override func isAccessibilityElement() -> Bool { false }
+
+  /// The tile views of the items that exist, in item order. Reads only: never creates an item, reloads or lays out
+  /// (doing so from an out-of-process client's accessibility callback re-enters layout while the client waits, and
+  /// it times out). The grid keeps every Favorite realized once it has a size (`FavoritesGridView.layout`).
+  func tileViews() -> [NSView] {
+    guard numberOfSections > 0 else { return [] }
+    return (0..<numberOfItems(inSection: 0)).compactMap { item(at: IndexPath(item: $0, section: 0))?.view }
   }
 }
 
@@ -272,6 +280,16 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityIdentifier(AXID.Favorites.grid)
+  }
+
+  /// The Favorite tiles, in order, as this group's children (the tiles report the group as their parent, since the
+  /// collection view between them is not an accessibility element). Read from the items that exist; see
+  /// `FavoritesCollectionView.tileViews()`.
+  public override func accessibilityChildren() -> [Any]? {
+    guard let favoritesCollectionView = collectionView as? FavoritesCollectionView else {
+      return super.accessibilityChildren()
+    }
+    return NSAccessibility.unignoredChildren(from: favoritesCollectionView.tileViews())
   }
 
   @available(*, unavailable)
@@ -474,6 +492,15 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     nodeIDs = new
     let difference = new.difference(from: old)
     if difference.isEmpty { return false }
+    // Without a size (an empty grid is 0 pt tall, so the first Favorites of an Arc import arrive that way) a batch
+    // update leaves the collection view's layout prepared for the old items: its content size stays empty and no
+    // item is realized once the grid is sized. Reload instead, here in the model change and not from `layout()`
+    // (a reload issued during the layout pass did not re-prepare the layout either); the collection view prepares
+    // its layout for every Favorite in its next layout pass, when the grid has its new height.
+    if collectionView.bounds.isEmpty {
+      collectionView.reloadData()
+      return FavoritesLayout.height(itemCount: old.count) != FavoritesLayout.height(itemCount: new.count)
+    }
     collectionView.performBatchUpdates({
       var removed = Set<IndexPath>(), inserted = Set<IndexPath>()
       for change in difference {
