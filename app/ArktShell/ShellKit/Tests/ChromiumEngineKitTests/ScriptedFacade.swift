@@ -345,6 +345,19 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     return tab
   }
 
+  /// `chrome::NewEmptyWindow`'s tab: Chromium's New Tab page, created already showing its URL (#299).
+  /// `urlAtInsert` false: the tab is inserted before its navigation starts (TabCreated without the URL).
+  @discardableResult
+  func insertNewTabPage(urlAtInsert: Bool = true) -> ScriptedTab {
+    let tab = ScriptedTab(facade: facade, owner: self, opener: nil, origin: .engine)
+    if urlAtInsert {
+      tab.url = ScriptedFacade.newTabPage
+      tab.title = "New Tab"
+    }
+    insert(tab, active: true, url: urlAtInsert ? nil : ScriptedFacade.newTabPage)
+    return tab
+  }
+
   /// A tab without a URL shows the initial about:blank, with no load events.
   private func insert(_ tab: ScriptedTab, active: Bool, url: URL?) {
     if tab.url == nil {
@@ -620,6 +633,20 @@ final class ScriptedFacade: NSObject, ArktEngine {
     engineCreateTab(in: browser, url: request.initialURL, opener: nil, active: true)
     return browser
   }
+
+  /// A Dock reopen with no window (`applicationShouldHandleReopen:` -> `chrome::NewEmptyWindow`): asks the embedder
+  /// for a host inside construction, then adds the New Tab page. `kind` lets a test give the same window another
+  /// request kind.
+  @discardableResult
+  func dockReopen(kind: ArktWindowRequestKind = .reopen, urlAtInsert: Bool = true) -> (ScriptedBrowser, ScriptedTab)? {
+    guard let hostProvider else { return nil }
+    let browser = makeBrowser(host: hostProvider(ScriptedRequest(kind: kind)))
+    return (browser, browser.insertNewTabPage(urlAtInsert: urlAtInsert))
+  }
+
+  /// Chromium's New Tab page URL.
+  // A constant literal that always parses.
+  static let newTabPage = URL(string: "chrome://newtab/")!
 
   func setActions(_ list: [ScriptedAction], in browser: ScriptedBrowser) {
     actions[ObjectIdentifier(browser)] = list

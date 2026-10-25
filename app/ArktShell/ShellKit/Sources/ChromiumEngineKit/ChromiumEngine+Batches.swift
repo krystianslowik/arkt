@@ -74,6 +74,7 @@ extension ChromiumEngine {
     let host = ObjectIdentifier(browser.host)
     guard let pending = pendingHosts.removeValue(forKey: host) else { return }  // another instance's window
     register(browser, adapter: pending.adapter, as: pending.id)
+    windows[pending.id]?.keepsNewTabPage = [.reopen, .startupURL].contains(pending.kind)
     hub.emit(.windowOpened(pending.id))
   }
 
@@ -97,14 +98,20 @@ extension ChromiumEngine {
   private func tabCreated(_ event: any ArktEngineEvent) {
     guard let handle = event.tab else { return }
     let key = ObjectIdentifier(handle)
-    // A tab this client created or duplicated was announced when the call returned (Decision 4).
-    guard tabByHandle[key] == nil, retired[key] == nil, let window = window(of: event) else { return }
+    // A tab this client created or duplicated was announced when the call returned (Decision 4); one deferred
+    // inside a nested loop is in the window only now.
+    guard tabByHandle[key] == nil, retired[key] == nil, let window = window(of: event) else {
+      if let window = window(of: event) { closeNewTabPage(in: window) }
+      return
+    }
+    if keepsBack(handle, url: event.url, in: window) { return }
     adopt(handle, in: window, origin: TabOrigin(facade: event.origin), url: event.url, title: event.title)
+    closeNewTabPage(in: window)
   }
 
   /// Lists and announces a tab the engine created on its own (contract rule 13), or one moved in from a window this
   /// instance does not list. Activation follows as its own `ActiveTabChanged`.
-  private func adopt(_ handle: any ArktTabHandle, in window: EngineWindowID, origin: TabOrigin, url: URL?,
+  func adopt(_ handle: any ArktTabHandle, in window: EngineWindowID, origin: TabOrigin, url: URL?,
                      title: String?) {
     var snapshot = initialSnapshot(of: handle, id: TabID(), window: window, origin: origin)
     if let url { snapshot.url = url }
@@ -117,9 +124,11 @@ extension ChromiumEngine {
     guard let handle = event.tab else { return }
     let key = ObjectIdentifier(handle)
     let target = window(of: event)
+    forgetNewTabPage(handle)
     guard let id = tabByHandle[key] else {
       if retired[key] == nil, let target {
         adopt(handle, in: target, origin: TabOrigin(facade: handle.origin), url: nil, title: nil)
+        closeNewTabPage(in: target)
       }
       return
     }
@@ -133,12 +142,14 @@ extension ChromiumEngine {
     tabs[id]?.snapshot.window = target
     tabs[id]?.snapshot.isActive = false
     hub.assign(id, to: target)
+    closeNewTabPage(in: target)
   }
 
   private func tabClosed(_ event: any ArktEngineEvent) {
     guard let handle = event.tab else { return }
     let key = ObjectIdentifier(handle)
     if retired.removeValue(forKey: key) != nil { return }  // closeTab answered closed and announced it
+    forgetNewTabPage(handle)
     guard let id = tabByHandle[key] else { return }
     removeTab(id)
     hub.emit(.tabClosed(id, reason: CloseReason(facade: event.closeReason)))
@@ -147,7 +158,11 @@ extension ChromiumEngine {
   // MARK: Tab state
 
   private func tabChanged(_ event: any ArktEngineEvent) {
-    guard let handle = event.tab, let id = tabByHandle[ObjectIdentifier(handle)], tabs[id] != nil else { return }
+    guard let handle = event.tab else { return }
+    guard let id = tabByHandle[ObjectIdentifier(handle)], tabs[id] != nil else {
+      if event.kind == .urlChanged { newTabPageNavigated(handle, to: event.url) }
+      return
+    }
     switch event.kind {
     case .activeTabChanged: activeTabChanged(id)
     case .closeCancelled:
@@ -196,7 +211,7 @@ extension ChromiumEngine {
 
   static func isBlank(_ url: URL?) -> Bool { url == nil || url?.absoluteString == "about:blank" }
 
-  private func activeTabChanged(_ id: TabID) {
+  func activeTabChanged(_ id: TabID) {
     guard let window = tabs[id]?.snapshot.window, windows[window] != nil, windows[window]?.activeTab != id else {
       return
     }

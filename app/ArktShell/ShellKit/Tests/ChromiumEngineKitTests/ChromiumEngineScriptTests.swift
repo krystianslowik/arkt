@@ -311,6 +311,142 @@ struct ChromiumEngineScriptTests {
     #expect(engine.windows[window]?.browser === browser)
   }
 
+  // MARK: Dock reopen (#299)
+
+  /// An engine with a host provider over the facade; the opener window comes first, as in the app.
+  func makeProviderEngine() -> (ChromiumEngine, EventRecorder) {
+    let engine = ChromiumEngine(facade: facade)
+    engine.windowHostProvider = { _ in StubWindowHost() }
+    facade.hostProvider = { engine.host(for: $0) }
+    return (engine, EventRecorder(engine))
+  }
+
+  /// Chromium adds its New Tab page to the window of a Dock reopen. The window is listed and announced; the page is
+  /// not, so the shell shows an empty window and adds no Today row.
+  @Test func reopenWindowKeepsItsNewTabPageUnlisted() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    let (browser, page) = try #require(facade.dockReopen())
+    try await delivered()
+    let window = try #require(engine.windowIDs.first)
+    #expect(recorder.windowEvents == [.windowOpened(window)])
+    #expect(engine.tabIDs.isEmpty && recorder.events.isEmpty)
+    #expect(engine.activeTab(in: window) == nil && engine.latestActiveTab(in: window) == nil)
+    #expect(page.owner === browser && !browser.isClosed, "the page keeps the Browser open")
+  }
+
+  /// Chromium may insert the page before its navigation starts: the tab is created without a URL (the initial
+  /// `about:blank`) and the New Tab page's URL follows. It is kept back all the same (real app, #299).
+  @Test func newTabPageInsertedBeforeItsURLIsKeptBack() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    let (browser, page) = try #require(facade.dockReopen(urlAtInsert: false))
+    try await delivered()
+    page.finishLoad()
+    try await delivered()
+    #expect(page.owner === browser && page.url == ScriptedFacade.newTabPage)
+    #expect(engine.tabIDs.isEmpty && recorder.events.isEmpty)
+  }
+
+  /// The first tab the shell opens in that window is the window's active tab, and the New Tab page closes then,
+  /// without an event (it was never announced) and without closing the window.
+  @Test func firstClientTabClosesTheReopenWindowsNewTabPage() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    let (browser, page) = try #require(facade.dockReopen())
+    try await delivered()
+    let window = try #require(engine.windowIDs.first)
+    let tab = engine.createTab(url: URL(string: "arkt-test://page.test/First")!, in: window)
+    try await delivered()
+    #expect(page.owner == nil, "the New Tab page closed")
+    #expect(!browser.isClosed && engine.windowIDs == [window])
+    #expect(engine.tabIDs == [tab] && engine.activeTab(in: window) == tab)
+    #expect(!recorder.events.contains { $0.tabID != tab })
+    #expect(!recorder.events.contains { if case .tabClosed = $0 { true } else { false } })
+    #expect(recorder.windowEvents == [.windowOpened(window)])
+  }
+
+  /// A tab an extension creates there (`chrome.tabs.create`) is listed as usual and also replaces the page.
+  @Test func engineTabClosesTheReopenWindowsNewTabPage() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    let (browser, page) = try #require(facade.dockReopen())
+    try await delivered()
+    facade.engineCreateTab(in: browser, url: URL(string: "arkt-test://page.test/Created")!, opener: nil, active: true)
+    try await delivered()
+    #expect(page.owner == nil && !browser.isClosed)
+    let tab = try #require(engine.tabIDs.first)
+    #expect(engine.tabIDs.count == 1 && engine.snapshot(of: tab)?.origin == .engine)
+    #expect(recorder.events.first == .tabCreated(tab))
+    #expect(!recorder.events.contains { if case .tabClosed = $0 { true } else { false } })
+  }
+
+  /// A menu command with no window (Show All History) opens its page in the New Tab page's tab: the tab is listed
+  /// then, with that URL, as the window's active tab.
+  @Test func newTabPageThatNavigatesIsListed() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    let (_, page) = try #require(facade.dockReopen())
+    let history = URL(string: "chrome://history/")!
+    page.startLoad(history, title: "History")
+    try await delivered()
+    let window = try #require(engine.windowIDs.first)
+    let tab = try #require(engine.tabIDs.first)
+    #expect(engine.tabIDs.count == 1)
+    #expect(engine.snapshot(of: tab)?.url == history && engine.activeTab(in: window) == tab)
+    #expect(recorder.events.prefix(2) == [.tabCreated(tab), .activeTabChanged(tab)])
+    #expect(engine.contentView(for: tab) === page.containerView)
+  }
+
+  /// A listed tab an extension moves into that window (`chrome.tabs.move`) replaces the page too.
+  @Test func listedTabMovedInClosesTheReopenWindowsNewTabPage() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    let opener = engine.createWindow(host: StubWindowHost())
+    let tab = engine.createTab(url: URL(string: "arkt-test://page.test/Moved")!, in: opener)
+    let (browser, page) = try #require(facade.dockReopen())
+    try await delivered()
+    let window = try #require(engine.windowIDs.last)
+    try scriptedBrowser(engine, opener).move(scriptedTab(engine, tab), to: browser)
+    try await delivered()
+    #expect(page.owner == nil && !browser.isClosed)
+    #expect(engine.snapshot(of: tab)?.window == window && browser.tabs.count == 1)
+    #expect(!recorder.events.contains { if case .tabClosed = $0 { true } else { false } })
+  }
+
+  /// Closing the empty window closes the page with it; the shell sees only `.windowClosed`.
+  @Test func closingTheEmptyReopenWindowReportsOnlyTheWindow() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    let (browser, _) = try #require(facade.dockReopen())
+    try await delivered()
+    let window = try #require(engine.windowIDs.first)
+    browser.close()
+    try await delivered()
+    #expect(engine.windowIDs.isEmpty && recorder.events.isEmpty)
+    #expect(recorder.windowEvents == [.windowOpened(window), .windowClosed(window)])
+  }
+
+  /// A startup window without a URL (the first Dock reopen of a session can take Chromium's startup path) keeps its
+  /// New Tab page back too; a startup URL's own tab is listed at once.
+  @Test func startupWindowKeepsItsNewTabPageButListsAURL() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    _ = try #require(facade.dockReopen(kind: .startupURL))
+    try await delivered()
+    #expect(engine.tabIDs.isEmpty && recorder.events.isEmpty)
+    let url = URL(string: "arkt-test://page.test/FromAnotherApp")!
+    let browser = try #require(facade.openEngineWindow(ScriptedRequest(kind: .startupURL, initialURL: url)))
+    try await delivered()
+    let tab = try #require(engine.tabIDs.first)
+    #expect(engine.tabIDs.count == 1 && engine.snapshot(of: tab)?.url == url)
+    #expect(engine.activeTab(in: try #require(engine.windowIDs.last)) == tab)
+    #expect(browser.tabs.count == 1)
+  }
+
+  /// Only a Dock reopen's or startup window's page is kept back: a New Tab page in a window an extension asked for
+  /// is a tab like any other.
+  @Test func newTabPageOfOtherRequestKindsIsListed() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    _ = try #require(facade.dockReopen(kind: .extension))
+    try await delivered()
+    let tab = try #require(engine.tabIDs.first)
+    #expect(engine.snapshot(of: tab)?.url == ScriptedFacade.newTabPage)
+    #expect(recorder.events.first == .tabCreated(tab))
+  }
+
   // MARK: Instance scoping
 
   @Test func instancesOverOneFacadeSeeOnlyTheirOwnWindowsAndTabs() async throws {
