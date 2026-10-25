@@ -22,11 +22,15 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
+#include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/base_window.h"
 #include "ui/gfx/native_ui_types.h"
@@ -241,6 +245,12 @@ ArktBrowserMainExtraParts::ArktBrowserMainExtraParts() = default;
 ArktBrowserMainExtraParts::~ArktBrowserMainExtraParts() = default;
 
 void ArktBrowserMainExtraParts::PreProfileInit() {
+  // Chromium's "Warn Before Quitting" is on by default (confirm_quit.cc): a
+  // quick Cmd-Q only shows "Hold Cmd-Q to quit". Arkt's menu has no item to
+  // turn it off (W3-8), so the default is off here; a policy or a value set
+  // earlier still wins (W3-9 smoke: Cmd-Q did not quit).
+  g_browser_process->local_state()->SetDefaultPrefValue(
+      prefs::kConfirmToQuitEnabled, base::Value(false));
   // Profile init precedes the startup browser, so every normal Browser is
   // created through the override.
   if (NativeWindowEnabled()) {

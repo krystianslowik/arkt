@@ -1202,6 +1202,10 @@ void ArktBrowserWindow::OnTabStripModelChanged(
                        weak_factory_.GetWeakPtr()));
   }
   if (selection.active_tab_changed() && selection.new_contents) {
+    // Chrome's frame retitles itself from the tab strip; here the window
+    // title (Window menu, Mission Control) would keep a closed tab's title
+    // until the new tab's title changed (W3-9 smoke).
+    UpdateTitleBar();
     [events addObject:[[ArktTabEvent alloc]
                           initWithKind:ArktTabEventKindActivated
                                  tabId:TabId(selection.new_contents)
