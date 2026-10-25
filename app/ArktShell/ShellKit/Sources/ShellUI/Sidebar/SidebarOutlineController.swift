@@ -25,8 +25,9 @@ public final class OutlineItem: NSObject {
 /// row views or overridden children (#269), so its rows reach VoiceOver and XCUITest's `outlineRows` through
 /// `axProxyRows`: a proxy outline element (`sidebar.outline`) with one `AXProxyRow` per displayed row, in display
 /// order, which `SpacePageView` lists in place of the scroll view. The controller supplies each row's identifier,
-/// label, state and disclosure from its model; every mutation of the displayed rows (reload, expand, collapse,
-/// insert, remove, move) marks the proxies stale so the next query builds them afresh.
+/// label, state and disclosure from its model. A structural change (expand, collapse, insert, remove, move,
+/// reloadData) marks the proxies stale so the next query builds them afresh; a row reload does not, so the element
+/// a client holds survives title, favicon and Closing changes (#297).
 @MainActor
 public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   let axProxyRows: AXProxyRows
@@ -77,48 +78,48 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     axProxyRows.invalidate()
   }
 
-  // Every change to the displayed rows: the proxy at an index may now stand for another item.
-
-  public override func reloadItem(_ item: Any?, reloadChildren: Bool) {
-    super.reloadItem(item, reloadChildren: reloadChildren)
-    axProxyRows.invalidate()
-  }
-
-  public override func reloadItem(_ item: Any?) {
-    super.reloadItem(item)
-    axProxyRows.invalidate()
-  }
+  // A structural change to the displayed rows (insert, remove, move, expand, collapse, reloadData): the proxy at
+  // an index may now stand for another item, so the proxies are rebuilt, and clients are told. A plain
+  // `reloadItem` is NOT here (#297): it changes no row's item, and the proxies read the new title and value when
+  // asked, so the element a VoiceOver user is on survives it. The title/value notification comes from
+  // `SidebarOutlineController.reload(node:)`, which knows the row.
 
   public override func expandItem(_ item: Any?) {
     super.expandItem(item)
     axProxyRows.invalidate()
+    axProxyRows.post(.rowExpanded, forRow: row(forItem: item))
   }
 
   public override func collapseItem(_ item: Any?) {
     super.collapseItem(item)
     axProxyRows.invalidate()
+    axProxyRows.post(.rowCollapsed, forRow: row(forItem: item))
   }
 
   public override func expandItem(_ item: Any?, expandChildren: Bool) {
     super.expandItem(item, expandChildren: expandChildren)
     axProxyRows.invalidate()
+    axProxyRows.post(.rowExpanded, forRow: row(forItem: item))
   }
 
   public override func collapseItem(_ item: Any?, collapseChildren: Bool) {
     super.collapseItem(item, collapseChildren: collapseChildren)
     axProxyRows.invalidate()
+    axProxyRows.post(.rowCollapsed, forRow: row(forItem: item))
   }
 
   public override func insertItems(at indexes: IndexSet, inParent parent: Any?,
                                    withAnimation animationOptions: NSTableView.AnimationOptions = []) {
     super.insertItems(at: indexes, inParent: parent, withAnimation: animationOptions)
     axProxyRows.invalidate()
+    axProxyRows.post(.rowCountChanged)
   }
 
   public override func removeItems(at indexes: IndexSet, inParent parent: Any?,
                                    withAnimation animationOptions: NSTableView.AnimationOptions = []) {
     super.removeItems(at: indexes, inParent: parent, withAnimation: animationOptions)
     axProxyRows.invalidate()
+    axProxyRows.post(.rowCountChanged)
   }
 
   public override func moveItem(at fromIndex: Int, inParent oldParent: Any?, to toIndex: Int,
@@ -209,11 +210,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Folders the user collapsed in this outline; preserved across moves and sibling removals (#94).
   private var collapsedFolders: Set<NodeID> = []
 
-  /// The outline becomes `scrollView`'s document view after its first reload and expansion. Without a superview its
-  /// visible rect is unbounded, so that load realizes a row view for every row of the Space up front. Installing it
-  /// first would realize only the rows the clip view shows, but an offscreen page is hidden and a hidden table
-  /// realizes nothing, so a Space switch would then build the incoming page's rows in the frame that first shows it
-  /// (a 20 to 30 ms frame in `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`).
+  /// The outline is `scrollView`'s document view before its first reload and expansion, so the load realizes only
+  /// the rows the clip view shows (#297). An offscreen page is hidden and a hidden table realizes nothing; the
+  /// pager's `preparePageForDisplay` builds a hidden page's rows before a switch shows it, off the showing frame.
   public init(source: any SidebarSource, spaceID: SpaceID, hostedIn scrollView: NSScrollView) {
     self.source = source
     self.spaceID = spaceID
@@ -250,11 +249,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.dataSource = self
     outlineView.delegate = self
     wireAccessibility()
+    scrollView.documentView = outlineView
     outlineView.reloadData()
     for id in pinnedIDs + todayIDs {
       expandContainer(id)
     }
-    scrollView.documentView = outlineView
   }
 
   // MARK: Items
@@ -543,9 +542,14 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let row = outlineView.row(forItem: existing)
     guard row >= 0 else { return }
     outlineView.reloadItem(existing, reloadChildren: false)
+    // The proxy keeps its element and reads the new fields when asked; tell clients that cached them (#297).
+    // A favicon-only reload over-posts, which costs the client one attribute read.
+    outlineView.axProxyRows.post(.titleChanged, forRow: row)
+    outlineView.axProxyRows.post(.valueChanged, forRow: row)
     if let container = source.parent(of: id)?.containerNode, case .split? = source.node(container),
        let splitItem = items[container] {
       outlineView.reloadItem(splitItem, reloadChildren: false)   // split titles derive from their panes
+      outlineView.axProxyRows.post(.titleChanged, forRow: outlineView.row(forItem: splitItem))
     }
   }
 

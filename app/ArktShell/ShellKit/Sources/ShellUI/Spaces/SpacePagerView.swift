@@ -10,6 +10,15 @@ import Motion
 /// frames) catches up with the layer (`syncStripFrame()`) at rest and whenever input needs it mid-motion: a hit test
 /// (a click, the start of a scroll gesture, a drag), a pointer move over the pager and a backing change. The cost is
 /// paid once per such input, never per display frame.
+/// A pager page that can build its on-screen rows when asked (#297). The pager puts the page where AppKit will
+/// tile it (see `preparePageForDisplay`): a page parked offscreen has an empty visible rect, and rows realized
+/// in that state are swept on a later pass (`_removeRowsBeingAnimatedOff`), so the table must be tiled while it
+/// intersects the visible area.
+@MainActor
+public protocol SpacePagerPage: AnyObject {
+  func constructVisibleRowsForDisplay()
+}
+
 @MainActor
 public final class SpacePagerView: NSView {
   /// Spring for the settle. TODO(parity): which spring preset Arc uses for Space paging.
@@ -83,6 +92,9 @@ public final class SpacePagerView: NSView {
     pages = newPages
     needsLayout = true
     jump(to: newIndex)
+    // A page added mid-session (a new Space) gets its rows now, in this pass; the window-open case has no
+    // width yet and is caught by the first layout below (#297).
+    for i in pages.indices { preparePageForDisplay(i) }
   }
 
   public override func layout() {
@@ -112,6 +124,9 @@ public final class SpacePagerView: NSView {
       } else {
         apply(offset: -CGFloat(index) * width)
       }
+      // First layout (window open) and resizes: the parked pages realize their visible rows here, never in a
+      // switch's frames (#297). Pages with rows already are a cheap check.
+      for i in pages.indices { preparePageForDisplay(i) }
     }
   }
 
@@ -142,6 +157,27 @@ public final class SpacePagerView: NSView {
   private var stripGeometryIsStale: Bool {
     guard let layer = strip.layer else { return false }
     return !layer.affineTransform().isIdentity
+  }
+
+  /// Builds a hidden page's visible rows before a switch shows it (#297), off the frame that shows it: the strip
+  /// is slid so the page intersects the visible area, the page tiles its table, and everything is put back, all
+  /// inside this run of the run loop, so nothing paints and the user sees nothing. Rows built this way survive
+  /// being parked again; rows built while the visible rect is empty do not. Goes through no counter: nothing
+  /// becomes visible, so `updatePageVisibility`'s churn accounting is untouched.
+  /// Pages whose visible rows were built already. Legitimately tiled rows survive being parked again; a page
+  /// leaves the set only by leaving `pages` (#297).
+  private var preparedPages: Set<ObjectIdentifier> = []
+
+  private func preparePageForDisplay(_ i: Int) {
+    guard pages.indices.contains(i), pageWidth > 0 else { return }
+    let view = pages[i]
+    guard let page = view as? SpacePagerPage, view.isHidden else { return }
+    guard preparedPages.insert(ObjectIdentifier(view)).inserted else { return }
+    if stripGeometryIsStale { syncStripFrame() }
+    let origin = strip.frame.origin
+    strip.setFrameOrigin(NSPoint(x: -CGFloat(i) * pageWidth, y: origin.y))
+    page.constructVisibleRowsForDisplay()
+    strip.setFrameOrigin(origin)
   }
 
   /// Whether a hit test made for `event` needs the view geometry to match the screen. Every click, drag, cursor or
@@ -255,6 +291,9 @@ public final class SpacePagerView: NSView {
     if isTracking { return }                               // the fingers own the strip
     frozenTarget = nil
     if !driver.isRunning && clamped == index && offset == -CGFloat(index) * pageWidth { return }
+    // The strip passes over every page between here and the target (and the settle's overshoot can show one
+    // more): build their rows now, off the animation frames (#297). Already-built pages cost a lookup.
+    for i in (min(index, clamped) - 1)...(max(index, clamped) + 1) { preparePageForDisplay(i) }
     let velocity = stopSettle()?.velocity ?? 0
     pacerSession = pacer.begin("space-key", in: self)
     settle(to: clamped, velocity: CGFloat(velocity))
@@ -325,6 +364,9 @@ public final class SpacePagerView: NSView {
     translation = PagingMath.initialTranslation(offset: offset, index: base, pageWidth: pageWidth, count: pages.count)
     tracker.reset()
     isTracking = true
+    // A swipe shows the neighbours first, and the settle's overshoot can show one page past the target:
+    // build two pages each way before the first moving frame (#297). Already-built pages cost a lookup.
+    for i in (base - 2)...(base + 2) { preparePageForDisplay(i) }
     pacerSession = pacer.begin("space-swipe", in: self)
   }
 
@@ -342,6 +384,8 @@ public final class SpacePagerView: NSView {
     let velocity = tracker.velocity
     let target = PagingMath.targetIndex(current: dragBase, translation: translation, velocity: velocity,
                                         pageWidth: pageWidth, count: pages.count)
+    // A fling passes every page between here and the target: build their rows before the settle's frames (#297).
+    for i in (min(dragBase, target) - 1)...(max(dragBase, target) + 1) { preparePageForDisplay(i) }
     settle(to: target, velocity: velocity)
   }
 

@@ -251,9 +251,16 @@ final class AccessibilityIdentifierTests: XCTestCase {
       descendants(of: page).filter { identifier(of: $0) == id }.compactMap { $0 as? NSAccessibilityProtocol }
     }
 
-    let dividers = inCurrentPage(AXID.Sidebar.divider)
-    XCTAssertEqual(dividers.count, 1)
-    XCTAssertEqual(dividers.first?.accessibilityRole(), .splitter)
+    // #297: the divider keeps its row in the proxy outline (row indices map), but it is a plain group and not an
+    // accessibility element, so VoiceOver skips it instead of announcing a splitter that resizes nothing.
+    let proxyChildren = try XCTUnwrap(page.outlineView.axProxyRows.element.accessibilityChildren())
+    let dividerProxies = proxyChildren.filter { ($0 as? AXProxyRow)?.accessibilityIdentifier() == AXID.Sidebar.divider }
+    XCTAssertEqual(dividerProxies.count, 1, "the divider keeps its row in the proxy outline")
+    let dividerProxy = try XCTUnwrap(dividerProxies.first as? AXProxyRow)
+    XCTAssertEqual(dividerProxy.accessibilityRole(), .group)
+    XCTAssertFalse(dividerProxy.isAccessibilityElement())
+    XCTAssertEqual(inCurrentPage(AXID.Sidebar.divider).count, 0,
+                   "a client's unignored walk skips the divider")
 
     let folders = inCurrentPage(AXID.Sidebar.rowFolder)
     XCTAssertEqual(folders.count, 1)

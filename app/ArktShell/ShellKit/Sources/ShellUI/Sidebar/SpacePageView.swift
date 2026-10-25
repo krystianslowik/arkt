@@ -24,7 +24,7 @@ extension SidebarMetrics {
 /// Escape, or an empty name [I], keeps the old one. Opening and closing the field is instant: it is a direct response
 /// to a click or a key.
 @MainActor
-public final class SpacePageView: NSView, NSTextFieldDelegate {
+public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   public let spaceID: SpaceID
   public let titleLabel = NSTextField(labelWithString: "")
   /// BH-038: shown while the header is hovered; fades with the rows' hover close timing (Reduce Motion: at once).
@@ -140,6 +140,16 @@ public final class SpacePageView: NSView, NSTextFieldDelegate {
   public override var isFlipped: Bool { true }
 
   public var outlineView: SidebarOutlineView { outlineController.outlineView }
+
+  /// Realizes the rows around the outline's scrolled position (#297). The pager calls this with the strip slid
+  /// so the page intersects the visible area: rows tiled in that state survive being parked again. The page is
+  /// shown only for the layout itself and hidden again before this returns; nothing paints in between.
+  public func constructVisibleRowsForDisplay() {
+    isHidden = false
+    layoutSubtreeIfNeeded()
+    outlineView.tile()
+    isHidden = true
+  }
 
   public private(set) var flavor: ThemeFlavor = .light
 
