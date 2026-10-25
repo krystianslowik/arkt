@@ -336,6 +336,18 @@ void ArktBrowserWindow::BindHost() {
                                     object:window
                                      queue:nil
                                 usingBlock:^(NSNotification*) {
+                                  // A Browser whose close completed is out of
+                                  // the browser collections but keeps its
+                                  // window until its posted deletion; when
+                                  // another closing window is ordered out
+                                  // first, this one can become key in between.
+                                  // Activating it then CHECKs in
+                                  // GlobalBrowserCollection::OnBrowserActivated
+                                  // (W3-9 contract runner, two windows closed
+                                  // together).
+                                  if (browser_->IsDeleteScheduled()) {
+                                    return;
+                                  }
                                   BrowserActiveStateManager::From(browser_)
                                       ->DidBecomeActive();
                                 }]];

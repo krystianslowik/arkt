@@ -1402,8 +1402,18 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 - (BOOL)isClosing {
   arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
-  return _closing ||
-         (contents && TabCloseTypesData::FromWebContents(contents) != nullptr);
+  if (_closing ||
+      (contents && TabCloseTypesData::FromWebContents(contents) != nullptr)) {
+    return YES;
+  }
+  // A window close runs every tab's beforeunload through UnloadController
+  // without marking the tabs (contract rule 16: a held window close shows its
+  // tabs closing until the dialog is answered; W3-9 contract runner).
+  arkt::ArktBrowserWindow* window =
+      _tab && _browser
+          ? arkt::ArktBrowserWindow::FromBrowser(_browser.browserInterface)
+          : nullptr;
+  return window && window->IsAttemptingToClose();
 }
 
 - (BOOL)wouldHoldClose {

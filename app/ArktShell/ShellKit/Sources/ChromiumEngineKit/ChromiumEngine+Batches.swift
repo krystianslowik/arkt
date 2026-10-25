@@ -154,6 +154,19 @@ extension ChromiumEngine {
       tabs[id]?.clientCloseHeld = false
       hub.emit(.closeCancelled(id))
     case .urlChanged:
+      if let phase = tabs[id]?.initialBlank {
+        if Self.isBlank(event.url) { break }
+        if phase == .blank {
+          // The first page: its URL, then its load start (rule 2), whatever Chromium's loading flag did so far.
+          tabs[id]?.initialBlank = .navigating
+          tabs[id]?.snapshot.url = event.url
+          hub.emit(.urlChanged(id, event.url))
+          guard tabs[id] != nil else { break }
+          tabs[id]?.snapshot.isLoading = true
+          hub.emit(.loadingChanged(id, isLoading: true))
+          break
+        }
+      }
       tabs[id]?.snapshot.url = event.url
       hub.emit(.urlChanged(id, event.url))
     case .titleChanged:
@@ -164,6 +177,11 @@ extension ChromiumEngine {
       tabs[id]?.snapshot.faviconData = event.faviconPNG
       hub.emit(.faviconChanged(id, event.faviconPNG))
     case .loadingChanged:
+      if let phase = tabs[id]?.initialBlank {
+        if phase == .blank { break }
+        if !event.isLoading { tabs[id]?.initialBlank = nil }
+        if tabs[id]?.snapshot.isLoading == event.isLoading { break }
+      }
       tabs[id]?.snapshot.isLoading = event.isLoading
       hub.emit(.loadingChanged(id, isLoading: event.isLoading))
     case .historyChanged:
@@ -175,6 +193,8 @@ extension ChromiumEngine {
       break
     }
   }
+
+  static func isBlank(_ url: URL?) -> Bool { url == nil || url?.absoluteString == "about:blank" }
 
   private func activeTabChanged(_ id: TabID) {
     guard let window = tabs[id]?.snapshot.window, windows[window] != nil, windows[window]?.activeTab != id else {

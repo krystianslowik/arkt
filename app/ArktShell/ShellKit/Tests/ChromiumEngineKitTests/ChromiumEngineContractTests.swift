@@ -4,52 +4,6 @@ import EngineAPITestSupport
 import Testing
 @testable import ChromiumEngineKit
 
-/// Every check of the shared engine contract (rules 1-16), each in its own test.
-enum ContractCheck: String, CaseIterable, Sendable {
-  // Rules 1-10
-  case createdTabIsListedAndAnnounced, navigateReportsURLLoadingAndTitle, titleChangedAfterLoadIsReported
-  case contentViewIsStable, closeIsTerminal, closeInsideObserverKeepsOrder, cancelledObservationStopsDelivery
-  case droppedObservationStopsDelivery, tabIDsKeepCreationOrder, hostChangeClearsFavicon, historyMovesBackAndForward
-  case historyAvailabilityIsReported, historyEntriesAndOffsetNavigation, duplicateTabCopiesURLTitleAndHistory
-  // Rules 11-16
-  case windowIsListedAndAnnounced, closeWindowClosesItsTabsThenReportsWindowClosed, hostCloseRequestClosesTheWindow
-  case activationIsOneTabPerWindow, engineCreatedTabIsAnnounced, engineCloseIsTerminal
-  case windowlessCreateTabLandsInMostRecentlyActiveWindow, heldCloseKeepsTheTabUntilAnswered
-  case skipUnloadHandlersNeverHolds, cancelledWindowCloseKeepsTheWindow
-
-  @MainActor
-  func run(_ h: EngineHarness) async throws {
-    switch self {
-    case .createdTabIsListedAndAnnounced: try await EngineContract.createdTabIsListedAndAnnounced(h)
-    case .navigateReportsURLLoadingAndTitle: try await EngineContract.navigateReportsURLLoadingAndTitle(h)
-    case .titleChangedAfterLoadIsReported: try await EngineContract.titleChangedAfterLoadIsReported(h)
-    case .contentViewIsStable: try await EngineContract.contentViewIsStable(h)
-    case .closeIsTerminal: try await EngineContract.closeIsTerminal(h)
-    case .closeInsideObserverKeepsOrder: try await EngineContract.closeInsideObserverKeepsOrder(h)
-    case .cancelledObservationStopsDelivery: try await EngineContract.cancelledObservationStopsDelivery(h)
-    case .droppedObservationStopsDelivery: try await EngineContract.droppedObservationStopsDelivery(h)
-    case .tabIDsKeepCreationOrder: try await EngineContract.tabIDsKeepCreationOrder(h)
-    case .hostChangeClearsFavicon: try await EngineContract.hostChangeClearsFavicon(h)
-    case .historyMovesBackAndForward: try await EngineContract.historyMovesBackAndForward(h)
-    case .historyAvailabilityIsReported: try await EngineContract.historyAvailabilityIsReported(h)
-    case .historyEntriesAndOffsetNavigation: try await EngineContract.historyEntriesAndOffsetNavigation(h)
-    case .duplicateTabCopiesURLTitleAndHistory: try await EngineContract.duplicateTabCopiesURLTitleAndHistory(h)
-    case .windowIsListedAndAnnounced: try await EngineContract.windowIsListedAndAnnounced(h)
-    case .closeWindowClosesItsTabsThenReportsWindowClosed:
-      try await EngineContract.closeWindowClosesItsTabsThenReportsWindowClosed(h)
-    case .hostCloseRequestClosesTheWindow: try await EngineContract.hostCloseRequestClosesTheWindow(h)
-    case .activationIsOneTabPerWindow: try await EngineContract.activationIsOneTabPerWindow(h)
-    case .engineCreatedTabIsAnnounced: try await EngineContract.engineCreatedTabIsAnnounced(h)
-    case .engineCloseIsTerminal: try await EngineContract.engineCloseIsTerminal(h)
-    case .windowlessCreateTabLandsInMostRecentlyActiveWindow:
-      try await EngineContract.windowlessCreateTabLandsInMostRecentlyActiveWindow(h)
-    case .heldCloseKeepsTheTabUntilAnswered: try await EngineContract.heldCloseKeepsTheTabUntilAnswered(h)
-    case .skipUnloadHandlersNeverHolds: try await EngineContract.skipUnloadHandlersNeverHolds(h)
-    case .cancelledWindowCloseKeepsTheWindow: try await EngineContract.cancelledWindowCloseKeepsTheWindow(h)
-    }
-  }
-}
-
 /// How the scripted facade orders a load's events.
 enum FacadeScript: String, CaseIterable, Sendable {
   /// Chromium's usual order: title, favicon clear, load end.
@@ -90,5 +44,6 @@ struct ChromiumEngineContractTests {
     }
     #expect(names.count == 24)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
+    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...16))
   }
 }

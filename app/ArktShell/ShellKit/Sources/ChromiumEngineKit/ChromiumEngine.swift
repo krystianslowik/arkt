@@ -30,6 +30,18 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
     var snapshot: TabSnapshot
     /// This client's close answered `held`; a second `closeTab` does nothing until it is answered.
     var clientCloseHeld = false
+    /// Set for a client tab created without a URL until its first page load ends (`ChromiumEngine+Batches`).
+    var initialBlank: InitialBlank?
+  }
+
+  /// A tab created without a URL loads Chromium's `about:blank` first. Its load start arrives before the first
+  /// navigation's URL and its commit after it, so the shell would see loading before the URL (contract rule 2) and
+  /// the URL fall back to `about:blank` for a moment (W3-9 contract runner, run 1).
+  enum InitialBlank {
+    /// Only the initial `about:blank` so far: its URL and loading events are not reported.
+    case blank
+    /// The first page's URL was reported (with the load start); `about:blank` URLs are not reported until it loads.
+    case navigating
   }
 
   struct WindowRecord {
@@ -90,7 +102,12 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
     recentWindow = window
     let first = !tabIDs.contains { tabs[$0]?.snapshot.window == window }
     let handle = record.browser.createTab(url: url, active: first)
-    return announceClientTab(handle, in: window)
+    let id = announceClientTab(handle, in: window)
+    if url == nil, tabs[id] != nil {
+      tabs[id]?.initialBlank = .blank
+      tabs[id]?.snapshot.isLoading = false
+    }
+    return id
   }
 
   public func closeTab(_ id: TabID) { closeTab(id, mode: .honourUnloadHandlers) }

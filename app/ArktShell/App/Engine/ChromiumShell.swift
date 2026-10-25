@@ -42,6 +42,12 @@ final class ChromiumShell: ChromiumEmbedderDelegate {
   /// replayed the window requests it queued (a startup URL or an extension window opens instead of it).
   func start(engine: ChromiumEngine) async throws {
     shellLog("engineDidStart (embedder class \(ChromiumEmbedding.embedderClassName))")
+    if EngineContractRunner.isRequested {
+      // The contract runner (W3-9) needs the engine only: no session, no shell window. It starts one turn after
+      // embedderReady, once the engine accepts windows.
+      RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { EngineContractRunner.start() } }
+      return
+    }
     try await composition.start(engine: engine, hostLookup: { [weak engine] id in engine?.host(of: id) },
                                 defersWindows: true)
     shellLog("session ready; the embedder calls embedderReady next")
