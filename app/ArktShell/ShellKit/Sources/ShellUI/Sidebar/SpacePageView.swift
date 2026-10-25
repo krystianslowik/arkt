@@ -247,6 +247,13 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
     Self.reorderToolTip
   }
 
+  /// Forgets the header tool tip too; the next layout installs it again.
+  public override func removeAllToolTips() {
+    super.removeAllToolTips()
+    headerToolTip = nil
+    headerToolTipRect = nil
+  }
+
   /// The header tool tip is installed (for tests).
   var showsHeaderToolTipForTesting: Bool { headerToolTip != nil }
 

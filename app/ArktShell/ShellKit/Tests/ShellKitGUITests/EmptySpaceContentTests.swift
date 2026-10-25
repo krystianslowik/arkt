@@ -268,6 +268,40 @@ final class EmptySpaceContentTests: XCTestCase {
     }
   }
 
+  /// #327: on a first run (no Space) the engine's tab for a URL from another app arrives as a batch, `.tabCreated`
+  /// then `.activeTabChanged`, while the engine already reports the tab as its latest active one. Creating the first
+  /// Space for that tab must not take the engine's selection as acknowledged: the card shows the page and its Today
+  /// row is current.
+  func testFirstRunEngineTabInABatchShowsItsPageInTheNewSpace() throws {
+    let source = StubSidebar()
+    let engine = InMemoryEngine()
+    let controller = ShellWindowController(engine: engine, sidebar: source, opensFirstTab: false)
+    defer { controller.close() }
+    XCTAssertTrue(controller.isShowingEmptyState, "first run: no Space yet")
+    let window = controller.ensureEngineWindow()
+    let url = try XCTUnwrap(URL(string: "about:blank#startup"))
+    var tab: TabID?
+    // Emitting inside a handler queues the tab's events behind it, as the Chromium engine's batch does.
+    let trigger = engine.observeWindows { event in
+      guard case .extensionActionsChanged = event, tab == nil else { return }
+      tab = engine.engineCreateTab(url: url, in: window)
+      XCTAssertEqual(engine.latestActiveTab(in: window), tab, "the selection is known before its event arrives")
+    }
+    defer { trigger.cancel() }
+
+    engine.setExtensionActions([], in: window)
+
+    let created = try XCTUnwrap(tab)
+    let space = try XCTUnwrap(controller.currentSpace, "the first Space was created for the tab")
+    let node = try XCTUnwrap(controller.sidebarController.current, "the Today row is selected")
+    XCTAssertEqual(source.section(containing: node), .today(space))
+    XCTAssertEqual(controller.engineTab(of: node), created)
+    XCTAssertEqual(controller.currentTab, created)
+    XCTAssertTrue(controller.rootView.card.contentView === engine.contentView(for: created), "the card shows the page")
+    XCTAssertEqual(controller.visibleNodes, [node])
+    XCTAssertFalse(controller.isShowingEmptyState)
+  }
+
   private func makeActivationHarness() throws
     -> (ShellWindowController, InMemoryEngine, [NodeID], [TabID], SpaceID) {
     let source = StubSidebar()
