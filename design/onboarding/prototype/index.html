@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt first run</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  /* Hero: every step is the arkt.dev hero. One centred message over one particle field; the shape above it is the
+     step's subject, built from real things. Window-wide, no card, no wizard chrome. */
+  .stage, .wash, .browser { position: absolute; inset: 0; }
+  .stage { z-index: 1; pointer-events: none; }
+  .stage canvas { width: 100%; height: 100%; display: block; }
+  .wash { z-index: 0; opacity: 0; background: var(--wash, transparent); transition: opacity 600ms ease, background 280ms ease; }
+  body[data-step="theme"] .wash { opacity: 0.22; }
+  :root[data-theme="dark"] body[data-step="theme"] .wash { opacity: 0.16; }
+  .rt body[data-step="theme"] .wash { opacity: 0.12; }
+
+  .lights { position: absolute; top: 18px; left: 18px; z-index: 9; display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12); }
+  .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+
+  /* Steps share the window. The outgoing one leaves fast; the incoming one resolves word by word. */
+  main { position: absolute; inset: 0; z-index: 2; }
+  .step { position: absolute; inset: 0; display: grid; justify-items: center; align-content: start; text-align: center; padding-top: 58px; visibility: hidden; }
+  .step.on { visibility: visible; }
+  .step .in, .step .w { opacity: 0; filter: blur(8px); transform: translateY(10px); transition: opacity 200ms ease, filter 200ms ease, transform 200ms var(--ease-out); }
+  .step.on .in { opacity: 1; filter: none; transform: none; transition: opacity 700ms var(--ease-out), filter 700ms var(--ease-out), transform 700ms var(--ease-out); transition-delay: calc(var(--d, 0) * 1ms); }
+  .w { display: inline-block; white-space: pre; }
+  .step.on .w { opacity: 1; filter: none; transform: none; transition: opacity 700ms var(--ease-out), filter 700ms var(--ease-out), transform 700ms var(--ease-out); transition-delay: calc(var(--base, 120ms) + var(--i) * 45ms); }
+  .rm .step .in, .rm .step .w, .rm .step.on .in, .rm .step.on .w { filter: none; transform: none; transition: opacity 200ms ease; transition-delay: 0ms; }
+
+  .slot { width: 560px; height: 236px; margin-top: 14px; flex: none; }
+  .t { font-size: 64px; margin-top: 16px; }
+  .step .lede { margin-top: 16px; font-size: 18px; }
+  .actions { display: flex; justify-content: center; gap: 10px; margin-top: 30px; }
+  .lede kbd { font: 600 0.92em/1 var(--font); color: var(--ink); }
+
+  /* Welcome */
+  .step[data-step="welcome"] { padding-top: 84px; }
+  .step[data-step="welcome"] .slot { width: 220px; height: 200px; margin-top: 0; }
+  .step[data-step="welcome"] .t { font-size: 80px; margin-top: 44px; }
+  .step[data-step="welcome"] .lede { color: var(--ink); font-size: 20px; margin-top: 22px; }
+  .step[data-step="welcome"] .actions { margin-top: 34px; }
+
+  /* Import: the live count is the sculpture, built like the website's countdown */
+  .count { display: grid; justify-items: center; gap: 12px; margin-top: 16px; }
+  .cd-num { display: block; font: 600 210px/0.86 var(--font); letter-spacing: -0.04em; color: transparent; min-width: 2.1ch; text-align: center; }
+  .rest { display: flex; gap: 64px; }
+  .rest .cd-num { font-size: 64px; }
+  .group { display: grid; justify-items: center; gap: 10px; }
+  .cd-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); transition: color 300ms ease; }
+  .big .cd-label { font-size: 13px; }
+  .cd-label .tick { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); display: none; }
+  .cd-label .tick::after { content: ""; display: block; width: 4px; height: 7px; margin: 1.5px 0 0 4px; border: solid #202321; border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); }
+  .done .cd-label .tick { display: block; }
+  .step[data-step="import"] .t { font-size: 54px; margin-top: 30px; }
+  .step[data-step="import"] .note { margin-top: 12px; font-size: 16px; color: var(--muted); min-height: 1.6em; }
+  .step[data-step="import"] .actions { margin-top: 24px; }
+  .import-failed .count .cd-label, .import-failed .count { visibility: hidden; }
+  html.no-field .cd-num { color: var(--ink); }
+
+  /* Make it yours: the Space itself is the shape, a true-colour preview with the field around it */
+  .preview { position: relative; width: 340px; height: 196px; margin: 20px auto 0; border-radius: 14px; overflow: hidden; background: linear-gradient(135deg, var(--t1), var(--t2)); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08), 0 24px 48px -26px rgb(0 0 0 / 0.45); transition: background 280ms ease; text-align: left; }
+  .preview .side { position: absolute; left: 0; top: 0; bottom: 0; width: 96px; padding: 30px 8px 0; }
+  .preview .dots3 { position: absolute; top: 10px; left: 10px; display: flex; gap: 5px; } .preview .dots3 i { width: 7px; height: 7px; border-radius: 50%; background: var(--chrome-2); }
+  .preview .fav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .preview .fav i { height: 18px; border-radius: 5px; background: var(--chrome-1); }
+  .preview .sname { margin: 10px 0 6px 2px; font: 500 9px/1 var(--system); color: var(--chrome-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .preview .row { height: 13px; margin: 3px 0; border-radius: 4px; background: var(--chrome-1); }
+  .preview .row.cur { background: var(--chrome-cur); }
+  .preview .page { position: absolute; left: 100px; top: 6px; right: 6px; bottom: 6px; border-radius: 7px; background: var(--page); box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.1); }
+  .preview.light { --chrome-1: rgb(14 15 16 / 0.07); --chrome-2: rgb(0 0 0 / 0.16); --chrome-cur: rgb(255 255 255 / 0.85); --chrome-text: rgb(0 0 0 / 0.64); --page: #ffffff; }
+  .preview.dark { --chrome-1: rgb(250 251 255 / 0.1); --chrome-2: rgb(255 255 255 / 0.22); --chrome-cur: rgb(250 251 255 / 0.2); --chrome-text: rgb(255 255 255 / 0.76); --page: #1e1f21; }
+  .step[data-step="theme"] .slot { position: relative; }
+  .name { display: block; width: 640px; margin-top: 18px; padding: 0 0 4px; border: 0; background: transparent; text-align: center; font: 600 64px/1.02 var(--font); letter-spacing: -0.055em; color: var(--ink); caret-color: var(--accent-text); }
+  .name::placeholder { color: var(--ink); opacity: 1; }
+  .name:focus::placeholder { color: var(--muted); opacity: 0.5; }
+  .name-wrap { position: relative; }
+  .name-wrap::after { content: ""; position: absolute; left: 50%; bottom: -2px; width: 120px; height: 2px; margin-left: -60px; border-radius: 2px; background: var(--line); transition: background-color 150ms ease, width 300ms var(--ease-out), margin 300ms var(--ease-out); }
+  .name-wrap:focus-within::after { background: var(--accent); width: 180px; margin-left: -90px; }
+  .step[data-step="theme"] .lede { margin-top: 12px; font-size: 16px; }
+  .picks { display: flex; align-items: center; gap: 28px; margin-top: 20px; }
+  .swatches { display: flex; gap: 12px; }
+  .swatch { position: relative; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; background: linear-gradient(135deg, var(--a), var(--b)); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1); transition: transform 160ms var(--ease-out); }
+  .swatch::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; box-shadow: 0 0 0 2px var(--focus); opacity: 0; transform: scale(0.92); transition: opacity 160ms ease, transform 220ms var(--ease-out); }
+  .swatch[aria-checked="true"]::after { opacity: 1; transform: none; }
+  .swatch:active { transform: scale(0.95); }
+  .swatch:focus-visible { outline-offset: 7px; border-radius: 50%; }
+  .swatch.arc::before { content: ""; position: absolute; right: -2px; bottom: -2px; width: 14px; height: 14px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
+  .seg { position: relative; display: inline-flex; padding: 4px; border-radius: 999px; background: var(--control); box-shadow: inset 0 0 0 1px var(--line); transition: opacity 200ms ease; }
+  .seg button { position: relative; z-index: 1; min-height: 36px; min-width: 70px; padding: 0 16px; border: 0; border-radius: 999px; background: none; color: var(--muted); font: 600 14px/1 var(--font); cursor: pointer; transition: color 200ms ease; }
+  .seg button[aria-checked="true"] { color: var(--ink); }
+  .seg .thumb { position: absolute; z-index: 0; top: 4px; bottom: 4px; left: 4px; width: 70px; border-radius: 999px; background: var(--bg); box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / 0.12); transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1); }
+  .seg[data-v="dark"] .thumb { transform: translateX(70px); }
+  .seg.off { opacity: 0.4; pointer-events: none; }
+  .theme-name { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 1.4em; }
+  .rm .seg .thumb, .rm .swatch::after { transition: opacity 150ms ease; }
+
+  /* Extensions: the option is one quiet pill */
+  .check { display: inline-flex; align-items: center; gap: 12px; margin-top: 22px; min-height: 46px; padding: 0 20px 0 14px; border: 0; border-radius: 999px; background: var(--control); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); font: 500 15px/1 var(--font); cursor: pointer; transition: background-color 150ms ease, transform 160ms var(--ease-out); }
+  .check:active { transform: scale(0.97); }
+  .check i { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--muted); transition: background-color 150ms ease, box-shadow 150ms ease; }
+  .check[aria-checked="true"] i { background: var(--accent); box-shadow: none; }
+  .check[aria-checked="true"] i::after { content: ""; display: block; width: 5px; height: 9px; margin: 4px 0 0 7.5px; border: solid #202321; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+  /* Wayfinding: small and quiet at the bottom edge, like the website's footer */
+  .foot { position: absolute; z-index: 4; left: 26px; right: 26px; bottom: 16px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; font-size: 13px; color: var(--muted); }
+  .foot .left { justify-self: start; } .foot .right { justify-self: end; }
+  .foot .where { letter-spacing: 0.01em; transition: opacity 300ms ease; }
+.button[hidden] { display: none; }
+  .foot [hidden] { display: inline-flex !important; visibility: hidden; opacity: 0; }
+  .foot > * { transition: opacity 250ms ease; }
+
+  /* Landing in the browser: the field folds onto the card, the window is the browser */
+  .browser { z-index: 0; opacity: 0; transition: opacity 240ms var(--ease-out); background: linear-gradient(135deg, var(--t1), var(--t2)); pointer-events: none; }
+  body.landed .browser { opacity: 1; z-index: 3; pointer-events: auto; }
+  .browser .side { position: absolute; left: 0; top: 0; bottom: 0; width: 200px; padding: 44px 10px 0; }
+  .browser .url { height: 30px; border-radius: 9px; background: var(--chrome-1); }
+  .browser .fav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-top: 12px; }
+  .browser .fav i { height: 46px; border-radius: 10px; background: var(--chrome-1); }
+  .browser .sname { margin: 18px 0 8px 8px; font: 500 12px/1 var(--system); color: var(--chrome-text); }
+  .browser .row { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 9px; font: 500 14px/1 var(--system); color: var(--chrome-ink); }
+  .browser .row.cur { background: var(--chrome-cur); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
+  .browser .row b { width: 16px; height: 16px; border-radius: 4px; background: var(--chrome-1); }
+  .browser .bar { position: absolute; left: 10px; right: 10px; bottom: 0; height: 50px; display: flex; align-items: center; justify-content: center; }
+  .browser .bar i { width: 4px; height: 4px; border-radius: 50%; background: var(--chrome-ink); }
+  .browser .card { position: absolute; left: 200px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; background: var(--page); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08), 0 8px 24px -12px rgb(0 0 0 / 0.3); }
+  .browser.light { --chrome-1: rgb(14 15 16 / 0.07); --chrome-cur: rgb(255 255 255 / 0.85); --chrome-text: rgb(0 0 0 / 0.64); --chrome-ink: rgb(14 15 16 / 0.9); --page: #ffffff; }
+  .browser.dark { --chrome-1: rgb(250 251 255 / 0.1); --chrome-cur: rgb(250 251 255 / 0.2); --chrome-text: rgb(255 255 255 / 0.76); --chrome-ink: rgb(255 255 255 / 0.84); --page: #1e1f21; }
+  .cmd { position: absolute; left: calc(200px + (100% - 210px) / 2); top: 22%; width: 560px; margin-left: -280px; border-radius: 14px; padding: 6px; background: rgb(30 31 33 / 0.86); -webkit-backdrop-filter: blur(30px) saturate(1.6); backdrop-filter: blur(30px) saturate(1.6); box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 30px 60px -20px rgb(0 0 0 / 0.5); opacity: 0; transform: scale(0.97); transition: opacity 200ms var(--ease-out), transform 260ms var(--ease-out); }
+  body.cmd-open .cmd { opacity: 1; transform: none; }
+  .cmd div { height: 46px; display: flex; align-items: center; padding: 0 14px; font: 400 17px/1 var(--system); color: rgb(255 255 255 / 0.5); }
+  .cmd div::before { content: ""; width: 2px; height: 20px; margin-right: 1px; background: #e9b520; }
+  .rt .cmd { background: rgb(30 31 33); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+  /* Skip setup: the system alert as a sheet (a stand-in for NSAlert) */
+  .sheet { position: absolute; z-index: 8; left: 50%; top: 28px; width: 268px; margin-left: -134px; padding: 20px 16px 16px; border-radius: 16px; text-align: center; font-family: var(--system);
+    background: rgb(240 240 240 / 0.86); -webkit-backdrop-filter: blur(40px) saturate(1.8); backdrop-filter: blur(40px) saturate(1.8); box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.18), 0 24px 60px -10px rgb(0 0 0 / 0.35);
+    opacity: 0; transform: scale(0.97); visibility: hidden; transition: opacity 180ms var(--ease-out), transform 240ms var(--ease-out), visibility 0s 240ms; }
+  :root[data-theme="dark"] .sheet { background: rgb(44 44 46 / 0.86); color: #f5f5f7; box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.16), 0 24px 60px -10px rgb(0 0 0 / 0.6); }
+  .rt .sheet { background: rgb(240 240 240); } .rt[data-theme="dark"] .sheet { background: rgb(44 44 46); }
+  body.asking .sheet { opacity: 1; transform: none; visibility: visible; transition: opacity 180ms var(--ease-out), transform 240ms var(--ease-out), visibility 0s; }
+  .sheet img { width: 64px; height: 64px; }
+  .sheet h2 { margin: 10px 0 6px; font: 700 13px/1.3 var(--system); }
+  .sheet p { margin: 0 0 16px; font: 400 11px/1.4 var(--system); }
+  .sheet .sb { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .sheet button { height: 28px; border: 0; border-radius: 8px; font: 500 13px/1 var(--system); background: rgb(0 0 0 / 0.08); color: inherit; cursor: pointer; }
+  :root[data-theme="dark"] .sheet button { background: rgb(255 255 255 / 0.14); }
+  .sheet button.default, :root[data-theme="dark"] .sheet button.default { background: #0a84ff; color: #fff; }
+
+  /* Compact: when the window is shorter than 700 pt the stage gives up height first */
+  @media (max-height: 700px) {
+    .step { padding-top: 46px; }
+    .slot { height: 196px; }
+    .t { font-size: 56px; }
+    .cd-num { font-size: 176px; } .rest .cd-num { font-size: 56px; }
+    .step[data-step="welcome"] { padding-top: 70px; } .step[data-step="welcome"] .slot { height: 176px; }
+    .step[data-step="welcome"] .t { font-size: 72px; margin-top: 36px; }
+    .preview { height: 168px; width: 300px; }
+    .name { font-size: 56px; }
+    .actions { margin-top: 24px; }
+  }
+</style>
+</head>
+<body data-step="welcome">
+<div class="wash" aria-hidden="true"></div>
+<div class="browser light" id="browser" aria-hidden="true">
+  <div class="side">
+    <div class="url"></div>
+    <div class="fav"><i></i><i></i><i></i></div>
+    <p class="sname" id="bName">Space 1</p>
+    <div class="row cur"><b></b>New Tab</div>
+    <div class="bar"><i></i></div>
+  </div>
+  <div class="card"></div>
+  <div class="cmd"><div>Search or enter address</div></div>
+</div>
+<div class="stage" aria-hidden="true"><canvas id="stage"></canvas></div>
+<div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<main id="flow" role="group" aria-label="Welcome to Arkt">
+  <section class="step" data-step="welcome" aria-label="Welcome to Arkt">
+    <div class="slot" role="img" aria-label="Arkt"></div>
+    <h1 class="t display halo" data-split>Keep the way you browse.</h1>
+    <p class="lede halo in" style="--d: 300">A native macOS browser.</p>
+    <div class="actions in" style="--d: 420"><button class="button" type="button" data-primary data-act="start">Get started</button></div>
+  </section>
+
+  <section class="step" data-step="import" aria-label="Bring your stuff over">
+    <p class="eyebrow in" id="impEyebrow">We found your browser data</p>
+    <div class="count" aria-live="polite">
+      <div class="group big" data-k="pinned"><span class="cd-num num" data-k="pinned">37</span><span class="cd-label in" style="--d: 500"><span class="tick"></span>pinned tabs</span></div>
+      <div class="rest">
+        <div class="group" data-k="spaces"><span class="cd-num num" data-k="spaces">4</span><span class="cd-label in" style="--d: 560"><span class="tick"></span>Spaces</span></div>
+        <div class="group" data-k="favorites"><span class="cd-num num" data-k="favorites">12</span><span class="cd-label in" style="--d: 600"><span class="tick"></span>Favorites</span></div>
+        <div class="group" data-k="folders"><span class="cd-num num" data-k="folders">9</span><span class="cd-label in" style="--d: 640"><span class="tick"></span>folders</span></div>
+      </div>
+    </div>
+    <h1 class="t display halo" id="impTitle">Bring your stuff over.</h1>
+    <p class="note halo in" id="impNote" style="--d: 420">Your other browser stays as it is.</p>
+    <div class="actions in" style="--d: 520">
+      <button class="button ghost" type="button" data-secondary data-act="fresh" id="impFresh">Start fresh</button>
+      <button class="button" type="button" data-primary data-act="import" id="impGo">Import</button>
+    </div>
+  </section>
+
+  <section class="step" data-step="theme" aria-label="Make it yours">
+    <p class="eyebrow in">Your first Space</p>
+    <div class="slot"><div class="preview light" id="preview"><span class="dots3"><i></i><i></i><i></i></span><div class="side"><div class="fav"><i></i><i></i><i></i></div><p class="sname" id="pName">Space 1</p><div class="row cur"></div><div class="row"></div><div class="row"></div></div><div class="page"></div></div></div>
+    <div class="name-wrap in" style="--d: 120"><input class="name" id="name" type="text" maxlength="40" placeholder="Space 1" aria-label="Name" spellcheck="false" autocomplete="off"></div>
+    <p class="lede halo in" id="themeLede" style="--d: 220">Pick a look. You can change it later.</p>
+    <div class="picks in" style="--d: 320">
+      <div class="swatches" role="radiogroup" aria-label="Theme" id="swatches"></div>
+      <div class="seg" role="radiogroup" aria-label="Appearance" id="seg" data-v="light"><span class="thumb"></span><button type="button" role="radio" data-v="light">Light</button><button type="button" role="radio" data-v="dark">Dark</button></div>
+    </div>
+    <p class="theme-name in" id="themeName" style="--d: 360">Dune</p>
+    <div class="actions in" style="--d: 420">
+      <button class="button ghost" type="button" data-secondary data-act="theme-skip">Skip</button>
+      <button class="button" type="button" data-primary data-act="next">Continue</button>
+    </div>
+  </section>
+
+  <section class="step" data-step="default" aria-label="Default browser">
+    <div class="slot"></div>
+    <h1 class="t display halo" data-split>Open links in Arkt.</h1>
+    <p class="lede halo in" id="defLede" style="--d: 300">Links from other apps open here. macOS asks you to confirm, and System Settings can change it later.</p>
+    <div class="actions in" style="--d: 420">
+      <button class="button ghost" type="button" data-secondary data-act="next">Not now</button>
+      <button class="button" type="button" data-primary data-act="make-default">Make default</button>
+    </div>
+  </section>
+
+  <section class="step" data-step="extensions" aria-label="Extensions and passwords">
+    <div class="slot"></div>
+    <h1 class="t display halo" data-split>Your extensions work here.</h1>
+    <p class="lede halo in" style="--d: 300">Arkt installs them from the Chrome Web Store. Your password manager's extension is there too.</p>
+    <button class="check in" type="button" role="checkbox" aria-checked="false" id="webstore" style="--d: 360"><i></i>Open the Chrome Web Store when setup ends</button>
+    <div class="actions in" style="--d: 420">
+      <button class="button ghost" type="button" data-secondary data-act="next">Skip</button>
+      <button class="button" type="button" data-primary data-act="next">Continue</button>
+    </div>
+  </section>
+
+  <section class="step" data-step="tour-1" data-tip="1" aria-label="Tip 1 of 5">
+    <p class="eyebrow in">Tip 1 of 5</p>
+    <div class="slot" role="img" aria-label="Command T, Command L"></div>
+    <h1 class="t display halo" data-split>Open a tab.</h1>
+    <p class="lede halo in" style="--d: 300">Press <kbd>Command-T</kbd> to search or type an address. <kbd>Command-L</kbd> edits the address of the current tab.</p>
+    <div class="actions in" style="--d: 420"><button class="button ghost" type="button" data-secondary data-act="tour-skip">Skip tour</button><button class="button" type="button" data-primary data-act="tip">Next</button></div>
+  </section>
+  <section class="step" data-step="tour-2" data-tip="2" aria-label="Tip 2 of 5">
+    <p class="eyebrow in">Tip 2 of 5</p>
+    <div class="slot" role="img" aria-label="Command W"></div>
+    <h1 class="t display halo" data-split>Close by archiving.</h1>
+    <p class="lede halo in" style="--d: 300"><kbd>Command-W</kbd> closes a tab and keeps it in the Archive, so you can find it again.</p>
+    <div class="actions in" style="--d: 420"><button class="button ghost" type="button" data-secondary data-act="tour-skip">Skip tour</button><button class="button" type="button" data-primary data-act="tip">Next</button></div>
+  </section>
+  <section class="step" data-step="tour-3" data-tip="3" aria-label="Tip 3 of 5">
+    <p class="eyebrow in">Tip 3 of 5</p>
+    <div class="slot"></div>
+    <h1 class="t display halo" data-split>Switch Spaces.</h1>
+    <p class="lede halo in" style="--d: 300">Swipe left or right with two fingers on the sidebar to move between Spaces.</p>
+    <div class="actions in" style="--d: 420"><button class="button ghost" type="button" data-secondary data-act="tour-skip">Skip tour</button><button class="button" type="button" data-primary data-act="tip">Next</button></div>
+  </section>
+  <section class="step" data-step="tour-4" data-tip="4" aria-label="Tip 4 of 5">
+    <p class="eyebrow in">Tip 4 of 5</p>
+    <div class="slot"></div>
+    <h1 class="t display halo" data-split>Split the view.</h1>
+    <p class="lede halo in" style="--d: 300">Drag a tab from the sidebar onto the page to see two tabs side by side.</p>
+    <div class="actions in" style="--d: 420"><button class="button ghost" type="button" data-secondary data-act="tour-skip">Skip tour</button><button class="button" type="button" data-primary data-act="tip">Next</button></div>
+  </section>
+  <section class="step" data-step="tour-5" data-tip="5" aria-label="Tip 5 of 5">
+    <p class="eyebrow in">Tip 5 of 5</p>
+    <div class="slot"></div>
+    <h1 class="t display halo" data-split>Keep Favorites close.</h1>
+    <p class="lede halo in" style="--d: 300">Drag a tab to the top of the sidebar to make it a Favorite.</p>
+    <div class="actions in" style="--d: 420"><button class="button ghost" type="button" data-secondary data-act="tour-skip">Skip tour</button><button class="button" type="button" data-primary data-act="tip">Done</button></div>
+  </section>
+
+  <section class="step" data-step="done" aria-label="You're all set">
+    <div class="slot" role="img" aria-label="Arkt"></div>
+    <h1 class="t display halo" data-split>You're all set.</h1>
+    <p class="lede halo in" style="--d: 300">To see this again, choose Help &gt; Welcome to Arkt.</p>
+    <div class="actions in" style="--d: 420"><button class="button" type="button" data-primary data-act="finish">Start browsing</button></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <button class="quiet left" type="button" data-act="back">Back</button>
+  <span class="where halo num" id="where"></span>
+  <button class="quiet right" type="button" data-act="skip-setup">Skip setup</button>
+</footer>
+
+<div class="sheet" role="alertdialog" aria-modal="true" aria-labelledby="skipT" aria-describedby="skipD">
+  <img src="../../brand/logos/01-mustard-on-white.png" alt="">
+  <h2 id="skipT">Skip setup?</h2>
+  <p id="skipD">You can set things up later with Help &gt; Welcome to Arkt. You can import your browser data later from the File menu.</p>
+  <div class="sb"><button type="button" data-act="skip-cancel">Cancel</button><button type="button" class="default" data-act="skip-confirm">Skip setup</button></div>
+</div>
+
+<script src="mark.js"></script>
+<script src="field.js"></script>
+<script>
+(async () => {
+  const { hex, mix, BRAND, SPRING, createField, textPoints, roundRect, foldPoint, project } = window.ArktField;
+  const q = new URLSearchParams(location.search);
+  const root = document.documentElement;
+  const mq = (m) => matchMedia(m).matches;
+
+  // Appearance and accessibility: the system's, or forced for review captures
+  const dark = q.get('theme') ? q.get('theme') === 'dark' : mq('(prefers-color-scheme: dark)');
+  root.dataset.theme = dark ? 'dark' : 'light';
+  const A = {
+    rm: q.has('rm') || mq('(prefers-reduced-motion: reduce)'),
+    rt: q.has('rt') || mq('(prefers-reduced-transparency: reduce)'),
+    ic: q.has('ic') || mq('(prefers-contrast: more)'),
+  };
+  Object.entries(A).forEach(([k, v]) => root.classList.toggle(k, v));
+  const still = q.has('still');
+  if (still) root.classList.add('still');
+
+  await Promise.all([document.fonts.load('600 40px "Avenir Next"'), document.fonts.load('400 16px "Avenir Next"'), document.fonts.load('500 14px "Avenir Next"')]);
+
+  // Words resolve one by one, 45 ms apart, as on arkt.dev
+  document.querySelectorAll('[data-split]').forEach((el) => {
+    const t = el.textContent.trim(); el.setAttribute('aria-label', t);
+    el.innerHTML = t.split(/\s+/).map((w, i) => `<span class="w" aria-hidden="true" style="--i:${i}">${w}</span>`).join(' ');
+  });
+
+  // ---- Data -------------------------------------------------------------------------------------------------
+  const ARC = { pinned: 37, spaces: 4, favorites: 12, folders: 9 };
+  const THEMES = {
+    dune: ['Dune', ['#f7eed2', '#ebd592'], ['#3d3420', '#1e1a10']],
+    mist: ['Mist', ['#e0f2fb', '#c5c6e2'], ['#3a4158', '#1c2030']],
+    paper: ['Paper', ['#f4f1ea', '#e4ddd2'], ['#3a3631', '#211f1c']],
+    sage: ['Sage', ['#e6ede3', '#c4d3c0'], ['#2f3b33', '#171e1a']],
+    blossom: ['Blossom', ['#f2eae4', '#f29bbb'], ['#4a2a3a', '#1f1520']],
+    indigo: ['Indigo', ['#e4e2f4', '#c9c3e8'], ['#2d4468', '#120f2e']],
+    arc: ['Imported', ['#f2eae4', '#f29bbb'], ['#f2eae4', '#f29bbb']],
+  };
+  const S = {
+    arc: q.get('arc') !== '0', isDefault: q.get('default') === '1',
+    imp: 'counting', imported: false, values: { ...ARC },
+    theme: 'dune', look: dark ? 'dark' : 'light', name: '', webstore: false,
+    step: 'welcome', opened: null, forward: [],
+  };
+  const stops = (id = S.theme, look = S.look) => (id === 'arc' ? THEMES.arc[1] : THEMES[id][look === 'dark' ? 2 : 1]);
+
+  // ---- Field ------------------------------------------------------------------------------------------------
+  const field = createField(document.getElementById('stage'), { count: 16000, still, reduced: A.rm, transparency: A.rt, contrast: A.ic, dark });
+  const { W, H } = field.size();
+  const MARK = []; for (let i = 0; i < MARK_FLAT.length; i += 5) MARK.push({ x: MARK_FLAT[i], y: MARK_FLAT[i + 1], c: [MARK_FLAT[i + 2] / 255, MARK_FLAT[i + 3] / 255, MARK_FLAT[i + 4] / 255] });
+  const L = (i) => i % 20;
+  const slot = (step) => document.querySelector(`.step[data-step="${step}"] .slot`).getBoundingClientRect();
+  const centreOf = (r) => [r.left + r.width / 2, r.top + r.height / 2];
+  const gauss = (rnd) => (rnd() + rnd() + rnd() + rnd() - 2) / 2;
+
+  const ambient = (rnd, tint) => { const spark = rnd() > 0.86; return { x: rnd() * W, y: rnd() * H, a: spark ? 0.65 : 0.2, c: spark ? 'accent' : tint ? tint(rnd()) : 'ink', s: 1 + rnd() * 1.7, drift: 12 + rnd() * 12, spring: SPRING.firmExtraSlow, ambient: true, delay: rnd() * 0.55 }; };
+  const mark = (rnd, cx, cy, h, extra = {}) => { const p = MARK[(rnd() * MARK.length) | 0], j = h / 130; return { x: cx + p.x * h + (rnd() - 0.5) * j * 1.6, y: cy + p.y * h + (rnd() - 0.5) * j * 1.6, c: p.c, a: 1, s: 1.3 + rnd() * 1.3 * Math.min(1, h / 150), drift: 0.8, delay: rnd() * 0.55, ...extra }; };
+
+  // The brand fold along the bottom edge, under Welcome, Import and Done, as under the website's hero
+  const unit = H / 12.6;
+  const sm = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const centre = (t) => [-10.5 + 21 * t, -6.15 + 3.0 * sm(0.4, 1.0, t) + 0.6 * Math.sin(Math.PI * t * 1.4), -1.2 + 1.6 * Math.sin(Math.PI * t)];
+  const fold = (rnd) => { const { p, c } = foldPoint(rnd, centre, 0.42); const [x, y, f] = project(p, W / 2, H / 2, unit, 20); return { x, y, c, a: 0.95, s: (1.2 + rnd() * 1.8) * f, drift: 1.6, delay: rnd() * 0.55 }; };
+
+  // Glyphs sampled from real type
+  const glyphs = new Map();
+  const glyph = (text, px, fam = '"Avenir Next"', weight = 600, tr = -0.04) => { const key = [text, px, fam, weight].join('|'); if (!glyphs.has(key)) glyphs.set(key, textPoints(text, px, weight, fam, tr)); return glyphs.get(key); };
+
+  // A path along a quadratic curve
+  const curve = (x0, y0, x1, y1, bend) => (u) => { const mx = (x0 + x1) / 2, my = (y0 + y1) / 2 + bend; const a = (1 - u) * (1 - u), b = 2 * (1 - u) * u, c = u * u; return [a * x0 + b * mx + c * x1, a * y0 + b * my + c * y1]; };
+
+  // ---- Formations, one per step (spec: Particle field) --------------------------------------------------------
+  const F = {};
+
+  F.welcome = (i, rnd) => { const r = slot('welcome'), [cx, cy] = centreOf(r); return L(i) < 11 ? mark(rnd, cx, cy, r.height * 0.92) : L(i) < 14 ? fold(rnd) : ambient(rnd); };
+
+  // Import: the live count. Each number's motes re-form when it changes; done categories turn mustard.
+  const share = { pinned: 0.46, spaces: 0.18, favorites: 0.18, folders: 0.18 };
+  const numEls = [...document.querySelectorAll('.cd-num')];
+  const isDigit = (i) => L(i) < 11;
+  const doneCats = new Set();
+  function digit(i, rnd) {
+    let u = (i * 0.6180339) % 1, acc = 0, el = numEls[0];
+    for (const e of numEls) { acc += share[e.dataset.k]; if (u < acc) { el = e; break; } }
+    const r = el.getBoundingClientRect(), k = el.dataset.k;
+    if (S.imp === 'failed') { const [cx, cy] = centreOf(slotFor()); return { x: cx + gauss(rnd) * 300, y: cy + gauss(rnd) * 90, c: 'ink', a: 0.3, s: 1 + rnd(), drift: 10, spring: SPRING.firmExtraSlow, delay: rnd() * 0.4 }; }
+    const g = glyph(String(S.values[k]), parseFloat(getComputedStyle(el).fontSize));
+    const p = g.pts[(rnd() * g.pts.length) | 0] || { x: 0, y: 0 };
+    const done = doneCats.has(k), spark = rnd() > (S.imp === 'imported' ? 0.8 : 0.88);
+    const counting = S.imp === 'counting';
+    return { x: r.left + r.width / 2 + p.x + (rnd() - 0.5) * 1.2, y: r.top + r.height / 2 + p.y + (rnd() - 0.5) * 1.2, c: done && S.imp === 'importing' ? 'accent' : spark ? 'accent' : 'ink', a: counting ? 0.55 : 0.92, s: 1.2 + rnd() * 1.6, drift: 0.8, spring: SPRING.firmSlow, delay: (p.x / 400 + 0.5) * 0.35 };
+  }
+  const slotFor = () => document.querySelector('.count').getBoundingClientRect();
+  F.import = (i, rnd) => (isDigit(i) ? digit(i, rnd) : L(i) < 14 ? fold(rnd) : ambient(rnd));
+
+  // Make it yours: the field takes the theme's colours, rises around the preview, and outlines it
+  const themeTint = () => { const [a, b] = stops().map(hex); const t = dark ? [1, 1, 1] : [0, 0, 0], k = dark ? 0.45 : 0.38; return (u) => mix(mix(a, b, u), t, k); };
+  let ripple = null;
+  F.theme = (i, rnd) => {
+    const r = document.getElementById('preview').getBoundingClientRect(), tint = themeTint();
+    const wait = ripple ? (p) => Math.hypot(p[0] - ripple[0], p[1] - ripple[1]) / 900 : () => rnd() * 0.55;
+    let p;
+    if (L(i) < 4) { const [u, v] = roundRect(rnd, r.width + 14, r.height + 14, 20, true); p = { x: r.left + r.width / 2 + u, y: r.top + r.height / 2 + v, c: tint(rnd()), a: 0.7, s: 1 + rnd() * 1.2, drift: 1.5 }; }
+    else if (L(i) < 11) { // a rising field in the margins, clear of the column
+      const side = rnd() < 0.5 ? -1 : 1, x0 = W / 2 + side * (360 + rnd() * (W / 2 - 360)), sp = 0.04 + rnd() * 0.08;
+      p = { path: (u) => [x0 + Math.sin(u * 9 + x0) * 6, H + 20 - u * (H + 40)], rate: sp, env: true, c: tint(rnd()), a: 0.85, s: 1.2 + rnd() * 1.8, spring: SPRING.firm };
+      p.x = x0; p.y = H * rnd();
+    } else if (L(i) < 12) { const [u, v] = roundRect(rnd, r.width + 40, r.height + 40, 30, false); p = { x: r.left + r.width / 2 + u, y: r.top + r.height / 2 + v, c: 'accent', a: rnd() > 0.7 ? 0.8 : 0, s: 1 + rnd() * 1.4, drift: 6 }; }
+    else p = ambient(rnd, tint);
+    p.delay = wait([p.x, p.y]);
+    return p;
+  };
+
+  // Default browser: links from other apps arrive from the window's left edge into the mark
+  F.default = (i, rnd) => {
+    const r = slot('default'), [cx, cy] = centreOf(r);
+    if (L(i) < 7) return mark(rnd, cx, cy, 150);
+    if (L(i) < 10) { const y0 = cy + gauss(rnd) * 140; return { path: curve(-20, y0, cx - 70, cy + gauss(rnd) * 30, -40 * rnd()), rate: 0.18 + rnd() * 0.12, env: true, c: rnd() > 0.15 ? 'accent' : 'ink', a: 0.9, s: 1 + rnd() * 1.5, spring: SPRING.firm, delay: rnd() * 0.55 }; }
+    return ambient(rnd);
+  };
+
+  // Extensions: the mark inside three tilted rings of clusters, a third of them mustard (the website's rings)
+  F.extensions = (i, rnd) => {
+    const r = slot('extensions'), [cx, cy] = centreOf(r);
+    if (L(i) < 4) return mark(rnd, cx, cy, 104);
+    if (L(i) < 12) {
+      const ring = (rnd() * 3) | 0, cl = (rnd() * 18) | 0, tilt = [-0.28, 0.0, 0.28][ring], rx = [250, 205, 160][ring], ry = [62, 48, 36][ring];
+      const off = [gauss(rnd) * 3, gauss(rnd) * 3], ph = (cl / 18 + ring * 0.11 + gauss(rnd) * 0.012 + 1) % 1;
+      const mustard = (cl + ring) % 3 === 0;
+      return { path: (u) => { const a = u * Math.PI * 2, ex = Math.cos(a) * rx, ey = Math.sin(a) * ry; return [cx + ex * Math.cos(tilt) - ey * Math.sin(tilt) + off[0], cy + ex * Math.sin(tilt) + ey * Math.cos(tilt) + off[1]]; }, rate: 0.025 * (ring % 2 ? -1 : 1), phase: ph, c: mustard ? 'accent' : 'ink', a: 0.9, s: 1.2 + rnd() * 1.3, spring: SPRING.firm, delay: rnd() * 0.55 };
+    }
+    return ambient(rnd);
+  };
+
+  // Key caps: rounded outlines with a heavier bottom edge, glyphs sampled from the system font
+  const cap = (rnd, x, y, text) => {
+    const u = rnd();
+    if (u < 0.42) { const [a, b] = roundRect(rnd, 72, 72, 16, true); return { x: x + a, y: y + b, c: 'ink', a: 0.8, s: 1.1 + rnd() }; }
+    if (u < 0.52) { return { x: x - 30 + rnd() * 60, y: y + 37 + rnd() * 3, c: 'ink', a: 0.7, s: 1.1 + rnd() }; }
+    if (u < 0.58) { const [a, b] = roundRect(rnd, 70, 70, 15, false); return { x: x + a, y: y + b, c: 'ink', a: 0.08, s: 1.4 }; }
+    const g = text === '⌘' ? glyph(text, 40, '-apple-system', 400, 0) : glyph(text, 34, '"Avenir Next"', 600, 0);
+    const p = g.pts[(rnd() * g.pts.length) | 0]; return { x: x + p.x, y: y + p.y, c: 'ink', a: 0.95, s: 1.1 + rnd() * 0.9 };
+  };
+  const withDelay = (p, rnd) => ({ drift: 0.6, delay: rnd() * 0.55, ...p });
+  F['tour-1'] = (i, rnd) => {
+    const [cx, cy] = centreOf(slot('tour-1'));
+    if (L(i) < 11) { const pair = rnd() < 0.5 ? 0 : 1, key = rnd() < 0.5 ? 0 : 1; const x = cx + (pair ? 120 : -120) + (key ? 42 : -42); return withDelay(cap(rnd, x, cy, key ? (pair ? 'L' : 'T') : '⌘'), rnd); }
+    if (L(i) < 12) return withDelay({ x: cx + gauss(rnd) * 220, y: cy + gauss(rnd) * 70, c: 'accent', a: rnd() > 0.6 ? 0.85 : 0, s: 1 + rnd() * 1.2, drift: 5 }, rnd);
+    return ambient(rnd);
+  };
+  F['tour-2'] = (i, rnd) => {
+    const [cx, cy] = centreOf(slot('tour-2'));
+    if (L(i) < 8) { const key = rnd() < 0.5 ? 0 : 1; return withDelay(cap(rnd, cx - 170 + (key ? 42 : -42), cy, key ? 'W' : '⌘'), rnd); }
+    if (L(i) < 10) { // the Archive: a tray
+      const u = rnd(), tx = cx + 170, ty = cy + 8;
+      if (u < 0.7) { const [a, b] = roundRect(rnd, 92, 64, 12, true); return withDelay({ x: tx + a, y: ty + b, c: 'ink', a: 0.8, s: 1.2 + rnd() }, rnd); }
+      if (u < 0.85) return withDelay({ x: tx - 46 + rnd() * 92, y: ty - 14, c: 'ink', a: 0.7, s: 1.1 + rnd() }, rnd);
+      return withDelay({ x: tx - 14 + rnd() * 28, y: ty + 4 + (rnd() - 0.5) * 2, c: 'ink', a: 0.85, s: 1.4 }, rnd);
+    }
+    if (L(i) < 12) return { path: curve(cx - 110, cy + gauss(rnd) * 12, cx + 120, cy + 8 + gauss(rnd) * 10, -60), rate: 0.35 + rnd() * 0.2, env: true, c: 'accent', a: 0.9, s: 1 + rnd() * 1.4, spring: SPRING.firm, delay: rnd() * 0.55 };
+    return ambient(rnd);
+  };
+  // Three Space rooms, paging over twice and resting on the second
+  let tipStart = 0;
+  const pan = (t) => { const ease = (a) => 1 - Math.exp(-4 * Math.max(0, a)); if (t < 1.4) return 0; if (t < 3.0) return ease(t - 1.4); if (t < 4.6) return 1 + ease(t - 3.0); return 2 - ease(t - 4.6); };
+  F['tour-3'] = (i, rnd) => {
+    const [cx, cy] = centreOf(slot('tour-3'));
+    if (L(i) < 15) {
+      // The rooms are an illustration: they always use the light stops, which read on both surfaces
+      const j = (rnd() * 3) | 0, th = [THEMES.dune, THEMES.mist, THEMES.blossom][j], [a, b] = th[1].map(hex);
+      const RW = 128, RH = 208, part = rnd(); let u, v, c, al = 0.9;
+      const fg = dark ? BRAND.porcelain : BRAND.graphite;
+      const deep = (cc) => mix(cc, [0, 0, 0], dark ? 0.05 : 0.25);
+      if (part < 0.3) { [u, v] = roundRect(rnd, RW, RH, 14, true); c = deep(mix(a, b, v / RH + 0.5)); al = 1; }
+      else if (part < 0.74) { [u, v] = roundRect(rnd, RW - 2, RH - 2, 13, false); c = deep(mix(a, b, 0.4 + 0.6 * (v / RH + 0.5))); al = 0.95; }
+      else if (part < 0.82) { const kk = (rnd() * 3) | 0, tw = 30; const [px, py] = roundRect(rnd, tw, 22, 6, true); u = -RW / 2 + 14 + tw / 2 + kk * (tw + 7) + px; v = -RH / 2 + 24 + py; c = fg; al = 0.6; }
+      else { const kk = (rnd() * 4) | 0; u = -RW / 2 + 16 + rnd() * (44 + kk * 12); v = -RH / 2 + 62 + kk * 22 + (rnd() - 0.5) * 3; c = fg; al = 0.7; }
+      const t0 = tipStart;
+      return { path: (_u, clock) => { const off = (j - 1 - (still || A.rm ? 1 : pan(clock - t0)) + 1) * 168; return [cx + off + u, cy + v]; }, rate: 0, phase: 0, c, a: al, s: 1.6 + rnd() * 1.6, spring: SPRING.firmSlow, delay: rnd() * 0.55 };
+    }
+    return ambient(rnd);
+  };
+  // A window: sidebar strip and page; tip 4 splits the page, tip 5 fills a Favorite
+  const win = (rnd, cx, cy, kind) => {
+    const WW = 360, WH = 200, sx = cx - WW / 2 + 82, u = rnd();
+    if (u < 0.3) { const [a, b] = roundRect(rnd, WW, WH, 14, true); return { x: cx + a, y: cy + b, c: 'ink', a: 0.75, s: 1.1 + rnd() }; }
+    if (u < 0.36) return { x: sx, y: cy - WH / 2 + 6 + rnd() * (WH - 12), c: 'ink', a: 0.35, s: 1.1 };
+    if (u < 0.56) { const kk = (rnd() * 5) | 0; return { x: cx - WW / 2 + 14 + rnd() * (34 + (kk * 9) % 24), y: cy - WH / 2 + 66 + kk * 22 + (rnd() - 0.5) * 3, c: 'ink', a: kk === 1 ? 0.95 : 0.6, s: 1.2 }; }
+    if (u < 0.66) { const kk = (rnd() * 3) | 0; const [a, b] = roundRect(rnd, 18, 16, 4, !(kind === 'fav' && kk === 2)); return { x: cx - WW / 2 + 22 + kk * 22 + a, y: cy - WH / 2 + 30 + b, c: kind === 'fav' && kk === 2 ? 'accent' : 'ink', a: kind === 'fav' && kk === 2 ? 1 : 0.6, s: 1.2 }; }
+    if (kind === 'split') { const right = rnd() < 0.5; const pw = (cx + WW / 2 - 8 - (sx + 8) - 8) / 2; const [a, b] = roundRect(rnd, pw, WH - 16, 8, rnd() < 0.8); return { x: sx + 8 + pw / 2 + (right ? pw + 8 : 0) + a, y: cy + b, c: right ? 'accent' : 'ink', a: right ? 0.8 : 0.5, s: 1.1 + rnd() * 0.6 }; }
+    const [a, b] = roundRect(rnd, cx + WW / 2 - 8 - (sx + 8), WH - 16, 8, rnd() < 0.8); return { x: (sx + 8 + cx + WW / 2 - 8) / 2 + a, y: cy + b, c: 'ink', a: 0.4, s: 1.1 };
+  };
+  F['tour-4'] = (i, rnd) => {
+    const [cx, cy] = centreOf(slot('tour-4'));
+    if (L(i) < 10) return withDelay(win(rnd, cx, cy, 'split'), rnd);
+    if (L(i) < 12) return { path: curve(cx - 140, cy - 34, cx + 100, cy, -30), rate: 0.3 + rnd() * 0.15, env: true, c: 'accent', a: 0.95, s: 1.2 + rnd() * 1.4, spring: SPRING.firm, delay: rnd() * 0.55 };
+    return ambient(rnd);
+  };
+  F['tour-5'] = (i, rnd) => {
+    const [cx, cy] = centreOf(slot('tour-5'));
+    if (L(i) < 10) return withDelay(win(rnd, cx, cy, 'fav'), rnd);
+    if (L(i) < 12) return { path: curve(cx - 150, cy + 44, cx - 114, cy - 70, 10), rate: 0.3 + rnd() * 0.15, env: true, c: 'accent', a: 0.95, s: 1.2 + rnd() * 1.4, spring: SPRING.firm, delay: rnd() * 0.55 };
+    return ambient(rnd);
+  };
+
+  F.done = (i, rnd) => {
+    const r = slot('done'), [cx, cy] = centreOf(r);
+    if (L(i) < 9) return mark(rnd, cx, cy, 168);
+    if (L(i) < 10) { const rad = 130 + gauss(rnd) * 10; return { path: (u) => [cx + Math.cos(u * 6.283) * rad, cy + Math.sin(u * 6.283) * rad * 0.42], rate: 0.04, c: 'accent', a: rnd() > 0.4 ? 0.9 : 0, s: 1 + rnd() * 1.6, spring: SPRING.firm, delay: rnd() * 0.55 }; }
+    if (L(i) < 13) return fold(rnd);
+    return ambient(rnd);
+  };
+
+  // Finish: the field folds onto the browser card's edge, then the page shows through
+  F.card = (i, rnd) => {
+    const card = document.querySelector('.browser .card').getBoundingClientRect();
+    if (L(i) < 12) { const [a, b] = roundRect(rnd, card.width, card.height, 10, true); return { x: card.left + card.width / 2 + a, y: card.top + card.height / 2 + b, c: rnd() > 0.8 ? 'accent' : 'ink', a: 0.85, s: 1.1 + rnd() * 1.2, drift: 0.6, delay: rnd() * 0.3, spring: SPRING.gather }; }
+    if (L(i) < 15) { const [a, b] = roundRect(rnd, card.width, card.height, 10, false); return { x: card.left + card.width / 2 + a, y: card.top + card.height / 2 + b, c: 'ink', a: 0.12, s: 1.2, delay: rnd() * 0.3 }; }
+    return { ...ambient(rnd), a: 0 };
+  };
+
+  // ---- Flow -------------------------------------------------------------------------------------------------
+  const order = () => ['welcome', S.arc ? 'import' : null, 'theme', S.isDefault ? null : 'default', 'extensions', 'tour', 'done'].filter(Boolean);
+  const stepOf = (id) => (id.startsWith('tour') ? 'tour' : id);
+  const flowEl = document.getElementById('flow');
+  const where = document.getElementById('where');
+  const foot = { back: document.querySelector('[data-act="back"]'), skip: document.querySelector('[data-act="skip-setup"]') };
+
+  function footer() {
+    const list = order().slice(1), idx = list.indexOf(stepOf(S.step));
+    const first = idx === 0 && !S.step.startsWith('tour'), end = S.step === 'done' || S.step === 'welcome';
+    foot.back.hidden = first || end || (S.step === 'import' && S.imp === 'importing');
+    foot.skip.hidden = S.step === 'done';
+    where.hidden = end;
+    where.textContent = idx >= 0 ? `${idx + 1} of ${list.length}` : '';
+    flowEl.setAttribute('aria-valuetext', where.textContent ? `Step ${where.textContent}` : '');
+  }
+
+  function show(id) {
+    document.querySelectorAll('.step').forEach((s) => s.classList.toggle('on', s.dataset.step === id));
+    document.body.dataset.step = stepOf(id);
+    S.step = id;
+    footer();
+  }
+
+  function go(id, { forward = true } = {}) {
+    if (forward && S.step !== id) S.forward = [];
+    show(id);
+    if (id.startsWith('tour')) tipStart = field.time;
+    if (id === 'import') enterImport();
+    else if (id === 'theme') enterTheme();
+    else field.form(F[id]);
+  }
+
+  function next() {
+    const list = order(), cur = stepOf(S.step);
+    if (cur === 'tour') { const n = +S.step.split('-')[1]; if (n < 5) return go(`tour-${n + 1}`); }
+    const n = list[list.indexOf(cur) + 1];
+    go(n === 'tour' ? 'tour-1' : n);
+  }
+  function back() {
+    const list = order(), cur = stepOf(S.step);
+    S.forward.push(S.step);
+    if (cur === 'tour') { const n = +S.step.split('-')[1]; if (n > 1) return go(`tour-${n - 1}`, { forward: false }); }
+    const p = list[list.indexOf(cur) - 1];
+    if (!p || p === 'welcome') return;
+    go(p === 'tour' ? 'tour-5' : p, { forward: false });
+  }
+
+  // Import states: counting, ready, importing, imported, failed
+  const impEl = document.querySelector('.step[data-step="import"]');
+  const imp = { eyebrow: document.getElementById('impEyebrow'), title: document.getElementById('impTitle'), note: document.getElementById('impNote'), go: document.getElementById('impGo'), fresh: document.getElementById('impFresh') };
+  function setImp(state) {
+    S.imp = state;
+    impEl.classList.toggle('import-failed', state === 'failed');
+    const copy = {
+      counting: ['Looking for your browser data', 'Bring your stuff over.', 'Your other browser stays as it is.', 'Import', true, false, 'Start fresh'],
+      ready: ['We found your browser data', 'Bring your stuff over.', 'Your other browser stays as it is.', 'Import', false, false, 'Start fresh'],
+      importing: ['Importing your browser data', 'Bringing it over.', 'Your other browser stays as it is.', 'Importing...', true, true, 'Start fresh'],
+      imported: ['Imported', 'Your setup is here.', 'All of it came over. Your other browser stays as it is.', 'Continue', false, null, ''],
+      failed: ['Your browser data', 'Couldn’t import your data.', 'Arkt couldn’t read it. Try again, or import later from File > Import Browser Data.', 'Try again', false, false, 'Start fresh'],
+    }[state];
+    [imp.eyebrow.textContent, imp.title.textContent, imp.note.textContent, imp.go.textContent] = copy;
+    imp.go.disabled = copy[4];
+    imp.fresh.hidden = copy[5] === null; imp.fresh.disabled = !!copy[5];
+    imp.go.dataset.act = state === 'imported' ? 'next' : state === 'failed' ? 'retry' : 'import';
+    document.querySelectorAll('.count .group').forEach((g) => g.classList.toggle('done', doneCats.has(g.dataset.k) || state === 'imported'));
+    numEls.forEach((e) => (e.textContent = S.values[e.dataset.k]));
+    footer();
+  }
+  function reformDigits() { field.form(F.import, { only: isDigit, retarget: true }); }
+  function enterImport() {
+    if (S.imp === 'counting' && !still) {
+      Object.keys(S.values).forEach((k) => (S.values[k] = 0));
+      setImp('counting'); field.form(F.import);
+      const t0 = performance.now(), keys = Object.keys(ARC);
+      const tick = (now) => {
+        if (S.step !== 'import' || S.imp !== 'counting') return;
+        const p = Math.min(1, (now - t0) / 1600), e = 1 - Math.pow(1 - p, 3);
+        let changed = false;
+        keys.forEach((k, j) => { const v = Math.round(ARC[k] * Math.min(1, Math.max(0, e * 1.25 - j * 0.08))); if (v !== S.values[k]) { S.values[k] = v; changed = true; } });
+        if (changed) { numEls.forEach((el) => (el.textContent = S.values[el.dataset.k])); reformDigits(); }
+        if (p < 1) requestAnimationFrame(tick); else { setImp('ready'); reformDigits(); }
+      };
+      requestAnimationFrame(tick);
+    } else { setImp(S.imp); field.form(F.import); }
+  }
+  function runImport() {
+    doneCats.clear(); S.values = { ...ARC }; setImp('importing'); reformDigits();
+    // Categories finish in the importer's real order; each one's number turns mustard as it lands
+    [['spaces', 500], ['favorites', 1100], ['pinned', 1900], ['folders', 2400]].forEach(([k, ms]) => setTimeout(() => {
+      if (S.imp !== 'importing') return; doneCats.add(k); setImp('importing'); reformDigits();
+      if (doneCats.size === 4) setTimeout(() => { S.imported = true; S.theme = 'arc'; S.opened = null; setImp('imported'); reformDigits(); }, 420);
+    }, ms));
+  }
+
+  // Make it yours
+  const swatchesEl = document.getElementById('swatches'), seg = document.getElementById('seg'), nameEl = document.getElementById('name');
+  const preview = document.getElementById('preview'), browser = document.getElementById('browser');
+  function buildSwatches() {
+    const ids = (S.imported ? ['arc'] : []).concat(['dune', 'mist', 'paper', 'sage', 'blossom', 'indigo']);
+    swatchesEl.innerHTML = ids.map((id) => `<button type="button" role="radio" class="swatch${id === 'arc' ? ' arc' : ''}" data-id="${id}" aria-label="${THEMES[id][0]}"></button>`).join('');
+    paintSwatches();
+  }
+  function paintSwatches() {
+    swatchesEl.querySelectorAll('.swatch').forEach((b) => { const [a, c] = stops(b.dataset.id); b.style.setProperty('--a', a); b.style.setProperty('--b', c); b.setAttribute('aria-checked', String(b.dataset.id === S.theme)); b.tabIndex = b.dataset.id === S.theme ? 0 : -1; });
+  }
+  function applyTheme() {
+    const [a, b] = stops(); const look = S.theme === 'arc' ? 'light' : S.look;
+    [preview, browser].forEach((el) => { el.style.setProperty('--t1', a); el.style.setProperty('--t2', b); el.classList.toggle('dark', look === 'dark'); el.classList.toggle('light', look !== 'dark'); });
+    document.querySelector('.wash').style.setProperty('--wash', `linear-gradient(135deg, ${a}, ${b})`);
+    seg.dataset.v = S.look; seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.v === S.look)));
+    seg.classList.toggle('off', S.theme === 'arc');
+    document.getElementById('themeName').textContent = THEMES[S.theme][0];
+    const nm = S.name || (S.imported ? 'Personal' : 'Space 1');
+    document.getElementById('pName').textContent = nm; document.getElementById('bName').textContent = nm;
+    paintSwatches();
+  }
+  function enterTheme() {
+    if (!S.opened) S.opened = { theme: S.theme, look: S.look, name: S.name };
+    nameEl.placeholder = S.imported ? 'Personal' : 'Space 1';
+    document.getElementById('themeLede').textContent = S.imported ? 'It keeps the look it came with. Pick another if you like.' : 'Pick a look. You can change it later.';
+    buildSwatches(); applyTheme(); ripple = null; field.form(F.theme);
+  }
+  function pick(id, from) {
+    S.theme = id; applyTheme();
+    const r = (from || swatchesEl.querySelector(`[data-id="${id}"]`)).getBoundingClientRect();
+    ripple = centreOf(r); field.form(F.theme); ripple = null;
+  }
+  function revertTheme() { if (S.opened) { Object.assign(S, S.opened); nameEl.value = S.name; applyTheme(); } }
+  swatchesEl.addEventListener('click', (e) => { const b = e.target.closest('.swatch'); if (b) pick(b.dataset.id, b); });
+  swatchesEl.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault(); e.stopPropagation();
+    const all = [...swatchesEl.querySelectorAll('.swatch')], i = all.findIndex((b) => b.dataset.id === S.theme);
+    const n = all[(i + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length];
+    pick(n.dataset.id, n); n.focus();
+  });
+  seg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.look = b.dataset.v; applyTheme(); ripple = centreOf(b.getBoundingClientRect()); field.form(F.theme); ripple = null; });
+  nameEl.addEventListener('input', () => { S.name = nameEl.value.trim(); applyTheme(); });
+  let nameOnFocus = '';
+  nameEl.addEventListener('focus', () => (nameOnFocus = nameEl.value));
+  nameEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); nameEl.value = nameOnFocus; S.name = nameOnFocus.trim(); applyTheme(); nameEl.blur(); }
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); act('next'); }
+  });
+
+  // Default browser
+  function makeDefault() {
+    document.getElementById('defLede').textContent = 'macOS is asking you to confirm. Arkt continues either way.';
+    setTimeout(() => next(), still ? 0 : 1400);
+  }
+
+  // Finish: land in the browser
+  function finish() {
+    applyTheme();
+    document.body.dataset.step = 'finish';
+    document.querySelectorAll('.step').forEach((s) => s.classList.remove('on'));
+    foot.back.hidden = true; foot.skip.hidden = true; where.hidden = true;
+    field.form(F.card);
+    const t0 = field.time;
+    field.onFrame = (t, dt) => {
+      const e = t - t0;
+      if (e > 0.65) document.body.classList.add('landed');
+      if (e > 0.9) { field.opacity = Math.max(0, field.opacity - dt * 6); document.body.classList.add('cmd-open'); }
+      if (field.opacity === 0) { field.stop(); field.onFrame = null; }
+    };
+    if (A.rm || still) { document.body.classList.add('landed', 'cmd-open'); }
+  }
+
+  // Skip setup asks first; confirming drops any theme preview
+  let opener = null;
+  const ask = () => { opener = document.activeElement; document.body.classList.add('asking'); document.querySelector('.sheet .default').focus({ preventScroll: true }); };
+  const cancelAsk = () => { document.body.classList.remove('asking'); opener?.focus?.({ preventScroll: true }); };
+  const confirmSkip = () => { document.body.classList.remove('asking'); if (S.step === 'theme') revertTheme(); finish(); };
+
+  function act(name) {
+    switch (name) {
+      case 'start': return next();
+      case 'next': return next();
+      case 'back': return back();
+      case 'fresh': S.imported = false; S.theme = 'dune'; S.opened = null; return go('theme');
+      case 'import': return runImport();
+      case 'retry': return runImport();
+      case 'theme-skip': revertTheme(); return next();
+      case 'make-default': return makeDefault();
+      case 'tip': return next();
+      case 'tour-skip': return go('done');
+      case 'finish': return finish();
+      case 'skip-setup': return ask();
+      case 'skip-cancel': return cancelAsk();
+      case 'skip-confirm': return confirmSkip();
+    }
+  }
+  document.addEventListener('click', (e) => { const b = e.target.closest('[data-act]'); if (b && !b.disabled) act(b.dataset.act); });
+  document.getElementById('webstore').addEventListener('click', (e) => { S.webstore = !S.webstore; e.currentTarget.setAttribute('aria-checked', String(S.webstore)); });
+
+  // Keyboard (spec section 7): Return is the primary button, Escape the secondary action, arrows step back and forth
+  addEventListener('keydown', (e) => {
+    const target = e.target instanceof Element ? e.target : document.body;
+    if (document.body.classList.contains('asking')) { if (e.key === 'Escape') cancelAsk(); if (e.key === 'Enter') confirmSkip(); return; }
+    const inControl = target.closest('input, [role="radiogroup"], [role="checkbox"]');
+    const cur = document.querySelector('.step.on');
+    if (!cur) return;
+    if (e.key === 'Enter' && !target.closest('button')) { const p = cur.querySelector('[data-primary]'); if (p && !p.disabled) act(p.dataset.act); }
+    if (e.key === 'Escape') {
+      if (S.step === 'welcome') return ask();
+      if (S.step === 'import' && S.imp === 'importing') return;
+      const s = cur.querySelector('[data-secondary]'); if (s && !s.disabled && !s.hidden) act(s.dataset.act);
+    }
+    if (inControl) return;
+    if (e.key === 'ArrowLeft') back();
+    if (e.key === 'ArrowRight' && S.forward.length) go(S.forward.pop(), { forward: false });
+  });
+
+  // ---- Screens for review and captures ----------------------------------------------------------------------
+  // ?s=welcome | import-counting | import | importing | imported | import-failed | theme | theme-after-import |
+  //    theme-no-arc | default | extensions | tour-1..5 | done | browser | skip-confirm
+  const screen = q.get('s') || 'welcome';
+  function setup(sc) {
+    if (sc === 'theme-no-arc') S.arc = false;
+    if (sc === 'import-counting') { S.imp = 'counting'; if (still) { S.values = { pinned: 23, spaces: 3, favorites: 7, folders: 5 }; setImp('counting'); } }
+    if (sc === 'import') S.imp = 'ready';
+    if (sc === 'importing') { S.imp = 'importing'; doneCats.add('spaces'); doneCats.add('favorites'); }
+    if (sc === 'imported') { S.imp = 'imported'; S.imported = true; }
+    if (sc === 'import-failed') S.imp = 'failed';
+    if (sc === 'theme-after-import' || ['default', 'extensions', 'done', 'browser'].includes(sc) || sc.startsWith('tour')) { S.imported = sc === 'theme-after-import'; }
+    if (sc === 'theme-after-import') S.theme = 'arc';
+    if (sc === 'skip-confirm') S.theme = 'sage';
+    const map = { 'import-counting': 'import', importing: 'import', imported: 'import', 'import-failed': 'import', 'theme-after-import': 'theme', 'theme-no-arc': 'theme', 'skip-confirm': 'theme', browser: 'done' };
+    return map[sc] || sc;
+  }
+  const first = setup(screen);
+  applyTheme();
+  if (still) {
+    go(first);
+    if (screen === 'skip-confirm') { S.opened = { theme: 'dune', look: S.look, name: '' }; document.body.classList.add('asking'); }
+    if (screen === 'browser') { finish(); field.opacity = 0; }
+    field.renderStill();
+  } else {
+    field.start();
+    const settle = q.has('settle');
+    go(first);
+    if (settle) field.settle();
+  }
+  // Hooks for keyframe captures
+  window.__act = act; window.__pick = (id) => pick(id); window.__go = go;
+  requestAnimationFrame(() => requestAnimationFrame(() => (root.dataset.ready = '1')));
+})();
+</script>
+</body>
+</html>

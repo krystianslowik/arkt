@@ -30,6 +30,41 @@
       76
     ],
     "pureVectorLogo": false
+  },
+  "type": {
+    "family": "Avenir Next",
+    "postScriptNames": {
+      "regular": "AvenirNext-Regular",
+      "medium": "AvenirNext-Medium",
+      "demiBold": "AvenirNext-DemiBold"
+    },
+    "source": "macOS system font, used by name; never bundled or redistributed",
+    "fallback": "system font",
+    "surfaces": "website, first run and onboarding, About, social graphics; browser chrome stays on the system font",
+    "display": {
+      "weight": 600,
+      "lineHeight": 0.92,
+      "trackingEm": -0.055
+    },
+    "body": {
+      "weight": 400,
+      "sizes": [
+        18,
+        20
+      ],
+      "lineHeight": 1.5,
+      "trackingEm": 0
+    },
+    "eyebrow": {
+      "weight": 600,
+      "size": 12,
+      "trackingEm": 0.16,
+      "uppercase": true
+    },
+    "button": {
+      "weight": 600,
+      "size": 15,
+      "height": 50
+    }
   }
 }
-

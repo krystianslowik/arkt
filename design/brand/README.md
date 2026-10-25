@@ -34,6 +34,21 @@ visual overview.
 Mustard is a fill color, not a text color: it does not reach readable contrast as text on porcelain or white. Put
 graphite text on mustard, and use mustard text only on graphite.
 
+## Type
+
+The brand has one family: **Avenir Next**, the face of arkt.dev. Decided with the first-run design (#303).
+
+| Surface | Type |
+|---|---|
+| Hero and moment surfaces: the website, first run and onboarding, About, Help > Welcome to Arkt, social graphics | Avenir Next at the website's scale: headlines DemiBold (600) from 54 to 132 at a line height of 0.92 and -0.055 em tracking, copy Regular (400) at 18 to 20, labels DemiBold 12 uppercase at +0.16 em, buttons DemiBold 15 |
+| Everyday browser chrome: sidebar, tab rows, toolbar, command bar, menus, settings, alerts | The system font, as Arc does. Unchanged |
+
+On the Mac, Avenir Next ships with macOS in `/System/Library/Fonts`, so the app uses it by PostScript name
+(`AvenirNext-Regular`, `AvenirNext-Medium`, `AvenirNext-DemiBold`) and falls back to the system font if it is
+missing. It is a Monotype face licensed to Apple: **never bundle or redistribute it**. Text in exported graphics is
+outlined, so they carry no font dependency. Tracking is set per size, never one value for every size. The full
+type scale for the first run is in [`docs/design/onboarding.md`](../../docs/design/onboarding.md), section 3.
+
 ## Usage rules
 
 - Write the name in lowercase: `arkt`. Use the supplied wordmark for lockups instead of typesetting it.

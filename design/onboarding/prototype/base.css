@@ -1,0 +1,91 @@
+/* Tokens, type and controls for the first run, lifted from arkt.dev (landing.css) so the app opens on the language
+   the website promised. The body is the window: at least 1000 x 680 pt.
+   Accessibility variants are classes on <html>, set from the system settings (or forced by the review bar):
+   .rm Reduce Motion, .rt Reduce Transparency, .ic Increase Contrast. */
+:root {
+  --bg: #faf9f5;
+  --bg-rgb: 250 249 245;
+  --ink: #202321;
+  --muted: #62655f;
+  --line: rgb(32 35 33 / 0.12);
+  --control: rgb(32 35 33 / 0.05);
+  --control-press: rgb(32 35 33 / 0.1);
+  --accent: #e9b520;
+  --accent-hover: #f3ca3d;
+  --accent-press: #dca319;
+  --on-accent: #202321;
+  --accent-text: #8a5a0e;
+  --focus: #202321;
+  --ghost: rgb(var(--bg-rgb) / 0.55);
+  --font: "Avenir Next", -apple-system, BlinkMacSystemFont, sans-serif;
+  --system: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #202321; --bg-rgb: 32 35 33; --ink: #faf9f5; --muted: #b6bab3; --line: rgb(250 249 245 / 0.12);
+  --control: rgb(250 249 245 / 0.06); --control-press: rgb(250 249 245 / 0.12);
+  --accent-text: #e9b520; --focus: #e9b520; --ghost: rgb(255 255 255 / 0.06); color-scheme: dark;
+}
+.ic { --muted: #3d403b; --line: rgb(32 35 33 / 0.45); }
+.ic[data-theme="dark"] { --muted: #e3e6df; --line: rgb(250 249 245 / 0.5); }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  position: relative; overflow: hidden; min-width: 1000px; min-height: 620px;
+  background: var(--bg); color: var(--ink);
+  font: 400 16px/1.6 var(--font);
+  -webkit-font-smoothing: antialiased; font-kerning: normal;
+}
+h1, p { margin: 0; }
+h1 { font-weight: 600; text-wrap: balance; }
+button, input { font: inherit; color: inherit; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 10px; }
+.ic :focus-visible { outline-width: 3px; }
+
+/* Type at the website's scale and tracking */
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent-text); }
+.display { letter-spacing: -0.055em; line-height: 0.92; }
+.lede { font-size: 19px; line-height: 1.5; color: var(--muted); max-width: 40ch; }
+.halo { text-shadow: 0 0 32px rgb(var(--bg-rgb) / 0.95), 0 0 12px rgb(var(--bg-rgb) / 0.8), 0 0 2px rgb(var(--bg-rgb) / 0.6); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Buttons: the website's pills. Mustard is a fill, never text. */
+.button {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 50px; min-width: 132px; padding: 0 26px; border-radius: 999px; border: 0;
+  font: 600 15px/1 var(--font); letter-spacing: 0.005em; cursor: pointer; white-space: nowrap;
+  background: var(--accent); color: var(--on-accent);
+  transition: transform 160ms var(--ease-out), background-color 150ms ease, opacity 200ms ease;
+}
+.button:active { transform: scale(0.97); background: var(--accent-press); }
+.button.ghost {
+  background: var(--ghost); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+.button.ghost:active { background: var(--control-press); }
+.button:disabled { opacity: 0.4; pointer-events: none; }
+@media (hover: hover) and (pointer: fine) {
+  .button:hover { background: var(--accent-hover); }
+  .button:active { background: var(--accent-press); }
+  .button.ghost:hover { background: rgb(var(--bg-rgb) / 0.85); }
+}
+.rt .button.ghost { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.ic .button.ghost { box-shadow: inset 0 0 0 1.5px var(--muted); }
+
+/* Quiet text controls: Back, Skip setup */
+.quiet {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--muted); font: 500 14px/1 var(--font); cursor: pointer;
+  transition: color 150ms ease, background-color 150ms ease, transform 160ms var(--ease-out), opacity 200ms ease;
+}
+.quiet:active { transform: scale(0.97); background: var(--control-press); }
+@media (hover: hover) and (pointer: fine) { .quiet:hover { color: var(--ink); background: var(--control); } }
+
+/* Press feedback under Reduce Motion is the pressed fill alone */
+.rm .button:active, .rm .quiet:active { transform: none; }
+
+.still *, .still *::before, .still *::after { transition: none !important; animation: none !important; }
