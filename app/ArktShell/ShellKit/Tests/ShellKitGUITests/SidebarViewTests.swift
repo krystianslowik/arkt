@@ -146,6 +146,8 @@ final class SidebarViewTests: XCTestCase {
                      title: title, in: location)
     }
     controller.view.layoutSubtreeIfNeeded()
+    // A layout pass of the collection view alone did not bring the items back before the fix; only a reload did.
+    grid.collectionView.layoutSubtreeIfNeeded()
 
     XCTAssertEqual(grid.frame.height, 46 * 2 + 9)
     XCTAssertFalse(grid.collectionView.bounds.isEmpty)

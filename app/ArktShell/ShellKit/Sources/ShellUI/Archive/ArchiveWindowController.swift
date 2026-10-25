@@ -241,7 +241,6 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   // MARK: Layout
 
   private func buildContent(in window: NSWindow) {
-
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("item"))
     column.resizingMask = .autoresizingMask
     tableView.addTableColumn(column)
