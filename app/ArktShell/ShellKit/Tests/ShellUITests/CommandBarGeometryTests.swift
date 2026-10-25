@@ -23,4 +23,13 @@ struct CommandBarGeometryTests {
     #expect(CommandBarGeometry.contentHeight(rowCount: 3) == CGFloat(60 + 1 + 3 * 50 + 16))
     #expect(CommandBarGeometry.contentHeight(rowCount: 20) == CommandBarGeometry.contentHeight(rowCount: 8))
   }
+
+  /// BH-113: the notice strip adds its height, with and without result rows.
+  @Test func noticeAddsItsHeight() {
+    let rows = 1
+    #expect(CommandBarGeometry.contentHeight(rowCount: rows, showsNotice: true)
+            == CommandBarGeometry.contentHeight(rowCount: rows) + CommandBarGeometry.noticeHeight)
+    #expect(CommandBarGeometry.contentHeight(rowCount: 0, showsNotice: true)
+            == CommandBarGeometry.inputHeight + CommandBarGeometry.noticeHeight)
+  }
 }

@@ -34,6 +34,29 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public var archivedProvider: (@MainActor (String) async -> [CommandBarResults.ArchivedMatch])?
   /// Enter on an archived match: restore it (BH-086).
   public var onRestoreArchived: ((UUID) -> Void)?
+  /// Settings: search suggestions and the BH-113 notice dismissal.
+  public var settings: CommandBarSettings = .ephemeral()
+  /// BH-108: the URL on the clipboard when the bar is open with an empty query (nil: no Paste and Go). The
+  /// default reads nothing, so tests stay deterministic; the window wires the general pasteboard.
+  public var clipboardURLProvider: () -> URL? = { nil }
+  /// BH-104: the Spaces a query can switch to; the handler switches.
+  public var spacesProvider: () -> [CommandBarResults.Space] = { [] }
+  public var onSwitchSpace: ((SpaceID) -> Void)?
+  /// BH-106 / KB-081: the actions the action search lists; the handler runs a chosen one.
+  public var actionsProvider: () -> [CommandBarAction] = { [] }
+  public var onAction: ((String) -> Void)?
+  /// BH-107 / KB-082: the engines an alias + Tab can scope to.
+  public var siteSearchProvider: () -> [SiteSearchEngine] = { SiteSearchEngines.seeded }
+  /// BH-109: a removed suggestion; the session exclusion is already applied. A future history store persists
+  /// removals through this hook.
+  public var onRemoveSuggestion: ((CommandBarResults.Result) -> Void)?
+
+  /// The bar's scope: normal, action search (BH-106) or a site-search engine (BH-107).
+  public private(set) var scope: CommandBarResults.Scope = .normal
+  /// Whether the search-suggestion privacy notice (BH-113) is up.
+  public private(set) var isNoticeVisible = false
+  /// BH-109: suggestions removed this controller's lifetime stay hidden.
+  private var removedSuggestionIDs: Set<String> = []
 
   public private(set) var isVisible = false
   public private(set) var mode: Mode = .newTab
@@ -94,6 +117,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
                                value: results[row].accessibilityCaption)
     }
     barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
+    barView.onDismissNotice = { [weak self] in self?.dismissNotice() }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
     for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification,
                  NSWindow.didChangeBackingPropertiesNotification] {
@@ -156,6 +180,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     endSignpost()                                   // a second show() before the first frame restarts the interval
     signpostState = ShellSignposts.signposter.beginInterval("CommandBarShow")
     mode = newMode
+    scope = .normal                                   // a fresh bar starts unscoped (BH-106, BH-107)
+    updateScopeChrome()
     switch newMode {
     case .newTab, .newSplitPane: prefill = nil
     case .currentTab(let url): prefill = url?.absoluteString
@@ -275,13 +301,18 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public func controlTextDidChange(_ obj: Notification) {
     searchArchive()
     reloadResults()
-    if let parent { setPanelFrame(frame(in: parent), display: true) }
+    relayout()
   }
 
   public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
     switch selector {
     case #selector(NSResponder.cancelOperation(_:)): hide(); return true          // Esc, KB-084
     case #selector(NSResponder.insertNewline(_:)): commit(); return true
+    case #selector(NSResponder.insertTab(_:)): return insertTabCommand()
+    case #selector(NSResponder.deleteBackward(_:)):
+      // [I] Backspace on the empty scoped field leaves the scope (Chromium omnibox convention; Arc unverified).
+      if scope != .normal, barView.field.stringValue.isEmpty { exitScope(); return true }
+      return false
     // Opt-Return's standard binding; handleKeyDown normally takes Opt-Return first. Only an actual Opt-Return opens
     // a new tab here; another key bound to this selector commits like Return.
     case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
@@ -297,11 +328,77 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Cmd-Return and Opt-Return (KB-085) [I]: open the selected result in a new tab, from Cmd-T and from Cmd-L
   /// alike (Chromium's omnibox opens Opt-Return in a new tab; Arc unverified, RT-08). Any other modifier, or
   /// Return during IME composition, goes on to the field editor.
+  /// Cmd-Opt-Delete (KB-083, BH-109) removes the selected suggestion.
   private func handleKeyDown(_ event: NSEvent) -> Bool {
-    guard isVisible, Self.isReturn(event, withExactly: [.command, .option]) else { return false }
+    guard isVisible else { return false }
+    if event.keyCode == 51,
+       event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command, .option] {
+      removeSelectedSuggestion()
+      return true
+    }
+    guard Self.isReturn(event, withExactly: [.command, .option]) else { return false }
     if let editor = barView.field.currentEditor() as? NSTextView, editor.hasMarkedText() { return false }
     commit(forcing: .newTab)
     return true
+  }
+
+  // MARK: Scopes (BH-106 action search, BH-107 site search)
+
+  /// Tab: on the empty bar just opened with Cmd-T, enters action search (KB-081); on a typed alias, scopes the
+  /// query to that engine (KB-082). Already scoped: consumed, stays [I]. Otherwise not ours.
+  private func insertTabCommand() -> Bool {
+    switch scope {
+    case .normal:
+      let text = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      if text.isEmpty {
+        guard mode == .newTab else { return false }   // KB-081: Tab immediately after Cmd-T
+        enterScope(.actions)
+        return true
+      }
+      if let engine = SiteSearchEngines.engine(aliased: text, in: siteSearchProvider()) {
+        enterScope(.siteSearch(engine))
+        return true
+      }
+      return false
+    case .actions, .siteSearch:
+      return true
+    }
+  }
+
+  private func enterScope(_ newScope: CommandBarResults.Scope) {
+    scope = newScope
+    barView.field.stringValue = ""
+    updateScopeChrome()
+    reloadResults()
+    relayout()
+  }
+
+  private func exitScope() {
+    scope = .normal
+    updateScopeChrome()
+    reloadResults()
+    relayout()
+  }
+
+  private func updateScopeChrome() {
+    let title: String?
+    let placeholder: String
+    switch scope {
+    case .normal:
+      title = nil
+      placeholder = "Search or Enter URL..."
+    case .actions:
+      title = "Actions"
+      placeholder = "Search actions..."
+    case .siteSearch(let engine):
+      title = engine.name
+      placeholder = "Search \(engine.name)"
+    }
+    barView.setScope(title: title)
+    barView.field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
+      .font: NSFont.systemFont(ofSize: 18),
+      .foregroundColor: ShellTokens.commandBarSecondaryText.nsColor(),
+    ])
   }
 
   /// True for a key-down of Return or keypad Enter whose Cmd / Opt / Ctrl / Shift modifiers are exactly one of
@@ -329,10 +426,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     let target = forced ?? openTarget
     hide()
     switch kind {
-    case .open(let url), .search(let url): onOpen?(url, target)
+    case .open(let url), .search(let url), .pasteAndGo(let url), .siteSearch(let url): onOpen?(url, target)
     // [I] A "Switch to Tab" result switches in every mode, the split pane bar included: the tab is already open.
     case .switchTo(let node): onSwitch?(node)
     case .restore(let id): onRestoreArchived?(id)
+    case .action(let id): onAction?(id)
+    case .switchSpace(let space): onSwitchSpace?(space)
     }
   }
 
@@ -356,6 +455,17 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: barView.field))
   }
 
+  /// The Paste and Go clipboard read (BH-108): a URL on the pasteboard. Plain text counts only with an
+  /// explicit scheme; a schemeless host ("example.com") may be text the user never meant as a URL.
+  public static func pasteboardURL(_ pasteboard: NSPasteboard) -> URL? {
+    if let string = pasteboard.string(forType: .URL), let url = URL(string: string), url.scheme != nil {
+      return url
+    }
+    guard let text = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+          URLInputParser.hasExplicitScheme(text) else { return nil }
+    return URLInputParser.url(from: text)
+  }
+
   /// setFrame is a window-server round trip (measured up to ~2.8 ms) even when nothing changes; skip it then.
   private func setPanelFrame(_ frame: NSRect, display: Bool) {
     guard panel.frame != frame else { return }
@@ -364,7 +474,14 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   private func frame(in parent: NSWindow) -> NSRect {
     CommandBarGeometry.frame(parentFrame: parent.frame,
-                             contentHeight: CommandBarGeometry.contentHeight(rowCount: results.count))
+                             contentHeight: CommandBarGeometry.contentHeight(rowCount: results.count,
+                                                                             showsNotice: isNoticeVisible))
+  }
+
+  /// Sets the panel's frame for the current results and notice, when it changed.
+  private func relayout(display: Bool = true) {
+    guard let parent else { return }
+    setPanelFrame(frame(in: parent), display: display)
   }
 
   /// Asks for the archived matches of the field's text; a reply for an older text is dropped.
@@ -401,15 +518,79 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     } else {
       []
     }
-    let fresh = CommandBarResults.make(query: text, openTabs: openTabsProvider(), archived: current)
+    var input = CommandBarResults.Input()
+    input.openTabs = openTabsProvider()
+    input.spaces = spacesProvider()
+    input.actions = actionsProvider()
+    // BH-108: Paste and Go is a new-tab surface; Cmd-L's prefill and the split pane bar never offer it.
+    input.clipboardURL = scope == .normal && mode == .newTab ? clipboardURLProvider() : nil
+    input.excluded = removedSuggestionIDs
+    input.searchSuggestionsEnabled = settings.searchSuggestionsEnabled
+    input.scope = scope
+    input.archived = current
+    let fresh = CommandBarResults.make(query: text, input: input)
     let scale = backingScale
     if fresh != results || scale != cellScale {
       results = fresh
       cellScale = scale
+      barView.setHoveredRow(nil)                      // the rows shifted; no honest hover target anymore
       barView.table.reloadData()
     }
     if !results.isEmpty, barView.table.selectedRow != 0 {
       barView.table.selectRowIndexes([0], byExtendingSelection: false)
+    }
+    updateNotice()
+  }
+
+  // MARK: Notice (BH-113) and refresh (BH-111)
+
+  /// The notice rides along with the rows that send the query to the engine ("Search ..." rows).
+  private func updateNotice() {
+    let hasEngineRow = results.contains {
+      if case .search = $0.kind { return true }
+      if case .siteSearch = $0.kind { return true }
+      return false
+    }
+    let shows = settings.searchSuggestionsEnabled && !settings.searchSuggestionNoticeDismissed && hasEngineRow
+    guard shows != isNoticeVisible else { return }
+    isNoticeVisible = shows
+    barView.setNoticeVisible(shows)
+  }
+
+  /// The notice's X: dismissed for good (BH-113, persisted by `settings`).
+  public func dismissNotice() {
+    settings.dismissSearchSuggestionNotice()
+    updateNotice()
+    relayout()
+  }
+
+  /// BH-111: the open bar's suggestions follow the current Space; the window calls this on a Space switch.
+  public func refreshSuggestions() {
+    guard isVisible else { return }
+    reloadResults()
+    relayout()
+  }
+
+  // MARK: Removal (BH-109, KB-083)
+
+  /// Cmd-Opt-Delete.
+  public func removeSelectedSuggestion() {
+    let row = barView.table.selectedRow
+    guard row >= 0 else { return }
+    removeSuggestion(at: row)
+  }
+
+  /// The hover X or Cmd-Opt-Delete: the row stays hidden for this controller's lifetime; `onRemoveSuggestion`
+  /// is the persistence hook. A row without a `removalID` (the user's own input, verbs) is not removable.
+  func removeSuggestion(at row: Int) {
+    guard results.indices.contains(row), let id = results[row].removalID else { return }
+    let result = results[row]
+    removedSuggestionIDs.insert(id)
+    onRemoveSuggestion?(result)
+    reloadResults()
+    relayout()
+    if !results.isEmpty {                             // the next suggestion takes the removed row's place
+      barView.table.selectRowIndexes([min(row, results.count - 1)], byExtendingSelection: false)
     }
   }
 
@@ -442,6 +623,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     let cell = tableView.makeView(withIdentifier: CommandBarCellView.identifier, owner: nil) as? CommandBarCellView
       ?? CommandBarCellView(frame: .zero)
     cell.configure(results[row], scale: cellScale)
+    cell.onRemove = results[row].removalID != nil ? { [weak self] in self?.removeSuggestion(at: row) } : nil
+    cell.setCloseHovered(barView.hoveredRow == row)
     return cell
   }
 
