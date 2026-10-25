@@ -201,7 +201,7 @@ final class MainMenuInventoryTests: XCTestCase {
     let toCommands: [(String, Selector)] = [
       ("New Window", #selector(AppCommands.newWindow(_:))),
       ("Settings...", #selector(AppCommands.showSettings(_:))),
-      ("Import from Arc...", #selector(AppCommands.importFromArc(_:))),
+      ("Import Browser Data...", #selector(AppCommands.importFromArc(_:))),
       ("Show Archive", #selector(AppCommands.showArchive(_:))),
     ]
     for (title, action) in toCommands {

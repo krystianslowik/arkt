@@ -187,7 +187,7 @@ public final class ArchiveListModel: ArchiveListDataSource {
     if case .favorites? = item.section { return "Favorites" }   // [I] Favorites entries carry no Space
     switch item.source {
     case .space(let id): return source.sidebar.spaces[id]?.title ?? "Unknown Space"
-    case .littleArc: return "Little Arc"
+    case .littleArc: return "Little Arkt"
     case .unknown: return "Unknown Space"
     }
   }

@@ -84,7 +84,7 @@ final class AccessibilityIdentifierTests: XCTestCase {
     controller.rootView.layoutSubtreeIfNeeded()
     let importButton = try element(AXID.EmptyState.importFromArc, in: controller)
     XCTAssertEqual(importButton.accessibilityRole(), .button)
-    XCTAssertEqual(importButton.accessibilityTitle(), "Import from Arc")
+    XCTAssertEqual(importButton.accessibilityTitle(), "Import")
     controller.close()
   }
 

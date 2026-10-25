@@ -322,7 +322,7 @@ final class AppSession {
     } catch {
       let (errorType, code) = (String(describing: type(of: error)), (error as NSError).code)
       Self.log.error("arc import failed \(errorType, privacy: .public) \(code, privacy: .public)")
-      shownWindow().toasts.show(Toast(text: "Couldn't import from Arc."))
+      shownWindow().toasts.show(Toast(text: "Couldn't import your browser data."))
       return nil
     }
   }
@@ -330,7 +330,7 @@ final class AppSession {
   /// Counts only (decision 6d).
   private func showSummary(_ summary: ArcImportSummary) {
     let alert = NSAlert()
-    alert.messageText = "Imported from Arc"
+    alert.messageText = "Import complete"
     alert.informativeText = summary.lines.joined(separator: "\n")
     alert.addButton(withTitle: "OK")
     if let sheetWindow = shownWindow().window {

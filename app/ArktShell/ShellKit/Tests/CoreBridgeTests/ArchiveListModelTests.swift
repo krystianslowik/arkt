@@ -356,7 +356,7 @@ struct ArchiveListModelTests {
     #expect(byTitle["Weekend"]?.reason == "Closed")
     #expect(byTitle["Reading"]?.detail == "Folder - Work - 2 hours ago")
     #expect(byTitle["Reading"]?.reason == "Auto archived")
-    #expect(byTitle["A | B"]?.detail == "Split View - Little Arc - 1 minute ago")
+    #expect(byTitle["A | B"]?.detail == "Split View - Little Arkt - 1 minute ago")
     #expect(byTitle["Lost"]?.detail == "lost.example - Unknown Space - 3 days ago")
     #expect(byTitle["Fav"]?.detail == "mail.example - Favorites - 1 minute ago")
     #expect(byTitle["Old"]?.detail == "old.example - Unknown Space - 1 week ago")

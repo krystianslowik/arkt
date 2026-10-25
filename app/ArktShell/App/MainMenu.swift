@@ -105,7 +105,7 @@ enum MainMenu {
       page("Save Page As...", .savePage, "s", [.command, .shift]),                         // KB-060 (Arc's key)
       page("Print...", .print, "p"),                                                       // KB-060
       .separator(),
-      item("Import from Arc...", #selector(AppCommands.importFromArc(_:)), "", [], target: commands),   // E4c
+      item("Import Browser Data...", #selector(AppCommands.importFromArc(_:)), "", [], target: commands),   // E4c
     ]
   }
 

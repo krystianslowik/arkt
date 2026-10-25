@@ -27,7 +27,7 @@ final class EmptyStateTests: XCTestCase {
     XCTAssertFalse(view.isHidden)
     XCTAssertEqual(view.headingLabel.stringValue, "Welcome to Arkt")
     XCTAssertEqual(view.bodyLabel.stringValue,
-                   "Bring your Spaces, pinned tabs and Archive over from Arc, or start fresh.")
+                   "Bring your Spaces, pinned tabs and Archive over, or start fresh.")
     XCTAssertTrue(view.importButton.isHidden)
     XCTAssertFalse(view.newSpaceButton.isHidden)
 
