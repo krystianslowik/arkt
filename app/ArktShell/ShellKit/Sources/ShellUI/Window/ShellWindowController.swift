@@ -64,6 +64,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A close was requested for the whole window and is held behind a prompt: tabs the engine opens in it meanwhile get
   /// no row (they would outlive the window in the sidebar).
   var isWindowCloseRequested = false
+  /// The close button asked the engine to close the window and the shown tabs are not stamped yet: they are stamped
+  /// when the first page actually closes (`.tabClosed(reason: .windowClosing)`), so a close the user cancels at a
+  /// leave-site prompt stamps nothing (decision 10; PR #274 review).
+  var stampsShownTabsOnWindowClose = false
   /// The window closed. A closed controller is not shown again (its command bar and pager released their display
   /// links); the app builds a new window instead (#241: Dock reopen).
   public private(set) var isClosed = false
@@ -80,6 +84,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var nodeByTab: [TabID: NodeID] = [:]
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
   private var sidebarObservation: SidebarObservation?
+  /// New Window (Cmd-N, `IDC_NEW_WINDOW`): set by the window set that owns this window. Nil: New Window is disabled.
+  public var onNewWindow: (@MainActor () -> Void)?
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
   /// does nothing.
   public var onArchive: (@MainActor ([NodeID]) -> Void)?
@@ -602,6 +608,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     let wasCurrent = currentTab == tab
     switch reason {
     case .windowClosing, .appTerminating:
+      if reason == .windowClosing, stampsShownTabsOnWindowClose {
+        stampsShownTabsOnWindowClose = false
+        for shown in shownNodes { onTabHidden?(shown) }      // decision 10, before the first page leaves
+      }
       shownNodes.removeAll { $0 == node }
       sidebarController.visible.remove(node)
       if wasCurrent { currentTab = nil; rootView.card.setContent(nil) }
@@ -655,12 +665,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public func windowDidDeminiaturize(_ notification: Notification) { reapplyTrafficLights() }
   /// The close button and Close Window (`performClose:`): with an engine window the engine decides
   /// (`onCloseRequested`): it closes the tabs, unload prompts first, and the window closes on its `.windowClosed`; a
-  /// cancelled prompt keeps it open. Without one (no tab was ever shown) the window closes as before.
+  /// cancelled prompt keeps it open. Without one (no tab was ever shown) the window closes as before. The shown tabs
+  /// are stamped once the first page closes, not here: a cancelled prompt leaves the stored sidebar as it was.
   public func windowShouldClose(_ sender: NSWindow) -> Bool {
     guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
-    for node in shownNodes { onTabHidden?(node) }          // decision 10, before any tab closes
     let open = Array(tabsByNode.values)
     isWindowCloseRequested = true
+    stampsShownTabsOnWindowClose = true
     request()
     markHeldCloses(open)
     return false

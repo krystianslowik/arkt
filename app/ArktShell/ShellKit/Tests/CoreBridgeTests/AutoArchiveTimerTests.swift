@@ -253,6 +253,37 @@ struct AutoArchiveTimerTests {
     #expect(harness.today == [tab])
   }
 
+  /// A quit cancelled while the first start is still loading (stop, then start again): the timer runs.
+  @Test func startAfterStopWhileStartIsLoadingRuns() async throws {
+    let harness = Harness()
+    await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))
+    await harness.state.holdLoads()
+    let tab = try harness.addTodayTab(idleHours: 40)
+    let starting = Task { try await harness.timer.start() }
+    await eventually { await harness.state.heldLoadCount == 1 }
+
+    harness.timer.stop()
+    try await harness.timer.start()
+    await harness.state.releaseLoads()
+    try await starting.value
+    await eventually { harness.sleeper.parkedCount == 1 }
+
+    #expect(harness.timer.isRunning)
+    #expect(harness.reports.map { $0.map(\.id) } == [[tab]])
+    harness.timer.stop()
+  }
+
+  /// A quit cancelled after the timer ran: it runs again.
+  @Test func startAfterStopRunsAgain() async throws {
+    let harness = Harness()
+    try await harness.timer.start()
+    harness.timer.stop()
+    try await harness.timer.start()
+    await eventually { harness.sleeper.parkedCount == 1 }
+    #expect(harness.timer.isRunning)
+    harness.timer.stop()
+  }
+
   @Test func startTwiceRunsOneLoop() async throws {
     let harness = Harness()
     try await harness.timer.start()

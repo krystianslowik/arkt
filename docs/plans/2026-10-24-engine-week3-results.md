@@ -14,7 +14,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-4 | Host mode for ShellUI windows | DONE | embedder hosts own Arkt windows, `createBrowserWithHost:`, request kinds from the call site, self-test embedder; all acceptance rows pass on `Chromium.app`; see "W3-4" below |
 | W3-5 | Tab facade | DONE (W3-5a #256, W3-5b) | W3-5a: pending-handle queue, close modes and reasons, CloseCancelled, stable containers, state events, held-window state. W3-5b: history and duplicate, extension actions for embedder windows, the test API; page context menu still blocked. See "W3-5a" and "W3-5b" below; review follow-ups in "#258" |
 | W3-6 | `ChromiumEngineKit` over the facade | DONE | `ChromiumEngine: EngineClient, EngineExtensions` and the typed `ArktShellEmbedder` in `ChromiumEngineKit`; contract rules 1-16 pass against a scripted facade with every driver (24 checks x 2 event orders, none not applicable); ShellKit 509 + 28; see "W3-6" below |
-| W3-7 | The shell as engine host, composition root (Swift lane) | A, B DONE; C, D TODO | `ShellEngineHost`, engine window on the first tab, `createTab(url:in:)`, commands, close button, per-window routing, close reasons, held closes, Extensions control, #241; see "W3-7 A and B" below |
+| W3-7 | The shell as engine host, composition root (Swift lane) | DONE | A, B: `ShellEngineHost`, engine window on the first tab, `createTab(url:in:)`, commands, close button, per-window routing, close reasons, held closes, Extensions control, #241. C, D: `AppComposition` for both engines, `ShellWindowSet` with host-matched provider windows, quit seams, the W3-8 menu in both builds, reserved keys in `ShellWindow`; see "W3-7 C and D" and "W3-7 A and B" below |
 | W3-8 | Main menu inventory and owner decision | DONE (steps 1-3; step 4 after W3-9) | Arkt owns the menu; conditions: a hidden `IDC_BOOKMARKS_MENU` placeholder (without it the first window crashes, measured), no `IDC_FILE_MENU` / `IDC_TAB_MENU` tags, Quit `IDC_EXIT` + `terminate:`; reserved keys in `ShellWindow`; no engine change; see "W3-8" below |
 | W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | TODO | |
 | W3-10 | Infobars, or a recorded gap | DONE | native rows on the tab container for every confirm infobar (every confirm type on Mac, triggered from `chrome://infobar-internals`), `--no-sandbox` acceptance passes; tab sharing and sign-in QR (own Views) recorded in #122; no patch; see "W3-10" below |
@@ -36,6 +36,111 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-7 C and D: start, quit and the main menu
+
+Date 2026-10-25. Branch `engine/33-w3-7cd-start-quit-menu` off `main` (rebased onto `46f3729`), Swift lane. Swift only:
+no engine worktree, `$CR` and `$EMB` not touched, no `EngineAPI`, facade header or `Package.swift` change, no app
+launch (part C's acceptance is the FakeEngine app; the real-engine run is W3-9).
+
+### Part C: start and quit
+
+- **`AppComposition`** (`App/AppComposition.swift`) holds what `AppDelegate.launch()` did: data folder, load, session.
+  `start(engine:hostLookup:defersWindows:) async throws` replaces the plan's `start(engine:windowHostProvider:)`: the
+  embedder already wires the engine's provider to the delegate, so the composition needs only the engine's
+  `host(of:)` to pair windows, and the Chromium engine defers the launch window. A failed launch shows the alert from
+  a run-loop callout (never a modal inside a main-actor job, W3-0a); Try Again loops inside `start`, Quit throws. So
+  `embedderReady` is called only once a session exists, and `startFailed` (after `embedderFailed` dropped the queue)
+  only quits.
+- **Quit without a facade call.** The header has no `chrome::AttemptExit()`; none is needed. The composition's quit
+  closure is `NSApp.terminate(nil)` in both builds; in the Engine build `NSApp` is `BrowserCrApplication`, whose
+  `terminate:` is Chromium's own quit path (W3-8 run B: Quit through `terminate:` gives `engineWillBeginTerminating`,
+  the `.appTerminating` closes and `engineWillTerminate`).
+- **FakeEngine:** `AppDelegate` installs the menu, calls `start`, and its `.terminateLater` path calls
+  `prepareForTermination()` then `flush()`, as before. **Engine:** `ChromiumShell` (`App/Engine/`, Engine
+  configuration only) is the `ChromiumEmbedderDelegate`: `start` runs `AppComposition.start` with deferred windows;
+  one run-loop turn after `embedderReady` it opens the launch window unless the engine's queued requests (a startup
+  URL, an extension's `chrome.windows.create`) built one; `host(for:in:)` is the window set's provider;
+  `engineWillBeginTerminating` is `prepareForTermination()`, `engineDidCancelTerminating` restarts auto-archive (the
+  stamps written at quit start stay), `engineWillTerminate` awaits `flush()`. `StandInShell` stays only for the
+  engine lane's `--arkt-reentrancy-probe` and `--arkt-embedder-fail` runs.
+- **`ShellWindowSet`** (ShellUI) holds every browser window: launch, New Window (without a page, so no row is shown
+  in two windows; its engine window comes with the first tab), FakeEngine's Dock reopen (#241), and windows for engine
+  requests. A provider window is built without calling the engine, in the opener's Space (else the primary window's)
+  with the requested frame, and is neither shown nor adopted until its `.windowOpened`; it is matched by host
+  (`hostLookup`), not by order, because a shell window's own `createWindow(host:)` announces its window before
+  `attach` records the id. Under Chromium a Dock reopen arrives as a `.reopen` request (`AppSession.reopenWindow` is
+  FakeEngine only now): an open window that never got an engine window is reused, otherwise a new one is built.
+  Quit stamps, auto-archive exemptions, favicons and import availability cover every open window.
+- **Host claims:** `IDC_NEW_WINDOW` (34000, through the set) and `IDC_CLOSE_WINDOW` (the close button's path), next to
+  `.newTab` and `.closeTab`.
+- **PR #274 review (LOW):** the close button no longer stamps the shown tabs before the engine answers; the stamp runs
+  on the first `.tabClosed(reason: .windowClosing)` of a requested close, still before any page leaves, so a close
+  cancelled at a leave-site prompt leaves the stored sidebar byte-identical (ShellUI cannot read `lastActiveAt` back,
+  so deferring replaces restoring). A cancelled quit does not undo `prepareForTermination`'s stamps.
+- **Engine build data:** the Engine configuration builds without `DEBUG`, so it ignored `ARKT_DATA_DIR`; it now
+  accepts the overrides like Debug and Profile (`ArktEnvironmentOverrides` YES). Without them an Engine run opens the
+  real Arkt data folder. **W3-11 must ship the engine bundle from a configuration that does not accept the overrides**
+  (no `ARKT_CHROMIUM_ENGINE`-style condition in `AppEnvironment`, `ArktEnvironmentOverrides` NO).
+
+### Part D: the menu
+
+`App/MainMenu.swift`, the same menu in both builds; `install(commands:)` sets it. FakeEngine installs it at launch,
+the Engine build one turn after `NSApplicationDidFinishLaunchingNotification` (observer registered in `engineMain()`
+before `ChromeMain`; nothing touches `NSApplication` there).
+
+1. Targets: About, Hide, Hide Others, Show All, Bring All to Front and Quit target `NSApp`; New Window, Settings,
+   Import from Arc and Show Archive target `AppCommands`, which validates from the session (nothing enabled before it
+   exists). Quit is `terminate:` with tag 34031 in the first menu. Settings (Cmd-,) is a disabled placeholder until
+   Arkt has a Settings window; it keeps the key from Chromium's settings page.
+2. Tags: a hidden top-level `IDC_BOOKMARKS_MENU` (57333) item with an empty submenu; no 57326, 57323 or 57324 anywhere.
+   The History menu is untagged.
+3. Page commands: 19 `commandDispatch:` items, nil target, tag = command id: Reload, Force Reload, Stop, Back, Forward,
+   Find, Find Next, Find Previous, Actual Size, Zoom In, Zoom Out, Save Page As (Shift-Cmd-S), Print, View Source,
+   Developer Tools, Inspect Elements, JavaScript Console, Show All History, Downloads. The six ids without an
+   `EngineCommand` constant (#272) and `IDC_NEW_WINDOW` are in `ShellUI.PendingEngineCommands`, the one place to delete
+   when #272 lands. FakeEngine's `forward` runs what WKWebView can (reload, force reload, stop, back and forward with
+   history, zoom) and disables the rest.
+4. Shell items: New Window (Cmd-N), Close Window (Shift-Cmd-W, `performClose:`), Enter Full Screen (Ctrl-Cmd-F),
+   Minimize (Cmd-M) and Zoom (checked to work on `ShellWindow`), Jump to Selection (Cmd-J). Existing items and keys kept.
+5. `servicesMenu`, `windowsMenu`, `helpMenu` are set on every install. AppKit keeps the first Services menu it was
+   given (a later assignment is ignored, measured on macOS 27), so an existing one (Chromium's) is moved under Arkt's
+   App menu; `windowsMenu` is replaced only by a menu inside the main menu, which Arkt's is.
+6. Reserved keys: `ShellWindow.performKeyEquivalent(with:)` sends Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q and
+   Cmd-Opt-Right / Left to `NSApp.mainMenu` before the view hierarchy, and goes the usual way when the menu has no item
+   for the key. `ReservedKeys` matches the virtual key code (Cyrillic layouts) or the unmodified character (AZERTY,
+   Dvorak) with exactly these modifiers (`.function`, `.numericPad`, Caps Lock ignored); the menu then decides the item.
+7. Install point as above; never from `engineDidStart`.
+
+### Verification
+
+`nice -n 10`, `-j 4`, scratch and derived data under `arkt-shell-dd/w3-7cd` on the Chromium disk.
+
+- ShellKit `swift test --skip ShellKitGUITests`: **551**, all pass (new: `ReservedKeysTests`).
+- ShellKit `--filter ShellKitGUITests`: **459**, 5 skipped, 0 failures. New: `ShellWindowSetTests` 11,
+  `ShellWindowKeyTests` 6, `MainMenuInventoryTests` 9, `FakeEnginePageCommandTests` 2, `EngineHostingTests` +3 (a
+  cancelled close and an unheld close stamp correctly, Close Window claimed).
+- ArktCore `swift test`: 355, all pass.
+- Debug app: `BUILD SUCCEEDED`, `NSPrincipalClass` `NSApplication`, `strings | grep -c "ARKT engine"` 0 in each
+  binary, no `Contents/Frameworks`.
+- Engine configuration (`ARKT_ENGINE_APP` = `out/Spike/Chromium.app` read-only, build directory on the scratch path,
+  `$EMB` not written): `BUILD SUCCEEDED`, `Engine framework copied`, framework CDHash equal to `out/Spike`'s,
+  `NSPrincipalClass` `BrowserCrApplication`, `nm -u | grep -cF '_OBJC_CLASS_$_Arkt'` 0, `ArktShellEmbedder` defined.
+- Checked to fail first: the reserved-key window test (Cmd-W reached the swallowing view), the cancelled-close test
+  (stamped at request).
+- On this machine a user key equivalent (`NSUserKeyEquivalents`) blanks "Find Next"; the menu test skips the key check
+  for titles the user rebound.
+
+### What W3-9 needs
+
+- Launch the Engine app with `ARKT_DATA_DIR` (and `ARKT_DEFAULTS_SUITE`) pointing at a scratch folder.
+- Startup replay: the launch window opens one turn after `embedderReady` unless the queued requests built a window. If
+  the facade replays asynchronously, a cold launch with a URL shows two windows; step 3 shows which.
+- Check that Chromium's Services submenu appears under Arkt's App menu, that Quit, Cmd-W with page focus and the page
+  commands reach the `Browser` (W3-8 step 4), and that a Dock reopen and `chrome.windows.create` land in adopted
+  windows in the right Space.
+- Unchanged gaps: nil-target page commands with the Archive window key (or no window) reach AppController (W3-8 M7);
+  Cmd-Left / Cmd-Right as Back / Forward; #272.
 
 ## W3-10: infobars on Arkt windows
 

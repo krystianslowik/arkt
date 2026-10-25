@@ -2,15 +2,15 @@ import CoreBridge
 import Foundation
 import Persistence
 
-/// Where Arkt keeps its data, where Arc's data would be and which defaults hold app settings. Debug and Profile builds
-/// (`ARKT_SMOKE_BUILD`) accept overrides (`EnvironmentOverrides`) so development, smoke and UI test runs never touch
-/// the real folders or defaults.
+/// Where Arkt keeps its data, where Arc's data would be and which defaults hold app settings. Debug, Profile
+/// (`ARKT_SMOKE_BUILD`) and Engine (`ARKT_CHROMIUM_ENGINE`, development only) builds accept overrides
+/// (`EnvironmentOverrides`) so development, smoke and UI test runs never touch the real folders or defaults.
 enum AppEnvironment {
   /// Arkt's data folder. `@concurrent`: `applicationSupport()` may create the folder, and the main thread never
   /// waits on disk.
   @concurrent
   static func databaseLocation() async throws -> DatabaseLocation {
-    #if DEBUG || ARKT_SMOKE_BUILD
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
     if let path = ProcessInfo.processInfo.environment["ARKT_DATA_DIR"] {
       return DatabaseLocation(directory: URL(fileURLWithPath: path, isDirectory: true))
     }
@@ -28,7 +28,7 @@ enum AppEnvironment {
   /// Arc's data folder; read only after the user asks for an import. Debug and Profile builds may point it at a
   /// fixture copy.
   static var arcDirectory: URL {
-    #if DEBUG || ARKT_SMOKE_BUILD
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
     if let path = ProcessInfo.processInfo.environment["ARKT_ARC_DIR"] {
       return URL(fileURLWithPath: path, isDirectory: true)
     }
@@ -41,7 +41,7 @@ enum AppEnvironment {
   /// `ARKT_DEFAULTS_SUITE` suite when it is set, so a test run never writes the real defaults; a suite name that
   /// would resolve to the real defaults stops the app instead of falling back to them.
   static var userDefaults: UserDefaults {
-    #if DEBUG || ARKT_SMOKE_BUILD
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
     if let suite = overrides.defaultsSuiteName {
       guard EnvironmentOverrides.isUsableSuiteName(suite, bundleIdentifier: Bundle.main.bundleIdentifier),
             let defaults = UserDefaults(suiteName: suite) else {
@@ -56,13 +56,13 @@ enum AppEnvironment {
   /// The sidebar autosave debounce. Debug and Profile builds take `ARKT_AUTOSAVE_DELAY_MS` (0 to 600000), so a test
   /// can quit inside the debounce deterministically.
   static var autosaveDelay: Duration {
-    #if DEBUG || ARKT_SMOKE_BUILD
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
     if let delay = overrides.autosaveDelay { return delay }
     #endif
     return SidebarAutosaver.defaultDelay
   }
 
-  #if DEBUG || ARKT_SMOKE_BUILD
+  #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
   private static var overrides: EnvironmentOverrides {
     EnvironmentOverrides(environment: ProcessInfo.processInfo.environment)
   }

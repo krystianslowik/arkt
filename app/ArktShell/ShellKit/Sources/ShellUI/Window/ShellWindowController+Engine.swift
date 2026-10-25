@@ -58,6 +58,7 @@ extension ShellWindowController {
       engineWindow = nil
       engineActiveTab = nil
       isWindowCloseRequested = false
+      stampsShownTabsOnWindowClose = false
       tabObservation = nil
       windowObservation = nil
       pendingArchives = [:]
@@ -153,6 +154,7 @@ extension ShellWindowController {
   /// left without a row.
   func closeWasCancelled(_ tab: TabID, node: NodeID) {
     isWindowCloseRequested = false
+    stampsShownTabsOnWindowClose = false                  // the tabs stayed visible: nothing to stamp
     sidebarController.setClosing(node, false)
     for (target, pending) in pendingArchives where pending.tabs.contains(tab) {
       pendingArchives[target] = nil
@@ -190,12 +192,15 @@ extension ShellWindowController {
 
   // MARK: Commands (Decision 9)
 
-  /// The commands the shell implements: New Tab opens the command bar, Close Tab archives or closes the current tab.
-  /// The rest of the W3-8 table joins with the menu (part D).
+  /// The commands the shell implements (week-3 results, W3-8 step 3): New Tab opens the command bar, Close Tab
+  /// archives or closes the current tab, New Window opens a shell window, Close Window asks the engine through the
+  /// close button's path. Every other command is the engine's.
   func claim(_ command: EngineCommand) -> CommandClaim? {
     switch command {
     case .newTab: CommandClaim(isEnabled: true)
     case .closeTab: CommandClaim(isEnabled: currentNode != nil)
+    case PendingEngineCommands.newWindow: CommandClaim(isEnabled: onNewWindow != nil)
+    case .closeWindow: CommandClaim(isEnabled: window != nil)
     default: nil
     }
   }
@@ -207,6 +212,14 @@ extension ShellWindowController {
       return true
     case .closeTab:
       closeTab(nil)
+      return true
+    case PendingEngineCommands.newWindow:
+      guard let onNewWindow else { return false }
+      onNewWindow()
+      return true
+    case .closeWindow:
+      guard let window else { return false }
+      window.performClose(nil)                            // windowShouldClose: the engine decides
       return true
     default:
       return false
