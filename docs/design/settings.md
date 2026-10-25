@@ -78,7 +78,9 @@ and translate exceptions (they live in the page's site controls).
   First open: General, centered on the screen of the key browser window.
 - **Close**: the close button and Cmd-W close it. Arkt's File menu maps Cmd-W to Archive Tab; while Settings is
   key the item would otherwise be disabled (its `closeTab:` action targets the first responder), so
-  `SettingsWindowController` implements `closeTab:` as `close()` and validates the item's title to "Close Window". Escape closes the window too (decision 2); inside a shortcut recorder
+  `SettingsWindowController` implements `closeTab:` as `close()` and validates the item's title to "Close Window". Escape closes the window too (decision 2), after any field that uses it: in the Shortcuts
+  search field Escape first clears a non-empty search (standard `NSSearchField` behavior) and closes Settings only when
+  the field is empty; inside a shortcut recorder
   Escape cancels the recording and leaves the window open. PARITY(NEEDS-RUNTIME-CHECK): Arc has
   `escKeyClosesSettingsEnabled` as a feature flag, its default is unknown.
 - **Pane keys**: Cmd-1 to Cmd-7 select panes. KB-020 gives Cmd-1 to Cmd-8 to Go to Sidebar Item; those menu items
@@ -153,10 +155,23 @@ New tokens (to add to `ShellUI/Theme`, with contrast tests next to `BrandTokensT
 | `SettingsTokens.groupFill` | white 0.85 (the `tabCurrent` level) | p3 #FAFBFF 0.06 | row groups |
 | `SettingsTokens.tabTileIdle` | p3 #0E0F10 0.06 | p3 #FAFBFF 0.08 | unselected tab tiles |
 | `SettingsTokens.toolbarMaterial` | `surfaceBrand` 0.82 over the vibrancy view | `surfaceBrand` 0.80 | chrome over scrolled content |
-| `AlertTokens.destructiveText` | sRGB #B3261E (6.2:1 on porcelain) | sRGB #FF7A6E (6.2:1 on graphite) | destructive button titles |
+| `AlertTokens.destructiveText` | sRGB #B3261E (6.20:1 on porcelain) | sRGB #FFAAA2 (8.71:1 on graphite) | destructive button titles |
+| `SettingsTokens.separatorIncreasedContrast` | black 0.20 | white 0.20 | group edges and separators with Increase Contrast |
 
 Contrast checked: graphite on mustard 8.4:1; `secondaryText` captions on `groupFill` over porcelain stay above 4.5:1
-(black 0.64 over near-white); destructive text on the neutral button fill stays above 5.5:1 in both appearances.
+(black 0.64 over near-white); destructive text is at least 4.5:1 in every placement, idle and hovered (table below).
+
+Destructive text, measured (WCAG 2.x, fills composited over the surface; neutral pressed fill is never used under
+destructive text, pressed keeps the hover fill and scales to 0.97):
+
+| Placement | Light #B3261E | Dark #FFAAA2 |
+|---|---|---|
+| on the surface (porcelain / graphite) | 6.20:1 | 8.71:1 |
+| neutral button fill | 5.59:1 | 6.44:1 |
+| neutral button fill, hovered | 5.02:1 | 5.45:1 |
+| neutral button fill inside a Settings group | 5.85:1 | 5.38:1 |
+| same, hovered | 5.25:1 | 4.58:1 |
+
 
 ## 5. Motion spec
 
@@ -167,7 +182,7 @@ Gate first (how often is it seen, and why does it move):
 | Window opens / closes | occasional | system | AppKit's own window animation; nothing custom |
 | Pane switch by click | occasional | spatial continuity | window frame resizes to the new pane, `NSAnimationContext` 0.25 s, timing (0.23, 1, 0.32, 1); old pane fades out over 0.08 s; new pane opacity 0 to 1 and translateY 4 to 0 on `SpringPreset.firm` (0.90 / 0.25 s) |
 | Pane switch by keyboard (Cmd-1 to Cmd-7) | frequent for keyboard users | none | instant: new pane and new frame in one step |
-| Tab tile selection | with the pane switch | state | mustard layer opacity 0 to 1 over 0.12 s; no sliding highlight (toolbar items are separate views) |
+| Tab tile selection | with the pane switch | state | by click: mustard layer opacity 0 to 1 over 0.12 s; by keyboard (Cmd-1 to Cmd-7): instant; no sliding highlight (toolbar items are separate views) |
 | Tab press | occasional | feedback | tile scale 0.96 on mouse down, `springyExtraFast` back |
 | Toggle | occasional | state | knob translateX on `springyFast` (0.80 / 0.18 s, a slight overshoot); the on-fill layer cross-fades 0.15 s |
 | Toggle press | occasional | feedback | knob stretches to scaleX 1.12 from its leading edge while the mouse is down |
@@ -189,8 +204,8 @@ Reduce Transparency: the toolbar material becomes opaque `surfaceBrand`; groups 
 
 Every color above is a `TokenPair`; the prototype's `#<state>&dark` screenshots show the dark side. In dark the
 content is graphite, groups lift by 6 % white, the focus ring and accent text switch to mustard, the selected tile
-stays mustard with a graphite glyph. Increase Contrast: group borders and separators use `cardBorder` instead of
-`sidebarDivider` (light black 0.10 to 0.10, dark 0.075 to 0.20).
+stays mustard with a graphite glyph. Increase Contrast: group borders and separators use `SettingsTokens.separatorIncreasedContrast`
+instead of `sidebarDivider` (light black 0.10 to 0.20, dark white 0.075 to 0.20); popup and button edges follow.
 
 ## 7. Keyboard and VoiceOver
 
@@ -245,7 +260,8 @@ stays mustard with a graphite glyph. Increase Contrast: group borders and separa
 
 1. Cmd-1 to Cmd-7 switch Settings panes while Settings is key: **yes**. Go to Sidebar Item (KB-020) validates false
    while Settings is key.
-2. Escape closes Settings: **yes** (inside a shortcut recorder, Escape cancels the recording first).
+2. Escape closes Settings: **yes** (inside a shortcut recorder, Escape cancels the recording first; in the Shortcuts
+   search field it clears a non-empty search first).
 3. Native ad and tracker blocking (BH-206): **not offered now**; no row.
 4. Rows for features not built yet: **shown disabled**, not hidden. Label in `secondaryText`, control at 42 % and not
    enabled, the caption ends with "Not available yet." (prototype flag `&today`, screenshots `general-today`,

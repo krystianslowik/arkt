@@ -54,7 +54,7 @@
   --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
   --toast: color(display-p3 0.1098 0.1098 0.1255 / 0.96);
   --toast-text: rgba(255,255,255,0.85); --toast-text-2: rgba(255,255,255,0.72); --toast-divider: rgba(255,255,255,0.14);
-  --destructive: #FF7A6E;
+  --destructive: #FFAAA2;
   --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
   --toast-shadow: 0 0 0 0.5px rgba(255,255,255,0.14), 0 8px 24px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.30);
   --theme-a: #3A3B44; --theme-b: #24252B;
@@ -173,9 +173,7 @@ button { font: inherit; color: inherit; }
 .toast-host { position: absolute; left: 190px; right: 10px; bottom: 10px; height: 120px; pointer-events: none; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 16px; }
 .toast { pointer-events: auto; max-width: 480px; min-height: 36px; border-radius: 18px; display: flex; align-items: center; gap: 8px;
   padding: 0 6px 0 12px; background: var(--toast); color: var(--toast-text); box-shadow: var(--toast-shadow);
-  -webkit-backdrop-filter: saturate(1.5) blur(20px); backdrop-filter: saturate(1.5) blur(20px);
   font-size: 13px; font-weight: 500; }
-:root[data-rt] .toast { -webkit-backdrop-filter: none; backdrop-filter: none; }
 .toast .g { width: 16px; height: 16px; flex: none; color: var(--toast-text-2); display: grid; place-items: center; }
 .toast .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 6px; }
 .toast .sep { width: 1px; height: 16px; background: var(--toast-divider); flex: none; }
@@ -294,7 +292,7 @@ const STATES = {
       foot: `<span class="sp"></span><button class="btn">Cancel</button><button class="btn destructive">Delete Space</button>` })}</div>` }),
   'launch-failure': () => `<div class="alert pre">${dlg({
       icon: appIcon, title: 'Arkt couldn’t open its data',
-      paras: [['Nothing was changed. Try again, or quit and look at the data folder.'], ['Error: SQLiteError 11', true]],
+      paras: [['Nothing was changed. Try again, or show the data folder.'], ['Error: SQLiteError 11', true]],
       foot: `<button class="btn" style="min-width:0">Show Data Folder</button><span class="sp"></span><button class="btn">Quit</button><button class="btn primary">Try Again</button>` })}</div>`,
   'launch-newer': () => `<div class="alert pre">${dlg({
       icon: appIcon, title: 'This data was saved by a newer version of Arkt',

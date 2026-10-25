@@ -64,7 +64,7 @@ enable delay, width (default 420), stacked buttons, neutral primary, Escape dism
 | Buttons | 28 high, radius 7, min 80, padding 14, 13 medium | engine kButton* |
 | Primary | `accent` fill, `onAccent` text, hover `accentHighlight`, pressed `accentPressed` | BrandTokens |
 | Neutral | `sidebarItemBackground` fill + 0.5 pt `sidebarDivider` edge; hover `sidebarItemHovered` | ShellTokens |
-| Destructive | neutral fill, `destructiveText` title | new AlertTokens.destructiveText |
+| Destructive | neutral fill, `destructiveText` title; pressed keeps the hover fill (no pressed fill), scale 0.97. Light #B3261E: 5.59:1 on the fill, 5.02:1 hovered; dark #FFAAA2: 6.44:1, 5.45:1 hovered | new AlertTokens.destructiveText |
 | Stacked buttons | full width, 8 apart, 16 above (permission prompts) | engine stackedButtons |
 | Sheet corners | bottom corners 12 (AppKit draws the sheet frame) | system |
 | Panel / alert corners | 12 (was 10 for the panel) | change, see section 6 |
@@ -98,7 +98,7 @@ The gain is the Space's own theme swatch and icon as the sheet's icon, so the us
 | Delete Space, with items | Delete the Space "Work"? | Its pinned tabs, folders and Today tabs move to the Archive, where you can restore them. / 3 pinned tabs, 3 Today tabs (secondary; counts only, omitted parts at zero) | Cancel, **Delete Space** (destructive) |
 | Delete Space, empty | Delete the Space "Work"? | This cannot be undone. | Cancel, **Delete Space** |
 | Delete Space, untitled | Delete this Space? | as above | as above |
-| Launch failure | Arkt couldn't open its data | Nothing was changed. Try again, or quit and look at the data folder. / Error: <type> <code> (secondary) | Show Data Folder (leading), Quit, **Try Again** (primary, Return) |
+| Launch failure | Arkt couldn't open its data | Nothing was changed. Try again, or show the data folder. / Error: <type> <code> (secondary) | Show Data Folder (leading), Quit, **Try Again** (primary, Return) |
 | Newer schema | This data was saved by a newer version of Arkt | Update Arkt to open it. Nothing was changed. | **Quit** (primary, Return) |
 | Extension install | Add "<name>"? (Chromium string) | subtitle: rating and users; list "It can:" + permissions | Open in Web Store (link), Cancel, **Add Extension** |
 | Extension uninstall | Remove "<name>"? (Chromium string) | checkbox Report abuse (Chromium string) | Cancel, **Remove** (destructive) |
@@ -136,7 +136,7 @@ does today; a transient toast over a persistent one hides it only while it is up
 | Action | 13 semibold `toastText`, 28 high capsule, padding 10, hover `sidebarItemBackground` | ToastView actionButton |
 | Multi-line (persistent) | radius 12, padding 10 / 8 / 10 / 12, text column 300 wide, up to 3 lines, line height 1.38; actions top-aligned | new |
 | Dismiss | 24 x 24 capsule, xmark 10 pt, `toastText` at 72 % | new |
-| Surface | `toastSurface` (light white 0.96 / dark #1C1C20 0.96), backdrop blur 20 with saturation 1.5 | ShellTokens.toastSurface |
+| Surface | `toastSurface` (light white 0.96 / dark #1C1C20 0.96) as a plain layer fill, no blur: at 0.96 a vibrancy view would barely show, and the opaque-enough fill keeps the contrast `ShellTokensContrastTests` measures | ShellTokens.toastSurface |
 | Shadow | `toastShadow`: 0.5 pt edge black 0.10 (dark white 0.14), 8 / 24 black 0.16 (dark 0.45), 1 / 3 black 0.08 | new AlertTokens.toastShadow |
 | Flavor | follows the Space theme's flavor, as today (BH-190) | ToastView.flavor |
 
@@ -145,7 +145,7 @@ does today; a transient toast over a persistent one hides it only while it is up
 | Toast | Text |
 |---|---|
 | Archive of several tabs (Clear, Archive Below, multi-selection Cmd-W) | Archived 3 tabs (never shown for one tab, decision 3) |
-| Auto-archive | Auto archived 3 tabs (BH-085, unchanged) |
+| Auto-archive (2 or more tabs only) | Auto archived 3 tabs (BH-085, unchanged; the singular form is no longer shown) |
 | Restore | Tab restored to Work / Folder restored to Work / Split View restored to Favorites; action View |
 | Restore failed | Couldn't restore from the Archive. |
 | Import failed | Couldn't import from Arc. |
@@ -179,7 +179,7 @@ comment naming each token. Changes for this pass:
 | panel exit | immediate | opacity to 0 over 0.10 s; immediate when keyboard-initiated | |
 | button press | none | scale 0.97 while pressed, 0.12 s ease-out back | `ArktDialogSheetButton` layer transform |
 | destructive primary | n/a | `destructivePrimary` flag: neutral fill, `destructiveText` title, no Return | uninstall, Clear data |
-| `DestructiveTextColor()` | n/a | Dynamic(#B3261E, #FF7A6E) | new function, comment "AlertTokens.destructiveText" |
+| `DestructiveTextColor()` | n/a | Dynamic(#B3261E, #FFAAA2) | new function, comment "AlertTokens.destructiveText" |
 | infobar | 40 / 12 / 20 / fade 0.14 | unchanged; button radius 6, height 24 | small push button |
 
 ## 7. Motion spec
@@ -202,15 +202,15 @@ Transform and opacity only, driven on the layer (`SpringDriver` for springs, `CA
 never `alphaValue` mixed with `layer.opacity` (the rule in `ToastView`). Layout never animates. Every spring is
 interruptible: a toast dismissed mid-entry reverses from its presentation value.
 
-Reduce Transparency: the toast drops its backdrop blur and uses `toastSurface` at alpha 1; sheets, panels and infobars
-are already opaque.
+Reduce Transparency: the toast uses `toastSurface` at alpha 1 (instead of 0.96); sheets, panels and infobars are already
+opaque.
 
 ## 8. Light and dark
 
 Dialogs: porcelain / graphite surface, `primaryText` and `secondaryText`, mustard primary in both. Toasts follow the
 Space theme's flavor (a light toast over a light theme, dark over dark), not the system appearance, as today
-(decision 2). Increase Contrast: dialog edges use `cardBorder`;
-the toast hairline goes to 20 %.
+(decision 2). Increase Contrast: dialog edges and the list divider use
+`SettingsTokens.separatorIncreasedContrast` (light black 0.20, dark white 0.20); the toast hairline goes to 20 %.
 
 ## 9. Keyboard and VoiceOver
 
@@ -242,7 +242,8 @@ the toast hairline goes to 20 %.
 1. Delete Space uses the **shared Arkt sheet** (not `NSAlert`).
 2. Toasts **follow the Space theme's flavor** (BH-190), not the system appearance.
 3. The undo toast shows **only when several tabs are archived at once** (Clear, Archive Below, a multi-selection
-   Cmd-W, an auto-archive pass). A single Cmd-W archive shows no toast; Cmd-Z still undoes it.
+   Cmd-W, an auto-archive pass that archived 2 or more tabs). A single Cmd-W archive and a 1-tab auto-archive pass
+   show no toast; Cmd-Z still undoes a manual archive.
 4. The launch-failure alert **gets "Show Data Folder"**.
 5. The caution badge on the app icon is **not accepted**: the launch alerts show the plain app icon with its clear
    space intact; the critical style is carried by the title and the copy.
