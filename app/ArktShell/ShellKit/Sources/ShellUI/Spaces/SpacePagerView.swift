@@ -4,7 +4,12 @@ import Motion
 /// Horizontal strip of Space pages (flipped). Two-finger horizontal swipes move the strip with the
 /// fingers (rubber-banded past the first and last Space) and settle on a spring with the release
 /// velocity (BH-035, GS-001); `go(to:)` animates keyboard and dot switches (KB-033..035).
-/// Per frame only the strip's origin moves; page contents are never laid out during a swipe.
+/// Per frame only the strip's layer moves (a translation, #24): the strip view's frame stays where it was last synced,
+/// so AppKit does not invalidate visible rects, tracking areas, layout or display under it on every frame.
+/// AppKit's view geometry (hit testing, the coordinates every view converts events with, tracking areas, accessibility
+/// frames) catches up with the layer (`syncStripFrame()`) at rest and whenever input needs it mid-motion: a hit test
+/// (a click, the start of a scroll gesture, a drag), a pointer move over the pager and a backing change. The cost is
+/// paid once per such input, never per display frame.
 @MainActor
 public final class SpacePagerView: NSView {
   /// Spring for the settle. TODO(parity): which spring preset Arc uses for Space paging.
@@ -16,6 +21,8 @@ public final class SpacePagerView: NSView {
   /// The page a running settle heads to (`index` when idle).
   public private(set) var targetIndex = 0
   public private(set) var isTracking = false
+  /// A settle spring is running.
+  var isSettling: Bool { driver.isRunning }
   /// Pacing of the last finished interaction (swipe or `go(to:)`).
   public private(set) var lastPacing: FrameStats?
 
@@ -27,7 +34,13 @@ public final class SpacePagerView: NSView {
   @_spi(Smoke) public var onSettleForTesting: (@MainActor (Int) -> Void)?
 
   let strip = NSView(frame: .zero)
-  private let driver = SpringDriver()
+  /// Tests: force the Reduce Motion path on (true) or off (false) whatever the system setting; nil follows it.
+  var reduceMotionForTesting: Bool?
+  /// Internal so GUI tests can present settle frames at chosen times (`tick(at:)`) instead of waiting on the display.
+  private(set) lazy var driver = SpringDriver(reduceMotion: { [weak self] in
+    self?.reduceMotionForTesting ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+  })
+  private var pointerArea: NSTrackingArea?
   let pacer = FramePacer()
   private var pacerSession = 0
   private(set) var offset: CGFloat = 0
@@ -75,14 +88,15 @@ public final class SpacePagerView: NSView {
   public override func layout() {
     super.layout()
     let width = pageWidth
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
+    // No explicit CATransaction here or in `apply`: as the outermost transaction of a display-link pass, its commit
+    // would flush AppKit's whole display cycle (window layout, view display) synchronously. Backing layers of views
+    // do not animate implicitly, so the implicit transaction commits these changes at the end of the pass.
     strip.frame = NSRect(x: offset, y: 0, width: CGFloat(pages.count) * width, height: bounds.height)
+    strip.layer?.setAffineTransform(.identity)
     for (i, page) in pages.enumerated() {
       let frame = NSRect(x: CGFloat(i) * width, y: 0, width: width, height: bounds.height)
       if page.frame != frame { page.frame = frame }
     }
-    CATransaction.commit()
     if width != laidOutWidth {
       laidOutWidth = width
       // A resize mid-settle snaps to the target; the spring's distance is stale.
@@ -103,16 +117,93 @@ public final class SpacePagerView: NSView {
 
   private func apply(offset newOffset: CGFloat) {
     offset = newOffset
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    strip.setFrameOrigin(NSPoint(x: newOffset, y: 0))
-    CATransaction.commit()
+    if strip.layer == nil || !(isTracking || driver.isRunning) {
+      syncStripFrame()
+    } else {
+      // Pixel-aligned, so text and glyphs stay sharp mid-swipe; the final offset is page-aligned anyway.
+      let scale = shellBackingScale
+      let shift = ((newOffset - strip.frame.origin.x) * scale).rounded() / scale
+      strip.layer?.setAffineTransform(CGAffineTransform(translationX: shift, y: 0))
+    }
     updatePageVisibility()
     onPosition?(position)
   }
 
+  /// Moves the strip view to `offset` and clears the layer translation (one implicit transaction, so the two never
+  /// show apart). Called whenever the strip comes to rest and when input needs the geometry mid-motion, so hit
+  /// testing, tracking areas and accessibility frames match what is on screen. A running settle or swipe carries on
+  /// from the new frame: the next `apply` translates the layer relative to it.
+  private func syncStripFrame() {
+    if strip.frame.origin.x != offset { strip.setFrameOrigin(NSPoint(x: offset, y: 0)) }
+    if let layer = strip.layer, !layer.affineTransform().isIdentity { layer.setAffineTransform(.identity) }
+  }
+
+  /// The strip shows somewhere other than where its view frame says (a layer translation is applied).
+  private var stripGeometryIsStale: Bool {
+    guard let layer = strip.layer else { return false }
+    return !layer.affineTransform().isIdentity
+  }
+
+  /// Whether a hit test made for `event` needs the view geometry to match the screen. Every click, drag, cursor or
+  /// accessibility hit test does; of scroll events only the first of a gesture (`mayBegin`, `began`) and discrete wheel
+  /// clicks do. The changed-phase and momentum events of a gesture stream at display rate, and the pager's own
+  /// `scrollWheel` handles them wherever they land; syncing on each would bring the per-frame geometry updates back.
+  static func hitTestNeedsCurrentGeometry(for event: NSEvent?) -> Bool {
+    guard let event, event.type == .scrollWheel else { return true }
+    if event.momentumPhase != [] { return false }
+    if event.phase == [] { return true }
+    return event.phase.contains(.mayBegin) || event.phase.contains(.began)
+  }
+
+  /// Mid-motion, a hit test inside the pager first brings the view geometry to where the strip shows: the view it
+  /// returns is the one drawn under the point, and that view converts the event with its real on-screen frame (a
+  /// table picks the row under the pointer, not the row the stale frame puts there). The motion goes on.
+  public override func hitTest(_ point: NSPoint) -> NSView? {
+    if stripGeometryIsStale, frame.contains(point), Self.hitTestNeedsCurrentGeometry(for: window?.currentEvent) {
+      syncStripFrame()
+    }
+    return super.hitTest(point)
+  }
+
+  /// The pager's own pointer-move area. The pager never moves while the strip does, so this area is not rebuilt per
+  /// frame; the rows' areas are, after a sync.
+  public override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let pointerArea { removeTrackingArea(pointerArea) }
+    let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self,
+                              userInfo: nil)
+    addTrackingArea(area)
+    pointerArea = area
+  }
+
+  /// A pointer moving over the strip mid-motion would otherwise enter and leave rows by their stale tracking areas
+  /// (hover on a row the pointer is not over): the sync rebuilds them where the rows show and resyncs hover. Nothing
+  /// happens at rest. The event is not passed up the responder chain; it was generated for this view's own area.
+  public override func mouseMoved(with event: NSEvent) {
+    if stripGeometryIsStale { syncStripFrame() }
+  }
+
+  /// A backing change (the window moved to a display with another scale or color space) makes AppKit update the
+  /// geometry of the layers it backs views with, which can reset the strip layer's transform before the next frame
+  /// rewrites it. Syncing first leaves nothing in the transform to lose; the next frame aligns to the new scale.
+  public override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    if stripGeometryIsStale { syncStripFrame() }
+  }
+
+  /// Horizontal on-screen translation of the strip's layer relative to its view frame (0 at rest).
+  var stripLayerShiftForTesting: CGFloat { strip.layer?.affineTransform().tx ?? 0 }
+
+  /// Pages shown since the strip started moving (nil at rest).
+  private var shownWhileMoving: ClosedRange<Int>?
+  /// How many times each page index was shown or hidden (tests: a moving strip must not toggle a page back and forth).
+  private(set) var pageVisibilityChangesForTesting: [Int: Int] = [:]
+
   /// Offscreen pages stay out of accessibility and the key loop: at rest only the current page is
-  /// shown; while the strip moves, only the two pages around the position.
+  /// shown; while the strip moves, the pages around the position. While it moves the shown range only grows (#24):
+  /// showing or hiding a page updates the tracking areas of every row in it, and each update makes the row's host
+  /// ask the window server where the pointer is, a blocking round trip, so a settle that oscillates around a page
+  /// must not toggle the page it passes on every swing. An extra page in the overshoot is clipped by the pager.
   private func updatePageVisibility() {
     guard !pages.isEmpty else { return }
     let last = pages.count - 1
@@ -120,14 +211,26 @@ public final class SpacePagerView: NSView {
     if isTracking || driver.isRunning || frozenTarget != nil, position.isFinite {
       let p = position
       let lower = min(max(Int(p.rounded(.down)), 0), last)
-      visible = lower...min(max(Int(p.rounded(.up)), 0), last)
+      let around = lower...min(max(Int(p.rounded(.up)), 0), last)
+      // Clamped: the page list may have shrunk since the range was recorded.
+      let shown = shownWhileMoving.map {
+        min($0.lowerBound, around.lowerBound)...min(max($0.upperBound, around.upperBound), last)
+      }
+      visible = shown ?? around
+      shownWhileMoving = visible
     } else {
-      let current = min(max(index, 0), last)
+      // `targetIndex`, not `index`: with Reduce Motion the spring presents its final value before its completion
+      // sets `index`, and showing the old page for that one call would hide and show the destination again.
+      let current = min(max(targetIndex, 0), last)
       visible = current...current
+      shownWhileMoving = nil
     }
     for (i, page) in pages.enumerated() {
       let hidden = !visible.contains(i)
-      if page.isHidden != hidden { page.isHidden = hidden }
+      if page.isHidden != hidden {
+        page.isHidden = hidden
+        pageVisibilityChangesForTesting[i, default: 0] += 1
+      }
     }
   }
 
@@ -182,6 +285,9 @@ public final class SpacePagerView: NSView {
     endPacing()
     isTracking = false
     frozenTarget = nil
+    targetIndex = index
+    syncStripFrame()
+    updatePageVisibility()
   }
 
   private func settle(to target: Int, velocity: CGFloat) {
@@ -195,6 +301,7 @@ public final class SpacePagerView: NSView {
                      guard let self, finished else { return }
                      if let stats = self.pacer.end(session: session) { self.lastPacing = stats }
                      self.index = target
+                     self.syncStripFrame()
                      self.updatePageVisibility()
                      self.settled(target)
                    })
@@ -249,6 +356,10 @@ public final class SpacePagerView: NSView {
     let target = targetIndex
     stopSettle()
     frozenTarget = target
+    // The frozen strip may rest under the fingers for any time, so its geometry is synced once here (a no-op when the
+    // hit test of the gesture's first scroll event already did it): one frame move, the shown rows' tracking areas
+    // rebuilt on AppKit's next update pass and one coalesced hover resync per host, once per touch-down.
+    syncStripFrame()
   }
 
   /// The gesture turned out vertical (or ended without moving): let a frozen settle finish.

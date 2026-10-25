@@ -72,6 +72,18 @@ final class SplitSidebarTests: XCTestCase {
     func children(_ location: SidebarLocation) -> [UUID] { source.children(of: location) }
   }
 
+  /// The context menus a Ctrl-click asked for: the clicked row, and the item titles after the menu's delegate
+  /// filled them (nil when `menu(for:)` gave no menu).
+  @MainActor
+  private final class ContextMenuRecorder {
+    var requests: [(row: Int, titles: [String]?)] = []
+
+    func record(_ menu: NSMenu?, clickedRow: Int) {
+      if let menu { menu.delegate?.menuNeedsUpdate?(menu) }
+      requests.append((clickedRow, menu?.items.map(\.title)))
+    }
+  }
+
   override func setUp() async throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
@@ -242,44 +254,122 @@ final class SplitSidebarTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// Sends a real Opt-click `NSEvent` through `SidebarOutlineView.mouseDown`, covering `clickModifiers` -> `rowClicked`.
-  func testOptClickMouseDownOnASplitRowSeparatesIt() throws {
-    let world = try Self.makeWorld()
-    let harness = Harness(world.sidebar)
+  /// Shows the window with `current` focused, lays it out and makes the outline first responder, as before a real
+  /// click.
+  private func shownOutline(_ harness: Harness, current: UUID) throws -> (NSWindow, SidebarOutlineView) {
     // NSTableView's mouse tracking runs against a window on screen, as in a real click.
     harness.controller.showWindow(nil)
     let window = try XCTUnwrap(harness.controller.window)
-    harness.controller.activate(node: world.panes[0])
+    harness.controller.activate(node: current)
     let view = try harness.outline().outlineView
     window.contentView?.layoutSubtreeIfNeeded()
     view.layoutSubtreeIfNeeded()
     XCTAssertTrue(window.makeFirstResponder(view))
-    let splitRow = try harness.row(world.split)
-    let rect = view.rect(ofRow: splitRow)
-    let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
-    XCTAssertEqual(view.row(at: view.convert(point, from: nil)), splitRow, "the click lands on the split row")
-    let down = try XCTUnwrap(NSEvent.mouseEvent(
-      with: .leftMouseDown, location: point, modifierFlags: [.option], timestamp: ProcessInfo.processInfo.systemUptime,
-      windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
-    let up = try XCTUnwrap(NSEvent.mouseEvent(
-      with: .leftMouseUp, location: point, modifierFlags: [.option], timestamp: ProcessInfo.processInfo.systemUptime,
-      windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
-    window.postEvent(up, atStart: true)
-    window.postEvent(down, atStart: true)
-    let currentDown = try XCTUnwrap(window.nextEvent(matching: .leftMouseDown, until: .distantPast,
-                                                     inMode: .default, dequeue: true))
+    return (window, view)
+  }
 
-    view.mouseDown(with: currentDown)
+  /// The middle of `node`'s row in window coordinates, checked to hit that row.
+  private func windowPoint(of node: UUID, in harness: Harness, _ view: SidebarOutlineView) throws -> NSPoint {
+    let row = try harness.row(node)
+    let rect = view.rect(ofRow: row)
+    let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    XCTAssertEqual(view.row(at: view.convert(point, from: nil)), row, "the click lands on the node's row")
+    return point
+  }
+
+  private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, _ flags: NSEvent.ModifierFlags = [],
+                          in window: NSWindow) throws -> NSEvent {
+    try XCTUnwrap(NSEvent.mouseEvent(
+      with: type, location: point, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+      windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1,
+      pressure: type == .leftMouseUp ? 0 : 1))
+  }
+
+  /// Sends a real Opt-click `NSEvent` through `SidebarOutlineView.mouseDown`, covering `clickModifiers` -> `rowClicked`.
+  /// The mouse-down goes straight in, with the location the hit test above checked. Posting it and taking it back
+  /// with `nextEvent` (#277) returned it 31 pt lower on CI right after the window was shown, on the pane row below
+  /// the split, which only activated that pane. The mouse-up is queued for the table's tracking loop.
+  func testOptClickMouseDownOnASplitRowSeparatesIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let (window, view) = try shownOutline(harness, current: world.panes[0])
+    let point = try windowPoint(of: world.split, in: harness, view)
+    window.postEvent(try mouseEvent(.leftMouseUp, at: point, [.option], in: window), atStart: true)
+
+    view.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, [.option], in: window))
+    window.discardEvents(matching: [.leftMouseUp], before: nil)
 
     XCTAssertEqual(view.clickModifiers, [], "clickModifiers is cleared when mouseDown returns")
-    XCTAssertNil(harness.source.node(world.split))
+    XCTAssertNil(harness.source.node(world.split), "the Opt-click separated the split")
     XCTAssertEqual(harness.children(.today(world.space)),
                    [world.today[0], world.panes[0], world.panes[1], world.today[1]])
     waitUntil("the card to show pane 0's page alone") {
       harness.split.isHidden && harness.controller.rootView.card.contentView === harness.page(world.panes[0])
     }
     XCTAssertEqual(harness.current, world.panes[0])
-    harness.controller.close()
+  }
+
+  /// A drag that the table starts on a tab row shows the drop overlay and does not activate the tab, at its start or
+  /// its end (#277). The table decides drag versus click and sends no row action for a drag; this covers the
+  /// controller's side of that seam.
+  func testATabRowDragDoesNotActivateTheTab() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    harness.controller.activate(node: world.today[0])
+    let outline = try harness.outline()
+    func overlayIsUp() -> Bool { harness.controller.rootView.subviews.contains { $0 is SplitDropOverlayView } }
+
+    outline.draggingSessionWillBegin(items: [outline.item(for: world.today[1])])
+    XCTAssertTrue(overlayIsUp(), "the drag shows the drop overlay")
+    XCTAssertEqual(harness.current, world.today[0], "a drag does not activate the dragged tab")
+    outline.draggingSessionEnded()
+
+    XCTAssertFalse(overlayIsUp())
+    XCTAssertEqual(harness.current, world.today[0], "nor does the end of the drag")
+  }
+
+  /// Ctrl-clicks `node`'s row in a freshly shown window, delivered by the window as AppKit does, and checks that the
+  /// outline asked for that row's context menu, which held `titles`, and that the row was not activated (#277).
+  /// One press per window: in CI run 40197146073 a second Ctrl press in the same window never reached the outline's
+  /// mouseDown (the row was not activated either), so each case gets its own window.
+  private func assertCtrlClickAsksForTheMenu(of node: (World) -> UUID, titles: [String],
+                                             file: StaticString = #filePath, line: UInt = #line) throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let (window, view) = try shownOutline(harness, current: world.today[0])
+    let recorder = ContextMenuRecorder()
+    view.presentContextMenu = { [unowned view] menu, _, _ in recorder.record(menu, clickedRow: view.clickedRow) }
+    let row = try harness.row(node(world))
+    let point = try windowPoint(of: node(world), in: harness, view)
+
+    window.sendEvent(try mouseEvent(.leftMouseDown, at: point, [.control], in: window))
+    window.sendEvent(try mouseEvent(.leftMouseUp, at: point, [.control], in: window))
+
+    XCTAssertEqual(recorder.requests.count, 1, "the press reached the outline and asked for a menu", file: file,
+                   line: line)
+    XCTAssertEqual(recorder.requests.first?.row, row, "for the clicked row", file: file, line: line)
+    XCTAssertEqual(recorder.requests.first?.titles ?? nil, titles, "the row's menu (nil: no menu)", file: file,
+                   line: line)
+    XCTAssertEqual(harness.current, world.today[0], "a Ctrl-click does not activate the row", file: file, line: line)
+    XCTAssertNotNil(harness.source.node(world.split), file: file, line: line)
+    XCTAssertEqual(view.clickModifiers, [], file: file, line: line)
+  }
+
+  /// Ctrl-click is a secondary click (#277): on a split row it asks for the row's context menu, as a right-click
+  /// does, and does not activate the row.
+  func testCtrlClickOnASplitRowAsksForItsMenuAndDoesNotActivateIt() throws {
+    try assertCtrlClickAsksForTheMenu(of: \.split,
+                                      titles: ["Separate All Tabs", "Convert to Vertical Split View",
+                                               "Duplicate Split View"])
+  }
+
+  /// On a plain tab row a Ctrl-click gets the same empty menu a right-click gets
+  /// (`testRightClickFillsTheMenuForTheClickedRow`), which does not open, and does not activate the row.
+  func testCtrlClickOnAPlainTabRowDoesNotActivateIt() throws {
+    try assertCtrlClickAsksForTheMenu(of: { $0.today[1] }, titles: [])
   }
 
   func testPlainClickOnASplitRowActivatesIt() throws {

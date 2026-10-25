@@ -494,9 +494,11 @@ final class SpacePagerTests: XCTestCase {
     controller.nextSpace(nil)
     let moving = await waitUntil { pager.offset < -0.2 * pager.bounds.width }
     try PacingEnvironment.requireCaught(moving, "the settle under way before the fingers touch down")
+    // Only the timing (did the settle finish before the test looked) may skip; the freeze itself is a hard check.
+    try PacingEnvironment.requireCaught(pager.isSettling, "the settle still running at touch down")
     pager.gestureMayBegin()
     let frozen = pager.offset
-    try PacingEnvironment.requireCaught(pager.frozenTarget == 1, "the settle still running at touch down")
+    XCTAssertEqual(pager.frozenTarget, 1)
     await displayFrames(3, on: pager)
     XCTAssertEqual(pager.offset, frozen, "the strip holds still under the fingers")
     await awaitSettle { pager.gestureEndedWithoutPaging() }
