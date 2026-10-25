@@ -314,11 +314,20 @@ final class SidebarHideTests: XCTestCase {
     // Warm the window up the way the pager gate does: a few on-time frames before measuring.
     try await Task.sleep(for: .milliseconds(300))
     var results: [(String, FrameStats)] = []
+    var details: [HitchDetail] = []
     for round in 0..<2 {
       await waitForSettle("revealed \(round)") { self.overlay.reveal() }
       results.append(("sidebar-reveal-\(round)", try XCTUnwrap(overlay.lastPacing)))
+      details += overlay.pacer.hitchDetails
       await waitForSettle("concealed \(round)") { self.overlay.conceal() }
       results.append(("sidebar-conceal-\(round)", try XCTUnwrap(overlay.lastPacing)))
+      details += overlay.pacer.hitchDetails
+    }
+    // What held the main thread across each late frame: app work (cpu near wall) or waiting (off CPU).
+    for d in details {
+      print(String(format: "sidebar.hitch label=%@ frame=%d ms=%.2f busyMs=%.2f cpuMs=%.2f offCpuMs=%.2f passes=%d",
+                   d.label, d.frame, d.interval * 1000, (d.longest?.wall ?? 0) * 1000, (d.longest?.cpu ?? 0) * 1000,
+                   (d.longest?.offCPU ?? 0) * 1000, d.passes))
     }
     var load = [0.0]
     let cores = ProcessInfo.processInfo.activeProcessorCount

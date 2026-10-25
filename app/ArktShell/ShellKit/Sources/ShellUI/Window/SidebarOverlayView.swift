@@ -63,7 +63,7 @@ public final class SidebarOverlayView: NSView {
 
   /// The spring drives `offset` in points. Reduce Motion is the fade variant below, not the driver's jump.
   private lazy var driver = SpringDriver(reduceMotion: { false })
-  private let pacer = FramePacer()
+  let pacer = FramePacer()
   private var pacerSession = 0
   /// Points from the resting place: 0 revealed, `concealedOffset` fully off the window.
   private var offset: CGFloat = 0
