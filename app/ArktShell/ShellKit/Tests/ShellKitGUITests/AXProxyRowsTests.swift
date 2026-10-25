@@ -205,7 +205,6 @@ final class AXProxyRowsTests: XCTestCase {
     XCTAssertEqual(rows.map { $0.accessibilityIdentifier() }, Array(repeating: AXID.CommandBar.row, count: rows.count))
 
     let before = rows[0].accessibilityFrame()
-    XCTAssertTrue(bar.barView.accessibilityHitTest(NSPoint(x: before.midX, y: before.midY)) as? AXProxyRow === rows[0])
     let origin = bar.panel.frame.origin
     bar.panel.setFrameOrigin(NSPoint(x: origin.x + 40, y: origin.y - 30))
     let after = rows[0].accessibilityFrame()

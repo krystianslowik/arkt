@@ -680,7 +680,7 @@ Base: `origin/main` at `46f3729`, branch `chore/176-command-bar-keys`.
   `NSTableRowView` never shows up as a child of `commandBar.results` for XCUITest, so
   `app.tables["commandBar.results"].tableRows.matching(identifier: "commandBar.row")` was empty while the Open row
   was on screen; `NSTableView` answers out of process from its own internals (#269). `CommandBarView` lists the
-  proxy table in place of the scroll view that holds the real table and routes hit tests to the proxies. Each
+  proxy table in place of the scroll view that holds the real table. Each
   proxy computes its label, value and identifier from the model for its row index, its selection from the table
   and its frame in screen coordinates when asked; nothing creates a row view or forces layout. Proxies keep their
   identity between queries and are rebuilt on `reloadData` and when the row count changes. The proxies subclass
@@ -765,10 +765,14 @@ not), #283 (open; its `CommandBarView.swift` bridge was not copied).
   result (`T: Sendable` in the Swift 6.2 and 6.3 standard library), and the proxy array is not `Sendable`
   (`NSAccessibilityElement` is neither `Sendable` nor main-actor isolated). The cached elements cannot leave
   main-actor state for a nonisolated caller without an unsafe annotation, so the bridge moved out of the table.
+- Accessibility hit tests at a row's point still return the real table's views, not the proxy row.
+  `accessibilityHitTest(_:)` comes from the nonisolated `NSAccessibility` protocol, and returning a cached proxy
+  from it would need the same non-Sendable crossing. XCUITest's queries and key presses do not use it; VoiceOver's
+  mouse tracking does. Follow-up if needed.
 - In-process tests, `ShellKitGUITests/AXProxyRowsTests.swift`: rows beyond the visible range report the model's
   labels and build no row view; frames are the row's screen rectangle and follow a moved window and the moved
   command bar panel; `reloadData` publishes fresh proxies; children are flat leaves parented to the proxy table and
-  follow selection; the command bar lists the proxy table instead of the scroll view and hit tests reach the rows.
+  follow selection; the command bar lists the proxy table instead of the scroll view.
 - UI tests assert the named behavior without sidebar rows (#269): Switch to Tab shows alpha's address in the
   sidebar URL bar with no second `/p/alpha` request; Cmd-Return and Opt-Return open delta in a new tab whose Back
   button is disabled, while the previous tab (navigated in place gamma -> epsilon) keeps Back enabled and is not
