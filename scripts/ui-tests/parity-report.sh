@@ -201,7 +201,10 @@ end
               + (if ($runs | length) > 0 then [ $case | .children[]? | select(is_run | not) | reasons_in($result)[] ] else [] end)
             )
             | map(select(type == "string" and length > 0)) | unique
-          )
+          ),
+          # Every node below the observation, for the stderr note on a skip or expected failure with no issue.
+          nodes: [ $obs | .children[]? | walk_objects | select(.nodeType | type == "string")
+                   | "\(.nodeType): \((.name // "") | tostring | .[0:200])" ]
         }
       end
   ]
@@ -314,6 +317,9 @@ $rowfile[0] as $rows
 | [$classified[] | select(.part != "") | .id] as $partial_ids
 | {
   unknown: $unknown,
+  unlinked: [ $obs[] | select(.result == "Skipped" or .result == "Expected Failure")
+              | select([.reasons[] | issue_of_reason] | length == 0)
+              | {name, result, nodes} ],
   report: ([
     "# Parity report",
     "",
@@ -443,6 +449,9 @@ if ! "$jq" -e -n \
 fi
 
 "$jq" -r '.report' "$workdir/result.json"
+# Not an error: a skip or expected failure whose reason names no issue gets no link. The note shows its nodes.
+"$jq" -r '.unlinked[] | "parity-report: note: \(.name) (\(.result)) names no #issue in a skip or expected-failure reason; nodes: \(.nodes | join(" | "))"' \
+  "$workdir/result.json" >&2
 "$jq" -r '.unknown[] | "\(.id)\t\(.tests | join(", "))"' "$workdir/result.json" > "$workdir/unknown.tsv"
 if [[ -s $workdir/unknown.tsv ]]; then
   while IFS=$'\t' read -r id tests; do
