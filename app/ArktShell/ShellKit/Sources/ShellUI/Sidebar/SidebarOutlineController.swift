@@ -209,9 +209,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Folders the user collapsed in this outline; preserved across moves and sibling removals (#94).
   private var collapsedFolders: Set<NodeID> = []
 
-  /// The outline becomes `scrollView`'s document view before its first reload. A view-based outline realizes a row
-  /// view for every row in its visible rect, and without a superview that rect is unbounded, so loading first would
-  /// build a row view for every row of the Space.
+  /// The outline becomes `scrollView`'s document view after its first reload and expansion. Without a superview its
+  /// visible rect is unbounded, so that load realizes a row view for every row of the Space up front. Installing it
+  /// first would realize only the rows the clip view shows, but an offscreen page is hidden and a hidden table
+  /// realizes nothing, so a Space switch would then build the incoming page's rows in the frame that first shows it
+  /// (a 20 to 30 ms frame in `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`).
   public init(source: any SidebarSource, spaceID: SpaceID, hostedIn scrollView: NSScrollView) {
     self.source = source
     self.spaceID = spaceID
@@ -248,11 +250,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.dataSource = self
     outlineView.delegate = self
     wireAccessibility()
-    scrollView.documentView = outlineView
     outlineView.reloadData()
     for id in pinnedIDs + todayIDs {
       expandContainer(id)
     }
+    scrollView.documentView = outlineView
   }
 
   // MARK: Items

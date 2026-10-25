@@ -235,16 +235,14 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     let fixture = try makeFixture(sidebar)
     let outline = fixture.outline
     let element = fixture.element
-    // 309 rows of 41 pt (about 12,700 pt) in a page under 800 pt tall. Only rows near the visible rect may have row
-    // views; the test picks the last row without one, wherever AppKit put the realized ones.
-    var realized: [Int] = []
-    outline.enumerateAvailableRowViews { _, row in realized.append(row) }
-    let visibleRange = outline.rows(in: outline.visibleRect)
-    XCTAssertLessThan(realized.count, 60, "only rows near the visible rect \(visibleRange) have row views")
-    let unrealized = (0..<outline.numberOfRows).filter { outline.rowView(atRow: $0, makeIfNecessary: false) == nil }
-    let last = try XCTUnwrap(unrealized.last, "precondition: some row has no row view (\(realized.count) realized)")
-    let lastNode = try XCTUnwrap((outline.item(atRow: last) as? OutlineItem)?.nodeID)
-    guard case .tab(_, _, let lastTitle)? = sidebar.node(lastNode) else { return XCTFail("row \(last) is not a tab") }
+    // A page realizes every row when it is built (see `SidebarOutlineController.init`). A tab added afterwards
+    // lands at the end of Today, about 12,700 pt below a page under 800 pt tall, so its row gets no row view.
+    let lastTitle = "Added Later"
+    let lastNode = sidebar.addTab(url: URL(string: "https://example.com/added-later")!, title: lastTitle,
+                                  in: .today(space))
+    let last = fixture.outlineController.row(for: lastNode)
+    XCTAssertEqual(last, outline.numberOfRows - 1)
+    XCTAssertNil(outline.rowView(atRow: last, makeIfNecessary: false), "precondition: the added row has no row view")
 
     let rows = try proxyRows(element)
     XCTAssertEqual(rows.count, outline.numberOfRows)
@@ -274,38 +272,6 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     let visible = try proxyRows(element, .visibleRows)
     let range = outline.rows(in: outline.visibleRect)
     XCTAssertEqual(visible.map { $0.accessibilityIndex() }, Array(range.location..<(range.location + range.length)))
-  }
-
-  /// Building a page realizes row views only for rows near what is visible, at every stage: the outline in its
-  /// scroll view before any layout, the page, and the page in a window. An outline loaded before it had a superview
-  /// used to realize every row (its visible rect is unbounded then).
-  func testBuildingAPageRealizesOnlyRowsNearTheVisibleRect() throws {
-    let sidebar = StubSidebar.sample()
-    let space = sidebar.spaceOrder[0]
-    for index in 0..<300 {
-      sidebar.addTab(url: URL(string: "https://example.com/synthetic-\(index)")!, title: "Synthetic \(index)",
-                     in: .today(space))
-    }
-    func realized(_ outline: NSOutlineView) -> Int {
-      var count = 0
-      outline.enumerateAvailableRowViews { _, _ in count += 1 }
-      return count
-    }
-
-    let hosted = SidebarOutlineController(source: sidebar, spaceID: space, hostedIn: NSScrollView(frame: .zero))
-    XCTAssertLessThan(realized(hosted.outlineView), 60, "outline in a scroll view, before layout")
-
-    let page = SpacePageView(source: sidebar, spaceID: space)
-    XCTAssertLessThan(realized(page.outlineView), 60, "page built")
-
-    let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 190, height: 800), styleMask: [.titled],
-                          backing: .buffered, defer: false)
-    window.isReleasedWhenClosed = false
-    windows.append(window)
-    window.contentView = page
-    page.layoutSubtreeIfNeeded()
-    XCTAssertLessThan(realized(page.outlineView), 60, "page in a window")
-    XCTAssertGreaterThan(realized(page.outlineView), 0, "the visible rows are realized")
   }
 
   // MARK: Cells
