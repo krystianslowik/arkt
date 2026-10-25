@@ -264,10 +264,16 @@ final class SplitSidebarTests: XCTestCase {
     let up = try XCTUnwrap(NSEvent.mouseEvent(
       with: .leftMouseUp, location: point, modifierFlags: [.option], timestamp: ProcessInfo.processInfo.systemUptime,
       windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
+    func geometry() -> String {
+      "frame=\(window.frame) content=\(window.contentLayoutRect) splitRowInWindow=\(view.convert(view.rect(ofRow: splitRow), to: nil)) "
+        + "outlineInWindow=\(view.convert(view.bounds, to: nil)) visible=\(view.visibleRect) hit=\(view.row(at: view.convert(point, from: nil)))"
+    }
+    print("DIAG277 geometry before nextEvent: \(geometry())")
     window.postEvent(up, atStart: true)
     window.postEvent(down, atStart: true)
     let currentDown = try XCTUnwrap(window.nextEvent(matching: .leftMouseDown, until: .distantPast,
                                                      inMode: .default, dequeue: true))
+    print("DIAG277 geometry after nextEvent: \(geometry()) eventLoc=\(currentDown.locationInWindow)")
     // TEMPORARY diagnostic for #277.
     let spy = ForwardingSpy()
     harness.controller.onError = { mutation, error in spy.errors.append("\(mutation): \(error)") }
@@ -328,6 +334,106 @@ final class SplitSidebarTests: XCTestCase {
       records.append("row=\(row) clickMods=\(mods) current=\(current) before=[\(before)] sent=\(sent) "
         + "after=[\(probe())]")
     }
+  }
+
+  /// TEMPORARY diagnostic for #277: what standard table tracking does for a press moved off the row, a drag on a tab
+  /// row, a Ctrl-click and an accessibility press.
+  func testZZDiagnoseClickVariants() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.showWindow(nil)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: world.today[0])
+    let outline = try harness.outline()
+    let view = outline.outlineView
+    window.contentView?.layoutSubtreeIfNeeded()
+    view.layoutSubtreeIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    _ = window.makeFirstResponder(view)
+    let spy = ForwardingSpy()
+    spy.view = view
+    let savedDragBegan = outline.onNodeDragBegan
+    let savedTarget = view.target
+    let savedAction = view.action
+    outline.onNodeDragBegan = { node in spy.errors.append("\(node)") }
+    view.target = spy
+    view.action = #selector(ForwardingSpy.clicked(_:))
+    func center(_ node: UUID) throws -> NSPoint {
+      let rect = view.rect(ofRow: try harness.row(node))
+      return view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    }
+    func event(_ type: NSEvent.EventType, _ at: NSPoint, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: at, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1,
+        pressure: type == .leftMouseUp ? 0 : 1))
+    }
+    func report(_ name: String) {
+      let left = NSApp.nextEvent(matching: [.leftMouseUp, .leftMouseDragged], until: .distantPast, inMode: .default,
+                                 dequeue: false)
+      print("DIAG277 \(name) actions=\(spy.records) dragBegan=\(spy.errors) leftover=\(left?.type.rawValue ?? 0)")
+      spy.records = []
+      spy.errors = []
+      window.discardEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged], before: nil)
+    }
+    let splitPoint = try center(world.split)
+    let off = NSPoint(x: view.convert(view.bounds, to: nil).maxX + 300, y: splitPoint.y)
+    let splitHit = view.row(at: view.convert(splitPoint, from: nil))
+    let offHit = view.row(at: view.convert(off, from: nil))
+    print("DIAG277 variants hit split=\(splitHit) off=\(off) offHit=\(offHit) rows=\(view.numberOfRows)")
+
+    // Press on the split row, move off the outline, release there.
+    NSApp.postEvent(try event(.leftMouseDragged, off), atStart: false)
+    NSApp.postEvent(try event(.leftMouseUp, off), atStart: false)
+    view.mouseDown(with: try event(.leftMouseDown, splitPoint))
+    report("moveOffRelease(split)")
+
+    // Same on a plain tab row (a drag source).
+    let tab = try center(world.today[1])
+    NSApp.postEvent(try event(.leftMouseDragged, NSPoint(x: off.x, y: tab.y)), atStart: false)
+    NSApp.postEvent(try event(.leftMouseUp, NSPoint(x: off.x, y: tab.y)), atStart: false)
+    view.mouseDown(with: try event(.leftMouseDown, tab))
+    report("moveOffRelease(tab)")
+
+    // A drag on a tab row that stays over the outline.
+    for dx in [4.0, 12.0, 24.0, 40.0] {
+      NSApp.postEvent(try event(.leftMouseDragged, NSPoint(x: tab.x + dx, y: tab.y)), atStart: false)
+    }
+    NSApp.postEvent(try event(.leftMouseUp, NSPoint(x: tab.x + 40, y: tab.y)), atStart: false)
+    view.mouseDown(with: try event(.leftMouseDown, tab))
+    report("drag(tab) right after")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    report("drag(tab) after 0.5 s")
+
+    // Ctrl-click on a plain tab row through the window, as AppKit delivers it.
+    let cancel = Timer(timeInterval: 1, repeats: true) { _ in
+      MainActor.assumeIsolated { view.menu?.cancelTracking() }
+    }
+    RunLoop.main.add(cancel, forMode: .common)
+    NSApp.postEvent(try event(.leftMouseUp, tab, .control), atStart: false)
+    window.sendEvent(try event(.leftMouseDown, tab, .control))
+    report("ctrlClick(tab) via window")
+
+    // Ctrl-click straight into the outline's mouseDown.
+    NSApp.postEvent(try event(.leftMouseUp, tab, .control), atStart: false)
+    view.mouseDown(with: try event(.leftMouseDown, tab, .control))
+    report("ctrlClick(tab) via mouseDown")
+    cancel.invalidate()
+
+    // Accessibility press on the tab row and its cell.
+    let tabRow = try harness.row(world.today[1])
+    let rowView = view.rowView(atRow: tabRow, makeIfNecessary: false)
+    let pressedRow = rowView?.accessibilityPerformPress() ?? false
+    let pressedCell = rowView?.view(atColumn: 0).map { ($0 as? NSView)?.accessibilityPerformPress() ?? false } ?? false
+    print("DIAG277 axPress row=\(pressedRow) cell=\(pressedCell) "
+      + "rowActions=\(rowView?.accessibilityCustomActions()?.map(\.name) ?? [])")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    report("axPress(tab)")
+
+    outline.onNodeDragBegan = savedDragBegan
+    view.target = savedTarget
+    view.action = savedAction
+    harness.controller.close()
   }
 
   func testPlainClickOnASplitRowActivatesIt() throws {
