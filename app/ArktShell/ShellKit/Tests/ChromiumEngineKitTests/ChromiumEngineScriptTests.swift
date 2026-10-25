@@ -393,6 +393,21 @@ struct ChromiumEngineScriptTests {
     #expect(engine.contentView(for: tab) === page.containerView)
   }
 
+  /// A listed tab an extension moves into that window (`chrome.tabs.move`) replaces the page too.
+  @Test func listedTabMovedInClosesTheReopenWindowsNewTabPage() async throws {
+    let (engine, recorder) = makeProviderEngine()
+    let opener = engine.createWindow(host: StubWindowHost())
+    let tab = engine.createTab(url: URL(string: "arkt-test://page.test/Moved")!, in: opener)
+    let (browser, page) = try #require(facade.dockReopen())
+    try await delivered()
+    let window = try #require(engine.windowIDs.last)
+    try scriptedBrowser(engine, opener).move(scriptedTab(engine, tab), to: browser)
+    try await delivered()
+    #expect(page.owner == nil && !browser.isClosed)
+    #expect(engine.snapshot(of: tab)?.window == window && browser.tabs.count == 1)
+    #expect(!recorder.events.contains { if case .tabClosed = $0 { true } else { false } })
+  }
+
   /// Closing the empty window closes the page with it; the shell sees only `.windowClosed`.
   @Test func closingTheEmptyReopenWindowReportsOnlyTheWindow() async throws {
     let (engine, recorder) = makeProviderEngine()

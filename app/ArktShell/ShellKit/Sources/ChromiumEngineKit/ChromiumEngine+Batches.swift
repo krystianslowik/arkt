@@ -142,6 +142,7 @@ extension ChromiumEngine {
     tabs[id]?.snapshot.window = target
     tabs[id]?.snapshot.isActive = false
     hub.assign(id, to: target)
+    closeNewTabPage(in: target)
   }
 
   private func tabClosed(_ event: any ArktEngineEvent) {
