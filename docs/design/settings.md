@@ -1,6 +1,6 @@
 # Settings window design
 
-Design issue: #305 (part of #304). Implementation issue: see #305.
+Design issue: #305 (part of #304). Implementation issue: #307.
 Prototype: [`design/settings/prototype.html`](../../design/settings/prototype.html). Screenshots:
 [`design/settings/screens/`](../../design/settings/screens/).
 

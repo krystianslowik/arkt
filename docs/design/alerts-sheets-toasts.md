@@ -1,6 +1,6 @@
 # Alerts, sheets and toasts design
 
-Design issue: #306 (part of #304). Implementation issue: see #306.
+Design issue: #306 (part of #304). Implementation issue: #308.
 Prototype: [`design/alerts-sheets-toasts/prototype.html`](../../design/alerts-sheets-toasts/prototype.html).
 Screenshots: [`design/alerts-sheets-toasts/screens/`](../../design/alerts-sheets-toasts/screens/).
 
