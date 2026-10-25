@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt Peek prototype</title>
+<style>
+/*
+  Arkt Peek: design prototype for #29 (design issue) under #304.
+  Single file, no network. Colors are ShellTokens / BrandTokens values (sRGB approximations of the Display P3
+  tokens); proposed new tokens are marked "proposed" and listed in docs/design/peek.md.
+  Hash state: #s=<state>&t=<transition>&ms=<frozen time>&theme=light|dark&rm=1&slow=4&shot=1
+*/
+:root {
+  color-scheme: light;
+  /* ShellTokens, light */
+  --primary-text: rgba(14,15,16,.90);
+  --secondary-text: rgba(0,0,0,.64);
+  --sidebar-fg: rgba(0,0,0,.48);
+  --item-bg: rgba(14,15,16,.05);
+  --item-hover: rgba(14,15,16,.10);
+  --letter-tile: rgba(14,15,16,.10);
+  --tab-current: rgba(255,255,255,.85);
+  --tab-current-shadow: 0 1px 2px rgba(0,0,0,.20);
+  --card-border: rgba(0,0,0,.10);
+  --card-shadow: 0 1px 3px rgba(0,0,0,.20);
+  --divider: rgba(14,15,16,.10);
+  --toast-surface: rgba(255,255,255,.96);
+  --toast-text: rgba(14,15,16,.90);
+  --toolbar-surface: #FFFFFF;
+  --toolbar-hairline: rgba(0,0,0,.10);
+  --command-surface: rgba(28,28,32,.98);
+  --command-text: rgba(255,255,255,.80);
+  --command-secondary: rgba(255,255,255,.33);
+  /* Space theme: the Personal sample theme from StubSidebar */
+  --theme-a: #F2EAE4;
+  --theme-b: #F29BBB;
+  /* BrandTokens */
+  --focus-ring: #202321;
+  --mustard: #E9B520;
+  --graphite: #202321;
+  --porcelain: #FAF9F5;
+  /* Proposed Peek tokens */
+  --peek-scrim: rgba(0,0,0,.18);
+  --peek-shadow: 0 18px 48px rgba(0,0,0,.22), 0 3px 10px rgba(0,0,0,.10);
+  --peek-control: rgba(255,255,255,.96);
+  --peek-control-hover: #FFFFFF;
+  --peek-grabber: rgba(255,255,255,.80);
+  /* Page mocks (web content, not chrome) */
+  --pg-bg: #FFFFFF; --pg-text: #1D1F22; --pg-muted: #6A6F76; --pg-line: #ECEDEF; --pg-soft: #F5F6F7;
+  --pg-link: #1F5FD1; --pg-sel: #EAF0FB;
+  /* Prototype bar and desk */
+  --desk-a: #D8DCE2; --desk-b: #C3C8D0;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --primary-text: rgba(255,255,255,.84);
+  --secondary-text: rgba(255,255,255,.76);
+  --sidebar-fg: rgba(255,255,255,.57);
+  --item-bg: rgba(250,251,255,.10);
+  --item-hover: rgba(250,251,255,.15);
+  --letter-tile: rgba(14,15,16,.15);
+  --tab-current: rgba(250,251,255,.20);
+  --tab-current-shadow: none;
+  --card-border: rgba(255,255,255,.20);
+  --card-shadow: none;
+  --divider: rgba(255,255,255,.075);
+  --toast-surface: rgba(28,28,32,.96);
+  --toast-text: rgba(255,255,255,.85);
+  --toolbar-surface: #1C1C20;
+  --toolbar-hairline: rgba(255,255,255,.05);
+  /* Space theme: the Dev sample theme from StubSidebar */
+  --theme-a: #2D4468;
+  --theme-b: #120F2E;
+  --focus-ring: #E9B520;
+  --peek-scrim: rgba(0,0,0,.42);
+  --peek-shadow: 0 18px 48px rgba(0,0,0,.55), 0 3px 10px rgba(0,0,0,.30);
+  --peek-control: rgba(28,28,32,.96);
+  --peek-control-hover: #2A2A30;
+  --peek-grabber: rgba(255,255,255,.55);
+  --pg-bg: #16181B; --pg-text: #E7E8E6; --pg-muted: #9A9FA6; --pg-line: #26292E; --pg-soft: #1E2124;
+  --pg-link: #7FB0FF; --pg-sel: #1F2A3D;
+  --desk-a: #1C1F25; --desk-b: #0D0F12;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: linear-gradient(160deg, var(--desk-a), var(--desk-b));
+  color: var(--primary-text);
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; }
+
+/* ---------- Prototype bar (not part of the design) ---------- */
+#bar {
+  position: fixed; inset: 0 0 auto 0; height: 52px; z-index: 10;
+  display: flex; align-items: center; gap: 18px; padding: 0 16px;
+  background: #202321; color: #FAF9F5; overflow-x: auto; white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(255,255,255,.06);
+}
+#bar .name { font-weight: 650; font-size: 14px; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+#bar .name i { width: 10px; height: 10px; border-radius: 3px; background: var(--mustard); display: inline-block; }
+#bar .grp { display: flex; align-items: center; gap: 4px; }
+#bar .grp > span { color: rgba(250,249,245,.5); margin-right: 4px; font-size: 12px; }
+#bar button {
+  border: 0; background: rgba(250,249,245,.08); color: #FAF9F5; height: 28px; padding: 0 10px; border-radius: 7px;
+  font-size: 12px; font-weight: 500; cursor: pointer; transition: transform 140ms var(--ease-out), background-color 140ms ease;
+}
+#bar button:active { transform: scale(.97); }
+@media (hover: hover) and (pointer: fine) { #bar button:hover { background: rgba(250,249,245,.16); } }
+#bar button[aria-pressed="true"] { background: #E9B520; color: #202321; }
+#bar button:focus-visible { outline: 2px solid #E9B520; outline-offset: 2px; }
+body.shot #bar { display: none; }
+
+/* ---------- Desk and window ---------- */
+#desk { position: absolute; inset: 52px 0 0 0; display: grid; place-items: center; }
+body.shot #desk { inset: 0; }
+#fit { width: 1280px; height: 800px; transform-origin: center; }
+#win {
+  position: relative; width: 1280px; height: 800px; border-radius: 10px; overflow: hidden;
+  background: linear-gradient(135deg, var(--theme-a), var(--theme-b));
+  box-shadow: 0 28px 70px rgba(0,0,0,.28), 0 0 0 .5px rgba(0,0,0,.35);
+  user-select: none;
+}
+:root[data-theme="dark"] #win { box-shadow: 0 28px 70px rgba(0,0,0,.6), 0 0 0 .5px rgba(255,255,255,.18); }
+
+/* ---------- Sidebar (ShellMetrics.standard, SidebarMetrics) ---------- */
+.sb { position: absolute; left: 0; top: 0; width: 190px; height: 800px; }
+.lights { position: absolute; left: 12px; top: 16px; display: flex; gap: 11px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.18); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.nav3 { position: absolute; right: 10px; top: 12px; display: flex; gap: 2px; color: var(--sidebar-fg); }
+.nav3 svg { width: 22px; height: 20px; padding: 3px; }
+.url { position: absolute; left: 8px; top: 40px; width: 174px; height: 30px; border-radius: 9px; background: var(--item-bg);
+  display: flex; align-items: center; padding: 0 10px; font-weight: 500; color: var(--secondary-text); font-size: 13px; white-space: nowrap; overflow: hidden; }
+.favs { position: absolute; left: 8px; top: 80px; width: 174px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.fav { height: 46px; border-radius: 10px; background: var(--item-bg); display: grid; place-items: center; }
+.fi { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 11px; }
+.stitle { position: absolute; left: 16px; top: 188px; height: 36px; display: flex; align-items: center; font-size: 12px; font-weight: 600; color: var(--secondary-text); }
+.row { position: absolute; left: 8px; width: 174px; height: 34px; border-radius: 9px; display: flex; align-items: center; padding: 0 8px; gap: 8px; }
+.row .t { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--primary-text); }
+.row.muted .t { color: var(--sidebar-fg); }
+.lt { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; font-size: 10px; font-weight: 650; color: #fff; }
+.row svg { width: 16px; height: 16px; flex: none; color: var(--sidebar-fg); }
+.pill { position: absolute; left: 8px; top: 0; width: 174px; height: 34px; border-radius: 9px; background: var(--tab-current); box-shadow: var(--tab-current-shadow); will-change: transform; }
+.hair { position: absolute; left: 16px; width: 158px; height: 1px; background: var(--divider); top: 338px; }
+.splitrow { gap: 6px; }
+.splitrow .half { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.splitrow .half .t { font-size: 13px; }
+.splitrow .bar { width: 1px; height: 16px; background: var(--divider); flex: none; }
+.bottom { position: absolute; left: 0; bottom: 0; width: 190px; height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: var(--sidebar-fg); }
+.bottom svg { width: 16px; height: 16px; }
+.dots { display: flex; gap: 17.5px; align-items: center; }
+.dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--sidebar-fg); }
+.dots i.on { background: var(--primary-text); transform: scale(1.35); }
+
+/* ---------- Cards (ContentCardView: radius 10 continuous, hairline cardBorder, cardShadow) ---------- */
+.plate, .card, .rim { position: absolute; left: 0; top: 0; transform-origin: 0 0; border-radius: 10px; will-change: transform, opacity; }
+.plate { background: var(--pg-bg); box-shadow: var(--card-shadow); }
+.card { overflow: hidden; }
+.rim { box-shadow: inset 0 0 0 1px var(--card-border); pointer-events: none; }
+.rim.half { opacity: .5; }
+.content { position: absolute; left: 0; top: 0; will-change: transform; }
+#peekPlate { box-shadow: var(--peek-shadow); }
+.scrim { position: absolute; inset: 0; background: var(--peek-scrim); pointer-events: none; will-change: opacity; }
+#win.peeking .scrim { pointer-events: auto; cursor: default; }
+
+/* ---------- Peek controls (proposed: 28 pt circles in the right gutter) ---------- */
+#ctrls { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 8px; will-change: transform, opacity; }
+.pc {
+  width: 28px; height: 28px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; cursor: default;
+  background: var(--peek-control); color: var(--secondary-text);
+  box-shadow: 0 0 0 .5px var(--card-border), 0 2px 6px rgba(0,0,0,.12);
+  transition: transform 140ms var(--ease-out), background-color 140ms ease, color 140ms ease;
+  position: relative;
+}
+.pc svg { width: 14px; height: 14px; }
+.pc:active { transform: scale(.94); }
+@media (hover: hover) and (pointer: fine) { .pc:hover { background: var(--peek-control-hover); color: var(--primary-text); } }
+.pc.hover { background: var(--peek-control-hover); color: var(--primary-text); }
+.pc:focus-visible, .pc.focus { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pc[aria-disabled="true"] { color: var(--sidebar-fg); opacity: .55; }
+.tip {
+  position: absolute; right: 38px; top: 50%; transform: translateY(-50%); white-space: nowrap; pointer-events: none;
+  background: var(--command-surface); color: var(--command-text); font-size: 12px; font-weight: 500;
+  height: 24px; padding: 0 8px; border-radius: 6px; display: none; align-items: center; gap: 8px;
+}
+.tip kbd { font: inherit; color: var(--command-secondary); }
+.pc.tipped .tip { display: flex; }
+#grab { position: absolute; left: 0; top: 0; width: 36px; height: 5px; border-radius: 3px; background: var(--peek-grabber); will-change: transform, opacity; }
+
+/* ---------- Toast (ToastView: 36 high, radius 18, 16 above the card bottom) ---------- */
+#toast {
+  position: absolute; left: 0; top: 0; height: 36px; border-radius: 18px; padding: 0 6px 0 16px; display: flex; align-items: center; gap: 12px;
+  background: var(--toast-surface); color: var(--toast-text); box-shadow: 0 0 0 .5px var(--card-border), 0 8px 24px rgba(0,0,0,.14);
+  font-weight: 500; will-change: transform, opacity; white-space: nowrap;
+}
+#toast button { border: 0; background: var(--item-bg); height: 26px; border-radius: 13px; padding: 0 10px; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+#toast kbd { font: inherit; font-weight: 500; color: var(--sidebar-fg); }
+
+/* ---------- Page mock: mail (the pinned tab) ---------- */
+.pg { position: absolute; inset: 0; background: var(--pg-bg); color: var(--pg-text); overflow: hidden; }
+.mail { display: flex; }
+.ml { width: 300px; flex: none; border-right: 1px solid var(--pg-line); height: 100%; }
+.mlh { height: 56px; display: flex; align-items: baseline; gap: 8px; padding: 20px 20px 0; }
+.mlh b { font-size: 20px; letter-spacing: -.01em; } .mlh span { color: var(--pg-muted); font-size: 12px; }
+.mi { padding: 12px 20px; border-bottom: 1px solid var(--pg-line); }
+.mi.sel { background: var(--pg-sel); }
+.mf { display: flex; justify-content: space-between; font-size: 13px; } .mf time { color: var(--pg-muted); font-size: 12px; }
+.ms { font-size: 13px; margin-top: 2px; } .mp { color: var(--pg-muted); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mr { flex: 1; padding: 28px 48px; min-width: 0; }
+.mhdr { display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.mhdr .av { width: 36px; height: 36px; border-radius: 50%; background: #0F5257; color: #fff; display: grid; place-items: center; font-weight: 700; }
+.mhdr span, .mhdr .to { color: var(--pg-muted); } .mhdr time { margin-left: auto; color: var(--pg-muted); font-size: 12px; }
+.mr h1 { font-size: 26px; letter-spacing: -.02em; margin: 26px 0 12px; }
+.mr p { font-size: 15px; line-height: 1.6; max-width: 560px; margin: 0 0 14px; }
+.mr a { color: var(--pg-link); text-decoration: none; font-weight: 600; border-radius: 3px; }
+.mr a.hover { text-decoration: underline; text-underline-offset: 3px; }
+.mband { height: 150px; max-width: 560px; border-radius: 10px; margin: 18px 0 18px; position: relative; overflow: hidden;
+  background: linear-gradient(180deg, #A8D5E2 0%, #F1E3C2 100%); }
+:root[data-theme="dark"] .mband { background: linear-gradient(180deg, #2B4B63 0%, #574A3A 100%); }
+.mband i { position: absolute; bottom: 0; border-radius: 4px 4px 0 0; }
+.cursor { position: absolute; width: 14px; height: 20px; pointer-events: none; display: none; }
+.cursor.on { display: block; }
+
+/* ---------- Page mock: travel guide (the Peek) ---------- */
+.atlas { background: var(--pg-bg); }
+.atlas nav { height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; border-bottom: 1px solid var(--pg-line); }
+.atlas .logo { font-weight: 800; font-size: 19px; letter-spacing: -.03em; color: #0F5257; display: flex; align-items: center; gap: 8px; }
+:root[data-theme="dark"] .atlas .logo { color: #6FC3C9; }
+.atlas .logo i { width: 18px; height: 18px; border-radius: 50%; background: conic-gradient(#0F5257 0 25%, #F2C14E 0 50%, #0F5257 0 75%, #F2C14E 0); }
+.atlas .nl { display: flex; gap: 22px; color: var(--pg-muted); font-size: 13px; font-weight: 500; }
+.atlas .nl b { color: #fff; background: #0F5257; padding: 6px 12px; border-radius: 14px; font-weight: 600; }
+.hero { height: 300px; position: relative; overflow: hidden; background: linear-gradient(180deg, #9FD3E6 0%, #F7E3BD 78%); }
+:root[data-theme="dark"] .hero { background: linear-gradient(180deg, #213A55 0%, #6B4E3A 85%); }
+.hero .sun { position: absolute; width: 90px; height: 90px; border-radius: 50%; background: #FFD98A; left: 62%; top: 48px; }
+:root[data-theme="dark"] .hero .sun { background: #F2C979; opacity: .8; }
+.hero .hl { position: absolute; bottom: 0; border-radius: 50% 50% 0 0; }
+.hero .bl, .mband .bl { position: absolute; bottom: 0; border-radius: 2px 2px 0 0; }
+.bl .roof { position: absolute; left: -4px; right: -4px; top: -10px; height: 12px; background: #C4623F; border-radius: 3px 3px 0 0; }
+.bl .win { position: absolute; width: 6px; height: 9px; background: rgba(0,0,0,.18); border-radius: 1px; }
+.tram { position: absolute; z-index: 2; bottom: 26px; width: 120px; height: 52px; background: #F2C14E; border-radius: 10px 10px 4px 4px; box-shadow: inset 0 -10px 0 rgba(0,0,0,.08); }
+.tram::before { content: ""; position: absolute; left: 10px; right: 10px; top: 10px; height: 18px; border-radius: 4px;
+  background: repeating-linear-gradient(90deg, #DCEFF5 0 18px, #F2C14E 18px 24px); }
+:root[data-theme="dark"] .tram::before { background: repeating-linear-gradient(90deg, #FFE6A6 0 18px, #F2C14E 18px 24px); }
+.tram::after { content: ""; position: absolute; left: 50%; top: -22px; width: 2px; height: 22px; background: #3A3A3A; transform: rotate(18deg); }
+.rail { position: absolute; z-index: 1; left: 0; right: 0; bottom: 20px; height: 6px; background: #8C8C8C; opacity: .5; }
+.art { max-width: 640px; margin: 0 auto; padding: 34px 24px 60px; }
+.art .kick { color: #0F5257; font-weight: 650; font-size: 13px; margin: 0 0 8px; }
+:root[data-theme="dark"] .art .kick { color: #6FC3C9; }
+.art h1 { font-size: 40px; line-height: 1.08; letter-spacing: -.03em; margin: 0 0 12px; }
+.art .dek { font-size: 18px; line-height: 1.5; color: var(--pg-muted); margin: 0 0 16px; }
+.art .by { font-size: 13px; color: var(--pg-muted); margin: 0 0 24px; display: flex; gap: 10px; align-items: center; }
+.art .by i { width: 26px; height: 26px; border-radius: 50%; background: #E3B39A; display: inline-block; }
+.art p { font-size: 16px; line-height: 1.65; margin: 0 0 16px; }
+.art h2 { font-size: 21px; letter-spacing: -.01em; margin: 26px 0 8px; }
+
+/* Peek toolbar variant (ContentToolbarView: 32 pt strip + 1 pt hairline) */
+.ptb { display: none; height: 33px; background: var(--toolbar-surface); border-bottom: 1px solid var(--toolbar-hairline); align-items: center; gap: 2px; padding: 0 8px; color: var(--secondary-text); }
+.ptb svg { width: 32px; height: 24px; padding: 4px 9px; }
+.ptb .u { margin-left: 6px; font-weight: 500; font-size: 13px; color: var(--secondary-text); }
+.ptb .u b { color: var(--primary-text); font-weight: 500; }
+.ptb .sp { flex: 1; }
+.withtb .ptb { display: flex; }
+.withtb .pg { top: 33px; }
+
+/* ---------- Recipes page (second split pane) ---------- */
+.rec { padding: 34px 40px; }
+.rec h1 { font-size: 26px; letter-spacing: -.02em; margin: 0 0 4px; }
+.rec .sub { color: var(--pg-muted); margin: 0 0 22px; font-size: 14px; }
+.rc { display: flex; gap: 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--pg-line); }
+.rc i { width: 64px; height: 48px; border-radius: 8px; flex: none; }
+.rc b { display: block; font-size: 15px; } .rc span { color: var(--pg-muted); font-size: 13px; }
+
+#win:not(.insplit) .only-split { display: none; }
+#win.insplit .no-split { display: none; }
+</style>
+</head>
+<body>
+<header id="bar" aria-label="Prototype controls">
+  <div class="name"><i></i>Peek</div>
+  <div class="grp" role="group" aria-label="States"><span>State</span>
+    <button data-s="idle">Idle</button><button data-s="open">Peek</button><button data-s="hover">Controls</button>
+    <button data-s="toolbar">Toolbar</button><button data-s="drag">Drag</button><button data-s="closed">Closed</button>
+    <button data-s="expanded">Tab</button><button data-s="split">Split</button><button data-s="insplit">In Split View</button>
+  </div>
+  <div class="grp" role="group" aria-label="Transitions"><span>Play</span>
+    <button data-t="open">Open</button><button data-t="close">Close</button><button data-t="esc">Esc</button>
+    <button data-t="expand">Expand</button><button data-t="split">Split</button><button data-t="fling">Fling</button>
+    <button data-t="snapback">Snap back</button><button data-t="reopen">Reopen</button><button data-t="interrupt">Interrupt</button>
+  </div>
+  <div class="grp" role="group" aria-label="Options">
+    <button id="tTheme" aria-pressed="false">Dark</button>
+    <button id="tRM" aria-pressed="false">Reduce Motion</button>
+    <button id="tSlow" aria-pressed="false">Slow 4x</button>
+  </div>
+</header>
+
+<div id="desk"><div id="fit"><div id="win" role="application" aria-label="Arkt window, Personal">
+
+  <!-- Sidebar -->
+  <div class="sb" aria-hidden="true">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="nav3">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 3 5 5-5 5"/></svg>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5V5h-2.5"/></svg>
+    </div>
+    <div class="url" id="urlText">mail.example.com</div>
+    <div class="favs">
+      <div class="fav"><div class="fi" style="background:#3E7BFA">C</div></div>
+      <div class="fav"><div class="fi" style="background:#0F5257">M</div></div>
+      <div class="fav"><div class="fi" style="background:#E0533D">N</div></div>
+      <div class="fav"><div class="fi" style="background:#7A5AF5">D</div></div>
+      <div class="fav"><div class="fi" style="background:#2E9E6A">S</div></div>
+    </div>
+    <div class="stitle">Personal</div>
+    <div class="pill" id="pill"></div><div class="pill" id="pillNew"></div>
+    <div class="row" style="top:224px"><div class="lt" style="background:#3E7BFA">C</div><div class="t">Family Calendar</div></div>
+    <div class="row" style="top:258px" id="inboxRow">
+      <div class="half" id="inboxA" style="display:flex;align-items:center;gap:8px;min-width:0"><div class="lt" style="background:#0F5257">M</div><div class="t">Inbox</div></div>
+    </div>
+    <div class="row splitrow" style="top:258px" id="splitRow">
+      <div class="half"><div class="lt" style="background:#0F5257">M</div><div class="t">Inbox</div></div>
+      <div class="bar"></div>
+      <div class="half"><div class="lt" id="splitB" style="background:#F2C14E;color:#202321">A</div><div class="t" id="splitBT">Three days in Lisbon</div></div>
+    </div>
+    <div class="row" style="top:292px"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.5c0-.8.7-1.5 1.5-1.5h3l1.5 1.5h4.5c.8 0 1.5.7 1.5 1.5v5.5c0 .8-.7 1.5-1.5 1.5h-9C2.7 13 2 12.3 2 11.5z"/></svg><div class="t">Trips</div></div>
+    <div class="hair"></div>
+    <div class="row muted" style="top:351px"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg><div class="t">New Tab</div></div>
+    <div class="row" id="newRow" style="top:385px"><div class="lt" style="background:#F2C14E;color:#202321">A</div><div class="t">Three days in Lisbon</div></div>
+    <div id="today">
+      <div class="row" style="top:385px"><div class="lt" style="background:#E0533D">W</div><div class="t">Weekend Recipes</div></div>
+      <div class="row" style="top:419px"><div class="lt" style="background:#7A5AF5">R</div><div class="t">Reading List</div></div>
+      <div class="row" style="top:453px"><div class="lt" style="background:#2E9E6A">G</div><div class="t">Garden Notes</div></div>
+    </div>
+    <div class="bottom">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2" y="3" width="12" height="3.5" rx="1"/><path d="M3 6.5V12c0 .6.4 1 1 1h8c.6 0 1-.4 1-1V6.5M6.5 9h3"/></svg>
+      <div class="dots"><i class="on"></i><i></i><i></i></div>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+    </div>
+  </div>
+
+  <!-- Second split pane (In Split View state) -->
+  <div class="plate only-split" id="recPlate"></div>
+  <div class="card only-split" id="rec"><div class="content" id="recContent"><div class="pg rec">
+    <h1>Weekend Recipes</h1><p class="sub">Six dishes for a slow Saturday</p>
+    <div class="rc"><i style="background:linear-gradient(135deg,#F2C14E,#E0533D)"></i><div><b>Custard tarts</b><span>45 minutes, makes 12</span></div></div>
+    <div class="rc"><i style="background:linear-gradient(135deg,#7FB77E,#2E6E4E)"></i><div><b>Green caldo verde</b><span>30 minutes, serves 4</span></div></div>
+    <div class="rc"><i style="background:linear-gradient(135deg,#E8A87C,#C4623F)"></i><div><b>Grilled sardines</b><span>20 minutes, serves 2</span></div></div>
+    <div class="rc"><i style="background:linear-gradient(135deg,#C9B8F0,#6F5AA8)"></i><div><b>Fig and almond cake</b><span>1 hour, serves 8</span></div></div>
+  </div></div></div>
+  <div class="rim only-split" id="recRim"></div>
+
+  <!-- Source tab: pinned Inbox -->
+  <div class="plate" id="srcPlate"></div>
+  <div class="card" id="src" aria-label="Inbox"><div class="content" id="srcContent">
+    <div class="pg mail">
+      <aside class="ml">
+        <div class="mlh"><b>Inbox</b><span>12 unread</span></div>
+        <div class="mi sel"><div class="mf"><b>Atlas Weekly</b><time>9:41</time></div><div class="ms">Lisbon, slowly</div><div class="mp">Three days, two trams and one very good custard tart</div></div>
+        <div class="mi"><div class="mf"><b>Marta Silva</b><time>8:12</time></div><div class="ms">Flights for May</div><div class="mp">I found two options that land before noon</div></div>
+        <div class="mi"><div class="mf"><b>Library</b><time>Yesterday</time></div><div class="ms">Your hold is ready</div><div class="mp">Pick it up by Friday at the front desk</div></div>
+        <div class="mi"><div class="mf"><b>Tomás</b><time>Yesterday</time></div><div class="ms">Garden plan</div><div class="mp">Tomatoes on the left, herbs by the door</div></div>
+        <div class="mi"><div class="mf"><b>Studio Nord</b><time>Mon</time></div><div class="ms">Invoice 0412</div><div class="mp">Thanks for the quick turnaround last week</div></div>
+        <div class="mi"><div class="mf"><b>Ana</b><time>Sun</time></div><div class="ms">Photos from the hike</div><div class="mp">The view from the second ridge was unreal</div></div>
+      </aside>
+      <article class="mr">
+        <div class="mhdr"><div class="av">A</div><div><b>Atlas Weekly</b> <span>hello@atlas.example</span><div class="to">to me</div></div><time>Today, 9:41</time></div>
+        <h1>Lisbon, slowly</h1>
+        <p>This week we went back to Lisbon with no plan except to ride the 28 tram end to end and eat whatever smelled best at the bottom of each hill.</p>
+        <div class="mband" id="mband"></div>
+        <p>Our editors put the whole trip into one walkable itinerary, with the viewpoints worth the climb and the cafés worth the queue. <a id="plink" href="#" tabindex="-1">Read the guide: Three days in Lisbon</a></p>
+        <p>Next week: the quiet side of Porto, and why you should take the slow train.</p>
+        <p style="color:var(--pg-muted);font-size:13px">You are receiving this because you subscribed to Atlas Weekly.</p>
+      </article>
+    </div>
+    <svg class="cursor" id="cursor" viewBox="0 0 14 20"><path d="M1 1v15l4-4 3 7 3-1.4-3-6.6h5.5z" fill="#fff" stroke="#000" stroke-width="1.1" stroke-linejoin="round"/></svg>
+  </div><div class="scrim" id="scrim"></div></div>
+  <div class="rim" id="srcRim"></div>
+
+  <!-- Peek -->
+  <div class="plate" id="peekPlate"></div>
+  <div class="card" id="peek" role="dialog" aria-label="Peek, Three days in Lisbon"><div class="content" id="peekContent">
+    <div class="ptb"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".4"><path d="m6 3 5 5-5 5"/></svg><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5V5h-2.5"/></svg><div class="u"><b>atlas.example</b>/guides/lisbon/three-days</div><div class="sp"></div><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5 9.5 6.5M7 4.5l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7L10.7 8.2M9 11.5l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7L5.3 7.8"/></svg></div>
+    <div class="pg atlas">
+      <nav><span class="logo"><i></i>atlas</span><span class="nl"><span>Guides</span><span>Cities</span><span>Itineraries</span><b>Subscribe</b></span></nav>
+      <header class="hero" id="hero"><div class="sun"></div><div class="rail"></div><div class="tram" style="left:58%"></div></header>
+      <main class="art">
+        <p class="kick">City guide</p>
+        <h1>Three days in Lisbon</h1>
+        <p class="dek">Seven hills, one yellow tram and a pastry habit you will not be able to shake. A walkable plan for a long weekend.</p>
+        <p class="by"><i></i>Inês Duarte, 8 minute read</p>
+        <p>Start high. The castle walls catch the first light before the river does, and by nine the lanes of Alfama below are already loud with deliveries and radios through open windows.</p>
+        <h2>Day one: Alfama and the river</h2>
+        <p>Walk down rather than up. Every staircase ends somewhere worth stopping, and the best lunch is usually the one with no menu outside.</p>
+      </main>
+    </div>
+  </div></div>
+  <div class="rim" id="peekRim"></div>
+  <div id="grab" aria-hidden="true"></div>
+  <div id="ctrls" role="toolbar" aria-label="Peek">
+    <button class="pc" id="bClose" aria-label="Close Peek" title="Close (Esc)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m4 4 8 8M12 4l-8 8"/></svg><span class="tip">Close<kbd>Esc</kbd></span></button>
+    <button class="pc" id="bExpand" aria-label="Open as Tab" title="Open as Tab (Command-O)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></svg><span class="tip">Open as Tab<kbd>&#8984;O</kbd></span></button>
+    <button class="pc" id="bSplit" aria-label="Add to Split View" title="Add to Split View"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M8 3v10"/></svg><span class="tip">Add to Split View</span></button>
+  </div>
+  <div id="toast" role="status" aria-live="polite"><span>Peek closed</span><button id="bReopen">Reopen <kbd>&#8984;Z</kbd></button></div>
+</div></div></div>
+
+<script>
+"use strict";
+/* ---------- Spring engine: SpringParameters (dampingRatio, response), semi-implicit Euler at 480 Hz ---------- */
+const P = {
+  firm: [0.90, 0.25], firmSlow: [0.90, 0.35], firmFast: [0.95, 0.15],
+  springy: [0.63, 0.28], springyFast: [0.80, 0.18],
+  /* Opacity-only helpers, critically damped. Reduce Motion uses these alone. */
+  fadeIn: [1, 0.16], fade: [1, 0.20], fadeFast: [1, 0.12]
+};
+let SLOW = 1, RM = false, FROZEN = false, simT = 0;
+class Spring {
+  constructor(v, eps) { this.v = v; this.t = v; this.vel = 0; this.p = P.firm; this.eps = eps; }
+  to(t, p) { this.t = t; if (p) this.p = P[p]; }
+  snap(v) { this.v = this.t = v; this.vel = 0; }
+  step(dt) {
+    const [z, r] = this.p, w = 2 * Math.PI / r;
+    this.vel += (-w * w * (this.v - this.t) - 2 * z * w * this.vel) * dt;
+    this.v += this.vel * dt;
+  }
+  get rest() { return Math.abs(this.v - this.t) < this.eps && Math.abs(this.vel) < this.eps * 20; }
+}
+const nodes = [];
+class Node {
+  constructor(init, draw) {
+    this.sp = {}; for (const k in init) this.sp[k] = new Spring(init[k], k === "o" ? 0.002 : 0.05);
+    this.drawFn = draw; this.restFns = []; nodes.push(this);
+  }
+  get v() { const o = {}; for (const k in this.sp) o[k] = this.sp[k].v; return o; }
+  to(vals, p) { for (const k in vals) this.sp[k].to(vals[k], p); this.wasRest = false; kick(); return this; }
+  set(vals) { for (const k in vals) this.sp[k].snap(vals[k]); this.draw(); return this; }
+  vel(vals) { for (const k in vals) this.sp[k].vel = vals[k]; return this; }
+  get rest() { for (const k in this.sp) if (!this.sp[k].rest) return false; return true; }
+  onRest(fn) { this.restFns.push(fn); }
+  draw() { this.drawFn(this.v, this); }
+}
+const timers = [];
+function after(ms, fn) { timers.push({ at: simT + ms / 1000, fn }); kick(); }
+const watchers = [];
+function when(cond, fn) { watchers.push({ cond, fn }); kick(); }
+function advance(dt) {
+  const h = 1 / 480; let n = Math.max(1, Math.ceil(dt / h)); const d = dt / n;
+  while (n--) {
+    simT += d;
+    for (const nd of nodes) for (const k in nd.sp) nd.sp[k].step(d);
+    for (let i = timers.length - 1; i >= 0; i--) if (timers[i].at <= simT) { const t = timers.splice(i, 1)[0]; t.fn(); }
+    for (let i = watchers.length - 1; i >= 0; i--) if (watchers[i].cond()) { const w = watchers.splice(i, 1)[0]; w.fn(); }
+  }
+  for (const nd of nodes) {
+    if (nd.rest) { for (const k in nd.sp) nd.sp[k].snap(nd.sp[k].t); if (!nd.wasRest) { nd.wasRest = true; const f = nd.restFns.splice(0); f.forEach(fn => fn()); } }
+    nd.draw();
+  }
+}
+let running = false, last = 0;
+function busy() { return timers.length || watchers.length || nodes.some(n => !n.rest); }
+function kick() { if (FROZEN || running) return; running = true; last = performance.now(); requestAnimationFrame(tick); }
+function tick(now) {
+  const dt = Math.min(0.05, (now - last) / 1000) / SLOW; last = now;
+  advance(dt);
+  if (busy() && !FROZEN) requestAnimationFrame(tick); else running = false;
+}
+function freezeAt(ms) { FROZEN = true; let left = ms / 1000; while (left > 1e-9) { const d = Math.min(1 / 240, left); advance(d); left -= d; } }
+
+/* ---------- Geometry (points; ShellMetrics.standard) ---------- */
+const $ = id => document.getElementById(id);
+const CARD = { x: 190, y: 10, w: 1080, h: 780 };
+const PEEK = { x: 246, y: 44, w: 968, h: 720 };               // proposed: 56 pt sides, 34 top, 26 bottom
+const LEFT = { x: 190, y: 10, w: 535, h: 780 }, RIGHT = { x: 735, y: 10, w: 535, h: 780 };
+const PEEK_IN_PANE = { x: 214, y: 44, w: 459, h: 720 };       // proposed: 24 pt left, 52 pt control gutter
+const RECEDE = 0.985;                                         // proposed: source card scale under a Peek
+const ROW = 34;
+
+/* A card: transform for position and uniform scale, an inset clip for size, content anchored by gravity.
+   The layout box (and the live page) resizes only at rest, which is what the native snapshot morph does. */
+class Card extends Node {
+  constructor(id, rect, gravity) {
+    super({ x: rect.x, y: rect.y, w: rect.w, h: rect.h, s: 1, o: 1 }, (v, c) => c.paint(v));
+    this.el = $(id); this.content = $(id + "Content"); this.plate = $(id + "Plate"); this.rim = $(id + "Rim");
+    this.gravity = gravity; this.commit();
+    this.onRestCommit = () => this.commit();
+  }
+  layout(w, h) {
+    this.BW = w; this.BH = h;
+    for (const el of [this.el, this.plate, this.rim]) { el.style.width = w + "px"; el.style.height = h + "px"; }
+  }
+  commit() {
+    const v = this.v; this.LW = Math.round(v.w); this.LH = Math.round(v.h);
+    this.layout(this.LW, this.LH); this.PW = this.LW; this.PH = this.LH;
+    this.content.style.width = this.LW + "px"; this.content.style.height = this.LH + "px";
+    this.draw();
+  }
+  morph(rect, p) {
+    const v = this.v;
+    this.layout(Math.ceil(Math.max(v.w, rect.w)) + 2, Math.ceil(Math.max(v.h, rect.h)) + 2);
+    this.PW = this.BW; this.PH = this.BH;
+    this.to({ x: rect.x, y: rect.y, w: rect.w, h: rect.h }, p);
+    this.onRest(() => this.commit());
+    return this;
+  }
+  place(rect, extra) { this.set(Object.assign({ x: rect.x, y: rect.y, w: rect.w, h: rect.h, s: 1, o: 1 }, extra || {})); this.commit(); return this; }
+  visual(v = this.v) { return { x: v.x + (1 - v.s) * v.w / 2, y: v.y + (1 - v.s) * v.h / 2, w: v.w * v.s, h: v.h * v.s }; }
+  paint(v) {
+    if (this.BW === undefined) return;
+    const r = this.visual(v), s = v.s;
+    this.el.style.transform = `translate(${r.x}px,${r.y}px) scale(${s})`;
+    this.el.style.clipPath = `inset(0px ${Math.max(0, this.BW - v.w)}px ${Math.max(0, this.BH - v.h)}px 0px round 10px)`;
+    this.el.style.opacity = v.o;
+    const gx = this.gravity === "center" ? (v.w - this.LW) / 2 : 0;
+    this.content.style.transform = `translateX(${gx}px)`;
+    const k = `translate(${r.x}px,${r.y}px) scale(${s * v.w / this.PW},${s * v.h / this.PH})`;
+    this.plate.style.transform = k; this.rim.style.transform = k;
+    this.plate.style.opacity = v.o; this.rim.style.opacity = v.o;
+  }
+}
+
+/* Page art: a deterministic row of Lisbon facades for the hero and the mail band. */
+(function buildArt() {
+  const pal = ["#F3D9B1", "#E9A68A", "#F6E7C8", "#A9CBD8", "#F2C9A0", "#D98C6C", "#EDE3D2", "#B7D3C4"];
+  const palDark = ["#5A4A3E", "#6B4636", "#4E4A44", "#34495A", "#5E4A38", "#5B3A30", "#4A4640", "#3A4C45"];
+  function row(host, n, maxH, seed) {
+    let x = -10, i = 0;
+    while (x < 1100) {
+      const w = 54 + ((seed * 7 + i * 13) % 5) * 12, h = maxH * (0.55 + ((seed + i * 17) % 7) / 16);
+      const b = document.createElement("div"); b.className = "bl";
+      b.style.cssText = `left:${x}px;width:${w}px;height:${h}px;background:var(--b${i % 8})`;
+      b.innerHTML = '<div class="roof"></div>';
+      for (let r = 0; r < Math.floor(h / 26) - 1; r++) for (let c = 0; c < Math.floor(w / 18); c++) {
+        const wi = document.createElement("i"); wi.className = "win"; wi.style.left = (8 + c * 18) + "px"; wi.style.top = (12 + r * 26) + "px"; b.appendChild(wi);
+      }
+      host.appendChild(b); x += w + 4; i++;
+    }
+  }
+  const css = document.createElement("style");
+  css.textContent = ":root{" + pal.map((c, i) => `--b${i}:${c}`).join(";") + "}:root[data-theme=dark]{" + palDark.map((c, i) => `--b${i}:${c}`).join(";") + "}";
+  document.head.appendChild(css);
+  const hero = $("hero"), band = $("mband");
+  const back = document.createElement("div"); back.style.cssText = "position:absolute;left:0;right:0;bottom:24px;height:180px;opacity:.55"; hero.insertBefore(back, hero.querySelector(".rail")); row(back, 0, 170, 3);
+  const front = document.createElement("div"); front.style.cssText = "position:absolute;left:-30px;right:0;bottom:24px;height:120px"; hero.insertBefore(front, hero.querySelector(".rail")); row(front, 0, 118, 5);
+  row(band, 0, 110, 2);
+})();
+
+const win = $("win");
+const src = new Card("src", CARD, "start");
+const rec = new Card("rec", RIGHT, "start");
+const peek = new Card("peek", PEEK, "center");
+const scrim = new Node({ o: 0 }, v => { $("scrim").style.opacity = v.o; });
+const ctrls = new Node({ o: 0, dx: 0 }, v => {
+  const r = peek.visual();
+  $("ctrls").style.transform = `translate(${r.x + r.w + 12 + v.dx}px,${r.y}px)`;
+  $("ctrls").style.opacity = v.o;
+  $("ctrls").style.visibility = v.o < 0.01 ? "hidden" : "visible";
+});
+const grab = new Node({ o: 0 }, v => {
+  const r = peek.visual();
+  $("grab").style.transform = `translate(${r.x + r.w / 2 - 18}px,${r.y - 12}px)`;
+  $("grab").style.opacity = v.o;
+});
+const toast = new Node({ o: 0, y: 8, s: 0.96 }, v => {
+  const el = $("toast"), w = el.offsetWidth || 220;
+  el.style.transform = `translate(${CARD.x + CARD.w / 2 - w / 2}px,${CARD.y + CARD.h - 16 - 36 + v.y}px) scale(${v.s})`;
+  el.style.opacity = v.o; el.style.visibility = v.o < 0.01 ? "hidden" : "visible";
+});
+const pill = new Node({ y: 258, o: 1 }, v => { $("pill").style.transform = `translateY(${v.y}px)`; $("pill").style.opacity = v.o; });
+const pillNew = new Node({ o: 0 }, v => { $("pillNew").style.transform = "translateY(385px)"; $("pillNew").style.opacity = v.o; });
+const today = new Node({ d: 0 }, v => { $("today").style.transform = `translateY(${v.d}px)`; });
+const newRow = new Node({ o: 0, s: 0.96 }, v => { $("newRow").style.opacity = v.o; $("newRow").style.transform = `scale(${v.s})`; });
+const rowA = new Node({ o: 1 }, v => { $("inboxRow").style.opacity = v.o; });
+const rowSplit = new Node({ o: 0 }, v => { $("splitRow").style.opacity = v.o; });
+[ctrls, grab, toast].forEach(n => n.draw());
+
+function linkCenter() {
+  const a = $("plink").getBoundingClientRect(), w = win.getBoundingClientRect(), k = w.width / 1280;
+  return { x: (a.left - w.left + a.width / 2) / k, y: (a.top - w.top + a.height / 2) / k };
+}
+function fromOrigin(rect, k) {
+  const o = linkCenter(), cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+  return { x: rect.x + (o.x - cx) * k, y: rect.y + (o.y - cy) * k };
+}
+
+/* ---------- States (applied instantly) ---------- */
+function reset() {
+  timers.length = 0; watchers.length = 0;
+  for (const n of nodes) n.restFns.length = 0;
+  win.className = ""; $("peek").classList.remove("withtb");
+  document.querySelectorAll(".pc").forEach(b => b.classList.remove("hover", "tipped", "focus"));
+  $("bSplit").removeAttribute("aria-disabled");
+  $("plink").classList.remove("hover"); $("cursor").classList.remove("on");
+  $("srcRim").classList.remove("half"); $("recRim").classList.remove("half");
+  $("splitBT").textContent = "Three days in Lisbon"; $("splitB").textContent = "A";
+  $("splitB").style.background = "#F2C14E"; $("splitB").style.color = "#202321";
+  $("urlText").textContent = "mail.example.com";
+  src.place(CARD); peek.place(PEEK, { o: 0 }); rec.place(RIGHT);
+  scrim.set({ o: 0 }); ctrls.set({ o: 0, dx: 0 }); grab.set({ o: 0 }); toast.set({ o: 0, y: 8, s: 0.96 });
+  pill.set({ y: 258, o: 1 }); pillNew.set({ o: 0 }); today.set({ d: 0 }); newRow.set({ o: 0, s: 0.96 }); rowA.set({ o: 1 }); rowSplit.set({ o: 0 });
+}
+function showPeekAt(rect) {
+  win.classList.add("peeking");
+  peek.place(rect); scrim.set({ o: 1 }); ctrls.set({ o: 1, dx: 0 }); grab.set({ o: 0.9 });
+  src.set({ s: RM ? 1 : RECEDE }); $("urlText").textContent = "atlas.example";
+}
+const STATES = {
+  idle() { reset(); $("plink").classList.add("hover"); placeCursor(); },
+  open() { reset(); showPeekAt(PEEK); },
+  hover() { reset(); showPeekAt(PEEK); $("bExpand").classList.add("hover", "tipped"); },
+  focus() { reset(); showPeekAt(PEEK); $("bSplit").classList.add("focus", "tipped"); },
+  toolbar() { reset(); $("peek").classList.add("withtb"); showPeekAt(PEEK); },
+  drag() { reset(); showPeekAt(PEEK); peek.set({ y: PEEK.y + 150, s: 0.964 }); scrim.set({ o: 0.55 }); ctrls.set({ o: 0 }); grab.set({ o: 0 }); src.set({ s: RM ? 1 : 0.9925 }); },
+  dragShort() { reset(); showPeekAt(PEEK); peek.set({ y: PEEK.y + 70, s: 0.983 }); scrim.set({ o: 0.8 }); ctrls.set({ o: 0.12 }); grab.set({ o: 0.1 }); },
+  closed() { reset(); toast.set({ o: 1, y: 0, s: 1 }); },
+  expanded() {
+    reset(); peek.place(CARD); src.set({ o: 0 }); today.set({ d: ROW }); newRow.set({ o: 1, s: 1 }); pill.set({ o: 0 }); pillNew.set({ o: 1 });
+    $("urlText").textContent = "atlas.example";
+  },
+  split() {
+    reset(); src.place(LEFT); peek.place(RIGHT); rowA.set({ o: 0 }); rowSplit.set({ o: 1 });
+    $("srcRim").classList.add("half"); $("urlText").textContent = "atlas.example";
+  },
+  insplit() { reset(); inSplitBase(); },
+  insplitPeek() { reset(); inSplitBase(); win.classList.add("peeking"); peek.place(PEEK_IN_PANE); scrim.set({ o: 1 }); ctrls.set({ o: 1 }); grab.set({ o: 0.9 }); src.set({ s: RM ? 1 : RECEDE }); $("urlText").textContent = "atlas.example"; },
+  splitFull() { reset(); showPeekAt(PEEK); $("bSplit").setAttribute("aria-disabled", "true"); $("bSplit").classList.add("tipped"); $("bSplit").querySelector(".tip").textContent = "Split View is full"; }
+};
+function inSplitBase() {
+  win.classList.add("insplit"); src.place(LEFT); rec.place(RIGHT); rowA.set({ o: 0 }); rowSplit.set({ o: 1 });
+  $("splitBT").textContent = "Weekend Recipes"; $("splitB").textContent = "W"; $("splitB").style.background = "#E0533D"; $("splitB").style.color = "#fff";
+  $("recRim").classList.add("half");
+}
+function placeCursor() {
+  const c = linkCenter(), s = src.visual();
+  const el = $("cursor"); el.classList.add("on");
+  el.style.left = (c.x - s.x + 30) + "px"; el.style.top = (c.y - s.y + 2) + "px";
+}
+
+/* ---------- Transitions ---------- */
+function peekOut(kind) {
+  win.classList.remove("peeking");
+  ctrls.to({ o: 0 }, "fadeFast"); grab.to({ o: 0 }, "fadeFast");
+  scrim.to({ o: 0 }, RM ? "fade" : "firm"); src.to({ s: 1 }, "firm");
+  $("urlText").textContent = "mail.example.com";
+  if (RM) { peek.to({ o: 0 }, "fadeFast"); }
+  else if (kind === "esc") { peek.to({ s: 0.97 }, "firmFast").to({ o: 0 }, "fadeFast"); }
+  else { const o = fromOrigin(peek.v, 0.3); peek.to({ x: o.x, y: o.y, s: 0.92 }, "firm").to({ o: 0 }, "fadeFast"); }
+  after(140, () => { RM ? toast.set({ y: 0, s: 1 }).to({ o: 1 }, "fade") : toast.to({ o: 1, y: 0, s: 1 }, "springyFast"); });
+}
+function dip(card, rect, done) {
+  card.to({ o: 0 }, "fadeFast");
+  when(() => card.v.o < 0.02, () => { card.place(rect, { o: 0 }); card.to({ o: 1 }, "fade"); done && done(); });
+}
+const T = {
+  open: { from: "idle", run() {
+    $("plink").classList.remove("hover"); $("cursor").classList.remove("on");
+    win.classList.add("peeking"); $("urlText").textContent = "atlas.example";
+    if (RM) { peek.place(PEEK, { o: 0 }); peek.to({ o: 1 }, "fade"); scrim.to({ o: 1 }, "fade"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 0.9 }, "fade"); return; }
+    const o = fromOrigin(PEEK, 0.3);
+    peek.place(PEEK, { x: o.x, y: o.y, s: 0.9, o: 0 });
+    peek.to({ x: PEEK.x, y: PEEK.y, s: 1 }, "firmSlow").to({ o: 1 }, "fadeIn");
+    scrim.to({ o: 1 }, "firm"); src.to({ s: RECEDE }, "firmSlow");
+    ctrls.set({ dx: -10 });
+    after(70, () => ctrls.to({ o: 1, dx: 0 }, "springyFast"));
+    after(110, () => grab.to({ o: 0.9 }, "fade"));
+  } },
+  close: { from: "open", run() { peekOut("click"); } },
+  esc: { from: "open", run() { peekOut("esc"); } },
+  expand: { from: "open", run() {
+    win.classList.remove("peeking");
+    ctrls.to({ o: 0 }, "fadeFast"); grab.to({ o: 0 }, "fadeFast"); scrim.to({ o: 0 }, RM ? "fade" : "firm");
+    if (RM) {
+      dip(peek, CARD, () => { src.set({ o: 0, s: 1 }); today.set({ d: ROW }); pill.to({ o: 0 }, "fade"); pillNew.to({ o: 1 }, "fade"); newRow.set({ s: 1 }).to({ o: 1 }, "fade"); });
+      return;
+    }
+    peek.morph(CARD, "firmSlow"); src.to({ s: 1 }, "firmSlow");
+    peek.onRest(() => src.set({ o: 0 }));
+    after(60, () => { today.to({ d: ROW }, "springyFast"); pill.to({ o: 0 }, "fade"); });
+    after(150, () => { newRow.to({ o: 1, s: 1 }, "springyFast"); pillNew.to({ o: 1 }, "fade"); });
+  } },
+  split: { from: "open", run() {
+    win.classList.remove("peeking");
+    ctrls.to({ o: 0 }, "fadeFast"); grab.to({ o: 0 }, "fadeFast"); scrim.to({ o: 0 }, RM ? "fade" : "firm");
+    const rows = () => { rowA.to({ o: 0 }, "fadeFast"); rowSplit.to({ o: 1 }, "fade"); };
+    if (RM) { dip(peek, RIGHT); dip(src, LEFT, () => $("srcRim").classList.add("half")); rows(); return; }
+    src.morph(LEFT, "firmSlow").to({ s: 1 }, "firmSlow"); peek.morph(RIGHT, "firmSlow");
+    peek.onRest(() => $("srcRim").classList.add("half"));
+    after(40, rows);
+  } },
+  fling: { from: "drag", run() {
+    win.classList.remove("peeking"); scrim.to({ o: 0 }, RM ? "fade" : "firm"); src.to({ s: 1 }, "firm");
+    if (RM) { peek.to({ o: 0 }, "fadeFast"); }
+    else { peek.vel({ y: 1400 }).to({ y: PEEK.y + 520, s: 0.9 }, "firm").to({ o: 0 }, "fade"); }
+    after(140, () => { RM ? toast.set({ y: 0, s: 1 }).to({ o: 1 }, "fade") : toast.to({ o: 1, y: 0, s: 1 }, "springyFast"); });
+  } },
+  snapback: { from: "dragShort", run() {
+    peek.vel({ y: -300 }).to({ y: PEEK.y, s: 1 }, RM ? "firm" : "springy");
+    scrim.to({ o: 1 }, "firm"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 0.9 }, "fade"); src.to({ s: RM ? 1 : RECEDE }, "firm");
+  } },
+  reopen: { from: "closed", run() {
+    toast.to({ o: 0 }, "fadeFast"); win.classList.add("peeking"); $("urlText").textContent = "atlas.example";
+    if (RM) { peek.place(PEEK, { o: 0 }); peek.to({ o: 1 }, "fade"); }
+    else { peek.place(PEEK, { s: 0.96, o: 0 }); peek.to({ s: 1 }, "firm").to({ o: 1 }, "fadeIn"); src.to({ s: RECEDE }, "firm"); }
+    scrim.to({ o: 1 }, RM ? "fade" : "firm"); after(60, () => ctrls.to({ o: 1 }, "fade")); after(90, () => grab.to({ o: 0.9 }, "fade"));
+  } },
+  /* Open, then Esc 120 ms later: the close picks up the open's position and velocity. */
+  interrupt: { from: "idle", run() { T.open.run(); after(120, () => peekOut("esc")); } }
+};
+
+/* ---------- Drag to dismiss (GS-022) ---------- */
+let drag = null;
+$("peek").addEventListener("pointerdown", e => {
+  if (FROZEN || !win.classList.contains("peeking") || drag) return;
+  drag = { y0: e.clientY, k: win.getBoundingClientRect().width / 1280, samples: [[performance.now(), 0]] };
+  $("peek").setPointerCapture(e.pointerId);
+});
+$("peek").addEventListener("pointermove", e => {
+  if (!drag) return;
+  let dy = (e.clientY - drag.y0) / drag.k;
+  if (dy < 0) dy = -Math.pow(-dy, 0.7);                       // rubber band upward
+  drag.dy = dy; drag.samples.push([performance.now(), dy]); if (drag.samples.length > 6) drag.samples.shift();
+  const f = Math.max(0, Math.min(1, dy / 300));
+  peek.set({ y: PEEK.y + dy, s: 1 - 0.06 * f }); scrim.set({ o: 1 - 0.75 * f });
+  ctrls.set({ o: Math.max(0, 1 - Math.abs(dy) / 60) }); grab.set({ o: Math.max(0, 0.9 - Math.abs(dy) / 60) });
+});
+function endDrag() {
+  if (!drag) return;
+  const s = drag.samples, a = s[0], b = s[s.length - 1];
+  const v = (b[1] - a[1]) / Math.max(1, b[0] - a[0]) * 1000;  // pt/s
+  const dy = drag.dy || 0; drag = null;
+  if (dy > 120 || v > 800) { peek.vel({ y: Math.max(v, 600) }); T.fling.run(); }
+  else { peek.vel({ y: v }).to({ y: PEEK.y, s: 1 }, RM ? "firm" : "springy"); scrim.to({ o: 1 }, "firm"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 0.9 }, "fade"); }
+}
+$("peek").addEventListener("pointerup", endDrag);
+$("peek").addEventListener("pointercancel", endDrag);
+
+/* ---------- Live interaction ---------- */
+$("plink").addEventListener("click", e => { e.preventDefault(); if (!win.classList.contains("peeking")) T.open.run(); });
+$("plink").addEventListener("mouseenter", () => $("plink").classList.add("hover"));
+$("plink").addEventListener("mouseleave", () => $("plink").classList.remove("hover"));
+$("scrim").addEventListener("click", () => peekOut("click"));
+$("bClose").addEventListener("click", () => peekOut("click"));
+$("bExpand").addEventListener("click", () => T.expand.run());
+$("bSplit").addEventListener("click", () => { if (!$("bSplit").hasAttribute("aria-disabled")) T.split.run(); });
+$("bReopen").addEventListener("click", () => T.reopen.run());
+document.addEventListener("keydown", e => {
+  const peeking = win.classList.contains("peeking");
+  if (e.key === "Escape" && peeking) { e.preventDefault(); peekOut("esc"); }
+  else if (e.metaKey && e.key.toLowerCase() === "w" && peeking) { e.preventDefault(); peekOut("esc"); }
+  else if (e.metaKey && e.key.toLowerCase() === "o" && peeking) { e.preventDefault(); T.expand.run(); }
+  else if (e.metaKey && e.key.toLowerCase() === "z" && !peeking && toast.v.o > 0.5) { e.preventDefault(); T.reopen.run(); }
+});
+
+/* ---------- Hash state, toggles, fit ---------- */
+function fit() {
+  const shot = document.body.classList.contains("shot");
+  const W = innerWidth - (shot ? 0 : 48), H = innerHeight - (shot ? 0 : 52 + 48);
+  const k = shot ? Math.min(1, W / 1280, H / 800) : Math.min(1, W / 1280, H / 800);
+  $("fit").style.transform = `scale(${k})`;
+}
+function params() { return new URLSearchParams(location.hash.slice(1)); }
+function writeHash(update) {
+  const q = params(); for (const k in update) { if (update[k] === null) q.delete(k); else q.set(k, update[k]); }
+  history.replaceState(null, "", "#" + q.toString());
+}
+function applyOptions(q) {
+  const dark = q.get("theme") ? q.get("theme") === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  RM = q.get("rm") ? q.get("rm") === "1" : matchMedia("(prefers-reduced-motion: reduce)").matches;
+  SLOW = Number(q.get("slow")) || 1;
+  document.body.classList.toggle("shot", q.get("shot") === "1");
+  $("tTheme").setAttribute("aria-pressed", String(dark));
+  $("tRM").setAttribute("aria-pressed", String(RM));
+  $("tSlow").setAttribute("aria-pressed", String(SLOW > 1));
+  fit();
+}
+function load() {
+  const q = params(); applyOptions(q);
+  FROZEN = false; simT = 0;
+  const t = q.get("t");
+  if (t && T[t]) {
+    STATES[T[t].from]();
+    T[t].run();
+    if (q.get("ms") !== null) freezeAt(Number(q.get("ms")));
+  } else {
+    (STATES[q.get("s")] || STATES.open)();
+  }
+  document.querySelectorAll("#bar [data-s]").forEach(b => b.setAttribute("aria-pressed", String(!t && b.dataset.s === (q.get("s") || "open"))));
+  document.querySelectorAll("#bar [data-t]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
+}
+document.querySelectorAll("#bar [data-s]").forEach(b => b.addEventListener("click", () => { writeHash({ s: b.dataset.s, t: null, ms: null }); load(); }));
+document.querySelectorAll("#bar [data-t]").forEach(b => b.addEventListener("click", () => { writeHash({ t: b.dataset.t, ms: null }); load(); }));
+$("tTheme").addEventListener("click", () => { writeHash({ theme: document.documentElement.dataset.theme === "dark" ? "light" : "dark" }); applyOptions(params()); });
+$("tRM").addEventListener("click", () => { writeHash({ rm: RM ? "0" : "1" }); applyOptions(params()); });
+$("tSlow").addEventListener("click", () => { writeHash({ slow: SLOW > 1 ? "1" : "4" }); applyOptions(params()); });
+addEventListener("hashchange", load);
+addEventListener("resize", fit);
+load();
+</script>
+</body>
+</html>
