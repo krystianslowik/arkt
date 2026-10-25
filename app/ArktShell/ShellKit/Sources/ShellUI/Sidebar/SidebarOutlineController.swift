@@ -20,8 +20,26 @@ public final class OutlineItem: NSObject {
 
 /// Outline view with Arc's flat geometry: no disclosure triangle, children indented by a fixed step, and a
 /// pressed state shown on the row under the pointer while the button is down.
+///
+/// Accessibility: `NSOutlineView` answers `AXChildren` / `AXRows` out of process from its own internals, without the
+/// row views or overridden children (#269), so its rows reach VoiceOver and XCUITest's `outlineRows` through
+/// `axProxyRows`: a proxy outline element (`sidebar.outline`) with one `AXProxyRow` per displayed row, in display
+/// order, which `SpacePageView` lists in place of the scroll view. The controller supplies each row's identifier,
+/// label, state and disclosure from its model; every mutation of the displayed rows (reload, expand, collapse,
+/// insert, remove, move) marks the proxies stale so the next query builds them afresh.
 @MainActor
 public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
+  let axProxyRows: AXProxyRows
+
+  public override init(frame frameRect: NSRect) {
+    axProxyRows = AXProxyRows(role: .outline, identifier: AXID.Sidebar.outline)
+    super.init(frame: frameRect)
+    axProxyRows.attach(to: self)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
   private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
     enumerateAvailableRowViews { rowView, _ in (rowView as? SidebarRowView)?.syncHover(pointerInWindow: pointer) }
   }
@@ -56,6 +74,57 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   public override func reloadData() {
     reloadDataCount += 1
     super.reloadData()
+    axProxyRows.invalidate()
+  }
+
+  // Every change to the displayed rows: the proxy at an index may now stand for another item.
+
+  public override func reloadItem(_ item: Any?, reloadChildren: Bool) {
+    super.reloadItem(item, reloadChildren: reloadChildren)
+    axProxyRows.invalidate()
+  }
+
+  public override func reloadItem(_ item: Any?) {
+    super.reloadItem(item)
+    axProxyRows.invalidate()
+  }
+
+  public override func expandItem(_ item: Any?) {
+    super.expandItem(item)
+    axProxyRows.invalidate()
+  }
+
+  public override func collapseItem(_ item: Any?) {
+    super.collapseItem(item)
+    axProxyRows.invalidate()
+  }
+
+  public override func expandItem(_ item: Any?, expandChildren: Bool) {
+    super.expandItem(item, expandChildren: expandChildren)
+    axProxyRows.invalidate()
+  }
+
+  public override func collapseItem(_ item: Any?, collapseChildren: Bool) {
+    super.collapseItem(item, collapseChildren: collapseChildren)
+    axProxyRows.invalidate()
+  }
+
+  public override func insertItems(at indexes: IndexSet, inParent parent: Any?,
+                                   withAnimation animationOptions: NSTableView.AnimationOptions = []) {
+    super.insertItems(at: indexes, inParent: parent, withAnimation: animationOptions)
+    axProxyRows.invalidate()
+  }
+
+  public override func removeItems(at indexes: IndexSet, inParent parent: Any?,
+                                   withAnimation animationOptions: NSTableView.AnimationOptions = []) {
+    super.removeItems(at: indexes, inParent: parent, withAnimation: animationOptions)
+    axProxyRows.invalidate()
+  }
+
+  public override func moveItem(at fromIndex: Int, inParent oldParent: Any?, to toIndex: Int,
+                                inParent newParent: Any?) {
+    super.moveItem(at: fromIndex, inParent: oldParent, to: toIndex, inParent: newParent)
+    axProxyRows.invalidate()
   }
 
   /// Shows the context menu of a Ctrl-click, when `menu(for:)` gave one; tests replace it to record the request
@@ -85,16 +154,13 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   public override var mouseDownCanMoveWindow: Bool { false }
   public override var needsPanelToBecomeKey: Bool { false }
 
-  public override func accessibilityChildren() -> [Any]? {
-    NSAccessibility.unignoredChildren(from: (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) })
-  }
+  // MARK: Accessibility
 
-  public override func accessibilityRows() -> [any NSAccessibilityRow]? {
-    (0..<numberOfRows).compactMap { rowView(atRow: $0, makeIfNecessary: false) }
-      .filter { $0.isAccessibilityElement() }
+  /// The proxy of the row hosting `view` (a cell), so the cell names it as its parent.
+  func axProxyRow(hosting view: NSView) -> AXProxyRow? {
+    let row = self.row(for: view)
+    return row >= 0 ? axProxyRows.rowElement(forRow: row) : nil
   }
-
-  public override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
 }
 
 /// Data source and delegate for one Space: pinned nodes, a divider, then Today nodes; folders and splits expand.
@@ -143,7 +209,12 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Folders the user collapsed in this outline; preserved across moves and sibling removals (#94).
   private var collapsedFolders: Set<NodeID> = []
 
-  public init(source: any SidebarSource, spaceID: SpaceID) {
+  /// The outline becomes `scrollView`'s document view after its first reload and expansion. Without a superview its
+  /// visible rect is unbounded, so that load realizes a row view for every row of the Space up front. Installing it
+  /// first would realize only the rows the clip view shows, but an offscreen page is hidden and a hidden table
+  /// realizes nothing, so a Space switch would then build the incoming page's rows in the frame that first shows it
+  /// (a 20 to 30 ms frame in `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`).
+  public init(source: any SidebarSource, spaceID: SpaceID, hostedIn scrollView: NSScrollView) {
     self.source = source
     self.spaceID = spaceID
     self.outlineView = SidebarOutlineView(frame: NSRect(x: 0, y: 0, width: 174, height: 400))
@@ -178,10 +249,12 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     rebuildRootItems()
     outlineView.dataSource = self
     outlineView.delegate = self
+    wireAccessibility()
     outlineView.reloadData()
     for id in pinnedIDs + todayIDs {
       expandContainer(id)
     }
+    scrollView.documentView = outlineView
   }
 
   // MARK: Items
@@ -273,7 +346,6 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       ?? SidebarRowView(frame: .zero)
     let item = item as? OutlineItem
     configure(row, for: item)
-    row.setAccessibilityCustomActions(accessibilityActions(for: item?.nodeID))
     return row
   }
 
@@ -304,25 +376,84 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { false }
 
   private func presentation(of id: NodeID) -> (String, NSImage) {
+    let scale = outlineView.shellBackingScale
     switch source.node(id) {
     case .tab(_, let url, let title)?:
       let image = faviconProvider?(id)
-        ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.faviconSize,
-                                scale: outlineView.shellBackingScale)
+        ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.faviconSize, scale: scale)
       return (title, image)
-    case .folder(_, let title)?:
+    case .folder?:
       let symbol = collapsedFolders.contains(id) ? "folder" : "folder.fill"
-      return (title, SidebarGlyphs.symbol(symbol, flavor: flavor, scale: outlineView.shellBackingScale))
+      return (title(of: id), SidebarGlyphs.symbol(symbol, flavor: flavor, scale: scale))
+    case .split?:
+      return (title(of: id), SidebarGlyphs.symbol("rectangle.split.2x1", flavor: flavor, scale: scale))
+    case nil:
+      return ("", SidebarGlyphs.symbol("questionmark.square", flavor: flavor, scale: scale))
+    }
+  }
+
+  /// A row's title: the tab or folder title, or a split's pane titles joined. No image is made, so accessibility
+  /// queries can read it cheaply.
+  private func title(of id: NodeID) -> String {
+    switch source.node(id) {
+    case .tab(_, _, let title)?, .folder(_, let title)?:
+      return title
     case .split?:
       let titles = children(of: id).compactMap { child -> String? in
         if case .tab(_, _, let title)? = source.node(child) { return title }
         return nil
       }
-      return (titles.joined(separator: " | "), SidebarGlyphs.symbol("rectangle.split.2x1", flavor: flavor,
-                                                                 scale: outlineView.shellBackingScale))
+      return titles.joined(separator: " | ")
     case nil:
-      return ("", SidebarGlyphs.symbol("questionmark.square", flavor: flavor, scale: outlineView.shellBackingScale))
+      return ""
     }
+  }
+
+  // MARK: Accessibility (#269)
+
+  /// Feeds the outline's proxy rows from the model: identifier and label as the rows have them, "Closing" while a
+  /// close is held, the depth and expansion of containers, selection as the `current` row state (outline selection
+  /// stays off), the realized cell (its title and hover close button) as the row's child, and the row's VoiceOver
+  /// actions. Every answer is read when asked; none builds a row view.
+  private func wireAccessibility() {
+    let proxies = outlineView.axProxyRows
+    proxies.content = { [weak self] row in self?.accessibilityContent(ofRow: row) }
+    proxies.isSelected = { [weak self] row in
+      guard let self, let id = self.nodeID(atRow: row) else { return false }
+      return self.state(for: id) == .current
+    }
+    proxies.children = { [weak self] row in
+      // The divider row's proxy is the splitter itself, so it lists nothing.
+      guard let self, self.nodeID(atRow: row) != nil,
+            let cell = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarTabCellView
+      else { return [] }
+      return [cell]
+    }
+    proxies.customActionNames = { [weak self] row in
+      guard let self, let id = self.nodeID(atRow: row) else { return [] }
+      return self.accessibilityActions(for: id).map(\.name)
+    }
+    proxies.performCustomAction = { [weak self] row, name in
+      guard let self, let id = self.nodeID(atRow: row) else { return false }
+      return self.performAccessibilityAction(named: name, on: id)
+    }
+  }
+
+  private func nodeID(atRow row: Int) -> NodeID? {
+    (outlineView.item(atRow: row) as? OutlineItem)?.nodeID
+  }
+
+  private func accessibilityContent(ofRow row: Int) -> AXProxyRowContent? {
+    guard let item = outlineView.item(atRow: row) as? OutlineItem else { return nil }
+    guard let id = item.nodeID else {
+      return AXProxyRowContent(identifier: AXID.Sidebar.divider, label: "", role: .separator)
+    }
+    let expandable = source.node(id)?.childLocation != nil
+    return AXProxyRowContent(
+      identifier: rowIdentifier(for: id), label: title(of: id),
+      value: (closingProvider?(id) ?? false) ? "Closing" : nil,
+      disclosureLevel: max(0, outlineView.level(forRow: row)),
+      isExpanded: expandable ? outlineView.isItemExpanded(item) : nil)
   }
 
   // MARK: Row state
@@ -346,15 +477,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     if let id = item?.nodeID {
       row.isInteractive = true
       row.state = state(for: id)
-      row.setAccessibilityElement(true)
-      row.setAccessibilityIdentifier(rowIdentifier(for: id))
-      row.setAccessibilityLabel(presentation(of: id).0)
     } else {
       row.isInteractive = false
       row.state = .normal
-      row.setAccessibilityElement(false)
-      row.setAccessibilityIdentifier(nil)
-      row.setAccessibilityLabel(nil)
     }
   }
 
@@ -375,6 +500,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let changed = resolver.changedNodes(from: self.resolver)
     self.resolver = resolver
     guard !changed.isEmpty else { return }
+    // The proxies read selection from the resolver; tell clients that cached it.
+    outlineView.axProxyRows.selectionDidChange()
     outlineView.enumerateAvailableRowViews { rowView, row in
       guard let rowView = rowView as? SidebarRowView,
             let item = self.outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }
@@ -416,15 +543,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let row = outlineView.row(forItem: existing)
     guard row >= 0 else { return }
     outlineView.reloadItem(existing, reloadChildren: false)
-    outlineView.rowView(atRow: row, makeIfNecessary: false)?.setAccessibilityLabel(presentation(of: id).0)
     if let container = source.parent(of: id)?.containerNode, case .split? = source.node(container),
        let splitItem = items[container] {
       outlineView.reloadItem(splitItem, reloadChildren: false)   // split titles derive from their panes
-      let splitRow = outlineView.row(forItem: splitItem)
-      if splitRow >= 0 {
-        outlineView.rowView(atRow: splitRow, makeIfNecessary: false)?
-          .setAccessibilityLabel(presentation(of: container).0)
-      }
     }
   }
 
@@ -433,6 +554,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// A location's child list changed: insert / remove exactly the rows that differ, reload nothing else.
   /// Ignores locations outside this Space. (Node-level changes go to `reload(node:)`.)
   public func apply(structure location: SidebarLocation) {
+    // The row mutations below drop the proxies too; this also covers a change that moves no row.
+    defer { outlineView.axProxyRows.invalidate() }
     switch location {
     case .pinned(let space) where space == spaceID:
       let new = source.children(of: location)
@@ -612,7 +735,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   }
 
   /// VoiceOver actions of a row: the X's action ("Close", "Archive", or "Remove Tab from Split View" on a pane row),
-  /// plus "Separate All Tabs" on a split row; none for folders and the divider.
+  /// plus "Separate All Tabs" on a split row; none for folders and the divider. The row's proxy lists their names and
+  /// performs one through `performAccessibilityAction(named:on:)`.
   func accessibilityActions(for id: NodeID?) -> [NSAccessibilityCustomAction] {
     guard let id else { return [] }
     var actions: [NSAccessibilityCustomAction] = []
@@ -623,6 +747,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       actions.append(customAction("Separate All Tabs", id) { $0.onSeparateSplit })
     }
     return actions
+  }
+
+  /// Runs the row action called `name` on `id`; false when the node is gone or has no such action.
+  func performAccessibilityAction(named name: String, on id: NodeID) -> Bool {
+    accessibilityActions(for: id).first { $0.name == name }?.handler?() ?? false
   }
 
   private func customAction(

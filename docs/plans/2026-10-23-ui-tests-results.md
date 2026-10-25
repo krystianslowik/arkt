@@ -923,3 +923,103 @@ In-process accessibility tests assert through the protocol getters (`accessibili
 out-of-process proof is the UI tests job.
 
 Known issues used: #277 (unrelated GUI-test flake).
+
+## #269: Sidebar outline rows out of process
+
+### What was done
+
+- Root cause: `NSOutlineView` (like `NSTableView`) answers `AXChildren` / `AXRows` out of process from its own
+  internals. The overrides that returned the realized row views answered in-process callers only, so on the
+  macos-26 runner XCUITest saw an `Outline` with no children. A diagnostic run on the runner showed the command bar
+  table (same override pattern) with no rows either.
+- The Space page lists a proxy outline (`sidebar.outline`, `AXProxyRows`, shared with U11) in place of the scroll
+  view: one proxy row per displayed row, read from the model on every query (identifier, label, `Closing` value,
+  disclosure level, expanded state, selection from the row state, VoiceOver actions, the realized cell as child).
+- `waitForOutlineRows` is a plain `Waits.until`; the #269 `XCTExpectFailure` wrapper is removed.
+
+### Verification
+
+- CI run 40206251471 (`0da8044`, macos-26, Xcode 26.6): UI tests 22 passed, 0 failed, among them
+  `LaunchTests.test_E_seededLaunchShowsImportedSpaces` and `LoopbackPageTests.test_E_loopbackPageLoadsInTheEngine`,
+  with every row wait plain.
+- One expected failure, scoped to one assertion: the order check of `test_KB001_BH100_cmdTOpensURLInNewTodayTab`.
+  Cmd-T appends to Today; the plan above expects the top and the spec leaves it open (BH-079, CF-27). Tracked in
+  #293.
+
+## U14: Quit, relaunch, recovery (#179)
+
+Base: `origin/main` at `46f3729`, branch `chore/179-quit-relaunch`. Local run on 2026-10-24
+(macOS 27.0, Xcode 27.1, Apple M2 Pro). `ARKT_UITEST_TIMEOUT_SCALE` was unset.
+
+### What was done
+
+- `UITests/PersistenceTests.swift`: the plan's 5 tests. No production files changed. Quit flush, the
+  debounce override, the default debounce, both recovery toasts, and a persistent toast surviving Cmd-T then Esc
+  were already in the app.
+- The debounce test sets `ARKT_AUTOSAVE_DELAY_MS=600000` (the largest value `EnvironmentOverrides` accepts) on
+  the first launch and clears it before the relaunch. Between the model change and Cmd-Q there is no row probe:
+  once the sidebar URL bar shows the loopback host, the test captures the size and modification date of
+  `data/Arkt.sqlite`, asserts the file does not contain the alpha address, and asserts the size and date are
+  unchanged immediately before Cmd-Q. The database uses a rollback journal, so a debounced write would change that
+  file. Only the termination flush can save the change.
+- `ArktUITestCase.quit` takes an optional `timeout` (seconds before scaling); test 1 passes 5.
+- The one fixed wait is the inverted expectation in `test_E_toastStaysUntilDismissed` (2 s, unscaled), commented
+  there as the absence assertion.
+
+### Tests
+
+| Test | Run time |
+|---|---|
+| `test_E_quitInsideAutosaveDebounceKeepsChange` | 37.781 s |
+| `test_E_quitAtDefaultDebounceKeepsChange` | 25.544 s |
+| `test_E_corruptDatabaseWithoutBackupShowsRecreatedToast` | 30.568 s |
+| `test_E_corruptDatabaseWithBackupShowsRestoredToast` | 48.624 s |
+| `test_E_toastStaysUntilDismissed` | 33.972 s |
+
+### Verification
+
+`Check UI test sources` on `app/ArktShell/UITests`: `UI test sources OK`, exit 0.
+
+```
+cd app/ArktShell
+nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests \
+  -derivedDataPath build -resultBundlePath build/ui-1792873897.xcresult \
+  -collect-test-diagnostics never -parallel-testing-enabled NO -jobs 2 \
+  -only-testing:ArktShellUITests/PersistenceTests test
+```
+
+Exit 0. `** TEST SUCCEEDED **`. Executed 5 tests, with 0 failures (0 unexpected) in 176.488 (176.492) seconds.
+Only `PersistenceTests` ran. CoreSimulator "out of date" (1171.7.0 vs 1174.9.2) was logged and did not fail the run.
+
+On this run the Today row predicate completed for every `Fixture alpha` check. These timings and this run are
+for commit `986f251`, before the review fixes below; the fixes were not run on a Mac by their author.
+
+CI on `986f251` (run 40130722270, job "UI tests (informative)", macos-26, scale 3): 23 UI tests, 0 failures
+(0 unexpected), `** TEST SUCCEEDED **`, all 5 `PersistenceTests` passed. Rows were missing (#269) and the URL bar
+held the loopback host after every relaunch. The notification dialog query found no dialog in any of the 5 tests.
+
+### Review fixes
+
+- Row checks go through `waitForOutlineRows` (expected failure while #269 hides the rows, the `Fixture alpha`
+  title assertion where they are exposed). The sidebar URL bar containing `127.0.0.1` is asserted every time in
+  addition. On `986f251` they bypassed it because recording the expected failure hung in-process symbolication
+  on the local Mac; that does not happen on CI, where the other suites record that expected failure, and where
+  the rows are exposed (macOS 27) nothing is recorded.
+- `dismissNotificationPermission` is gone. Nothing in the app requests notification authorization: no
+  `UserNotifications` import, no `UNUserNotificationCenter`, `NSUserNotification`, `requestAuthorization`, no
+  `WKUIDelegate` on the FakeEngine web view, and the fixture pages have no script. The CI run above found no
+  dialog. The origin of the dialog seen on the local macOS 27 Mac is not known; clicking Don't Allow wrote a
+  decision outside the sandbox for whichever app owned the prompt, so the tests no longer touch it. If it appears again, the test fails
+  and the dialog's owner process and text belong in an issue.
+- The `launchEnvironment` assertions (which only read the harness's own input) are removed.
+
+### Deviations from the plan
+
+- The backup wait requires a finished `Arkt-*.sqlite`, not the `.tmp` written first.
+- Test 1 waits for `.notRunning` within 5 s times the scale (`quit(app, timeout: 5)`). The other tests use the
+  default (10 s). Test 2 calls `quit` immediately after Enter. `quit` still activates and waits for foreground
+  before the key, so the key stays on this app.
+- `toast.action` is matched by identifier on any element, and "Show Files" is accepted as `label` or `title`.
+  Out of process the button exposes those words as its title. It is never clicked.
+
+Known issues used: #269 (outline rows).
