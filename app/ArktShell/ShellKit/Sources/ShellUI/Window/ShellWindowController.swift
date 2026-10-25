@@ -27,14 +27,48 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var isArcImportAvailable = false { didSet { emptyState.showsImport = isArcImportAvailable } }
   /// "Import from Arc" in the empty state.
   public var onImportFromArc: (@MainActor () -> Void)?
-  /// "New Space" in the empty state. Default: creates a Space named `newSpaceTitle`.
+  /// "New Space" in the empty state. Default: `newSpace(_:)` ("Space N" after the current Space, title open).
   public var onNewSpace: (@MainActor () -> Void)?
-  /// Name of a Space created by "New Space" or by Cmd-T with no Space.
-  public static let newSpaceTitle = "Space"               // [I] product wording, see open questions
+  /// Base of the "Space N" name given to a Space created by New Space or by Cmd-T with no Space (decision on #106).
+  public static let newSpaceTitle = "Space"
   public var isShowingEmptyState: Bool { sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
-  /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7).
-  public internal(set) var currentTab: TabID?
+  /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
+  /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
+  public internal(set) var currentTab: TabID? {
+    didSet {
+      guard let tab = currentTab, tab != oldValue else { return }
+      engine.activateTab(tab)
+      engineActiveTab = tab
+    }
+  }
+  /// What the engine sees of this window: the window, the card, the command and close seams.
+  public let engineHost: ShellEngineHost
+  /// The engine window this shell window hosts: created on the first tab (week-3 decision 4) or adopted from a host
+  /// provider (`adopt(engineWindow:)`); nil again once the engine reports it closed.
+  public internal(set) var engineWindow: EngineWindowID?
+  /// Events of this window's tabs (`observe(window:)`) and of the window itself.
+  var tabObservation: EngineObservation?
+  var windowObservation: EngineObservation?
+  /// Archives waiting for their tabs to close (week-3 Decision 11): the node to archive, the tabs still open, and
+  /// whether it held the current tab when Cmd-W was pressed.
+  var pendingArchives: [NodeID: PendingArchive] = [:]
+  /// The engine's active tab of this window as last asked for or reported.
+  var engineActiveTab: TabID?
+  /// The engine's active tab closed while the window still had tabs: the engine's own pick of the next active tab is
+  /// not followed (the shell picks the successor), it is answered with the shell's current tab. In-process engines
+  /// report their pick after the shell's own activation, Chromium one task later, and none when the pick is already
+  /// the active tab, so the expectation also lapses after `reactivationGrace` (`expectEngineReactivation()`).
+  var expectsEngineReactivation = false
+  var reactivationGeneration = 0
+  /// A close was requested for the whole window and is held behind a prompt: tabs the engine opens in it meanwhile get
+  /// no row (they would outlive the window in the sidebar).
+  var isWindowCloseRequested = false
+  /// The window closed. A closed controller is not shown again (its command bar and pager released their display
+  /// links); the app builds a new window instead (#241: Dock reopen).
+  public private(set) var isClosed = false
+  /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
+  public internal(set) var extensionsButton: ExtensionsButton?
   /// The engine reported a favicon for a sidebar node (nil: cleared); the app persists it. Called for favicons
   /// caught up from the snapshot when a tab is created and for later `.faviconChanged` events.
   public var onFaviconChanged: (@MainActor (NodeID, Data?) -> Void)?
@@ -42,9 +76,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// text names the failed mutation (`errorText(for:error:)`).
   public var onError: (@MainActor (SidebarMutation, any Error) -> Void)?
   /// Engine tabs are created lazily, when a sidebar node is first shown (`openEngineTab(for:)`).
-  private(set) var tabsByNode: [NodeID: TabID] = [:]
-  private var nodeByTab: [TabID: NodeID] = [:]
-  private var observation: EngineObservation?
+  var tabsByNode: [NodeID: TabID] = [:]
+  var nodeByTab: [TabID: NodeID] = [:]
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
   private var sidebarObservation: SidebarObservation?
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
@@ -69,9 +102,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public let toolbarSetting: ToolbarSetting
 
   /// `toolbarSetting` defaults to an in-memory setting so windows built without one (tests, the smoke) never
-  /// write user defaults.
+  /// write user defaults. `opensFirstTab` shows the first tab of the first Space at once, which creates the engine
+  /// window; a window built by an engine host provider passes false, as a provider must not call the engine, and
+  /// gets its window through `adopt(engineWindow:)`.
   public init(engine: any EngineClient, sidebar: any SidebarSource,
-              metrics: ShellMetrics = .standard, toolbarSetting: ToolbarSetting = .ephemeral()) {
+              metrics: ShellMetrics = .standard, toolbarSetting: ToolbarSetting = .ephemeral(),
+              opensFirstTab: Bool = true) {
     let window = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800))
     // Symbol bitmaps at the shell window's scale, before the first row or button draws. A later scale change
     // re-renders the views' glyphs (viewDidChangeBackingProperties) and prewarms again below.
@@ -86,7 +122,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.commandBar = CommandBarController(parent: window)
     self.toasts = ToastPresenter()
     self.toolbarSetting = toolbarSetting
+    self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
+    engineHost.controller = self
+    window.commandHost = engineHost
     let toastView = ToastView(frame: .zero)
     toastView.presenter = toasts
     root.card.toastView = toastView
@@ -94,7 +133,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     onError = { [weak self] mutation, error in
       self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error)))
     }
-    onNewSpace = { [weak self] in self?.createSpace() }
+    onNewSpace = { [weak self] in self?.newSpace(nil) }
+    wireSpaceEntryPoints()
     confirmSpaceRemoval = { [weak self] prompt, answer in self?.presentSpaceRemovalSheet(prompt, answer: answer) }
     emptyState.onNewSpace = { [weak self] in self?.onNewSpace?() }
     emptyState.onImport = { [weak self] in self?.onImportFromArc?() }
@@ -117,7 +157,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
     wireAddressBars()
     wireSplit()
-    observation = engine.observe { [weak self] event in self?.handle(event) }
+    wireExtensions()                        // tab and window events start with the engine window (attach)
     // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
       switch change {
@@ -139,7 +179,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     updateEmptyState()
     root.themeBackground.setPosition(sidebarController.view.pager.position)
     // Open with the first tab of the first Space so the card shows a real page.
-    if let space = sidebarController.currentSpace, let first = sidebarController.tabToRestore(in: space) {
+    if opensFirstTab, let space = sidebarController.currentSpace,
+       let first = sidebarController.tabToRestore(in: space) {
       sidebarController.activate(node: first)
     }
     reapplyTrafficLights()
@@ -181,10 +222,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   // MARK: Spaces
 
-  /// Creates a Space named `newSpaceTitle`; it becomes current through `.spaceAdded`. Reports a failure via `onError`.
+  /// Creates a Space named "Space N" right after the current one, without showing it (`newSpace(_:)` is the user's
+  /// New Space); the first Space becomes current through `.spaceAdded`. Reports a failure via `onError`.
   @discardableResult
   func createSpace() -> SpaceID? {
-    do { return try sidebar.addSpace(title: Self.newSpaceTitle) } catch { onError?(.addSpace, error); return nil }
+    do { return try sidebar.addSpace(title: nextSpaceTitle(), after: currentSpace) } catch {
+      onError?(.addSpace, error)
+      return nil
+    }
   }
 
   private func updateEmptyState() {
@@ -353,6 +398,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// action call it for every row except a pane row, whose X removes the pane from its split (BH-121). Today: archived
   /// (a split as one unit), and when it held the current tab the nearest sibling becomes current. Pinned and
   /// Favorites: the pages close and the rows stay. Folders are ignored.
+  ///
+  /// The pages close first, honouring leave-site prompts (week-3 Decision 11): a Today node is archived only once
+  /// every page it shows has closed. While a close is held the row shows its closing state and the page stays
+  /// mounted (the prompt is tab-modal on it); a cancelled prompt keeps the tab and nothing is archived. Another close
+  /// of a node already waiting does nothing.
   public func close(node: NodeID) {
     let tabs: [NodeID]
     switch sidebar.node(node) {
@@ -360,20 +410,35 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .split?: tabs = sidebar.children(of: .split(node))
     case .folder?, nil: return
     }
+    let open = tabs.compactMap { tabsByNode[$0] }
     switch sidebar.section(containing: node) {
     case .today?:
+      guard pendingArchives[node] == nil else { return }
       let holdsCurrent = currentNode.map(tabs.contains) ?? false
-      let next = holdsCurrent ? successor(of: node) : nil   // resolved while the node is still in place
-      onArchive?([node])
-      guard sidebar.node(node) == nil else { return }
-      if let next, sidebar.node(next) != nil { activate(node: next) }
+      guard !open.isEmpty else {
+        archive(node, heldCurrent: holdsCurrent)
+        return
+      }
+      // Registered before the first close: an unheld close reports `.tabClosed` before `closeTab` returns.
+      pendingArchives[node] = PendingArchive(tabs: Set(open), heldCurrent: holdsCurrent)
+      for tab in open { engine.closeTab(tab, mode: .honourUnloadHandlers) }
     case .pinned?, .favorites?:
-      for tab in tabs.compactMap({ tabsByNode[$0] }) {
-        engine.closeTab(tab)                  // `.tabClosed` clears the card and the row state
+      for tab in open {
+        engine.closeTab(tab, mode: .honourUnloadHandlers)   // `.tabClosed` clears the card and the row state
       }
     default:
       return
     }
+    markHeldCloses(open)
+  }
+
+  /// Archives `node` now. When it held the current tab and nothing became current meanwhile, the nearest sibling
+  /// (resolved while the node is still in place) becomes current.
+  func archive(_ node: NodeID, heldCurrent: Bool) {
+    let next = heldCurrent ? successor(of: node) : nil
+    onArchive?([node])
+    guard sidebar.node(node) == nil else { return }
+    if let next, sidebar.node(next) != nil, currentTab == nil { activate(node: next) }
   }
 
   /// The tab to show after `node` leaves: the first tab of the nearest sibling below, else above. With no such sibling
@@ -394,9 +459,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   /// Engine tabs of nodes the sidebar no longer holds are closed; `.tabClosed` then drops the mappings. Runs inside
-  /// change delivery, so it must not mutate the sidebar (closing a tab does not).
+  /// change delivery, so it must not mutate the sidebar (closing a tab does not). The row is already gone (auto-archive,
+  /// Delete Space, an import merge), so nothing could show a leave-site prompt for it: these closes skip
+  /// `beforeunload` and never hold, and no live tab outlives its row (week-3 Decision 11).
   private func closeEngineTabsOfRemovedNodes() {
-    for (node, tab) in tabsByNode where sidebar.node(node) == nil { engine.closeTab(tab) }
+    for (node, tab) in tabsByNode where sidebar.node(node) == nil { engine.closeTab(tab, mode: .skipUnloadHandlers) }
   }
 
   // MARK: Command bar
@@ -446,10 +513,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The engine tab of `node`, created on first use. Every engine tab the window creates comes from here, so the
   /// sidebar's loaded state (Favorite X, #82) stays exact: created pages are marked loaded, and `.tabClosed` calls
   /// `deactivate(node:)` (#156 review).
+  ///
+  /// The first one creates this window's engine window (week-3 decision 4), and every tab lands in that window
+  /// (the `in:` form of `createTab`), so with two windows a tab never opens in the other one.
   func openEngineTab(for node: NodeID) -> TabID? {
     if let existing = tabsByNode[node] { return existing }
     guard case .tab(_, let url, _)? = sidebar.node(node) else { return nil }
-    let tab = engine.createTab(url: url)
+    let tab = engine.createTab(url: url, in: ensureEngineWindow())
     tabsByNode[node] = tab
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)
@@ -470,7 +540,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     for node in hidden { onTabHidden?(node) }
   }
 
-  private func replay(_ snapshot: TabSnapshot, into node: NodeID) {
+  func replay(_ snapshot: TabSnapshot, into node: NodeID) {
     guard case .tab(_, let url, let title)? = sidebar.node(node) else { return }
     let newURL = snapshot.url.flatMap { $0 == url ? nil : $0 }
     let newTitle = snapshot.title.isEmpty || snapshot.title == title ? nil : snapshot.title
@@ -483,8 +553,16 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     onFaviconChanged?(node, data)
   }
 
-  private func handle(_ event: EngineEvent) {
-    guard let node = nodeByTab[event.tabID] else { return }
+  /// Events of this window's tabs (`observe(window:)`).
+  func handle(_ event: EngineEvent) {
+    guard let node = nodeByTab[event.tabID] else {
+      if case .tabCreated(let tab) = event { engineDidCreateTab(tab) }
+      if case .activeTabChanged(let tab) = event {      // a tab without a row took it
+        engineActiveTab = tab
+        expectsEngineReactivation = false
+      }
+      return
+    }
     switch event {
     case .titleChanged(_, let title) where !title.isEmpty:
       sidebar.updateTab(node, url: nil, title: title)
@@ -497,23 +575,57 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .historyChanged(let tab, _, _):
       if tab == toolbarTab { refreshToolbarHistory() }
       refreshPaneToolbar(of: node)
-    case .tabClosed(let tab, _):        // every reason, as before; routing by reason is W3-7 (Decision 12)
-      tabsByNode[node] = nil
-      nodeByTab[tab] = nil
-      let wasCurrent = currentTab == tab
-      shownNodes.removeAll { $0 == node }                     // a closed page is not hidden, it is gone
-      sidebarController.visible.remove(node)
-      if wasCurrent { currentTab = nil }
-      if splitState.panes.contains(node) {
-        sidebarController.deactivate(node: node)
-        paneDidClose(node, wasFocused: wasCurrent)
-      } else {
-        if wasCurrent { rootView.card.setContent(nil); refreshAddress() }
-        sidebarController.deactivate(node: node)
-        hiddenPaneDidClose(node)
-      }
-    default:
+    case .tabClosed(let tab, let reason):
+      tabDidClose(tab, node: node, reason: reason)
+    case .activeTabChanged(let tab):
+      engineDidActivate(tab, node: node)
+    case .closeCancelled(let tab):
+      closeWasCancelled(tab, node: node)
+    case .tabCreated, .titleChanged, .loadingChanged:
       break
+    }
+  }
+
+  /// A tab of this window closed (week-3 Decision 12). The page is gone in every case; what happens to its row
+  /// depends on why:
+  /// - `.windowClosing`, `.appTerminating`: unload only. Nothing in the sidebar changes and nothing else is shown or
+  ///   opened (the window is going away). The close button reports the shown tabs hidden before it asks the engine
+  ///   (decision 10), as `prepareForTermination` does before quit, so the closes themselves write nothing.
+  /// - `.client`: as asked. A Today node waiting in `pendingArchives` is archived once its last page is gone.
+  /// - `.page`, `.extension`: the page or an extension closed it; a Today row is archived, a Pinned or Favorite row
+  ///   stays unloaded as after Cmd-W.
+  private func tabDidClose(_ tab: TabID, node: NodeID, reason: CloseReason) {
+    tabsByNode[node] = nil
+    nodeByTab[tab] = nil
+    let wasCurrent = currentTab == tab
+    switch reason {
+    case .windowClosing, .appTerminating:
+      shownNodes.removeAll { $0 == node }
+      sidebarController.visible.remove(node)
+      if wasCurrent { currentTab = nil; rootView.card.setContent(nil) }
+      sidebarController.deactivate(node: node)
+      return
+    case .client, .page, .extension:
+      break
+    }
+    shownNodes.removeAll { $0 == node }                     // a closed page is not hidden, it is gone
+    sidebarController.visible.remove(node)
+    if wasCurrent { currentTab = nil }
+    if tab == engineActiveTab {
+      engineActiveTab = nil
+      if !tabsByNode.isEmpty { expectEngineReactivation() }  // the engine picks a next active tab; the shell does
+    }
+    if splitState.panes.contains(node) {
+      sidebarController.deactivate(node: node)
+      paneDidClose(node, wasFocused: wasCurrent)
+    } else {
+      if wasCurrent { rootView.card.setContent(nil); refreshAddress() }
+      sidebarController.deactivate(node: node)
+      hiddenPaneDidClose(node)
+    }
+    if pendingArchiveTabClosed(tab) { return }
+    if reason != .client, case .today? = sidebar.section(containing: node) {
+      archive(node, heldCurrent: wasCurrent)
     }
   }
 
@@ -539,9 +651,23 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     if let scale = window?.backingScaleFactor { SymbolImageCache.shared.prewarm(scale: scale) }   // cache hits if warm
   }
   public func windowDidDeminiaturize(_ notification: Notification) { reapplyTrafficLights() }
+  /// The close button and Close Window (`performClose:`): with an engine window the engine decides
+  /// (`onCloseRequested`): it closes the tabs, unload prompts first, and the window closes on its `.windowClosed`; a
+  /// cancelled prompt keeps it open. Without one (no tab was ever shown) the window closes as before.
+  public func windowShouldClose(_ sender: NSWindow) -> Bool {
+    guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
+    for node in shownNodes { onTabHidden?(node) }          // decision 10, before any tab closes
+    let open = Array(tabsByNode.values)
+    isWindowCloseRequested = true
+    request()
+    markHeldCloses(open)
+    return false
+  }
+
   /// The shown tabs, every pane of a split, stop being visible (decision 10). The command bar's display link retains
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
+    isClosed = true
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
     commandBar.invalidate()

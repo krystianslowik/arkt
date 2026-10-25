@@ -29,6 +29,7 @@ namespace arkt {
 
 class ArktExclusiveAccessContext;
 class ArktExtensionsContainer;
+class ArktInfobarPresenter;
 class ArktModalDialogHost;
 class ArktSidePanelUI;
 class ArktStubLocationBar;
@@ -75,6 +76,9 @@ class ArktBrowserWindow : public BrowserWindow,
   NSView* PromptAnchorViewFor(content::WebContents* contents) const {
     return DialogHostViewFor(contents);
   }
+  // The facade put the tab's contents view in its container (host mode):
+  // the tab's infobars go to the top of that container (Task W3-10).
+  void OnTabContentsViewAdopted(content::WebContents* contents);
 
   // ui::BaseWindow:
   bool IsActive() const override;
@@ -282,6 +286,12 @@ class ArktBrowserWindow : public BrowserWindow,
   void Mount(content::WebContents* contents);
   void Unmount(content::WebContents* contents);
   void OnCardResized();
+  // Infobars (Task W3-10): a presenter per tab, made when the tab enters the
+  // window and dropped when it leaves; LayoutInfobars puts the tab's bar at
+  // the top of the view that holds its contents view (the tab's container in
+  // host mode, the card for the mounted tab otherwise), above the page.
+  void AddInfobarPresenter(content::WebContents* contents);
+  void LayoutInfobars(content::WebContents* contents);
   // The host window may have become visible or moved to the active Space:
   // tab-modal dialogs that could not attach then attach now (#261 review).
   void OnWindowPlacementChanged();
@@ -322,6 +332,8 @@ class ArktBrowserWindow : public BrowserWindow,
   std::unique_ptr<ArktModalDialogHost> modal_dialog_host_;
   std::map<content::WebContents*, std::unique_ptr<ArktModalDialogHost>>
       tab_modal_dialog_hosts_;
+  std::map<content::WebContents*, std::unique_ptr<ArktInfobarPresenter>>
+      infobar_presenters_;
   std::unique_ptr<ArktStubLocationBar> location_bar_;
   std::unique_ptr<ArktSidePanelUI> side_panel_ui_;
   std::unique_ptr<new_tab_footer::NewTabFooterController>

@@ -584,3 +584,82 @@ Base: `origin/main` at `ab08905`, branch `chore/171-ui-tests-u6`.
 | Single `ARKT_SMOKE` site | `grep -rn ARKT_SMOKE app/ArktShell/UITests` | 1 hit (`Sandbox.seedFromArcFixture`) |
 | `ArcFixture` render & checksums | `xctest -XCTest ArktShellUITests.LaunchTests/test_E_arcFixtureRenderRewritesURLsAndMatchesExpectedCounts` | pass (0.009 s) |
 | `build-for-testing` | `xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build build-for-testing` | `** TEST BUILD SUCCEEDED **` |
+
+## U7: First run, New Space, Cmd-T, Today, Cmd-L (#172)
+
+Base: `origin/main` at `01e68c3`, branch `chore/172-ui-tests-u7`.
+
+### What was done
+
+- `UITests/FirstRunAndOpenTests.swift`: 9 tests (the plan's 8, with the `Space 1` naming rule as its own test).
+- `UITests/Harness/Shell.swift` (new): command bar and sidebar row helpers (`openCommandBar`, `openInNewTab`, `submit`,
+  `waitForCommandBar`, `todayRow`, `todayRows`, `spaceDots`). The plan's `Shell.openInNewTab(_:)` for U8 is
+  `Shell.openInNewTab(_:in:)`.
+- #269 known issue narrowed (review follow-up from #270): `expectOutlineRowsKnownIssue()` marked the whole test. It is
+  replaced by `ArktUITestCase.waitForOutlineRows(_:_:)`, which wraps only the row wait in a non-strict
+  `XCTExpectFailure` and returns whether the rows were there. Any other failure in the test still fails it, and the
+  checks after the wait run (`continueAfterFailure` is on for the duration of the wait). `LaunchTests` and
+  `LoopbackPageTests` use it.
+- Deviation: the first-run test renders the Arc fixture into the same sandbox after a quit and relaunches, because a
+  test launches into one sandbox only.
+- Deviation: the closed command bar is "root absent or value `closed`", since a hidden panel can leave the
+  accessibility tree.
+- Not covered: `Space 2` (New Space from the Spaces menu, #106) is not asserted yet.
+
+### Tests
+
+| Test | Parity | Run time (CI) |
+|---|---|---|
+| `test_E_firstRunShowsEmptyStateWithoutImport` | none | 12.2 s |
+| `test_E_newSpaceCreatesFirstSpace` | none | 6.6 s |
+| `test_E_newSpaceTitleFollowsDecision106` (asserts normally since #106 landed) | none | 5.0 s |
+| `test_KB001_BH100_cmdTOpensURLInNewTodayTab` | KB-001, BH-100 | 77.5 s (two #269 waits) |
+| `test_KB002_BH101_cmdLEditedEnterNavigatesCurrentTab` | KB-002, BH-101 | 79.9 s (two #269 waits) |
+| `test_KB004_BH102_cmdLUneditedEnterReloads` | KB-004, BH-102 | 48.6 s (one #269 wait) |
+| `test_KB003_BH103_cmdTOrCmdLWhileOpenCloses` | KB-003, BH-103 | 13.8 s |
+| `test_KB084_escClosesCommandBar` | KB-084, NEEDS-RUNTIME-CHECK RT-08 | 10.1 s |
+| `test_E_cmdTWithNoSpaceCreatesSpaceThenTab` | none | 44.8 s (one #269 wait) |
+
+### Verification
+
+Run on CI ("UI tests (informative)", macos-26, `ARKT_UITEST_TIMEOUT_SCALE=3`), not locally: the machine was under load
+and other GUI work was running. 14 tests, 0 unexpected failures, 380 s. On macOS 26 the sidebar rows are missing
+(#269), so each row wait times out at 30 s as an expected failure; the remaining checks of each test ran and passed.
+The `Space 1` test reported its expected failure (`"Space"` is not `"Space 1"`). Run times with rows exposed
+(macOS 27) are not measured yet.
+
+Known issues used: #269 (outline rows), #106 (Space naming).
+
+## U8: Toolbar and Back / Forward (#173)
+
+Base: `origin/main` at `12202c5`, branch `chore/173-ui-tests-u8`.
+
+### What was done
+
+- `UITests/ToolbarTests.swift`: 4 tests, as in the plan.
+- `UITests/Harness/Shell.swift`: `createFirstSpace(in:)` moved here from `FirstRunAndOpenTests` (now an
+  `ArktUITestCase` extension) so both suites share it.
+- Back / Forward state is also checked through `toolbar.urlBar`, which is not an outline row, so only the row-label
+  checks go through `waitForOutlineRows` (#269).
+- A test launches into one sandbox only, so "a fresh sandbox starts with the Toolbar off" is asserted at the start of
+  the toggle and relaunch tests (each runs in its own new suite) rather than by a second launch. A Toolbar left on in
+  the real `dev.arkt.ArktShell` domain would make those assertions fail.
+- Deferred: KB-031 / KB-032 (Cmd-[ / Cmd-]) to #119; `parity-deferred.txt` entries are added in U16.
+
+### Tests
+
+| Test | Parity |
+|---|---|
+| `test_KB018_BH032_cmdShiftDTogglesToolbar` | KB-018, BH-032 |
+| `test_BH031_GS042_sidebarURLBarContextMenuShowsToolbar` | BH-031, GS-042 |
+| `test_BH032_toolbarSettingSurvivesRelaunchInSameSuite` | BH-032 |
+| `test_BH032_backForwardEnabledFollowsHistory` | BH-032 |
+
+### Verification
+
+Source typecheck with `swiftc -typecheck` against XCTest (the machine was under load, load average above 20, so no
+local UI run). CI "UI tests (informative)" on `d9a9145` (macos-26, scale 3, 10 m 55 s): pass, all 4 `ToolbarTests` passed
+beside the existing 14 tests. The context menu item "Show Toolbar" shares its title with the View menu item, so the
+test clicks the hittable match.
+
+Known issues used: #269 (outline rows).

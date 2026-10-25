@@ -191,6 +191,7 @@ public final class SidebarController {
     page.outlineController.onNodeDragBegan = { [weak self] node in self?.onNodeDragBegan?(node) }
     page.outlineController.onNodeDragEnded = { [weak self] in self?.onNodeDragEnded?() }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
+    page.outlineController.closingProvider = { [weak self] node in self?.closingNodes.contains(node) ?? false }
     page.outlineController.setRowStates(resolver)
     pages[id] = page
     return page
@@ -222,9 +223,21 @@ public final class SidebarController {
     if loadedNodes.insert(node).inserted { view.favorites.reload(node: node) }
   }
 
-  /// Forgets a node that no longer has a tab (engine tab closed): its loaded state, any current/previous role, and
-  /// its favicon only when the node itself is gone from the source.
+  /// Rows whose page close is held behind a leave-site prompt (week-3 Decision 11).
+  public private(set) var closingNodes: Set<NodeID> = []
+
+  /// Shows or clears a row's closing state: dimmed, without its X, until the close ends either way. Only that row
+  /// is reconfigured.
+  public func setClosing(_ node: NodeID, _ closing: Bool) {
+    let changed = closing ? closingNodes.insert(node).inserted : closingNodes.remove(node) != nil
+    guard changed else { return }
+    for page in pages.values { page.outlineController.reload(node: node) }
+  }
+
+  /// Forgets a node that no longer has a tab (engine tab closed): its loaded state, any current/previous role, its
+  /// closing state, and its favicon only when the node itself is gone from the source.
   public func deactivate(node: NodeID) {
+    setClosing(node, false)
     if source.node(node) == nil { favicons[node] = nil }
     let wasLoaded = loadedNodes.remove(node) != nil
     guard node == current || node == previous else {

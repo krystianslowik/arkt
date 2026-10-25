@@ -30,7 +30,18 @@ namespace arkt {
 // values, with and without a user gesture), hold (a beforeunload handler
 // with a user gesture, through the test API) and answer <session id>
 // accept|cancel. Words starting with '#' are ignored.
+//
+// Task W3-8: with --arkt-menu-probe[=<options>] the embedder waits for
+// NSApplicationDidFinishLaunchingNotification, replaces Chromium's main menu
+// with an Arkt-shaped one (App menu with Quit, a File menu with Cmd-W
+// "Archive Tab" and Shift-Cmd-W "Close Window" targeting the embedder) and
+// only then becomes ready. Options, comma separated: "filetag" tags the File
+// menu IDC_FILE_MENU, "bookmarks" adds a hidden item tagged
+// IDC_BOOKMARKS_MENU. The command menu-check resolves Cmd-W, Shift-Cmd-W,
+// Cmd-Q and Cmd-T through Chromium's key-equivalent search and logs the
+// items, the command each maps to and the menu state afterwards.
 inline constexpr char kFacadeSelfTestSwitch[] = "arkt-facade-selftest";
+inline constexpr char kMenuProbeSwitch[] = "arkt-menu-probe";
 
 // The self-test embedder, or nil when the switch is absent.
 id<ArktEngineEmbedder> CreateSelfTestEmbedder();

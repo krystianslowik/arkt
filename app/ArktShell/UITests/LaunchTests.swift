@@ -85,7 +85,6 @@ final class LaunchTests: ArktUITestCase {
   }
 
   func test_E_seededLaunchShowsImportedSpaces() async throws {
-    expectOutlineRowsKnownIssue()
     let server = try await fixtureServer()
     let sandbox = try Sandbox()
     let checksums = try sandbox.seedFromArcFixture(server: server)
@@ -94,7 +93,7 @@ final class LaunchTests: ArktUITestCase {
     let dots = app.buttons.matching(identifier: AXID.Sidebar.spaceDot)
     XCTAssertTrue(Waits.until("2 Space dots", { dots.count == ArcFixture.expected.spaces }))
     let rows = app.outlineRows
-    XCTAssertTrue(Waits.until("current Space page has rows", { rows.count > 0 }))
+    waitForOutlineRows("current Space page has rows") { rows.count > 0 }
     XCTAssertTrue(Waits.until("fixture page requested from loopback server", { !server.requestedPaths.isEmpty }))
     let unexpected = server.requestedPaths.filter { !ArcFixture.fixturePaths.contains($0) }
     XCTAssertEqual(unexpected, [], "server saw non-fixture paths: \(unexpected)")

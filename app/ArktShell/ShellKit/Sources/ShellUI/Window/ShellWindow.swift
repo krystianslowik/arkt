@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 
 /// Visually borderless shell window. A real `.borderless` window would lose the traffic lights, key-window
 /// behavior and resizing, so this is a titled, full-size-content window with a hidden, transparent titlebar
@@ -58,5 +59,50 @@ public final class ShellWindow: NSWindow {
       return
     }
     super.sendEvent(event)
+  }
+
+  // MARK: Engine commands (Decision 9)
+
+  /// Where the engine's command selectors go: the window's host. Set by `ShellWindowController`.
+  weak var commandHost: ShellEngineHost?
+
+  /// Chromium's menu items and Arkt's page-command items: the sender's tag is the `EngineCommand` id.
+  @objc public func commandDispatch(_ sender: Any?) {
+    guard let command = Self.command(of: sender) else { return }
+    commandHost?.dispatch(command, disposition: .currentTab)
+  }
+
+  /// As `commandDispatch(_:)`, with the disposition the current event's modifiers ask for (Back with Cmd opens a
+  /// background tab, as in Chrome).
+  @objc public func commandDispatchUsingKeyModifiers(_ sender: Any?) {
+    guard let command = Self.command(of: sender) else { return }
+    commandHost?.dispatch(command, disposition: Self.disposition(for: NSApp.currentEvent?.modifierFlags ?? []))
+  }
+
+  public override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+    switch item.action {
+    case #selector(commandDispatch(_:)), #selector(commandDispatchUsingKeyModifiers(_:)):
+      guard let host = commandHost else { return false }
+      return host.validate(EngineCommand(rawValue: item.tag))
+    default:
+      return super.validateUserInterfaceItem(item)
+    }
+  }
+
+  private static func command(of sender: Any?) -> EngineCommand? {
+    guard let tag = (sender as? NSValidatedUserInterfaceItem)?.tag else { return nil }
+    return EngineCommand(rawValue: tag)
+  }
+
+  /// Chromium's `ui::DispositionFromEventFlags` for the flags a menu or key event can carry: Cmd opens a background
+  /// tab, Cmd-Shift a foreground tab, Shift a new window; anything else stays in the current tab.
+  static func disposition(for flags: NSEvent.ModifierFlags) -> EngineDisposition {
+    let flags = flags.intersection([.command, .shift])
+    switch flags {
+    case [.command, .shift]: return .newForegroundTab
+    case [.command]: return .newBackgroundTab
+    case [.shift]: return .newWindow
+    default: return .currentTab
+    }
   }
 }
