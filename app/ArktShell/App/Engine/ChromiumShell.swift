@@ -44,7 +44,7 @@ final class ChromiumShell: ChromiumEmbedderDelegate {
     shellLog("engineDidStart (embedder class \(ChromiumEmbedding.embedderClassName))")
     try await composition.start(engine: engine, hostLookup: { [weak engine] id in engine?.host(of: id) },
                                 defersWindows: true)
-    shellLog("session ready, calling embedderReady")
+    shellLog("session ready; the embedder calls embedderReady next")
     RunLoop.main.perform(inModes: [.common]) {
       MainActor.assumeIsolated {
         let composition = ChromiumShell.shared.composition

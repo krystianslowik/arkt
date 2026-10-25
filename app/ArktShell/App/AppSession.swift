@@ -173,8 +173,13 @@ final class AppSession {
     resumeAutoArchive()
   }
 
-  /// Starts the timer (at launch, and again after a cancelled quit stopped it).
+  /// A quit started and was not cancelled: auto-archive stays stopped.
+  private var isTerminating = false
+
+  /// Starts the timer (at launch, and again after a cancelled quit stopped it), unless a quit is under way. A start
+  /// while the first one still loads keeps that load going (`AutoArchiveTimer.start`).
   private func resumeAutoArchive() {
+    guard !isTerminating else { return }
     Task { [autoArchive] in
       do { try await autoArchive.start() } catch {
         Self.log.error("auto-archive unavailable \(String(describing: type(of: error)), privacy: .public)")
@@ -346,6 +351,7 @@ final class AppSession {
   /// Runs before the termination flush: stops the auto-archive timer, then stamps every window's visible tabs
   /// (decision 10).
   func prepareForTermination() {
+    isTerminating = true
     autoArchive.stop()  // stop first: no auto-archive pass may run between the sidebar write and the outbox write
     source.markInactive(windows.visibleNodes, at: .now)
   }
@@ -353,6 +359,7 @@ final class AppSession {
   /// The quit was cancelled (Chromium: a held leave-site prompt, or the user): auto-archive runs again. The visible
   /// tabs keep the stamp `prepareForTermination` wrote; they are stamped again when they stop being visible.
   func terminationCancelled() {
+    isTerminating = false
     resumeAutoArchive()
   }
 
