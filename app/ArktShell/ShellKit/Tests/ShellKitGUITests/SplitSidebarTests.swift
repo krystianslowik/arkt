@@ -330,8 +330,8 @@ final class SplitSidebarTests: XCTestCase {
   }
 
   /// Ctrl-click is a secondary click (#277): on a split row it asks for the row's context menu, as a right-click
-  /// does; on a plain tab row, which has no menu items, it does nothing. Neither activates the row. The window
-  /// delivers the mouse-down, as AppKit does.
+  /// does; on a plain tab row it gets the same empty menu a right-click gets, which does not open. Neither activates
+  /// the row. The window delivers the events, as AppKit does.
   func testCtrlClickShowsTheRowMenuAndDoesNotActivateTheRow() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
@@ -342,8 +342,11 @@ final class SplitSidebarTests: XCTestCase {
     let splitPoint = try windowPoint(of: world.split, in: harness, view)
     let tabPoint = try windowPoint(of: world.today[1], in: harness, view)
 
-    window.sendEvent(try mouseEvent(.leftMouseDown, at: splitPoint, [.control], in: window))
-    window.sendEvent(try mouseEvent(.leftMouseDown, at: tabPoint, [.control], in: window))
+    // Each press is released, as a real click is. Without the up, the second press never reached the outline on CI.
+    for point in [splitPoint, tabPoint] {
+      window.sendEvent(try mouseEvent(.leftMouseDown, at: point, [.control], in: window))
+      window.sendEvent(try mouseEvent(.leftMouseUp, at: point, [.control], in: window))
+    }
 
     XCTAssertEqual(recorder.shown,
                    [["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"], []],
