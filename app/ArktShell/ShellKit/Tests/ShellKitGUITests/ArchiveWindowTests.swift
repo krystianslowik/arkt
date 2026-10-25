@@ -101,6 +101,40 @@ final class ArchiveWindowTests: XCTestCase {
     }
   }
 
+  /// Accessibility rows come from the loaded page through `AXProxyRows`, not from row views: every row of a page
+  /// taller than the window is listed with its title and its place, date and reason, the far row gets no row view,
+  /// and the legacy attributes out-of-process clients read give the same rows and count.
+  @available(macOS, deprecated: 10.10, message: "Calls the legacy accessibility entry points")
+  func testAccessibilityRowsComeFromThePageWithoutRowViews() async throws {
+    let source = StubArchiveSource()
+    source.pages = [ArchiveListPage(rows: Self.rows(250), unreadable: 0, mayHaveMore: true)]
+    let controller = makeWindow(source)
+    await controller.reload()
+    let table = controller.tableView
+
+    let rows = try XCTUnwrap(table.accessibilityRows())
+    XCTAssertEqual(rows.count, 250)
+    XCTAssertEqual(table.accessibilityRowCount(), 250)
+    let last = try XCTUnwrap(rows.last as? NSAccessibilityElement)
+    XCTAssertEqual(last.accessibilityIdentifier(), AXID.Archive.row)
+    XCTAssertEqual(last.accessibilityLabel(), "Item 249")
+    XCTAssertEqual(last.accessibilityValue() as? String, "a.example - Work - 1 hour ago, Closed")
+    XCTAssertNil(table.rowView(atRow: 249, makeIfNecessary: false), "no row view is built for accessibility")
+
+    let legacy = try XCTUnwrap(table.accessibilityAttributeValue(.rows) as? [Any])
+    XCTAssertEqual(legacy.count, 250)
+    XCTAssertEqual(table.accessibilityArrayAttributeCount(.children), 250)
+    XCTAssertEqual((table.accessibilityAttributeValue(.rowCount) as? NSNumber)?.intValue, 250)
+    XCTAssertFalse(((table.accessibilityValue() as? String) ?? "").hasPrefix("rows "),
+                   "the table value is not a test-only count string")
+
+    source.pages = [ArchiveListPage(rows: Self.rows(3, from: 10), unreadable: 0, mayHaveMore: false)]
+    await controller.reload()
+    let reloaded = try XCTUnwrap(table.accessibilityRows())
+    XCTAssertEqual(reloaded.compactMap { ($0 as? NSAccessibilityElement)?.accessibilityLabel() },
+                   ["Item 10", "Item 11", "Item 12"])
+  }
+
   func testFooterAndLoadMoreHiddenWhenNothingIsMissing() async throws {
     let source = StubArchiveSource()
     source.pages = [ArchiveListPage(rows: Self.rows(2), unreadable: 0, mayHaveMore: false)]
