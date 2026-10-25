@@ -228,7 +228,10 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   }
 
   func close(mode: ArktCloseMode) -> ArktCloseResult {
-    guard let owner, !isClosing else { return isClosing ? .held : .closed }
+    // As the real facade, a close that skips unload handlers runs whatever close is under way (its window's).
+    guard let owner, !isClosing || (mode == .skipUnloadHandlers && dialog == nil) else {
+      return isClosing ? .held : .closed
+    }
     if isPending || facade.isNested {
       isClosing = true
       let deferred = { [self] in

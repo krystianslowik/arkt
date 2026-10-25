@@ -113,7 +113,10 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   public func closeTab(_ id: TabID) { closeTab(id, mode: .honourUnloadHandlers) }
 
   public func closeTab(_ id: TabID, mode: CloseMode) {
-    guard let record = tabs[id], !record.clientCloseHeld, !record.handle.isClosing else { return }
+    // A close under way answers a second one, except `.skipUnloadHandlers`: a tab of a window whose close is held
+    // reports closing, and a tab the shell drops then must still close (W3-7 B, W3-9).
+    guard let record = tabs[id], !record.clientCloseHeld,
+          mode == .skipUnloadHandlers || !record.handle.isClosing else { return }
     switch record.handle.close(mode: mode.facade) {
     case .closed:
       retired[ObjectIdentifier(record.handle)] = record.handle
