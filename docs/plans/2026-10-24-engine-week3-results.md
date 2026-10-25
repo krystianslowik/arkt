@@ -2403,3 +2403,40 @@ Verification:
 - `swift test --filter ShellKitGUITests`: 511 run, 5 skipped (FakeEngine lacks those contract drivers), 0 failures.
 - `app/ArktCore` is untouched. `xcodebuild` Debug build of `ArktShell` and `build-for-testing` of `ArktShellUITests`
   succeed. The new XCUITest (`SpaceSwitchTests`) was compiled, not run.
+
+## Engine follow-up: first-run URL card (#327) and stale tooltip (#301 item 3)
+
+Date 2026-10-26. Branch `fix/327-first-run-url-card` off `main` at `7a68572`. Swift only: no patch, `.patches` unchanged
+(7), no Chromium rebuild; the Engine app built with `xcodebuild -scheme ArktShell -configuration Engine
+CONFIGURATION_BUILD_DIR=$EMB`.
+
+### Root causes
+
+- **#327.** On a first run the held startup window's batch (`WindowOpened, TabCreated, LoadingChanged,
+  ActiveTabChanged`) reaches `engineDidCreateTab` with no Space. Creating Space 1 shows it while it is still empty, and
+  `showEmptySpace()` records the engine's latest selection as acknowledged (the #301 guard against late reports). The
+  Chromium engine's `latestActiveTab(in:)` already returns the new tab, so its queued `.activeTabChanged` was then taken
+  for an acknowledgement and never reached `show(node:)`. Creating the first Space for an engine tab now keeps the
+  acknowledgement from before; the batch's own activation shows the page.
+- **#301 item 3.** The stale window is the Space title's tool tip ("Drag to Reorder Space", 131 x 20 pt, layer 103):
+  shown when the window closed (Close Window while the pointer rests on the header), it stayed on screen after both
+  shell windows were gone. `windowWillClose` now removes the tool tips of the window's views (the `toolTip` strings
+  and the header's rect tool tip), which takes a shown one down.
+
+### Checks (Engine app, profile `$PROF/327-try`, scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and defaults suite, no Space)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Cold launch with a URL, first run | PASS | executable started from the terminal, the GURL event sent to the process by PID before readiness: `launch finished (1 window(s) from queued requests)`; Space 1 created, the Today row selected and the page shown in the card (window-only screenshot) |
+| Stale tooltip, before the fix | reproduced | Space title tool tip on screen (layer 103, 131 x 20), Close Window: the tool tip stayed on screen with no shell window, also after the pointer moved |
+| No stray windows after closing both windows | PASS | two windows, the title tool tip shown at each Close Window; afterwards `CGWindowListCopyWindowInfo` for the app's PID lists no on-screen window |
+
+The removable-volume prompt did not appear: the app ran from the terminal (the LaunchServices path stays a maintainer
+check, as for #299).
+
+### Verification
+
+- Red first: `testFirstRunEngineTabInABatchShowsItsPageInTheNewSpace` failed (no selected row) and
+  `testClosingTheWindowRemovesEveryToolTipOfItsViews` failed (10 tool tips left after the close).
+- ShellKit `swift test --skip ShellKitGUITests`: 608 passed. `swift test --filter ShellKitGUITests`: 517 run (515 + 2
+  new), 5 skipped, 0 failures. ArktCore `swift test`: 378 passed.
