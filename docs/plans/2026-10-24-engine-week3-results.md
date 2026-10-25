@@ -16,9 +16,9 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-6 | `ChromiumEngineKit` over the facade | DONE | `ChromiumEngine: EngineClient, EngineExtensions` and the typed `ArktShellEmbedder` in `ChromiumEngineKit`; contract rules 1-16 pass against a scripted facade with every driver (24 checks x 2 event orders, none not applicable); ShellKit 509 + 28; see "W3-6" below |
 | W3-7 | The shell as engine host, composition root (Swift lane) | DONE | A, B: `ShellEngineHost`, engine window on the first tab, `createTab(url:in:)`, commands, close button, per-window routing, close reasons, held closes, Extensions control, #241. C, D: `AppComposition` for both engines, `ShellWindowSet` with host-matched provider windows, quit seams, the W3-8 menu in both builds, reserved keys in `ShellWindow`; see "W3-7 C and D" and "W3-7 A and B" below |
 | W3-8 | Main menu inventory and owner decision | DONE (steps 1-3; step 4 after W3-9) | Arkt owns the menu; conditions: a hidden `IDC_BOOKMARKS_MENU` placeholder (without it the first window crashes, measured), no `IDC_FILE_MENU` / `IDC_TAB_MENU` tags, Quit `IDC_EXIT` + `terminate:`; reserved keys in `ShellWindow`; no engine change; see "W3-8" below |
-| W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | DONE (Chromium disk lost before the last steps) | contract 16/16 in the app; smoke, startup and quit checks pass except SIGTERM (#298); 120 Hz gate holds (0 % over 8.6 ms); #9 holds; six fixes, gaps #298-#301; see "W3-9" below |
+| W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | DONE except SIGTERM session end (#298, fails) and logout (maintainer check) | contract 16/16 in the app; smoke, startup and quit checks pass; 120 Hz gate holds (0 % over 8.6 ms); #9 holds; seven fixes, gaps #298-#301; see "W3-9" below |
 | W3-10 | Infobars, or a recorded gap | DONE | native rows on the tab container for every confirm infobar (every confirm type on Mac, triggered from `chrome://infobar-internals`), `--no-sandbox` acceptance passes; tab sharing and sign-in QR (own Views) recorded in #122; no patch; see "W3-10" below |
-| W3-11 | Self-contained bundle with the release framework | TODO | |
+| W3-11 | Self-contained bundle with the release framework | TODO | before the engine bundle ships, strip or gate the test-only code W3-9 links into the Engine app: `EngineAPITestSupport` (`InMemoryEngine`, `EngineContract`), the contract runner and its loopback server (`--arkt-engine-contract` skips the shell session for any launch that passes it), next to the `ARKT_*` overrides (W3-7 C and D) |
 | W3-12 | Results, patch budget, issue updates, housekeeping | TODO | |
 
 ## Patch budget
@@ -49,7 +49,11 @@ folder (`ARKT_DATA_DIR`, `ARKT_ARC_DIR`, `ARKT_DEFAULTS_SUITE` under `$PROF/w3-9
 
 **The Chromium disk went away at 18:39:11** (unmounted by the system, not by any command of this task), during the third
 cold `open -a <app> <url>` launch. `$CR`, `$EMB`, the profiles, logs and window-only screenshots of this task are on it;
-the log lines below were copied before. Steps still open because of it are listed under "Not run".
+the log lines below were copied before. **It was mounted again at about 19:10** and everything on it was intact: `$CR`
+clean on branch `arkt` at `8910b992e4`, `git -C $CR rev-list --count 156.0.8078.48..HEAD` 7 (= `.patches` 7), `$EMB`
+with all 518 component dylibs equal to `out/Spike`'s (`cmp`), an incremental `autoninja` with nothing to rebuild, the
+`w3-9-*` profiles present, 0 crash dumps in the startup run's user data folder (the run in flight when the disk went) and
+under `Arkt Dev Engine/Crashpad`. The steps the loss had cut short were then run ("Second session" below).
 
 ### What landed
 
@@ -100,6 +104,16 @@ the log lines below were copied before. Steps still open because of it are liste
   6. **Window title stayed on a closed tab's title** (Window menu showed "Gamma" while "Alpha" was shown). The title now
      also follows active-tab changes (`UpdateTitleBar()` from the window's `TabStripModelObserver`; it only sets the
      `NSWindow` title).
+  7. **A URL opened by another app at a cold launch got a Today row but no page** (second session, `open -a <app>
+     <url>`: row added, card empty, twice). Chromium builds that window before the embedder is ready; when the facade
+     adopts it at replay, its tab is already active and no selection change announces it. The facade now records
+     `ActiveTabChanged` for the active tab of a window adopted with tabs (`WindowOpened,TabCreated,LoadingChanged,
+     ActiveTabChanged`), and the shell shows the page.
+  8. Review follow-ups (#302): `--arkt-engine-contract=<checks>` with an unknown name or an empty list exits 2 with
+     `ARKT_CONTRACT setup failed: --arkt-engine-contract= names no check: unknown <name>` (it ran nothing and passed
+     before); the runner logs windows left open after a check; the scripted facade closes a tab with
+     `.skipUnloadHandlers` while a window close shows its dialog, as the real facade does (script test); `BUILD.gn`
+     gn-formatted.
 
 ### Contract (run 5, `$PROF/w3-9-contract5`, final build)
 
@@ -171,8 +185,8 @@ ARKT_CONTRACT exit 0
 |---|---|---|
 | First window shows the restored Space | PASS | quit run B1: the stored Space with its split shown |
 | Cold launch, URL as argument | PASS after fix 4 | `window request queued kind=startupURL`, `embedderReady (1 queued request(s))`, `window request kind startupURL`, `launch finished (1 window(s) from queued requests)`; one window, the URL's Today row selected |
-| Cold launch, `open -a <app> <url>` | PASS (one run; gap #299) | one window with the URL's page and Today row; reported as `kind=reopen` |
-| Extension `chrome.windows.create` from `runtime.onStartup` | not run | |
+| Cold launch, `open -a <app> <url>` | PASS after fix 7 (gap #299) | one window, the URL's page shown and its row selected; reported as `kind=reopen` |
+| Extension opening a window at startup | PASS (see the note) | `startup-probe` (new, `engine/test-extensions/startup-probe`): `embedderReady (0 queued request(s))`, `launch finished (0 window(s) ...)`, 2.7 s later `window request kind extension`, `host asked kind=extension`, an adopted shell window with the probe's page as a Today row next to the launch window. `runtime.onStartup` itself does not reach an extension loaded with `--load-extension` (it is installed again at each launch; a first try logged no request), so the probe opens its window on its first service worker start of the session; on this machine that came after readiness, so the before-readiness queue was not exercised by an extension |
 
 ### Quit (no CDP port, `ARKT_AUTOSAVE_DELAY_MS=600000`, a new Today row created right before quitting)
 
@@ -202,18 +216,30 @@ Built-in Liquid Retina XDR display, `screenMaxFPS=120`; the shell's display-link
 
 Gate (at most 1 % over 8.6 ms) holds: 0 %.
 
-### Not run (to finish when the Chromium disk is back)
+### Second session (disk back, final build)
 
-`chrome.windows.create` from `runtime.onStartup`; Shift-Cmd-W and Cmd-N as reserved keys with page focus; Stop during a
-load; a nil-target page command with the Archive window key (W3-8 M7); a repeat of the `open -a <app> <url>` cold launch;
-`ShellKitGUITests` against this branch on the Chromium disk (run on the internal disk instead, below). Logout is a
-maintainer check.
+| Check | Result | Evidence |
+|---|---|---|
+| Cmd-N with page focus | PASS | page field focused (`document.hasFocus()` true), Cmd-N: a new shell window, the page's `keydown` listener saw nothing |
+| Shift-Cmd-W with page focus | PASS | page "Kappa" focused, Shift-Cmd-W: batch `TabClosed,WindowClosed`, `native window destroyed`, the other window stays |
+| Stop during a load | PASS | a page whose response stays open 15 s: `document.readyState` `loading`, Stop enabled; View > Stop: `complete` 0.8 s later, Stop disabled |
+| Page command with the Archive window key (W3-8 M7) | PASS | Archive window key: Reload and Zoom disabled, a page marker survives a click on Reload (nothing reached a `Browser`) |
+| Page command with no window (M7) | recorded | Reload and Zoom disabled; Show All History and the Developer items stay enabled and reach AppController, which creates a `Browser`: `window request kind reopen`, an adopted shell window with History |
+| Cold `open -a <app> <url>` | PASS after fix 7 | above |
+| Contract on the final build | 16/16 | run 7: 24 checks PASS, `result 16/16`, exit 0, 0 `FATAL`, 0 dumps; `--arkt-engine-contract=closeIsTerminl`: exit 2 with the message above |
+| Relaunch shows the quit writes | PASS | the rows written at quit (B1 "Zeta", B2 "Eta") are in the sidebar of every later launch on that data folder |
+
+Unexplained, recorded: in the startup-probe run the probe's page went on to `/p/StartupProbe-next` with a `LINK`
+transition (Chromium's history) while no input was sent to the app; not reproduced.
+
+Logout stays a maintainer check. SIGTERM is #298.
 
 ### Verification
 
 - Contract: above. Crash dumps: 0 in each run's user data folder and under `Arkt Dev Engine/Crashpad`.
-- Run on the internal disk after the Chromium disk was lost (scratch and derived data in a temporary folder, not under
-  `arkt-shell-dd`): ShellKit `swift test --skip ShellKitGUITests` 580 tests, all pass (new: the two `about:blank`
+- Second session, on the Chromium disk (`arkt-shell-dd/w3-9-spm`): ShellKit `--filter ShellKitGUITests` 491, 5 skipped,
+  0 failures; `--skip ShellKitGUITests` 581, all pass (one more script test).
+- First session, on the internal disk after the Chromium disk was lost (scratch and derived data in a temporary folder): ShellKit `swift test --skip ShellKitGUITests` 580 tests, all pass (new: the two `about:blank`
   scripts and the skip-unload close script; `everyContractCheckIsListed` also checks the rule numbers cover 1-16).
   ShellKit `--filter ShellKitGUITests` 491, 5 skipped, one failing test: `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`
   (2 frames over 8.6 ms), the load-dependent flake recorded in "W3-7 A and B"; alone it then passed twice (once skipped by
@@ -221,8 +247,8 @@ maintainer check.
 - Debug app (`xcodebuild -configuration Debug CODE_SIGNING_ALLOWED=NO`): `BUILD SUCCEEDED`, `NSPrincipalClass`
   `NSApplication`, `strings | grep -c "ARKT engine"` 0 in each binary, no `Contents/Frameworks`. The Debug app now also
   links `EngineAPITestSupport` (unused there), next to `ChromiumEngineKit` (#268).
-- Patch budget: `wc -l < engine/patches/chromium/.patches` 7; the `$CR` side could not be read again after the disk loss,
-  and no file outside `engine/arkt` changed in the engine.
+- Patch budget: `wc -l < engine/patches/chromium/.patches` 7, `git -C $CR rev-list --count 156.0.8078.48..HEAD` 7; no file
+  outside `engine/arkt` changed in the engine.
 
 ## W3-7 C and D: start, quit and the main menu
 
