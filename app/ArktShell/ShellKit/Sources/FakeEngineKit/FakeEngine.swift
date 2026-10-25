@@ -261,10 +261,6 @@ public final class FakeEngine: EngineClient {
 
   // MARK: - Page commands
 
-  /// `IDC_STOP` and `IDC_RELOAD_BYPASSING_CACHE`, which `EngineCommand` has no constant for yet (#272). FakeEngineKit
-  /// does not depend on ShellUI, where the menu's copies live (`PendingEngineCommands`); a test keeps them equal.
-  static let stopCommand = EngineCommand(rawValue: 33006)
-  static let reloadBypassingCacheCommand = EngineCommand(rawValue: 33007)
   /// WKWebView's page zoom steps, as Safari's.
   private static let zoomSteps: [CGFloat] = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3]
 
@@ -272,8 +268,8 @@ public final class FakeEngine: EngineClient {
   func canExecute(_ command: EngineCommand, in window: EngineWindowID) -> Bool {
     guard let tab = activeTabs[window], let entry = entries[tab] else { return false }
     switch command {
-    case .reload, Self.reloadBypassingCacheCommand: return true
-    case Self.stopCommand: return entry.snapshot.isLoading
+    case .reload, .reloadBypassingCache: return true
+    case .stop: return entry.snapshot.isLoading
     case .back: return entry.snapshot.canGoBack
     case .forward: return entry.snapshot.canGoForward
     case .zoomIn: return entry.webView.pageZoom < Self.zoomSteps[Self.zoomSteps.count - 1]
@@ -289,8 +285,8 @@ public final class FakeEngine: EngineClient {
     }
     switch command {
     case .reload: web.reload()
-    case Self.reloadBypassingCacheCommand: web.reloadFromOrigin()
-    case Self.stopCommand: web.stopLoading()
+    case .reloadBypassingCache: web.reloadFromOrigin()
+    case .stop: web.stopLoading()
     case .back: goBack(tab)
     case .forward: goForward(tab)
     case .zoomIn: web.pageZoom = Self.zoomSteps.first { $0 > web.pageZoom + 0.001 } ?? web.pageZoom
