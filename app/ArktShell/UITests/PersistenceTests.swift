@@ -2,69 +2,60 @@ import XCTest
 
 /// Quit inside the autosave debounce, relaunch, and the recovery toasts after a corrupt database (plan U14).
 ///
-/// Sidebar rows are not in the out-of-process accessibility tree (#269), including on this Mac. The row probe
-/// does not go through `waitForOutlineRows`: recording that expected failure symbolicates in-process, and that
-/// `open` of a test object file does not return on this machine, so the suite never finishes. A missing row is
-/// not a failure. The sidebar URL bar (not an outline row) showing the loopback host is what proves the tab is
-/// there. When the row is present, its label is the assertion and the URL bar is not consulted.
+/// Sidebar rows are not in the out-of-process accessibility tree on the macOS 26 runner (#269). The `Fixture alpha`
+/// row goes through `waitForOutlineRows`, the harness's known-issue wait: an expected failure where the rows are
+/// missing, the title assertion where they are exposed. The sidebar URL bar (not an outline row) showing the
+/// loopback host is asserted every time as well.
 final class PersistenceTests: ArktUITestCase {
   private static let recreatedPrefix = "Arkt couldn't read its saved sidebar and no backup could be used"
   private static let restoredPrefix = "Arkt couldn't read its saved sidebar and restored it from a backup"
 
-  /// Cmd-Q only after this app is frontmost, then `.notRunning` within `seconds` times the scale. The activation is
-  /// what keeps the key off any other process; same order as `ArktUITestCase.quit`.
-  private func quit(
-    _ app: XCUIApplication, notRunningWithin seconds: TimeInterval,
-    file: StaticString = #filePath, line: UInt = #line
-  ) {
-    app.activate()
-    guard waitFor(app, .runningForeground, file: file, line: line) else { return }
-    app.typeKey("q", modifierFlags: .command)
-    waitFor(app, .notRunning, timeout: seconds, file: file, line: line)
-  }
-
-  /// True when the Today row is in the accessibility tree. Otherwise requires the sidebar URL bar to show the
-  /// loopback host, which is the tab the row would be (#269). The row wait records nothing on a miss: see the type
-  /// comment.
-  @discardableResult
-  private func expectFixtureAlpha(
+  /// The sidebar URL bar shows the loopback host: the shown tab is a fixture page. Needs no outline row.
+  private func expectLoopbackURLBar(
     _ app: XCUIApplication, _ what: String, file: StaticString = #filePath, line: UInt = #line
-  ) -> Bool {
-    let row = Shell.todayRow(app, label: FixtureServer.title(ofPage: "alpha"))
-    let rowShown = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-      MainActor.assumeIsolated { row.exists }
-    }, object: nil)
-    if XCTWaiter().wait(for: [rowShown], timeout: Waits.scaled(nil)) == .completed { return true }
+  ) {
     let urlBar = Shell.element(app, AXID.Sidebar.urlBar)
     XCTAssertTrue(Waits.until("sidebar URL bar shows the loopback host (\(what))", file: file, line: line) {
       (urlBar.value as? String)?.contains("127.0.0.1") == true
     }, what, file: file, line: line)
-    return false
   }
 
-  /// The first launch can raise a notification permission dialog. The runner clicks Don't Allow in the middle of
-  /// typing, which closes the command bar. Dismiss it before the address is typed, then come back to this app.
-  private func dismissNotificationPermission(_ app: XCUIApplication) {
-    let center = XCUIApplication(bundleIdentifier: "com.apple.UserNotificationCenter")
-    let dialog = center.dialogs.firstMatch
-    guard dialog.exists else { return }
-    let deny = dialog.buttons.matching(NSPredicate(format: "title CONTAINS %@", "Don")).firstMatch
-    if deny.exists { deny.click() }
-    app.activate()
-    _ = waitFor(app, .runningForeground)
+  /// The Today row titled `Fixture alpha` (expected failure while #269 hides the rows), then the URL bar.
+  private func expectFixtureAlpha(
+    _ app: XCUIApplication, _ what: String, file: StaticString = #filePath, line: UInt = #line
+  ) {
+    let row = Shell.todayRow(app, label: FixtureServer.title(ofPage: "alpha"))
+    waitForOutlineRows("\(row) to exist (\(what))", file: file, line: line) { row.exists }
+    expectLoopbackURLBar(app, what, file: file, line: line)
   }
 
-  /// Cmd-T and the alpha address. A notification dialog is cleared before Return, and the bar is reopened if that
-  /// clearance closed it. Does not wait for the bar to close: the default-debounce test quits on the next line.
+  /// Cmd-T and the alpha address. Does not wait for the bar to close: the default-debounce test quits on the next
+  /// line.
   private func openAlpha(
     _ server: FixtureServer, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line
   ) {
     XCTAssertTrue(Shell.openCommandBar(app, key: "t"), file: file, line: line)
-    dismissNotificationPermission(app)
-    if !Shell.isCommandBarOpen(app) {
-      XCTAssertTrue(Shell.openCommandBar(app, key: "t"), file: file, line: line)
-    }
     Shell.submit(server.page("alpha"), in: app)
+  }
+
+  private func databaseURL(_ sandbox: Sandbox) -> URL {
+    sandbox.dataDirectory.appendingPathComponent("Arkt.sqlite")
+  }
+
+  /// Size and modification date of the live database. It uses a rollback journal (`ArktDatabase`), so every
+  /// committed write changes `Arkt.sqlite` itself.
+  private struct DatabaseStamp: Equatable {
+    let size: UInt64
+    let modified: Date
+  }
+
+  private func databaseStamp(_ sandbox: Sandbox) throws -> DatabaseStamp {
+    let attributes = try FileManager.default.attributesOfItem(atPath: databaseURL(sandbox).path)
+    guard let size = (attributes[.size] as? NSNumber)?.uint64Value,
+          let modified = attributes[.modificationDate] as? Date else {
+      throw HarnessError("no size or modification date for \(databaseURL(sandbox).path)")
+    }
+    return DatabaseStamp(size: size, modified: modified)
   }
 
   /// New Space, the alpha page, wait for its row, Cmd-Q. A `.created` launch writes no backup.
@@ -78,7 +69,7 @@ final class PersistenceTests: ArktUITestCase {
   }
 
   private func corruptLiveDatabase(_ sandbox: Sandbox, file: StaticString = #filePath, line: UInt = #line) throws {
-    let database = sandbox.dataDirectory.appendingPathComponent("Arkt.sqlite")
+    let database = databaseURL(sandbox)
     XCTAssertTrue(FileManager.default.fileExists(atPath: database.path), "live database before overwrite",
                   file: file, line: line)
     try Data("not a database".utf8).write(to: database)
@@ -109,21 +100,28 @@ final class PersistenceTests: ArktUITestCase {
   func test_E_quitInsideAutosaveDebounceKeepsChange() async throws {
     let server = try await fixtureServer()
     let sandbox = try Sandbox()
-    // Far past the row wait, so the debounced write cannot fire. Only the termination flush can save the change.
-    sandbox.autosaveDelayMilliseconds = 60_000
+    // The longest delay the app accepts (`EnvironmentOverrides.autosaveDelayMilliseconds`, 10 minutes): the debounced
+    // write cannot fire during this test, so only the termination flush can save the change.
+    sandbox.autosaveDelayMilliseconds = 600_000
     let app = try launch(sandbox)
-    XCTAssertEqual(app.launchEnvironment["ARKT_AUTOSAVE_DELAY_MS"], "60000")
 
     try createFirstSpace(in: app)
     openAlpha(server, in: app)
     XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
-    expectFixtureAlpha(app, "Fixture alpha before quit")
+    // The tab is in the model once the URL bar shows it. No row probe from here to Cmd-Q: its timeout would only
+    // move Cmd-Q later.
+    expectLoopbackURLBar(app, "alpha before quit")
+    let settled = try databaseStamp(sandbox)
+    // `SidebarStorageFormat` writes JSON without escaping slashes, so a saved sidebar with this tab would contain its
+    // address.
+    let onDisk = try Data(contentsOf: databaseURL(sandbox))
+    XCTAssertNil(onDisk.range(of: Data(server.page("alpha").utf8)), "the tab was saved before Cmd-Q")
+    XCTAssertEqual(try databaseStamp(sandbox), settled, "Arkt.sqlite was written before Cmd-Q")
     // The flush itself is bounded at 1 s; 5 s times the scale is the bound this wait asserts.
-    quit(app, notRunningWithin: 5)
+    quit(app, timeout: 5)
 
     sandbox.autosaveDelayMilliseconds = nil
     let relaunched = try launch(sandbox)
-    XCTAssertNil(relaunched.launchEnvironment["ARKT_AUTOSAVE_DELAY_MS"])
     expectFixtureAlpha(relaunched, "Fixture alpha after relaunch")
   }
 
@@ -131,7 +129,6 @@ final class PersistenceTests: ArktUITestCase {
     let server = try await fixtureServer()
     let sandbox = try Sandbox()
     let app = try launch(sandbox)
-    XCTAssertNil(app.launchEnvironment["ARKT_AUTOSAVE_DELAY_MS"])
 
     try createFirstSpace(in: app)
     openAlpha(server, in: app)
