@@ -1253,3 +1253,85 @@ Deviations from the plan:
 - The icon picker lives on the header "..." menu (symbols, then "Emoji..."); Arc's own picker was not measured.
 - The header draws no Space icon next to the title; the spec does not place one there (BH-038 names the edit icon and
   the "..." menu only). Icons show in the dock.
+
+## Command bar: action search, site search, Paste and Go, suggestion removal (#112)
+
+Plan: parity spec section 2.7 (BH-104 to BH-114); Track C open question 5 (default search engine stays the
+Google placeholder). Pull request: see #112.
+
+### Per rule
+
+- BH-104 (partially, rest deferred): results now collect open tabs from every Space of the window's profile,
+  the current Space first, and matching Spaces appear as "Switch to Space" results. Deferred: archived tabs
+  (no shell-facing archive provider; `Archive` lives in ArktCore), history (no history store yet) and
+  extensions (no extension list provider) as result sources, and folders as results (tied to the BH-105
+  deferral below). Arc actions are covered by BH-106's action search.
+- BH-105 DEFERRED: showing only the switched-to tab under its closed folder needs the sidebar outline's
+  peek-row rendering, which BH-092 also waits on; it is sidebar outline work, not command bar work. The
+  command bar side (matching tabs inside closed folders, across Spaces) is done: `openTabs` walks folders.
+- BH-106 / KB-081: Tab on the empty bar just opened with Cmd-T enters action search (chip "Actions",
+  placeholder "Search actions..."); the window's verbs are New Space, Next Space, Previous Space, Toggle
+  Toolbar. Tab elsewhere is left alone; Backspace on the empty scoped field leaves the scope [I] (Arc
+  unverified).
+- BH-107 / KB-082: a typed alias plus Tab scopes the query to the engine (chip with the engine name); Enter
+  opens the engine's search URL. Tab is the only trigger, per the spec (`migratedToTabOnlySiteSearchTrigger`).
+  Seeded engines (`seededPopularSiteSearches`): YouTube `yt`, Wikipedia `wiki`, GitHub `gh`,
+  Stack Overflow `so`, behind `SiteSearchEngines.seeded`; the window can substitute a real keyword store later.
+- BH-108 / GS-035: a URL on the clipboard at bar open makes "Paste and Go" the top suggestion of the empty
+  Cmd-T bar (Cmd-L never offers it); Enter opens it. The bottom bar's "+" button turns into "Paste and Go"
+  (symbol, tooltip, accessibility label) while hovered with Cmd held and a URL on the clipboard, and clicking
+  in that state opens the URL; a `flagsChanged` monitor lives only for the hover. The pasteboard read is
+  `CommandBarController.pasteboardURL(_:)`: URLs only; a schemeless host is not Paste and Go.
+- BH-109 / KB-083: the hovered removable row shows an X, and Cmd-Opt-Delete removes the selected row;
+  removal is session-scoped (the row stays hidden for the controller's lifetime) and `onRemoveSuggestion` is
+  the hook a history store will persist through. The typed-URL row, Paste and Go, actions and Spaces are not
+  removable. After a removal the next suggestion takes the row's place.
+- BH-110: covered by `CommandBarTests.testSidebarClickWorksWhileTheBarIsOpen`: with the bar open and key, a
+  click on a sidebar row hit-tests to the row (the centered panel is not in its way), activates it and
+  resigns the bar.
+- BH-111: `SidebarController.onCurrentSpaceChanged` fires when a Space commits; the window refreshes the open
+  bar's suggestions on it (current Space first, so the order flips on a switch).
+- BH-112: already done before #112; `CommandBarTests.testGeometryAndDarkSurface` pins the centered frame
+  (midX == parent midX, top at 34% of the window height).
+- BH-113: the notice "We talk to your search engine to help us suggest results." rides with the rows that
+  send the query to the engine (it adds `CommandBarGeometry.noticeHeight`, top edge pinned); the X dismisses
+  it for good under Arc's key `commandBarSearchSuggestionsPrivacyHasBeenExplicitlyDismissed`, and
+  `searchSuggestEnabled` off drops the search rows and the notice. Both live in `CommandBarSettings`,
+  defaults-backed in the app, ephemeral in tests.
+- BH-114 / KB-038 DEFERRED: NEEDS-RUNTIME-CHECK (RT-03). Whether holding Cmd / Ctrl alone opens anything in
+  Arc, and with which defaults and timing, is unverified; it needs a maintainer runtime check and a product
+  decision before implementation.
+- Search engine choice and the suggestions setting wired to the Settings window: DEFERRED, as the issue
+  prefers: the Settings window (#307) waits on the #305 design review. `CommandBarSettings` persists both
+  under Arc's keys, so the wiring is a read of the same defaults once #307 exists.
+
+### Tests
+
+TDD: failing tests first (compile errors counted), then implementation.
+
+- `app/ArktCore`: `swift test` — 368 passed (103 + 102 + 65 + 98), unchanged by this branch.
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` — 610 passed (ShellUITests 266, 47 suites;
+  +28 vs main: SiteSearchEnginesTests 4, CommandBarActionsTests 3, CommandBarSettingsTests 4,
+  CommandBarResultsScopeTests 15, CommandBarGeometryTests +1, CommandBarOpenTabsTests +1).
+- `swift test --filter ShellKitGUITests` — 515 cases, 514 passed; the one failure is
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` under parallel-lane load (load1 6.3-9.4 on 10
+  cores, just under the gate's NOT-MEASURABLE cutoff; the hitch moves between labels across runs).
+  A/B: origin/main versions of the touched files pass 3/3 standalone, this branch passes 3/3 standalone and
+  4/4 including an earlier run; the swipe/settle path is unchanged by this branch (the BH-111 hook early
+  returns while the bar is closed). New GUI tests: CommandBarTests +14, SidebarViewTests +5.
+- App build (App target touched): `xcodegen generate` + Debug `xcodebuild build` — BUILD SUCCEEDED.
+- XCUITest (`ArktShellUITests/CommandBarKeyTests` + `FirstRunAndOpenTests`): 13 tests, 0 failures,
+  `** TEST SUCCEEDED **` (result bundle `build/ui-112b.xcresult`). A first run under load had two harness
+  timeouts (window and results-table snapshot at load1 14-19); both passed in the rerun and are the
+  harness's known load sensitivity.
+
+### Deviations and leftovers
+
+- The search engine for the search row stays the Google placeholder (open question 5); its display name is
+  `CommandBarSettings.searchEngineName`.
+- Suggestion removal is session-scoped; persisting removals waits on a history store (`onRemoveSuggestion`
+  is the seam).
+- The seeded site-search list is a placeholder set of four popular engines; a Chromium keyword store replaces
+  it behind `siteSearchProvider`.
+- `CommandBarGeometry.noticeHeight` (32) is TODO(measure), like the other unmeasured chrome constants
+  (open question 2).
