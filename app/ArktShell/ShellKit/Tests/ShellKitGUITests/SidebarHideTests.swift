@@ -14,6 +14,7 @@ final class SidebarHideTests: XCTestCase {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
     controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+    // A small CI screen can clamp the window: frames below are asserted against the bounds it actually got.
     controller.window?.setContentSize(NSSize(width: 1200, height: 800))
     controller.showWindow(nil)               // the reveal spring runs on the window's display link
     root.layoutSubtreeIfNeeded()
@@ -45,7 +46,8 @@ final class SidebarHideTests: XCTestCase {
     controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     XCTAssertFalse(controller.isSidebarVisible)
-    XCTAssertEqual(root.card.frame, CGRect(x: 10, y: 10, width: 1180, height: 780))
+    XCTAssertEqual(root.card.frame,
+                   CGRect(x: 10, y: 10, width: root.bounds.width - 20, height: root.bounds.height - 20))
     XCTAssertTrue(overlay.isHidden, "concealed: nothing drawn, hit or exposed to accessibility")
     XCTAssertEqual(root.effectiveSidebarWidth, 0)
     XCTAssertEqual(root.sidebarContainer.frame.width, 190, "the sidebar keeps its width: no row relayout")
@@ -55,7 +57,7 @@ final class SidebarHideTests: XCTestCase {
     XCTAssertTrue(controller.isSidebarVisible)
     XCTAssertEqual(root.card.frame.minX, 190)
     XCTAssertFalse(overlay.isHidden)
-    XCTAssertEqual(overlay.frame, CGRect(x: 0, y: 0, width: 190, height: 800))
+    XCTAssertEqual(overlay.frame, CGRect(x: 0, y: 0, width: 190, height: root.bounds.height))
   }
 
   func testMenuItemIsTitledForTheState() {
@@ -134,7 +136,7 @@ final class SidebarHideTests: XCTestCase {
     XCTAssertFalse(overlay.isHidden)
     XCTAssertEqual(root.card.frame.minX, 10, "an overlay: the content does not move")
     let inset = ShellMetrics.standard.sidebarOverlayInset
-    XCTAssertEqual(overlay.frame, CGRect(x: inset, y: inset, width: 190, height: 800 - 2 * inset))
+    XCTAssertEqual(overlay.frame, CGRect(x: inset, y: inset, width: 190, height: root.bounds.height - 2 * inset))
     XCTAssertTrue(overlay.layer?.affineTransform().isIdentity ?? false)
     XCTAssertEqual(overlay.alphaValue, 1)
     // Drawn and hit above the card.
@@ -235,7 +237,7 @@ final class SidebarHideTests: XCTestCase {
     root.layoutSubtreeIfNeeded()
     XCTAssertTrue(controller.isSidebarVisible)
     XCTAssertFalse(overlay.isAnimating)
-    XCTAssertEqual(overlay.frame, CGRect(x: 0, y: 0, width: 190, height: 800))
+    XCTAssertEqual(overlay.frame, CGRect(x: 0, y: 0, width: 190, height: root.bounds.height))
     XCTAssertEqual(overlay.alphaValue, 1)
   }
 
