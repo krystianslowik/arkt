@@ -282,6 +282,103 @@ final class SplitSidebarTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// TEMPORARY diagnostic for #277: prints how NSTableView tracking handles a synthesized Opt-click on CI.
+  @MainActor private final class ClickSpy: NSObject {
+    var records: [String] = []
+    weak var view: SidebarOutlineView?
+    @objc func clicked(_ sender: Any?) {
+      var current = "nil"
+      if let event = NSApp.currentEvent {
+        current = String(event.type.rawValue) + "/"
+          + String(event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue)
+      }
+      let row = view?.clickedRow ?? -9
+      let mods = view?.clickModifiers.rawValue ?? 0
+      records.append("row=\(row) clickMods=\(mods) current=\(current)")
+    }
+  }
+
+  func testZZDiagnoseOptClickTracking() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.showWindow(nil)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: world.panes[0])
+    let view = try harness.outline().outlineView
+    window.contentView?.layoutSubtreeIfNeeded()
+    view.layoutSubtreeIfNeeded()
+    _ = window.makeFirstResponder(view)
+    let spy = ClickSpy()
+    spy.view = view
+    let savedTarget = view.target
+    let savedAction = view.action
+    view.target = spy
+    view.action = #selector(ClickSpy.clicked(_:))
+    let splitRow = try harness.row(world.split)
+    let rect = view.rect(ofRow: splitRow)
+    let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    func log(_ text: String) { print("DIAG277 \(text)") }
+    log("env pressedButtons=\(NSEvent.pressedMouseButtons) mods=\(NSEvent.modifierFlags.rawValue) "
+      + "active=\(NSApp.isActive) key=\(window.isKeyWindow) visible=\(window.isVisible) frame=\(window.frame) "
+      + "pointer=\(NSEvent.mouseLocation) clickScreen=\(window.convertPoint(toScreen: point)) "
+      + "row=\(splitRow) hit=\(view.row(at: view.convert(point, from: nil)))")
+    func events(_ flags: NSEvent.ModifierFlags) throws -> (NSEvent, NSEvent) {
+      let now = ProcessInfo.processInfo.systemUptime
+      let down = try XCTUnwrap(NSEvent.mouseEvent(
+        with: .leftMouseDown, location: point, modifierFlags: flags, timestamp: now,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+      let up = try XCTUnwrap(NSEvent.mouseEvent(
+        with: .leftMouseUp, location: point, modifierFlags: flags, timestamp: now,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
+      return (down, up)
+    }
+    func finish(_ name: String) {
+      let during = spy.records
+      let upLeft = NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast, inMode: .default, dequeue: false)
+      log("\(name) during=\(during) upStillQueued=\(upLeft != nil)")
+      spy.records = []
+      RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+      log("\(name) late=\(spy.records)")
+      spy.records = []
+      window.discardEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged], before: nil)
+    }
+    for trial in 0..<4 {
+      do {
+        let (down, up) = try events(.option)
+        window.postEvent(up, atStart: true)
+        window.postEvent(down, atStart: true)
+        let dq = try XCTUnwrap(window.nextEvent(matching: .leftMouseDown, until: .distantPast, inMode: .default,
+                                                dequeue: true))
+        log("dequeued#\(trial) same=\(dq === down) mods=\(dq.modifierFlags.rawValue) "
+          + "origMods=\(down.modifierFlags.rawValue) cg=\(dq.cgEvent?.flags.rawValue ?? 0) "
+          + "loc=\(dq.locationInWindow) ts=\(dq.timestamp)")
+        view.mouseDown(with: dq)
+        finish("dequeued#\(trial)")
+      }
+      do {
+        let (down, up) = try events(.option)
+        window.postEvent(up, atStart: true)
+        view.mouseDown(with: down)
+        finish("direct#\(trial)")
+      }
+      do {
+        let (down, up) = try events(.option)
+        NSApp.postEvent(up, atStart: false)
+        view.mouseDown(with: down)
+        finish("directAppend#\(trial)")
+      }
+      do {
+        let (down, up) = try events(.option)
+        window.postEvent(up, atStart: true)
+        window.sendEvent(down)
+        finish("sendEvent#\(trial)")
+      }
+    }
+    view.target = savedTarget
+    view.action = savedAction
+    harness.controller.close()
+  }
+
   func testPlainClickOnASplitRowActivatesIt() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
