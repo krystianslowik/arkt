@@ -8,6 +8,7 @@ Status: design. Nothing here is implemented yet.
 
 ## Contents
 
+- [Decisions (maintainer, 2026-10-25)](#decisions-maintainer-2026-10-25)
 1. [Idea](#1-idea)
 2. [Flow](#2-flow)
 3. [Shared layout](#3-shared-layout)
@@ -20,9 +21,23 @@ Status: design. Nothing here is implemented yet.
 10. [State and persistence](#10-state-and-persistence)
 11. [Parity with Arc](#11-parity-with-arc)
 12. [Implementation dependencies](#12-implementation-dependencies)
-13. [Open questions](#13-open-questions)
+13. [Open questions (resolved)](#13-open-questions-resolved)
 14. [Screenshots](#14-screenshots)
 15. [Prototype](#15-prototype)
+
+## Decisions (maintainer, 2026-10-25)
+
+Answers to the seven open questions of the first draft. The rest of this document already follows them.
+
+| # | Question | Decision | Where it lands |
+|---|---|---|---|
+| 1 | Live count before import, or import then show? | **Live count before importing.** The read-only counting pass in `ArcImportCoordinator` is in scope of the implementation issue | Sections 5.2, 12 |
+| 2 | Make it yours after an import? | **Yes, it also appears after an import**, for the first imported Space. It starts on that Space's Arc look with no swatch selected; Skip keeps it | Sections 2, 5.3 |
+| 3 | Name 1Password in the extensions step? | **No.** The copy stays generic ("your password manager's extension") | Section 5.5 |
+| 4 | Tour length | **Five tips.** Command-L is folded into the first tip | Section 5.6 |
+| 5 | Default first-Space theme | **Dune**, the mustard-adjacent family. It is the first swatch and the theme behind the window from the fold on | Sections 3, 4, 5.3 |
+| 6 | Should Skip setup confirm? | **Yes.** Skip setup (and Escape on Welcome) asks first | Section 5.9 |
+| 7 | First-launch window size | **At least 1000 x 680 pt, fitting smaller screens**: on a smaller visible frame the window takes the visible frame and the compact layout applies | Section 3 |
 
 ## 1. Idea
 
@@ -51,7 +66,9 @@ filling the sidebar, the tour demos).
 flowchart TD
   L[First launch: profile has no Space and onboarding not finished] --> W[Welcome]
   W -->|Get started| A{Arc found?}
-  W -->|Skip setup / Escape| F[Finish: fresh Space 1, default theme]
+  W -->|Skip setup / Escape| C{Skip setup? confirmation}
+  C -->|Skip setup| F[Finish: fresh Space 1, Dune theme]
+  C -->|Cancel / Escape| W
   A -->|yes| I[Bring your Arc setup]
   A -->|no| T[Make it yours]
   A -->|still checking| I
@@ -61,7 +78,7 @@ flowchart TD
   E -->|Try again| P
   E -->|Start fresh| T
   I -->|Start fresh / Escape| T
-  D1 -->|Continue| B
+  D1 -->|Continue| T
   T -->|Continue / Skip / Escape| B{Arkt already default browser?}
   B -->|no| DB[Default browser]
   B -->|yes| X[Extensions and passwords]
@@ -79,18 +96,19 @@ Branch rules:
 | Arc found (Arc's sidebar file exists, `AppSession.refreshArcImportAvailability`) | Import step is shown |
 | Arc not found | Import step is left out; Make it yours is the first step; one fewer progress dot |
 | Arc check still running when Welcome is left | Import step is shown in its counting state; if the check then says "no Arc", the step is replaced by Make it yours with a normal forward transition |
-| Import path chosen | Make it yours is left out: imported Spaces keep their Arc themes. The theme can still be changed later from the Space header |
-| Start fresh, or import failed and then Start fresh | Make it yours is shown |
+| Import path chosen | Make it yours is shown for the first imported Space. It starts on that Space's Arc look with no swatch selected, the name field shows the imported name as its placeholder, and Skip keeps the Arc look |
+| Start fresh, or import failed and then Start fresh | Make it yours is shown, starting on Dune |
 | Arkt is already the default browser | Default browser step is left out |
-| "Skip setup" (any step) or Escape on Welcome | Finish immediately: a fresh "Space 1" with the default theme unless an import already finished, then the browser state |
+| "Skip setup" (any step) or Escape on Welcome | Asks first (section 5.9). On confirm: a fresh "Space 1" with the Dune theme unless an import already finished, then the browser state. On Cancel: back to the same step, nothing changed |
 
 Every step can be skipped: each has a secondary action (Skip, Not now, Start fresh, Skip tour), Escape runs that
-secondary action, and "Skip setup" in the card's top-right corner ends the whole flow from any step. An import in
+secondary action, and "Skip setup" in the card's top-right corner ends the whole flow from any step after a
+confirmation. An import in
 progress is the only thing Escape does not interrupt; Skip setup during an import lets the import finish in the
 background and then shows the File > Import from Arc summary alert instead of the step.
 
-Progress dots count the steps after Welcome for the current branch: Arc found and fresh is 6 (import, theme, default,
-extensions, tour, done); Arc found and imported is 5; no Arc is 5; Arkt already default removes one more.
+Progress dots count the steps after Welcome for the current branch: Arc found is 6 (import, theme, default,
+extensions, tour, done) on both the import and the fresh path; no Arc is 5; Arkt already default removes one more.
 
 ## 3. Shared layout
 
@@ -116,8 +134,9 @@ Reference window for every screenshot: 1120 x 720 pt.
 
 | Element | Spec |
 |---|---|
-| Window | First run opens at least 1000 x 680 pt so the tallest step (Make it yours) fits without scrolling |
-| Background | The Space theme (`ThemeBackgroundView`: gradient plus grain), the default theme until the user picks one |
+| Window | First run opens at least 1000 x 680 pt so the tallest step (Make it yours) fits without scrolling. When the screen's visible frame is smaller, the window takes the visible frame and the compact layout applies |
+| Compact layout | When the card is 620 pt tall or less: column padding 48 top and 56 bottom, controls and button row 24 below what precedes them, 16 between Make it yours groups, tour illustration 120 high (mini window scaled to 0.79, key caps 52), Done mark 24 above the title. Nothing else changes |
+| Background | The Space theme (`ThemeBackgroundView`: gradient plus grain): Dune, the default first-Space theme, until the user picks one or an import brings the first Space's Arc look |
 | Sidebar | Normal position and width (190, `ShellMetrics.sidebarDefaultWidth`), Toolbar-off layout (URL bar at y 40, height 30). Non-interactive and hidden from accessibility during setup |
 | Ghost sidebar | Real geometry with placeholder content: URL bar, three empty Favorite tiles, the Space title, two skeleton rows (16 pt icon block, text block 70-92 pt wide, `sidebarItemHovered` fill, radius 4), divider, "New Tab" row, dock with one dot. Content at opacity 0.55 |
 | Content card | Normal card frame (insets 10, radius 10, `cardBorder`, `cardShadow`), filled with `BrandTokens.surfaceBrand` instead of the page |
@@ -181,10 +200,10 @@ stub "Personal" stops; Indigo dark reuses the stub "Dev" stops; Paper light is t
 
 | Family | Light stops | Dark stops |
 |---|---|---|
-| Mist (default selection) | #E0F2FB to #C5C6E2 | #3A4158 to #1C2030 |
+| Dune (default, first swatch) | #F7EED2 to #EBD592 | #3D3420 to #1E1A10 |
+| Mist | #E0F2FB to #C5C6E2 | #3A4158 to #1C2030 |
 | Paper | #F4F1EA to #E4DDD2 | #3A3631 to #211F1C |
 | Sage | #E6EDE3 to #C4D3C0 | #2F3B33 to #171E1A |
-| Dune | #F7EED2 to #EBD592 | #3D3420 to #1E1A10 |
 | Blossom | #F2EAE4 to #F29BBB | #4A2A3A to #1F1520 |
 | Indigo | #E4E2F4 to #C9C3E8 | #2D4468 to #120F2E |
 
@@ -247,7 +266,7 @@ it. File > Import from Arc keeps the alert.
 | | |
 |---|---|
 | Title | Make it yours |
-| Body | Pick a look for your first Space. You can change it later. |
+| Body | Fresh path: "Pick a look for your first Space. You can change it later." Import path: "Your first Space keeps its look from Arc. Pick another if you like. You can change it later." |
 | Theme | Label "Theme" (12 semibold, `brandTextSecondary`, 8 above). Six swatches in a row, 440 wide, 12 apart (about 63 pt square), radius 12, a 1 pt inner hairline. Selected: a 2 pt `focusRing` ring 4 pt outside the swatch. Radio group |
 | Appearance | Label "Appearance". Segmented control "Light" / "Dark", track `brandControlFill` radius 8 with 2 pt padding, segments 72 x 28, the thumb is a `surfaceBrand` pill with a hairline. Starts at the system appearance |
 | Name | Label "Name", text field 32 high, radius 8, `brandControlFill`, 1 pt `brandHairline`, 14 pt text, placeholder "Space 1" (the name New Space would give, `SpaceNaming`), 40 characters max. Fills the rest of the row, 16 from the segmented control |
@@ -258,7 +277,11 @@ it. File > Import from Arc keeps the alert.
 Live preview: choosing a swatch or the appearance repaints the window background behind the card at once
 (`ThemeBackgroundView.replaceThemes(_:crossfade:)`), and the sidebar chrome flips between its light and dark token
 sets with it. Typing a name updates the sidebar's Space title; picking an icon replaces the dock dot with the symbol.
-Skip keeps the default theme, "Space 1" and no icon; Continue keeps the choices. The Space itself is created when
+Fresh path: Dune is selected at the start; Skip keeps Dune, "Space 1" and no icon. Import path: no swatch is
+selected at the start and the window shows the first imported Space's Arc look; the name placeholder is that Space's
+name; Skip keeps the Arc look, name and icon. Continue keeps the choices on both paths.
+
+![Make it yours after an import, light](../../design/onboarding/screens/20-theme-after-import-light.png) The Space itself is created when
 this step is left (Continue or Skip), so Back from the next step returns to the same choices.
 
 ### 5.4 Default browser
@@ -287,8 +310,8 @@ out when Arkt is already the default browser.
 | Option | Checkbox row, 440 wide, radius 12, hairline border, 12 x 16 padding: **Open the Chrome Web Store** / "It opens in a tab when setup ends." Off by default |
 | Buttons | Skip, **Continue** |
 
-Nothing opens mid-setup. When the option is on, the Web Store opens as the first Space's tab at the end instead of the
-empty new tab. 1Password is not named: desktop-app integration depends on signing (#23), and the copy only claims
+No password manager is named (decision 3). Nothing opens mid-setup. When the option is on, the Web Store opens as the first Space's tab at the end instead of the
+empty new tab. Desktop-app integration for password managers depends on signing (#23), and the copy only claims
 what the engine build already does (Web Store install works on the native window, engine week 3 results, W7). This
 step is shown only in builds that run the Chromium engine; the WKWebView development shell leaves it out.
 
@@ -296,25 +319,24 @@ step is shown only in builds that run the Chromium engine; the WKWebView develop
 
 ![Tour tip 1, light](../../design/onboarding/screens/09-tour-1-light.png)
 
-Six tips, one at a time. Each has an illustration area (440 x 152), a title, a body, "{n} of 6" (12 pt
+Five tips, one at a time (decision 4). Each has an illustration area (440 x 152), a title, a body, "{n} of 5" (12 pt
 `brandTextSecondary`, tabular, 16 below the body), and Skip tour, **Next** ("Done" on the last tip). Back steps
 through tips before leaving the tour. A matching area of the ghost sidebar is highlighted with a mustard fill
 (`accent` at 28 % over light themes, 20 % over dark, radius 10) so the tip points at the real place.
 
 | # | Title | Body | Illustration | Sidebar highlight | Parity rows |
 |---|---|---|---|---|---|
-| 1 | Open a tab | Press Command-T, then search or type an address. | Key caps "Command" "T" | New Tab row | KB-001 |
-| 2 | Go to the address | Press Command-L to edit the address of the current tab. | Key caps "Command" "L" | URL bar | KB-002 |
-| 3 | Close by archiving | Command-W closes a tab and keeps it in the Archive, so you can find it again. | Key caps "Command" "W" | Archive button in the dock | KB-008 |
-| 4 | Switch Spaces | Swipe left or right with two fingers on the sidebar to move between Spaces. | Mini window: two finger dots swipe, the sidebar pages over, the page dot moves | Dock dots | GS-001, BH-035 |
-| 5 | Split the view | Drag a tab from the sidebar onto the page to see two tabs side by side. | Mini window: a tab chip travels from the sidebar to the page, a drop zone shows, the page splits | Pinned rows | GS-011, BH-117 |
-| 6 | Keep Favorites close | Drag a tab to the top of the sidebar to make it a Favorite. | Mini window: a tab chip travels up into the Favorites row | Favorites | GS-008, BH-047 |
+| 1 | Open a tab | Press Command-T to search or type an address. Command-L edits the address of the current tab. | Two key-cap pairs, "Command" "T" and "Command" "L", 32 apart | New Tab row and URL bar | KB-001, KB-002 |
+| 2 | Close by archiving | Command-W closes a tab and keeps it in the Archive, so you can find it again. | Key caps "Command" "W" | Archive button in the dock | KB-008 |
+| 3 | Switch Spaces | Swipe left or right with two fingers on the sidebar to move between Spaces. | Mini window: two finger dots swipe, the sidebar pages over, the page dot moves | Dock dots | GS-001, BH-035 |
+| 4 | Split the view | Drag a tab from the sidebar onto the page to see two tabs side by side. | Mini window: a tab chip travels from the sidebar to the page, a drop zone shows, the page splits | Pinned rows | GS-011, BH-117 |
+| 5 | Keep Favorites close | Drag a tab to the top of the sidebar to make it a Favorite. | Mini window: a tab chip travels up into the Favorites row | Favorites | GS-008, BH-047 |
 
 Key caps: 64 high, min 64 wide, radius 14, SF Pro Display Medium 28, `brandControlFill` with a hairline border and a
 3 pt hairline bottom edge. Key glyphs are the Command symbol and the letter, drawn as text, not images. Mini window:
 280 x 152, radius 12, a 72 wide sidebar strip and a page inset 4; the moving chip is an `accent` fill.
 
-Tip 3 copy assumes Today tabs archive on close, which is the shipped behavior (KB-008); a pinned tab closes and stays
+Tip 2 copy assumes Today tabs archive on close, which is the shipped behavior (KB-008); a pinned tab closes and stays
 pinned, which the tip does not need to explain.
 
 ### 5.7 You're all set
@@ -337,6 +359,24 @@ card shows the first tab's page surface, a "New Tab" Today row is current, and t
 place with the field focused. With the Web Store option on, the first tab is the Chrome Web Store instead and the
 command bar stays closed. After an import, the current Space is the first imported Space and its own last state
 applies; a new tab is still opened and focused so typing works at once.
+
+### 5.9 Skip setup confirmation
+
+![Skip setup confirmation, dark](../../design/onboarding/screens/14-skip-confirm-dark.png)
+
+Skip setup in the card corner, Skip setup on Welcome, and Escape on Welcome ask first (decision 6). Native: an
+`NSAlert` run as a sheet on the onboarding window (`beginSheetModal`), alert style informational, with the app icon.
+
+| | |
+|---|---|
+| Message | Skip setup? |
+| Informative text | You can set things up later with Help > Welcome to Arkt. Import from Arc stays in the File menu. |
+| Buttons | **Skip setup** (default, Return), Cancel (Escape) |
+
+The default is Skip setup because the user has just asked for it; Cancel returns to the same step with focus back on
+the control that opened the alert. The secondary actions of each step (Skip, Not now, Start fresh, Skip tour) do not
+ask: they skip one step, not the setup. During an import, a confirmed Skip setup lets the import finish in the
+background as described in section 2. The prototype draws a stand-in for the sheet.
 
 ## 6. Motion
 
@@ -369,9 +409,10 @@ ease-in.
 | M7 Counts arrive | Arc count finishes | Each count: opacity from the "-" placeholder to the number | 160 ms `EASE_OUT`, 40 ms apart. No rolling digits: numbers do not move | n/a |
 | M8 Import progress | Each category finishes | Spinner replaced by a check: opacity 0 to 1, scale 0.8 to 1 | `springyFast`, in the real completion order (no fake timing) | n/a |
 | M9 Sidebar fills | Import finished | Imported Favorites and rows: opacity 0 to 1, translateY 6 to 0 | `firm`, 30 ms apart, the first 12 items only; the rest appear without motion | n/a |
-| M10 Key cap press | Tips 1 to 3 appear | Each key: translateY 0 to 2 and scale 0.96 over 90 ms `EASE_OUT`, then back with `springyFast`; second key 70 ms after the first | Plays once per tip, 260 ms after the tip appears | n/a |
-| M11 Tour demos | Tips 4 to 6 appear | Swipe: finger dots fade in and slide 24 (360 ms `EASE_IN_OUT`), the sidebar pages over (`springy`). Split: chip travels 800 ms `EASE_IN_OUT`, drop zone fades in, then the page splits (200 ms fades). Favorite: chip travels 700 ms `EASE_IN_OUT` up into the Favorites row, the tile pops in with `springyFast` from scale 0.9 | Each demo plays twice, then rests on its end frame. They never loop forever | Leaving the tip stops the demo at once |
+| M10 Key cap press | Tips 1 and 2 appear | Each key: translateY 0 to 2 and scale 0.96 over 90 ms `EASE_OUT`, then back with `springyFast`; second key 70 ms after the first | Plays once per tip, 260 ms after the tip appears | n/a |
+| M11 Tour demos | Tips 3 to 5 appear | Swipe: finger dots fade in and slide 24 (360 ms `EASE_IN_OUT`), the sidebar pages over (`springy`). Split: chip travels 800 ms `EASE_IN_OUT`, drop zone fades in, then the page splits (200 ms fades). Favorite: chip travels 700 ms `EASE_IN_OUT` up into the Favorites row, the tile pops in with `springyFast` from scale 0.9 | Each demo plays twice, then rests on its end frame. They never loop forever | Leaving the tip stops the demo at once |
 | M12 Finish | Start browsing, Skip setup | Card content: opacity to 0. Page surface: opacity 0 to 1. Ghost content: opacity 0.55 to 1. Command bar: its own normal presentation | Content 160 ms `EASE_OUT`; page 240 ms `EASE_OUT` at +80 ms; command bar after the page settles (+320 ms). Skip setup uses the same path, no extra flourish | n/a |
+| M14 Skip setup confirmation | Skip setup, Escape on Welcome | The system sheet animation of `NSAlert`; nothing custom. The prototype approximates it with opacity and a 0.97 scale on `firm` | System | System |
 | M13 Press | Any button or swatch | Scale to 0.97 (swatches 0.95, icons 0.94) on press, back on release | 160 ms `EASE_OUT` (the existing press feel); no hover motion, only fill color | Yes |
 
 Keyboard navigation (Return, Escape, arrows) runs the same transitions as clicks. This is deliberate: onboarding is a
@@ -429,7 +470,8 @@ grows to 3 pt.
 | Key | Action |
 |---|---|
 | Return | The step's primary button (the default button). In the Name field, Return moves on like Continue |
-| Escape | The step's secondary action: Skip, Not now, Start fresh, Skip tour. On Welcome: Skip setup. During an import: nothing |
+| Escape | The step's secondary action: Skip, Not now, Start fresh, Skip tour. On Welcome: asks to Skip setup. During an import: nothing. In the Skip setup alert: Cancel |
+| Return in the Skip setup alert | Skip setup |
 | Right arrow | Next step, or next tip in the tour. Not in the import step before the import finished. Ignored while a text field has focus |
 | Left arrow | Back, or previous tip. Ignored while a text field has focus |
 | Tab, Shift-Tab | Moves focus through the card in reading order (section 8); Skip setup and Back are in the loop |
@@ -461,9 +503,10 @@ setup. The progress dots are not separate elements; the group's value reads "Ste
 | Name | text field | label "Name", placeholder read as "Space 1" |
 | Icon | radio button | "None", "Star", "Bookmark", "Folder", "Heart", "Bolt", "Book", "Globe", "Person" |
 | Web Store option | checkbox | "Open the Chrome Web Store", help "It opens in a tab when setup ends." |
-| Key caps | image | "Command T", "Command L", "Command W" |
+| Key caps | image | "Command T, Command L" (tip 1), "Command W" (tip 2) |
+| Skip setup alert | alert (system) | "Skip setup?", the informative text, buttons "Skip setup" and "Cancel"; focus returns to the opener on Cancel |
 | Tour demos | hidden | (the body text says it) |
-| Tip count | static text | "1 of 6" |
+| Tip count | static text | "1 of 5" |
 | Back | button | "Back" |
 | Skip setup | button | "Skip setup" |
 
@@ -509,7 +552,7 @@ Arc's onboarding was not inspected for this design. Known rows:
 
 | Topic | Arc (source) | Arkt | Note |
 |---|---|---|---|
-| Tour content | BH-211: Arc101 onboarding strings "Open your first tab", "Pin tabs to save for later", "Spaces for work and life", "Multitask with Split View", "Favorites keep your most used sites and apps close" / "Drag to add Favorites". SINGLE-SOURCE, order and gating unknown | Six tips: open a tab, the address, archiving, Spaces, Split View, Favorites | PARITY(NEEDS-RUNTIME-CHECK): order, whether Arc's tips are interactive, and whether pinning is a separate tip. Arkt drops "pin tabs" for "close by archiving", the habit that surprises new users most; easy to add as a seventh tip |
+| Tour content | BH-211: Arc101 onboarding strings "Open your first tab", "Pin tabs to save for later", "Spaces for work and life", "Multitask with Split View", "Favorites keep your most used sites and apps close" / "Drag to add Favorites". SINGLE-SOURCE, order and gating unknown | Five tips: open a tab (with the address), archiving, Spaces, Split View, Favorites | PARITY(NEEDS-RUNTIME-CHECK): order, whether Arc's tips are interactive, and whether pinning is a separate tip. Arkt drops "pin tabs" for "close by archiving", the habit that surprises new users most |
 | Gestures and keys taught | KB-001, KB-002, KB-008, GS-001, GS-008, GS-011 (CONFIRMED) | Taught as in Arc | The behaviors exist; only the teaching is new |
 | Default browser | BH-129 [S] NUX "Links Open in Little Arc" suggests Arc's onboarding touches default-browser handling | One optional step, system prompt | PARITY(NEEDS-RUNTIME-CHECK): where and how Arc asks. Little Arc routing is not part of this flow |
 | Account | Arc's first run is reported to require an account | No account step | Deliberate difference: Arkt has no account. PARITY(NEEDS-RUNTIME-CHECK) |
@@ -519,41 +562,35 @@ Arc's onboarding was not inspected for this design. Known rows:
 
 ## 12. Implementation dependencies
 
-1. **Count-only preview pass.** `ArcImportSummary` exists only after `ArcImportCoordinator.run`. The "live count"
-   needs a read-only pass that returns Spaces, pinned tabs, Favorites and folders without writing anything (counts
-   only, same privacy rule). Alternative if that is too costly: import first, then show what came over (see open
-   question 1).
+1. **Count-only preview pass (required, decision 1).** `ArcImportSummary` exists only after
+   `ArcImportCoordinator.run`. The live count needs a read-only pass that returns Spaces, pinned tabs, Favorites and
+   folders without writing anything (counts only, same privacy rule).
 2. **Per-category progress.** M8 needs the importer to report category completion (or at least start and finish).
    If it cannot, all four checks appear together at the end, with the same stagger as M7.
 3. **Default browser registration.** Nothing in the code sets the default browser today. Needs the URL scheme and
    document type registration in the app's Info.plist and `NSWorkspace.setDefaultApplication(at:toOpenURLsWithScheme:)`
    (macOS shows its own confirmation), plus a check of the current default to leave the step out.
-4. **Theme catalog.** Add the six families (light and dark) to `SpaceThemeCatalog` and pass `ShellTokensContrastTests`.
+4. **Theme catalog.** Add the six families (light and dark) to `SpaceThemeCatalog`, Dune first and the default for a
+   Space created by onboarding, and pass `ShellTokensContrastTests`.
 5. **Brand tokens.** Add the five proposed `BrandTokens` and their contrast tests.
 6. **Help menu item** and an `AppCommands` action that starts the flow on the key window.
 7. **Engine-only step.** The extensions step needs a build-configuration check (Chromium engine vs WKWebView shell).
+8. **Window frame.** The first-run window frame is at least 1000 x 680 pt, clamped to the screen's visible frame.
 
-## 13. Open questions
+## 13. Open questions (resolved)
 
-1. Live count before import (needs a preview pass in the importer) or "import, then show what came over"? The design
-   assumes the preview; the fallback keeps every screen and drops the Ready state's numbers.
-2. Should the import path also offer Make it yours, for the first imported Space? The design leaves it out because
-   imported Spaces keep their Arc themes.
-3. Extensions step copy: is naming no password manager right while #23 is open, or should it say "1Password, once
-   signing is in place"? The design names none.
-4. Tour length: six tips, or five with Command-L folded into tip 1? "The sidebar in 20 seconds" fits six at about 3
-   seconds each only if users click through quickly.
-5. The default first-Space theme: Mist (neutral, cool) is selected by default. Dune is the closest to the brand
-   mustard; is a brand-colored default wanted?
-6. Should Skip setup ask for confirmation? The design does not: everything is reachable later (File > Import from
-   Arc, the Space header, Help > Welcome to Arkt).
-7. Window size on first launch: the design asks for at least 1000 x 680 pt. Is that compatible with the current
-   default window frame?
+The seven questions of the first draft were answered on 2026-10-25; see
+[Decisions](#decisions-maintainer-2026-10-25). Nothing is open in this design. Choices made while applying the
+decisions, for review:
+
+- The Skip setup alert's default button is Skip setup, not Cancel (section 5.9).
+- On the import path the theme step starts with no swatch selected, so "keep the Arc look" needs no extra control.
+- The compact layout starts at a card height of 620 pt (section 3).
 
 ## 14. Screenshots
 
 Rendered from the prototype with the project's Chromium build in headless mode, window 1120 x 720 pt at device scale 2
-(2240 x 1440 px), settled end states (`?still=1&shot=1`), quantized to 256 colors. Files are in
+(2240 x 1440 px; 21 is 1000 x 620 pt), settled end states (`?still=1&shot=1`), quantized to 256 colors. Files are in
 [`design/onboarding/screens/`](../../design/onboarding/screens/).
 
 | # | Step | Light | Dark |
@@ -566,12 +603,12 @@ Rendered from the prototype with the project's Chromium build in headless mode, 
 | 06 | Make it yours | [06-theme-light.png](../../design/onboarding/screens/06-theme-light.png) | [06-theme-dark.png](../../design/onboarding/screens/06-theme-dark.png) |
 | 07 | Default browser | [07-default-light.png](../../design/onboarding/screens/07-default-light.png) | [07-default-dark.png](../../design/onboarding/screens/07-default-dark.png) |
 | 08 | Extensions and passwords | [08-extensions-light.png](../../design/onboarding/screens/08-extensions-light.png) | [08-extensions-dark.png](../../design/onboarding/screens/08-extensions-dark.png) |
-| 09 | Tour 1, Open a tab | [09-tour-1-light.png](../../design/onboarding/screens/09-tour-1-light.png) | [09-tour-1-dark.png](../../design/onboarding/screens/09-tour-1-dark.png) |
-| 10 | Tour 2, Go to the address | [10-tour-2-light.png](../../design/onboarding/screens/10-tour-2-light.png) | [10-tour-2-dark.png](../../design/onboarding/screens/10-tour-2-dark.png) |
-| 11 | Tour 3, Close by archiving | [11-tour-3-light.png](../../design/onboarding/screens/11-tour-3-light.png) | [11-tour-3-dark.png](../../design/onboarding/screens/11-tour-3-dark.png) |
-| 12 | Tour 4, Switch Spaces (end frame) | [12-tour-4-light.png](../../design/onboarding/screens/12-tour-4-light.png) | [12-tour-4-dark.png](../../design/onboarding/screens/12-tour-4-dark.png) |
-| 13 | Tour 5, Split the view (end frame) | [13-tour-5-light.png](../../design/onboarding/screens/13-tour-5-light.png) | [13-tour-5-dark.png](../../design/onboarding/screens/13-tour-5-dark.png) |
-| 14 | Tour 6, Keep Favorites close (end frame) | [14-tour-6-light.png](../../design/onboarding/screens/14-tour-6-light.png) | [14-tour-6-dark.png](../../design/onboarding/screens/14-tour-6-dark.png) |
+| 09 | Tour 1, Open a tab (Command-T and Command-L) | [09-tour-1-light.png](../../design/onboarding/screens/09-tour-1-light.png) | [09-tour-1-dark.png](../../design/onboarding/screens/09-tour-1-dark.png) |
+| 10 | Tour 2, Close by archiving | [10-tour-2-light.png](../../design/onboarding/screens/10-tour-2-light.png) | [10-tour-2-dark.png](../../design/onboarding/screens/10-tour-2-dark.png) |
+| 11 | Tour 3, Switch Spaces (end frame) | [11-tour-3-light.png](../../design/onboarding/screens/11-tour-3-light.png) | [11-tour-3-dark.png](../../design/onboarding/screens/11-tour-3-dark.png) |
+| 12 | Tour 4, Split the view (end frame) | [12-tour-4-light.png](../../design/onboarding/screens/12-tour-4-light.png) | [12-tour-4-dark.png](../../design/onboarding/screens/12-tour-4-dark.png) |
+| 13 | Tour 5, Keep Favorites close (end frame) | [13-tour-5-light.png](../../design/onboarding/screens/13-tour-5-light.png) | [13-tour-5-dark.png](../../design/onboarding/screens/13-tour-5-dark.png) |
+| 14 | Skip setup confirmation (over Make it yours) | [14-skip-confirm-light.png](../../design/onboarding/screens/14-skip-confirm-light.png) | [14-skip-confirm-dark.png](../../design/onboarding/screens/14-skip-confirm-dark.png) |
 | 15 | You're all set | [15-done-light.png](../../design/onboarding/screens/15-done-light.png) | [15-done-dark.png](../../design/onboarding/screens/15-done-dark.png) |
 | 16 | Landing in the browser | [16-browser-light.png](../../design/onboarding/screens/16-browser-light.png) | [16-browser-dark.png](../../design/onboarding/screens/16-browser-dark.png) |
 | 17 | Make it yours, no Arc (first step, no Back, 5 dots) | [17-theme-no-arc-light.png](../../design/onboarding/screens/17-theme-no-arc-light.png) | [17-theme-no-arc-dark.png](../../design/onboarding/screens/17-theme-no-arc-dark.png) |
@@ -579,6 +616,8 @@ Rendered from the prototype with the project's Chromium build in headless mode, 
 | 19a | Fold (M2) paused at about 160 ms | [19-motion-a-fold-160ms-light.png](../../design/onboarding/screens/19-motion-a-fold-160ms-light.png) | [19-motion-a-fold-160ms-dark.png](../../design/onboarding/screens/19-motion-a-fold-160ms-dark.png) |
 | 19b | Fold (M2) paused at about 320 ms | [19-motion-b-fold-320ms-light.png](../../design/onboarding/screens/19-motion-b-fold-320ms-light.png) | [19-motion-b-fold-320ms-dark.png](../../design/onboarding/screens/19-motion-b-fold-320ms-dark.png) |
 | 19c | Step forward (M3) paused at about 100 ms | [19-motion-c-step-100ms-light.png](../../design/onboarding/screens/19-motion-c-step-100ms-light.png) | [19-motion-c-step-100ms-dark.png](../../design/onboarding/screens/19-motion-c-step-100ms-dark.png) |
+| 20 | Make it yours after an import (Arc look kept, no swatch selected) | [20-theme-after-import-light.png](../../design/onboarding/screens/20-theme-after-import-light.png) | [20-theme-after-import-dark.png](../../design/onboarding/screens/20-theme-after-import-dark.png) |
+| 21 | Make it yours, compact layout (window 1000 x 620 pt) | [21-theme-compact-light.png](../../design/onboarding/screens/21-theme-compact-light.png) | [21-theme-compact-dark.png](../../design/onboarding/screens/21-theme-compact-dark.png) |
 
 Reduce Motion end states are identical to the ones above (section 6.2), so they are not duplicated.
 
@@ -591,7 +630,8 @@ It has no network access and no dependencies.
   to any step, and replays from the start.
 - URL parameters: `appearance=light|dark`, `motion=reduce`, `transparency=reduce`, `arc=0`, `still=1` (no entrance
   motion), `shot=1` (window fills the viewport). Hash: `#welcome`, `#import`, `#importing`, `#imported`,
-  `#import-failed`, `#theme`, `#default`, `#extensions`, `#tour-1` to `#tour-6`, `#done`, `#browser`.
+  `#import-failed`, `#theme`, `#theme-after-import`, `#default`, `#extensions`, `#tour-1` to `#tour-5`, `#done`,
+  `#browser`, `#skip-confirm`.
 - Springs are the `SpringPreset` values solved with the `SpringParameters` formulas and sampled into CSS `linear()`
   easings, so the curves are the spec, not an approximation. Transitions retarget from the current presented value;
   unlike `SpringDriver`, they do not carry velocity.
