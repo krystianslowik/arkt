@@ -56,11 +56,6 @@ final class ArchiveContentView: NSView {
     }
     return children + [table.axProxyRows.element]
   }
-
-  override func accessibilityHitTest(_ point: NSPoint) -> Any? {
-    if let hit = table.axProxyRows.hitTest(point) { return hit }
-    return super.accessibilityHitTest(point)
-  }
 }
 
 @MainActor
