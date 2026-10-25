@@ -42,6 +42,20 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     }
   }
 
+  /// KB-017, BH-001 (#102): View > Hide Sidebar on Cmd-S, first in the View menu; `validateMenuItem` flips the title.
+  func testHideSidebarSitsFirstInTheViewMenuOnCommandS() throws {
+    _ = NSApplication.shared
+    let view = try XCTUnwrap(MainMenu.make(commands: AppCommands()).menu.items.first { $0.title == "View" }?.submenu)
+    let item = try XCTUnwrap(view.items.first)
+    XCTAssertEqual(item.title, "Hide Sidebar")
+    XCTAssertEqual(item.action, #selector(ShellWindowController.toggleSidebar(_:)))
+    XCTAssertEqual(item.keyEquivalent, "s")
+    XCTAssertEqual(item.keyEquivalentModifierMask, [.command])
+    XCTAssertNil(item.target, "reaches the main window's controller through the responder chain")
+    let commandS = allItems().filter { $0.keyEquivalent == "s" && $0.keyEquivalentModifierMask == [.command] }
+    XCTAssertEqual(commandS.count, 1, "no other item binds Cmd-S")
+  }
+
   // MARK: Split View (S5)
 
   /// RT-38 (passive read, #78): Arc's View menu holds these four directly, with these titles and keys.
