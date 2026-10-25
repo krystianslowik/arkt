@@ -330,39 +330,46 @@ final class SplitSidebarTests: XCTestCase {
     XCTAssertEqual(harness.current, world.today[0], "nor does the end of the drag")
   }
 
-  /// Ctrl-click is a secondary click (#277): on a split row it asks for the row's context menu, as a right-click
-  /// does; on a plain tab row it gets the same empty menu a right-click gets, which does not open. Neither activates
-  /// the row. The window delivers the events, as AppKit does, to the outline's mouseDown.
-  func testCtrlClickShowsTheRowMenuAndDoesNotActivateTheRow() throws {
+  /// Ctrl-clicks `node`'s row in a freshly shown window, delivered by the window as AppKit does, and checks that the
+  /// outline asked for that row's context menu, which held `titles`, and that the row was not activated (#277).
+  /// One press per window: in CI run 40197146073 a second Ctrl press in the same window never reached the outline's
+  /// mouseDown (the row was not activated either), so each case gets its own window.
+  private func assertCtrlClickAsksForTheMenu(of node: (World) -> UUID, titles: [String],
+                                             file: StaticString = #filePath, line: UInt = #line) throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     defer { harness.controller.close() }
     let (window, view) = try shownOutline(harness, current: world.today[0])
     let recorder = ContextMenuRecorder()
     view.presentContextMenu = { [unowned view] menu, _, _ in recorder.record(menu, clickedRow: view.clickedRow) }
-    let presses = [(world.split, ["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"]),
-                   (world.today[1], [String]())]
+    let row = try harness.row(node(world))
+    let point = try windowPoint(of: node(world), in: harness, view)
 
-    for (index, (node, titles)) in presses.enumerated() {
-      let row = try harness.row(node)
-      let point = try windowPoint(of: node, in: harness, view)
-      // Start each press with the outline's menu empty, as before any menu was shown, so the window hands it to
-      // mouseDown, the path under test. In CI run 40196082631 the second press, sent while the menu still held the
-      // split row's items, never reached mouseDown (the window's own context-menu handling took it); the same press
-      // sent straight to mouseDown asked for its row's menu.
-      view.menu?.removeAllItems()
-      let down = try mouseEvent(.leftMouseDown, at: point, [.control], in: window)
-      XCTAssertEqual(down.clickCount, 1, "press \(index) is a single click")
-      window.sendEvent(down)
-      window.sendEvent(try mouseEvent(.leftMouseUp, at: point, [.control], in: window))
-      XCTAssertEqual(recorder.requests.count, index + 1, "press \(index) reached the outline and asked for a menu")
-      guard recorder.requests.count == index + 1 else { continue }
-      XCTAssertEqual(recorder.requests[index].row, row, "press \(index) asked for its own row's menu")
-      XCTAssertEqual(recorder.requests[index].titles, titles, "press \(index) got its row's menu (nil: no menu)")
-    }
-    XCTAssertEqual(harness.current, world.today[0], "a Ctrl-click does not activate the row")
-    XCTAssertNotNil(harness.source.node(world.split))
-    XCTAssertEqual(view.clickModifiers, [])
+    window.sendEvent(try mouseEvent(.leftMouseDown, at: point, [.control], in: window))
+    window.sendEvent(try mouseEvent(.leftMouseUp, at: point, [.control], in: window))
+
+    XCTAssertEqual(recorder.requests.count, 1, "the press reached the outline and asked for a menu", file: file,
+                   line: line)
+    XCTAssertEqual(recorder.requests.first?.row, row, "for the clicked row", file: file, line: line)
+    XCTAssertEqual(recorder.requests.first?.titles ?? nil, titles, "the row's menu (nil: no menu)", file: file,
+                   line: line)
+    XCTAssertEqual(harness.current, world.today[0], "a Ctrl-click does not activate the row", file: file, line: line)
+    XCTAssertNotNil(harness.source.node(world.split), file: file, line: line)
+    XCTAssertEqual(view.clickModifiers, [], file: file, line: line)
+  }
+
+  /// Ctrl-click is a secondary click (#277): on a split row it asks for the row's context menu, as a right-click
+  /// does, and does not activate the row.
+  func testCtrlClickOnASplitRowAsksForItsMenuAndDoesNotActivateIt() throws {
+    try assertCtrlClickAsksForTheMenu(of: \.split,
+                                      titles: ["Separate All Tabs", "Convert to Vertical Split View",
+                                               "Duplicate Split View"])
+  }
+
+  /// On a plain tab row a Ctrl-click gets the same empty menu a right-click gets
+  /// (`testRightClickFillsTheMenuForTheClickedRow`), which does not open, and does not activate the row.
+  func testCtrlClickOnAPlainTabRowDoesNotActivateIt() throws {
+    try assertCtrlClickAsksForTheMenu(of: { $0.today[1] }, titles: [])
   }
 
   func testPlainClickOnASplitRowActivatesIt() throws {
