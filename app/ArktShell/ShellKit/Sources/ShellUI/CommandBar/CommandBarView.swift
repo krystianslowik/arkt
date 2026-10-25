@@ -158,7 +158,20 @@ final class CommandBarView: NSView {
   func setNoticeVisible(_ visible: Bool) {
     guard visible != !noticeView.isHidden else { return }
     noticeView.isHidden = !visible
+    if visible { applyNoticeDismissImage() }
     needsLayout = true
+  }
+
+  /// The notice's X glyph at the bar's backing scale; without it the borderless image-only button draws nothing.
+  private func applyNoticeDismissImage() {
+    noticeDismissButton.image = SymbolImageCache.shared.symbol("xmark", box: 10,
+                                                               color: ShellTokens.commandBarSecondaryText,
+                                                               scale: shellBackingScale)
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    if !noticeView.isHidden { applyNoticeDismissImage() }
   }
 
   /// The row under the pointer, if any; its remove button shows (BH-109). Cleared when the results reload.

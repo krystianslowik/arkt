@@ -481,8 +481,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     input.openTabs = openTabsProvider()
     input.spaces = spacesProvider()
     input.actions = actionsProvider()
-    // BH-108: Paste and Go is a new-tab surface; Cmd-L's prefill and the split pane bar never offer it.
-    input.clipboardURL = scope == .normal && mode == .newTab ? clipboardURLProvider() : nil
+    // BH-108: Paste and Go is a new-tab surface; Cmd-L's prefill and the split pane bar never offer it. The row
+    // shows only on an empty query, so a typed keystroke never pays for a pasteboard read.
+    let queryIsEmpty = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    input.clipboardURL = scope == .normal && mode == .newTab && queryIsEmpty ? clipboardURLProvider() : nil
     input.excluded = removedSuggestionIDs
     input.searchSuggestionsEnabled = settings.searchSuggestionsEnabled
     input.scope = scope

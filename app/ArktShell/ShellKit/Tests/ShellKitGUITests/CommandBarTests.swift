@@ -1114,6 +1114,7 @@ final class CommandBarTests: XCTestCase {
     XCTAssertEqual(bar.barView.noticeLabel.stringValue,
                    "We talk to your search engine to help us suggest results.")
 
+    XCTAssertNotNil(bar.barView.noticeDismissButton.image, "the notice's X draws a glyph")
     bar.barView.noticeDismissButton.performClick(nil)
     XCTAssertTrue(settings.searchSuggestionNoticeDismissed)
     XCTAssertFalse(bar.isNoticeVisible)
