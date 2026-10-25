@@ -2,6 +2,9 @@ import AppKit
 
 /// One sidebar row's background: a rounded fill at Arc's token levels, inset to a 34 pt pill on the 41 pt
 /// pitch. Selection is the `current` state, never AppKit's highlight.
+///
+/// Not an accessibility element: the outline publishes an `AXProxyRow` for every row (#269), and that proxy lists
+/// this view's cell as its child.
 @MainActor
 public final class SidebarRowView: NSTableRowView {
   public static let reuseIdentifier = NSUserInterfaceItemIdentifier("SidebarRowView")
@@ -9,10 +12,7 @@ public final class SidebarRowView: NSTableRowView {
   public let backgroundLayer = CALayer()
 
   public var state: TabRowState = .normal {
-    didSet {
-      if state != oldValue { needsDisplay = true }
-      setAccessibilitySelected(state == .current)
-    }
+    didSet { if state != oldValue { needsDisplay = true } }
   }
   public var flavor: ThemeFlavor = .light {
     didSet { if flavor != oldValue { needsDisplay = true } }
@@ -59,7 +59,6 @@ public final class SidebarRowView: NSTableRowView {
     backgroundLayer.cornerCurve = .continuous
     backgroundLayer.shadowRadius = 2
     backgroundLayer.shadowOffset = CGSize(width: 0, height: -1)
-    setAccessibilityRole(.row)
   }
 
   @available(*, unavailable)
@@ -133,19 +132,7 @@ public final class SidebarRowView: NSTableRowView {
   public override func mouseEntered(with event: NSEvent) { isHovered = true }
   public override func mouseExited(with event: NSEvent) { isHovered = false; isPressed = false }
 
-  public override func isAccessibilitySelected() -> Bool { state == .current }
-
-  public override func accessibilityParent() -> Any? {
-    superview.flatMap(NSAccessibility.unignoredAncestor(of:))
-  }
-
-  public override func accessibilityChildren() -> [Any]? {
-    NSAccessibility.unignoredChildren(from: subviews)
-  }
-
-  public override func accessibilityLabel() -> String? {
-    tabCell?.titleField.stringValue ?? super.accessibilityLabel()
-  }
+  public override func isAccessibilityElement() -> Bool { false }
 
   public override func prepareForReuse() {
     super.prepareForReuse()
@@ -153,8 +140,5 @@ public final class SidebarRowView: NSTableRowView {
     isPressed = false
     state = .normal
     isInteractive = true
-    setAccessibilitySelected(false)
-    setAccessibilityIdentifier(nil)
-    setAccessibilityLabel(nil)
   }
 }

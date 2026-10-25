@@ -32,6 +32,9 @@ public final class SidebarTabCellView: NSTableCellView {
     addSubview(titleField)
     addSubview(closeButton)
     closeButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.rowClose)
+    // The row's proxy lists this cell as its one child (#269); the title and the X sit under it.
+    setAccessibilityElement(true)
+    setAccessibilityRole(.cell)
     imageView = faviconView
     textField = titleField
   }
@@ -82,6 +85,15 @@ public final class SidebarTabCellView: NSTableCellView {
   public override func prepareForReuse() {
     super.prepareForReuse()
     setCloseButtonShown(false, animated: false)
+  }
+
+  /// The proxy of the row this cell is in (#269): the proxy lists the cell as its child. Outside a sidebar outline,
+  /// the usual ancestor.
+  public override func accessibilityParent() -> Any? {
+    var ancestor = superview
+    while let view = ancestor, !(view is SidebarOutlineView) { ancestor = view.superview }
+    if let outline = ancestor as? SidebarOutlineView, let proxy = outline.axProxyRow(hosting: self) { return proxy }
+    return super.accessibilityParent()
   }
 
   public override func viewDidChangeBackingProperties() {
