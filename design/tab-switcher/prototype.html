@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt Tab Switcher</title>
+<!--
+  Arkt tab switcher prototype (#103). Single file, no network, no external assets.
+  States are addressable by hash: #s=<state>[&theme=dark][&rm=1][&shot=1]
+    state: first | mid | single | sidebar
+    theme=dark: dark appearance   rm=1: Reduce Motion   shot=1: hide the prototype controls, window fills the viewport
+  1 CSS px = 1 pt. Colors are the ShellTokens / BrandTokens values; the panel reuses AlertTokens.overlayShadow.
+  The MRU list is a multi-Space example: Work, Personal and Dev rows, one camera indicator, one split marker.
+  All titles and URLs are synthetic.
+-->
+<style>
+:root {
+  /* BrandTokens */
+  --accent: #E9B520; --on-accent: #202321;
+  --focus: #202321;                   /* focusRing */
+  /* ShellTokens */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
+  --text-2: rgba(0,0,0,0.64);                                    /* secondaryText */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --card-border: rgba(0,0,0,0.10);                               /* cardBorder */
+  --toast: rgba(255,255,255,0.96);                               /* toastSurface (light flavor) */
+  /* AlertTokens */
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
+  --toast-shadow: 0 0 0 0.5px rgba(0,0,0,0.10), 0 8px 24px rgba(0,0,0,0.16), 0 1px 3px rgba(0,0,0,0.08);
+  /* Window context (prototype only: a Space theme and a page) */
+  --theme-a: #F2F0EE; --theme-b: #E4E1DD;                        /* Personal sample theme */
+  --page: #FFFFFF; --page-ink: rgba(0,0,0,0.10); --page-ink-2: rgba(0,0,0,0.18);
+  --desktop: #C9CDD2;
+  --row-cur: rgba(255,255,255,0.85);  /* tabCurrent */
+  --sb-fg: rgba(0,0,0,0.48);          /* sidebarForeground */
+  --spring-springy-fast: cubic-bezier(0.34, 1.28, 0.64, 1);      /* springyFast 0.80 / 0.18 s */
+  --rec-green: #28C840;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --focus: #E9B520;
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
+  --toast: color(display-p3 0.1098 0.1098 0.1255 / 0.96);
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
+  --toast-shadow: 0 0 0 0.5px rgba(255,255,255,0.14), 0 8px 24px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.30);
+  --theme-a: #3A3B44; --theme-b: #24252B;                        /* Dev sample theme */
+  --page: #1E1F22; --page-ink: rgba(255,255,255,0.10); --page-ink-2: rgba(255,255,255,0.22);
+  --desktop: #2C3036;
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20);
+  --sb-fg: rgba(255,255,255,0.57);
+  --rec-green: #30D158;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--desktop);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color: var(--text); -webkit-font-smoothing: antialiased;
+  display: grid; place-items: center; padding: 40px 16px; overflow: hidden;
+}
+body.shot { padding: 0; display: block; }
+button { font: inherit; color: inherit; }
+
+/* ---------- Prototype bar ---------- */
+#bar { position: fixed; left: 0; right: 0; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 6px;
+  align-items: center; padding: 10px 14px; background: rgba(128,128,128,0.12); backdrop-filter: blur(12px);
+  font-size: 12px; }
+body.shot #bar { display: none; }
+#bar button { height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: rgba(128,128,128,0.18);
+  color: inherit; cursor: default; }
+#bar button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+#bar .sep { width: 1px; height: 16px; background: rgba(128,128,128,0.4); margin: 0 4px; }
+#bar .lbl { opacity: 0.6; margin-right: 2px; }
+
+/* ---------- Browser window context ---------- */
+.win { width: 1280px; height: 800px; max-width: 100%; border-radius: 12px; position: relative; overflow: hidden;
+  background: linear-gradient(165deg, var(--theme-a), var(--theme-b));
+  box-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10); }
+body.shot .win { width: 100vw; height: 100vh; max-width: none; border-radius: 0; box-shadow: none; }
+.lights { position: absolute; left: 12px; top: 16px; display: flex; gap: 11px; z-index: 3; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+
+.sidebar { position: absolute; left: 0; top: 0; bottom: 0; width: 200px; padding: 44px 10px 10px; }
+.urlpill { height: 34px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; padding: 0 10px;
+  color: var(--text-2); font-size: 13px; margin-bottom: 12px; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px; }
+.favs i { height: 38px; border-radius: 9px; background: var(--fill); display: grid; place-items: center; }
+.favs i b { width: 16px; height: 16px; border-radius: 4px; display: block; }
+.stitle { font-weight: 600; font-size: 11px; color: var(--text-2); padding: 0 8px 6px; }
+.srow { height: 34px; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 0 9px; font-size: 13px;
+  color: var(--text); white-space: nowrap; overflow: hidden; position: relative; }
+.srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.srow b { width: 16px; height: 16px; border-radius: 4px; flex: none; display: block; }
+.srow span { overflow: hidden; text-overflow: ellipsis; }
+.srow.kbfocus { box-shadow: 0 0 0 2px var(--focus); }
+.srow.cur.kbfocus { box-shadow: 0 0 0 2px var(--focus), 0 1px 2px rgba(0,0,0,0.08); }
+.sdiv { height: 1px; margin: 8px 8px; background: var(--divider); }
+.sbottom { position: absolute; left: 10px; right: 10px; bottom: 10px; height: 28px; display: flex; justify-content: center;
+  align-items: center; gap: 8px; }
+.sbottom i { width: 6px; height: 6px; border-radius: 50%; background: var(--sb-fg); opacity: 0.6; }
+.sbottom i.on { opacity: 1; width: 7px; height: 7px; background: var(--text); }
+
+/* Overflow pill (BH-018), proposed */
+.opill { position: absolute; left: 0; right: 0; top: 298px; display: none; justify-content: center; z-index: 4; pointer-events: none; }
+.opill span { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: 12px;
+  background: var(--toast); box-shadow: var(--toast-shadow); font-size: 11px; color: var(--text-2); }
+.opill svg { width: 9px; height: 9px; }
+.win.s-sidebar .opill { display: flex; }
+.win.s-sidebar .gone { display: none; }
+
+.card { position: absolute; left: 200px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; overflow: hidden;
+  background: var(--page); box-shadow: 0 0 0 1px var(--card-border), 0 1px 4px rgba(0,0,0,0.10); }
+.page { position: absolute; inset: 0; padding: 56px 72px; }
+.page i { display: block; height: 10px; border-radius: 5px; background: var(--page-ink); margin-bottom: 14px; }
+.page i.h { height: 26px; width: 46%; border-radius: 7px; background: var(--page-ink-2); margin-bottom: 26px; }
+.page i.img { height: 180px; border-radius: 10px; margin: 26px 0; }
+
+/* ---------- Switcher panel ---------- */
+/* No entrance animation by design: the panel is presented complete on the first frame after the key press. */
+.sw { position: absolute; left: 50%; top: 38%; transform: translateX(-50%); width: 480px; padding: 6px;
+  border-radius: 12px; background: var(--toast); box-shadow: var(--overlay-shadow); z-index: 10; display: none; }
+.win.s-first .sw, .win.s-mid .sw, .win.s-single .sw { display: block; }
+.sw .hl { position: absolute; left: 6px; right: 6px; top: 6px; height: 40px; border-radius: 8px;
+  background: var(--fill-hover); box-shadow: inset 0 0 0 1px var(--divider);
+  transition: transform 180ms var(--spring-springy-fast); }
+:root[data-rm] .sw .hl { transition: none; }
+.sw .rows { position: relative; display: grid; gap: 0; }
+.swr { height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 10px; white-space: nowrap; position: relative; }
+.swr .fv { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; color: #fff; margin-left: 2px; }
+.swr .t { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.swr .rec { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: 12px; }
+.swr .rec i { width: 7px; height: 7px; border-radius: 50%; background: var(--rec-green); }
+.swr .rec svg { width: 12px; height: 12px; opacity: 0.6; }
+.swr .split { flex: none; width: 12px; height: 12px; margin-left: 12px; opacity: 0.55; }
+.swr .sp { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 12px; max-width: 132px;
+  font-size: 11px; color: var(--text-2); }
+.swr .sp i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.swr .sp em { font-style: normal; overflow: hidden; text-overflow: ellipsis; }
+.win.s-single .swr.hide, .win.s-single .sw .hl.hide { display: none; }
+</style>
+</head>
+<body class="s-first">
+<div id="bar">
+  <span class="lbl">State</span>
+  <button data-s="first">First open</button>
+  <button data-s="mid">Mid-cycle</button>
+  <button data-s="single">Single row (after W)</button>
+  <button data-s="sidebar">Sidebar focus (Ctrl-Space)</button>
+  <span class="sep"></span>
+  <button id="tTheme" aria-pressed="false">Dark</button>
+  <button id="tRM" aria-pressed="false">Reduce Motion</button>
+</div>
+
+<div class="win s-first" id="win">
+  <div class="lights"><i></i><i></i><i></i></div>
+
+  <div class="sidebar">
+    <div class="urlpill">planeview.app/board</div>
+    <div class="favs">
+      <i><b style="background:#3E7BFA"></b></i>
+      <i><b style="background:#E9B520"></b></i>
+      <i><b style="background:#8E5CF5"></b></i>
+      <i><b style="background:#3AAFA9"></b></i>
+    </div>
+    <div class="stitle">Pinned</div>
+    <div class="srow"><b style="background:#3E7BFA"></b><span>Mail — Groupmail</span></div>
+    <div class="srow"><b style="background:#E0714F"></b><span>Calendar — Kalend</span></div>
+    <div class="srow"><b style="background:#3AAFA9"></b><span>Chat — Flock</span></div>
+    <div class="sdiv"></div>
+    <div class="stitle">Today</div>
+    <div class="srow gone"><b style="background:#8E5CF5"></b><span>Release notes — Monolith</span></div>
+    <div class="srow gone"><b style="background:#3E7BFA"></b><span>Metrics — Dashboard</span></div>
+    <div class="srow"><b style="background:#E9B520"></b><span>Spec draft — Notework</span></div>
+    <div class="srow cur" id="curRow"><b style="background:#5B8DEF"></b><span>Sprint board — Planeview</span></div>
+    <div class="srow"><b style="background:#C2557A"></b><span>Team offsite — Notework</span></div>
+    <div class="opill"><span><svg viewBox="0 0 10 10" fill="none"><path d="M2 6.5 5 3.5 8 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>2 more above</span></div>
+    <div class="sbottom"><i></i><i class="on"></i><i></i></div>
+  </div>
+
+  <div class="card">
+    <div class="page">
+      <i class="h"></i>
+      <i style="width:88%"></i><i style="width:94%"></i><i style="width:70%"></i>
+      <i class="img"></i>
+      <i style="width:92%"></i><i style="width:81%"></i><i style="width:88%"></i><i style="width:60%"></i>
+    </div>
+  </div>
+
+  <div class="sw" role="dialog" aria-label="Recent tabs">
+    <div class="hl" id="hl"></div>
+    <div class="rows" id="rows">
+      <div class="swr" data-i="0">
+        <span class="fv" style="background:#2F9E6E">M</span>
+        <span class="t">Release checklist — Monolith Docs</span>
+        <span class="sp"><i style="background:#3E7BFA"></i><em>Work</em></span>
+      </div>
+      <div class="swr" data-i="1">
+        <span class="fv" style="background:#3E7BFA">G</span>
+        <span class="t">Inbox (3) — Groupmail</span>
+        <span class="sp"><i style="background:#E9B520"></i><em>Personal</em></span>
+      </div>
+      <div class="swr" data-i="2">
+        <span class="fv" style="background:#8E5CF5">P</span>
+        <span class="t">PR #302: Engine week 3 — arkt</span>
+        <svg class="split" viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="0.75" y="0.75" width="4.5" height="10.5" rx="1.5" stroke="currentColor"/><rect x="6.75" y="0.75" width="4.5" height="10.5" rx="1.5" stroke="currentColor"/></svg>
+        <span class="sp"><i style="background:#8E5CF5"></i><em>Dev</em></span>
+      </div>
+      <div class="swr" data-i="3">
+        <span class="fv" style="background:#E0714F">L</span>
+        <span class="t">Design sync — Lattice Meet</span>
+        <span class="rec"><svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="0.5" y="3" width="7" height="6" rx="1.5" stroke="currentColor"/><path d="M8 5.4 11.5 3.6v4.8L8 6.6" stroke="currentColor" stroke-linejoin="round"/></svg><i></i></span>
+        <span class="sp"><i style="background:#3E7BFA"></i><em>Work</em></span>
+      </div>
+      <div class="swr" data-i="4">
+        <span class="fv" style="background:#3AAFA9">S</span>
+        <span class="t">Q3 budget — Sheets</span>
+        <span class="sp"><i style="background:#E9B520"></i><em>Personal</em></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const win = $("win"), hl = $("hl"), rows = Array.from(document.querySelectorAll(".swr"));
+const ROW_H = 40;
+
+function setHighlight(i) { hl.style.transform = `translateY(${i * ROW_H}px)`; }
+
+const STATES = {
+  first()  { setHighlight(0); rows.forEach(r => r.classList.remove("hide")); hl.classList.remove("hide"); $("curRow").classList.remove("kbfocus"); },
+  mid()    { setHighlight(1); rows.forEach(r => r.classList.remove("hide")); hl.classList.remove("hide"); $("curRow").classList.remove("kbfocus"); },
+  single() { rows.forEach((r, i) => r.classList.toggle("hide", i !== 0)); setHighlight(0); hl.classList.remove("hide"); $("curRow").classList.remove("kbfocus"); },
+  sidebar(){ $("curRow").classList.add("kbfocus"); }
+};
+
+/* ---------- Hash state, toggles ---------- */
+function params() { return new URLSearchParams(location.hash.slice(1)); }
+function writeHash(update) {
+  const q = params(); for (const k in update) { if (update[k] === null) q.delete(k); else q.set(k, update[k]); }
+  history.replaceState(null, "", "#" + q.toString());
+}
+function applyOptions(q) {
+  const dark = q.get("theme") ? q.get("theme") === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  if (q.get("rm") === "1") document.documentElement.dataset.rm = "1"; else delete document.documentElement.dataset.rm;
+  document.body.classList.toggle("shot", q.get("shot") === "1");
+  $("tTheme").setAttribute("aria-pressed", String(dark));
+  $("tRM").setAttribute("aria-pressed", String(q.get("rm") === "1"));
+}
+function load() {
+  const q = params(); applyOptions(q);
+  const s = q.get("s") || "first";
+  win.className = "win s-" + s;
+  (STATES[s] || STATES.first)();
+  document.querySelectorAll("#bar [data-s]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.s === s)));
+}
+document.querySelectorAll("#bar [data-s]").forEach(b => b.addEventListener("click", () => { writeHash({ s: b.dataset.s }); load(); }));
+$("tTheme").addEventListener("click", () => { writeHash({ theme: document.documentElement.dataset.theme === "dark" ? "light" : "dark" }); applyOptions(params()); });
+$("tRM").addEventListener("click", () => { writeHash({ rm: document.documentElement.dataset.rm ? "0" : "1" }); applyOptions(params()); });
+addEventListener("hashchange", load);
+load();
+</script>
+</body>
+</html>
