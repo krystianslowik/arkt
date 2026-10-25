@@ -25,6 +25,8 @@ final class AppSession {
   let windows: ShellWindowSet
   /// One instance for every window, so Show / Hide Toolbar reaches all of them.
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
+  /// Search suggestions and the BH-113 notice dismissal, shared by every window's command bar (#112).
+  let commandBarSettings = CommandBarSettings(defaults: AppEnvironment.userDefaults)
   let archiveStore: ArchiveStore
   let settingsStore: SettingsStore
   let importer: ArcImportCoordinator
@@ -60,7 +62,7 @@ final class AppSession {
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
     self.windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
-                                  hostLookup: hostLookup)
+                                  commandBarSettings: commandBarSettings, hostLookup: hostLookup)
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
     self.archiveStore = archiveStore
