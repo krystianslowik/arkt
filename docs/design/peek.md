@@ -71,13 +71,14 @@ All values in points, on the shell's existing grid (`ShellMetrics.standard`: con
 | Control fill | light white 96 %, dark `#1C1C20` 96 %, hairline `cardBorder` | reuses `ShellTokens.toastSurface` |
 | Control glyph | 14 pt, `secondaryText`; `primaryText` on hover | |
 | Control order, top to bottom | Close, Open as Tab, Add to Split View | proposed; Arc lists expand, split, close (BH-148), PARITY(NEEDS-RUNTIME-CHECK) |
-| Grabber | 36 x 5, radius 3, 12 above the card's top edge, centered; light white 80 %, dark white 55 % | proposed |
+| Grabber | 36 x 5, radius 3, 12 above the card's top edge, centered, full opacity at rest; light black 50 % (3.6:1 over a white page under the light scrim, 4.0:1 over plain white), dark white 55 % (6.3:1 over a near-black page under the dark scrim); WCAG 1.4.11 asks 3:1 | proposed `ShellTokens.peekGrabber` |
 | Keyboard focus ring | 2 pt, 2 pt outset | `BrandTokens.focusRing` |
 | Toolbar inside Peek (when "Show Toolbar" is on) | the Toolbar strip (32 pt plus 1 pt hairline) at the top of the Peek card | `ContentToolbarView`, BH-151 |
 | "Peek closed" toast | `ToastView`: 36 high, radius 18, 16 above the card bottom | `ShellTokens.toastSurface`, `toastText` |
 
 New tokens this design adds (`ShellTokens`, `TokenPair`, light and dark): `peekScrim`, `peekShadow` (color plus
-radius and offset), `peekGrabber`. The controls reuse `toastSurface`. No other new colors.
+radius and offset), `peekGrabber`. The controls reuse `toastSurface`. No other new colors. `ShellTokensContrastTests`
+gains a case for `peekGrabber`: at least 3:1 against white and against the dark page fill, each under `peekScrim`.
 
 ## States
 
@@ -92,7 +93,8 @@ radius and offset), `peekGrabber`. The controls reuse `toastSurface`. No other n
 | Closed, with the reopen toast | `#s=closed` | `peek-closed-{light,dark}.png` |
 | Opened as a Today tab | `#s=expanded` | `peek-expanded-{light,dark}.png` |
 | Added to a Split View | `#s=split` | `peek-split-{light,dark}.png` |
-| Peek inside a Split View pane | `#s=insplitPeek` | `peek-insplitPeek-{light,dark}.png` |
+| Peek inside a Split View, source pane 655 pt (1520 pt window) | `#s=insplitPeek` | `peek-insplitPeek-{light,dark}.png` |
+| Peek inside a Split View, source pane 535 pt (under 600 pt) | `#s=insplitNarrow` | `peek-insplitNarrow-{light,dark}.png` |
 | Split View already full | `#s=splitFull` | `peek-splitFull-{light,dark}.png` |
 
 ## Flows
@@ -147,8 +149,13 @@ bounce, keeping the release velocity.
 A Peek belongs to its source pane, not to the whole split. It covers the source pane only: the scrim and the recede
 apply to that pane, the other panes stay live and clickable, and clicking another pane closes the Peek like a click
 on the scrim. The card insets in a pane are 24 on the left, 34 top, 26 bottom and 52 on the right, which is the
-control gutter. Below a 600 pt wide pane the Peek covers the whole content area instead, with the normal insets.
-Decided 2026-10-25; Arc's behavior is PARITY(NEEDS-RUNTIME-CHECK).
+control gutter. Below a 600 pt wide pane the Peek covers the whole content area instead, with the normal insets:
+the scrim and the recede then apply to every pane, and a click on any pane closes the Peek. Decided 2026-10-25;
+Arc's behavior is PARITY(NEEDS-RUNTIME-CHECK).
+
+The prototype shows both sides of the threshold: `#s=insplitPeek` uses a 1520 pt window (content card 1320 pt,
+panes 655 pt) with the Peek over the source pane only, and `#s=insplitNarrow` keeps the 1280 pt window (panes 535 pt)
+with the Peek over the whole content area.
 
 ### Edge cases
 
@@ -290,10 +297,11 @@ order in Arc, Peek across tab and Space switches.
 
 ## Screenshot index
 
-All in `design/peek/screens/`, 2640 x 1680 (1320 x 840 pt at 2x), quantized to 256 colors to stay under 400 KB.
+All in `design/peek/screens/`, 2640 x 1680 (1320 x 840 pt at 2x; `peek-insplitPeek` is 3120 x 1680 for the wider
+window), quantized to 256 colors to stay under 400 KB.
 
 States, light and dark: `peek-idle`, `peek-open`, `peek-hover`, `peek-focus`, `peek-toolbar`, `peek-drag`,
-`peek-closed`, `peek-expanded`, `peek-split`, `peek-insplitPeek`, `peek-splitFull`.
+`peek-closed`, `peek-expanded`, `peek-split`, `peek-insplitPeek`, `peek-insplitNarrow`, `peek-splitFull`.
 
 Motion keyframes, light and dark: `peek-kf-open-{40,90,160}ms`, `peek-kf-close-{50,110}ms`, `peek-kf-esc-{40,90}ms`,
 `peek-kf-expand-{60,140,240}ms`, `peek-kf-split-{60,140,240}ms`, `peek-kf-fling-{60,140}ms`,

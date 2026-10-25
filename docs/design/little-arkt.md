@@ -46,8 +46,9 @@ Typeface: the system font (SF Pro), as everywhere in the shell.
 | `window.open` with features, extension popup windows | Little Arkt popup (below) | #123, decided 2026-10-25 |
 
 Settings (Settings > Links, final copy): "Links from other apps open in Little Arkt" (on), "Open Little Arkt when I
-press ⌥⌘N" (off by default, decided 2026-10-25; the user opts in, BH-131), "Open Little Arkt when clicking on links with ⌥⌘ held" (default to be
-checked). Settings > Profiles: "Archive Little Arkts after:" with the same choices as "Archive tabs after", default
+press ⌥⌘N" (off by default, decided 2026-10-25; the user opts in, BH-131), "Open Little Arkt when clicking on links with ⌥⌘ held" (on in
+Arkt: it only reacts to a deliberate two-modifier click and costs nothing when unused; Arc's default is unknown,
+see Parity notes). Settings > Profiles: "Archive Little Arkts after:" with the same choices as "Archive tabs after", default
 6 hours (BH-137).
 
 ## Layout
@@ -164,9 +165,15 @@ Decided for #123 (maintainer, 2026-10-25). A page's `window.open` with window fe
 
 Springs from `Motion/SpringPreset`, on layer transform and opacity only. The window itself never animates its frame:
 appear and close animate the root layer of the window's content (with the window's own shadow off and a layer shadow
-in its place during the motion), and the promotion moves the page's card on a transparent, click-through overlay
-window that spans both windows, the native form of the prototype's lifted card. The card's size changes through its
-mask; the page view is resized once, at rest, in the main window.
+in its place during the motion).
+
+The promotion never moves the live page mid-flight. At the start, the shell takes a snapshot of the page (an image
+of the tab's current frame from the engine) and puts it in a `CALayer` on a transparent, click-through overlay window
+that spans both windows; that layer is what flies, with its position and mask bounds animated. Meanwhile the live
+tab stays where it is, hidden. When the flight settles, the tab moves between engine windows once, its view is
+mounted in the main window's content card at the final size, and after its first frame there the snapshot layer and
+the overlay window are removed (a 0.1 s crossfade covers any difference). If the snapshot is not ready within one
+frame, the flight starts with the card's plate (page background color) and the snapshot fades in on it.
 
 | Transition | What moves | Preset |
 |---|---|---|
@@ -178,8 +185,7 @@ mask; the page view is resized once, at rest, in the main window.
 | Space chooser, profile sheet | native menu and sheet, system motion | |
 
 The flight starts from wherever the window is: Open in during the appear picks up the card's current scale and
-opacity (prototype: Play > Interrupt). The prototype holds the card above the main window for the whole flight and
-lands it in the card slot; native lands it by mounting the tab's view in the main window's card at rest.
+opacity (prototype: Play > Interrupt). In the prototype the lifted card stands in for the snapshot layer.
 
 Reduce Motion:
 
@@ -250,6 +256,8 @@ as usual (Personal sample theme in light, Dev in dark).
 - Arc's hotkey default is unknown (BH-131), PARITY(NEEDS-RUNTIME-CHECK RT-23). Arkt ships it off; this is a product
   decision, not a parity claim.
 - KB-077 key, Cmd-Opt-O or Cmd-Shift-O (CF-13). PARITY(NEEDS-RUNTIME-CHECK RT-07).
+- Arc's default for Opt-Cmd-click into Little Arc (`optionCommandClickLittleArcEntryPointEnabled`) is unknown.
+  PARITY(NEEDS-RUNTIME-CHECK, add to RT-23). Arkt ships it on until that is checked.
 - The Space chooser's contents beyond the Space list, the profile sheet's wording and the popup behavior are Arkt's.
 - The neutral brand frame, the accent Open in button and the flight into the main window are Arkt design choices.
 
@@ -259,7 +267,9 @@ as usual (Personal sample theme in light, Dev in dark).
   `ShellWindowSet.host(for:)` by request kind and destination: `.startupURL` when the link route resolves to Little
   Arkt, and `.page` / `.extension` popups once the engine reports them as such (today a page's new window arrives as
   `.reopen`, week-3 W3-4).
-- Missing engine pieces: moving a tab between engine windows (for Open in, without a reload); reporting `.page`
+- Missing engine pieces: an image snapshot of a tab's current frame (for the Open in flight; Chromium can copy it
+  from the compositor surface); moving a tab between engine windows once, at the end of the flight, without a
+  reload; reporting `.page`
   window requests with the opener and the requested bounds; letting the shell close a popup when its page calls
   `window.close()` (already a window close event).
 - Missing shell pieces: open-URL events and default-browser registration (#135); link routing (#113) for the
@@ -276,8 +286,9 @@ as usual (Personal sample theme in light, Dev in dark).
 5. The global Cmd-Opt-N hotkey is off by default. The user turns it on in Settings > Links ("Open Little Arkt when I
    press ⌥⌘N"), laid out as in the Settings window design. The in-app File menu item works either way.
 
-No open questions remain for Little Arkt. Parity checks still open: RT-23 (size, position, hotkey default in Arc) and
-RT-07 (KB-077 key).
+No open questions remain for Little Arkt. Parity checks still open: RT-23 (size, position, the hotkey default and the
+Opt-Cmd-click default in Arc) and RT-07 (KB-077 key). Arkt's own Opt-Cmd-click default (on) is a design call, not a
+maintainer decision; flag it if it should be off.
 
 ## Screenshot index
 

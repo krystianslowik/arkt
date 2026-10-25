@@ -45,7 +45,7 @@
   --peek-shadow: 0 18px 48px rgba(0,0,0,.22), 0 3px 10px rgba(0,0,0,.10);
   --peek-control: rgba(255,255,255,.96);
   --peek-control-hover: #FFFFFF;
-  --peek-grabber: rgba(255,255,255,.80);
+  --peek-grabber: rgba(0,0,0,.50);            /* 3.6:1 over a white page under the light scrim */
   /* Page mocks (web content, not chrome) */
   --pg-bg: #FFFFFF; --pg-text: #1D1F22; --pg-muted: #6A6F76; --pg-line: #ECEDEF; --pg-soft: #F5F6F7;
   --pg-link: #1F5FD1; --pg-sel: #EAF0FB;
@@ -78,7 +78,7 @@
   --peek-shadow: 0 18px 48px rgba(0,0,0,.55), 0 3px 10px rgba(0,0,0,.30);
   --peek-control: rgba(28,28,32,.96);
   --peek-control-hover: #2A2A30;
-  --peek-grabber: rgba(255,255,255,.55);
+  --peek-grabber: rgba(255,255,255,.55);      /* 6.3:1 over a dark page under the dark scrim */
   --pg-bg: #16181B; --pg-text: #E7E8E6; --pg-muted: #9A9FA6; --pg-line: #26292E; --pg-soft: #1E2124;
   --pg-link: #7FB0FF; --pg-sel: #1F2A3D;
   --desk-a: #1C1F25; --desk-b: #0D0F12;
@@ -118,9 +118,9 @@ body.shot #bar { display: none; }
 /* ---------- Desk and window ---------- */
 #desk { position: absolute; inset: var(--bar-h, 52px) 0 0 0; display: grid; place-items: center; }
 body.shot #desk { inset: 0; }
-#fit { width: 1280px; height: 800px; transform-origin: center; }
+#fit { width: var(--win-w, 1280px); height: 800px; transform-origin: center; }
 #win {
-  position: relative; width: 1280px; height: 800px; border-radius: 10px; overflow: hidden;
+  position: relative; width: var(--win-w, 1280px); height: 800px; border-radius: 10px; overflow: hidden;
   background: linear-gradient(135deg, var(--theme-a), var(--theme-b));
   box-shadow: 0 28px 70px rgba(0,0,0,.28), 0 0 0 .5px rgba(0,0,0,.35);
   user-select: none;
@@ -285,7 +285,7 @@ body.shot #desk { inset: 0; }
   <div class="grp" role="group" aria-label="States"><span>State</span>
     <button data-s="idle">Idle</button><button data-s="open">Peek</button><button data-s="hover">Controls</button>
     <button data-s="toolbar">Toolbar</button><button data-s="drag">Drag</button><button data-s="closed">Closed</button>
-    <button data-s="expanded">Tab</button><button data-s="split">Split</button><button data-s="insplit">In Split View</button>
+    <button data-s="expanded">Tab</button><button data-s="split">Split</button><button data-s="insplitPeek">In Split View</button><button data-s="insplitNarrow">Narrow split</button>
   </div>
   <div class="grp" role="group" aria-label="Transitions"><span>Play</span>
     <button data-t="open">Open</button><button data-t="close">Close</button><button data-t="esc">Esc</button>
@@ -352,7 +352,7 @@ body.shot #desk { inset: 0; }
     <div class="rc"><i style="background:linear-gradient(135deg,#7FB77E,#2E6E4E)"></i><div><b>Green caldo verde</b><span>30 minutes, serves 4</span></div></div>
     <div class="rc"><i style="background:linear-gradient(135deg,#E8A87C,#C4623F)"></i><div><b>Grilled sardines</b><span>20 minutes, serves 2</span></div></div>
     <div class="rc"><i style="background:linear-gradient(135deg,#C9B8F0,#6F5AA8)"></i><div><b>Fig and almond cake</b><span>1 hour, serves 8</span></div></div>
-  </div></div></div>
+  </div></div><div class="scrim" id="scrim2"></div></div>
   <div class="rim only-split" id="recRim"></div>
 
   <!-- Source tab: pinned Inbox -->
@@ -477,7 +477,13 @@ const $ = id => document.getElementById(id);
 const CARD = { x: 190, y: 10, w: 1080, h: 780 };
 const PEEK = { x: 246, y: 44, w: 968, h: 720 };               // proposed: 56 pt sides, 34 top, 26 bottom
 const LEFT = { x: 190, y: 10, w: 535, h: 780 }, RIGHT = { x: 735, y: 10, w: 535, h: 780 };
-const PEEK_IN_PANE = { x: 214, y: 44, w: 459, h: 720 };       // proposed: 24 pt left, 52 pt control gutter
+/* Peek inside a Split View needs a source pane of at least 600 pt (proposed threshold). The In Split View states use a
+   wider window (1520 pt: content card 1320, panes 655) so the pane-only layout is shown at a width where it applies. */
+const PANE_MIN = 600;
+const WIDE = { win: 1520, left: { x: 190, y: 10, w: 655, h: 780 }, right: { x: 855, y: 10, w: 655, h: 780 } };
+let WIN_W = 1280;
+function setWindowWidth(w) { WIN_W = w; document.documentElement.style.setProperty("--win-w", w + "px"); fit(); }
+const PEEK_IN_PANE = { x: 214, y: 44, w: 579, h: 720 };       // in a 655 pt pane: 24 pt left, 52 pt control gutter
 const RECEDE = 0.985;                                         // proposed: source card scale under a Peek
 const ROW = 34;
 
@@ -557,6 +563,7 @@ const src = new Card("src", CARD, "start");
 const rec = new Card("rec", RIGHT, "start");
 const peek = new Card("peek", PEEK, "center");
 const scrim = new Node({ o: 0 }, v => { $("scrim").style.opacity = v.o; });
+const scrim2 = new Node({ o: 0 }, v => { $("scrim2").style.opacity = v.o; });
 const ctrls = new Node({ o: 0, dx: 0 }, v => {
   const r = peek.visual();
   $("ctrls").style.transform = `translate(${r.x + r.w + 12 + v.dx}px,${r.y}px)`;
@@ -570,7 +577,8 @@ const grab = new Node({ o: 0 }, v => {
 });
 const toast = new Node({ o: 0, y: 8, s: 0.96 }, v => {
   const el = $("toast"), w = el.offsetWidth || 220;
-  el.style.transform = `translate(${CARD.x + CARD.w / 2 - w / 2}px,${CARD.y + CARD.h - 16 - 36 + v.y}px) scale(${v.s})`;
+  const c = src.v;   /* centered on the source card: the whole card, or the source pane in a split */
+  el.style.transform = `translate(${c.x + c.w / 2 - w / 2}px,${c.y + c.h - 16 - 36 + v.y}px) scale(${v.s})`;
   el.style.opacity = v.o; el.style.visibility = v.o < 0.01 ? "hidden" : "visible";
 });
 const pill = new Node({ y: 258, o: 1 }, v => { $("pill").style.transform = `translateY(${v.y}px)`; $("pill").style.opacity = v.o; });
@@ -582,7 +590,7 @@ const rowSplit = new Node({ o: 0 }, v => { $("splitRow").style.opacity = v.o; })
 [ctrls, grab, toast].forEach(n => n.draw());
 
 function linkCenter() {
-  const a = $("plink").getBoundingClientRect(), w = win.getBoundingClientRect(), k = w.width / 1280;
+  const a = $("plink").getBoundingClientRect(), w = win.getBoundingClientRect(), k = w.width / WIN_W;
   return { x: (a.left - w.left + a.width / 2) / k, y: (a.top - w.top + a.height / 2) / k };
 }
 function fromOrigin(rect, k) {
@@ -602,13 +610,14 @@ function reset() {
   $("splitBT").textContent = "Three days in Lisbon"; $("splitB").textContent = "A";
   $("splitB").style.background = "#F2C14E"; $("splitB").style.color = "#202321";
   $("urlText").textContent = "mail.example.com";
-  src.place(CARD); peek.place(PEEK, { o: 0 }); rec.place(RIGHT);
+  if (WIN_W !== 1280) setWindowWidth(1280);
+  src.place(CARD); peek.place(PEEK, { o: 0 }); rec.place(RIGHT); scrim2.set({ o: 0 });
   scrim.set({ o: 0 }); ctrls.set({ o: 0, dx: 0 }); grab.set({ o: 0 }); toast.set({ o: 0, y: 8, s: 0.96 });
   pill.set({ y: 258, o: 1 }); pillNew.set({ o: 0 }); today.set({ d: 0 }); newRow.set({ o: 0, s: 0.96 }); rowA.set({ o: 1 }); rowSplit.set({ o: 0 });
 }
 function showPeekAt(rect) {
   win.classList.add("peeking");
-  peek.place(rect); scrim.set({ o: 1 }); ctrls.set({ o: 1, dx: 0 }); grab.set({ o: 0.9 });
+  peek.place(rect); scrim.set({ o: 1 }); ctrls.set({ o: 1, dx: 0 }); grab.set({ o: 1 });
   src.set({ s: RM ? 1 : RECEDE }); $("urlText").textContent = "atlas.example";
 }
 const STATES = {
@@ -628,12 +637,17 @@ const STATES = {
     reset(); src.place(LEFT); peek.place(RIGHT); rowA.set({ o: 0 }); rowSplit.set({ o: 1 });
     $("srcRim").classList.add("half"); $("urlText").textContent = "atlas.example";
   },
-  insplit() { reset(); inSplitBase(); },
-  insplitPeek() { reset(); inSplitBase(); win.classList.add("peeking"); peek.place(PEEK_IN_PANE); scrim.set({ o: 1 }); ctrls.set({ o: 1 }); grab.set({ o: 0.9 }); src.set({ s: RM ? 1 : RECEDE }); $("urlText").textContent = "atlas.example"; },
+  insplit() { reset(); inSplitBase(true); },
+  /* Source pane 655 pt (at least PANE_MIN): the Peek covers the source pane only. */
+  insplitPeek() { reset(); inSplitBase(true); win.classList.add("peeking"); peek.place(PEEK_IN_PANE); scrim.set({ o: 1 }); ctrls.set({ o: 1 }); grab.set({ o: 1 }); src.set({ s: RM ? 1 : RECEDE }); $("urlText").textContent = "atlas.example"; },
+  /* Source pane 535 pt (under PANE_MIN): the Peek covers the whole content area, over both panes. */
+  insplitNarrow() { reset(); inSplitBase(false); win.classList.add("peeking"); peek.place(PEEK); scrim.set({ o: 1 }); scrim2.set({ o: 1 }); ctrls.set({ o: 1 }); grab.set({ o: 1 }); src.set({ s: RM ? 1 : RECEDE }); rec.set({ s: RM ? 1 : RECEDE }); $("urlText").textContent = "atlas.example"; },
   splitFull() { reset(); showPeekAt(PEEK); $("bSplit").setAttribute("aria-disabled", "true"); $("bSplit").classList.add("tipped"); $("bSplit").querySelector(".tip").textContent = "Split View is full"; }
 };
-function inSplitBase() {
-  win.classList.add("insplit"); src.place(LEFT); rec.place(RIGHT); rowA.set({ o: 0 }); rowSplit.set({ o: 1 });
+function inSplitBase(wide) {
+  if (wide) setWindowWidth(WIDE.win);
+  const L = wide ? WIDE.left : LEFT, R = wide ? WIDE.right : RIGHT;
+  win.classList.add("insplit"); src.place(L); rec.place(R); rowA.set({ o: 0 }); rowSplit.set({ o: 1 });
   $("splitBT").textContent = "Weekend Recipes"; $("splitB").textContent = "W"; $("splitB").style.background = "#E0533D"; $("splitB").style.color = "#fff";
   $("recRim").classList.add("half");
 }
@@ -647,7 +661,7 @@ function placeCursor() {
 function peekOut(kind) {
   win.classList.remove("peeking");
   ctrls.to({ o: 0 }, "fadeFast"); grab.to({ o: 0 }, "fadeFast");
-  scrim.to({ o: 0 }, RM ? "fade" : "firm"); src.to({ s: 1 }, "firm");
+  scrim.to({ o: 0 }, RM ? "fade" : "firm"); scrim2.to({ o: 0 }, RM ? "fade" : "firm"); src.to({ s: 1 }, "firm"); rec.to({ s: 1 }, "firm");
   $("urlText").textContent = "mail.example.com";
   if (RM) { peek.to({ o: 0 }, "fadeFast"); }
   else if (kind === "esc") { peek.to({ s: 0.97 }, "firmFast").to({ o: 0 }, "fadeFast"); }
@@ -662,14 +676,14 @@ const T = {
   open: { from: "idle", run() {
     $("plink").classList.remove("hover"); $("cursor").classList.remove("on");
     win.classList.add("peeking"); $("urlText").textContent = "atlas.example";
-    if (RM) { peek.place(PEEK, { o: 0 }); peek.to({ o: 1 }, "fade"); scrim.to({ o: 1 }, "fade"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 0.9 }, "fade"); return; }
+    if (RM) { peek.place(PEEK, { o: 0 }); peek.to({ o: 1 }, "fade"); scrim.to({ o: 1 }, "fade"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 1 }, "fade"); return; }
     const o = fromOrigin(PEEK, 0.3);
     peek.place(PEEK, { x: o.x, y: o.y, s: 0.9, o: 0 });
     peek.to({ x: PEEK.x, y: PEEK.y, s: 1 }, "firmSlow").to({ o: 1 }, "fadeIn");
     scrim.to({ o: 1 }, "firm"); src.to({ s: RECEDE }, "firmSlow");
     ctrls.set({ dx: -10 });
     after(70, () => ctrls.to({ o: 1, dx: 0 }, "springyFast"));
-    after(110, () => grab.to({ o: 0.9 }, "fade"));
+    after(110, () => grab.to({ o: 1 }, "fade"));
   } },
   close: { from: "open", run() { peekOut("click"); } },
   esc: { from: "open", run() { peekOut("esc"); } },
@@ -702,13 +716,13 @@ const T = {
   } },
   snapback: { from: "dragShort", run() {
     peek.vel({ y: -300 }).to({ y: PEEK.y, s: 1 }, RM ? "firm" : "springy");
-    scrim.to({ o: 1 }, "firm"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 0.9 }, "fade"); src.to({ s: RM ? 1 : RECEDE }, "firm");
+    scrim.to({ o: 1 }, "firm"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 1 }, "fade"); src.to({ s: RM ? 1 : RECEDE }, "firm");
   } },
   reopen: { from: "closed", run() {
     toast.to({ o: 0 }, "fadeFast"); win.classList.add("peeking"); $("urlText").textContent = "atlas.example";
     if (RM) { peek.place(PEEK, { o: 0 }); peek.to({ o: 1 }, "fade"); }
     else { peek.place(PEEK, { s: 0.96, o: 0 }); peek.to({ s: 1 }, "firm").to({ o: 1 }, "fadeIn"); src.to({ s: RECEDE }, "firm"); }
-    scrim.to({ o: 1 }, RM ? "fade" : "firm"); after(60, () => ctrls.to({ o: 1 }, "fade")); after(90, () => grab.to({ o: 0.9 }, "fade"));
+    scrim.to({ o: 1 }, RM ? "fade" : "firm"); after(60, () => ctrls.to({ o: 1 }, "fade")); after(90, () => grab.to({ o: 1 }, "fade"));
   } },
   /* Open, then Esc 120 ms later: the close picks up the open's position and velocity. */
   interrupt: { from: "idle", run() { T.open.run(); after(120, () => peekOut("esc")); } }
@@ -718,7 +732,7 @@ const T = {
 let drag = null;
 function startDrag(e) {
   if (FROZEN || !win.classList.contains("peeking") || drag) return;
-  drag = { y0: e.clientY, k: win.getBoundingClientRect().width / 1280, samples: [[performance.now(), 0]] };
+  drag = { y0: e.clientY, k: win.getBoundingClientRect().width / WIN_W, samples: [[performance.now(), 0]] };
   e.currentTarget.setPointerCapture(e.pointerId);
 }
 $("peek").addEventListener("pointerdown", startDrag);
@@ -730,7 +744,7 @@ function moveDrag(e) {
   drag.dy = dy; drag.samples.push([performance.now(), dy]); if (drag.samples.length > 6) drag.samples.shift();
   const f = Math.max(0, Math.min(1, dy / 300));
   peek.set({ y: PEEK.y + dy, s: 1 - 0.06 * f }); scrim.set({ o: 1 - 0.75 * f });
-  ctrls.set({ o: Math.max(0, 1 - Math.abs(dy) / 60) }); grab.set({ o: Math.max(0, 0.9 - Math.abs(dy) / 60) });
+  ctrls.set({ o: Math.max(0, 1 - Math.abs(dy) / 60) }); grab.set({ o: Math.max(0, 1 - Math.abs(dy) / 60) });
 }
 $("peek").addEventListener("pointermove", moveDrag);
 $("grab").addEventListener("pointermove", moveDrag);
@@ -740,7 +754,7 @@ function endDrag() {
   const v = (b[1] - a[1]) / Math.max(1, b[0] - a[0]) * 1000;  // pt/s
   const dy = drag.dy || 0; drag = null;
   if (dy > 120 || v > 800) { peek.vel({ y: Math.max(v, 600) }); T.fling.run(); }
-  else { peek.vel({ y: v }).to({ y: PEEK.y, s: 1 }, RM ? "firm" : "springy"); scrim.to({ o: 1 }, "firm"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 0.9 }, "fade"); }
+  else { peek.vel({ y: v }).to({ y: PEEK.y, s: 1 }, RM ? "firm" : "springy"); scrim.to({ o: 1 }, "firm"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 1 }, "fade"); }
 }
 for (const id of ["peek", "grab"]) { $(id).addEventListener("pointerup", endDrag); $(id).addEventListener("pointercancel", endDrag); }
 
@@ -749,6 +763,7 @@ $("plink").addEventListener("click", e => { e.preventDefault(); if (!win.classLi
 $("plink").addEventListener("mouseenter", () => $("plink").classList.add("hover"));
 $("plink").addEventListener("mouseleave", () => $("plink").classList.remove("hover"));
 $("scrim").addEventListener("click", () => peekOut("click"));
+$("scrim2").addEventListener("click", () => peekOut("click"));
 $("bClose").addEventListener("click", () => peekOut("click"));
 $("bExpand").addEventListener("click", () => T.expand.run());
 $("bSplit").addEventListener("click", () => { if (!$("bSplit").hasAttribute("aria-disabled")) T.split.run(); });
@@ -766,7 +781,7 @@ function fit() {
   const shot = document.body.classList.contains("shot");
   const barH = shot ? 0 : $("bar").offsetHeight; document.documentElement.style.setProperty("--bar-h", barH + "px");
   const W = innerWidth - (shot ? 0 : 48), H = innerHeight - (shot ? 0 : barH + 48);
-  const k = shot ? Math.min(1, W / 1280, H / 800) : Math.min(1, W / 1280, H / 800);
+  const k = Math.min(1, W / WIN_W, H / 800);
   $("fit").style.transform = `scale(${k})`;
 }
 function params() { return new URLSearchParams(location.hash.slice(1)); }
