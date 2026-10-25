@@ -124,7 +124,7 @@ struct SidebarDiffTests {
     return sidebar
   }
 
-  @Test func titleProfileOrThemeChangeEmitsSpaceChanged() throws {
+  @Test func titleProfileThemeOrIconChangeEmitsSpaceChanged() throws {
     let (a, b) = (Self.space("A"), Self.space("B"))
     let old = try Self.sidebar([a, b])
     var renamed = a
@@ -136,6 +136,9 @@ struct SidebarDiffTests {
     var reprofiled = a
     reprofiled.profile = "Work"
     #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([reprofiled, b])) == [.spaceChanged(a.id)])
+    var reiconed = a
+    reiconed.icon = .symbol("star")
+    #expect(SidebarDiff.changes(from: old, to: try Self.sidebar([reiconed, b])) == [.spaceChanged(a.id)])
   }
 
   /// Only the Space that left its place is reported, not every Space whose index shifted.

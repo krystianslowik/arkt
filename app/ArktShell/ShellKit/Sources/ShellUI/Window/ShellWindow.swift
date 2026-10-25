@@ -61,6 +61,20 @@ public final class ShellWindow: NSWindow {
     super.sendEvent(event)
   }
 
+  // MARK: Reserved keys (W3-8 step 3)
+
+  /// The keys Arkt handles before the focused view. A web page takes every key equivalent first
+  /// (`RenderWidgetHostViewCocoa`), so without this a page could swallow Cmd-W or Cmd-Q.
+  public var reservedKeys = ReservedKeys.arkt
+
+  /// A reserved key goes to the main menu first, before the view hierarchy; when the menu has no item for it, it goes
+  /// the usual way. This is where Chromium reserves its own keys on macOS (the window's command dispatcher runs before
+  /// the first responder), and it covers the FakeEngine build too.
+  public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if reservedKeys.matches(event), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
+    return super.performKeyEquivalent(with: event)
+  }
+
   // MARK: Engine commands (Decision 9)
 
   /// Where the engine's command selectors go: the window's host. Set by `ShellWindowController`.

@@ -4,11 +4,11 @@ import ChromiumEngineKit
 import Darwin
 import EngineAPI
 
-// The Engine build's shell until W3-7 part C and W3-9 (the typed embedder itself is ChromiumEngineKit's
-// ArktShellEmbedder). It stands in for AppComposition: a simulated 2 s start before embedderReady (or a failure with
-// --arkt-embedder-fail), plain windows for the engine's own window requests that mount the active tab's container,
-// logged quit seams and a simulated flush. W3-9 replaces it with AppComposition.start, ShellWindowController hosts,
-// prepareForTermination() and flush().
+// The engine lane's stand-in shell, for its probes only (--arkt-reentrancy-probe, --arkt-embedder-fail); every
+// other Engine launch runs ChromiumShell over AppComposition (W3-7 part C). A simulated 2 s start before
+// embedderReady (or a failure with --arkt-embedder-fail), plain windows for the engine's own window requests that
+// mount the active tab's container, logged quit seams and a simulated flush. W3-9 decides whether the probes move to
+// the Arkt shell.
 
 nonisolated func shellLog(_ message: String) {
     var now = timeval()
@@ -31,6 +31,12 @@ func runLoopModeName() -> String {
 @MainActor
 final class StandInShell: ChromiumEmbedderDelegate {
     static let shared = StandInShell()
+
+    /// The launch asks for the stand-in: one of the engine lane's probe switches is present.
+    static var isRequested: Bool {
+        let arguments = CommandLine.arguments
+        return arguments.contains("--arkt-reentrancy-probe") || arguments.contains("--arkt-embedder-fail")
+    }
 
     /// Stands in for `AppComposition.start`.
     private static let simulatedStart: Duration = .seconds(2)

@@ -24,7 +24,7 @@ settings:
     DEAD_CODE_STRIPPING: YES
     ARKT_PRINCIPAL_CLASS: NSApplication
     # Info.plist `ArktEnvironmentOverrides`: YES only where the build reads the ARKT_* environment overrides (Debug,
-    # Profile); NO in Release, Engine and any new config. The UI test harness refuses to launch a bundle without YES.
+    # Profile, Engine); NO in Release and any new config. The UI test harness refuses to launch a bundle without YES.
     ARKT_ENV_OVERRIDES: "NO"
   configs:
     Debug:
@@ -36,8 +36,11 @@ settings:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_CHROMIUM_ENGINE"
       # Chromium CHECKs that NSApp is a BrowserCrApplication (chrome_browser_application_mac.mm).
       ARKT_PRINCIPAL_CLASS: BrowserCrApplication
-      # Development only; the signed release bundle is Task W3-11.
+      # Development only; the signed release bundle is Task W3-11, from a configuration that reads no overrides.
       ENABLE_HARDENED_RUNTIME: NO
+      # Reads the ARKT_* overrides (AppEnvironment, ARKT_CHROMIUM_ENGINE), so a development run can keep the shell's
+      # data, Arc folder and defaults away from the real ones (ARKT_DATA_DIR and the rest).
+      ARKT_ENV_OVERRIDES: "YES"
       # Keep the Swift entry point in the main executable, like Chromium's stub, instead of
       # Xcode's debug stub plus ArktShell.debug.dylib.
       ENABLE_DEBUG_DYLIB: NO

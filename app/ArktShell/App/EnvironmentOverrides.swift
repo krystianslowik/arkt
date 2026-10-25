@@ -1,10 +1,10 @@
-#if DEBUG || ARKT_SMOKE_BUILD
+#if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
 import Foundation
 
-/// Parsing of the environment overrides that Debug and Profile builds (`ARKT_SMOKE_BUILD`) accept. Release builds
-/// compile none of it. Pure: it reads only the dictionary it is given, so ShellKit's `ShellUITests` compile this file
-/// through a symlink and test it (the app target has no test target). `AppEnvironment` passes the process
-/// environment.
+/// Parsing of the environment overrides that Debug, Profile (`ARKT_SMOKE_BUILD`) and Engine (`ARKT_CHROMIUM_ENGINE`)
+/// builds accept. Release builds compile none of it. Pure: it reads only the dictionary it is given, so ShellKit's
+/// `ShellUITests` compile this file through a symlink and test it (the app target has no test target).
+/// `AppEnvironment` passes the process environment.
 struct EnvironmentOverrides {
   static let dataDirectoryKey = "ARKT_DATA_DIR"
   static let arcDirectoryKey = "ARKT_ARC_DIR"

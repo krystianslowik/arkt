@@ -71,6 +71,24 @@ final class EngineHostingTests: XCTestCase {
     XCTAssertTrue(harness.engine.executedCommands.isEmpty, "claimed commands never reach the engine")
   }
 
+  /// Close Window (`IDC_CLOSE_WINDOW`, from a Chromium path) takes the close button's way: the engine closes the
+  /// tabs, then the window.
+  func testTheHostClaimsCloseWindowAndAsksTheEngine() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    window.orderFront(nil)
+    defer { window.orderOut(nil) }
+    let host = harness.controller.engineHost
+    XCTAssertEqual(host.claim(.closeWindow), CommandClaim(isEnabled: true))
+
+    XCTAssertTrue(host.perform(.closeWindow, disposition: .currentTab))
+
+    XCTAssertFalse(window.isVisible)
+    XCTAssertTrue(harness.engine.windowIDs.isEmpty)
+    XCTAssertTrue(harness.engine.executedCommands.isEmpty)
+  }
+
   func testCloseTabIsDisabledWithoutACurrentTab() throws {
     var sidebar = SidebarModel.Sidebar()
     _ = sidebar.addSpace(title: "Empty")
@@ -136,7 +154,7 @@ final class EngineHostingTests: XCTestCase {
     harness.hidden = []
 
     XCTAssertFalse(harness.controller.windowShouldClose(window))
-    XCTAssertEqual(harness.hidden, [world.today[0]], "the shown tab is reported hidden before the engine closes it")
+    XCTAssertTrue(harness.hidden.isEmpty, "nothing is stamped while the engine has not answered")
 
     XCTAssertTrue(window.isVisible)
     XCTAssertEqual(harness.engine.snapshot(of: tab)?.isClosing, true)
@@ -146,15 +164,64 @@ final class EngineHostingTests: XCTestCase {
     XCTAssertEqual(harness.controller.engineWindow, engineWindow)
     XCTAssertEqual(harness.controller.currentTab, tab)
     XCTAssertFalse(harness.controller.sidebarController.closingNodes.contains(world.today[0]))
+    XCTAssertTrue(harness.hidden.isEmpty, "a cancelled close stamps nothing")
 
     XCTAssertFalse(harness.controller.windowShouldClose(window))
     XCTAssertTrue(window.isVisible)
     XCTAssertTrue(harness.engine.answerDialog(tab, accept: true))
+    XCTAssertEqual(harness.hidden, [world.today[0]], "the shown tab is stamped once, before its page closes")
     XCTAssertFalse(window.isVisible, "closed on .windowClosed")
     XCTAssertNil(harness.controller.engineWindow)
     XCTAssertTrue(harness.engine.windowIDs.isEmpty)
     XCTAssertTrue(harness.archived.isEmpty)
     XCTAssertNotNil(harness.source.node(world.today[0]))
+  }
+
+  /// PR #274 review: a close-button close the user cancels at the leave-site prompt leaves the stored sidebar
+  /// byte-identical (no `lastActiveAt` stamp for tabs that never stopped being visible).
+  func testACancelledWindowCloseLeavesTheStoredSidebarByteIdentical() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: world.panes[0])
+    let pane = try XCTUnwrap(harness.controller.currentTab)
+    harness.engine.holdClose(pane)
+    harness.hidden = []
+    let before = try SidebarStorageFormat.encode(harness.source.sidebar)
+
+    XCTAssertFalse(harness.controller.windowShouldClose(window))
+    XCTAssertTrue(harness.engine.answerDialog(pane, accept: false))
+
+    XCTAssertEqual(try SidebarStorageFormat.encode(harness.source.sidebar), before)
+    XCTAssertTrue(harness.hidden.isEmpty)
+    XCTAssertEqual(harness.controller.visibleNodes, Set(world.panes), "both panes are still shown")
+  }
+
+  /// Without a prompt the close goes through at once: every shown tab, both panes of a shown split, is stamped once,
+  /// before the pages close, and nothing else changes.
+  func testAnUnheldWindowCloseStampsTheShownTabsOnce() throws {
+    let world = try EngineWorld.make()
+    let harness = EngineHarnessWindow(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    window.orderFront(nil)
+    defer { window.orderOut(nil) }
+    harness.controller.activate(node: world.today[0])
+    harness.controller.activate(node: world.panes[1])
+    harness.hidden = []
+    var visibleWhenStamped: [Set<UUID>] = []
+    let stamp = harness.controller.onTabHidden
+    harness.controller.onTabHidden = { [weak controller = harness.controller] id in
+      visibleWhenStamped.append(controller?.visibleNodes ?? [])
+      stamp?(id)
+    }
+
+    XCTAssertFalse(harness.controller.windowShouldClose(window))
+
+    XCTAssertEqual(Set(harness.hidden), Set(world.panes))
+    XCTAssertEqual(harness.hidden.count, 2)
+    XCTAssertEqual(visibleWhenStamped, [Set(world.panes), Set(world.panes)], "stamped before any page closed")
+    XCTAssertFalse(window.isVisible)
+    XCTAssertTrue(harness.archived.isEmpty)
   }
 
   /// A tab the engine opens while the window's close is held gets no row: the window is going away.
@@ -165,6 +232,7 @@ final class EngineHostingTests: XCTestCase {
     harness.controller.activate(node: world.today[0])
     let tab = try XCTUnwrap(harness.controller.currentTab)
     harness.engine.holdClose(tab)
+    harness.hidden = []
     XCTAssertFalse(harness.controller.windowShouldClose(window))
     let before = try SidebarStorageFormat.encode(harness.source.sidebar)
 
@@ -172,8 +240,11 @@ final class EngineHostingTests: XCTestCase {
                                                in: try XCTUnwrap(harness.controller.engineWindow), active: true)
 
     XCTAssertNil(harness.engine.snapshot(of: popup), "closed without a row")
-    XCTAssertTrue(harness.engine.answerDialog(tab, accept: true))
     XCTAssertEqual(try SidebarStorageFormat.encode(harness.source.sidebar), before)
+    let today = harness.source.children(of: .today(world.space))
+    XCTAssertTrue(harness.engine.answerDialog(tab, accept: true))
+    XCTAssertEqual(harness.source.children(of: .today(world.space)), today, "only the shown tab's stamp, no row")
+    XCTAssertEqual(harness.hidden, [world.today[0]])
   }
 }
 

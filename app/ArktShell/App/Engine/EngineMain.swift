@@ -43,7 +43,14 @@ private func engineFrameworkPath() -> String {
 func engineMain() -> Never {
     // The hook finds the embedder by name only (NSClassFromString). install
     // references the class, which keeps dead stripping from dropping it.
-    ChromiumEmbedding.install(StandInShell.shared)
+    // The engine-lane probes (--arkt-reentrancy-probe, --arkt-embedder-fail)
+    // keep the stand-in shell; every other launch runs the Arkt shell.
+    if StandInShell.isRequested {
+        ChromiumEmbedding.install(StandInShell.shared)
+    } else {
+        ChromiumShell.shared.installMenuAfterLaunch()
+        ChromiumEmbedding.install(ChromiumShell.shared)
+    }
 
     let path = engineFrameworkPath()
     FileHandle.standardError.write(Data("ARKT engine shell: dlopen \(path)\n".utf8))
