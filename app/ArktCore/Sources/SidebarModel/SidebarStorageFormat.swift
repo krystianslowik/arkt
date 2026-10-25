@@ -8,10 +8,14 @@ import Foundation
 /// Deterministic: arrays follow model order, favorites are sorted by profile and keys are sorted. Dates are Double
 /// seconds since 2001-01-01 (Swift's default, also Arc's), written in shortest round-trip form.
 ///
-/// Version policy: a document must carry exactly `currentVersion`. A newer version (written by a later Arkt) or an
+/// Version policy: a document is written as `currentVersion`. A newer version (written by a later Arkt) or an
 /// unknown one throws `SidebarDocumentError.unsupportedVersion` and is never read on a best-effort basis, so an older
 /// build cannot silently drop data it does not understand. Any new field, even an optional one, requires a version
 /// bump; a new version gets a new frozen fixture and an explicit migration from the older versions.
+///
+/// Version 2 adds `Space.icon` (`SpaceIcon`'s tagged shape). Version 1 is the same document without that field:
+/// decoding it leaves every icon nil and is the whole migration. Nothing else is rewritten. An `icon` key inside a
+/// version 1 document is not part of version 1 and is ignored, never read as a version 2 icon.
 ///
 /// Equality: two stored documents hold the same sidebar when their decoded values are equal. Byte equality is only a
 /// fast path (the encoding is deterministic for a given build), never the definition.
@@ -20,7 +24,12 @@ import Foundation
 /// `Sidebar.maximumNestingDepth`, enforced by `insert`, bounds how deep the decoded tree may be, and is reported as
 /// `.invalidTree(.nestingTooDeep(id))`.
 public enum SidebarStorageFormat {
-  public static let currentVersion = 1
+  public static let currentVersion = 2
+
+  /// Documents this build reads. Version 1 migrates by leaving `Space.icon` nil (the field did not exist).
+  /// `SidebarStorageFormat` versions only the sidebar document; archived `NodeSnapshot`s carry no Space data and are
+  /// versioned on their own (`ArchiveStore.snapshotFormatVersion`).
+  public static let readableVersions: Set<Int> = [1, 2]
 
   /// Same value as `Sidebar.maximumNestingDepth`, the model invariant that decoding enforces through `insert`.
   public static let maximumNestingDepth = Sidebar.maximumNestingDepth
@@ -58,6 +67,26 @@ private struct SpaceEntry: Codable {
   var today: [NodeSnapshot]
 }
 
+/// A version 1 Space entry. Read only; this build writes `currentVersion`.
+private struct SpaceEntryV1: Decodable {
+  struct SpaceV1: Decodable {
+    var id: SpaceID
+    var title: String
+    var profile: String
+    var theme: SpaceTheme?
+  }
+
+  var space: SpaceV1
+  var pinned: [NodeSnapshot]
+  var today: [NodeSnapshot]
+
+  var entry: SpaceEntry {
+    SpaceEntry(
+      space: Space(id: space.id, title: space.title, profile: space.profile, theme: space.theme, icon: nil),
+      pinned: pinned, today: today)
+  }
+}
+
 private struct FavoritesEntry: Codable {
   var profile: String
   var items: [NodeSnapshot]
@@ -69,10 +98,16 @@ extension Sidebar: Codable {
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let version = try container.decode(Int.self, forKey: .version)
-    guard version == SidebarStorageFormat.currentVersion else {
+    guard SidebarStorageFormat.readableVersions.contains(version) else {
       throw SidebarDocumentError.unsupportedVersion(version)
     }
-    let spaces = try container.decode([SpaceEntry].self, forKey: .spaces)
+    // Version 1 Spaces decode through their own shape, which has no icon: an `icon` key in a version 1 document is
+    // never read, whatever it holds.
+    let spaces: [SpaceEntry] = if version == 1 {
+      try container.decode([SpaceEntryV1].self, forKey: .spaces).map(\.entry)
+    } else {
+      try container.decode([SpaceEntry].self, forKey: .spaces)
+    }
     let favorites = try container.decode([FavoritesEntry].self, forKey: .favorites)
     var sidebar = Sidebar()
     var profiles: Set<String> = []

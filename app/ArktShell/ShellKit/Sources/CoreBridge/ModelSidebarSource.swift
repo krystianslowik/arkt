@@ -79,6 +79,14 @@ public final class ModelSidebarSource: SidebarSource {
     mutate { $0.moveSpace(id, to: index) }
   }
 
+  public func setIcon(_ id: UUID, to icon: SpaceIconInfo?) {
+    mutate { $0.setIcon(id, to: BridgeMapping.modelIcon(icon)) }
+  }
+
+  public func setTheme(_ id: UUID, to theme: SpaceThemeInfo?) {
+    mutate { $0.setTheme(id, to: theme.map(BridgeMapping.modelTheme)) }
+  }
+
   /// Engine-driven title / URL changes. Unknown or non-tab ids are ignored, like `StubSidebar`.
   public func updateTab(_ id: UUID, url: URL?, title: String?) {
     _ = try? mutate { try $0.updateTab(id, url: url, title: title) }

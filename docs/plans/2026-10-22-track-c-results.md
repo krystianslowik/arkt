@@ -1215,3 +1215,41 @@ and `space-swipe-flavor` twice (`64@20.58`, `9@30.30`). The probe names both:
 - The WindowServer-side trace of the acceptance criteria was not taken: the cause is in the app (a per-frame
   window-server query and per-frame view geometry), shown by the probe, `sample` and the A/B above.
 - #275 (light/dark chrome flip pass), #278 (hover resync query during a switch).
+
+## Space icon, theme picker and header drag reorder (#279)
+
+Plan: parity spec section 2.2 (BH-034, BH-038, BH-039); decisions D1 and D2 are in the track C plan's Decisions
+section. Pull request #287.
+
+- Model and storage: `Space.icon` is `SpaceIcon` (`.symbol(name)` or `.emoji(text)`, D1), stored as a tagged object.
+  Sidebar documents are written as format version 2 with a frozen fixture (`sidebar-v2.json`, a symbol and an emoji
+  icon, the emoji written as JSON escapes). Version 1 documents still load, every icon nil; a version 1 document that
+  carries an `icon` key is decoded through the version 1 Space shape, so the key is ignored whatever it holds.
+- Archive rows keep their own format version (`ArchiveStore.snapshotFormatVersion = 1`). `NodeSnapshot` holds no Space
+  data and did not change, so stamping rows with the sidebar format (2) would only have hidden them from builds that
+  read version 1.
+- `SidebarSource.setTheme(_:to:)` takes an optional theme; nil is the header menu's "Default" (D2), and
+  `SidebarSpaceInfo.usesDefaultTheme` drives its checkmark.
+- The bridge stores theme colors as sRGB components and converts Display P3 colors (through extended sRGB) instead of
+  copying their components.
+- Dock: a symbol is the dot's own fill (`sidebarForeground` to `primaryText`, the #72 contrast pair) seen through the
+  symbol as a mask; an emoji is drawn as text into a bitmap at the backing scale and dims by the idle dot's alpha ratio
+  (TODO(measure)). Icon bitmaps are cached per (icon, scale); a swipe frame sets only fills and opacities, no frame,
+  image or rasterization (`swipeFramesNeverRedrawAnIcon`).
+- Header drag: the title follows the pointer 1:1 (frame origin only), rubber-banded where no Space is left to pass;
+  one slot is one header width, so a move commits at half of it, like a swipe between Space pages. On release the
+  title springs home (`SpringDriver`, damping 1.0, response 0.3 s, TODO(parity)) with the release velocity; a press
+  during the spring catches it; Reduce Motion snaps. The "Drag to Reorder Space" tip is off while the title is open
+  and is installed again only when the header rect changes.
+
+Tests: counts are taken from the macOS CI run of this pull request (no local Swift toolchain was used for this
+section). New test functions against `main`: ArktCore 9, ShellKit unit 20 (17 `ShellUITests`, 3 `CoreBridgeTests`),
+`ShellKitGUITests` 5.
+
+Deviations from the plan:
+
+- Paper and Dusk are placeholder colors, `TODO(design)` like `bridgeDefault`; no design or Arc measurement backs them.
+- Profile is a disabled item on the header menu; profiles are not in the model yet.
+- The icon picker lives on the header "..." menu (symbols, then "Emoji..."); Arc's own picker was not measured.
+- The header draws no Space icon next to the title; the spec does not place one there (BH-038 names the edit icon and
+  the "..." menu only). Icons show in the dock.

@@ -12,9 +12,22 @@ public final class ThemeBackgroundView: WindowDragView {
   private let grain = CALayer()
   private var lowerIndex = -1
   public private(set) var position: CGFloat = 0
+  /// TODO(measure): Arc's Space theme crossfade.
+  public var crossfadeDuration: TimeInterval = 0.28
+  /// Read when a theme is replaced. Tests replace it; Reduce Motion snaps.
+  public var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  private var crossfadeToken = 0
+  private var crossfadeActive = false
+  private var suppressSnap = false
+  private static let crossfadeKey = "themeCrossfade"
 
   public var themes: [SpaceThemeInfo] = [] {
-    didSet { lowerIndex = -1; setPosition(position) }
+    didSet {
+      guard !suppressSnap else { return }
+      cancelCrossfade()
+      lowerIndex = -1
+      setPosition(position)
+    }
   }
 
   public override init(frame: NSRect) {
@@ -47,9 +60,48 @@ public final class ThemeBackgroundView: WindowDragView {
     CATransaction.commit()
   }
 
-  /// position 1.25 = theme 1 blended 25% toward theme 2.
+  /// Replaces `themes`. `crossfade` fades the settled Space from its old theme to the new one. Anything else (a
+  /// reorder, a different count, a swipe in progress, Reduce Motion, a duration of 0) snaps, which is what
+  /// `themes`'s setter does.
+  public func replaceThemes(_ newThemes: [SpaceThemeInfo], crossfade: Bool) {
+    let old = themes
+    guard crossfade, let index = settledIndex(), old.indices.contains(index), newThemes.count == old.count,
+          newThemes[index] != old[index], crossfadeDuration > 0, !reducesMotion()
+    else {
+      if themes != newThemes { themes = newThemes }
+      return
+    }
+    cancelCrossfade()
+    let token = crossfadeToken
+    suppressSnap = true
+    themes = newThemes
+    suppressSnap = false
+    let duration = crossfadeDuration
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    base.colors = Self.gradientColors(old[index])
+    overlay.colors = Self.gradientColors(newThemes[index])
+    overlay.opacity = 1
+    lowerIndex = index
+    let grainFrom = Float(old[index].textureOpacity)
+    let grainTo = Float(newThemes[index].textureOpacity)
+    grain.opacity = grainTo
+    CATransaction.commit()
+    fade(overlay, from: 0, to: 1, duration: duration)
+    if grainFrom != grainTo { fade(grain, from: grainFrom, to: grainTo, duration: duration) }
+    crossfadeActive = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, self.crossfadeToken == token, self.crossfadeActive else { return }
+        self.setPosition(self.position)
+      }
+    }
+  }
+
+  /// position 1.25 = theme 1 blended 25% toward theme 2. An in-flight theme crossfade stops here.
   public func setPosition(_ newPosition: CGFloat) {
     position = newPosition
+    cancelCrossfade()
     guard !themes.isEmpty else { return }
     let clamped = min(max(newPosition, 0), CGFloat(themes.count - 1))
     let lower = Int(clamped.rounded(.down))
@@ -66,6 +118,37 @@ public final class ThemeBackgroundView: WindowDragView {
     let grainFrom = themes[lower].textureOpacity, grainTo = themes[upper].textureOpacity
     grain.opacity = Float(grainFrom + (grainTo - grainFrom) * Double(t))
     CATransaction.commit()
+  }
+
+  private func settledIndex() -> Int? {
+    guard !themes.isEmpty else { return nil }
+    let nearest = position.rounded()
+    guard abs(position - nearest) < 0.001 else { return nil }
+    let index = Int(nearest)
+    return themes.indices.contains(index) ? index : nil
+  }
+
+  private func cancelCrossfade() {
+    guard crossfadeActive else { return }
+    crossfadeActive = false
+    crossfadeToken &+= 1
+    overlay.removeAnimation(forKey: Self.crossfadeKey)
+    grain.removeAnimation(forKey: Self.crossfadeKey)
+    lowerIndex = -1
+  }
+
+  private func fade(_ layer: CALayer, from: Float, to: Float, duration: TimeInterval) {
+    let animation = CABasicAnimation(keyPath: "opacity")
+    animation.fromValue = from
+    animation.toValue = to
+    animation.duration = duration
+    animation.fillMode = .forwards
+    animation.isRemovedOnCompletion = false
+    layer.add(animation, forKey: Self.crossfadeKey)
+  }
+
+  var crossfadeAnimationForTesting: CABasicAnimation? {
+    overlay.animation(forKey: Self.crossfadeKey) as? CABasicAnimation
   }
 
   /// A gradient needs two stops; a single color is drawn flat.

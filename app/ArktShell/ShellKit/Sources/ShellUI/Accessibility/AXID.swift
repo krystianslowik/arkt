@@ -62,6 +62,10 @@ public enum AXID {
     public static let spaceTitle = "sidebar.spaceTitle"
     /// The Space header's hover edit button (#106); present only while shown.
     public static let spaceRename = "sidebar.spaceRename"
+    /// The Space header's hover "..." button (BH-038); present only while shown.
+    public static let spaceOptions = "sidebar.spaceOptions"
+    /// The menu that button opens: Icon, Theme, and a disabled Profile.
+    public static let spaceMenu = "sidebar.spaceMenu"
     /// Label: row title. Selected: row state is `current`.
     public static let rowPinned = "sidebar.row.pinned"
     /// Label: row title. Selected: row state is `current`.

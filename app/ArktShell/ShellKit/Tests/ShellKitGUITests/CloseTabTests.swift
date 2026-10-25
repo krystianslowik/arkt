@@ -119,9 +119,9 @@ final class CloseTabTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// User decision 4, PARITY(NEEDS-RUNTIME-CHECK BH-123): Cmd-W on a split pane in Today archives only that pane;
-  /// the split collapses into the remaining pane, which becomes current.
-  func testSplitPaneInTodayArchivesOnlyThatPane() throws {
+  /// User decision 4, PARITY(NEEDS-RUNTIME-CHECK BH-123): Cmd-W on a pane of a two-pane Today split archives only
+  /// that pane. The split collapses, the container hides, and the survivor shows as a plain tab.
+  func testCmdWOnPaneOfTwoCollapsesAndShowsSurvivorAsPlainTab() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     harness.controller.activate(node: world.panes[0])
@@ -131,7 +131,13 @@ final class CloseTabTests: XCTestCase {
     XCTAssertEqual(harness.archived, [[world.panes[0]]])
     XCTAssertNil(harness.source.node(world.split), "a split left with one pane becomes a plain tab")
     XCTAssertEqual(harness.source.children(of: .today(world.space)), world.today + [world.panes[1]])
+    let survivor = try XCTUnwrap(harness.controller.engineTab(of: world.panes[1]))
+    waitUntil("the split container hidden and the survivor shown on the single card") {
+      harness.controller.rootView.split.isHidden && !harness.controller.rootView.card.isHidden
+    }
     XCTAssertEqual(harness.controller.visibleNodes, [world.panes[1]])
+    XCTAssertEqual(harness.controller.sidebarController.current, world.panes[1])
+    XCTAssertTrue(harness.controller.rootView.card.contentView === harness.engine.contentView(for: survivor))
     harness.controller.close()
   }
 

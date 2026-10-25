@@ -55,9 +55,14 @@ public final class AutoArchiveTimer {
   }
 
   /// Loads the clock start and the settings, ticks once, then ticks every `interval`. Throws the store's error and
-  /// then never ticks. A call while starting or running does nothing; a `stop()` during the load wins.
+  /// then never ticks. A call while running does nothing; a `stop()` during the load wins, unless `start()` is called
+  /// again before the load finishes (a quit cancelled while the first start still loads): then the load goes on.
   public func start() async throws {
-    guard loop == nil, !isStarting else { return }
+    guard loop == nil else { return }
+    guard !isStarting else {
+      stopRequested = false
+      return
+    }
     isStarting = true
     stopRequested = false
     defer { isStarting = false }

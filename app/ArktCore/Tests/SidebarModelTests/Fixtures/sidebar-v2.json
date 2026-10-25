@@ -1,0 +1,84 @@
+{
+  "version": 2,
+  "spaces": [
+    {
+      "space": {
+        "id": "D1000000-0000-4000-8000-0000000000A1",
+        "title": "Alpha",
+        "profile": "default",
+        "icon": { "type": "symbol", "symbol": "star" },
+        "theme": {
+          "baseColors": [{ "red": 0.2, "green": 0.4, "blue": 0.6, "alpha": 1 }],
+          "overlayColors": [],
+          "texture": "grain",
+          "isDark": true
+        }
+      },
+      "pinned": [
+        {
+          "id": "D1000000-0000-4000-8000-000000000101",
+          "createdAt": 783000000,
+          "kind": { "type": "folder", "folder": { "title": "Docs" } },
+          "children": [
+            {
+              "id": "D1000000-0000-4000-8000-000000000102",
+              "createdAt": 783000001.5,
+              "kind": { "type": "tab", "tab": { "url": "https://example.com/a", "title": "A", "customTitle": "Renamed A" } },
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "D1000000-0000-4000-8000-000000000103",
+          "createdAt": 783000002,
+          "kind": { "type": "split", "split": { "orientation": "horizontal", "widthFactors": [0.5, 0.5] } },
+          "children": [
+            {
+              "id": "D1000000-0000-4000-8000-000000000104",
+              "createdAt": 783000003,
+              "kind": { "type": "tab", "tab": { "url": "https://example.com/b", "title": "B" } },
+              "children": []
+            },
+            {
+              "id": "D1000000-0000-4000-8000-000000000105",
+              "createdAt": 783000004,
+              "kind": { "type": "tab", "tab": { "url": "https://example.com/c", "title": "C" } },
+              "children": []
+            }
+          ]
+        }
+      ],
+      "today": [
+        {
+          "id": "D1000000-0000-4000-8000-000000000106",
+          "createdAt": 783000005,
+          "kind": { "type": "tab", "tab": { "url": "https://example.com/d", "title": "D", "lastActiveAt": 783000100.25 } },
+          "children": []
+        }
+      ]
+    },
+    {
+      "space": {
+        "id": "D1000000-0000-4000-8000-0000000000B1",
+        "title": "Beta",
+        "profile": "work",
+        "icon": { "type": "emoji", "emoji": "\ud83d\ude80" }
+      },
+      "pinned": [],
+      "today": []
+    }
+  ],
+  "favorites": [
+    {
+      "profile": "default",
+      "items": [
+        {
+          "id": "D1000000-0000-4000-8000-000000000107",
+          "createdAt": 783000006,
+          "kind": { "type": "tab", "tab": { "url": "https://example.com/mail", "title": "Mail" } },
+          "children": []
+        }
+      ]
+    }
+  ]
+}

@@ -45,6 +45,27 @@ struct SidebarStoreTests {
     await #expect(throws: SidebarStoreError.checksumMismatch) { try await store.load() }
   }
 
+  /// A snapshot written before Space icons (format column 1, body version 1) still loads; icons stay nil.
+  @Test func version1SnapshotLoadsWithNilIcons() async throws {
+    let database = try ArktDatabase.inMemory()
+    let store = SidebarStore(database: database)
+    let id = "D1000000-0000-4000-8000-0000000000A1"
+    let body = Data("""
+      {"favorites":[],"spaces":[{"pinned":[],"space":{"id":"\(id)","profile":"default","title":"Alpha"},"today":[]}],"version":1}
+      """.utf8)
+    try await database.writer.write { db in
+      try db.execute(
+        sql: """
+          INSERT INTO sidebar_snapshot (id, format_version, saved_at, sha256, body) VALUES (1, 1, 0, ?, ?)
+          """,
+        arguments: [SidebarStore.sha256(body), body])
+    }
+    let sidebar = try #require(try await store.load())
+    let space = try #require(UUID(uuidString: id))
+    #expect(sidebar.spaces[space]?.title == "Alpha")
+    #expect(sidebar.spaces[space]?.icon == nil)
+  }
+
   @Test func validChecksumButUnsupportedVersionFailsToDecode() async throws {
     let database = try ArktDatabase.inMemory()
     let store = SidebarStore(database: database)

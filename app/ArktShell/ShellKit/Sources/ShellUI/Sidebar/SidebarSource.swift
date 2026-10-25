@@ -46,14 +46,43 @@ public struct SpaceThemeInfo: Equatable, Sendable {
   }
 }
 
+/// A Space's dock icon (BH-034, decision D1 on #279): an SF Symbol name such as "star", or one emoji. Nil draws the
+/// dot. Mirrors `SidebarModel.SpaceIcon` case for case.
+public enum SpaceIconInfo: Hashable, Sendable {
+  case symbol(String)
+  /// Exactly one emoji, as `validatedEmoji(_:)` accepts it.
+  case emoji(String)
+
+  /// `.emoji(text)` when `text`, trimmed of whitespace, is exactly one extended grapheme cluster shown as an emoji;
+  /// nil otherwise. Accepted: a cluster whose first scalar has emoji presentation by default (U+1F680, a flag, a ZWJ
+  /// sequence starting with one), or an emoji-capable scalar followed by the emoji variation selector U+FE0F (U+2764
+  /// U+FE0F, a keycap such as "1" U+FE0F U+20E3). Rejected: plain digits, "#", "*" and other text-default scalars
+  /// without U+FE0F (they are `isEmoji` only because keycaps exist), letters, and anything longer than one cluster.
+  public static func validatedEmoji(_ text: String) -> SpaceIconInfo? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.count == 1, let character = trimmed.first else { return nil }
+    let scalars = Array(character.unicodeScalars)
+    guard let first = scalars.first else { return nil }
+    let presentsAsEmoji = first.properties.isEmojiPresentation
+      || (first.properties.isEmoji && scalars.count > 1 && scalars[1] == "\u{FE0F}")
+    return presentsAsEmoji ? .emoji(String(character)) : nil
+  }
+}
+
 public struct SidebarSpaceInfo: Equatable, Sendable {
   public var id: SpaceID
   public var title: String
   public var profile: String
+  /// The theme the window draws: the Space's own, or the source's default when it has none.
   public var theme: SpaceThemeInfo
+  /// The Space has no theme of its own and `theme` is the source's default (the header menu's "Default", D2 on #279).
+  public var usesDefaultTheme: Bool
+  public var icon: SpaceIconInfo?
 
-  public init(id: SpaceID, title: String, profile: String, theme: SpaceThemeInfo) {
+  public init(id: SpaceID, title: String, profile: String, theme: SpaceThemeInfo, usesDefaultTheme: Bool = false,
+              icon: SpaceIconInfo? = nil) {
     self.id = id; self.title = title; self.profile = profile; self.theme = theme
+    self.usesDefaultTheme = usesDefaultTheme; self.icon = icon
   }
 }
 
@@ -141,6 +170,12 @@ public protocol SidebarSource: AnyObject {
   /// Moves a Space so that it lands at `index`, measured before it is removed, clamped (BH-039). Emits `.spaceMoved`
   /// when the order changed; an unknown id is ignored.
   func moveSpace(_ id: SpaceID, to index: Int)
+  /// Sets a Space's icon (BH-034). Nil clears it. Emits `.spaceChanged` when it changed; an unknown id or the same
+  /// icon is ignored.
+  func setIcon(_ id: SpaceID, to icon: SpaceIconInfo?)
+  /// Sets a Space's theme (BH-034). Nil clears it, so the Space draws the source's default theme (D2 on #279). Emits
+  /// `.spaceChanged` when it changed; an unknown id or the same theme is ignored.
+  func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo?)
   func updateTab(_ id: NodeID, url: URL?, title: String?)
 
   // Split writes (BH-115, BH-116, BH-120). Each applies as one step: observers get its changes once, and a throw
@@ -185,7 +220,7 @@ public enum SidebarChange: Hashable, Sendable {
   case spaceRemoved(SpaceID)
   /// A Space changed its place in `spaceOrder` relative to the others (not just shifted by an add or a removal).
   case spaceMoved(SpaceID)
-  /// A Space's title, profile or theme changed.
+  /// A Space's title, profile, theme or icon changed.
   case spaceChanged(SpaceID)
 }
 

@@ -96,6 +96,48 @@ struct AutoArchiveTimerTests {
     harness.timer.stop()
   }
 
+  /// Plan S8 step 4, timer and policy side (decision 10). The exempt set here stands in for what the window
+  /// publishes for a shown split, every pane; that the window really publishes every pane is asserted in
+  /// `SplitArchiveTests.testAutoArchiveExemptsEveryShownPane`. With one pane idle past the threshold the split stays
+  /// with nothing exempt (a split ages from its most recent pane). Once both panes are idle, the exempt panes keep it,
+  /// one exempt pane is enough (the split-as-a-unit rule), and dropping the exemption archives the split as one item.
+  @Test func autoArchiveExemptsEveryVisiblePane() async throws {
+    let harness = Harness()
+    await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))
+    let idle = harness.clock.now.addingTimeInterval(-40 * Self.hour)
+    let recent = harness.clock.now.addingTimeInterval(-2 * Self.hour)
+    let (split, panes) = try harness.source.mutate { sidebar -> (UUID, [UUID]) in
+      let split = try sidebar.addSplit(
+        orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(harness.space), createdAt: idle)
+      let left = try sidebar.addTab(
+        url: Self.url, title: "L", lastActiveAt: idle, in: .split(split), createdAt: idle)
+      let right = try sidebar.addTab(
+        url: Self.url, title: "R", lastActiveAt: recent, in: .split(split), createdAt: recent)
+      return (split, [left, right])
+    }
+    harness.exempt = Set(panes)
+
+    try await harness.timer.start()
+
+    #expect(harness.reports.isEmpty)
+    #expect(harness.today == [split])
+    harness.exempt = []
+    #expect(harness.timer.tick().isEmpty, "one pane idle past the threshold does not archive the split")
+    #expect(harness.today == [split])
+
+    harness.clock.now = harness.clock.now.addingTimeInterval(11 * Self.hour)  // both panes now idle past 12 hours
+    harness.exempt = Set(panes)
+    #expect(harness.timer.tick().isEmpty)
+    harness.exempt = [panes[1]]
+    #expect(harness.timer.tick().isEmpty, "any exempt pane protects the whole split")
+    #expect(harness.reports.isEmpty)
+    harness.exempt = []
+    #expect(harness.timer.tick().map(\.id) == [split])
+    #expect(harness.reports.map { $0.map(\.id) } == [[split]])
+    #expect(harness.today.isEmpty)
+    harness.timer.stop()
+  }
+
   @Test func freshStartProtectsOldTabs() async throws {  // first launch: the clock starts now
     let harness = Harness()
     _ = try harness.addTodayTab(idleHours: 400)
@@ -209,6 +251,37 @@ struct AutoArchiveTimerTests {
     #expect(harness.timer.tick().isEmpty)
     #expect(harness.reports.isEmpty)
     #expect(harness.today == [tab])
+  }
+
+  /// A quit cancelled while the first start is still loading (stop, then start again): the timer runs.
+  @Test func startAfterStopWhileStartIsLoadingRuns() async throws {
+    let harness = Harness()
+    await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))
+    await harness.state.holdLoads()
+    let tab = try harness.addTodayTab(idleHours: 40)
+    let starting = Task { try await harness.timer.start() }
+    await eventually { await harness.state.heldLoadCount == 1 }
+
+    harness.timer.stop()
+    try await harness.timer.start()
+    await harness.state.releaseLoads()
+    try await starting.value
+    await eventually { harness.sleeper.parkedCount == 1 }
+
+    #expect(harness.timer.isRunning)
+    #expect(harness.reports.map { $0.map(\.id) } == [[tab]])
+    harness.timer.stop()
+  }
+
+  /// A quit cancelled after the timer ran: it runs again.
+  @Test func startAfterStopRunsAgain() async throws {
+    let harness = Harness()
+    try await harness.timer.start()
+    harness.timer.stop()
+    try await harness.timer.start()
+    await eventually { harness.sleeper.parkedCount == 1 }
+    #expect(harness.timer.isRunning)
+    harness.timer.stop()
   }
 
   @Test func startTwiceRunsOneLoop() async throws {
