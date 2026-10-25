@@ -87,7 +87,7 @@ extension ShellWindowController {
     let title = snapshot.title.isEmpty ? (url.host() ?? url.absoluteString) : snapshot.title
     let node: NodeID
     do {
-      guard let space = sidebarController.currentSpace ?? createSpace() else {
+      guard let space = sidebarController.currentSpace ?? createFirstSpace() else {
         engine.closeTab(tab, mode: .skipUnloadHandlers)
         return
       }
@@ -101,6 +101,16 @@ extension ShellWindowController {
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)
     replay(snapshot, into: node)
+  }
+
+  /// The first Space, created for an engine tab on a first run (#327). Showing the new, still empty Space runs
+  /// `showEmptySpace()`, which takes the engine's latest selection as acknowledged so a late report cannot leave a
+  /// Space the user picked. Here nobody picked anything: the latest selection is this batch's own tab, whose
+  /// `.activeTabChanged` is still queued, and it must show the page. The acknowledgement from before is kept.
+  private func createFirstSpace() -> SpaceID? {
+    let acknowledged = engineActiveTab
+    defer { engineActiveTab = acknowledged }
+    return createSpace()
   }
 
   /// The row of an engine tab whose first URL is not known yet; the tab's `.urlChanged` replaces it.
