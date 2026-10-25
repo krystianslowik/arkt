@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Arkt startup probe",
+  "version": "1.0",
+  "description": "Opens a window at startup, once per browser session (W3-9 startup check).",
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "permissions": [
+    "storage"
+  ]
+}
