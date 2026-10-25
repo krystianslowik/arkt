@@ -155,11 +155,14 @@ class ArktUITestCase: XCTestCase {
 
   /// Quits the way a user does (Cmd-Q, so `applicationShouldTerminate` flushes) and waits until the app has exited.
   /// The key goes only to the app under test: it is activated first and must be frontmost before the key is typed.
-  func quit(_ app: XCUIApplication) {
+  /// `timeout` (seconds before scaling, default `Waits.defaultTimeout`) bounds the wait for `.notRunning`.
+  func quit(
+    _ app: XCUIApplication, timeout: TimeInterval? = nil, file: StaticString = #filePath, line: UInt = #line
+  ) {
     app.activate()
-    guard waitFor(app, .runningForeground) else { return }
+    guard waitFor(app, .runningForeground, file: file, line: line) else { return }
     app.typeKey("q", modifierFlags: .command)
-    waitFor(app, .notRunning)
+    waitFor(app, .notRunning, timeout: timeout, file: file, line: line)
   }
 
   // MARK: - Failure artifacts
