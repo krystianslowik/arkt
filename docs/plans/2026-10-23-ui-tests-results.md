@@ -810,7 +810,8 @@ Base: `origin/main` at `46f3729`, branch `chore/177-space-switching`. Same machi
   that does switch (Cmd-Opt-Right after Ctrl-9; the opposite arrow after an end arrow), and the test waits for that
   switch before asserting. Menu key equivalents run in order, every switch goes through `SpacePagerView.go(to:)`
   (which stops a running settle), and the arrows count from the target of a running switch, so a late switch from the
-  no-op key cannot land after the check. No fixed waits.
+  no-op key cannot land after the check. No fixed waits. The other Space's page is checked by waiting until it is
+  gone: at rest the pager hides every page but the current one, and hidden pages leave the accessibility tree.
 - Precondition, not handled by the harness: Ctrl-1 and Ctrl-2 must not be bound to Mission Control's "Switch to
   Desktop 1" / "Switch to Desktop 2" (System Settings > Keyboard > Keyboard Shortcuts > Mission Control) on the Mac
   running the tests; where they are, the system takes the key and the Ctrl-N waits time out. The tests do not change

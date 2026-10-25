@@ -49,7 +49,9 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitForSelected(second))
     XCTAssertTrue(waitForSelected(spacePage(app, title: secondSpaceTitle)))
     XCTAssertFalse(first.isSelected)
-    XCTAssertFalse(spacePage(app, title: firstSpaceTitle).isSelected)
+    // At rest the pager hides every page but the current one, and a hidden page leaves the accessibility tree
+    // (`SpacePagerView.updatePageVisibility`); the other page is gone once the settle ends.
+    XCTAssertTrue(waitUntilGone(spacePage(app, title: firstSpaceTitle)))
     XCTAssertEqual(Shell.spaceDots(app).count, ArcFixture.expected.spaces)
   }
 
@@ -69,7 +71,7 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitForSelected(spaceDot(app, index: 0)))
     XCTAssertTrue(waitForSelected(spacePage(app, title: firstSpaceTitle)))
     XCTAssertFalse(spaceDot(app, index: 1).isSelected)
-    XCTAssertFalse(spacePage(app, title: secondSpaceTitle).isSelected)
+    XCTAssertTrue(waitUntilGone(spacePage(app, title: secondSpaceTitle)))
 
     // At the first Space a further Left stays put. Sync point: one Right, which lands on Beta. A Left that pushed the
     // target below Alpha would leave Alpha current here.
@@ -78,7 +80,7 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitForSelected(spaceDot(app, index: 1)))
     XCTAssertTrue(waitForSelected(spacePage(app, title: secondSpaceTitle)))
     XCTAssertFalse(spaceDot(app, index: 0).isSelected)
-    XCTAssertFalse(spacePage(app, title: firstSpaceTitle).isSelected)
+    XCTAssertTrue(waitUntilGone(spacePage(app, title: firstSpaceTitle)))
     XCTAssertEqual(Shell.spaceDots(app).count, ArcFixture.expected.spaces)
   }
 
