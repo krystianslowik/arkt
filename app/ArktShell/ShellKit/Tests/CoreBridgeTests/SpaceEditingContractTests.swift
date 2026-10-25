@@ -180,11 +180,13 @@ struct SpaceEditingContractTests {
 
     let readBack = try #require(source.space(id)?.theme.baseColors.first)
     let space = try #require(CGColorSpace(name: CGColorSpace.displayP3))
-    let original = try #require(p3.cgColor.converted(to: space, intent: .relativeColorimetric, options: nil)?.components)
+    let original = try #require(
+      p3.cgColor.converted(to: space, intent: .relativeColorimetric, options: nil)?.components)
     let extended = try #require(CGColorSpace(name: CGColorSpace.extendedSRGB))
-    let readColor = try #require(CGColor(
-      colorSpace: extended, components: [readBack.red, readBack.green, readBack.blue, readBack.alpha].map { CGFloat($0) }))
-    let roundTripped = try #require(readColor.converted(to: space, intent: .relativeColorimetric, options: nil)?.components)
+    let readComponents = [readBack.red, readBack.green, readBack.blue, readBack.alpha].map { CGFloat($0) }
+    let readColor = try #require(CGColor(colorSpace: extended, components: readComponents))
+    let roundTripped = try #require(
+      readColor.converted(to: space, intent: .relativeColorimetric, options: nil)?.components)
     #expect(original.count == roundTripped.count)
     for (want, got) in zip(original, roundTripped) { #expect(abs(want - got) < 0.001) }
   }

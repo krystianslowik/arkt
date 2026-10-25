@@ -114,7 +114,8 @@ struct SidebarStorageFormatTests {
   /// The stored icon shape is explicit and tagged, like `NodeKind`: one key names the case, one holds its value.
   @Test func spaceIconEncodesAsATaggedObject() throws {
     func object(_ icon: SpaceIcon) throws -> NSDictionary {
-      try #require(try JSONSerialization.jsonObject(with: SidebarStorageFormat.makeEncoder().encode(icon)) as? NSDictionary)
+      let data = try SidebarStorageFormat.makeEncoder().encode(icon)
+      return try #require(try JSONSerialization.jsonObject(with: data) as? NSDictionary)
     }
     #expect(try object(.symbol("star")) == (["type": "symbol", "symbol": "star"] as NSDictionary))
     #expect(try object(.emoji("\u{1F680}")) == (["type": "emoji", "emoji": "\u{1F680}"] as NSDictionary))

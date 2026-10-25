@@ -331,7 +331,8 @@ final class SpaceEditingTests: XCTestCase {
   func testEmojiPromptEnablesSetOnlyForOneEmoji() {
     let prompt = SpaceEmojiPrompt(current: nil)
     XCTAssertFalse(prompt.canSet)
-    for (text, valid) in [("\u{1F680}", true), ("7", false), ("\u{1F680}\u{1F680}", false), ("\u{2764}\u{FE0F}", true)] {
+    let cases = [("\u{1F680}", true), ("7", false), ("\u{1F680}\u{1F680}", false), ("\u{2764}\u{FE0F}", true)]
+    for (text, valid) in cases {
       prompt.field.stringValue = text
       prompt.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: prompt.field))
       XCTAssertEqual(prompt.canSet, valid, "\(text.unicodeScalars.map(\.value))")

@@ -67,16 +67,16 @@ enum BridgeMapping {
   static func icon(_ icon: SidebarModel.SpaceIcon?) -> SpaceIconInfo? {
     switch icon {
     case nil: nil
-    case .symbol(let name): .symbol(name)
-    case .emoji(let emoji): .emoji(emoji)
+    case .symbol(let name)?: .symbol(name)
+    case .emoji(let emoji)?: .emoji(emoji)
     }
   }
 
   static func modelIcon(_ icon: SpaceIconInfo?) -> SidebarModel.SpaceIcon? {
     switch icon {
     case nil: nil
-    case .symbol(let name): .symbol(name)
-    case .emoji(let emoji): .emoji(emoji)
+    case .symbol(let name)?: .symbol(name)
+    case .emoji(let emoji)?: .emoji(emoji)
     }
   }
 

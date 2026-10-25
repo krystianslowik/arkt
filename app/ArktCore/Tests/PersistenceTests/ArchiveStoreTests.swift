@@ -186,7 +186,8 @@ struct ArchiveStoreTests {
     let item = Self.tab("A", url: "https://example.com/a", source: .unknown, at: 1)
     _ = try await store.add([item], onConflict: .replace)
     let stamped = try await database.writer.read { db in
-      try Int.fetchOne(db, sql: "SELECT format_version FROM archived_item WHERE id = ?", arguments: [item.id.uuidString])
+      try Int.fetchOne(
+        db, sql: "SELECT format_version FROM archived_item WHERE id = ?", arguments: [item.id.uuidString])
     }
     #expect(stamped == 1)
     #expect(ArchiveStore.snapshotFormatVersion == 1)
