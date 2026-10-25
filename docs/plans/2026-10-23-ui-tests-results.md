@@ -675,19 +675,22 @@ Base: `origin/main` at `46f3729`, branch `chore/176-command-bar-keys`.
   `commandBar.row` and returns false without pressing when that row's value is `Search`. `selectCommandBarRow` moves
   with Down and does not press Enter. Row queries stay on the results table (`commandBar.results`); a whole-app
   `descendants` query also walks the web view and stalls inside a wait.
-- `ShellUI/Accessibility/AXProxyRows.swift` (new, shared): `AXProxyRows` publishes one `AXProxyRow` per table row.
+- `ShellUI/Accessibility/AXProxyRows.swift` (new, shared): `AXProxyRows` publishes the table as one
+  `AXProxyTable` element (role table, identifier `commandBar.results`) with one `AXProxyRow` child per row.
   `NSTableRowView` never shows up as a child of `commandBar.results` for XCUITest, so
   `app.tables["commandBar.results"].tableRows.matching(identifier: "commandBar.row")` was empty while the Open row
-  was on screen. Each proxy computes its label, value and identifier from the model for its row index, its
-  selection from the table and its frame in screen coordinates when asked; nothing creates a row view or forces
-  layout. Proxies are rebuilt on `reloadData` and when the row count changes. The legacy
-  `accessibilityAttributeValue`, array-count and array-values entry points are `nonisolated` (the SDK declares them
-  on `NSObject`), answer only on the main thread through `MainActor.assumeIsolated` with a `Sendable` result, and
-  defer to `super` otherwise. No `nonisolated(unsafe)` and no `@unchecked Sendable`. Each proxy's
+  was on screen; `NSTableView` answers out of process from its own internals (#269). `CommandBarView` lists the
+  proxy table in place of the scroll view that holds the real table and routes hit tests to the proxies. Each
+  proxy computes its label, value and identifier from the model for its row index, its selection from the table
+  and its frame in screen coordinates when asked; nothing creates a row view or forces layout. Proxies keep their
+  identity between queries and are rebuilt on `reloadData` and when the row count changes. The proxies subclass
+  `NSAccessibilityElement`, whose getters the SDK leaves nonisolated: they read main-actor state only on the main
+  thread, through `MainActor.assumeIsolated` with `Sendable` results, and fall back to an empty answer off it. No
+  legacy `accessibilityAttributeValue` override, no `nonisolated(unsafe)`, no `@unchecked Sendable`. Each proxy's
   `accessibilityChildren()` is empty so a snapshot does not walk from the row back into the table. The Archive table
   (#292) and the sidebar outline (#283, #269) reuse this helper and land after this pull request.
-- `CommandBarView.swift`: `CommandBarTableView` holds an `AXProxyRows` and forwards the modern and legacy row
-  attributes to it. `CommandBarController` supplies the row content from its results.
+- `CommandBarView.swift`: `CommandBarTableView` owns the `AXProxyRows` and reports reloads and selection changes;
+  `CommandBarView` lists its element. `CommandBarController` supplies the row content from its results.
 - The three KB-085 tests are marked `PARITY(NEEDS-RUNTIME-CHECK RT-08)`. They assert Arkt's current [I] default.
 - Sidebar checks go through `waitForOutlineRows` (#269). Command bar rows are selected directly.
 
@@ -755,12 +758,17 @@ not), #283 (open; its `CommandBarView.swift` bridge was not copied).
 - Bridge redesign above (`AXProxyRows`): the `MainThreadAX` helper and its `nonisolated(unsafe)` local are gone.
   Labels no longer depend on a row view existing, and frames are no longer captured at publish time.
 - The removed `@objc accessibilityChildrenInNavigationOrder()` claimed the method is not overridable; it is a
-  requirement of the `NSAccessibility` protocol since macOS 10.13. Out-of-process clients reach it as the
-  `AXChildrenInNavigationOrder` attribute through `accessibilityAttributeValue(_:)`, which the bridge answers.
+  requirement of the `NSAccessibility` protocol since macOS 10.13. With the proxy table in place of the real table,
+  no table override is needed for it.
+- A first version kept the proxies under the real `NSTableView` behind nonisolated legacy
+  `accessibilityAttributeValue` overrides. It did not compile: `MainActor.assumeIsolated` requires a `Sendable`
+  result (`T: Sendable` in the Swift 6.2 and 6.3 standard library), and the proxy array is not `Sendable`
+  (`NSAccessibilityElement` is neither `Sendable` nor main-actor isolated). The cached elements cannot leave
+  main-actor state for a nonisolated caller without an unsafe annotation, so the bridge moved out of the table.
 - In-process tests, `ShellKitGUITests/AXProxyRowsTests.swift`: rows beyond the visible range report the model's
   labels and build no row view; frames are the row's screen rectangle and follow a moved window and the moved
-  command bar panel; `reloadData` publishes fresh proxies; children are flat leaves parented to the table and follow
-  selection.
+  command bar panel; `reloadData` publishes fresh proxies; children are flat leaves parented to the proxy table and
+  follow selection; the command bar lists the proxy table instead of the scroll view and hit tests reach the rows.
 - UI tests assert the named behavior without sidebar rows (#269): Switch to Tab shows alpha's address in the
   sidebar URL bar with no second `/p/alpha` request; Cmd-Return and Opt-Return open delta in a new tab whose Back
   button is disabled, while the previous tab (navigated in place gamma -> epsilon) keeps Back enabled and is not
