@@ -98,6 +98,60 @@ struct ArchiverTests {
     #expect(world.sidebar.nodes[panes[1]]?.parent == .today(world.work))
   }
 
+  /// A pane archived out of a split is a plain tab. Restoring it uses the tab rule: top of Today, not back into the
+  /// split that kept the other panes.
+  @Test func restoredPaneComesBackAsPlainTab() throws {
+    var world = try Self.makeWorld()
+    let split = try world.sidebar.addSplit(
+      orientation: .horizontal, widthFactors: [1.0 / 3, 1.0 / 3, 1.0 / 3], in: .today(world.work))
+    let panes = try ["l", "m", "r"].map {
+      try world.sidebar.addTab(url: Self.url($0), title: $0, in: .split(split))
+    }
+    let item = try Archiver.archive(panes[0], from: &world.sidebar, reason: .manual, at: Self.now)
+    #expect(item.snapshot.children.isEmpty)
+    guard case .tab = item.snapshot.kind else {
+      Issue.record("a pane archives as a tab")
+      return
+    }
+    #expect(world.sidebar.children(of: .split(split)) == [panes[1], panes[2]])
+
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+
+    #expect(restored == RestoredItem(nodeID: panes[0], space: world.work, location: .today(world.work)))
+    #expect(world.sidebar.children(of: .today(world.work)).first == panes[0])
+    #expect(world.sidebar.nodes[panes[0]]?.parent == .today(world.work))
+    #expect(world.sidebar.children(of: .split(split)) == [panes[1], panes[2]])
+  }
+
+  /// Plan S8 step 9, model level: an archived split whose factors do not match its pane count restores at the top of
+  /// Today with its panes in order and its factors exactly as archived; restore does not rewrite them. The
+  /// normalization on show is not asserted here: it is `SplitLayout.normalized` (`SplitLayoutTests`) and, through a
+  /// window, `SplitArchiveTests.testMismatchedFactorsStayStoredAndNormalizeOnShow`.
+  @Test func archivedSplitWithMismatchedFactorsRestoresWithStoredFactors() throws {
+    var world = try Self.makeWorld()
+    let factors = [0.2, 0.3, 0.5]
+    let left = NodeSnapshot(kind: .tab(TabItem(url: Self.url("l"), title: "Left")), createdAt: Self.now)
+    let right = NodeSnapshot(kind: .tab(TabItem(url: Self.url("r"), title: "Right")), createdAt: Self.now)
+    let split = NodeSnapshot(
+      kind: .split(SplitItem(orientation: .vertical, widthFactors: factors)), createdAt: Self.now,
+      children: [left, right])
+    let item = ArchivedItem(
+      reason: .manual, archivedAt: Self.now, source: .space(world.work), section: .today, snapshot: split)
+
+    let restored = try Archiver.restore(item, into: &world.sidebar, fallbackSpace: world.work)
+
+    #expect(restored.nodeID == split.id)
+    #expect(restored.location == .today(world.work))
+    #expect(world.sidebar.children(of: .split(split.id)) == [left.id, right.id])
+    guard case .split(let stored)? = world.sidebar.nodes[split.id]?.kind else {
+      Issue.record("restored root is not a split")
+      return
+    }
+    #expect(stored.orientation == .vertical)
+    #expect(stored.widthFactors == factors)
+    #expect(world.sidebar.children(of: .today(world.work)).first == split.id)
+  }
+
   // MARK: Restore
 
   /// BH-086: a restored tab returns to its original Space (top of Today [I]) with its original id.
