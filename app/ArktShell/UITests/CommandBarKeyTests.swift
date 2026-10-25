@@ -4,10 +4,12 @@ import XCTest
 ///
 /// KB-085 is NEEDS-RUNTIME-CHECK (RT-08). Tests marked [I] assert Arkt's current default. Every Enter in this class
 /// goes through `Shell.commitSelectedRow()`, which refuses a row whose value is `Search`. The typed text is only a
-/// loopback URL or `Fixture`.
+/// loopback URL or `Fixture`. What a Search row does on Enter is covered in process (`CommandBarTests`), where the
+/// search URL is observed without being loaded.
 ///
-/// Sidebar rows are not in the accessibility tree on the macOS 26 runner (#269); assertions that need them go through
-/// `waitForOutlineRows`.
+/// Sidebar rows are not in the accessibility tree on the macOS 26 runner (#269). Every test proves its behavior
+/// without them (URL bars, Back state, the fixture server's request log); the row checks are one combined
+/// `waitForOutlineRows` per test, so a test waits out that timeout at most once.
 final class CommandBarKeyTests: ArktUITestCase {
   private static let pages = ["alpha", "beta", "gamma"]
   /// Query that matches the three open tabs and adds one search row. Never committed.
@@ -41,9 +43,15 @@ final class CommandBarKeyTests: ArktUITestCase {
     XCTAssertTrue(Shell.isCommandBarOpen(app), "wrapping onto the search row does not commit it")
   }
 
+  /// BH-104 / BH-110: a "Switch to Tab" result shows the open tab instead of loading it again. Shown from gamma, the
+  /// alpha row switches: the sidebar URL bar shows alpha's address and the fixture server sees no second request for
+  /// it. The sidebar rows (#269) are one combined check at the end.
   func test_BH104_BH110_switchToTabRow() async throws {
-    let (_, app) = try await launchWithThreeTabs()
-    let before = Shell.todayRows(app).count
+    let (server, app) = try await launchWithThreeTabs()
+    let urlBar = Shell.element(app, AXID.Sidebar.urlBar)
+    XCTAssertTrue(Waits.until("sidebar URL bar shows /p/gamma") { Self.value(of: urlBar).contains("/p/gamma") })
+    let alphaLoads = Self.requests(server, "alpha")
+    XCTAssertGreaterThanOrEqual(alphaLoads, 1, "alpha loaded when its tab opened: \(server.requestedPaths)")
     showFixtureResults(in: app)
 
     let title = FixtureServer.title(ofPage: "alpha")
@@ -51,9 +59,16 @@ final class CommandBarKeyTests: ArktUITestCase {
     XCTAssertTrue(Shell.commitSelectedRow(app))
     XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
 
+    XCTAssertTrue(Waits.until("sidebar URL bar shows /p/alpha after Switch to Tab") {
+      Self.value(of: urlBar).contains("/p/alpha")
+    })
+    XCTAssertEqual(Self.requests(server, "alpha"), alphaLoads,
+                   "Switch to Tab did not load alpha again: \(server.requestedPaths)")
+
     let alpha = Shell.todayRow(app, label: title)
-    if waitForOutlineRows("\(alpha) selected", { alpha.exists && alpha.isSelected }) {
-      XCTAssertEqual(Shell.todayRows(app).count, before, "switching tabs adds no row")
+    let rows = Shell.todayRows(app)
+    waitForOutlineRows("\(alpha) selected and still three Today rows") {
+      alpha.exists && alpha.isSelected && rows.count == Self.pages.count
     }
   }
 
@@ -61,34 +76,14 @@ final class CommandBarKeyTests: ArktUITestCase {
   /// Arkt's [I] default.
   func test_KB085_cmdEnterOpensURLInNewTab() async throws {
     let (server, app) = try await launchWithThreeTabs()
-    try openEditedURLInNewTab("delta", modifiers: .command, server: server, app: app)
+    try openEditedURLInNewTab(modifiers: .command, server: server, app: app)
   }
 
   /// PARITY(NEEDS-RUNTIME-CHECK RT-08): Opt-Enter opens the selected result in a new tab, including from Cmd-L.
   /// Arkt's [I] default.
   func test_KB085_optEnterOpensURLInNewTab() async throws {
     let (server, app) = try await launchWithThreeTabs()
-    try openEditedURLInNewTab("delta", modifiers: .option, server: server, app: app)
-  }
-
-  /// Every Enter in the class uses `Shell.commitSelectedRow()`. On a Search row that helper presses nothing: the bar
-  /// stays open and the fixture server sees no further page.
-  func test_E_noSearchCommitted() async throws {
-    let (server, app) = try await launchWithThreeTabs()
-    let pagesBefore = server.requestedPaths.filter { $0.hasPrefix("/p/") }
-    showFixtureResults(in: app)
-
-    XCTAssertTrue(Shell.selectCommandBarRow(app, label: Self.query, value: "Search"))
-    XCTAssertEqual(Shell.selectedCommandBarRow(app)?.value as? String, Optional("Search"))
-    XCTAssertFalse(Shell.commitSelectedRow(app), "refuses to press Enter on a Search row")
-    XCTAssertTrue(Shell.isCommandBarOpen(app))
-    XCTAssertEqual(Shell.selectedCommandBarRow(app)?.value as? String, Optional("Search"))
-
-    let pagesAfter = server.requestedPaths.filter { $0.hasPrefix("/p/") }
-    XCTAssertEqual(pagesAfter, pagesBefore, "no search row was committed: \(server.requestedPaths)")
-    for path in server.requestedPaths {
-      XCTAssertTrue(path == "/favicon.ico" || path.hasPrefix("/p/"), "unexpected request \(path)")
-    }
+    try openEditedURLInNewTab(modifiers: .option, server: server, app: app)
   }
 
   // MARK: - Setup
@@ -114,10 +109,6 @@ final class CommandBarKeyTests: ArktUITestCase {
       XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
       XCTAssertTrue(Waits.until("/p/\(name) requested") { server.requestedPaths.contains("/p/\(name)") })
     }
-    for name in names {
-      let row = Shell.todayRow(app, label: FixtureServer.title(ofPage: name))
-      waitForOutlineRows("\(row) to exist") { row.exists }
-    }
   }
 
   /// Cmd-T, type `Fixture`: the open-tab rows (caption "Switch to Tab") plus one search row.
@@ -136,40 +127,76 @@ final class CommandBarKeyTests: ArktUITestCase {
     return ordered
   }
 
-  /// Cmd-L on alpha, replace the address, then Cmd-Enter or Opt-Enter. The new page is a Today row; alpha stays.
+  /// Requests the fixture server has seen for `/p/<name>`.
+  private static func requests(_ server: FixtureServer, _ name: String) -> Int {
+    server.requestedPaths.filter { $0 == "/p/\(name)" }.count
+  }
+
+  private static func value(of element: XCUIElement) -> String { (element.value as? String) ?? "" }
+
+  /// With the Toolbar on, from gamma: Cmd-L and Return navigate gamma in place to epsilon, so that tab has Back
+  /// history. Cmd-L again (prefilled with epsilon), a new address, then Cmd-Return or Opt-Return. A new tab shows
+  /// delta with Back disabled, where in-place navigation would have left Back enabled; switching back to the
+  /// epsilon tab finds its Back history intact and loads nothing again. The sidebar rows (#269) are one combined
+  /// check at the end.
   private func openEditedURLInNewTab(
-    _ name: String, modifiers: XCUIElement.KeyModifierFlags, server: FixtureServer, app: XCUIApplication
+    modifiers: XCUIElement.KeyModifierFlags, server: FixtureServer, app: XCUIApplication
   ) throws {
-    let title = FixtureServer.title(ofPage: "alpha")
-    let alpha = Shell.todayRow(app, label: title)
-    let rowsVisible = waitForOutlineRows("\(alpha) to exist") { alpha.exists }
-    if rowsVisible {
-      alpha.click()
-      XCTAssertTrue(waitForSelected(alpha))
-      XCTAssertTrue(Waits.until("sidebar URL bar shows /p/alpha") {
-        (Shell.element(app, AXID.Sidebar.urlBar).value as? String)?.contains("/p/alpha") == true
-      })
-    }
+    app.typeKey("d", modifierFlags: [.command, .shift])
+    XCTAssertTrue(waitFor(Shell.element(app, AXID.Toolbar.root)))
+    let back = app.buttons[AXID.Toolbar.back]
+    let urlBar = Shell.element(app, AXID.Toolbar.urlBar)
+    XCTAssertTrue(Waits.until("toolbar URL bar shows /p/gamma") { Self.value(of: urlBar).contains("/p/gamma") })
+    XCTAssertTrue(waitForEnabled(back, false), "gamma opened in a new tab has no Back history")
 
     XCTAssertTrue(Shell.openCommandBar(app, key: "l"))
     let field = Shell.commandBarField(app)
-    if rowsVisible {
-      XCTAssertTrue(Waits.until("address field holds /p/alpha") {
-        (field.value as? String)?.contains("/p/alpha") == true
-      })
-    }
+    XCTAssertTrue(Waits.until("Cmd-L prefills /p/gamma") { Self.value(of: field).contains("/p/gamma") })
     field.typeKey("a", modifierFlags: .command)
-    field.typeText(server.page(name))
+    field.typeText(server.page("epsilon"))
+    XCTAssertTrue(Waits.until("selected row is Open, not Search; \(Shell.commandBarRowSummary(app))") {
+      (Shell.selectedCommandBarRow(app)?.value as? String) == "Open"
+    })
+    XCTAssertTrue(Shell.commitSelectedRow(app))
+    XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
+    XCTAssertTrue(Waits.until("toolbar URL bar shows /p/epsilon") { Self.value(of: urlBar).contains("/p/epsilon") })
+    XCTAssertTrue(waitForEnabled(back, true), "Return from Cmd-L navigated gamma's tab in place")
+    let epsilonLoads = Self.requests(server, "epsilon")
+    XCTAssertGreaterThanOrEqual(epsilonLoads, 1, "epsilon loaded: \(server.requestedPaths)")
+
+    XCTAssertTrue(Shell.openCommandBar(app, key: "l"))
+    XCTAssertTrue(Waits.until("Cmd-L prefills /p/epsilon") { Self.value(of: field).contains("/p/epsilon") })
+    field.typeKey("a", modifierFlags: .command)
+    field.typeText(server.page("delta"))
     XCTAssertTrue(Waits.until("selected row is Open, not Search; \(Shell.commandBarRowSummary(app))") {
       (Shell.selectedCommandBarRow(app)?.value as? String) == "Open"
     })
     XCTAssertTrue(Shell.commitSelectedRow(app, modifiers: modifiers))
     XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
-    XCTAssertTrue(Waits.until("/p/\(name) requested") { server.requestedPaths.contains("/p/\(name)") })
+    XCTAssertTrue(Waits.until("/p/delta requested") { server.requestedPaths.contains("/p/delta") })
+    XCTAssertTrue(Waits.until("toolbar URL bar shows /p/delta") { Self.value(of: urlBar).contains("/p/delta") })
+    XCTAssertTrue(waitForEnabled(back, false), "delta opened in a new tab, not in epsilon's tab")
+    let deltaLoads = Self.requests(server, "delta")
 
-    let opened = Shell.todayRow(app, label: FixtureServer.title(ofPage: name))
-    if waitForOutlineRows("\(opened) exists and \(alpha) remains", { opened.exists && alpha.exists }) {
-      XCTAssertEqual(Shell.todayRows(app).count, Self.pages.count + 1)
+    let epsilonTitle = FixtureServer.title(ofPage: "epsilon")
+    XCTAssertTrue(Shell.openCommandBar(app, key: "t"))
+    Shell.commandBarField(app).typeText(Self.query)
+    XCTAssertTrue(Shell.selectCommandBarRow(app, label: epsilonTitle, value: "Switch to Tab"))
+    XCTAssertTrue(Shell.commitSelectedRow(app))
+    XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
+    XCTAssertTrue(Waits.until("toolbar URL bar shows /p/epsilon again") {
+      Self.value(of: urlBar).contains("/p/epsilon")
+    })
+    XCTAssertTrue(waitForEnabled(back, true), "the previous tab kept its Back history")
+    XCTAssertEqual(Self.requests(server, "epsilon"), epsilonLoads,
+                   "switching back did not load epsilon again: \(server.requestedPaths)")
+    XCTAssertEqual(Self.requests(server, "delta"), deltaLoads, "nothing loaded delta again: \(server.requestedPaths)")
+
+    let rows = Shell.todayRows(app)
+    let delta = Shell.todayRow(app, label: FixtureServer.title(ofPage: "delta"))
+    let epsilon = Shell.todayRow(app, label: epsilonTitle)
+    waitForOutlineRows("four Today rows, \(delta) and \(epsilon) among them") {
+      rows.count == Self.pages.count + 1 && delta.exists && epsilon.exists
     }
   }
 }

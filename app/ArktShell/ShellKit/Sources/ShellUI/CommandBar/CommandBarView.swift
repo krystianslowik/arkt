@@ -1,149 +1,59 @@
 import AppKit
 
-/// Runs `body` on the main actor from a nonisolated AppKit callback. `MainActor.assumeIsolated` can only return a
-/// `Sendable` value, and an accessibility element array is not one. The result stays on this thread:
-/// `assumeIsolated` traps unless the caller is already on the main thread.
-private enum MainThreadAX {
-  static func sync<T>(_ body: @MainActor () -> T) -> T {
-    nonisolated(unsafe) var result: T?
-    MainActor.assumeIsolated {
-      result = body()
-    }
-    return result!
-  }
-}
-
-/// One command-bar result as an accessibility element. `NSTableRowView` is dropped from the out-of-process tree, so
-/// XCUITest's `tableRows` query on `commandBar.results` sees no children unless the table publishes these.
-@MainActor
-private final class CommandBarAXRow: NSAccessibilityElement, NSAccessibilityRow {
-  /// The formal element protocol requires a non-optional identifier. The inherited getter is optional, so the
-  /// witness has to be this override or the row conformance does not type-check.
-  override func accessibilityIdentifier() -> String { AXID.CommandBar.row }
-
-  /// Empty on purpose. A failure snapshot walks children, and the inherited element children walk back to the
-  /// table that lists this row.
-  override func accessibilityChildren() -> [Any]? { [] }
-}
-
+/// The results table. It exposes one `AXProxyRow` per result (`AXProxyRows`): `NSTableRowView` is dropped from the
+/// out-of-process accessibility tree, so XCUITest's `tableRows` query on `commandBar.results` and VoiceOver row
+/// navigation would see no rows otherwise. The controller supplies each row's label and value from its results.
 @MainActor
 final class CommandBarTableView: NSTableView {
-  private var axRows: [CommandBarAXRow] = []
-  private var publishingAX = false
+  nonisolated let axProxyRows: AXProxyRows
 
-  override func accessibilityChildren() -> [Any]? { axRows }
-
-  /// Not an overridable Swift method on `NSTableView`, but the ObjC selector is what out-of-process clients call
-  /// for `AXChildrenInNavigationOrder` when they do not go through `accessibilityAttributeValue`.
-  @objc func accessibilityChildrenInNavigationOrder() -> [NSAccessibilityElement]? { axRows }
-
-  override func accessibilityRows() -> [any NSAccessibilityRow]? { axRows }
-
-  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { axRows }
-
-  override func accessibilitySelectedRows() -> [any NSAccessibilityRow]? {
-    axRows.filter { $0.isAccessibilitySelected() }
+  override init(frame frameRect: NSRect) {
+    axProxyRows = AXProxyRows()
+    super.init(frame: frameRect)
+    axProxyRows.attach(to: self)
   }
 
-  override func accessibilityRowCount() -> Int { axRows.count }
-
-  override func layout() {
-    super.layout()
-    publishRows()
-  }
-
-  override func tile() {
-    super.tile()
-    publishRows()
-  }
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override func reloadData() {
     super.reloadData()
-    publishRows()
+    axProxyRows.invalidate()
   }
 
-  override func selectRowIndexes(_ indexes: IndexSet, byExtendingSelection extend: Bool) {
-    super.selectRowIndexes(indexes, byExtendingSelection: extend)
-    for (index, element) in axRows.enumerated() {
-      element.setAccessibilitySelected(index == selectedRow)
-    }
-  }
+  override func accessibilityChildren() -> [Any]? { axProxyRows.rows }
 
-  /// XCUITest reads `AXChildren` and `AXRows` through these legacy methods. `NSTableView` does not forward them to
-  /// the overrides above. The methods are nonisolated AppKit entry points; the table is main-actor, and these calls
-  /// are already on the main thread. They only read `axRows` — creating row views here re-enters layout and stalls
-  /// the snapshot.
+  override func accessibilityRows() -> [any NSAccessibilityRow]? { axProxyRows.rows }
+
+  override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { axProxyRows.visibleRows }
+
+  override func accessibilitySelectedRows() -> [any NSAccessibilityRow]? { axProxyRows.selectedRows }
+
+  override func accessibilityRowCount() -> Int { axProxyRows.rows.count }
+
+  // Legacy entry points. Out-of-process clients read `AXChildren`, `AXRows` and `AXChildrenInNavigationOrder`
+  // through these, and `NSTableView` answers them from its row views without calling the overrides above. They are
+  // `nonisolated` because the SDK declares them on `NSObject`; `AXProxyRows` explains the main-thread handling.
+  // Marked deprecated like the methods they override, so the `super` calls do not warn.
+
+  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
   override nonisolated func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
-    MainThreadAX.sync {
-      if attribute == .rowCount { return NSNumber(value: self.axRows.count) }
-      if let rows = self.rows(for: attribute) { return rows }
-      return super.accessibilityAttributeValue(attribute)
-    }
+    if let value = axProxyRows.attributeValue(attribute) { return value }
+    return super.accessibilityAttributeValue(attribute)
   }
 
+  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
   override nonisolated func accessibilityArrayAttributeCount(_ attribute: NSAccessibility.Attribute) -> Int {
-    MainThreadAX.sync {
-      if let rows = self.rows(for: attribute) { return rows.count }
-      return super.accessibilityArrayAttributeCount(attribute)
-    }
+    if let count = axProxyRows.arrayAttributeCount(attribute) { return count }
+    return super.accessibilityArrayAttributeCount(attribute)
   }
 
+  @available(macOS, deprecated: 10.10, message: "Legacy accessibility entry point; answered by AXProxyRows")
   override nonisolated func accessibilityArrayAttributeValues(
     _ attribute: NSAccessibility.Attribute, index: Int, maxCount: Int
   ) -> [Any] {
-    MainThreadAX.sync {
-      guard let rows = self.rows(for: attribute) else {
-        return super.accessibilityArrayAttributeValues(attribute, index: index, maxCount: maxCount)
-      }
-      guard index >= 0, index < rows.count, maxCount > 0 else { return [] }
-      return Array(rows[index..<min(rows.count, index + maxCount)])
-    }
-  }
-
-  /// Copies label, caption, selection and screen frame off row views that already exist. Never asks the table to
-  /// build a row: that runs from accessibility callbacks and deadlocks the hierarchy snapshot.
-  private func publishRows() {
-    guard !publishingAX else { return }
-    publishingAX = true
-    defer { publishingAX = false }
-    let count = numberOfRows
-    if axRows.count != count {
-      axRows = (0..<count).map { index in
-        let element = CommandBarAXRow()
-        element.setAccessibilityElement(true)
-        element.setAccessibilityRole(.row)
-        element.setAccessibilityIdentifier(AXID.CommandBar.row)
-        element.setAccessibilityParent(self)
-        element.setAccessibilityIndex(index)
-        return element
-      }
-    }
-    for index in axRows.indices {
-      let element = axRows[index]
-      element.setAccessibilityIndex(index)
-      if let view = rowView(atRow: index, makeIfNecessary: false) {
-        element.setAccessibilityLabel(view.accessibilityLabel())
-        if let value = view.accessibilityValue() { element.setAccessibilityValue(value) }
-      }
-      element.setAccessibilitySelected(index == selectedRow)
-      guard let window else { continue }
-      var rowRect = rect(ofRow: index)
-      if rowRect.width < 1 { rowRect.size.width = bounds.width > 1 ? bounds.width : 1 }
-      if rowRect.height < 1 { rowRect.size.height = rowHeight }
-      element.setAccessibilityFrame(window.convertToScreen(convert(rowRect, to: nil)))
-    }
-  }
-
-  private func rows(for attribute: NSAccessibility.Attribute) -> [Any]? {
-    switch attribute {
-    case .children, .visibleChildren, .rows, .visibleRows,
-         NSAccessibility.Attribute(rawValue: "AXChildrenInNavigationOrder"):
-      return axRows
-    case .selectedRows:
-      return axRows.filter { $0.isAccessibilitySelected() }
-    default:
-      return nil
-    }
+    if let values = axProxyRows.arrayAttributeValues(attribute, index: index, maxCount: maxCount) { return values }
+    return super.accessibilityArrayAttributeValues(attribute, index: index, maxCount: maxCount)
   }
 }
 
@@ -153,7 +63,7 @@ final class CommandBarView: NSView {
   let field = NSTextField()
   let divider = NSView()
   let scrollView = NSScrollView()
-  let table: NSTableView = CommandBarTableView()
+  let table = CommandBarTableView(frame: .zero)
 
   override var isFlipped: Bool { true }
 
