@@ -32,6 +32,28 @@ struct ReservedKeysTests {
     #expect(keys.matches(keyCode: UInt16(kVK_ANSI_A), character: "Q", modifiers: .command))
   }
 
+  /// AZERTY puts Z and A on the W and Q keys: Cmd-Z (undo in a web editor) and Cmd-A stay the page's.
+  @Test func `azerty undo and select all are not reserved`() {
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_W), character: "z", modifiers: .command))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_Q), character: "a", modifiers: .command))
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_Z), character: "w", modifiers: .command), "AZERTY's own W key")
+  }
+
+  /// Dvorak types Y, P and comma on the T, L and W keys: Cmd-Y, Cmd-P and Cmd-, are not reserved.
+  @Test func `dvorak keys on reserved key codes are not reserved`() {
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_T), character: "y", modifiers: .command))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_L), character: "p", modifiers: .command))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_W), character: ",", modifiers: .command))
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_Comma), character: "w", modifiers: .command), "Dvorak's W key")
+  }
+
+  /// A Cyrillic layout types no ASCII letter: the key code decides.
+  @Test func `cyrillic layouts match by key code`() {
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_T), character: "е", modifiers: .command))
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_W), character: "ц", modifiers: [.command, .shift]))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_Z), character: "я", modifiers: .command))
+  }
+
   /// Arrow keys arrive with `.function` and `.numericPad`; Caps Lock changes nothing.
   @Test func `space switching arrows match with their extra device flags`() {
     let flags: NSEvent.ModifierFlags = [.command, .option, .function, .numericPad]

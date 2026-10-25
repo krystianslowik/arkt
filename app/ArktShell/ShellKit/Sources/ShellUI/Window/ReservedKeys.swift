@@ -6,10 +6,11 @@ import Carbon.HIToolbox
 /// next and previous tab), plus Cmd-L. `ShellWindow.performKeyEquivalent(with:)` checks them before the focused view
 /// (a web page takes every key equivalent first), so a page cannot swallow Cmd-W or Cmd-Q.
 ///
-/// A key matches by its virtual key code, which does not depend on the keyboard layout (a Cyrillic layout still
-/// reports `kVK_ANSI_W` for the W key), or by its character, which covers layouts that move the letter (AZERTY,
-/// Dvorak). The main menu then decides what the key runs, with its own layout-aware matching, so a key matched here
-/// that is not one of these items just runs that item. Modifiers must match exactly: Shift-Cmd-T is not Cmd-T.
+/// A key that types an ASCII character matches by that character, so a layout that moves the letter (AZERTY's Z on
+/// the W key, Dvorak's Y on the T key) reserves its own W and leaves Cmd-Z and Cmd-Y to the page. A key that types
+/// no ASCII character (a Cyrillic layout) matches by its virtual key code (`kVK_ANSI_W` for the W key), as the main
+/// menu does for such layouts. Keys without a character (arrows) match by key code. Modifiers must match exactly:
+/// Shift-Cmd-T is not Cmd-T.
 public struct ReservedKeys: Sendable {
   public struct Key: Hashable, Sendable {
     public let keyCode: UInt16
@@ -52,8 +53,11 @@ public struct ReservedKeys: Sendable {
   public func matches(keyCode: UInt16, character: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
     let flags = Self.significant(modifiers).rawValue
     let character = character?.lowercased() ?? ""
+    let typesASCII = character.unicodeScalars.count == 1 && character.unicodeScalars.allSatisfy(\.isASCII)
     return keys.contains { key in
-      key.modifiers == flags && (key.keyCode == keyCode || (!key.character.isEmpty && key.character == character))
+      guard key.modifiers == flags else { return false }
+      guard !key.character.isEmpty, typesASCII else { return key.keyCode == keyCode }
+      return key.character == character
     }
   }
 
