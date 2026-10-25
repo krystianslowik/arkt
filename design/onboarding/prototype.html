@@ -15,8 +15,8 @@
     ?arc=0                   Arc is not installed (the import step is left out)
     ?still=1                 no entrance motion; every step renders at its settled end state
     ?shot=1                  hide the review bar; the window fills the viewport (screenshots)
-  Hash: #welcome #import #importing #imported #import-failed #theme #default #extensions
-        #tour-1 ... #tour-6 #done #browser
+  Hash: #welcome #import #importing #imported #import-failed #theme #theme-after-import #default #extensions
+        #tour-1 ... #tour-5 #done #browser #skip-confirm
 -->
 <style>
 :root {
@@ -321,7 +321,8 @@ body.rm .ic:active { transform: none; }
 
 /* Tour */
 .demo { width: 440px; height: 152px; position: relative; margin-bottom: 32px; }
-.keys { position: absolute; inset: 0; display: flex; gap: 12px; align-items: center; justify-content: center; }
+.keys { position: absolute; inset: 0; display: flex; gap: 32px; align-items: center; justify-content: center; }
+.keygroup { display: flex; gap: 12px; }
 .key {
   min-width: 64px; height: 64px; padding: 0 16px; border-radius: 14px; display: grid; place-items: center;
   font: 500 28px/1 var(--font-display); color: var(--text-primary); background: var(--control-fill);
@@ -359,6 +360,31 @@ body[data-appearance="dark"] .fingers i { background: rgba(250,249,245,.35); }
 }
 .cmdbar.on { opacity: 1; }
 body.rt .cmdbar { background: #1C1C20; }
+
+/* Skip setup confirmation (stands in for an NSAlert sheet) */
+.alert {
+  position: absolute; z-index: 45; left: 50%; top: 40px; width: 260px; transform: translateX(-50%);
+  padding: 20px 16px 16px; border-radius: 12px; text-align: center; background: var(--page-surface);
+  box-shadow: 0 0 0 0.5px var(--card-border), 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.alert[hidden] { display: none; }
+.alert-icon { width: 48px; height: 48px; display: block; margin: 0 auto 12px; }
+.alert h2 { margin: 0; font: 600 13px/16px var(--font); color: var(--text-primary); }
+.alert p { margin: 6px 0 16px; font-size: 11px; line-height: 14px; color: var(--text-secondary); }
+.alert button { display: block; width: 100%; min-width: 0; height: 28px; }
+.alert button + button { margin-top: 8px; }
+
+/* Compact layout when the card is short (small screens, decision 7) */
+.card { container-type: size; }
+@container (max-height: 620px) {
+  .step { padding: 48px 32px 56px; }
+  .controls, .actions { margin-top: 24px; }
+  .group + .group { margin-top: 16px; }
+  .demo { height: 120px; margin-bottom: 24px; }
+  .demo .mini { transform: scale(0.79); transform-origin: top center; }
+  .key { min-width: 52px; height: 52px; font-size: 24px; }
+  .done-mark { margin-bottom: 24px; }
+}
 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
@@ -432,7 +458,7 @@ body.rt .cmdbar { background: #1C1C20; }
         <section class="step" data-step="theme" role="group" aria-labelledby="t-theme">
           <div class="col">
             <h1 id="t-theme">Make it yours</h1>
-            <p class="body">Pick a look for your first Space. You can change it later.</p>
+            <p class="body" id="themeBody">Pick a look for your first Space. You can change it later.</p>
             <div class="controls">
               <div class="group">
                 <span class="field-label" id="l-theme">Theme</span>
@@ -539,6 +565,14 @@ body.rt .cmdbar { background: #1C1C20; }
       </div>
     </section>
 
+    <div class="alert" id="alert" role="alertdialog" aria-modal="true" aria-labelledby="alertTitle" aria-describedby="alertBody" hidden>
+      <img class="alert-icon" id="alertIcon" alt="" src="../brand/logos/01-mustard-on-white.png">
+      <h2 id="alertTitle">Skip setup?</h2>
+      <p id="alertBody">You can set things up later with Help &gt; Welcome to Arkt. Import from Arc stays in the File menu.</p>
+      <button class="btn-p" type="button" id="alertSkip" data-act="confirmSkip">Skip setup</button>
+      <button class="btn-s" type="button" data-act="cancelSkip">Cancel</button>
+    </div>
+
     <div class="sr" aria-live="polite" id="live"></div>
   </div>
 </div>
@@ -603,13 +637,15 @@ body.rt .cmdbar { background: #1C1C20; }
 
   // ---------- Themes (proposed first-Space set; light and dark gradient per family) ----------
   const THEMES = [
+    { id: "dune",    name: "Dune",    light: ["#F7EED2", "#EBD592"], dark: ["#3D3420", "#1E1A10"] },
     { id: "mist",    name: "Mist",    light: ["#E0F2FB", "#C5C6E2"], dark: ["#3A4158", "#1C2030"] },
     { id: "paper",   name: "Paper",   light: ["#F4F1EA", "#E4DDD2"], dark: ["#3A3631", "#211F1C"] },
     { id: "sage",    name: "Sage",    light: ["#E6EDE3", "#C4D3C0"], dark: ["#2F3B33", "#171E1A"] },
-    { id: "dune",    name: "Dune",    light: ["#F7EED2", "#EBD592"], dark: ["#3D3420", "#1E1A10"] },
     { id: "blossom", name: "Blossom", light: ["#F2EAE4", "#F29BBB"], dark: ["#4A2A3A", "#1F1520"] },
     { id: "indigo",  name: "Indigo",  light: ["#E4E2F4", "#C9C3E8"], dark: ["#2D4468", "#120F2E"] },
   ];
+  // Sample theme of the first imported Space ("Personal"): its Arc theme is kept unless a swatch is picked.
+  const ARC_THEME = { id: "arc", name: "Arc theme", light: ["#F2EAE4", "#F29BBB"], dark: ["#4A2A3A", "#1F1520"] };
   const ICONS = {
     none: '<circle cx="9" cy="9" r="2" fill="currentColor" stroke="none"/>',
     star: '<path d="M9 2.5l1.9 4 4.3.5-3.2 2.9.9 4.3L9 12l-3.9 2.2.9-4.3L2.8 7l4.3-.5z"/>',
@@ -631,13 +667,13 @@ body.rt .cmdbar { background: #1C1C20; }
   // ---------- State ----------
   const state = {
     step: "welcome", importState: "scanning", path: null, // path: "import" | "fresh" | null
-    theme: "mist", mode: opt.appearance, icon: "none", name: "", tip: 0, done: false,
+    theme: "dune", mode: opt.appearance, icon: "none", name: "", tip: 0, done: false,
   };
 
   function flow() {
     const f = ["welcome"];
     if (opt.arc) f.push("import");
-    if (state.path !== "import") f.push("theme");
+    f.push("theme");                       // shown on both paths (decision 2)
     f.push("default", "extensions", "tour", "done");
     return f;
   }
@@ -652,6 +688,7 @@ body.rt .cmdbar { background: #1C1C20; }
     const dark = opt.appearance === "dark";
     $("#mark").src = dark ? "../brand/logos/02-mustard-on-graphite.png" : "../brand/logos/01-mustard-on-white.png";
     $("#doneMark").src = $("#mark").src;
+    $("#alertIcon").src = $("#mark").src;
     $("#wordmark").src = dark ? "../brand/logos/wordmark-ivory.png" : "../brand/logos/wordmark-graphite.png";
     $("#r-appearance").setAttribute("aria-pressed", String(dark));
     $("#r-motion").setAttribute("aria-pressed", String(opt.reduceMotion));
@@ -676,7 +713,7 @@ body.rt .cmdbar { background: #1C1C20; }
   // ---------- Space theme background (ThemeBackgroundView: 0.28 s crossfade, snaps under Reduce Motion) ----------
   let themeFront = $("#themeA"), themeBack = $("#themeB");
   function gradient() {
-    const t = THEMES.find(x => x.id === state.theme);
+    const t = state.theme === "arc" ? ARC_THEME : THEMES.find(x => x.id === state.theme);
     const [a, b] = t[state.mode];
     return `linear-gradient(135deg, ${a}, ${b})`;
   }
@@ -707,7 +744,7 @@ body.rt .cmdbar { background: #1C1C20; }
     $("#sbFavs").innerHTML = noFavs ? "" : (imported ? favs : ["", "", ""]).map(l => `<div class="sb-fav">${l ? `<span class="tile">${l}</span>` : ""}</div>`).join("");
     $("#sbSpace").style.top = noFavs ? "78px" : "";
     $("#sbList").style.top = noFavs ? "114px" : "";
-    $("#sbSpace").textContent = imported ? "Personal" : (state.name.trim() || "Space 1");
+    $("#sbSpace").textContent = state.name.trim() || (imported ? "Personal" : "Space 1");
     const pinned = imported
       ? [{ l: "M", t: "Mail" }, { l: "C", t: "Calendar" }, { l: "D", t: "Docs" }]
       : (landed ? [] : [{ skel: 1, w: 92 }, { skel: 1, w: 70 }]);
@@ -717,7 +754,7 @@ body.rt .cmdbar { background: #1C1C20; }
       `<div class="row newtab" id="newtabRow"><div class="bg"></div><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg><span class="title">New Tab</span></div>` +
       today.map(rowHTML).join("");
     const nSpaces = imported ? ARC.spaces : 1;
-    const icon = imported ? "none" : state.icon;
+    const icon = state.icon;
     $("#sbDots").innerHTML = Array.from({ length: nSpaces }, (_, i) =>
       i === 0 && icon !== "none" ? svgIcon(icon, 16) : `<i class="${i === 0 ? "on" : ""}"></i>`).join("");
     $("#sbUrl").textContent = landed ? "" : "";
@@ -786,7 +823,7 @@ body.rt .cmdbar { background: #1C1C20; }
       if (c && !opt.still) animate(c, { opacity: "1", transform: "scale(1)" }, opt.reduceMotion ? fade(200) : "springyFast");
       if (importProgress < COUNT_ROWS.length) importTimer = setTimeout(tick, 380);
       else importTimer = setTimeout(() => {
-        state.importState = "imported"; renderCounts(); renderSidebar(); staggerSidebar();
+        state.importState = "imported"; state.theme = "arc"; applyTheme(true); renderCounts(); renderSidebar(); staggerSidebar();
         say("Imported from Arc. Continue to the next step.");
         setHash("imported"); focusDefault();
       }, 300);
@@ -804,10 +841,15 @@ body.rt .cmdbar { background: #1C1C20; }
 
   // ---------- Theme step ----------
   function renderThemePicker() {
-    $("#swatches").innerHTML = THEMES.map(t => {
+    const keep = state.theme === "arc";
+    $("#themeBody").textContent = state.path === "import"
+      ? "Your first Space keeps its look from Arc. Pick another if you like. You can change it later."
+      : "Pick a look for your first Space. You can change it later.";
+    $("#spaceName").placeholder = state.path === "import" ? "Personal" : "Space 1";
+    $("#swatches").innerHTML = THEMES.map((t, i) => {
       const [a, b] = t[state.mode];
       const on = t.id === state.theme;
-      return `<button type="button" class="sw" role="radio" aria-checked="${on}" aria-label="${t.name}" tabindex="${on ? 0 : -1}" data-theme="${t.id}" style="background:linear-gradient(135deg, ${a}, ${b})"></button>`;
+      return `<button type="button" class="sw" role="radio" aria-checked="${on}" aria-label="${t.name}" tabindex="${on || (keep && i === 0) ? 0 : -1}" data-theme="${t.id}" style="background:linear-gradient(135deg, ${a}, ${b})"></button>`;
     }).join("");
     $$("#seg button").forEach(b => {
       const on = b.dataset.mode === state.mode;
@@ -827,12 +869,11 @@ body.rt .cmdbar { background: #1C1C20; }
 
   // ---------- Tour ----------
   const TIPS = [
-    { title: "Open a tab", body: "Press Command-T, then search or type an address.", keys: ["\u2318", "T"], hl: "newtab", label: "Command T" },
-    { title: "Go to the address", body: "Press Command-L to edit the address of the current tab.", keys: ["\u2318", "L"], hl: "url", label: "Command L" },
-    { title: "Close by archiving", body: "Command-W closes a tab and keeps it in the Archive, so you can find it again.", keys: ["\u2318", "W"], hl: "archive", label: "Command W" },
-    { title: "Switch Spaces", body: "Swipe left or right with two fingers on the sidebar to move between Spaces.", demo: "swipe", hl: "dots" },
-    { title: "Split the view", body: "Drag a tab from the sidebar onto the page to see two tabs side by side.", demo: "split", hl: "rows" },
-    { title: "Keep Favorites close", body: "Drag a tab to the top of the sidebar to make it a Favorite.", demo: "favorite", hl: "favs" },
+    { title: "Open a tab", body: "Press Command-T to search or type an address. Command-L edits the address of the current tab.", keys: [["\u2318", "T"], ["\u2318", "L"]], hl: ["newtab", "url"], label: "Command T, Command L" },
+    { title: "Close by archiving", body: "Command-W closes a tab and keeps it in the Archive, so you can find it again.", keys: [["\u2318", "W"]], hl: ["archive"], label: "Command W" },
+    { title: "Switch Spaces", body: "Swipe left or right with two fingers on the sidebar to move between Spaces.", demo: "swipe", hl: ["dots"] },
+    { title: "Split the view", body: "Drag a tab from the sidebar onto the page to see two tabs side by side.", demo: "split", hl: ["rows"] },
+    { title: "Keep Favorites close", body: "Drag a tab to the top of the sidebar to make it a Favorite.", demo: "favorite", hl: ["favs"] },
   ];
   let demoTimers = [];
   function clearDemo() { demoTimers.forEach(clearTimeout); demoTimers = []; $$("#demo *").forEach(e => e.getAnimations().forEach(a => a.cancel())); }
@@ -865,7 +906,7 @@ body.rt .cmdbar { background: #1C1C20; }
 
   function highlight(id) {
     $$(".hl").forEach(h => {
-      const on = h.dataset.hl === id;
+      const on = id.includes(h.dataset.hl);
       const target = on ? { opacity: "1", transform: "scale(1)" } : { opacity: "0", transform: opt.reduceMotion ? "scale(1)" : "scale(0.97)" };
       if (opt.still) { h.style.opacity = target.opacity; h.style.transform = "none"; return; }
       animate(h, target, opt.reduceMotion ? fade(200) : (on ? "firmSlow" : "firmFast"));
@@ -877,7 +918,7 @@ body.rt .cmdbar { background: #1C1C20; }
     clearDemo();
     const d = $("#demo");
     if (tip.keys) {
-      d.innerHTML = `<div class="keys" role="img" aria-label="${tip.label}">${tip.keys.map(k => `<span class="key">${k}</span>`).join("")}</div>`;
+      d.innerHTML = `<div class="keys" role="img" aria-label="${tip.label}">${tip.keys.map(g => `<span class="keygroup">${g.map(k => `<span class="key">${k}</span>`).join("")}</span>`).join("")}</div>`;
       if (!opt.still && !opt.reduceMotion) {
         // One press, once, as the tip appears: the keys dip 2 pt and spring back.
         $$(".key", d).forEach((k, i) => demoTimers.push(setTimeout(() => {
@@ -1090,6 +1131,32 @@ body.rt .cmdbar { background: #1C1C20; }
     [acts, skip].forEach(e => { e.style.opacity = "0"; animate(e, { opacity: "1" }, fade(240), 560); });
   }
 
+  // "Skip setup" asks first (decision 6). Native: an NSAlert sheet on the window; Return skips, Escape cancels.
+  let alertOpen = false, alertReturn = null;
+  function confirmSkip() {
+    if (alertOpen || state.done) return;
+    alertOpen = true; alertReturn = document.activeElement;
+    const al = $("#alert");
+    al.hidden = false;
+    $("#win").querySelectorAll(".card, .field, .sidebar").forEach(el => el.inert = true);
+    if (!opt.still) {
+      al.style.opacity = "0"; al.style.transform = opt.reduceMotion ? "translateX(-50%)" : "translateX(-50%) translateY(-8px) scale(0.97)";
+      animate(al, { opacity: "1", transform: "translateX(-50%)" }, opt.reduceMotion ? fade(200) : "firm");
+    } else { al.style.opacity = "1"; al.style.transform = "translateX(-50%)"; }
+    $("#alertSkip").focus({ preventScroll: true });
+    say("Skip setup? You can set things up later with Help, Welcome to Arkt.");
+  }
+  function closeAlert() {
+    if (!alertOpen) return;
+    alertOpen = false;
+    const al = $("#alert");
+    $("#win").querySelectorAll(".card, .field, .sidebar").forEach(el => el.inert = false);
+    $("#sidebar").inert = false;
+    const a = opt.still ? null : animate(al, { opacity: "0", transform: opt.reduceMotion ? "translateX(-50%)" : "translateX(-50%) scale(0.98)" }, opt.reduceMotion ? fade(150) : "firmFast");
+    if (a) a.onfinish = () => { if (!alertOpen) al.hidden = true; }; else al.hidden = true;
+    if (alertReturn && alertReturn.focus) alertReturn.focus({ preventScroll: true });
+  }
+
   function finish() {
     state.done = true;
     if (state.step !== "done") { /* Skip setup: no flourish */ }
@@ -1121,9 +1188,18 @@ body.rt .cmdbar { background: #1C1C20; }
     if (b && !b.disabled) {
       const act = b.dataset.act;
       if (act === "start") leaveWelcome();
-      else if (act === "skipAll") finish();
+      else if (act === "skipAll") confirmSkip();
+      else if (act === "confirmSkip") { closeAlert(); finish(); }
+      else if (act === "cancelSkip") closeAlert();
       else if (act === "next") next();
-      else if (act === "skip") { if (state.step === "tour") { showStep("done", 1); } else next(); }
+      else if (act === "skip") {
+        if (state.step === "tour") { showStep("done", 1); return; }
+        if (state.step === "theme") {           // Skip keeps the starting look: Dune for a fresh Space, Arc's for an import
+          state.theme = state.path === "import" ? "arc" : "dune"; state.name = ""; state.icon = "none"; state.mode = opt.appearance;
+          $("#spaceName").value = ""; applyTheme(true); renderSidebar();
+        }
+        next();
+      }
       else if (act === "fresh") { state.path = "fresh"; clearTimeout(importTimer); next(); }
       else if (act === "import") runImport();
       else if (act === "makeDefault") { $("#b-default").textContent = "macOS is asking you to confirm. Arkt continues either way."; setTimeout(next, opt.still ? 0 : 900); }
@@ -1142,7 +1218,7 @@ body.rt .cmdbar { background: #1C1C20; }
     if (state.step === "tour" && state.tip > 0) { state.tip--; renderTip(-1); setHash(`tour-${state.tip + 1}`); return; }
     back();
   });
-  $("#skipAll").addEventListener("click", finish);
+  $("#skipAll").addEventListener("click", confirmSkip);
   $("#spaceName").addEventListener("input", (e) => { state.name = e.target.value; renderSidebar(); });
 
   // Radio groups: arrow keys move the selection (roving tabindex)
@@ -1158,6 +1234,15 @@ body.rt .cmdbar { background: #1C1C20; }
 
   document.addEventListener("keydown", (e) => {
     if (e.target.closest && e.target.closest(".review")) return;
+    if (alertOpen) {
+      if (e.key === "Escape") { e.preventDefault(); closeAlert(); }
+      else if (e.key === "Enter" && document.activeElement?.tagName !== "BUTTON") { e.preventDefault(); $("#alertSkip").click(); }
+      else if (e.key === "Tab") {             // focus stays inside the alert
+        const b = $$("#alert button"); const i = b.indexOf(document.activeElement);
+        e.preventDefault(); b[(i + (e.shiftKey ? -1 : 1) + b.length) % b.length].focus();
+      }
+      return;
+    }
     const inText = e.target.tagName === "INPUT" && e.target.type === "text";
     if (radioKeys(e, ".sw", "theme", v => { state.theme = v; renderThemePicker(); applyTheme(true); })) return;
     if (radioKeys(e, "#seg button", "mode", v => { state.mode = v; renderThemePicker(); moveSegThumb(true); applyTheme(true); })) return;
@@ -1165,7 +1250,7 @@ body.rt .cmdbar { background: #1C1C20; }
     if (state.done) return;
     if (e.key === "Escape") {
       e.preventDefault();
-      if (state.step === "welcome") return finish();
+      if (state.step === "welcome") return confirmSkip();
       if (state.step === "import" && state.importState === "importing") return; // an import in progress is not cancelled by Escape
       const skip = stepEl(state.step).querySelector('[data-act="skip"], [data-act="fresh"]');
       if (skip) skip.click(); else next();
@@ -1190,7 +1275,7 @@ body.rt .cmdbar { background: #1C1C20; }
   });
 
   // ---------- Review controls ----------
-  const STEPS = ["welcome", "import", "importing", "imported", "import-failed", "theme", "default", "extensions", "tour-1", "tour-2", "tour-3", "tour-4", "tour-5", "tour-6", "done", "browser"];
+  const STEPS = ["welcome", "import", "importing", "imported", "import-failed", "theme", "default", "extensions", "tour-1", "tour-2", "tour-3", "tour-4", "tour-5", "done", "browser", "skip-confirm", "theme-after-import"];
   const sel = $("#r-step");
   sel.innerHTML = STEPS.map(s => `<option value="${s}">${s}</option>`).join("");
   function syncSelect() { const h = location.hash.slice(1) || "welcome"; if (STEPS.includes(h)) sel.value = h; }
@@ -1220,8 +1305,13 @@ body.rt .cmdbar { background: #1C1C20; }
       if (h === "import-failed") { state.importState = "failed"; }
       renderCounts(); renderSidebar(); showStep("import", 1);
     } else if (h.startsWith("tour")) {
-      state.path = opt.arc ? "fresh" : null; state.tip = Math.max(0, Math.min(5, (parseInt(h.split("-")[1], 10) || 1) - 1));
+      state.path = opt.arc ? "fresh" : null; state.tip = Math.max(0, Math.min(TIPS.length - 1, (parseInt(h.split("-")[1], 10) || 1) - 1));
       renderSidebar(); showStep("tour", 1);
+    } else if (h === "theme-after-import") {
+      opt.arc = true; state.path = "import"; state.importState = "imported"; state.theme = "arc";
+      applyTheme(false); renderCounts(); renderSidebar(); showStep("theme", 1);
+    } else if (h === "skip-confirm") {
+      state.path = opt.arc ? "fresh" : null; renderSidebar(); showStep("theme", 1); confirmSkip();
     } else if (h === "browser") {
       state.path = opt.arc ? "fresh" : null; renderSidebar(); showStep("done", 1); finish();
     } else if (["theme", "default", "extensions", "done"].includes(h)) {
