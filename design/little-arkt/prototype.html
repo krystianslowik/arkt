@@ -76,7 +76,7 @@ body { font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvet
 button { font: inherit; color: inherit; }
 
 /* ---------- Prototype bar (not part of the design) ---------- */
-#bar { position: fixed; inset: 0 0 auto 0; height: 52px; z-index: 10; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #202321; color: #FAF9F5; overflow-x: auto; white-space: nowrap; }
+#bar { position: fixed; inset: 0 0 auto 0; min-height: 52px; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 12px 16px; background: #202321; color: #FAF9F5; white-space: nowrap; }
 #bar .name { font-weight: 650; font-size: 14px; display: flex; align-items: center; gap: 8px; }
 #bar .name i { width: 10px; height: 10px; border-radius: 3px; background: #E9B520; display: inline-block; }
 #bar .grp { display: flex; align-items: center; gap: 4px; }
@@ -87,7 +87,7 @@ button { font: inherit; color: inherit; }
 #bar button[aria-pressed="true"] { background: #E9B520; color: #202321; }
 #bar button:focus-visible { outline: 2px solid #E9B520; outline-offset: 2px; }
 body.shot #bar { display: none; }
-#desk { position: absolute; inset: 52px 0 0 0; display: grid; place-items: center; }
+#desk { position: absolute; inset: var(--bar-h, 52px) 0 0 0; display: grid; place-items: center; }
 body.shot #desk { inset: 0; }
 #fit { width: 1440px; height: 900px; transform-origin: center; }
 
@@ -445,6 +445,8 @@ class Card extends Node {
     this.content.style.transform = `translateX(${this.gravity === "center" ? (v.w - this.LW) / 2 : 0}px)`;
     const k = `translate(${r.x}px,${r.y}px) scale(${s * v.w / this.PW},${s * v.h / this.PH})`;
     this.plate.style.transform = k; this.rim.style.transform = k; this.plate.style.opacity = v.o; this.rim.style.opacity = v.o;
+    const hidden = v.o < 0.01 ? "hidden" : "visible";
+    this.el.style.visibility = hidden; this.plate.style.visibility = hidden; this.rim.style.visibility = hidden;
   }
 }
 
@@ -611,7 +613,8 @@ document.addEventListener("keydown", e => {
 
 function fit() {
   const shot = document.body.classList.contains("shot");
-  const W = innerWidth - (shot ? 0 : 48), H = innerHeight - (shot ? 0 : 100);
+  const barH = shot ? 0 : $("bar").offsetHeight; document.documentElement.style.setProperty("--bar-h", barH + "px");
+  const W = innerWidth - (shot ? 0 : 48), H = innerHeight - (shot ? 0 : barH + 48);
   $("fit").style.transform = `scale(${Math.min(1, W / 1440, H / 900)})`;
 }
 function params() { return new URLSearchParams(location.hash.slice(1)); }

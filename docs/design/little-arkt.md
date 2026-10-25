@@ -39,14 +39,14 @@ Typeface: the system font (SF Pro), as everywhere in the shell.
 | A route matches the link | The route's destination wins | BH-140 (#113) |
 | The same link again while its window is open | That window comes forward and nudges; no duplicate | BH-134 |
 | Another link while one is open | A second window, cascaded | BH-133 |
-| Cmd-Opt-N anywhere (global hotkey, when enabled) | Quick lookup bar on the current desktop, above full-screen apps; Return opens the result in a new Little Arkt window | BH-130, KB-045 |
+| Cmd-Opt-N anywhere (global hotkey, off by default, turned on in Settings) | Quick lookup bar on the current desktop, above full-screen apps; Return opens the result in a new Little Arkt window | BH-130, KB-045 |
 | Cmd-Opt-N with Arkt frontmost | Same, from the File menu ("New Little Arkt Window") | KB-044 |
 | Opt-Cmd-click a link (when enabled) | Little Arkt window | BH-132, GS-028 |
 | Opt-Cmd-click a sidebar tab (when enabled) | That tab moves into a Little Arkt window | BH-132 |
-| `window.open` with features, extension popup windows | Little Arkt popup (below) | #123, proposal |
+| `window.open` with features, extension popup windows | Little Arkt popup (below) | #123, decided 2026-10-25 |
 
 Settings (Settings > Links, final copy): "Links from other apps open in Little Arkt" (on), "Open Little Arkt when I
-press ⌥⌘N" (default to be checked, BH-131), "Open Little Arkt when clicking on links with ⌥⌘ held" (default to be
+press ⌥⌘N" (off by default, decided 2026-10-25; the user opts in, BH-131), "Open Little Arkt when clicking on links with ⌥⌘ held" (default to be
 checked). Settings > Profiles: "Archive Little Arkts after:" with the same choices as "Archive tabs after", default
 6 hours (BH-137).
 
@@ -54,9 +54,9 @@ checked). Settings > Profiles: "Archive Little Arkts after:" with the same choic
 
 | Element | Value | Token or source |
 |---|---|---|
-| Window | 480 x 620 pt, borderless (full-size content view, hidden title bar), standard window shadow, radius 12 | proposed; PARITY(NEEDS-RUNTIME-CHECK RT-23, BH-143) |
-| First position | top-right of the current screen's visible frame, 24 pt from the right edge and 20 below the menu bar | proposed |
-| Further windows | each 28 pt left and 28 pt down from the frontmost Little Arkt window; wraps back to the first position when it would leave the visible frame | proposed |
+| Window | 480 x 620 pt, borderless (full-size content view, hidden title bar), standard window shadow, radius 12 | decided 2026-10-25 until RT-23 is measured; PARITY(NEEDS-RUNTIME-CHECK RT-23, BH-143) |
+| First position | top-right of the current screen's visible frame, 24 pt from the right edge and 20 below the menu bar | decided 2026-10-25 |
+| Further windows | each 28 pt left and 28 pt down from the frontmost Little Arkt window; wraps back to the first position when it would leave the visible frame | decided 2026-10-25 |
 | Size after a resize | the last size the user set is used for new windows | BH-142 |
 | Minimum size | 360 x 400 | proposed |
 | Frame | 6 pt around the card on the left, right and bottom | proposed |
@@ -136,7 +136,7 @@ it is a keyboard action used many times a day.
 
 ### Popups
 
-Proposal for #123. A page's `window.open` with window features, and an extension's
+Decided for #123 (maintainer, 2026-10-25). A page's `window.open` with window features, and an extension's
 `chrome.windows.create({type: "popup"})`, open in a Little Arkt popup:
 
 - the size and position the page asked for (clamped to the screen and the minimum size), else centered over the
@@ -200,7 +200,7 @@ Keyframe screenshots (`la-kf-<transition>-<ms>ms-<theme>.png`, `la-rm-...` for R
 | Cmd-O | Open in the most recent Space | KB-076 |
 | Cmd-Opt-O | Choose a Space | KB-077, PARITY(NEEDS-RUNTIME-CHECK RT-07) |
 | Cmd-W | Close and archive | KB-080 |
-| Cmd-Opt-N | Quick lookup (global when enabled, in-app always) | KB-044, KB-045 |
+| Cmd-Opt-N | Quick lookup: in-app always; system-wide only after the user turns it on in Settings (off by default) | KB-044, KB-045 |
 | Cmd-L | Edit the URL in the top bar; Return navigates | proposed |
 | Cmd-Shift-C, Cmd-Shift-Opt-C | Copy the URL, as Markdown | KB-013, KB-014 |
 | Cmd-[ and Cmd-], Cmd-R | Back, forward, reload | standard |
@@ -245,9 +245,10 @@ as usual (Personal sample theme in light, Dev in dark).
 
 ## Parity notes
 
-- Default size and position are unknown (BH-143). PARITY(NEEDS-RUNTIME-CHECK RT-23). The 480 x 620 top-right
-  proposal is Arkt's.
-- The hotkey's default state is unknown (BH-131). PARITY(NEEDS-RUNTIME-CHECK RT-23).
+- Default size and position are unknown (BH-143). PARITY(NEEDS-RUNTIME-CHECK RT-23). Arkt uses 480 x 620 at the
+  top-right until RT-23 is measured.
+- Arc's hotkey default is unknown (BH-131), PARITY(NEEDS-RUNTIME-CHECK RT-23). Arkt ships it off; this is a product
+  decision, not a parity claim.
 - KB-077 key, Cmd-Opt-O or Cmd-Shift-O (CF-13). PARITY(NEEDS-RUNTIME-CHECK RT-07).
 - The Space chooser's contents beyond the Space list, the profile sheet's wording and the popup behavior are Arkt's.
 - The neutral brand frame, the accent Open in button and the flight into the main window are Arkt design choices.
@@ -265,14 +266,18 @@ as usual (Personal sample theme in light, Dev in dark).
   destination; a global hotkey (`RegisterEventHotKey`, no Accessibility permission needed); the Archive's Little Arkt
   source and its threshold in auto-archive.
 
-## Open questions for the maintainer
+## Decisions (maintainer, 2026-10-25)
 
-1. Frame color: neutral brand surface (proposal), or the most recent Space's theme?
-2. The accent (mustard) Open in button: the one branded action in the shell so far. Keep it, or use the neutral
-   sidebar item style?
-3. Popups (#123): Little Arkt popup for `window.open` with features and for extension popups. Agree?
-4. Default window 480 x 620 at the top-right, cascading 28 pt. Agree until RT-23 is measured?
-5. Should the global hotkey be on by default?
+1. Frame: the neutral brand surface (`BrandTokens.surfaceBrand`), not a Space theme. Accepted.
+2. The mustard "Open in <Space>" split button stays. Accepted.
+3. Popups (#123): `window.open` with window features and extension popup windows open in a Little Arkt popup window;
+   Peek is only for link clicks. Accepted.
+4. Default window 480 x 620 at the top-right, cascading 28 pt, until RT-23 is measured. Accepted.
+5. The global Cmd-Opt-N hotkey is off by default. The user turns it on in Settings > Links ("Open Little Arkt when I
+   press ⌥⌘N"), laid out as in the Settings window design. The in-app File menu item works either way.
+
+No open questions remain for Little Arkt. Parity checks still open: RT-23 (size, position, hotkey default in Arc) and
+RT-07 (KB-077 key).
 
 ## Screenshot index
 

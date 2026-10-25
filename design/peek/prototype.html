@@ -96,9 +96,9 @@ button { font: inherit; color: inherit; }
 
 /* ---------- Prototype bar (not part of the design) ---------- */
 #bar {
-  position: fixed; inset: 0 0 auto 0; height: 52px; z-index: 10;
-  display: flex; align-items: center; gap: 18px; padding: 0 16px;
-  background: #202321; color: #FAF9F5; overflow-x: auto; white-space: nowrap;
+  position: fixed; inset: 0 0 auto 0; min-height: 52px; z-index: 10;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 12px 16px;
+  background: #202321; color: #FAF9F5; white-space: nowrap;
   box-shadow: 0 1px 0 rgba(255,255,255,.06);
 }
 #bar .name { font-weight: 650; font-size: 14px; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
@@ -116,7 +116,7 @@ button { font: inherit; color: inherit; }
 body.shot #bar { display: none; }
 
 /* ---------- Desk and window ---------- */
-#desk { position: absolute; inset: 52px 0 0 0; display: grid; place-items: center; }
+#desk { position: absolute; inset: var(--bar-h, 52px) 0 0 0; display: grid; place-items: center; }
 body.shot #desk { inset: 0; }
 #fit { width: 1280px; height: 800px; transform-origin: center; }
 #win {
@@ -190,7 +190,7 @@ body.shot #desk { inset: 0; }
 }
 .tip kbd { font: inherit; color: var(--command-secondary); }
 .pc.tipped .tip { display: flex; }
-#grab { position: absolute; left: 0; top: 0; width: 36px; height: 5px; border-radius: 3px; background: var(--peek-grabber); will-change: transform, opacity; }
+#grab { position: absolute; left: 0; top: 0; width: 36px; height: 5px; cursor: grab; touch-action: none; border-radius: 3px; background: var(--peek-grabber); will-change: transform, opacity; }
 
 /* ---------- Toast (ToastView: 36 high, radius 18, 16 above the card bottom) ---------- */
 #toast {
@@ -521,6 +521,8 @@ class Card extends Node {
     const k = `translate(${r.x}px,${r.y}px) scale(${s * v.w / this.PW},${s * v.h / this.PH})`;
     this.plate.style.transform = k; this.rim.style.transform = k;
     this.plate.style.opacity = v.o; this.rim.style.opacity = v.o;
+    const hidden = v.o < 0.01 ? "hidden" : "visible";
+    this.el.style.visibility = hidden; this.plate.style.visibility = hidden; this.rim.style.visibility = hidden;
   }
 }
 
@@ -714,12 +716,14 @@ const T = {
 
 /* ---------- Drag to dismiss (GS-022) ---------- */
 let drag = null;
-$("peek").addEventListener("pointerdown", e => {
+function startDrag(e) {
   if (FROZEN || !win.classList.contains("peeking") || drag) return;
   drag = { y0: e.clientY, k: win.getBoundingClientRect().width / 1280, samples: [[performance.now(), 0]] };
-  $("peek").setPointerCapture(e.pointerId);
-});
-$("peek").addEventListener("pointermove", e => {
+  e.currentTarget.setPointerCapture(e.pointerId);
+}
+$("peek").addEventListener("pointerdown", startDrag);
+$("grab").addEventListener("pointerdown", startDrag);
+function moveDrag(e) {
   if (!drag) return;
   let dy = (e.clientY - drag.y0) / drag.k;
   if (dy < 0) dy = -Math.pow(-dy, 0.7);                       // rubber band upward
@@ -727,7 +731,9 @@ $("peek").addEventListener("pointermove", e => {
   const f = Math.max(0, Math.min(1, dy / 300));
   peek.set({ y: PEEK.y + dy, s: 1 - 0.06 * f }); scrim.set({ o: 1 - 0.75 * f });
   ctrls.set({ o: Math.max(0, 1 - Math.abs(dy) / 60) }); grab.set({ o: Math.max(0, 0.9 - Math.abs(dy) / 60) });
-});
+}
+$("peek").addEventListener("pointermove", moveDrag);
+$("grab").addEventListener("pointermove", moveDrag);
 function endDrag() {
   if (!drag) return;
   const s = drag.samples, a = s[0], b = s[s.length - 1];
@@ -736,8 +742,7 @@ function endDrag() {
   if (dy > 120 || v > 800) { peek.vel({ y: Math.max(v, 600) }); T.fling.run(); }
   else { peek.vel({ y: v }).to({ y: PEEK.y, s: 1 }, RM ? "firm" : "springy"); scrim.to({ o: 1 }, "firm"); ctrls.to({ o: 1 }, "fade"); grab.to({ o: 0.9 }, "fade"); }
 }
-$("peek").addEventListener("pointerup", endDrag);
-$("peek").addEventListener("pointercancel", endDrag);
+for (const id of ["peek", "grab"]) { $(id).addEventListener("pointerup", endDrag); $(id).addEventListener("pointercancel", endDrag); }
 
 /* ---------- Live interaction ---------- */
 $("plink").addEventListener("click", e => { e.preventDefault(); if (!win.classList.contains("peeking")) T.open.run(); });
@@ -759,7 +764,8 @@ document.addEventListener("keydown", e => {
 /* ---------- Hash state, toggles, fit ---------- */
 function fit() {
   const shot = document.body.classList.contains("shot");
-  const W = innerWidth - (shot ? 0 : 48), H = innerHeight - (shot ? 0 : 52 + 48);
+  const barH = shot ? 0 : $("bar").offsetHeight; document.documentElement.style.setProperty("--bar-h", barH + "px");
+  const W = innerWidth - (shot ? 0 : 48), H = innerHeight - (shot ? 0 : barH + 48);
   const k = shot ? Math.min(1, W / 1280, H / 800) : Math.min(1, W / 1280, H / 800);
   $("fit").style.transform = `scale(${k})`;
 }

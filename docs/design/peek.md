@@ -44,7 +44,7 @@ Settings (Settings > Links, final copy): "Open a Peek window when clicking on li
 "Only affects Favorites and pinned tabs" (on by default), and "Open a Peek window when clicking on links with Shift
 held" (on by default).
 
-Popups (#123). The maintainer decided popups open in Peek or Little Arkt. Proposal, to confirm:
+Popups (#123), decided by the maintainer on 2026-10-25:
 
 - `window.open` with window features (sign-in, payment, share dialogs) opens a Little Arkt popup window, not a Peek.
   These pages need a real, separate window: they are sized by the opener, the opener keeps running behind them, and
@@ -59,15 +59,15 @@ All values in points, on the shell's existing grid (`ShellMetrics.standard`: con
 
 | Element | Value | Token or source |
 |---|---|---|
-| Peek card | content card inset by 56 left and right, 34 top, 26 bottom | proposed; PARITY(NEEDS-RUNTIME-CHECK RT-24, BH-154) |
+| Peek card | content card inset by 56 left and right, 34 top, 26 bottom | Arkt's value; PARITY(NEEDS-RUNTIME-CHECK RT-24, BH-154) |
 | Peek card in a 1080 x 780 content card | 968 x 720 | |
 | Minimum margin | 24 on every side; below a 600 pt wide content card the side insets shrink to 24 and the controls move inside the card's top-right corner | proposed |
 | Corner radius | 10, continuous | `ShellMetrics.cardCornerRadius` |
 | Hairline | 1 physical pixel | `ShellTokens.cardBorder` |
 | Shadow | light: black 22 %, radius 24, y 18, plus black 10 %, radius 5, y 3; dark: black 55 % and 30 % | proposed `ShellTokens.peekShadow` |
 | Scrim over the source card | light black 18 %, dark black 42 %, clipped to the source card | proposed `ShellTokens.peekScrim` |
-| Source card scale while a Peek is open | 0.985 about its center | proposed |
-| Controls | three 28 pt circles, 8 apart, 12 right of the card's top-right corner, top-aligned with the card | proposed |
+| Source card scale while a Peek is open | 0.985 about its center | decided 2026-10-25 |
+| Controls | three 28 pt circles, 8 apart, 12 right of the card's top-right corner, top-aligned with the card (outside the card) | decided 2026-10-25 |
 | Control fill | light white 96 %, dark `#1C1C20` 96 %, hairline `cardBorder` | reuses `ShellTokens.toastSurface` |
 | Control glyph | 14 pt, `secondaryText`; `primaryText` on hover | |
 | Control order, top to bottom | Close, Open as Tab, Add to Split View | proposed; Arc lists expand, split, close (BH-148), PARITY(NEEDS-RUNTIME-CHECK) |
@@ -116,8 +116,9 @@ Cmd-W, and dragging the card down. After a close, a "Peek closed" toast with "Re
 Cmd-Shift-T and Cmd-Z reopen it (BH-150, KB-079), with its history; a reopened Peek opens at the same place, without
 the travel from the link.
 
-Esc goes to the page first. If the page handles it (closes its own dialog, leaves full screen), the Peek stays. Only
-an unhandled Esc closes the Peek. PARITY(NEEDS-RUNTIME-CHECK): Arc's order is not documented.
+Esc goes to the page first (maintainer decision, 2026-10-25). If the page uses it (closes its own dialog, leaves full
+screen, cancels a field), the Peek stays and the next Esc closes the Peek. An Esc the page does not use closes the
+Peek at once. PARITY(NEEDS-RUNTIME-CHECK): Arc's order is not documented.
 
 ### Open as Tab (Cmd-O)
 
@@ -147,7 +148,7 @@ A Peek belongs to its source pane, not to the whole split. It covers the source 
 apply to that pane, the other panes stay live and clickable, and clicking another pane closes the Peek like a click
 on the scrim. The card insets in a pane are 24 on the left, 34 top, 26 bottom and 52 on the right, which is the
 control gutter. Below a 600 pt wide pane the Peek covers the whole content area instead, with the normal insets.
-Proposed; PARITY(NEEDS-RUNTIME-CHECK).
+Decided 2026-10-25; Arc's behavior is PARITY(NEEDS-RUNTIME-CHECK).
 
 ### Edge cases
 
@@ -204,7 +205,7 @@ at 120 ms) at 150.
 
 | Key | Action | Rule |
 |---|---|---|
-| Esc | Close the Peek (after the page declines it) | KB-039, KB-078 |
+| Esc | Goes to the page first; when the page uses it, the next Esc closes the Peek; otherwise it closes the Peek | KB-039, KB-078 |
 | Cmd-W | Close the Peek | KB-078 |
 | Cmd-O | Open as Tab | KB-076 |
 | Cmd-Shift-T, Cmd-Z | Reopen the last closed Peek | KB-010, KB-011, KB-079 |
@@ -249,7 +250,7 @@ theme, dark ones the Dev sample theme (both from `StubSidebar`). Dark mode drops
 
 ## Parity notes
 
-- Size, position and insets of the Peek are unpublished (BH-154): the values above are Arkt's proposal.
+- Size, position and insets of the Peek are unpublished (BH-154): the values above are Arkt's.
   PARITY(NEEDS-RUNTIME-CHECK RT-24).
 - The order and placement of the controls: Arc documents expand, Split and close at the top right (BH-148); whether
   they sit inside or outside the card is not documented. PARITY(NEEDS-RUNTIME-CHECK).
@@ -274,14 +275,18 @@ theme, dark ones the Dev sample theme (both from `StubSidebar`). Dark mode drops
 - Opening as a tab moves no web contents: the same tab joins the sidebar. Split moves it into a `SplitContainerView`
   pane.
 
-## Open questions for the maintainer
+## Decisions (maintainer, 2026-10-25)
 
-1. Popups (#123): Little Arkt popup window for `window.open` with features and for extension popup windows, Peek only
-   for link clicks. Agree?
-2. Peek inside a Split View covers the source pane only, falling back to the whole content area below 600 pt. Agree?
-3. Controls outside the card, in the right gutter (proposal) or inside the card's top-right corner?
-4. Keep the source card's recede (0.985), or scrim only?
-5. Esc: page first, then Peek (proposal), or Peek always?
+1. Popups (#123): `window.open` with window features and extension popup windows open in a Little Arkt popup window;
+   Peek is only for link clicks. Accepted.
+2. Peek inside a Split View covers only the source pane, and the whole content area below a 600 pt wide pane.
+   Accepted.
+3. Peek's controls sit outside the card, in the right gutter. Accepted.
+4. The source card recedes to 0.985 under a Peek. Accepted.
+5. Esc goes to the page first; when the page uses it, the second Esc closes the Peek. Accepted.
+
+No open questions remain for Peek. Parity checks still open: RT-24 (size and insets), control placement in Arc, Esc
+order in Arc, Peek across tab and Space switches.
 
 ## Screenshot index
 
