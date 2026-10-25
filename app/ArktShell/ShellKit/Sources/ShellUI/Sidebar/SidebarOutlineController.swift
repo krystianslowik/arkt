@@ -50,17 +50,6 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// GS-033) instead of `NSApp.currentEvent`, which is not always the click.
   private(set) var clickModifiers: NSEvent.ModifierFlags = []
 
-  /// Row under this mouse-down. Used when `NSTableView` does not set `clickedRow` before sending the action.
-  fileprivate var mouseDownRow = -1
-  /// True while `mouseDown` is on the stack. A row action that arrives later no longer has this click's modifiers.
-  fileprivate var acceptingClick = false
-  /// The row action for this mouse-down already ran (from tracking, or from the fallback below).
-  fileprivate var didDeliverClick = false
-  /// A drag session began inside this mouse-down; the click action must not also run.
-  fileprivate var clickSuppressedByDrag = false
-  /// Runs the row action when tracking did not. Set by the outline controller.
-  fileprivate var onTrackedClick: ((_ row: Int, _ modifiers: NSEvent.ModifierFlags) -> Void)?
-
   /// Number of `reloadData()` calls so far; exists for tests (checks that split edits never reload the whole outline).
   private(set) var reloadDataCount = 0
 
@@ -71,35 +60,12 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 
   public override func mouseDown(with event: NSEvent) {
     clickModifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-    mouseDownRow = row(at: convert(event.locationInWindow, from: nil))
-    acceptingClick = true
-    didDeliverClick = false
-    clickSuppressedByDrag = false
-    // The row X is a button and runs its own action. Tracking then sends no row action; do not add one.
-    let onCloseButton = mouseDownHitCloseButton(event)
-    let rowView = mouseDownRow >= 0 ? rowView(atRow: mouseDownRow, makeIfNecessary: false) as? SidebarRowView : nil
+    defer { clickModifiers = [] }
+    let row = self.row(at: convert(event.locationInWindow, from: nil))
+    let rowView = row >= 0 ? self.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView : nil
     rowView?.isPressed = true
-    // Tracking sometimes returns without sending the row action (the mouse-up is not in the tracking-mode
-    // queue yet). Deliver it here, while `clickModifiers` still names this event, unless a drag took the click.
     super.mouseDown(with: event)
-    if !didDeliverClick, !clickSuppressedByDrag, !onCloseButton, mouseDownRow >= 0 {
-      didDeliverClick = true
-      onTrackedClick?(mouseDownRow, clickModifiers)
-    }
     rowView?.isPressed = false
-    clickModifiers = []
-    acceptingClick = false
-    mouseDownRow = -1
-  }
-
-  /// True when `event` lands on the row's hover X. Hidden buttons are not hit-tested.
-  private func mouseDownHitCloseButton(_ event: NSEvent) -> Bool {
-    var view: NSView? = hitTest(convert(event.locationInWindow, from: nil))
-    while let current = view, current !== self {
-      if current is HoverCloseButton { return true }
-      view = current.superview
-    }
-    return false
   }
 
   /// Clicks activate rows; the window drags from empty sidebar space only.
@@ -188,9 +154,6 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.autoresizesOutlineColumn = false
     outlineView.target = self
     outlineView.action = #selector(rowClicked(_:))
-    outlineView.onTrackedClick = { [weak self] row, modifiers in
-      self?.handleClick(row: row, modifiers: modifiers)
-    }
     outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
     outlineView.setDraggingSourceOperationMask([], forLocal: false)   // tabs stay inside the app
     let menu = NSMenu()
@@ -279,7 +242,6 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   /// Rows cannot be selected, so a drag carries one row: the first tab among `items`.
   func draggingSessionWillBegin(items: [Any]) {
-    outlineView.clickSuppressedByDrag = true
     let ids = items.compactMap { ($0 as? OutlineItem)?.nodeID }
     guard let id = ids.first(where: isTab) else { return }
     onNodeDragBegan?(id)
@@ -534,28 +496,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   // MARK: Clicks
 
   @objc private func rowClicked(_ sender: Any?) {
-    if outlineView.acceptingClick {
-      // Tracking and the fallback share one delivery. A drag owns the mouse-down instead.
-      guard !outlineView.clickSuppressedByDrag, !outlineView.didDeliverClick else { return }
-      outlineView.didDeliverClick = true
-      let row = outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.mouseDownRow
-      handleClick(row: row, modifiers: outlineView.clickModifiers)
-      return
-    }
-    // A mouse delivery after `mouseDown` returns has lost this click's modifiers, or repeats one already
-    // delivered. A non-mouse sender, such as an accessibility press, still activates the clicked row.
-    guard !Self.eventIsMouseClick(NSApp.currentEvent) else { return }
-    handleClick(row: outlineView.clickedRow, modifiers: [])
-  }
-
-  private static func eventIsMouseClick(_ event: NSEvent?) -> Bool {
-    switch event?.type {
-    case .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp,
-         .otherMouseDown, .otherMouseUp:
-      return true
-    default:
-      return false
-    }
+    handleClick(row: outlineView.clickedRow, modifiers: outlineView.clickModifiers)
   }
 
   /// A click on `row`. Folders toggle. Opt-click on a split row separates it (GS-033); Opt-click on the current tab

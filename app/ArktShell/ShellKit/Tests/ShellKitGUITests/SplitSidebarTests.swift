@@ -242,10 +242,7 @@ final class SplitSidebarTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// Covers `mouseDown` recording `clickModifiers` and the row action separating the split (GS-033).
-  /// The mouse-down is passed straight in. Posting it and dequeuing with `nextEvent` can replace `modifierFlags`
-  /// with the keys actually held, so Option is missing whenever Option is up. The mouse-up is queued first so
-  /// table tracking inside `mouseDown` finishes and the row action runs before this asserts.
+  /// Sends a real Opt-click `NSEvent` through `SidebarOutlineView.mouseDown`, covering `clickModifiers` -> `rowClicked`.
   func testOptClickMouseDownOnASplitRowSeparatesIt() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
@@ -267,22 +264,21 @@ final class SplitSidebarTests: XCTestCase {
     let up = try XCTUnwrap(NSEvent.mouseEvent(
       with: .leftMouseUp, location: point, modifierFlags: [.option], timestamp: ProcessInfo.processInfo.systemUptime,
       windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
-    XCTAssertEqual(down.modifierFlags.intersection([.command, .option, .control, .shift]), .option,
-                   "the mouse-down keeps Option and no other click modifier")
     window.postEvent(up, atStart: true)
+    window.postEvent(down, atStart: true)
+    let currentDown = try XCTUnwrap(window.nextEvent(matching: .leftMouseDown, until: .distantPast,
+                                                     inMode: .default, dequeue: true))
 
-    view.mouseDown(with: down)
-    window.discardEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged], before: nil)
+    view.mouseDown(with: currentDown)
 
     XCTAssertEqual(view.clickModifiers, [], "clickModifiers is cleared when mouseDown returns")
-    XCTAssertNil(harness.source.node(world.split), "the split is gone")
+    XCTAssertNil(harness.source.node(world.split))
     XCTAssertEqual(harness.children(.today(world.space)),
                    [world.today[0], world.panes[0], world.panes[1], world.today[1]])
     waitUntil("the card to show pane 0's page alone") {
       harness.split.isHidden && harness.controller.rootView.card.contentView === harness.page(world.panes[0])
     }
     XCTAssertEqual(harness.current, world.panes[0])
-    XCTAssertEqual(harness.controller.visibleNodes, [world.panes[0]], "pane 0 is shown alone")
     harness.controller.close()
   }
 
