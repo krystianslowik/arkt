@@ -12,10 +12,13 @@ public enum CommandBarGeometry {
   public static let maxVisibleRows = 8                 // TODO(measure)
   public static let listPadding: CGFloat = 8
   public static let inputLeading: CGFloat = 20
+  /// BH-113 notice strip under the input row. TODO(measure): Arc's notice height.
+  public static let noticeHeight: CGFloat = 32
 
-  public static func contentHeight(rowCount: Int) -> CGFloat {
+  public static func contentHeight(rowCount: Int, showsNotice: Bool = false) -> CGFloat {
+    let notice = showsNotice ? noticeHeight : 0
     let rows = min(rowCount, maxVisibleRows)
-    return rows == 0 ? inputHeight : inputHeight + 1 + CGFloat(rows) * rowHeight + 2 * listPadding
+    return rows == 0 ? inputHeight + notice : inputHeight + notice + 1 + CGFloat(rows) * rowHeight + 2 * listPadding
   }
 
   /// Screen-space frame (origin bottom-left), top edge pinned so result changes grow downward.
