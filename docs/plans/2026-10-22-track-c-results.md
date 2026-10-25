@@ -1314,7 +1314,7 @@ TDD: failing tests first (compile errors counted), then implementation.
   +28 vs main: SiteSearchEnginesTests 4, CommandBarActionsTests 3, CommandBarSettingsTests 4,
   CommandBarResultsScopeTests 15, CommandBarGeometryTests +1, CommandBarOpenTabsTests +1).
 - `swift test --filter ShellKitGUITests` — 515 cases, 514 passed; the one failure is
-  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` under parallel-lane load (load1 6.3-9.4 on 10
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` under heavy machine load (load1 6.3-9.4 on 10
   cores, just under the gate's NOT-MEASURABLE cutoff; the hitch moves between labels across runs).
   A/B: origin/main versions of the touched files pass 3/3 standalone, this branch passes 3/3 standalone and
   4/4 including an earlier run; the swipe/settle path is unchanged by this branch (the BH-111 hook early
