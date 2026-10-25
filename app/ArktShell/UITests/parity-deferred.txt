@@ -1,0 +1,2 @@
+GS-001	XCUITest scroll has no gesture phases; manual check	#26
+BH-040	XCUITest scroll has no gesture phases; manual check	#26
