@@ -303,7 +303,7 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     let folderItem = try XCTUnwrap(fixture.outline.item(atRow: folderRow))
     fixture.outline.collapseItem(folderItem)
     fixture.outline.expandItem(folderItem)
-    let posted = proxies.postedNotificationsForTesting
+    let posted = proxies.postedNotificationsForTesting ?? []
     XCTAssertTrue(posted.contains { $0.0 == .rowCollapsed && $0.1 == folderRow },
                   "collapse posts rowCollapsed for the folder's row")
     XCTAssertTrue(posted.contains { $0.0 == .rowExpanded && $0.1 == folderRow },
@@ -311,14 +311,14 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
 
     _ = fixture.sidebar.addTab(url: URL(string: "https://example.com/synthetic-notify")!,
                                title: "Synthetic Notify", in: .today(fixture.space))
-    XCTAssertTrue(proxies.postedNotificationsForTesting.contains { $0.0 == .rowCountChanged },
+    XCTAssertTrue((proxies.postedNotificationsForTesting ?? []).contains { $0.0 == .rowCountChanged },
                   "an insert posts rowCountChanged")
 
     proxies.postedNotificationsForTesting = []
     let tab = fixture.sidebar.children(of: .today(fixture.space))[0]
     let tabRow = fixture.outlineController.row(for: tab)
     fixture.outlineController.reload(node: tab)
-    let reloaded = proxies.postedNotificationsForTesting.filter { $0.1 == tabRow }.map(\.0)
+    let reloaded = (proxies.postedNotificationsForTesting ?? []).filter { $0.1 == tabRow }.map(\.0)
     XCTAssertTrue(reloaded.contains(.titleChanged), "a row reload posts titleChanged")
     XCTAssertTrue(reloaded.contains(.valueChanged), "a row reload posts valueChanged (Closing)")
   }

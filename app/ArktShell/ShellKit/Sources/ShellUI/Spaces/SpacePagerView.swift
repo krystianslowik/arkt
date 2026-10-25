@@ -1,15 +1,6 @@
 import AppKit
 import Motion
 
-/// Horizontal strip of Space pages (flipped). Two-finger horizontal swipes move the strip with the
-/// fingers (rubber-banded past the first and last Space) and settle on a spring with the release
-/// velocity (BH-035, GS-001); `go(to:)` animates keyboard and dot switches (KB-033..035).
-/// Per frame only the strip's layer moves (a translation, #24): the strip view's frame stays where it was last synced,
-/// so AppKit does not invalidate visible rects, tracking areas, layout or display under it on every frame.
-/// AppKit's view geometry (hit testing, the coordinates every view converts events with, tracking areas, accessibility
-/// frames) catches up with the layer (`syncStripFrame()`) at rest and whenever input needs it mid-motion: a hit test
-/// (a click, the start of a scroll gesture, a drag), a pointer move over the pager and a backing change. The cost is
-/// paid once per such input, never per display frame.
 /// A pager page that can build its on-screen rows when asked (#297). The pager puts the page where AppKit will
 /// tile it (see `preparePageForDisplay`): a page parked offscreen has an empty visible rect, and rows realized
 /// in that state are swept on a later pass (`_removeRowsBeingAnimatedOff`), so the table must be tiled while it
@@ -19,6 +10,15 @@ public protocol SpacePagerPage: AnyObject {
   func constructVisibleRowsForDisplay()
 }
 
+/// Horizontal strip of Space pages (flipped). Two-finger horizontal swipes move the strip with the
+/// fingers (rubber-banded past the first and last Space) and settle on a spring with the release
+/// velocity (BH-035, GS-001); `go(to:)` animates keyboard and dot switches (KB-033..035).
+/// Per frame only the strip's layer moves (a translation, #24): the strip view's frame stays where it was last synced,
+/// so AppKit does not invalidate visible rects, tracking areas, layout or display under it on every frame.
+/// AppKit's view geometry (hit testing, the coordinates every view converts events with, tracking areas, accessibility
+/// frames) catches up with the layer (`syncStripFrame()`) at rest and whenever input needs it mid-motion: a hit test
+/// (a click, the start of a scroll gesture, a drag), a pointer move over the pager and a backing change. The cost is
+/// paid once per such input, never per display frame.
 @MainActor
 public final class SpacePagerView: NSView {
   /// Spring for the settle. TODO(parity): which spring preset Arc uses for Space paging.
@@ -90,6 +90,8 @@ public final class SpacePagerView: NSView {
       strip.addSubview(page)
     }
     pages = newPages
+    // A removed page leaves the set, so a new page that reuses its address is still prepared (#297).
+    preparedPages.formIntersection(newPages.map(ObjectIdentifier.init))
     needsLayout = true
     jump(to: newIndex)
     // A page added mid-session (a new Space) gets its rows now, in this pass; the window-open case has no
@@ -159,15 +161,15 @@ public final class SpacePagerView: NSView {
     return !layer.affineTransform().isIdentity
   }
 
+  /// Pages whose visible rows were built already. Legitimately tiled rows survive being parked again; a page
+  /// leaves the set only by leaving `pages` (#297).
+  private var preparedPages: Set<ObjectIdentifier> = []
+
   /// Builds a hidden page's visible rows before a switch shows it (#297), off the frame that shows it: the strip
   /// is slid so the page intersects the visible area, the page tiles its table, and everything is put back, all
   /// inside this run of the run loop, so nothing paints and the user sees nothing. Rows built this way survive
   /// being parked again; rows built while the visible rect is empty do not. Goes through no counter: nothing
   /// becomes visible, so `updatePageVisibility`'s churn accounting is untouched.
-  /// Pages whose visible rows were built already. Legitimately tiled rows survive being parked again; a page
-  /// leaves the set only by leaving `pages` (#297).
-  private var preparedPages: Set<ObjectIdentifier> = []
-
   private func preparePageForDisplay(_ i: Int) {
     guard pages.indices.contains(i), pageWidth > 0 else { return }
     let view = pages[i]

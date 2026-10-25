@@ -255,16 +255,17 @@ final class AXProxyRows {
     NSAccessibility.post(element: element, notification: .selectedRowsChanged)
   }
 
-  /// Testing seam: every notification posted through `post(_:forRow:)`, as (name, row) pairs in order; a nil
-  /// row names the table element.
-  var postedNotificationsForTesting: [(NSAccessibility.Notification, Int?)] = []
+  /// Testing seam: when a test sets this to an array, every notification posted through `post(_:forRow:)` is
+  /// recorded as a (name, row) pair in order; a nil row names the table element. Nil (the default) records nothing,
+  /// so a long session does not accumulate a log of every title change.
+  var postedNotificationsForTesting: [(NSAccessibility.Notification, Int?)]?
 
   /// Posts `notification` for the proxy of `row`, or for the table element when `row` is nil (#297): clients
   /// that cached the tree are told to refresh.
   func post(_ notification: NSAccessibility.Notification, forRow row: Int? = nil) {
     let target: NSAccessibilityElement = row.flatMap { rowElement(forRow: $0) } ?? element
     NSAccessibility.post(element: target, notification: notification)
-    postedNotificationsForTesting.append((notification, row))
+    postedNotificationsForTesting?.append((notification, row))
   }
 
   /// The proxy of one table row (nil for an index the table does not have), for a view that the proxy lists as a
