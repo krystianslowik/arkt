@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt Tab Context Menus</title>
+<!--
+  Arkt tab context menus prototype (#105). Single file, no network, ASCII-only source.
+  States are addressable by hash: #<state>[&dark][&rm][&rt][&shot]
+    state: today-menu | pinned-menu | favorite-menu | folder-menu | folder-menu-opt | split-menu |
+           pane-menu | multi-menu | empty-menu | rename | dimmed
+    dark: dark appearance   rm: Reduce Motion (no-op here)   rt: Reduce Transparency (no-op)   shot: hide the prototype controls
+  1 CSS px = 1 pt. Colors are the ShellTokens / BrandTokens values; menu metrics imitate a native NSMenu
+  (the real thing is drawn by AppKit). See design/tab-context-menus/tab-context-menus.md.
+-->
+<style>
+:root {
+  /* BrandTokens */
+  --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
+  --focus: #202321;                   /* focusRing */
+  /* ShellTokens */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
+  --text-2: rgba(0,0,0,0.64);                                    /* secondaryText */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --card-border: rgba(0,0,0,0.10);                               /* cardBorder */
+  /* Window context (prototype only: a Space theme and a page) */
+  --theme-a: #F2F0EE; --theme-b: #E4E1DD;
+  --page: #FFFFFF; --page-ink: rgba(0,0,0,0.10); --page-ink-2: rgba(0,0,0,0.18);
+  --desktop: #C9CDD2;
+  --win-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
+  --row-cur: rgba(255,255,255,0.85);  /* tabCurrent */
+  --row-sel: rgba(255,255,255,0.70);  /* tabContentVisible (proposed multi-selection fill, OQ9) */
+  --sb-fg: rgba(0,0,0,0.48);          /* sidebarForeground */
+  /* Menu (native NSMenu imitation) */
+  --menu: rgba(247,247,249,0.97);
+  --menu-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 10px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.08);
+  --menu-hi: #0A64E1;                 /* system accent highlight */
+  --menu-sep: rgba(0,0,0,0.10);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --focus: #E9B520;
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
+  --theme-a: #3A3B44; --theme-b: #24252B;
+  --page: #1E1F22; --page-ink: rgba(255,255,255,0.10); --page-ink-2: rgba(255,255,255,0.22);
+  --desktop: #2C3036;
+  --win-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20);
+  --row-sel: color(display-p3 0.98 0.984 1 / 0.15);
+  --sb-fg: rgba(255,255,255,0.57);
+  --menu: rgba(45,45,48,0.97);
+  --menu-shadow: 0 0 0 0.5px rgba(255,255,255,0.16), 0 10px 32px rgba(0,0,0,0.50), 0 2px 8px rgba(0,0,0,0.30);
+  --menu-sep: rgba(255,255,255,0.12);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--desktop);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color: var(--text); -webkit-font-smoothing: antialiased;
+  display: grid; place-items: center; padding: 40px 16px; overflow: hidden;
+}
+button { font: inherit; color: inherit; }
+
+/* ---------- Browser window context ---------- */
+.win { width: 1000px; height: 680px; max-width: 100%; border-radius: 12px; position: relative; overflow: hidden;
+  background: linear-gradient(165deg, var(--theme-a), var(--theme-b)); box-shadow: var(--win-shadow); }
+/* BH-025: non-key window dims only the sidebar (values proposed, OQ8) */
+.win.nonkey { background: linear-gradient(165deg, color-mix(in srgb, var(--theme-a) 88%, var(--desktop)), color-mix(in srgb, var(--theme-b) 88%, var(--desktop))); }
+.win.nonkey .sidebar > * { opacity: 0.6; }
+.lights { position: absolute; left: 12px; top: 16px; display: flex; gap: 11px; z-index: 2; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.sidebar { position: absolute; left: 0; top: 0; bottom: 0; width: 190px; padding: 44px 10px 10px; }
+.urlpill { height: 34px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; padding: 0 10px; color: var(--text-2); font-size: 13px; margin-bottom: 12px; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px; }
+.favs i { height: 38px; border-radius: 9px; background: var(--fill); display: grid; place-items: center; }
+.favs i b { width: 16px; height: 16px; border-radius: 4px; display: block; }
+.stitle { font-weight: 600; font-size: 13px; color: var(--text-2); padding: 0 8px 6px; }
+.srow { height: 34px; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 0 9px; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; }
+.srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.srow.sel { background: var(--row-sel); }
+.srow.indent { margin-left: 18px; }
+.srow b { width: 16px; height: 16px; border-radius: 4px; flex: none; display: block; }
+.srow .chev { flex: none; width: 10px; height: 10px; color: var(--text-2); display: grid; place-items: center; margin-left: -4px; }
+.srow .spl { flex: none; width: 16px; height: 16px; display: block; }
+.sdiv { height: 1px; margin: 8px 8px; background: var(--divider); }
+.newtab { color: var(--sb-fg); }
+.sbottom { position: absolute; left: 10px; right: 10px; bottom: 10px; height: 28px; display: flex; justify-content: center; align-items: center; gap: 8px; }
+.sbottom i { width: 6px; height: 6px; border-radius: 50%; background: var(--sb-fg); opacity: 0.6; }
+.sbottom i.on { opacity: 1; width: 7px; height: 7px; background: var(--text); }
+.card { position: absolute; left: 190px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; overflow: hidden; background: var(--page);
+  box-shadow: 0 0 0 1px var(--card-border), 0 1px 4px rgba(0,0,0,0.10); }
+.page { position: absolute; inset: 0; padding: 56px 72px; }
+.page i { display: block; height: 10px; border-radius: 5px; background: var(--page-ink); margin-bottom: 14px; }
+.page i.h { height: 26px; width: 52%; border-radius: 7px; background: var(--page-ink-2); margin-bottom: 26px; }
+.page i.img { height: 150px; border-radius: 10px; margin: 26px 0; }
+
+/* Inline rename field (BH-026): the row keeps its fill, the field takes the title's bounds */
+.srow .field { flex: 1; min-width: 0; background: var(--page); border-radius: 5px; outline: 2px solid var(--focus);
+  padding: 1px 4px; font-weight: 500; overflow: hidden; }
+.srow .field .s { background: var(--menu-hi); color: #fff; border-radius: 2px; }
+
+/* ---------- Context menu (native NSMenu imitation) ---------- */
+.menu { position: absolute; min-width: 224px; padding: 5px; border-radius: 8px; background: var(--menu);
+  box-shadow: var(--menu-shadow); color: var(--text); z-index: 8; }
+.mi { height: 22px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 5px; font-size: 14px; white-space: nowrap; }
+.mi .k { margin-left: auto; opacity: 0.5; font-size: 13px; letter-spacing: 1px; }
+.mi .sub { margin-left: auto; opacity: 0.6; font-size: 10px; }
+.mi.dis { opacity: 0.35; }
+.mi.hov { background: var(--menu-hi); color: #fff; }
+.mi.hov .k, .mi.hov .sub { opacity: 0.85; }
+.msep { height: 1px; background: var(--menu-sep); margin: 5px 12px; }
+
+/* Prototype controls */
+.proto { position: fixed; right: 16px; bottom: 16px; display: flex; gap: 6px; padding: 6px; border-radius: 10px; background: rgba(0,0,0,0.72); color: #fff; font-size: 12px; z-index: 50; }
+.proto button { all: unset; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
+.proto button[aria-pressed="true"] { background: #E9B520; color: #202321; }
+:root[data-shot] .proto { display: none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div class="proto" aria-label="Prototype controls">
+  <button id="pDark" aria-pressed="false">Dark</button>
+</div>
+<script>
+var CMD = '&#8984;', SH = '&#8679;', OPT = '&#8997;';
+var GLYPHS = {
+  chevOpen: '<svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.8 3.2 5 6.8 8.2 3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  split: '<svg width="16" height="16" viewBox="0 0 16 16"><rect x="1.6" y="3" width="5.6" height="10" rx="1.6" fill="currentColor"/><rect x="8.8" y="3" width="5.6" height="10" rx="1.6" fill="currentColor" opacity="0.55"/></svg>',
+  tri: '&#9656;'
+};
+
+function row(id, color, title, cls) {
+  return '<div class="srow' + (cls ? ' ' + cls : '') + '"' + (id ? ' id="' + id + '"' : '') + '><b style="background:' + color + '"></b>' + title + '</div>';
+}
+function folderRow(id, title) {
+  return '<div class="srow" id="' + id + '"><span class="chev">' + GLYPHS.chevOpen + '</span><b style="background:#B0926A"></b>' + title + '</div>';
+}
+function splitRow(id, title) {
+  return '<div class="srow" id="' + id + '"><span class="spl" style="color:#8E6BBF">' + GLYPHS.split + '</span>' + title + '</div>';
+}
+function renameRow(id, color, title) {
+  return '<div class="srow" id="' + id + '"><b style="background:' + color + '"></b><span class="field" role="textbox" aria-label="Tab name"><span class="s">' + title + '</span></span></div>';
+}
+
+/* One sidebar for every state; per-state classes annotate rows. opts: {cur, sel[], renameRowId, nonkey, menuHtml} */
+function browser(opts) {
+  var fav = ['#4285F4', '#E01E5A', '#0F9D58', '#202321'];
+  var sel = opts.sel || [];
+  function clsFor(id, base) {
+    var c = base || '';
+    if (id === opts.cur) c += ' cur';
+    if (sel.indexOf(id) >= 0 && id !== opts.cur) c += ' sel';
+    return c;
+  }
+  var html = '<div class="win' + (opts.nonkey ? ' nonkey' : '') + '" id="win" role="application" aria-label="Arkt window">'
+    + '<div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>'
+    + '<nav class="sidebar" aria-label="Sidebar">'
+    + '<div class="urlpill">fieldguide.example.com</div>'
+    + '<div class="favs">' + fav.map(function (c, i) { return '<i' + (i === 1 ? ' id="fav2"' : '') + '><b style="background:' + c + '"></b></i>'; }).join('') + '</div>'
+    + '<div class="stitle">Work</div>'
+    + row('p1', '#5B7AA6', 'Q4 planning', clsFor('p1'))
+    + row('p2', '#E9B520', 'Design review notes', clsFor('p2'))
+    + folderRow('fold1', 'Research')
+    + row('fc1', '#7C8A6E', 'Lichen bibliography', clsFor('fc1', 'indent'))
+    + splitRow('split1', 'Spec + Preview')
+    + row('sp1', '#2E5FD8', 'Parity spec', clsFor('sp1', 'indent'))
+    + row('sp2', '#8E6BBF', 'Preview', clsFor('sp2', 'indent'))
+    + '<div class="sdiv"></div>'
+    + '<div class="srow newtab">+&nbsp; New Tab</div>'
+    + (opts.renameRowId === 't1' ? renameRow('t1', '#E56B4F', 'Field guide to lichens') : row('t1', '#E56B4F', 'Field guide to lichens', clsFor('t1')))
+    + (opts.short ? '' : (opts.renameRowId === 't2' ? renameRow('t2', '#7C8A6E', 'Release checklist') : row('t2', '#7C8A6E', 'Release checklist', clsFor('t2')))
+    + (opts.renameRowId === 't3' ? renameRow('t3', '#8E6BBF', 'Weekend recipes') : row('t3', '#8E6BBF', 'Weekend recipes', clsFor('t3'))))
+    + '<i id="emptyA" style="position:absolute;left:120px;top:' + (opts.short ? 565 : 620) + 'px;width:2px;height:2px" aria-hidden="true"></i>'
+    + '<div class="sbottom" aria-hidden="true"><i></i><i class="on"></i><i></i></div>'
+    + '</nav>'
+    + '<main class="card" aria-label="Page"><div class="page"><i class="h"></i><i></i><i></i><i style="width:84%"></i><i class="img" style="background:var(--page-ink)"></i><i></i><i style="width:66%"></i><i></i></div></main>'
+    + (opts.menuHtml || '')
+    + '</div>';
+  return html;
+}
+
+/* items: [title, key, {dis, sub, hov}] or '-' */
+function menu(items, anchor, up) {
+  var inner = items.map(function (it) {
+    if (it === '-') return '<div class="msep"></div>';
+    var o = it[2] || {};
+    var cls = 'mi' + (o.dis ? ' dis' : '') + (o.hov ? ' hov' : '');
+    var tail = o.sub ? '<span class="sub">' + GLYPHS.tri + '</span>' : (it[1] ? '<span class="k">' + it[1] + '</span>' : '');
+    return '<div class="' + cls + '" role="menuitem"' + (o.dis ? ' aria-disabled="true"' : '') + (o.sub ? ' aria-haspopup="true"' : '') + '><span>' + it[0] + '</span>' + tail + '</div>';
+  }).join('');
+  return '<div class="menu" role="menu" data-anchor="' + anchor + '"' + (up ? ' data-up="1"' : '') + '>' + inner + '</div>';
+}
+function flyout(items, anchorItem) {
+  var inner = items.map(function (it) {
+    if (it === '-') return '<div class="msep"></div>';
+    if (typeof it === 'string') it = [it];
+    var o = it[2] || {};
+    return '<div class="mi' + (o.dis ? ' dis' : '') + '" role="menuitem"' + (o.dis ? ' aria-disabled="true"' : '') + '><span>' + it[0] + '</span></div>';
+  }).join('');
+  return '<div class="menu fly" role="menu" data-anchor-item="' + anchorItem + '" style="min-width:180px">' + inner + '</div>';
+}
+
+var STATES = {
+  'today-menu': function () {
+    return browser({ cur: 't1', menuHtml: menu([
+      ['Rename'], ['Duplicate'], ['Pin Tab', CMD + 'D'], ['Move To', '', { sub: 1 }], '-',
+      ['Copy Link', SH + CMD + 'C'], '-',
+      ['Archive Below'], ['Archive', CMD + 'W']
+    ], 't2') });
+  },
+  'pinned-menu': function () {
+    return browser({ cur: 't1', menuHtml: menu([
+      ['Rename'], ['Duplicate'], ['Unpin Tab', CMD + 'D'], '-',
+      ['Back to Pinned URL'], ['Replace Pin with Current Page'], ['Edit Pinned URL'], '-',
+      ['Move To', '', { sub: 1, hov: 1 }], '-',
+      ['Copy Link', SH + CMD + 'C'], '-',
+      ['Close and Keep Pinned', CMD + 'W']
+    ], 'p1') + flyout(['Favorites', '-', ['Work', '', { dis: 1 }], ['Personal'], ['Reading']], 'Move To') });
+  },
+  'favorite-menu': function () {
+    return browser({ cur: 't1', menuHtml: menu([
+      ['Rename'], ['Change Icon'], '-',
+      ['Back to Pinned URL', '', { dis: 1 }], ['Edit Pinned URL'], '-',
+      ['Copy Link', SH + CMD + 'C'], '-',
+      ['Remove from Favorites'], ['Close and Keep Favorite', CMD + 'W']
+    ], 'fav2') });
+  },
+  'folder-menu': function () {
+    return browser({ cur: 't1', menuHtml: menu([
+      ['Rename'], ['Change Icon'], '-',
+      ['Duplicate'], ['Share', '', { dis: 1 }], '-',
+      ['Copy All Links'], ['Paste URL as New Tab', OPT + CMD + 'V'], '-',
+      ['Move To', '', { sub: 1 }], ['Delete']
+    ], 'fold1') });
+  },
+  'folder-menu-opt': function () {
+    return browser({ cur: 't1', menuHtml: menu([
+      ['Rename'], ['Change Icon'], '-',
+      ['Duplicate'], ['Share', '', { dis: 1 }], '-',
+      ['Copy All as Markdown Links', SH + OPT + CMD + 'C'], ['Paste URL as New Tab', OPT + CMD + 'V'], '-',
+      ['Move To', '', { sub: 1 }], ['Delete']
+    ], 'fold1') });
+  },
+  'split-menu': function () {
+    return browser({ cur: 'split1', menuHtml: menu([
+      ['Rename'], ['Duplicate Split View'], '-',
+      ['Separate All Tabs'], ['Convert to Vertical Split View'], '-',
+      ['Pin Tab', CMD + 'D'], ['Move To', '', { sub: 1 }], ['Share Split View', '', { dis: 1 }]
+    ], 'split1') });
+  },
+  'pane-menu': function () {
+    return browser({ cur: 'split1', menuHtml: menu([
+      ['Mute'], ['Duplicate Split View'], ['Archive Below'], ['Share', '', { dis: 1 }], '-',
+      ['Remove Tab from Split View'], ['Archive', CMD + 'W']
+    ], 'sp2') });
+  },
+  'multi-menu': function () {
+    return browser({ cur: 't1', sel: ['t1', 't2', 't3'], menuHtml: menu([
+      ['Open in Split View'], ['New Folder'], '-',
+      ['Duplicate'], ['Pin Tabs', CMD + 'D'], ['Move To', '', { sub: 1 }], '-',
+      ['Copy Links', SH + CMD + 'C'], '-',
+      ['Archive', CMD + 'W']
+    ], 't3', true) });
+  },
+  'empty-menu': function () {
+    return browser({ cur: 't1', short: true, menuHtml: menu([
+      ['New Tab', CMD + 'T'], ['New Folder'], ['Paste URL as New Tab', OPT + CMD + 'V'], '-',
+      ['Clear Today Tabs', SH + CMD + 'K']
+    ], 'emptyA') });
+  },
+  'rename': function () {
+    return browser({ cur: 't1', renameRowId: 't2' });
+  },
+  'dimmed': function () {
+    return browser({ cur: 't1', nonkey: true });
+  }
+};
+
+var stage = document.getElementById('stage');
+function placeMenus() {
+  var win = document.getElementById('win');
+  if (!win) return;
+  var wr = win.getBoundingClientRect();
+  stage.querySelectorAll('.menu[data-anchor]').forEach(function (m) {
+    var a = document.getElementById(m.getAttribute('data-anchor'));
+    if (!a) return;
+    var r = a.getBoundingClientRect();
+    m.style.left = Math.round(r.right - wr.left - 4) + 'px';
+    if (m.hasAttribute('data-up')) m.style.top = Math.round(r.bottom - wr.top - m.offsetHeight - 2) + 'px';
+    else m.style.top = Math.round(r.top - wr.top + 2) + 'px';
+  });
+  stage.querySelectorAll('.menu.fly[data-anchor-item]').forEach(function (m) {
+    var main = stage.querySelector('.menu[data-anchor]');
+    var item = main ? main.querySelector('.mi.hov') : null;
+    if (!item) return;
+    var r = item.getBoundingClientRect();
+    m.style.left = Math.round(r.right - wr.left - 2) + 'px';
+    m.style.top = Math.round(r.top - wr.top - 5) + 'px';
+  });
+}
+function show(state) {
+  stage.innerHTML = (STATES[state] || STATES['today-menu'])();
+  placeMenus();
+}
+function flags() { var parts = location.hash.slice(1).split('&'); return { state: parts[0] || 'today-menu', set: new Set(parts.slice(1)) }; }
+function applyHash() {
+  var f = flags(), root = document.documentElement;
+  root.dataset.theme = f.set.has('dark') ? 'dark' : 'light';
+  f.set.has('shot') ? root.setAttribute('data-shot', '') : root.removeAttribute('data-shot');
+  document.getElementById('pDark').setAttribute('aria-pressed', f.set.has('dark'));
+  show(f.state);
+}
+document.getElementById('pDark').onclick = function () {
+  var f = flags();
+  f.set.has('dark') ? f.set.delete('dark') : f.set.add('dark');
+  location.hash = [f.state].concat(Array.from(f.set)).join('&');
+};
+window.addEventListener('hashchange', applyHash);
+applyHash();
+</script>
+</body>
+</html>
