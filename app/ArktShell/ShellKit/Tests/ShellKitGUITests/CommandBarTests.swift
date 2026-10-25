@@ -1187,10 +1187,14 @@ final class CommandBarTests: XCTestCase {
     let outlineController = try XCTUnwrap(shell.sidebarController.currentPage?.outlineController)
     let row = outlineController.row(for: target)
     XCTAssertGreaterThanOrEqual(row, 0)
+    // A runner screen smaller than the 1400 x 900 frame shrinks the window; the row must be on screen to be hit.
+    outline.scrollRowToVisible(row)
+    outline.layoutSubtreeIfNeeded()
     let rowView = try XCTUnwrap(outline.rowView(atRow: row, makeIfNecessary: true))
     let content = try XCTUnwrap(shell.window?.contentView)
     let hit = content.hitTest(rowView.convert(NSPoint(x: 10, y: rowView.bounds.midY), to: content))
-    XCTAssertTrue(hit?.isDescendant(of: outline) ?? false, "the click lands on the sidebar row, not the bar")
+    XCTAssertTrue(hit?.isDescendant(of: outline) ?? false,
+                  "the click lands on the sidebar row, not the bar (hit: \(hit.map { String(describing: type(of: $0)) } ?? "nil"))")
 
     // The click's two effects, as AppKit delivers them: the shell window goes key and the row activates.
     shell.commandBar.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification,
