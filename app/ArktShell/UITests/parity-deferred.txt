@@ -8,7 +8,7 @@ KB-074	Edit the focused pane URL is not in the UI suite yet	#54
 KB-075	Expand Current Split is not in the UI suite yet	#55
 BH-040	Space icon animation during a swipe is manual with GS-001	#26
 BH-069	Second Cmd-W on an already-closed pinned tab is not implemented	#85
-BH-087	Archive search UI is not implemented	#111
+BH-087 (search)	Archive search UI is not implemented	#111
 BH-115	A split as one sidebar item is not in the UI suite yet	#54
 BH-116	The full-split toast is not in the UI suite yet	#55
 BH-117	Creating a split is not in the UI suite yet	#57
