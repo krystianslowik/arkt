@@ -72,10 +72,24 @@ final class SplitSidebarTests: XCTestCase {
     func children(_ location: SidebarLocation) -> [UUID] { source.children(of: location) }
   }
 
-  /// The context menus that began tracking, by item titles.
+  /// Stands in as the outline menu's delegate: fills it through the real delegate, records the items of each menu
+  /// that opens, and dismisses it once its tracking loop runs.
   @MainActor
-  private final class MenuTrackingRecorder {
-    var titles: [[String]] = []
+  private final class ContextMenuRecorder: NSObject, NSMenuDelegate {
+    let filler: (any NSMenuDelegate)?
+    var opened: [[String]] = []
+
+    init(filling menu: NSMenu) {
+      filler = menu.delegate
+      super.init()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) { filler?.menuNeedsUpdate?(menu) }
+
+    func menuWillOpen(_ menu: NSMenu) {
+      opened.append(menu.items.map(\.title))
+      menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 0, inModes: [.eventTracking])
+    }
   }
 
   override func setUp() async throws {
@@ -329,29 +343,22 @@ final class SplitSidebarTests: XCTestCase {
   }
 
   /// Ctrl-click on a split row opens its context menu, as a right-click does, and does not also activate the row
-  /// (#277). The window delivers it, as AppKit does; the menu is dismissed as soon as it begins tracking.
+  /// (#277). The window delivers it, as AppKit does; the menu is dismissed as soon as its tracking loop runs.
   func testCtrlClickOnASplitRowOpensItsMenuWithoutActivatingIt() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     let (window, view) = try shownOutline(harness, current: world.today[0])
     let point = try windowPoint(of: world.split, in: harness, view)
-    let opened = MenuTrackingRecorder()
-    let observer = NotificationCenter.default.addObserver(
-      forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
-    ) { note in
-      let menu = note.object as? NSMenu        // NSMenu is main-actor bound, so it crosses; the Notification does not
-      MainActor.assumeIsolated {
-        opened.titles.append(menu?.items.map(\.title) ?? [])
-        menu?.cancelTracking()
-      }
-    }
-    defer { NotificationCenter.default.removeObserver(observer) }
+    let menu = try XCTUnwrap(view.menu)
+    let recorder = ContextMenuRecorder(filling: menu)
+    menu.delegate = recorder
+    defer { menu.delegate = recorder.filler }
     NSApp.postEvent(try mouseEvent(.leftMouseUp, at: point, [.control], in: window), atStart: false)
 
     window.sendEvent(try mouseEvent(.leftMouseDown, at: point, [.control], in: window))
     window.discardEvents(matching: [.leftMouseUp], before: nil)
 
-    XCTAssertEqual(opened.titles, [["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"]],
+    XCTAssertEqual(recorder.opened, [["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"]],
                    "the split row's context menu opened once")
     XCTAssertEqual(harness.current, world.today[0], "a Ctrl-click does not activate the row")
     XCTAssertNotNil(harness.source.node(world.split))
