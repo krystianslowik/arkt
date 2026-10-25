@@ -131,6 +131,9 @@ targets:
       # ChromiumEngine and the typed ArktShellEmbedder; only App/Engine (Engine configuration) imports it.
       - package: ShellKit
         product: ChromiumEngineKit
+      # The shared engine contract, for the Engine configuration's contract runner (App/Engine, W3-9).
+      - package: ShellKit
+        product: EngineAPITestSupport
       - package: ArktCore
         product: Persistence      # composition root only: the one GRDB link
       - package: ArktCore

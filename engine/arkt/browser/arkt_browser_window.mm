@@ -336,6 +336,18 @@ void ArktBrowserWindow::BindHost() {
                                     object:window
                                      queue:nil
                                 usingBlock:^(NSNotification*) {
+                                  // A Browser whose close completed is out of
+                                  // the browser collections but keeps its
+                                  // window until its posted deletion; when
+                                  // another closing window is ordered out
+                                  // first, this one can become key in between.
+                                  // Activating it then CHECKs in
+                                  // GlobalBrowserCollection::OnBrowserActivated
+                                  // (W3-9 contract runner, two windows closed
+                                  // together).
+                                  if (browser_->IsDeleteScheduled()) {
+                                    return;
+                                  }
                                   BrowserActiveStateManager::From(browser_)
                                       ->DidBecomeActive();
                                 }]];
@@ -1190,6 +1202,10 @@ void ArktBrowserWindow::OnTabStripModelChanged(
                        weak_factory_.GetWeakPtr()));
   }
   if (selection.active_tab_changed() && selection.new_contents) {
+    // Chrome's frame retitles itself from the tab strip; here the window
+    // title (Window menu, Mission Control) would keep a closed tab's title
+    // until the new tab's title changed (W3-9 smoke).
+    UpdateTitleBar();
     [events addObject:[[ArktTabEvent alloc]
                           initWithKind:ArktTabEventKindActivated
                                  tabId:TabId(selection.new_contents)

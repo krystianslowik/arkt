@@ -635,6 +635,18 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     for (int i = 0; i < model->count(); ++i) {
       Inserted(model->GetTabAtIndex(i), handle, model);
     }
+    // A window held before the embedder was ready already has its tabs and
+    // its active tab when it is adopted at replay; no selection change will
+    // announce that tab (W3-9: a URL opened by another app at a cold launch
+    // got a Today row the shell never showed).
+    if (ArktFacadeTab* active = HandleForTab(model->GetActiveTab())) {
+      ArktFacadeEvent* activated = [[ArktFacadeEvent alloc] init];
+      activated.kind = ArktEngineEventKindActiveTabChanged;
+      activated.tab = active;
+      activated.browser = handle;
+      activated.isActive = YES;
+      Record(activated);
+    }
     // The action list needs a fully constructed Browser (we may be inside
     // its construction), so the window's actions menu is attached from a
     // posted task.
@@ -1402,8 +1414,18 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 - (BOOL)isClosing {
   arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
-  return _closing ||
-         (contents && TabCloseTypesData::FromWebContents(contents) != nullptr);
+  if (_closing ||
+      (contents && TabCloseTypesData::FromWebContents(contents) != nullptr)) {
+    return YES;
+  }
+  // A window close runs every tab's beforeunload through UnloadController
+  // without marking the tabs (contract rule 16: a held window close shows its
+  // tabs closing until the dialog is answered; W3-9 contract runner).
+  arkt::ArktBrowserWindow* window =
+      _tab && _browser
+          ? arkt::ArktBrowserWindow::FromBrowser(_browser.browserInterface)
+          : nullptr;
+  return window && window->IsAttemptingToClose();
 }
 
 - (BOOL)wouldHoldClose {

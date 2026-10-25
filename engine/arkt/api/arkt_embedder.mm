@@ -294,11 +294,21 @@ class Embedder : public FacadeDelegate {
     state_ = State::kReady;
     LOG(WARNING) << "ARKT: embedderReady (" << queue_.size()
                  << " queued request(s))";
-    // Replayed from a posted task: the embedder is on the stack, and replay
-    // calls back into it (-hostForEngineWindowRequest:).
-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-        FROM_HERE,
-        base::BindOnce(&Embedder::Replay, weak_factory_.GetWeakPtr()));
+    // Replayed before this call returns, as createBrowser(host:) creates at
+    // once: the shell decides right after it whether a launch window is
+    // still needed, and a posted replay ran after that decision (W3-9: a
+    // cold launch with a URL showed the launch window and the URL's window).
+    // The embedder answers -hostForEngineWindowRequest: re-entrantly; only a
+    // nested loop still defers the replay to a posted task.
+    if (IsInNestedLoop()) {
+      LOG(WARNING) << "ARKT: embedderReady inside a nested loop ("
+                   << DescribeRunLoopNesting() << "), replay posted";
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE,
+          base::BindOnce(&Embedder::Replay, weak_factory_.GetWeakPtr()));
+    } else {
+      Replay();
+    }
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
             kReentrancyProbeSwitch)) {
       base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(

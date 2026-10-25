@@ -228,7 +228,11 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   }
 
   func close(mode: ArktCloseMode) -> ArktCloseResult {
-    guard let owner, !isClosing else { return isClosing ? .held : .closed }
+    // As the real facade (`ScopedSkipUnloadHandlers`), a close that skips unload handlers runs whatever close is
+    // under way, a pending leave-site dialog included; ChromiumEngine guards its own held close (`clientCloseHeld`).
+    guard let owner, !isClosing || mode == .skipUnloadHandlers else {
+      return isClosing ? .held : .closed
+    }
     if isPending || facade.isNested {
       isClosing = true
       let deferred = { [self] in
@@ -368,6 +372,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     tabList.remove(at: index)
     tab.owner = nil
     tab.isClosing = false
+    tab.dialog = nil
     let closed = ScriptedEvent(.tabClosed, tab: tab, browser: self)
     closed.closeReason = reason
     facade.record(closed)

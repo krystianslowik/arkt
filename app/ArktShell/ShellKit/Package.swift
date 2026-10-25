@@ -12,6 +12,8 @@ let package = Package(
     .library(name: "CoreBridge", targets: ["CoreBridge"]),
     // The engine app's composition root only (ChromiumEngineKitIsolationTests).
     .library(name: "ChromiumEngineKit", targets: ["ChromiumEngineKit"]),
+    // The shared engine contract; the app links it for the Engine configuration's contract runner (W3-9).
+    .library(name: "EngineAPITestSupport", targets: ["EngineAPITestSupport"]),
   ],
   dependencies: [
     // Local, relative: ShellKit lives in app/ArktShell/ShellKit, ArktCore in app/ArktCore. Only pure products are

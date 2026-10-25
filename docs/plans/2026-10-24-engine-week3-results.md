@@ -16,9 +16,9 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-6 | `ChromiumEngineKit` over the facade | DONE | `ChromiumEngine: EngineClient, EngineExtensions` and the typed `ArktShellEmbedder` in `ChromiumEngineKit`; contract rules 1-16 pass against a scripted facade with every driver (24 checks x 2 event orders, none not applicable); ShellKit 509 + 28; see "W3-6" below |
 | W3-7 | The shell as engine host, composition root (Swift lane) | DONE | A, B: `ShellEngineHost`, engine window on the first tab, `createTab(url:in:)`, commands, close button, per-window routing, close reasons, held closes, Extensions control, #241. C, D: `AppComposition` for both engines, `ShellWindowSet` with host-matched provider windows, quit seams, the W3-8 menu in both builds, reserved keys in `ShellWindow`; see "W3-7 C and D" and "W3-7 A and B" below |
 | W3-8 | Main menu inventory and owner decision | DONE (steps 1-3; step 4 after W3-9) | Arkt owns the menu; conditions: a hidden `IDC_BOOKMARKS_MENU` placeholder (without it the first window crashes, measured), no `IDC_FILE_MENU` / `IDC_TAB_MENU` tags, Quit `IDC_EXIT` + `terminate:`; reserved keys in `ShellWindow`; no engine change; see "W3-8" below |
-| W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | TODO | |
+| W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | DONE except SIGTERM session end (#298, fails) and logout (maintainer check) | contract 16/16 in the app; smoke, startup and quit checks pass; 120 Hz gate holds (0 % over 8.6 ms); #9 holds; seven fixes, gaps #298-#301; see "W3-9" below |
 | W3-10 | Infobars, or a recorded gap | DONE | native rows on the tab container for every confirm infobar (every confirm type on Mac, triggered from `chrome://infobar-internals`), `--no-sandbox` acceptance passes; tab sharing and sign-in QR (own Views) recorded in #122; no patch; see "W3-10" below |
-| W3-11 | Self-contained bundle with the release framework | TODO | |
+| W3-11 | Self-contained bundle with the release framework | TODO | before the engine bundle ships, strip or gate the test-only code W3-9 links into the Engine app: `EngineAPITestSupport` (`InMemoryEngine`, `EngineContract`), the contract runner and its loopback server (`--arkt-engine-contract` skips the shell session for any launch that passes it), next to the `ARKT_*` overrides (W3-7 C and D) |
 | W3-12 | Results, patch budget, issue updates, housekeeping | TODO | |
 
 ## Patch budget
@@ -36,6 +36,219 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-9: ShellUI on ChromiumEngine, contract runner, smoke
+
+Date 2026-10-25. Branch `engine/33-w3-9-real-ui` off `main` at `a22acbb`. Overlay and Swift only: no patch, `.patches`
+unchanged (7 files); every engine change is under `engine/arkt`. Builds: `nice -n 10 autoninja -C out/Spike -j 6 chrome`
+(`The build has finished successfully.` for each change; `gn check out/Spike '//arkt/*'`: `Header dependency check OK`),
+changed component dylibs re-cloned next to the bundle in `$EMB`, the app built with `xcodebuild -scheme ArktShell
+-configuration Engine CONFIGURATION_BUILD_DIR=$EMB`. Every GUI run: one at a time, own windows only, a scratch shell data
+folder (`ARKT_DATA_DIR`, `ARKT_ARC_DIR`, `ARKT_DEFAULTS_SUITE` under `$PROF/w3-9-*`), `--user-data-dir` under `$PROF`,
+`--use-mock-keychain`, pages from a loopback server on `127.0.0.1:8691`, stopped by PID or by the app's own Quit.
+
+**The Chromium disk went away at 18:39:11** (unmounted by the system, not by any command of this task), during the third
+cold `open -a <app> <url>` launch. `$CR`, `$EMB`, the profiles, logs and window-only screenshots of this task are on it;
+the log lines below were copied before. **It was mounted again at about 19:10** and everything on it was intact: `$CR`
+clean on branch `arkt` at `8910b992e4`, `git -C $CR rev-list --count 156.0.8078.48..HEAD` 7 (= `.patches` 7), `$EMB`
+with all 518 component dylibs equal to `out/Spike`'s (`cmp`), an incremental `autoninja` with nothing to rebuild, the
+`w3-9-*` profiles present, 0 crash dumps in the startup run's user data folder (the run in flight when the disk went) and
+under `Arkt Dev Engine/Crashpad`. The steps the loss had cut short were then run ("Second session" below).
+
+### What landed
+
+- **Contract runner** (`App/Engine/EngineContractRunner.swift`, `ContractPageServer.swift`; Engine configuration only).
+  `--arkt-engine-contract` (with `--arkt-engine-test-api` and `--load-extension=<tabs-probe>`) runs every check of rules
+  1-16 against a fresh `ChromiumEngine` from `ChromiumEmbedding.makeEngine()`, each with its own windows (the engine's
+  window is created first). The shell session is not started. Harness: pages from a loopback server of the runner's own
+  (`/page/<title>?n=<serial>`, a PNG favicon; `127.0.0.1` and `localhost` as the two hosts of rule 6); `settle` waits for
+  a `loadingChanged(false)` on a page other than the initial `about:blank`; `retitle`, `holdClose` (a `beforeunload`
+  handler set with a user gesture, sticky activation checked) and `engineCreateTab` (`window.open` with a gesture) through
+  the test API; `engineCloseTab` / `engineActivate` through `chrome.tabs.remove` / `chrome.tabs.update`, run from the
+  tabs probe's new `control.html` page in a control engine's window (the tab found by its unique URL); `answerDialog`
+  retried until the dialog is up. One `ARKT_CONTRACT` line per check and per rule, `result n/16`, exit 0 only when every
+  rule passed (a rule reported not applicable fails). `--arkt-engine-contract=<check>,...` runs a subset.
+  **Deviation:** the plan's `-ArktEngineContract YES` cannot be used: Chromium reads every non-switch argument as a
+  startup URL (`YES` became a queued startup window).
+- `ContractCheck` (the list of the 24 checks with their rule numbers) moved from the kit's tests to
+  `EngineAPITestSupport`, which becomes a library product the app links (the runner). The Debug app links it unused,
+  as it links `ChromiumEngineKit` (#268).
+- Fixes found by the runner and the smoke:
+  1. **Crash with two windows closing together** (run 1, `FATAL ... global_browser_collection.cc:70 Check failed: it !=
+     browsers_activation_order_.end()` from `BrowserActiveStateManager::DidBecomeActive` <- `-[NSWindow becomeKeyWindow]`
+     <- `ArktBrowserWindow::UnbindHost` <- `~Browser`). A Browser whose close completed is out of the collection but keeps
+     its window until its posted deletion; when another closing window is ordered out first, this one became key and was
+     activated. The window's key observer now ignores a Browser with `IsDeleteScheduled()`. The same shape is reachable
+     from the shell (Quit or closing two windows), not only from the runner.
+  2. **Initial `about:blank` reported as a load** (run 1, rule 2: `tabCreated, loadingChanged(true), activeTabChanged,
+     urlChanged(page), urlChanged(about:blank), urlChanged(page), titleChanged, loadingChanged(false)`). A tab created
+     without a URL loads Chromium's `about:blank`; its load start arrives before the first navigation's URL and its commit
+     after it. `ChromiumEngine` no longer reports that load or that URL: the first page's URL is reported with its load
+     start, and `about:blank` URLs are dropped until the first page loaded. Scripted tests for both cases (checked to fail
+     without the change).
+  3. **A held window close did not show its tabs closing** (run 2, rule 16 `cancelledWindowCloseKeepsTheWindow`: timed
+     out waiting for `isClosing`). A window close runs every tab's `beforeunload` through `UnloadController` without
+     marking the tabs; `isClosing` is now also true for every tab of a window whose close is in progress. So that a tab the
+     shell drops while such a close is held still closes, `ChromiumEngine.closeTab(_:mode: .skipUnloadHandlers)` no longer
+     returns early for a closing tab (scripted test, checked to fail first). Effect on the shell: during a held window
+     close, Cmd-W and a row's X do nothing for that window's tabs, and auto-archive skips all of them.
+  4. **Cold launch with a URL showed two windows** (startup run 1: `launch finished (0 window(s) from queued requests)`,
+     then `window request kind startupURL`, two windows). The facade replayed the queued requests from a posted task, which
+     ran after the shell's launch-window decision. `embedderReady` now replays before it returns (inside a nested loop it is
+     still posted); the shell's `host(for:)` is re-entered inside the `Task` that called `embedderReady`. This changes the
+     W3-3 design ("replayed from a posted task").
+  5. **Cmd-Q did not quit.** Chromium 156 registers `kConfirmToQuitEnabled` (Warn Before Quitting) as `true`
+     (`confirm_quit.cc`), so a short Cmd-Q only shows the hold-to-quit panel, and Arkt's menu has no item to turn it off
+     (W3-8). The hook sets its default to `false` (`SetDefaultPrefValue`: a policy or a stored value still wins). Parity
+     with Arc is a maintainer decision.
+  6. **Window title stayed on a closed tab's title** (Window menu showed "Gamma" while "Alpha" was shown). The title now
+     also follows active-tab changes (`UpdateTitleBar()` from the window's `TabStripModelObserver`; it only sets the
+     `NSWindow` title).
+  7. **A URL opened by another app at a cold launch got a Today row but no page** (second session, `open -a <app>
+     <url>`: row added, card empty, twice). Chromium builds that window before the embedder is ready; when the facade
+     adopts it at replay, its tab is already active and no selection change announces it. The facade now records
+     `ActiveTabChanged` for the active tab of a window adopted with tabs (`WindowOpened,TabCreated,LoadingChanged,
+     ActiveTabChanged`), and the shell shows the page.
+  8. Review follow-ups (#302): `--arkt-engine-contract=<checks>` with an unknown name or an empty list exits 2 with
+     `ARKT_CONTRACT setup failed: --arkt-engine-contract= names no check: unknown <name>` (it ran nothing and passed
+     before); the runner logs windows left open after a check; the scripted facade closes a tab with
+     `.skipUnloadHandlers` while a window close shows its dialog, as the real facade does (script test); `BUILD.gn`
+     gn-formatted.
+
+### Contract (run 5, `$PROF/w3-9-contract5`, final build)
+
+```
+ARKT_CONTRACT setup pages=127.0.0.1:<port> tabs-probe=<id>
+rule 1 createdTabIsListedAndAnnounced PASS (48 ms)        rule 1 tabIDsKeepCreationOrder PASS (36 ms)
+rule 2 navigateReportsURLLoadingAndTitle PASS (1619 ms)   rule 2 titleChangedAfterLoadIsReported PASS (64 ms)
+rule 3 contentViewIsStable PASS (40 ms)
+rule 4 closeIsTerminal PASS (69 ms)                       rule 4 closeInsideObserverKeepsOrder PASS (1616 ms)
+rule 5 cancelledObservationStopsDelivery PASS (48 ms)     rule 5 droppedObservationStopsDelivery PASS (40 ms)
+rule 6 hostChangeClearsFavicon PASS (2019 ms)
+rule 7 historyMovesBackAndForward PASS (203 ms)           rule 8 historyAvailabilityIsReported PASS (125 ms)
+rule 9 historyEntriesAndOffsetNavigation PASS (1452 ms)   rule 10 duplicateTabCopiesURLTitleAndHistory PASS (138 ms)
+rule 11 windowIsListedAndAnnounced PASS (85 ms)           rule 11 closeWindowClosesItsTabsThenReportsWindowClosed PASS (118 ms)
+rule 11 hostCloseRequestClosesTheWindow PASS (62 ms)      rule 12 activationIsOneTabPerWindow PASS (116 ms)
+rule 13 engineCreatedTabIsAnnounced PASS (160 ms)         rule 14 engineCloseIsTerminal PASS (163 ms)
+rule 15 windowlessCreateTabLandsInMostRecentlyActiveWindow PASS (100 ms)
+rule 16 heldCloseKeepsTheTabUntilAnswered PASS (381 ms)   rule 16 skipUnloadHandlersNeverHolds PASS (99 ms)
+rule 16 cancelledWindowCloseKeepsTheWindow PASS (2599 ms)
+ARKT_CONTRACT result 16/16
+ARKT_CONTRACT exit 0
+```
+
+16/16, none not applicable, 0 `FATAL`/`Check failed` in the run, no crash dump. Runs 1-4 are the failures above (run 1:
+14/16 with the crash; run 2: 15/16; run 4: the window-close check alone after fix 3).
+
+### Smoke on the shell (run A, `$PROF/w3-9-smoke-a`, tabs probe and action probe, CDP port of its own)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Start with scratch data, first window | PASS | `engineDidStart`, `main menu installed`, `session ready`, `launch finished (0 window(s) from queued requests)`; first run shows the welcome card; New Space (AX) |
+| Cmd-T, command bar, page loads | PASS | `Alpha visible` (CDP); row "Alpha" in Today |
+| Cmd-L navigates the current tab | PASS | the tab's URL `p/Gamma`, favicon drawn on the row |
+| `chrome.tabs.create({active:false})` | PASS | Today row "Beta" in the same window, the shown page stays `visible` |
+| `chrome.tabs.update({active:true})` | PASS | Beta `visible`, Alpha `hidden`, Beta's row selected |
+| Cmd-W with page focus (reserved key) | PASS | page focused (`document.hasFocus()` true, a page `keydown` listener saw the typed key), Cmd-W: `facade tab closed ... reason client`, the row archived (stored archive: `Gamma|manual`) |
+| At most one engine pick within the 1 s grace after a close | PASS | after the close: one batch `TabClosed,ActiveTabChanged,...` (Chromium's pick); with a different successor (archive of the held tab below), the shell's activation follows in the next batch and wins; no further engine pick |
+| `chrome.windows.create` with bounds | PASS | `window request kind extension`, adopted shell window at the requested 400,150 900x650, in the opener's Space, row "Delta" |
+| Extension popup from the sidebar Extensions button | PASS | AX menu lists both probes; `TriggerPopup ... by_user=1`, `anchor restored`, `popup loaded ... popup.html` |
+| Split View with two engine pages | PASS | View > Add Split View: both panes `visible` (CDP) |
+| Held close by the page | PASS | `beforeunload` with a gesture, Cmd-W: the row dims, "Leave site?" dialog over the card; Cancel: `facade close cancelled`, batch `CloseCancelled`, row back; Cmd-W, Leave: `tab closed ... reason client`, archived (`Alpha-third|manual`) |
+| Web Store install from the real UI | PASS | uBlock Origin Lite detail page (consent "Reject all", no sign-in), Add to Chrome: `install sheet shown type=0 permissions=1`, AX "Add extension": `install sheet accepted`, the extension in the sidebar Extensions menu; the confirmation copy names Chromium and a menu item Arkt does not have (#121 comment) |
+| Services submenu under Arkt's App menu | PASS | 23 items with text selected in the page |
+| Edit menu with page focus | PASS | Select All selects the page field's text; Cut, Copy, Paste enabled |
+| Dock reopen with no window | PASS (gap #299) | both windows closed (`browsers normal=0`), `open -a` on the running app: `window request kind reopen`, an adopted shell window on Space 1; Chromium's `chrome://newtab/` became a Today row (#299) |
+| Two windows on one Space | gap #300 | selecting a row live in the other window loads it again |
+| Empty Space, Space title, stale tooltip | gap #301 | |
+
+**Page commands (W3-8 step 4)**, AX menu clicks, window frontmost, page focused:
+
+| Command | Reaches the `Browser` | Evidence |
+|---|---|---|
+| Reload, Force Reload | yes | a page variable set before is gone after each |
+| Stop | enabled state only | disabled while idle; not clicked during a load |
+| Back, Forward | yes | after a navigation with a user gesture: `p/Alpha-third` -> `p/Alpha-next` -> `p/Alpha-third`; after a script navigation without one, Back does nothing (Chromium's history intervention skips that entry; `history.back()` from the page works) |
+| Zoom In, Zoom Out, Actual Size | yes | `devicePixelRatio` 2 -> 2.2 -> 1.8 -> 2 (Actual Size validated a moment after the zoom change) |
+| Find | yes | `stub FindBar::Show` (find bar is #134) |
+| Find Next, Find Previous | enabled, no visible effect | no find bar (#134) |
+| Save Page As | yes | the save panel as a sheet on the shell window, name "Alpha-third"; cancelled |
+| Print | yes | Chromium's print preview over the card; cancelled with Escape |
+| View Source | yes | new active tab `view-source:...`, the shell selects its Today row |
+| Developer Tools, JavaScript Console, Inspect Elements | yes | DevTools window (`views=1`), closed again |
+| Show All History, Downloads | yes | Today rows "History" (`chrome://history/`) and "Download History" (`chrome://downloads/`) |
+| Quit | yes | menu: `quit started`, `engineWillBeginTerminating`, `app terminating`, `engineWillTerminate`, `termination flush succeeded true`, `lifetime keep-alive released`; with the CDP port the process then stays (W3-3), stopped by PID |
+
+### Startup
+
+| Check | Result | Evidence |
+|---|---|---|
+| First window shows the restored Space | PASS | quit run B1: the stored Space with its split shown |
+| Cold launch, URL as argument | PASS after fix 4 | `window request queued kind=startupURL`, `embedderReady (1 queued request(s))`, `window request kind startupURL`, `launch finished (1 window(s) from queued requests)`; one window, the URL's Today row selected |
+| Cold launch, `open -a <app> <url>` | PASS after fix 7 (gap #299) | one window, the URL's page shown and its row selected; reported as `kind=reopen` |
+| Extension opening a window at startup | PASS (see the note) | `startup-probe` (new, `engine/test-extensions/startup-probe`): `embedderReady (0 queued request(s))`, `launch finished (0 window(s) ...)`, 2.7 s later `window request kind extension`, `host asked kind=extension`, an adopted shell window with the probe's page as a Today row next to the launch window. `runtime.onStartup` itself does not reach an extension loaded with `--load-extension` (it is installed again at each launch; a first try logged no request), so the probe opens its window on its first service worker start of the session; on this machine that came after readiness, so the before-readiness queue was not exercised by an extension |
+
+### Quit (no CDP port, `ARKT_AUTOSAVE_DELAY_MS=600000`, a new Today row created right before quitting)
+
+| Path | Result | Evidence |
+|---|---|---|
+| Cmd-Q (after fix 5) | PASS | `quit started`, `engineWillBeginTerminating`, `app terminating`, `engineWillTerminate`, `termination flush succeeded true`, process exited; the stored snapshot (unchanged since launch: `saved_at` the same before the quit) then had the new row, every earlier row unchanged, the shown split's `lastActiveAt` stamped |
+| Quit Apple event (Dock Quit) | PASS | the same seam lines; the pending row stored |
+| `kill -TERM` (session end) | FAIL, #298 | `quit started`, `engineWillBeginTerminating`, then the process is gone: `chrome::SessionEnding()` ends with `TerminateCurrentProcessImmediately`, no `engineWillTerminate`; the pending row lost |
+| Logout | maintainer check | |
+
+### Web identity (#9)
+
+Loopback echo page in the shell: `User-Agent` and `navigator.userAgent` `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)
+AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36`; `Sec-CH-UA` `"Not:A-Brand";v="8",
+"Chromium";v="156"`; full version list `Not:A-Brand 8.0.0.0, Chromium 156.0.8078.48`; platform `macOS` `27.0.0`, arch
+`arm`. No `Arkt` in either brand list; no `--user-agent` in any of the app's 18 processes. PASS.
+
+### 120 Hz (shell card with live engine pages)
+
+Built-in Liquid Retina XDR display, `screenMaxFPS=120`; the shell's display-link pacer (`dev.arkt.shell` / `perf`,
+`pacing` lines), pages with a running CSS animation:
+
+| Interaction | Sessions | Frames each | Intervals over 8.6 ms | Max |
+|---|---|---|---|---|
+| Space switch (Ctrl-1 / Ctrl-2): the window showing a Split View of two live pages, and the window showing one live page | 40 | 59-60 | 0 | 8.33 ms |
+| Split View divider drag between two live pages | 3 | 129-133 | 0 | 8.33 ms |
+
+Gate (at most 1 % over 8.6 ms) holds: 0 %.
+
+### Second session (disk back, final build)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Cmd-N with page focus | PASS | page field focused (`document.hasFocus()` true), Cmd-N: a new shell window, the page's `keydown` listener saw nothing |
+| Shift-Cmd-W with page focus | PASS | page "Kappa" focused, Shift-Cmd-W: batch `TabClosed,WindowClosed`, `native window destroyed`, the other window stays |
+| Stop during a load | PASS | a page whose response stays open 15 s: `document.readyState` `loading`, Stop enabled; View > Stop: `complete` 0.8 s later, Stop disabled |
+| Page command with the Archive window key (W3-8 M7) | PASS | Archive window key: Reload and Zoom disabled, a page marker survives a click on Reload (nothing reached a `Browser`) |
+| Page command with no window (M7) | recorded | Reload and Zoom disabled; Show All History and the Developer items stay enabled and reach AppController, which creates a `Browser`: `window request kind reopen`, an adopted shell window with History |
+| Cold `open -a <app> <url>` | PASS after fix 7 | above |
+| Contract on the final build | 16/16 | run 7: 24 checks PASS, `result 16/16`, exit 0, 0 `FATAL`, 0 dumps; `--arkt-engine-contract=closeIsTerminl`: exit 2 with the message above |
+| Relaunch shows the quit writes | PASS | the rows written at quit (B1 "Zeta", B2 "Eta") are in the sidebar of every later launch on that data folder |
+
+Unexplained, recorded: in the startup-probe run the probe's page went on to `/p/StartupProbe-next` with a `LINK`
+transition (Chromium's history) while no input was sent to the app; not reproduced.
+
+Logout stays a maintainer check. SIGTERM is #298.
+
+### Verification
+
+- Contract: above. Crash dumps: 0 in each run's user data folder and under `Arkt Dev Engine/Crashpad`.
+- Second session, on the Chromium disk (`arkt-shell-dd/w3-9-spm`): ShellKit `--filter ShellKitGUITests` 491, 5 skipped,
+  0 failures; `--skip ShellKitGUITests` 581, all pass (one more script test).
+- First session, on the internal disk after the Chromium disk was lost (scratch and derived data in a temporary folder): ShellKit `swift test --skip ShellKitGUITests` 580 tests, all pass (new: the two `about:blank`
+  scripts and the skip-unload close script; `everyContractCheckIsListed` also checks the rule numbers cover 1-16).
+  ShellKit `--filter ShellKitGUITests` 491, 5 skipped, one failing test: `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`
+  (2 frames over 8.6 ms), the load-dependent flake recorded in "W3-7 A and B"; alone it then passed twice (once skipped by
+  its load gate). ArktCore `swift test` 366, all pass.
+- Debug app (`xcodebuild -configuration Debug CODE_SIGNING_ALLOWED=NO`): `BUILD SUCCEEDED`, `NSPrincipalClass`
+  `NSApplication`, `strings | grep -c "ARKT engine"` 0 in each binary, no `Contents/Frameworks`. The Debug app now also
+  links `EngineAPITestSupport` (unused there), next to `ChromiumEngineKit` (#268).
+- Patch budget: `wc -l < engine/patches/chromium/.patches` 7, `git -C $CR rev-list --count 156.0.8078.48..HEAD` 7; no file
+  outside `engine/arkt` changed in the engine.
 
 ## W3-7 C and D: start, quit and the main menu
 
@@ -1592,7 +1805,8 @@ passed on the command line for all targets.
    `createBrowserWithHost:` (W3-4, `NOTREACHED`), per-tab state events, stable containers, history, duplicate, close
    reasons other than `client` / `appTerminating`, `.skipUnloadHandlers`, extension actions and the test API (W3-5;
    logged, empty answers).
-3. **Readiness queue for Chromium-created windows.** A URL argument is a real queued request: `--no-startup-window`
+3. **Readiness queue for Chromium-created windows** (W3-9 changed the replay below from a posted task to a synchronous
+   one inside `embedderReady`; see "W3-9", fix 4). A URL argument is a real queued request: `--no-startup-window`
    makes `StartupBrowserCreator::ProcessCmdLineImpl` drop URL arguments (`startup_browser_creator.cc:1173`), so the
    seam reads `CommandLine::GetArgs()` and creates the `Browser` only after `embedderReady`. A `Browser` Chromium
    creates on its own (Dock reopen through `CreateBrowser` -> `chrome::NewEmptyWindow`, a URL from `open -a`) has no

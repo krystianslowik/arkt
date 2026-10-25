@@ -110,6 +110,94 @@ struct ChromiumEngineScriptTests {
     #expect(engine.snapshot(of: id) == nil)
   }
 
+  // MARK: The initial about:blank (W3-9)
+
+  /// Records what the real facade reported for a tab created without a URL (W3-9 contract runner, run 1).
+  func record(_ kind: ArktEngineEventKind, on tab: ScriptedTab, _ fill: (ScriptedEvent) -> Void = { _ in }) {
+    let event = ScriptedEvent(kind, tab: tab, browser: tab.owner)
+    fill(event)
+    facade.record(event)
+  }
+
+  func pageEvents(_ recorder: EventRecorder, _ id: TabID) -> [EngineEvent] {
+    recorder.events(for: id).filter { event in
+      switch event {
+      case .urlChanged, .loadingChanged, .titleChanged: true
+      default: false
+      }
+    }
+  }
+
+  @Test func initialBlankLoadIsNotReportedAndTheFirstPageIsInOrder() async throws {
+    let (engine, window, _) = makeEngine()
+    let recorder = EventRecorder(engine)
+    let id = engine.createTab(url: nil, in: window)
+    let tab = try scriptedTab(engine, id)
+    try await delivered()
+    let page = URL(string: "arkt-test://page.test/Page")!
+    let blank = URL(string: "about:blank")!
+    // Chromium: the about:blank load starts before the first navigation's URL and commits after it.
+    record(.loadingChanged, on: tab) { $0.isLoading = true }
+    try await delivered()
+    #expect(engine.snapshot(of: id)?.isLoading == false)
+    record(.urlChanged, on: tab) { $0.url = page }
+    record(.urlChanged, on: tab) { $0.url = blank }
+    record(.urlChanged, on: tab) { $0.url = page }
+    record(.titleChanged, on: tab) { $0.title = "Page" }
+    record(.loadingChanged, on: tab) { $0.isLoading = false }
+    try await delivered()
+    #expect(pageEvents(recorder, id) == [.urlChanged(id, page), .loadingChanged(id, isLoading: true),
+                                         .urlChanged(id, page), .titleChanged(id, "Page"),
+                                         .loadingChanged(id, isLoading: false)])
+    // After the first page loaded, about:blank is an ordinary URL again.
+    record(.urlChanged, on: tab) { $0.url = blank }
+    try await delivered()
+    #expect(pageEvents(recorder, id).last == .urlChanged(id, blank))
+  }
+
+  @Test func blankTabThatNeverNavigatesReportsNoLoad() async throws {
+    let (engine, window, _) = makeEngine()
+    let recorder = EventRecorder(engine)
+    let id = engine.createTab(url: nil, in: window)
+    let tab = try scriptedTab(engine, id)
+    record(.loadingChanged, on: tab) { $0.isLoading = true }
+    record(.urlChanged, on: tab) { $0.url = URL(string: "about:blank")! }
+    record(.loadingChanged, on: tab) { $0.isLoading = false }
+    try await delivered()
+    #expect(pageEvents(recorder, id).isEmpty)
+    #expect(engine.snapshot(of: id)?.isLoading == false)
+  }
+
+  /// A window close marks all its tabs closing (the real facade, W3-9); a tab the shell drops meanwhile still closes.
+  @Test func skipUnloadHandlersClosesATabThatIsClosing() async throws {
+    let (engine, window, _) = makeEngine()
+    let recorder = EventRecorder(engine)
+    let id = engine.createTab(url: nil, in: window)
+    try scriptedTab(engine, id).isClosing = true
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+    #expect(engine.snapshot(of: id) == nil)
+    #expect(recorder.events(for: id).last == .tabClosed(id, reason: .client))
+  }
+
+  /// The real facade closes under `ScopedSkipUnloadHandlers` even while the window close shows the tab's leave-site
+  /// dialog (#302 review).
+  @Test func skipUnloadHandlersClosesATabShowingTheWindowCloseDialog() async throws {
+    let (engine, window, _) = makeEngine()
+    let recorder = EventRecorder(engine)
+    let id = engine.createTab(url: URL(string: "arkt-test://page.test/Held")!, in: window)
+    let tab = try scriptedTab(engine, id)
+    tab.finishLoad()
+    _ = try await engine.evaluateScript("window.onbeforeunload = () => true", in: id, userGesture: true)
+    try await delivered()
+    engine.closeWindow(window)
+    try await delivered()
+    #expect(tab.dialog != nil && engine.snapshot(of: id)?.isClosing == true)
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+    try await delivered()
+    #expect(engine.snapshot(of: id) == nil)
+    #expect(recorder.events(for: id).last == .tabClosed(id, reason: .client))
+  }
+
   // MARK: Nested run loops (Decision 3)
 
   @Test func deferredCallsQueueBehindTheInsert() async throws {
