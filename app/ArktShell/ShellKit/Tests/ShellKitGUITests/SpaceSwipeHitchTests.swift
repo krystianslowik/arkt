@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 import EngineAPITestSupport
 @_spi(Smoke) @testable import ShellUI
+@testable import Motion
 
 /// Steps a scripted swipe once per display frame.
 @MainActor
@@ -133,16 +134,137 @@ final class SpaceSwipeHitchTests: XCTestCase {
     }
   }
 
-  /// Touching down freezes the settle with the view frame where the strip shows, so rows under the fingers hit-test.
-  func testFrozenSettleSyncsTheStripFrame() async throws {
+  /// Presents frames of the pager's running settle at chosen times, 1/120 s apart from `start`, until `reached`
+  /// holds for the position or the spring stops. No display link and no waiting: the test runs on the main actor
+  /// without suspending, so the real display link cannot present a frame in between.
+  private func presentSettleFrames(_ pager: SpacePagerView, from start: CFTimeInterval,
+                                   until reached: (CGFloat) -> Bool) -> CFTimeInterval {
+    var time = start
+    while pager.isSettling, !reached(pager.position), time < start + 2 {
+      time += 1.0 / 120
+      pager.driver.tick(at: time)
+    }
+    return time
+  }
+
+  /// Starts `go(to: 1)` from page 0 and stops it a third of the way (or more) there, with the strip shown on its
+  /// layer translation. Returns the time of the last presented frame.
+  private func midSettle(_ pager: SpacePagerView) throws -> CFTimeInterval {
+    pager.reduceMotionForTesting = false
+    XCTAssertEqual(pager.index, 0)
+    let start = CACurrentMediaTime()
+    pager.go(to: 1)
+    let time = presentSettleFrames(pager, from: start) { $0 >= 0.3 }
+    XCTAssertTrue(pager.isSettling, "mid-settle")
+    XCTAssertGreaterThanOrEqual(pager.position, 0.3)
+    XCTAssertLessThan(pager.position, 0.9)
+    XCTAssertNotEqual(pager.stripLayerShiftForTesting, 0, "mid-settle the strip shows on its layer translation")
+    return time
+  }
+
+  /// A click mid-settle lands on what is drawn under the pointer. In the pager's right part page 1 already shows
+  /// there; the strip's view frame from before the settle puts page 0 there. The hit test brings the view geometry to
+  /// the screen first, so the hit is on page 1 and page 1 converts the point with its on-screen frame (a table would
+  /// pick the row under the pointer). The settle carries on to page 1 from there.
+  func testAHitTestMidSettleFindsTheViewShownUnderThePoint() throws {
     let pager = controller.pager
-    controller.nextSpace(nil)
-    try? await Task.sleep(nanoseconds: 60_000_000)
-    try PacingEnvironment.requireCaught(pager.isSettling, "the settle still running at touch down")
+    let window = try XCTUnwrap(pager.window)
+    let width = pager.bounds.width
+    let time = try midSettle(pager)
+    let local = NSPoint(x: width * 0.85, y: pager.bounds.midY)
+    let point = pager.convert(local, to: nil)
+    let hit = try XCTUnwrap(window.contentView?.hitTest(point))
+    XCTAssertTrue(hit === pager.pages[1] || hit.isDescendant(of: pager.pages[1]), "hit \(hit) is not on page 1")
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
+    XCTAssertEqual(pager.strip.frame.minX, pager.offset, accuracy: 0.01)
+    XCTAssertEqual(pager.pages[1].convert(point, from: nil).x, local.x - (pager.offset + width), accuracy: 0.5,
+                   "page 1 converts the click with the frame it shows at")
+    XCTAssertTrue(pager.isSettling, "the click does not stop the settle")
+    _ = presentSettleFrames(pager, from: time) { _ in false }
+    XCTAssertFalse(pager.isSettling)
+    XCTAssertEqual(pager.index, 1)
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
+    XCTAssertEqual(pager.strip.frame.minX, -width, accuracy: 0.01)
+  }
+
+  /// Hit tests for the changed-phase and momentum events of a scroll gesture leave the geometry alone (they stream at
+  /// display rate); the first event of a gesture, a wheel click and every other event bring it to the screen.
+  func testOnlyGestureStartsAndNonScrollEventsSyncTheGeometryOnAHitTest() throws {
+    func scroll(phase: Int64, momentum: Int64 = 0, continuous: Bool = true) throws -> NSEvent {
+      let cg = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                                     wheel1: 0, wheel2: -4, wheel3: 0))
+      cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: continuous ? 1 : 0)
+      cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+      cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
+      return try XCTUnwrap(NSEvent(cgEvent: cg))
+    }
+    XCTAssertTrue(SpacePagerView.hitTestNeedsCurrentGeometry(for: nil))
+    XCTAssertTrue(SpacePagerView.hitTestNeedsCurrentGeometry(for: try scroll(phase: 128)), "may begin")
+    XCTAssertTrue(SpacePagerView.hitTestNeedsCurrentGeometry(for: try scroll(phase: 1)), "began")
+    XCTAssertFalse(SpacePagerView.hitTestNeedsCurrentGeometry(for: try scroll(phase: 2)), "changed")
+    XCTAssertFalse(SpacePagerView.hitTestNeedsCurrentGeometry(for: try scroll(phase: 0, momentum: 2)), "momentum")
+    XCTAssertTrue(SpacePagerView.hitTestNeedsCurrentGeometry(for: try scroll(phase: 0, continuous: false)), "wheel")
+    let click = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [],
+                                                 timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                                 clickCount: 1, pressure: 1))
+    XCTAssertTrue(SpacePagerView.hitTestNeedsCurrentGeometry(for: click))
+  }
+
+  /// A pointer moving over the strip mid-settle syncs the geometry, so rows enter and leave by where they show.
+  func testAPointerMoveMidSettleSyncsTheStripFrame() throws {
+    let pager = controller.pager
+    let window = try XCTUnwrap(pager.window)
+    _ = try midSettle(pager)
+    let move = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved,
+                                                location: pager.convert(NSPoint(x: 10, y: 10), to: nil),
+                                                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                                context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+    pager.mouseMoved(with: move)
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
+    XCTAssertEqual(pager.strip.frame.minX, pager.offset, accuracy: 0.01)
+    XCTAssertTrue(pager.isSettling)
+    pager.stopInteraction()
+  }
+
+  /// A backing change mid-settle (the window dragged to a display with another scale) moves the strip's geometry to
+  /// where it shows and clears the translation, so AppKit resetting the backing layer's transform loses nothing; the
+  /// next frame translates from there.
+  func testABackingChangeMidSettleKeepsTheStripWhereItShows() throws {
+    let pager = controller.pager
+    let time = try midSettle(pager)
+    let shown = pager.strip.frame.minX + pager.stripLayerShiftForTesting
+    pager.viewDidChangeBackingProperties()
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
+    XCTAssertEqual(pager.strip.frame.minX, shown, accuracy: 0.5, "the strip stays where it showed")
+    XCTAssertTrue(pager.isSettling)
+    pager.driver.tick(at: time + 1.0 / 120)
+    XCTAssertEqual(pager.strip.frame.minX + pager.stripLayerShiftForTesting, pager.offset, accuracy: 0.5)
+    pager.stopInteraction()
+  }
+
+  /// Touching down freezes the settle with the view frame where the strip shows, so rows under the fingers hit-test.
+  func testFrozenSettleSyncsTheStripFrame() throws {
+    let pager = controller.pager
+    _ = try midSettle(pager)
     pager.gestureMayBegin()
+    XCTAssertFalse(pager.isSettling)
+    XCTAssertEqual(pager.frozenTarget, 1)
     XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
     XCTAssertEqual(pager.strip.frame.minX, pager.offset, accuracy: 0.01)
     pager.stopInteraction()
+  }
+
+  /// Stopping mid-settle leaves the pager at rest on its last settled page: the moving range is dropped, so a later
+  /// at-rest update cannot show the abandoned target.
+  func testStopInteractionMidSettleRestsOnTheSettledPage() throws {
+    let pager = controller.pager
+    _ = try midSettle(pager)
+    XCTAssertFalse(pager.pages[1].isHidden, "page 1 shows while the strip moves")
+    pager.stopInteraction()
+    XCTAssertFalse(pager.isSettling)
+    XCTAssertEqual(pager.targetIndex, pager.index)
+    XCTAssertEqual(pager.pages.indices.filter { !pager.pages[$0].isHidden }, [pager.index])
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
   }
 
   /// Personal -> Work -> Dev (dark) -> Work -> Personal, by swipe and by keyboard. The two `flavor` legs cross the

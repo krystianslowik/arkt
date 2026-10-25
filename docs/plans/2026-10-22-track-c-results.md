@@ -1132,8 +1132,20 @@ transaction was not the cause; the view frame move was.
   `jump(to:)`, `stopInteraction()`, a touch-down freeze (`gestureMayBegin`) and `layout()`. No explicit
   `CATransaction` in `apply` or `layout()` (backing layers do not animate implicitly; the test checks
   `animationKeys()` is nil). The spring, rubber band, velocity hand-over and freeze logic are unchanged.
-  While the strip moves, hit testing and hover use the rest frame; a touch-down freeze syncs the frame first, so a
-  frozen strip is hit-testable where it shows.
+  Mid-motion, AppKit's view geometry is brought to the screen on input instead of per frame (review of #282: with the
+  rest frame, a click during a `go(to:)` settle landed on the row the stale frame put under the pointer, possibly in
+  the Space being left). The pager syncs the strip frame (and clears the translation; the spring carries on from the
+  new frame) on: a hit test inside it for any event except the changed-phase and momentum events of a scroll gesture
+  (those stream at display rate and the pager handles them wherever they land), so clicks, drags, the first event of a
+  scroll gesture and accessibility hit tests find the view drawn under the point and that view converts the event with
+  its on-screen frame; a pointer move over the pager (its own `.mouseMoved` area, which never moves), so rows enter and
+  leave by where they show; a backing change (`viewDidChangeBackingProperties`, a window dragged to a display with
+  another scale), so AppKit updating the backing layer's geometry has no transform to reset; and a touch-down freeze.
+  Not synced mid-motion: accessibility frames read without a hit test, which are off by the current translation until
+  the next input or rest. A swipe with a still pointer and a keyboard switch with a still pointer stay transform-only.
+  Alternatives rejected: translating the point in an overridden `hitTest(_:)` returns the right view, but that view
+  then converts the event with its stale frame (a table picks the wrong row) and tracking areas stay stale; moving a
+  layer AppKit does not own (layer-hosting strip, manual sublayer) cannot hold the pages, which are views.
 - While the strip moves, the set of shown pages only grows; it shrinks to the current page at rest. Before, a settle
   that overshot its page hid and showed the neighbour on each swing (3 changes of one page in one swipe), and each
   change rebuilt that page's tracking areas and queued another window-server query. At rest the shown page is
@@ -1180,7 +1192,11 @@ and `space-swipe-flavor` twice (`64@20.58`, `9@30.30`). The probe names both:
 
 - `SpaceSwipeHitchTests` (GUI): `testSwipeMovesTheStripLayerNotItsFrame` (frame unchanged while tracking, translation
   matches the offset, no implicit animation, frame synced and translation cleared at rest),
-  `testFrozenSettleSyncsTheStripFrame`, `testAnInteractionShowsAndHidesEachPageOnce` and its Reduce Motion variant (both fail
+  `testFrozenSettleSyncsTheStripFrame`, `testAHitTestMidSettleFindsTheViewShownUnderThePoint`,
+  `testOnlyGestureStartsAndNonScrollEventsSyncTheGeometryOnAHitTest`, `testAPointerMoveMidSettleSyncsTheStripFrame`,
+  `testABackingChangeMidSettleKeepsTheStripWhereItShows`, `testStopInteractionMidSettleRestsOnTheSettledPage` (the
+  mid-settle ones present spring frames at chosen times through `SpringDriver.tick(at:)`, no sleeps or display
+  waits), `testAnInteractionShowsAndHidesEachPageOnce` and its Reduce Motion variant (both fail
   before the fix: a page changed 3 times in one swipe), and `testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU` (every pass of swipes and
   keyboard switches both ways under 8.34 ms of main-thread CPU; it fails before the fix with 13.7-14.8 ms; the two
   legs that cross the light/dark flip are reported, not gated, until #275; skipped as NOT-MEASURABLE on screens below
@@ -1191,6 +1207,8 @@ and `space-swipe-flavor` twice (`64@20.58`, `9@30.30`). The probe names both:
 
 ### Still open
 
+- WindowServer trace (acceptance criterion 1 of #24) and a manual trackpad swipe plus a window drag across displays
+  with different scales mid-swipe: maintainer steps, not run here.
 - Smoke `-ArktSmokeRepeat 25` in 3 of 3 idle runs (acceptance criterion of #24) needs a Profile build of the app and an
   idle machine; not run here (no app launches in this task). The smoke swipes Personal <-> Work, which no longer
   rebuilds tracking areas per frame.
