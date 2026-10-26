@@ -150,13 +150,18 @@ extension ShellWindowController {
       }
       focusOutlineKeyboard(on: row, page: page)
     }
+    grid.onKeyboardFocusMoved = { [weak self, weak grid] id in
+      guard let self, let grid else { return }
+      self.announceSidebarFocus(on: grid.tile(for: id) ?? grid, nodeID: id)
+    }
     grid.focusKeyboard(on: id)
+    guard let focused = grid.keyboardFocusID else { return }   // an empty grid must not take the outline's focus
     guard window?.makeFirstResponder(grid.collectionView) == true,
           window?.firstResponder === grid.collectionView else {
       grid.keyboardFocusID = nil
       return
     }
-    announceSidebarFocus(on: grid)
+    announceSidebarFocus(on: grid, nodeID: focused)
   }
 
   private func focusOutlineKeyboard(on row: Int, page: SpacePageView) {
@@ -165,6 +170,9 @@ extension ShellWindowController {
     page.outlineView.onKeyboardFocusMoved = { [weak self, weak page] row in
       guard let self, let page else { return }
       self.sidebarReveal.reveal(row: row, in: page, flavor: self.currentFlavor)
+      if let id = page.outlineController.nodeID(atRow: row) {
+        self.announceSidebarFocus(on: page.outlineView, nodeID: id)
+      }
     }
     page.outlineView.onKeyboardFocusAbove = { [weak self, weak page] in
       guard let self, let page else { return }
@@ -175,18 +183,27 @@ extension ShellWindowController {
       page.outlineView.keyboardFocusRow = nil
       return
     }
-    announceSidebarFocus(on: page.outlineView)
+    announceSidebarFocus(on: page.outlineView, nodeID: controller.nodeID(atRow: row))
   }
 
-  private func announceSidebarFocus(on element: NSView) {
-    let title = currentNode.flatMap { node -> String? in
-      if case .tab(_, _, let title)? = sidebar.node(node) { return title }
-      return nil
-    }
+  private func announceSidebarFocus(on element: NSView, nodeID: NodeID?) {
+    let announcement = nodeID.map { sidebarAnnouncementText(for: $0) } ?? "Sidebar"
     NSAccessibility.post(element: element, notification: .announcementRequested, userInfo: [
-      .announcement: ["Sidebar", title].compactMap { $0 }.joined(separator: ", "),
+      .announcement: announcement,
       .priority: NSAccessibilityPriorityLevel.high.rawValue,
     ])
+  }
+
+  /// The destination's name, not the still-current tab's: arrows and grid / outline hand-offs use the same text.
+  func sidebarAnnouncementText(for node: NodeID) -> String {
+    let title: String?
+    switch sidebar.node(node) {
+    case .tab(_, _, let tabTitle)?: title = tabTitle
+    case .folder(_, let folderTitle)?: title = folderTitle
+    case .split?: title = "Split View"
+    case nil: title = nil
+    }
+    return ["Sidebar", title].compactMap { $0 }.joined(separator: ", ")
   }
 
   /// Return or Esc in the sidebar: the current page takes keyboard focus again.

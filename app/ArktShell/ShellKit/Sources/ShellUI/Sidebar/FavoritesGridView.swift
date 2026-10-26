@@ -263,6 +263,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   /// Return or Esc leaves keyboard navigation; Down below the last tile enters the outline.
   var onKeyboardFocusExit: (@MainActor () -> Void)?
   var onKeyboardFocusBelow: (@MainActor () -> Void)?
+  /// Left / Right / vertical grid movement changed the destination VoiceOver should read (#343).
+  var onKeyboardFocusMoved: (@MainActor (NodeID) -> Void)?
   public var faviconProvider: (@MainActor (NodeID) -> NSImage?)?
   /// A tile's hover close (X) or its VoiceOver close action was used (#82); the window runs the same close as Cmd-W.
   public var onClose: (@MainActor (NodeID) -> Void)?
@@ -513,6 +515,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       let proposed = currentIndex + step
       if nodeIDs.indices.contains(proposed) {
         keyboardFocusID = nodeIDs[proposed]
+        onKeyboardFocusMoved?(nodeIDs[proposed])
       } else if deltaRows > 0 {
         onKeyboardFocusBelow?()
       }

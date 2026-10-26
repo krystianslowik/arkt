@@ -725,7 +725,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
   }
 
-  private func nodeID(atRow row: Int) -> NodeID? {
+  func nodeID(atRow row: Int) -> NodeID? {
     (outlineView.item(atRow: row) as? OutlineItem)?.nodeID
   }
 

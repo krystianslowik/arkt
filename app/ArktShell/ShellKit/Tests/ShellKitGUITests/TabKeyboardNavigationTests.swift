@@ -327,6 +327,36 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertNil(outline.keyboardFocusRow)
   }
 
+  /// #343: with no Favorites, Up at the first outline row keeps the outline cursor and its ring.
+  func testUpAtTheFirstOutlineRowWithoutFavoritesKeepsOutlineFocus() throws {
+    for favorite in favorites { source.removeNode(favorite) }
+    controller.activate(node: pinned)
+    controller.revealCurrentTab(nil)
+    let row = try XCTUnwrap(outline.keyboardFocusRow)
+
+    outline.keyDown(with: try key(kVK_UpArrow))
+
+    XCTAssertTrue(controller.window?.firstResponder === outline)
+    XCTAssertEqual(outline.keyboardFocusRow, row)
+    XCTAssertFalse(outline.keyboardFocusRing.isHidden)
+  }
+
+  /// #343 / design VoiceOver: a moved tile cursor reports its destination, and announcement text uses that
+  /// destination's title rather than the still-current tab's title.
+  func testFavoriteCursorMovementReportsItsDestinationForVoiceOver() throws {
+    controller.activate(node: favorites[0])
+    controller.revealCurrentTab(nil)
+    let grid = controller.sidebarController.view.favorites
+    var destinations: [NodeID] = []
+    grid.onKeyboardFocusMoved = { destinations.append($0) }
+
+    grid.collectionView.keyDown(with: try key(kVK_RightArrow))
+
+    XCTAssertEqual(destinations, [favorites[1]])
+    XCTAssertEqual(controller.sidebarAnnouncementText(for: favorites[1]), "Sidebar, F1")
+    XCTAssertEqual(controller.sidebarAnnouncementText(for: pinned), "Sidebar, P")
+  }
+
   /// #343: Esc leaves a moved tile cursor without opening it.
   func testEscapeFromAFavoriteGivesFocusBackWithoutOpeningAnything() throws {
     controller.activate(node: favorites[0])
