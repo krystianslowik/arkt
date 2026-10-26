@@ -1393,3 +1393,46 @@ assertions), `SidebarViewTests.testContainerLayout` (title leading with the care
 `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` flaked as documented in the #102 and #107 sections in
 an earlier loaded run (1 to 2 frames over 8.6 ms at load15 5.4 with other worktrees' builds running); the final
 full run is green.
+
+## Tab switcher and keyboard tab navigation (#103) (2026-10-26)
+
+Spec sections 1.1 and 2.1 (BH-007 to BH-020, KB-020 to KB-030, KB-036), built against `design/tab-switcher/`.
+
+- **Recent tabs.** `RecentTabs`: per window, newest first, moved to front whenever `currentTab` changes (a split's
+  focused pane counts), pruned on sidebar changes; capacity 64, not persisted. Scope is the window's own Spaces and
+  Favorites, PARITY(NEEDS-RUNTIME-CHECK RT-12).
+- **Switcher (BH-007 to BH-011, KB-022 to KB-025).** `ShellWindow.sendEvent` gives key-down, flags-changed and
+  mouse-down events to `TabSwitcherController` before anything else, so a focused page never sees Ctrl-Tab, Tab,
+  backtick, W or Esc while the switcher uses them; Ctrl-Tab and Ctrl-Shift-Tab are also in `ReservedKeys.arkt`. The
+  panel (`TabSwitcherView`) is built with the window and only filled and unhidden on the key-down, at full opacity,
+  so it is on screen with the next frame; a Ctrl release before the first presented frame (display-link tick)
+  commits with no fade (the flick). Up to five rows, highlight wraps, Ctrl-Shift-Tab opens on the last row, W closes
+  the highlighted tab through the Cmd-W path and keeps the switcher open, Esc, a click outside or another key cancel
+  (another key then goes on as usual), a lost key window cancels. Rows: favicon or letter tile, title, split glyph
+  for a pane, Space dot (the theme's most saturated stop) and name. VoiceOver: a "Recent tabs" dialog group, rows
+  "title, Space, k of n[, split]", announcements on open, move, close and cancel.
+- **Motion.** Open: none. Highlight: `springyFast` on the fill's translation, retargeted from the presented value
+  and velocity. W: the panel takes its new height at once (a key press), the closed row fades where it was and the
+  rows below slide up (`firmFast`, transform only) under a clip. Dismiss: 0.10 s opacity, strong ease-out. Reduce
+  Motion: highlight jumps, W crossfades, the fade stays.
+- **Cmd-1 ... Cmd-9, next / previous (BH-014 to BH-016, KB-020, KB-021, KB-028 to KB-030).** `SidebarTabOrder`:
+  Favorites, Pinned, Today of the current Space; an open folder's items in place, a collapsed folder's none, a split
+  is one item. Cmd-9 is the last item unless "Command-9 opens the ninth tab"; Favorites are counted unless "Count
+  Favorites in Command-1 to Command-8" is off (`TabNavigationSettings`, defaults until #307 builds Settings). Next /
+  previous stop at the ends. Cmd-} / Cmd-{ are hidden aliases (RT-02). New Tabs menu after Spaces.
+- **Ctrl-Cmd-Right / Left (BH-013, KB-026, KB-027).** Cycle the recent-tab order without an overlay, wrapping; the
+  order is frozen for the run of presses (RT-01).
+- **Reveal (BH-018).** A keyboard landing on a row out of view scrolls the outline (`SpringDriver`, `springyFast`;
+  Reduce Motion jumps) and shows "N more above / below" for 3 s or until the next user scroll.
+- **Ctrl-Space (BH-019, BH-020, KB-036).** Shows a hidden sidebar [I], opens the folders holding the current tab,
+  makes the outline the key view with a focus row: Up / Down (divider skipped, scrolled by the reveal spring),
+  Return opens and gives focus back to the page (a folder toggles in place), Esc gives focus back. The ring is a
+  3 pt stroke in `NSColor.keyboardFocusIndicatorColor`: a table view ignores a row-sized focus ring mask. The next
+  click removes it.
+- **Not built here.** The recording indicator needs camera and microphone state from the engine (#117). BH-017 has
+  nothing to skip until the Pinned section collapses (#108). The Favorites grid has no keyboard focus yet (Left /
+  Right).
+
+Tests: ShellKit unit 660 (621 + 39), ShellKitGUITests 580 (540 + 40), ArktCore 378 (not touched). The Space pager
+pacing gate failed in one full GUI run at load1 about 5.5; alternating single runs at the same load passed 3 of 3 on
+this branch and 2 of 3 on `main`.
