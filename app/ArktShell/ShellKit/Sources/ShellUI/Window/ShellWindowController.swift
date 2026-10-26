@@ -107,6 +107,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var splitState = SplitWindowState()
   /// Toolbar on or off (KB-018, BH-032). The app passes one backed by user defaults; the default is ephemeral.
   public let toolbarSetting: ToolbarSetting
+  /// The first run (or Help > Welcome to Arkt) while it covers this window (`presentOnboarding`).
+  public internal(set) var onboarding: OnboardingController?
 
   /// `toolbarSetting` defaults to an in-memory setting so windows built without one (tests, the smoke) never
   /// write user defaults. `opensFirstTab` shows the first tab of the first Space at once, which creates the engine
@@ -707,6 +709,7 @@ extension ShellWindowController: NSMenuItemValidation {
   /// Titles the Toggle Toolbar and Show / Hide Sidebar items for the current state (KB-018, KB-017) and validates the Split View items (S5) and Delete
   /// Space (#206). Every other item stays enabled, as it was before this controller validated menu items.
   public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if onboarding != nil { return false }               // the first run covers the browser
     if let enabled = validateSplitMenuItem(menuItem) { return enabled }
     if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
