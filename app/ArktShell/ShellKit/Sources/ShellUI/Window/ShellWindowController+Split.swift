@@ -25,6 +25,10 @@ struct SplitWindowState {
   var pendingSide: SplitPaneSide = .afterFocus
   /// The drop target above the page, made on the first sidebar drag and in the view tree only while one runs (S7).
   var dropOverlay: SplitDropOverlayView?
+  /// A pane closed by its X (#388) whose split has not shown without it yet: the next show of that split reflows on
+  /// the spring (or, with one pane left, the last page grows into the single card). Keyboard closes (Cmd-W,
+  /// Ctrl-Shift--) stay instant: a keyboard action is never animated.
+  var reflowAfterClose: (split: NodeID, pane: NodeID)?
 }
 
 /// Where a new pane goes relative to the focused tab, and the orientation of a split made from a plain tab (BH-117).
@@ -46,6 +50,7 @@ extension ShellWindowController {
     let container = rootView.split
     container.onCommitFactors = { [weak self] factors in self?.commitSplitFactors(factors) }
     container.onFocusRequest = { [weak self] index in self?.focusPane(at: index) }
+    container.onCloseRequest = { [weak self] index in self?.closePane(at: index) }
     sidebarController.preferredPane = { [weak self] split in self?.preferredPane(of: split) }
     wireSplitRows()
     wireSplitDrag()
@@ -76,13 +81,15 @@ extension ShellWindowController {
       return openEngineTab(for: pane).flatMap { engine.contentView(for: $0) }
     }
     let focusMoved = currentTab != focusTab || splitState.split != split
+    let animated = consumeReflow(showing: split, panes: panes)
     rootView.card.setContent(nil)                               // a page shown alone may move into a pane card
     splitState.split = split
     splitState.panes = panes
     splitState.focus = focus
     splitState.activePane[split] = focus
     rootView.showsSplit = true
-    rootView.split.show(panes: pages, axis: SplitLayout.axis(for: layout.orientation), factors: layout.widthFactors)
+    rootView.split.show(panes: pages, axis: SplitLayout.axis(for: layout.orientation), factors: layout.widthFactors,
+                        animated: animated)
     rootView.split.focusedIndex = focusIndex
     currentTab = focusTab
     setShown(panes.filter { engineTab(of: $0) != nil })
@@ -91,14 +98,58 @@ extension ShellWindowController {
     if focusMoved, let page = engine.contentView(for: focusTab) { window?.makeFirstResponder(page) }
   }
 
-  /// Gives the content area back to the single card; the split container lets go of its pages first.
+  /// Gives the content area back to the single card; the split container lets go of its pages first. When the split
+  /// ended because a pane closed by its X, the page left alone grows from its pane into the card (#388).
   func hideSplit() {
     guard splitState.split != nil else { return }
+    let survivorFrame = consumeReflow(showing: nil, panes: []) ? lastPaneFrame() : nil
     splitState.split = nil
     splitState.panes = []
     splitState.focus = nil
     rootView.split.show(panes: [], axis: .sideBySide, factors: [])
     rootView.showsSplit = false
+    if let survivorFrame { rootView.reflowCard(from: survivorFrame) }
+  }
+
+  // MARK: Pane close button (#388)
+
+  /// The X of pane `index` (BH-121): closes that pane only, as Cmd-W closes the focused one. A Today pane is archived
+  /// and goes on the reopen stack (Cmd-Shift-T brings it back); its split shrinks on the reflow spring and ends with
+  /// one pane left. A Pinned or Favorite pane's page closes and its placeholder stays. Focus stays where it is unless
+  /// the closed pane had it.
+  func closePane(at index: Int) {
+    guard let split = splitState.split, splitState.panes.indices.contains(index) else { return }
+    let pane = splitState.panes[index]
+    guard engineTab(of: pane) != nil else { return }
+    splitState.reflowAfterClose = (split, pane)
+    close(node: pane)
+  }
+
+  /// Whether this show of `split` (nil: the split ends) is the one after a pane closed by its X: true once the pane
+  /// has left the split. A show of another split, or a close that kept the pane (a placeholder), forgets the close.
+  private func consumeReflow(showing split: NodeID?, panes: [NodeID]) -> Bool {
+    guard let pending = splitState.reflowAfterClose else { return false }
+    guard pending.split == splitState.split, split == nil || split == pending.split else {
+      splitState.reflowAfterClose = nil
+      return false
+    }
+    if panes.contains(pending.pane) {
+      // A Today pane waits in `closedPanes` until its archive; any other closed pane stays as a placeholder.
+      let isToday = if case .today? = sidebar.section(containing: pending.pane) { true } else { false }
+      let staysClosed = splitState.closedPanes.contains(pending.pane) && !isToday
+      if staysClosed { splitState.reflowAfterClose = nil }
+      return false
+    }
+    splitState.reflowAfterClose = nil
+    return true
+  }
+
+  /// The frame, in the root view, of the one pane still showing a page, if exactly one is.
+  private func lastPaneFrame() -> CGRect? {
+    let container = rootView.split
+    let shown = container.paneCards.filter { $0.contentView != nil }
+    guard shown.count == 1, let card = shown.first else { return nil }
+    return rootView.convert(card.frame, from: container)
   }
 
   /// The split row's pane to focus: the last focused one unless its page was closed, else the first open pane.
@@ -123,7 +174,7 @@ extension ShellWindowController {
     guard event.window === window, splitState.split != nil else { return }
     let container = rootView.split
     let point = container.convert(event.locationInWindow, from: nil)
-    guard let index = container.paneCards.firstIndex(where: { !$0.isHidden && $0.frame.contains(point) }),
+    guard let index = container.paneIndex(forMouseDownAt: point),
           index != container.focusedIndex || currentTab == nil else { return }
     focusPane(at: index)
   }
