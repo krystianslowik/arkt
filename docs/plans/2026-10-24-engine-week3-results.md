@@ -2923,6 +2923,7 @@ Date 2026-10-26. Branch `feat/345-peek-modifier-links` off `main` at `55fb137`. 
 | Command-click opens a background Today tab | PASS | `disposition 4` answered navigate; a new unselected row, the source stays shown |
 | Command-Shift-click opens a foreground Today tab | PASS | `disposition 3` answered navigate; a new selected row, no Peek |
 | `target=_blank` to the same host opens a Today tab | PASS | a new selected row, no Peek |
+| `window.open(url)` without features in a pinned tab opens a Peek that keeps its opener | PASS | the engine's tab in the Peek, `window.opener` true in it (after a relaunch with the same profile) |
 
 ### Verification
 
@@ -2931,5 +2932,20 @@ Date 2026-10-26. Branch `feat/345-peek-modifier-links` off `main` at `55fb137`. 
   successfully.` `git -C $CR rev-list --count 156.0.8078.48..arkt` 9 = `.patches` 9.
 - Debug and Engine apps: `BUILD SUCCEEDED`.
 - Red first: the new routing tests failed to compile (`routeOpenedTab` missing).
-- ShellKit `swift test --skip ShellKitGUITests`: 909 passed (902 + 7). GUI: see the pull request.
+- ShellKit `swift test --skip ShellKitGUITests`: 909 passed (902 + 7); after the rebase on #365, 936 passed
+  (929 + 7). `swift test --filter ShellKitGUITests`: 747 run (743 + 4), 9 skipped, 0 failures (before the rebase).
+
+### Deviations and checks still open
+
+- Command-Shift-click on a `target=_blank` link goes through `AddNewContents`, not `OpenURLFromTab`, so it reaches
+  the window as an active tab with an opener, like a plain `target=_blank` click, and opens a Peek from a pinned tab or
+  a Favorite. NEEDS-RUNTIME-CHECK against Arc.
+- The window remembers, for 2 s, a source whose modified click it answered with navigate, because no disposition
+  reaches `.tabCreated`; that is what keeps a Command-Shift-click on a plain link a foreground Today tab.
+- A `window.open` whose URL arrives after the tab's creation batch would see `about:blank` and stay a Today row; in
+  the check above the URL was in the batch.
+- The `link activation (disposition 1) answered navigate` line right after a `target=_blank` click is patch 0008's
+  throttle asking about the new tab's own first navigation; it navigates because the shell does not list that tab yet.
+- A `target=_blank` tab taken into a Peek replaces a Peek that is already open, whatever its source (one Peek per
+  window at a time, as before).
 
