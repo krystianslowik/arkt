@@ -29,6 +29,11 @@ public final class SidebarController {
   /// A tab row's drag of every Space page started and ended (S7), forwarded from `SidebarOutlineController`.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   public var onNodeDragEnded: (@MainActor () -> Void)?
+  /// A sidebar drag settled on a location (BH-047): the Favorites band, or the Space page for a Favorite. The
+  /// window moves the node; false means the move was refused.
+  public var onSidebarDrop: (@MainActor (_ node: NodeID, _ location: SidebarLocation) -> Bool)?
+  /// A row's "Move To > Favorites" (BH-047); the window moves the node.
+  public var onMoveToFavorites: (@MainActor (NodeID) -> Void)?
   /// The "+" button in the bottom bar.
   public var onNewTab: (@MainActor () -> Void)?
   /// The pane to focus when a split row is activated (decision 7: the split's last focused pane). Nil, or a node
@@ -57,6 +62,8 @@ public final class SidebarController {
   /// the window calls `deactivate(node:)` when any page closes; nodes that leave the source are dropped like
   /// favicons. Decides whether a Favorite tile shows its X (#82).
   private(set) var loadedNodes: Set<NodeID> = []
+  /// The drop overlay over the Favorites band and the Space page, shown during a sidebar drag (BH-047).
+  private(set) var dropOverlay: FavoritesDropOverlayView?
   /// Tabs the window shows besides the current one (the other panes of a shown split), drawn as `.contentVisible`.
   public var visible: Set<NodeID> = [] {
     didSet { if visible != oldValue { applyRowStates() } }
@@ -73,8 +80,8 @@ public final class SidebarController {
     view.favorites.faviconProvider = { [weak self] id in self?.favicons[id] }
     view.favorites.onClose = { [weak self] id in self?.onClose?(id) }
     view.favorites.pageLoadedProvider = { [weak self] id in self?.loadedNodes.contains(id) ?? false }
-    view.favorites.onNodeDragBegan = { [weak self] id in self?.onNodeDragBegan?(id) }
-    view.favorites.onNodeDragEnded = { [weak self] in self?.onNodeDragEnded?() }
+    view.favorites.onNodeDragBegan = { [weak self] id in self?.nodeDragBegan(id) }
+    view.favorites.onNodeDragEnded = { [weak self] in self?.nodeDragEnded() }
     view.spaceDots.onSelect = { [weak self] index in self?.goToSpace(at: index) }
     view.pager.onPosition = { [weak self] position in self?.pagerMoved(to: position) }
     view.pager.onSettle = { [weak self] index in self?.pagerSettled(on: index) }
@@ -225,8 +232,9 @@ public final class SidebarController {
     page.outlineController.onConvertSplit = { [weak self] node in self?.onConvertSplit?(node) }
     page.outlineController.onDuplicateSplit = { [weak self] node in self?.onDuplicateSplit?(node) }
     page.outlineController.onDuplicateIntoSplit = { [weak self] node in self?.onDuplicateIntoSplit?(node) }
-    page.outlineController.onNodeDragBegan = { [weak self] node in self?.onNodeDragBegan?(node) }
-    page.outlineController.onNodeDragEnded = { [weak self] in self?.onNodeDragEnded?() }
+    page.outlineController.onMoveToFavorites = { [weak self] node in self?.onMoveToFavorites?(node) }
+    page.outlineController.onNodeDragBegan = { [weak self] node in self?.nodeDragBegan(node) }
+    page.outlineController.onNodeDragEnded = { [weak self] in self?.nodeDragEnded() }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
     page.outlineController.closingProvider = { [weak self] node in self?.closingNodes.contains(node) ?? false }
     page.outlineController.setRowStates(resolver)
@@ -297,6 +305,40 @@ public final class SidebarController {
     let states = resolver
     for page in pages.values { page.outlineController.setRowStates(states) }
     view.favorites.setRowStates(states)       // refreshes the visible tiles, this one's X included
+  }
+
+  // MARK: Sidebar drag and drop (BH-047)
+
+  private func nodeDragBegan(_ id: NodeID) {
+    showDropOverlay(for: id)
+    onNodeDragBegan?(id)
+  }
+
+  private func nodeDragEnded() {
+    dropOverlay?.end()
+    dropOverlay?.removeFromSuperview()
+    dropOverlay = nil
+    onNodeDragEnded?()
+  }
+
+  /// Covers the Favorites band and the Space page below it for the drag; the zones resolve through
+  /// `FavoritesDrop` and the drop itself is the window's (`onSidebarDrop`).
+  private func showDropOverlay(for id: NodeID) {
+    let overlay = FavoritesDropOverlayView()
+    overlay.onTarget = { [weak self] node, point, band, bounds in
+      guard let self, case .tab? = self.source.node(node) else { return nil }
+      return FavoritesDrop.target(at: point, band: band, bounds: bounds,
+                                  section: self.source.section(containing: node),
+                                  profile: self.profile, currentSpace: self.currentSpace)
+    }
+    overlay.onDrop = { [weak self] node, location in self?.onSidebarDrop?(node, location) ?? false }
+    let band = FavoritesDrop.band(favoritesFrame: view.favorites.frame)
+    overlay.frame = NSRect(x: 0, y: band.minY, width: view.bounds.width,
+                           height: max(0, view.pager.frame.maxY - band.minY))
+    overlay.autoresizingMask = []
+    view.addSubview(overlay, positioned: .above, relativeTo: view.pager)
+    overlay.begin(node: id, band: CGRect(x: band.minX, y: 0, width: band.width, height: band.height))
+    dropOverlay = overlay
   }
 
   // MARK: Updates
