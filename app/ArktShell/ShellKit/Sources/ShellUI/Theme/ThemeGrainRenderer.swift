@@ -24,6 +24,9 @@ final class ThemeGrainRenderer {
   private let queue: any MTLCommandQueue
   private let pipeline: any MTLRenderPipelineState
   private var tiles: [TileKey: any MTLTexture] = [:]
+  /// Tiles being synthesized off the main thread, and who to call when they are uploaded.
+  private var pending: Set<TileKey> = []
+  private var waiting: [@MainActor () -> Void] = []
 
   private struct TileKey: Hashable {
     var texture: ThemeTexture
@@ -58,17 +61,21 @@ final class ThemeGrainRenderer {
   }
 
   /// Draws `texture` into `layer` at `scale`, tiled from the top left when the layer is larger than one tile.
-  /// Returns false when no drawable was available.
+  /// Returns false when nothing was drawn: no drawable, or the tile is not synthesized yet. In that case the tile is
+  /// synthesized off the main thread and `ready` runs once it is uploaded, so the caller can draw again.
   @discardableResult
-  func draw(_ texture: ThemeTexture, into layer: CAMetalLayer, scale: CGFloat) -> Bool {
+  func draw(_ texture: ThemeTexture, into layer: CAMetalLayer, scale: CGFloat,
+            ready: @escaping @MainActor () -> Void = {}) -> Bool {
+    guard let tile = preparedTile(texture, scale: scale, ready: ready) else { return false }
     let signpost = ShellSignposts.signposter.beginInterval("theme.grain.draw")
     defer { ShellSignposts.signposter.endInterval("theme.grain.draw", signpost) }
     let size = CGSize(width: (layer.bounds.width * scale).rounded(), height: (layer.bounds.height * scale).rounded())
     guard size.width > 0, size.height > 0 else { return false }
     layer.contentsScale = scale
     if layer.drawableSize != size { layer.drawableSize = size }
-    guard let drawable = layer.nextDrawable(), let tile = tile(texture, scale: scale),
-          let commandBuffer = encode(tile, into: drawable.texture) else { return false }
+    guard let drawable = layer.nextDrawable(), let commandBuffer = encode(tile, into: drawable.texture) else {
+      return false
+    }
     commandBuffer.present(drawable)
     commandBuffer.commit()
     drawCount += 1
@@ -82,7 +89,7 @@ final class ThemeGrainRenderer {
                                                               mipmapped: false)
     descriptor.usage = [.renderTarget, .shaderRead]
     descriptor.storageMode = .shared
-    guard let target = device.makeTexture(descriptor: descriptor), let tile = tile(texture, scale: scale),
+    guard let target = device.makeTexture(descriptor: descriptor), let tile = tileNow(texture, scale: scale),
           let commandBuffer = encode(tile, into: target) else { return nil }
     commandBuffer.commit()
     commandBuffer.waitUntilCompleted()
@@ -113,11 +120,52 @@ final class ThemeGrainRenderer {
     return commandBuffer
   }
 
-  /// The tile for `scale` as an R8 texture, synthesized and uploaded once per texture and size.
-  private func tile(_ texture: ThemeTexture, scale: CGFloat) -> (any MTLTexture)? {
-    let key = TileKey(texture: texture, pixels: ThemeTexture.tilePixels(scale: Double(scale)))
+  /// Synthesizes and uploads every texture's tile for `scale` on the calling thread (tests start from a warm cache).
+  func prepareForTesting(scale: CGFloat) {
+    for texture in ThemeTexture.allCases { _ = tileNow(texture, scale: scale) }
+  }
+
+  private func key(_ texture: ThemeTexture, _ scale: CGFloat) -> TileKey {
+    TileKey(texture: texture, pixels: ThemeTexture.tilePixels(scale: Double(scale)))
+  }
+
+  /// The uploaded tile, or nil while it is synthesized off the main thread (then `ready` runs after the upload).
+  private func preparedTile(_ texture: ThemeTexture, scale: CGFloat,
+                            ready: @escaping @MainActor () -> Void) -> (any MTLTexture)? {
+    let key = key(texture, scale)
     if let cached = tiles[key] { return cached }
-    let tile = texture.tile(scale: Double(scale))
+    waiting.append(ready)
+    guard pending.insert(key).inserted else { return nil }
+    Task { [weak self] in
+      let tile = await Self.synthesize(texture, scale: Double(scale))
+      guard let self else { return }
+      self.pending.remove(key)
+      self.upload(tile, key: key)
+      guard self.pending.isEmpty else { return }
+      let callbacks = self.waiting
+      self.waiting = []
+      for callback in callbacks { callback() }
+    }
+    return nil
+  }
+
+  @concurrent
+  private static func synthesize(_ texture: ThemeTexture, scale: Double) async -> (bytes: [UInt8], pixels: Int) {
+    let signpost = ShellSignposts.signposter.beginInterval("theme.grain.synthesize")
+    defer { ShellSignposts.signposter.endInterval("theme.grain.synthesize", signpost) }
+    return texture.tile(scale: scale)
+  }
+
+  /// The tile, synthesized on the calling thread when missing (tests and offscreen rendering only).
+  private func tileNow(_ texture: ThemeTexture, scale: CGFloat) -> (any MTLTexture)? {
+    let key = key(texture, scale)
+    if let cached = tiles[key] { return cached }
+    return upload(texture.tile(scale: Double(scale)), key: key)
+  }
+
+  /// Uploads a synthesized tile as an R8 texture and caches it.
+  @discardableResult
+  private func upload(_ tile: (bytes: [UInt8], pixels: Int), key: TileKey) -> (any MTLTexture)? {
     let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: tile.pixels,
                                                               height: tile.pixels, mipmapped: false)
     descriptor.usage = .shaderRead

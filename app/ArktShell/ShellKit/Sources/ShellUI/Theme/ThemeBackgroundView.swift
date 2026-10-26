@@ -297,7 +297,8 @@ public final class ThemeBackgroundView: WindowDragView {
     let scale = window.backingScaleFactor
     let used = Set(themes.compactMap(\.textureKind))
     for (texture, tile) in grainTiles where used.contains(texture) && grainDrawnScale[texture] != scale {
-      if grainRenderer.draw(texture, into: tile, scale: scale) { grainDrawnScale[texture] = scale }
+      let drawn = grainRenderer.draw(texture, into: tile, scale: scale) { [weak self] in self?.drawGrainIfNeeded() }
+      if drawn { grainDrawnScale[texture] = scale }
     }
   }
 

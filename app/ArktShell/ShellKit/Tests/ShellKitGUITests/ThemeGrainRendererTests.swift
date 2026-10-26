@@ -14,9 +14,14 @@ final class ThemeGrainRendererTests: XCTestCase {
     window = nil
   }
 
-  private func renderer() throws -> ThemeGrainRenderer {
+  /// A renderer with every tile already synthesized (`warm`), so draws happen synchronously.
+  private func renderer(warm: Bool = true) throws -> ThemeGrainRenderer {
     guard let renderer = ThemeGrainRenderer(device: MTLCreateSystemDefaultDevice()) else {
       throw XCTSkip("no Metal device")
+    }
+    if warm {
+      renderer.prepareForTesting(scale: 1)
+      renderer.prepareForTesting(scale: 2)
     }
     return renderer
   }
@@ -118,6 +123,16 @@ final class ThemeGrainRendererTests: XCTestCase {
     XCTAssertEqual(renderer.drawCount, 0)
     visible = true
     NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+    XCTAssertEqual(renderer.drawCount, 2)
+  }
+
+  /// The main thread never synthesizes a tile: the first draw waits for it, made off the main thread, then lands.
+  func testAColdTileIsSynthesizedOffTheMainThreadAndThenDrawn() throws {
+    let renderer = try renderer(warm: false)
+    _ = hosted(renderer, themes: [theme("sand", 1), theme("tweed", 0.5)])
+    XCTAssertEqual(renderer.drawCount, 0, "nothing to draw before the tiles exist")
+    let deadline = Date().addingTimeInterval(10)
+    while renderer.drawCount < 2, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
     XCTAssertEqual(renderer.drawCount, 2)
   }
 
