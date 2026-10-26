@@ -220,6 +220,20 @@ final class FavoritesMoveTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// A pane cannot be favorited by a drop: the move would leave its split with one pane.
+  func testDropOfAPaneOnTheBandIsRefused() throws {
+    let world = try Self.makeWorld(favorites: 2)
+    let harness = Harness(world.sidebar)
+    try harness.beginOutlineDrag(world.pane)
+    let overlay = try XCTUnwrap(harness.overlay)
+    XCTAssertNil(overlay.preview(at: harness.bandPoint()))
+    XCTAssertFalse(overlay.drop(node: world.pane, at: harness.bandPoint()))
+    XCTAssertEqual(harness.children(.split(world.split)).count, 2)
+    XCTAssertEqual(harness.children(.favorites(profile: "default")), world.favorites)
+    try harness.endOutlineDrag()
+    harness.controller.close()
+  }
+
   // MARK: Drag below the Space title (BH-047)
 
   func testDropOfAFavoriteOnThePagePinsItInTheCurrentSpace() throws {

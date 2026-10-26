@@ -339,7 +339,9 @@ public final class SidebarController {
   private func showDropOverlay(for id: NodeID) {
     let overlay = FavoritesDropOverlayView()
     overlay.onTarget = { [weak self] node, point, band, bounds in
+      // Panes stay out: `moveNode` would leave their split with one pane; splits own that path (`addToSplit`).
       guard let self, case .tab? = self.source.node(node) else { return nil }
+      if case .split? = self.source.parent(of: node) { return nil }
       return FavoritesDrop.target(at: point, band: band, bounds: bounds,
                                   section: self.source.section(containing: node),
                                   profile: self.profile, currentSpace: self.currentSpace)
@@ -357,11 +359,17 @@ public final class SidebarController {
   // MARK: Unloading (BH-049)
 
   /// After an activation loaded a Favorite past the recency limit, asks the window to unload the least recently
-  /// used ones. The current tab, visible panes and held closes never unload.
+  /// used ones. The current tab, visible panes and held closes never unload. Entries that left Favorites since
+  /// they loaded (dropped on the page, moved into a split) are dropped first, so only Favorites are ever closed;
+  /// held closes are already on their way out and do not count toward the limit.
   private func unloadOverflowFavorites() {
-    var exempt = visible.union(closingNodes)
+    favoriteLoadOrder.removeAll { id in
+      if case .favorites? = source.section(containing: id) { false } else { true }
+    }
+    let counted = favoriteLoadOrder.filter { !closingNodes.contains($0) }
+    var exempt = visible
     if let current { exempt.insert(current) }
-    for id in FavoritesUnloadPolicy.evictions(loadedOrder: favoriteLoadOrder, exempt: exempt) {
+    for id in FavoritesUnloadPolicy.evictions(loadedOrder: counted, exempt: exempt) {
       onFavoriteUnload?(id)
     }
   }

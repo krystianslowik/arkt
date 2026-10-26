@@ -84,6 +84,18 @@ final class FavoritesUnloadTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// A loaded Favorite that moved to Pinned leaves the recency order: later evictions never close it.
+  func testAFavoriteMovedToPinnedIsNeverUnloaded() throws {
+    let world = try Self.makeWorld(favorites: 6)
+    let harness = Harness(world.sidebar)
+    harness.activate(world.favorites[0])
+    try harness.source.moveNode(world.favorites[0], to: .pinned(world.space), at: 0)
+    for favorite in world.favorites.dropFirst() { harness.activate(favorite) }
+    XCTAssertNotNil(harness.tab(of: world.favorites[0]), "a Pinned tab is not a Favorite to unload")
+    XCTAssertNil(harness.tab(of: world.favorites[1]), "the least recently used Favorite still unloads")
+    harness.controller.close()
+  }
+
   /// Pinned and Today tabs are never unloaded by the Favorites limit.
   func testTodayTabsStayLoaded() throws {
     let world = try Self.makeWorld(favorites: 5)
