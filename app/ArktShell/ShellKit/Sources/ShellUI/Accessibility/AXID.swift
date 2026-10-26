@@ -127,4 +127,52 @@ public enum AXID {
     public static let divider = "split.divider"
     public static let reopen = "split.reopen"
   }
+
+  /// The first run over the whole window (`OnboardingView`, onboarding spec sections 6 and 11); absent once it ends.
+  public enum Onboarding {
+    /// Label "Welcome to Arkt". Value: "Step {n} of {total}" (empty on Welcome).
+    public static let root = "onboarding"
+    /// The current step's container: `step` + "." + the step identifier ("welcome", "import", "theme", "default",
+    /// "extensions", "tour-1" ... "tour-5", "done").
+    public static let step = "onboarding.step"
+    public static func step(_ identifier: String) -> String { "\(step).\(identifier)" }
+    /// The step title. Label: the title text.
+    public static let title = "onboarding.title"
+    public static let lede = "onboarding.lede"
+    public static let eyebrow = "onboarding.eyebrow"
+    /// The footer's "{n} of {total}".
+    public static let progress = "onboarding.progress"
+    public static let back = "onboarding.back"
+    public static let skipSetup = "onboarding.skipSetup"
+    // Buttons by action.
+    public static let getStarted = "onboarding.getStarted"
+    public static let importData = "onboarding.import"
+    public static let startFresh = "onboarding.startFresh"
+    public static let tryAgain = "onboarding.tryAgain"
+    public static let continueButton = "onboarding.continue"
+    public static let skip = "onboarding.skip"
+    public static let notNow = "onboarding.notNow"
+    public static let makeDefault = "onboarding.makeDefault"
+    public static let next = "onboarding.next"
+    public static let skipTour = "onboarding.skipTour"
+    public static let startBrowsing = "onboarding.startBrowsing"
+    /// Import: one static text per count. Label: "37 pinned tabs", "Pinned tabs, counting", "37 pinned tabs, imported".
+    public static let countPinnedTabs = "onboarding.count.pinnedTabs"
+    public static let countSpaces = "onboarding.count.spaces"
+    public static let countFavorites = "onboarding.count.favorites"
+    public static let countFolders = "onboarding.count.folders"
+    /// Make it yours: the Space name field (label "Name").
+    public static let name = "onboarding.name"
+    /// The swatch radio group; each swatch is a radio button labelled with its theme name ("Dune", "Imported").
+    public static let swatches = "onboarding.swatches"
+    public static let swatch = "onboarding.swatch"
+    /// The Light / Dark radio group and its two radio buttons.
+    public static let appearance = "onboarding.appearance"
+    public static let appearanceLight = "onboarding.appearance.light"
+    public static let appearanceDark = "onboarding.appearance.dark"
+    /// Extensions: the Chrome Web Store checkbox.
+    public static let webStore = "onboarding.webStore"
+    /// The stage image of Welcome, Done and tips 1 and 2.
+    public static let stage = "onboarding.stage"
+  }
 }
