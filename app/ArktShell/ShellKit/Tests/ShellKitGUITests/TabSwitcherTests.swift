@@ -205,6 +205,44 @@ final class TabSwitcherTests: XCTestCase {
     XCTAssertEqual(controller.sidebarController.current, tabs[2])
   }
 
+  /// The window losing key (another app, another window) ends the session as a cancel, so a Ctrl release that
+  /// arrives later switches nothing.
+  func testResigningKeyCancelsAndALaterCtrlReleaseSwitchesNothing() throws {
+    view([tabs[0], tabs[1], tabs[2]])
+    try ctrlTab()
+    XCTAssertTrue(switcher.isOpen)
+
+    controller.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification))
+
+    XCTAssertFalse(switcher.isOpen)
+    XCTAssertTrue(panel.isHidden, "never presented, so hidden at once")
+    try releaseCtrl()
+    XCTAssertEqual(controller.sidebarController.current, tabs[2])
+  }
+
+  // MARK: Spaces
+
+  /// RT-12 as assumed: the list spans this window's Spaces in viewing order, and landing on a tab of another Space
+  /// shows that Space.
+  func testTheListSpansSpacesAndLandingOnAnotherSpaceShowsIt() throws {
+    let other = source.addSpace(title: "Home", theme: SpaceThemeInfo(baseColors: [.white(1)], isDark: false))
+    let away = source.addTab(url: URL(string: "https://example.com/away")!, title: "Away", in: .today(other))
+    view([tabs[0], away, tabs[1]])
+    XCTAssertEqual(controller.currentSpace, space)
+
+    try ctrlTab()
+    XCTAssertEqual(shownTitles(), ["Away", "Tab 0"])
+    XCTAssertEqual(panel.rowViews[0].spaceField.stringValue, "Home")
+    try releaseCtrl()
+
+    XCTAssertEqual(controller.sidebarController.current, away)
+    XCTAssertEqual(controller.currentSpace, other)
+    try ctrlTab()
+    XCTAssertEqual(shownTitles(), ["Tab 1", "Tab 0"], "the Space switch kept the viewing order")
+    try releaseCtrl()
+    XCTAssertEqual(controller.currentSpace, space)
+  }
+
   // MARK: W
 
   /// BH-010: W closes the highlighted tab, the row that took its place is highlighted, and the switcher stays open.
