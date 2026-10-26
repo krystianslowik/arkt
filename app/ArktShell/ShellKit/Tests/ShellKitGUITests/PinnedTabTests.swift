@@ -1,4 +1,5 @@
 import AppKit
+import Archive
 import CoreBridge
 import EngineAPI
 import EngineAPITestSupport
@@ -255,6 +256,79 @@ final class PinnedTabTests: XCTestCase {
     XCTAssertTrue(try harness.choose("Unpin Tab", on: world.today[0]))
     XCTAssertEqual(harness.children(.today(world.space)), [world.today[0], world.today[1], world.split])
     XCTAssertEqual(harness.controller.toasts.current?.text, "Un-Pinned Tab from Work")
+    harness.controller.close()
+  }
+
+  // MARK: Unpin and auto-archive
+
+  /// Stamps hidden tabs the way `AppSession` wires `onTabHidden` (decision 10), at the fixed test clock.
+  private func wireStamping(_ harness: Harness) {
+    harness.controller.onTabHidden = { [unowned harness] id in harness.source.markInactive([id], at: Self.now) }
+  }
+
+  /// The Today items the idle timer would archive right now, with what the window shows exempt.
+  private func autoArchived(_ harness: Harness) -> [UUID] {
+    AutoArchivePolicy.itemsToArchive(
+      in: harness.source.sidebar,
+      AutoArchiveInput(now: Self.now, startedAt: .distantPast, exempt: harness.controller.visibleNodes,
+                       threshold: { _ in .twelveHours }))
+  }
+
+  private static let longIdle = now.addingTimeInterval(-2 * 86_400)
+
+  /// An idle pinned tab that is not current, unpinned from its row, restarts its idle clock: it lands in Today
+  /// without being archived on the next timer pass.
+  func testUnpinningAnIdleBackgroundTabDoesNotAutoArchiveIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    wireStamping(harness)
+    harness.source.markInactive([world.p0], at: Self.longIdle)
+
+    XCTAssertTrue(try harness.choose("Unpin Tab", on: world.p0))
+
+    XCTAssertEqual(harness.children(.today(world.space)).first, world.p0)
+    XCTAssertFalse(autoArchived(harness).contains(world.p0))
+    harness.controller.close()
+  }
+
+  /// The same for an unpinned split: every pane restarts its clock, so the split stays.
+  func testUnpinningAnIdleBackgroundSplitDoesNotAutoArchiveIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    wireStamping(harness)
+    try harness.source.moveNode(world.split, to: .pinned(world.space), at: 3)
+    harness.source.markInactive(world.panes, at: Self.longIdle)
+
+    harness.controller.togglePin(of: world.split)
+
+    XCTAssertEqual(harness.children(.today(world.space)).first, world.split)
+    XCTAssertFalse(autoArchived(harness).contains(world.split))
+    harness.controller.close()
+  }
+
+  /// A Favorite dragged to Today restarts its idle clock the same way.
+  func testMovingAnIdleFavoriteToTodayDoesNotAutoArchiveIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    wireStamping(harness)
+    harness.source.markInactive([world.favorite], at: Self.longIdle)
+
+    XCTAssertTrue(harness.controller.move(world.favorite, to: .today(world.space)))
+
+    XCTAssertFalse(autoArchived(harness).contains(world.favorite))
+    harness.controller.close()
+  }
+
+  /// Reordering inside Today is not activity: the idle clock keeps running.
+  func testReorderingWithinTodayKeepsTheIdleClock() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    wireStamping(harness)
+    harness.source.markInactive([world.today[1]], at: Self.longIdle)
+
+    XCTAssertTrue(harness.controller.move(world.today[1], to: .today(world.space), at: 0))
+
+    XCTAssertTrue(autoArchived(harness).contains(world.today[1]))
     harness.controller.close()
   }
 
