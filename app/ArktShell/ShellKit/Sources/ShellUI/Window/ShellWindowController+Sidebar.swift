@@ -53,6 +53,7 @@ extension ShellWindowController {
 
   /// Titles View > Show / Hide Sidebar; nil for any other item.
   func validateSidebarMenuItem(_ menuItem: NSMenuItem) -> Bool? {
+    if let enabled = validateFolderMenuItem(menuItem) { return enabled }
     guard menuItem.action == #selector(toggleSidebarVisibility(_:)) else { return nil }
     menuItem.title = Self.sidebarMenuTitle(isVisible: isSidebarVisible)
     return true

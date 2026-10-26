@@ -281,10 +281,10 @@ final class TabActionsTests: XCTestCase {
     try harness.cell(world.today[2]).endRename(commit: false)
 
     let folderPoint = try point(of: folder, in: harness, view)
-    let item = try XCTUnwrap(view.item(atRow: try harness.row(folder)))
     try click(at: folderPoint, in: window, view)
     try click(at: folderPoint, count: 2, in: window, view)
-    XCTAssertFalse(view.isItemExpanded(item), "the first click collapsed it and the second did not reopen it")
+    XCTAssertFalse(try harness.outline().isFolderOpen(folder),
+                   "the first click closed it and the second did not reopen it")
     XCTAssertNil(try harness.outline().renamingNode)
   }
 
@@ -621,6 +621,31 @@ final class TabActionsTests: XCTestCase {
     XCTAssertEqual(harness.archived, [folder])
     XCTAssertNil(harness.source.node(folder))
     harness.controller.close()
+  }
+
+  /// BH-095 with the current tab inside: a Split View in the folder goes to the Archive whole, and the window shows
+  /// the next tab instead of going blank, as Close Tab does (#109 review).
+  func testDeleteFolderHoldingTheCurrentSplitShowsTheNextTab() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "F", in: .pinned(world.work))
+    let split = try world.sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5], in: .folder(folder))
+    let panes = try (0..<2).map { try world.sidebar.addTab(url: Self.url("fs\($0)"), title: "FS\($0)",
+                                                           in: .split(split)) }
+    let after = try world.sidebar.addTab(url: Self.url("p0"), title: "P0", in: .pinned(world.work))
+    let harness = Harness(world.sidebar)
+    harness.controller.showWindow(nil)
+    defer { harness.controller.close() }
+    harness.controller.activate(node: panes[1])
+    try harness.outline().toggleFolder(folder, animated: false)     // the pane's split peeks out of the closed folder
+    XCTAssertGreaterThanOrEqual(try harness.outline().row(for: split), 0)
+
+    try harness.choose("Delete", on: folder)
+
+    XCTAssertEqual(harness.archived, [folder], "the folder goes whole; its split is not split up")
+    for node in [folder, split] + panes { XCTAssertNil(harness.source.node(node)) }
+    XCTAssertEqual(harness.current, after, "the next tab becomes current")
+    XCTAssertEqual(try harness.outline().row(for: split), -1, "no row of the folder is left")
+    XCTAssertGreaterThanOrEqual(try harness.outline().row(for: after), 0)
   }
 
   // MARK: Favorite tile (design 3.3)

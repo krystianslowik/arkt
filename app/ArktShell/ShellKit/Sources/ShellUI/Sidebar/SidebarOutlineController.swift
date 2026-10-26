@@ -54,6 +54,16 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// Rows ask on every tracking-area update (a scroll updates all of them); one lookup serves them all.
   func setNeedsHoverResync() { hoverResync.setNeeded() }
 
+  /// A row's hover state changed (the pointer entered or left it); the controller turns it into Folder Preview's
+  /// hover (BH-093).
+  var onRowHover: (@MainActor (_ row: Int, _ hovered: Bool) -> Void)?
+
+  func rowHoverChanged(_ rowView: NSTableRowView, hovered: Bool) {
+    let row = self.row(for: rowView)
+    guard row >= 0 else { return }
+    onRowHover?(row, hovered)
+  }
+
   /// Reads the pointer once and sets the hover state of every realized row from it.
   func resyncHoverWithPointer() { hoverResync.resyncNow() }
 
@@ -374,9 +384,24 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Pinned items (unless collapsed), the divider, then Today items. Rebuilt only when the pinned or Today ids
   /// change, or the collapse toggles.
   private var rootItems: [OutlineItem] = []
+  /// Each container's children as the source last reported them (split titles and states, BH-092 move-ins).
   private var containerChildren: [NodeID: [NodeID]] = [:]
-  /// Folders the user collapsed in this outline; preserved across moves and sibling removals (#94).
-  private var collapsedFolders: Set<NodeID> = []
+  /// Each container's children as this outline lists them (`display`): what the data source answers.
+  private var shownChildren: [NodeID: [NodeID]] = [:]
+  /// Open, closed, closing and peeking folders of this outline (per window, BH-098); collapsed folders are preserved
+  /// across moves and sibling removals (#94).
+  private var display = FolderDisplay()
+  /// The open and close springs of this outline's folders (#109).
+  let folderMotion = FolderMotion()
+  /// The style each row draws in the current folder motion frame; rows realized mid-motion take theirs from here.
+  /// Keyed by outline item, so the Pinned / Today divider row moves with the rows around it.
+  private var rowStyles: [ObjectIdentifier: FolderMotionLayout.RowStyle] = [:]
+  /// Rows a Reduce Motion open shows that had no row view yet; they fade in when it is added.
+  private var pendingFades: Set<NodeID> = []
+  /// Folder rows drawn above the rows sliding under them.
+  private var raisedRows: Set<NodeID> = []
+  /// The current tab this outline last saw, so a change ends the previous peek.
+  private var peekedCurrent: NodeID?
 
   /// The outline is `scrollView`'s document view before its first reload and expansion, so the load realizes only
   /// the rows the clip view shows (#297). An offscreen page is hidden and a hidden table realizes nothing; the
@@ -427,10 +452,19 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
     scrollView.documentView = outlineView
     outlineView.reloadData()
-    for id in pinnedIDs + todayIDs {
-      expandContainer(id)
+    syncAllFolders()
+    folderMotion.onFrame = { [weak self] progress in self?.presentFolderMotion(progress) }
+    folderMotion.onSettle = { [weak self] folder, open in self?.folderMotionSettled(folder, open: open) }
+    outlineView.onRowHover = { [weak self] row, hovered in
+      guard let self, let id = self.nodeID(atRow: row), case .folder? = self.source.node(id) else { return }
+      self.onFolderHover?(id, hovered)
     }
   }
+
+  /// The pointer entered or left a folder row (Folder Preview, BH-093).
+  public var onFolderHover: (@MainActor (NodeID, Bool) -> Void)?
+  /// A folder of this outline opened or closed.
+  public var onFoldersChanged: (@MainActor () -> Void)?
 
   // MARK: Items
 
@@ -455,24 +489,21 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   }
 
   /// Folders the user collapsed in this outline; the keyboard skips their tabs (`SidebarTabOrder`).
-  public var collapsedFolderIDs: Set<NodeID> { collapsedFolders }
+  public var collapsedFolderIDs: Set<NodeID> { display.collapsed }
 
   /// Opens every collapsed folder that holds `id` (BH-019) and returns its row, or nil when this outline does not
-  /// show it.
+  /// show it. A keyboard reveal: no motion.
   @discardableResult
   public func expandAncestors(of id: NodeID) -> Int? {
-    var folders: [NodeID] = []
+    var folders: Set<NodeID> = []
     var location = source.parent(of: id)
     for _ in 0..<64 {                                 // depth guard against a malformed source
       guard let container = location?.containerNode else { break }
-      if case .folder? = source.node(container) { folders.append(container) }
+      if case .folder? = source.node(container) { folders.insert(container) }
       location = source.parent(of: container)
     }
-    for folder in folders.reversed() where collapsedFolders.contains(folder) {
-      collapsedFolders.remove(folder)
-      expandContainer(folder)
-      reload(node: folder)
-    }
+    let next = display.collapsed.subtracting(folders)
+    if next != display.collapsed { setCollapsed(next, animated: false) }
     let found = row(for: id)
     return found >= 0 ? found : nil
   }
@@ -494,7 +525,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private func keyboardReturn(on row: Int) {
     guard let id = nodeID(atRow: row) else { return }
     if case .folder? = source.node(id) {
-      handleClick(row: row, modifiers: [])
+      clearSelection()
+      toggleFolder(id, animated: false)               // a keyboard action never animates
       return
     }
     outlineView.keyboardFocusRow = nil
@@ -515,12 +547,21 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
     guard let item = item as? OutlineItem else { return rootItems.count }
     guard let id = item.nodeID else { return 0 }
-    return children(of: id).count
+    return shown(id).count
   }
 
   public func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
     guard let item = item as? OutlineItem, let id = item.nodeID else { return rootItems[index] }
-    return self.item(for: children(of: id)[index])
+    return self.item(for: shown(id)[index])
+  }
+
+  /// The children the outline lists under `id`: answered from `shownChildren`, filled from `display` on first ask.
+  private func shown(_ id: NodeID) -> [NodeID] {
+    if let listed = shownChildren[id] { return listed }
+    _ = children(of: id)                              // remembers the source's list for later diffs
+    let fresh = display.children(of: id, in: source)
+    shownChildren[id] = fresh
+    return fresh
   }
 
   public func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
@@ -607,7 +648,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
         ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.faviconSize, scale: scale)
       return (title, image)
     case .folder?:
-      let symbol = collapsedFolders.contains(id) ? "folder" : "folder.fill"
+      let symbol = display.collapsed.contains(id) ? "folder" : "folder.fill"
       return (title(of: id), SidebarGlyphs.symbol(symbol, flavor: flavor, scale: scale))
     case .split?:
       return (title(of: id), SidebarGlyphs.symbol("rectangle.split.2x1", flavor: flavor, scale: scale))
@@ -672,12 +713,17 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     guard let id = item.nodeID else {
       return AXProxyRowContent(identifier: AXID.Sidebar.divider, label: "", role: .separator)
     }
-    let expandable = source.node(id)?.childLocation != nil
+    // A closed folder with a row peeking out is expanded in the outline but closed to the user.
+    let isExpanded: Bool? = switch source.node(id) {
+    case .folder?: isFolderOpen(id)
+    case .split?: outlineView.isItemExpanded(item)
+    case .tab?, nil: nil
+    }
     return AXProxyRowContent(
       identifier: rowIdentifier(for: id), label: title(of: id),
       value: (closingProvider?(id) ?? false) ? "Closing" : nil,
       disclosureLevel: max(0, outlineView.level(forRow: row)),
-      isExpanded: expandable ? outlineView.isItemExpanded(item) : nil)
+      isExpanded: isExpanded)
   }
 
   // MARK: Row state
@@ -712,6 +758,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       row.isInteractive = false
       row.state = .normal
     }
+    let id = item?.nodeID
+    applyStyle(item.flatMap { rowStyles[ObjectIdentifier($0)] } ?? .rest, raised: id.map(raisedRows.contains) ?? false,
+               to: row)
   }
 
   private func rowIdentifier(for id: NodeID) -> String {
@@ -730,6 +779,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public func setRowStates(_ resolver: TabRowState.Resolver) {
     let changed = resolver.changedNodes(from: self.resolver)
     self.resolver = resolver
+    if resolver.current != peekedCurrent { currentChanged() }
     guard !changed.isEmpty else { return }
     // The proxies read selection from the resolver; tell clients that cached it.
     outlineView.axProxyRows.selectionDidChange()
@@ -794,8 +844,12 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// A location's child list changed: insert / remove exactly the rows that differ, reload nothing else.
   /// Ignores locations outside this Space. (Node-level changes go to `reload(node:)`.)
   public func apply(structure location: SidebarLocation) {
-    // The row mutations below drop the proxies too; this also covers a change that moves no row.
-    defer { outlineView.axProxyRows.invalidate() }
+    // The row mutations below drop the proxies too; this also covers a change that moves no row. A folder in motion
+    // may have left with the change, so the motion frame is presented again for the rows that remain.
+    defer {
+      outlineView.axProxyRows.invalidate()
+      presentFolderMotion(folderMotion.progress())
+    }
     switch location {
     case .pinned(let space) where space == spaceID:
       let new = source.children(of: location)
@@ -816,7 +870,20 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       guard let parent = items[id], let old = containerChildren[id] else { return }
       let new = source.children(of: location)
       containerChildren[id] = new
-      applyDiff(old: old.map { item(for: $0) }, new: new.map { item(for: $0) }, parent: parent)
+      // BH-092: a tab (or split) moved into a closed folder peeks out under it; the folder stays closed (BH-091). A
+      // moved folder does not peek itself; the current tab inside it does.
+      if case .folder = location, !display.settled.isEffectivelyOpen(id, in: source) {
+        for added in new where !old.contains(added) {
+          switch source.node(added) {
+          case .tab?, .split?: display.peeks.insert(added)
+          case .folder?, nil: break
+          }
+        }
+        peekCurrent(in: &display)
+        syncAllFolders()                              // the folders above it list the new path too
+      } else {
+        syncDisplay(id)
+      }
       if case .split = location { outlineView.reloadItem(parent, reloadChildren: false) }  // title from panes
     default:
       return
@@ -846,28 +913,312 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
     for change in difference.insertions {
       if case .insert(let offset, _, _) = change, let id = new[offset].nodeID {
-        expandContainer(id)
+        syncDisplay(id)
       }
     }
     pruneSelection()
   }
 
-  /// Expands `id` (unless it is a folder the user collapsed) and any non-collapsed containers inside it (#94).
-  private func expandContainer(_ id: NodeID) {
-    guard source.node(id)?.childLocation != nil, !collapsedFolders.contains(id) else { return }
-    outlineView.expandItem(item(for: id))
-    for child in children(of: id) where source.node(child)?.childLocation != nil {
-      expandContainer(child)
-    }
-  }
-
-  /// Drops the cached item and child list of `id` and of its cached descendants that left the source.
+  /// Drops the cached item and child lists of `id` and of its cached descendants that left the source.
   private func forget(_ id: NodeID) {
+    if let item = items[id] { rowStyles[ObjectIdentifier(item)] = nil }
     items[id] = nil
-    collapsedFolders.remove(id)
+    display.collapsed.remove(id)
+    display.closing.remove(id)
+    display.peeks.remove(id)
+    pendingFades.remove(id)
+    raisedRows.remove(id)
+    if folderMotion.isMoving(id) { folderMotion.cancel(id) }
+    shownChildren[id] = nil
     for child in containerChildren.removeValue(forKey: id) ?? [] where source.node(child) == nil {
       forget(child)
     }
+  }
+
+  // MARK: Folders (#109)
+
+  /// The key of the Reduce Motion fade on rows a folder shows.
+  public static let folderFadeKey = "arkt.folder.fade"
+
+  /// Whether the user has `folder` open in this outline. A closed folder may still list a row peeking out of it.
+  public func isFolderOpen(_ folder: NodeID) -> Bool { !display.collapsed.contains(folder) }
+
+  /// Opens a closed folder or closes an open one. `animated`: a pointer toggle, on the folder spring (or, with
+  /// Reduce Motion, a fade of the rows it shows); a keyboard toggle passes false and applies at once.
+  public func toggleFolder(_ folder: NodeID, animated: Bool) {
+    guard case .folder? = source.node(folder) else { return }
+    var next = display.collapsed
+    if next.remove(folder) == nil { next.insert(folder) }
+    setCollapsed(next, animated: animated)
+  }
+
+  /// Collapse All Folders / Expand All Folders (BH-097) for this Space.
+  public func setAllFolders(open: Bool, animated: Bool) {
+    let folders = Set(folders(under: [.pinned(spaceID), .today(spaceID)]))
+    setCollapsed(open ? display.collapsed.subtracting(folders) : display.collapsed.union(folders), animated: animated)
+  }
+
+  /// Whether this Space has a folder anywhere in Pinned or Today.
+  public var hasFolders: Bool { !folders(under: [.pinned(spaceID), .today(spaceID)]).isEmpty }
+
+  /// The style `node`'s row draws in the current folder motion frame.
+  func rowStyle(for node: NodeID) -> FolderMotionLayout.RowStyle {
+    items[node].flatMap { rowStyles[ObjectIdentifier($0)] } ?? .rest
+  }
+
+  /// The style of the row at `row` (the divider too).
+  func rowStyle(atRow row: Int) -> FolderMotionLayout.RowStyle {
+    styleKey(atRow: row).flatMap { rowStyles[$0] } ?? .rest
+  }
+
+  private func styleKey(atRow row: Int) -> ObjectIdentifier? {
+    (outlineView.item(atRow: row) as? OutlineItem).map(ObjectIdentifier.init)
+  }
+
+  /// Whether `node` sits under any of `folders`.
+  private func isInside(_ node: NodeID, anyOf folders: Set<NodeID>) -> Bool {
+    var location = source.parent(of: node)
+    for _ in 0..<64 {                                 // depth guard against a malformed source
+      guard let container = location?.containerNode else { return false }
+      if folders.contains(container) { return true }
+      location = source.parent(of: container)
+    }
+    return false
+  }
+
+  /// Every folder in `locations`, depth first.
+  private func folders(under locations: [SidebarLocation]) -> [NodeID] {
+    var found: [NodeID] = []
+    var queue = locations.flatMap { source.children(of: $0) }
+    var guardCount = 0
+    while let id = queue.first, guardCount < 10_000 {
+      queue.removeFirst()
+      guardCount += 1
+      guard case .folder? = source.node(id) else { continue }
+      found.append(id)
+      queue.insert(contentsOf: source.children(of: .folder(id)), at: 0)
+    }
+    return found
+  }
+
+  /// Moves this outline to `collapsed`. Each folder whose rows appear or disappear and that sits outside every other
+  /// such folder gets one spring for its whole block (nested folders closed by Collapse All ride their outer folder's
+  /// spring). A closing folder keeps its rows until its spring settles (`display.closing`), so a reversal finds them in
+  /// place; an opening one inserts them at once and springs them out from under the folder row.
+  private func setCollapsed(_ collapsed: Set<NodeID>, animated: Bool) {
+    pendingFades = []
+    let before = display
+    var target = display
+    target.collapsed = collapsed
+    target.closing = []
+    // A folder that opens takes its peeking rows back; closing it again leaves only the current tab out [I].
+    let opened = before.collapsed.subtracting(collapsed)
+    if !opened.isEmpty { target.peeks = target.peeks.filter { !isInside($0, anyOf: opened) } }
+    peekCurrent(in: &target)
+    let tops = changedTops(before: before, after: target)
+    let moving = animated && folderMotion.canAnimate(in: outlineView)
+    let fades = animated && !moving && outlineView.window?.isVisible == true
+    var rowsBefore: [NodeID: [NodeID]] = [:]
+    for top in tops { rowsBefore[top] = shownDescendants(of: top) }
+
+    var next = target
+    next.closing = before.closing.intersection(collapsed)
+    for top in tops {
+      let subtree = Set([top] + folders(under: [.folder(top)]))
+      if target.isEffectivelyOpen(top, in: source) {
+        next.closing.subtract(subtree)                         // an opening folder ends its own close
+      } else if moving {
+        next.closing.formUnion(subtree.filter { before.isOpen($0) && collapsed.contains($0) })
+      }
+      if !moving {                                             // applied at once: no spring may follow
+        next.closing.subtract(subtree)
+        for folder in subtree where folderMotion.isMoving(folder) { folderMotion.cancel(folder) }
+      }
+    }
+    display = next
+    syncAllFolders()
+
+    for top in tops {
+      let shownBefore = Set(rowsBefore[top] ?? [])
+      if target.isEffectivelyOpen(top, in: source) {
+        let shownAfter = Set(shownDescendants(of: top))
+        let appeared = shownAfter.subtracting(shownBefore)
+        if moving {
+          let carried = folderMotion.changing[top].map { $0.union(appeared) } ?? appeared
+          folderMotion.run(top, open: true, changing: carried.intersection(shownAfter), in: outlineView)
+        } else if fades {
+          fadeIn(appeared)
+        }
+      } else if moving {
+        var settled = display
+        settled.closing.subtract([top] + folders(under: [.folder(top)]))
+        let staying = Set(settled.descendants(of: top, in: source))
+        folderMotion.run(top, open: false, changing: shownBefore.subtracting(staying), in: outlineView)
+      }
+    }
+    for folder in before.collapsed.symmetricDifference(collapsed) { reload(node: folder) }   // the folder glyph
+    presentFolderMotion(folderMotion.progress())
+    if before.collapsed != collapsed { onFoldersChanged?() }
+  }
+
+  /// The folders whose shown rows change between `before` and `after` (or whose close is reversed while it still
+  /// runs), outermost only, in this Space.
+  private func changedTops(before: FolderDisplay, after: FolderDisplay) -> [NodeID] {
+    var tops: [NodeID] = []
+    func visit(_ ids: [NodeID]) {
+      for id in ids {
+        guard let location = source.node(id)?.childLocation else { continue }
+        guard case .folder = location else {
+          visit(source.children(of: location))
+          continue
+        }
+        let changed = before.children(of: id, in: source) != after.children(of: id, in: source)
+          || before.isEffectivelyOpen(id, in: source) != after.isEffectivelyOpen(id, in: source)
+          || (before.closing.contains(id) && after.isOpen(id))
+        if changed { tops.append(id) } else { visit(source.children(of: location)) }
+      }
+    }
+    visit(pinnedIDs + todayIDs)
+    return tops
+  }
+
+  /// The current tab peeks out of the closed folders around it (BH-105, BH-093), in `display` or a target state.
+  private func peekCurrent(in state: inout FolderDisplay) {
+    guard let current = resolver.current, source.spaceID(containing: current) == spaceID else { return }
+    let root = FolderDisplay.peekRoot(of: current, in: source)
+    if state.settled.isHidden(root, in: source) { state.peeks.insert(root) }
+  }
+
+  /// A new current tab: the previous peeks go back into their folders, and the new tab peeks out if a closed folder
+  /// hides it.
+  private func currentChanged() {
+    peekedCurrent = resolver.current
+    var next = display
+    next.peeks = []
+    peekCurrent(in: &next)
+    guard next != display else { return }
+    display = next
+    syncAllFolders()
+    presentFolderMotion(folderMotion.progress())
+  }
+
+  /// Brings the outline's rows under every shown container in line with `display`.
+  private func syncAllFolders() {
+    for item in rootItems {
+      if let id = item.nodeID { syncDisplay(id) }
+    }
+  }
+
+  /// Brings the rows under `id` (and its containers) in line with `display`: inserts and removes exactly the rows
+  /// that differ, and expands the item when it lists any row or is open.
+  private func syncDisplay(_ id: NodeID) {
+    guard source.node(id)?.childLocation != nil else { return }
+    let item = item(for: id)
+    _ = children(of: id)
+    let new = display.children(of: id, in: source)
+    let wantsExpanded = !new.isEmpty || display.isEffectivelyOpen(id, in: source)
+    if outlineView.isItemExpanded(item) {
+      let old = shownChildren[id] ?? []
+      if old != new {
+        shownChildren[id] = new
+        applyDiff(old: old.map { self.item(for: $0) }, new: new.map { self.item(for: $0) }, parent: item)
+      }
+      if !wantsExpanded { outlineView.collapseItem(item) }
+    } else {
+      shownChildren[id] = new
+      if wantsExpanded { outlineView.expandItem(item) }
+    }
+    for child in new where source.node(child)?.childLocation != nil { syncDisplay(child) }
+  }
+
+  /// The node rows under `folder`'s row, in order; empty when it has no row.
+  private func shownDescendants(of folder: NodeID) -> [NodeID] {
+    let row = row(for: folder)
+    guard row >= 0 else { return [] }
+    let level = outlineView.level(forRow: row)
+    var rows: [NodeID] = []
+    var next = row + 1
+    while next < outlineView.numberOfRows, outlineView.level(forRow: next) > level {
+      if let id = nodeID(atRow: next) { rows.append(id) }
+      next += 1
+    }
+    return rows
+  }
+
+  /// A folder's spring came to rest: a closed one lets its rows go.
+  private func folderMotionSettled(_ folder: NodeID, open: Bool) {
+    guard !open else { return }
+    display.closing.subtract([folder] + folders(under: [.folder(folder)]))
+    syncAllFolders()
+  }
+
+  /// One frame of the folder springs: each realized row gets its offset and opacity as layer properties (never a
+  /// frame change, which would rebuild tracking areas and layout every frame).
+  private func presentFolderMotion(_ progress: [NodeID: Double]) {
+    var transitions: [FolderMotionLayout.Transition] = []
+    var raised: Set<NodeID> = []
+    for (folder, value) in progress {
+      guard let changing = folderMotion.changing[folder], row(for: folder) >= 0 else { continue }
+      let rows = Set(changing.map { row(for: $0) }.filter { $0 >= 0 })
+      transitions.append(FolderMotionLayout.Transition(changingRows: rows, progress: value))
+      raised.insert(folder)
+    }
+    var styles: [ObjectIdentifier: FolderMotionLayout.RowStyle] = [:]
+    if !transitions.isEmpty {
+      let heights = (0..<outlineView.numberOfRows).map { outlineView.rect(ofRow: $0).height }
+      for (row, style) in FolderMotionLayout.styles(rowHeights: heights, transitions: transitions).enumerated()
+      where style != .rest {
+        if let key = styleKey(atRow: row) { styles[key] = style }
+      }
+    }
+    guard styles != rowStyles || raised != raisedRows else { return }
+    rowStyles = styles
+    raisedRows = raised
+    outlineView.enumerateAvailableRowViews { rowView, row in
+      let id = self.nodeID(atRow: row)
+      self.applyStyle(self.styleKey(atRow: row).flatMap { styles[$0] } ?? .rest,
+                      raised: id.map(raised.contains) ?? false, to: rowView)
+    }
+  }
+
+  private func applyStyle(_ style: FolderMotionLayout.RowStyle, raised: Bool, to rowView: NSTableRowView) {
+    guard let layer = rowView.layer else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer.transform = style.offsetY == 0 ? CATransform3DIdentity : CATransform3DMakeTranslation(0, style.offsetY, 0)
+    layer.opacity = Float(style.alpha)
+    layer.zPosition = raised ? 1 : 0
+    CATransaction.commit()
+  }
+
+  /// Reduce Motion: rows a folder shows fade in where they stand, with no movement.
+  /// A row without a row view yet fades when the outline adds one (`didAdd`).
+  private func fadeIn(_ nodes: Set<NodeID>) {
+    for node in nodes {
+      let row = row(for: node)
+      guard row >= 0 else { continue }
+      if let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false) {
+        Self.addFade(to: rowView)
+      } else {
+        pendingFades.insert(node)
+      }
+    }
+  }
+
+  private static func addFade(to rowView: NSTableRowView) {
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = Float(0)
+    fade.toValue = Float(1)
+    fade.duration = 0.15
+    fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+    rowView.layer?.add(fade, forKey: folderFadeKey)
+  }
+
+  public func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
+    let id = nodeID(atRow: row)
+    applyStyle(styleKey(atRow: row).flatMap { rowStyles[$0] } ?? .rest, raised: id.map(raisedRows.contains) ?? false,
+               to: rowView)
+    if let id, pendingFades.remove(id) != nil { Self.addFade(to: rowView) }
   }
 
   // MARK: Clicks
@@ -900,14 +1251,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     clearSelection()                                  // a plain click collapses the selection (design 6)
     switch source.node(id) {
     case .folder?:
-      if outlineView.isItemExpanded(item) {
-        collapsedFolders.insert(id)
-        outlineView.collapseItem(item)
-      } else {
-        collapsedFolders.remove(id)
-        expandContainer(id)
-      }
-      reload(node: id)
+      toggleFolder(id, animated: true)
     case .split? where option:
       onSeparateSplit?(id)
     case .tab? where option && resolver.current == id && !isPane(id):
