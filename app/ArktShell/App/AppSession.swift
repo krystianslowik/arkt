@@ -100,7 +100,7 @@ final class AppSession {
     windows.configure = { [weak self] controller in self?.wire(controller) }
     archiveSearch.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
-    archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text)) }
+    archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
   }
 
   /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine
@@ -196,8 +196,11 @@ final class AppSession {
     // A tab whose close a leave-site prompt would hold is skipped too, and retried on the next pass (week-3
     // Decision 11).
     autoArchive.exempt = { [weak self] in self?.windows.autoArchiveExempt ?? [] }   // every window's
+    // One undo unit on the primary window: Cmd-Z or the toast's Undo restores the pass; the toast shows only for two
+    // or more tabs (alerts design, decision 3).
     autoArchive.onArchived = { [weak self] archived in
-      self?.windows.primary?.toasts.show(Toast(text: ToastText.autoArchived(archived.count)))
+      self?.windows.primary?.rememberAutoArchived(archived.map(\.id),
+                                                  toast: ToastText.autoArchiveToast(count: archived.count))
     }
     importer.onAutoArchiveClockReset = { [weak self] date in self?.autoArchive.clockDidReset(to: date) }
     resumeAutoArchive()
@@ -275,7 +278,7 @@ final class AppSession {
     // The source Space wins; when it is gone the item lands in the Space on screen (BH-157 routing comes later).
     model.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
-    model.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text)) }
+    model.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
     let controller = ArchiveWindowController(dataSource: model)
     archiveWindow = controller
     controller.show()
@@ -310,7 +313,7 @@ final class AppSession {
   /// keep the newer one (#91).
   private func didRestore(_ restored: RestoredItem, toast text: String) {
     let window = shownWindow()
-    window.toasts.show(Toast(text: text, actionTitle: "View")) { [weak window] in
+    window.toasts.show(Toast(text: text, glyph: ToastText.restoredGlyph, actionTitle: "View")) { [weak window] in
       guard let window, !window.isClosed else { return }
       window.showWindow(nil)
       window.activate(node: restored.nodeID)
@@ -387,7 +390,7 @@ final class AppSession {
     } catch {
       let (errorType, code) = (String(describing: type(of: error)), (error as NSError).code)
       Self.log.error("arc import failed \(errorType, privacy: .public) \(code, privacy: .public)")
-      if showsFailureToast { shownWindow().toasts.show(Toast(text: "Couldn't import your browser data.")) }
+      if showsFailureToast { shownWindow().toasts.show(Toast(text: ToastText.importFailed, kind: .error)) }
       return nil
     }
   }

@@ -35,12 +35,24 @@ public enum AXID {
     public static let urlBar = "toolbar.urlBar"
   }
 
+  /// The shared dialog (`DialogSheetView`): Delete Space, Clear Archive, the launch alerts.
+  public enum Dialog {
+    /// Label: the title; help: the body.
+    public static let root = "dialog"
+    public static let primary = "dialog.primary"
+    public static let secondary = "dialog.secondary"
+    public static let cancel = "dialog.cancel"
+    public static let footerLink = "dialog.footerLink"
+  }
+
   /// The toast over the bottom of the content card (`ToastView`); absent while no toast shows.
   public enum Toast {
     /// Label: the toast text. Value: `persistent` or `timed`.
     public static let root = "toast"
     /// The action button; present only while the toast has an action.
     public static let action = "toast.action"
+    /// The dismiss button of a persistent toast.
+    public static let dismiss = "toast.dismiss"
     /// Value of `root` for a toast that stays until dismissed (recovery notices).
     public static let persistent = "persistent"
     /// Value of `root` for a toast that hides after its duration.

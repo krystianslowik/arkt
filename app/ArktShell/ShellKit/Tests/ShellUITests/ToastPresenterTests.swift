@@ -46,7 +46,7 @@ struct ToastPresenterTests {
 
   @Test func persistentToastStaysUntilDismissed() {
     let presenter = ToastPresenter(sleep: Self.forever)
-    presenter.show(Toast(text: "Recovered", isPersistent: true))
+    presenter.show(Toast(text: "Recovered", kind: .persistent))
     #expect(presenter.current?.text == "Recovered")
     #expect(!presenter.isTimerArmedForTesting)
     presenter.dismiss()
@@ -56,7 +56,7 @@ struct ToastPresenterTests {
   @Test func transientOverPersistentRestoresThePersistentToast() async {
     let gate = AsyncStream<Void>.makeStream()
     let presenter = ToastPresenter(sleep: Self.gated(gate.stream))
-    presenter.show(Toast(text: "Recovered", isPersistent: true))
+    presenter.show(Toast(text: "Recovered", kind: .persistent))
     presenter.show(Toast(text: "Couldn't add the tab."))
     #expect(presenter.current?.text == "Couldn't add the tab.")
     gate.continuation.yield()
@@ -66,8 +66,8 @@ struct ToastPresenterTests {
 
   @Test func persistentToastReplacesAnotherPersistentToast() {
     let presenter = ToastPresenter(sleep: Self.forever)
-    presenter.show(Toast(text: "First", isPersistent: true))
-    presenter.show(Toast(text: "Second", isPersistent: true))
+    presenter.show(Toast(text: "First", kind: .persistent))
+    presenter.show(Toast(text: "Second", kind: .persistent))
     #expect(presenter.current?.text == "Second")
     presenter.dismiss()
     #expect(presenter.current == nil)
@@ -76,7 +76,7 @@ struct ToastPresenterTests {
   @Test func actionRunsAndDismisses() {
     let presenter = ToastPresenter(sleep: Self.forever)
     var calls = 0
-    presenter.show(Toast(text: "Restored", actionTitle: "Show Files", isPersistent: true)) { calls += 1 }
+    presenter.show(Toast(text: "Restored", kind: .persistent, actionTitle: "Show Files")) { calls += 1 }
     presenter.performActionForTesting()
     #expect(calls == 1)
     #expect(presenter.current == nil)
@@ -114,6 +114,103 @@ struct ToastPresenterTests {
     }
     presenter.performActionForTesting()
     #expect(presenter.current?.text == "Two")
+  }
+}
+
+/// Kinds, lifetimes and pausing (alerts design 4.1).
+@MainActor
+struct ToastKindTests {
+  private static let forever: ToastSleep = { _ in try await Task.sleep(for: .seconds(3600)) }
+
+  @Test func kindsCarryTheirGlyphAndLifetime() {
+    #expect(Toast(text: "Archived 3 tabs", kind: .undo).glyph == "archivebox")
+    #expect(Toast(text: "Archived 3 tabs", kind: .undo).duration == .seconds(6))
+    #expect(Toast(text: "Couldn't add the tab.", kind: .error).glyph == "exclamationmark.circle")
+    #expect(Toast(text: "Couldn't add the tab.", kind: .error).duration == .seconds(4))
+    #expect(Toast(text: "Recovered", kind: .persistent).glyph == "exclamationmark.shield")
+    #expect(Toast(text: "Recovered", kind: .persistent).duration == nil)
+    #expect(Toast(text: "Recovered", kind: .persistent).isPersistent)
+    #expect(Toast(text: "New Tab Created").glyph == nil)
+    #expect(Toast(text: "New Tab Created").duration == .seconds(4))
+    #expect(Toast(text: "Tab restored to Work", glyph: "arrow.counterclockwise").glyph == "arrow.counterclockwise")
+    #expect(!Toast(text: "Archived 3 tabs", kind: .undo).isPersistent)
+  }
+
+  @Test func theTimerSleepsForTheToastsOwnLifetime() async {
+    let recorder = DurationRecorder()
+    let presenter = ToastPresenter(sleep: { duration in
+      await recorder.record(duration)
+      try await Task.sleep(for: .seconds(3600))
+    })
+    presenter.show(Toast(text: "Archived 3 tabs", kind: .undo))
+    await recorder.waitForCount(1)
+    presenter.show(Toast(text: "Pinned to Work"))
+    await recorder.waitForCount(2)
+    #expect(await recorder.durations == [.seconds(6), .seconds(4)])
+  }
+
+  @Test func aPausedToastStaysAndResumesAtFullLength() async {
+    let recorder = DurationRecorder()
+    let gate = AsyncStream<Void>.makeStream()
+    let presenter = ToastPresenter(sleep: { duration in
+      await recorder.record(duration)
+      for await _ in gate.stream { return }
+    })
+    presenter.show(Toast(text: "Archived 3 tabs", kind: .undo))
+    await recorder.waitForCount(1)
+    presenter.setPaused(true, for: .hover)
+    #expect(!presenter.isTimerArmedForTesting)
+    presenter.setPaused(true, for: .windowInactive)
+    presenter.setPaused(false, for: .hover)
+    #expect(!presenter.isTimerArmedForTesting, "still paused while the window is not key")
+    gate.continuation.yield()
+    await presenter.waitForIdleForTesting()
+    #expect(presenter.current?.text == "Archived 3 tabs", "a cancelled timer never dismisses")
+    presenter.setPaused(false, for: .windowInactive)
+    #expect(presenter.isTimerArmedForTesting)
+    await recorder.waitForCount(2)
+    #expect(await recorder.durations == [.seconds(6), .seconds(6)])
+    gate.continuation.yield()
+    await presenter.waitForIdleForTesting()
+    #expect(presenter.current == nil)
+  }
+
+  @Test func aToastShownWhilePausedWaitsForTheResume() {
+    let presenter = ToastPresenter(sleep: Self.forever)
+    presenter.setPaused(true, for: .windowInactive)
+    presenter.show(Toast(text: "Archived 3 tabs", kind: .undo))
+    #expect(!presenter.isTimerArmedForTesting)
+    presenter.setPaused(false, for: .windowInactive)
+    #expect(presenter.isTimerArmedForTesting)
+  }
+
+  @Test func dismissWhereTakesDownOnlyAMatchingToast() {
+    let presenter = ToastPresenter(sleep: Self.forever)
+    presenter.show(Toast(text: "Archived 3 tabs", kind: .undo))
+    presenter.dismiss { $0.kind == .error }
+    #expect(presenter.current?.kind == .undo)
+    presenter.dismiss { $0.kind == .undo }
+    #expect(presenter.current == nil)
+  }
+
+  @Test func theDismissButtonTakesAPersistentToastDown() {
+    let presenter = ToastPresenter(sleep: Self.forever)
+    var calls = 0
+    presenter.show(Toast(text: "Recovered", kind: .persistent, actionTitle: "Show Files")) { calls += 1 }
+    presenter.dismissFromButton()
+    #expect(presenter.current == nil)
+    #expect(calls == 0, "dismiss never runs the action")
+  }
+}
+
+/// Records each sleep's duration.
+private actor DurationRecorder {
+  private(set) var durations: [Duration] = []
+
+  func record(_ duration: Duration) { durations.append(duration) }
+
+  func waitForCount(_ count: Int) async {
+    while durations.count < count { await Task.yield() }
   }
 }
 

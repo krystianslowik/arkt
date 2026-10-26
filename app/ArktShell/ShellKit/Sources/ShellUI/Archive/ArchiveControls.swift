@@ -57,24 +57,56 @@ extension NSControl {
 
 // MARK: - Pill button
 
-/// The window's pills (design section 2): the mustard primary (Restore), and neutral pills (Got It, Cancel) whose
-/// title may be destructive (Clear Archive in the confirmation). A real `NSButton`, so Space, VoiceOver's press, the
-/// key view loop and the system focus ring work; the cell draws nothing and layers draw the pill.
+/// The brand's pills, shared by the Archive window (design section 2), the dialogs and the toasts (alerts design 3.2,
+/// 4.2): the mustard primary (Restore, Try Again), and neutral pills (Got It, Cancel, a toast's Undo) whose title may
+/// be destructive (Clear Archive, Delete Space). A real `NSButton`, so Space, VoiceOver's press, the key view loop and
+/// the system focus ring work; the cell draws nothing and layers draw the pill. Colors follow the effective
+/// appearance, so a host sets `appearance` to choose the flavor (a toast takes its Space theme's).
 @MainActor
 final class ArchivePillButton: NSButton {
   enum Style { case primary, neutral, destructive }
 
+  /// Size and type of a pill. `archive`: the Archive window's (13 pt, medium for neutral pills). `dialog`: 28 high,
+  /// 13 semibold, padding 16, at least 76 wide. `toastAction`: 24 high, 12 semibold, padding 12.
+  struct Metrics: Equatable {
+    var height: CGFloat
+    var fontSize: CGFloat
+    /// Nil: semibold for the primary, medium otherwise (the Archive's pills).
+    var weight: NSFont.Weight?
+    var padding: CGFloat
+    /// Nil: twice the height.
+    var minWidth: CGFloat?
+    var pressScale: CGFloat
+
+    static func archive(height: CGFloat = ArchiveMetrics.pillHeight) -> Metrics {
+      Metrics(height: height, fontSize: 13, weight: nil, padding: 16, minWidth: nil, pressScale: 0.97)
+    }
+
+    static let dialog = Metrics(height: 28, fontSize: 13, weight: .semibold, padding: 16, minWidth: 76, pressScale: 0.97)
+    static let toastAction = Metrics(height: 24, fontSize: 12, weight: .semibold, padding: 12, minWidth: 0,
+                                     pressScale: 0.96)
+  }
+
   let style: Style
-  private let pillHeight: CGFloat
+  let metrics: Metrics
+  private var pillHeight: CGFloat { metrics.height }
+  /// A key drawn after the title at half strength (the Peek toast's Reopen, #346); nil: none.
+  var shortcut: String? { didSet { restyle(); invalidateIntrinsicContentSize() } }
+  /// A 1 pt edge (Increase Contrast on a toast's pill); nil: none.
+  var edge: RGBA? { didSet { restyle() } }
   private let body = CALayer()
   private let label = CATextLayer()
   private var hovering = false
   private(set) var pressing = false
   private var tracking: NSTrackingArea?
 
-  init(style: Style, title: String, height: CGFloat = ArchiveMetrics.pillHeight) {
+  convenience init(style: Style, title: String, height: CGFloat = ArchiveMetrics.pillHeight) {
+    self.init(style: style, title: title, metrics: .archive(height: height))
+  }
+
+  init(style: Style, title: String, metrics: Metrics) {
     self.style = style
-    pillHeight = height
+    self.metrics = metrics
     super.init(frame: .zero)
     let cell = ArchivePillCell()
     cell.owner = self
@@ -104,12 +136,27 @@ final class ArchivePillButton: NSButton {
   override func updateLayer() { restyle() }
 
   private var titleFont: NSFont {
-    .systemFont(ofSize: 13, weight: style == .primary ? .semibold : .medium)
+    .systemFont(ofSize: metrics.fontSize, weight: metrics.weight ?? (style == .primary ? .semibold : .medium))
   }
 
+  private var displayedTitle: NSAttributedString {
+    let color = displayedTitleColor.nsColor()
+    let text = NSMutableAttributedString(string: title, attributes: [.font: titleFont, .foregroundColor: color])
+    if let shortcut {
+      text.append(NSAttributedString(string: " " + shortcut, attributes: [
+        .font: NSFont.systemFont(ofSize: metrics.fontSize, weight: .medium),
+        .foregroundColor: color.withAlphaComponent(0.5),
+      ]))
+    }
+    return text
+  }
+
+  /// The drawn title, the key included (tests).
+  var displayedTitleText: String { displayedTitle.string }
+
   override var intrinsicContentSize: NSSize {
-    let width = ceil((title as NSString).size(withAttributes: [.font: titleFont]).width) + 32
-    return NSSize(width: max(width, pillHeight * 2), height: pillHeight)
+    let width = ceil(displayedTitle.size().width) + 2 * metrics.padding
+    return NSSize(width: max(width, metrics.minWidth ?? pillHeight * 2), height: pillHeight)
   }
 
   /// The fill drawn now, for tests: mustard for an enabled primary (hover and pressed shades), the neutral fill
@@ -141,9 +188,9 @@ final class ArchivePillButton: NSButton {
     let scale = window?.backingScaleFactor ?? 2
     ArchiveMotion.set {
       body.backgroundColor = displayedFill.cgColor
-      label.string = NSAttributedString(string: title, attributes: [
-        .font: titleFont, .foregroundColor: displayedTitleColor.nsColor(),
-      ])
+      body.borderColor = edge?.cgColor
+      body.borderWidth = edge == nil ? 0 : 1
+      label.string = displayedTitle
       label.contentsScale = scale
       layer?.opacity = isEnabled ? 1 : 0.4
     }
@@ -157,8 +204,9 @@ final class ArchivePillButton: NSButton {
       body.position = CGPoint(x: bounds.midX, y: bounds.midY)
       body.cornerRadius = bounds.height / 2
       let lineHeight = ceil(titleFont.ascender - titleFont.descender + titleFont.leading)
-      label.frame = CGRect(x: 8, y: ((bounds.height - lineHeight) / 2).rounded(), width: max(0, bounds.width - 16),
-                           height: lineHeight)
+      let inset = min(8, metrics.padding / 2)
+      label.frame = CGRect(x: inset, y: ((bounds.height - lineHeight) / 2).rounded(),
+                           width: max(0, bounds.width - 2 * inset), height: lineHeight)
     }
   }
 
@@ -191,14 +239,15 @@ final class ArchivePillButton: NSButton {
     restyle()
   }
 
-  /// Follows the cell's highlight while the pointer is down: the pressed fill, plus scale 0.97 for 160 ms ease-out
-  /// (feedback; Reduce Motion keeps the fill change only).
+  /// Follows the cell's highlight while the pointer is down: the pressed fill, plus the metrics' press scale for 160 ms
+  /// ease-out (feedback; Reduce Motion keeps the fill change only). A destructive or neutral pill keeps its hover fill
+  /// while pressed (no pressed fill under destructive text, alerts design 3.2).
   fileprivate func setPressed(_ pressed: Bool) {
     guard isEnabled, pressed != pressing else { return }
     pressing = pressed
     restyle()
     guard !ArchiveMotion.reduceMotion() else { return }
-    let scale = pressed ? ArchiveMotion.pressScale : 1
+    let scale = pressed ? metrics.pressScale : 1
     ArchiveMotion.animate(body, "transform", to: NSValue(caTransform3D: CATransform3DMakeScale(scale, scale, 1)),
                           duration: ArchiveMotion.pressDuration)
   }
@@ -241,11 +290,14 @@ final class ArchiveLinkButton: NSButton {
   enum Style { case secondary, destructive }
 
   let style: Style
+  /// 12 pt in the Archive window, 13 pt as a dialog's footer link.
+  let fontSize: CGFloat
   private var hovering = false
   private var tracking: NSTrackingArea?
 
-  init(style: Style, title: String) {
+  init(style: Style, title: String, fontSize: CGFloat = 12) {
     self.style = style
+    self.fontSize = fontSize
     super.init(frame: .zero)
     self.title = title
     isBordered = false
@@ -272,7 +324,7 @@ final class ArchiveLinkButton: NSButton {
 
   private func restyle() {
     var attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 12), .foregroundColor: displayedColor.nsColor(),
+      .font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: displayedColor.nsColor(),
     ]
     if style == .destructive, hovering, isEnabled { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
     attributedTitle = NSAttributedString(string: title, attributes: attributes)

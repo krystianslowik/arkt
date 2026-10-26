@@ -115,6 +115,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var reopenStack = ReopenStack()
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
+  /// The reopen batch the visible undo toast belongs to; nil without one.
+  var undoToastBatch: UUID?
+  /// The Delete Space sheet while it is up.
+  var spaceRemovalSheet: DialogSheet?
   /// Removes a Space (the app's ArchiveCoordinator: its pinned and Today items are archived, decision on #86); Delete
   /// Space calls it once `confirmSpaceRemoval` said yes. Nil: Delete Space is disabled.
   public var onRemoveSpace: (@MainActor (SpaceID) -> Void)?
@@ -173,7 +177,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     root.card.toastView = toastView
     toasts.view = toastView
     onError = { [weak self] mutation, error in
-      self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error)))
+      self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error), kind: .error))
     }
     onNewSpace = { [weak self] in self?.newSpace(nil) }
     wireSpaceEntryPoints()
@@ -255,12 +259,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     refreshToastFlavor()
   }
 
-  /// Toasts follow the flavor of the Space the pager is nearest to.
+  /// Toasts follow the theme of the Space the pager is nearest to: its flavor and its first color stop (BH-190,
+  /// alerts design decision 2).
   private func refreshToastFlavor() {
     let themes = rootView.themeBackground.themes
     guard !themes.isEmpty else { return }
     let index = min(max(Int(pager.position.rounded()), 0), themes.count - 1)
-    toasts.view?.flavor = themes[index].flavor
+    toasts.view?.theme = themes[index]
   }
 
   /// The default error toast's text for a failed `mutation`. A full split says "Cannot Add New Pane" (BH-116).
