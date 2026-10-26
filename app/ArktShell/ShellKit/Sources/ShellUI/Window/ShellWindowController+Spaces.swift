@@ -108,6 +108,12 @@ extension ShellWindowController {
     sidebarController.view.newTabButton.menu = menu
   }
 
+  /// What the Spaces menu lists for this window (#387): its profile's Spaces in sidebar order, the order
+  /// `goToSpace(_:)` indexes.
+  public var spaceMenuEntries: [SpacesMenu.Entry] {
+    sidebarController.spaces.map { SpacesMenu.Entry(id: $0, title: sidebar.space($0)?.title ?? "") }
+  }
+
   private func page(of space: SpaceID) -> SpacePageView? {
     pager.pages.lazy.compactMap { $0 as? SpacePageView }.first { $0.spaceID == space }
   }
