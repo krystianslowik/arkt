@@ -27,6 +27,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 |---|---|---|---|---|
 | 0001-0006 | week 2 (hook, draw, keychain, factory hook, tab features, dialogs) | exist | 13 | 0 |
 | 0007 | extension dialogs as native sheets (#244, pull request #252) | exists | 4 | 0 |
+| 0008 | link activation throttle for Peek (#313, pull request #349) | exists | 1 | 0 |
 | - | Handshake (Decision 1) | ObjC runtime lookup, no patch (W3-0: lookup works) | 0 | 0 |
 | - | Framework name (Decision 7) | no patch unless open decision 1 changes | 0 (1-2) | 0 |
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
@@ -36,6 +37,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+After #313: 8 patch files, 18 upstream files, 0 hot-file hunks.
 
 ## W3-12: Results, patch budget, issue updates, housekeeping
 
@@ -2734,7 +2736,7 @@ on the shared machine; its variants are covered by the unit and GUI tests.
 - Debug and Engine apps: `BUILD SUCCEEDED`.
 - Frame-time gate: `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate` measured on this machine
   (120 Hz, load below the core count): 0 hitches over 8.6 ms for the open and the close in every run alone (9 runs)
-  and with the other Peek GUI tests (3 runs). It failed twice at load 6 to 8 (another agent's builds): once with the
+  and with the other Peek GUI tests (3 runs). It failed twice at load 6 to 8 (other builds): once with the
   other Peek GUI tests (2 intervals over 8.6 ms, max 20.8 ms) and once in a full-suite run, where the existing
   `SpacePagerTests` pacing gate failed too, with main-thread passes of 9 to 14 ms. The last full run passed, with the
   timing gates skipped as NOT-MEASURABLE once the load passed the core count. A run on a quiet machine is still due.
