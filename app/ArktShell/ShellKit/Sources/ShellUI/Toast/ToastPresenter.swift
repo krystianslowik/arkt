@@ -4,14 +4,28 @@ import Foundation
 public struct Toast: Equatable, Sendable {
   public var text: String
   public var actionTitle: String?
+  /// The action's key, drawn after its title at half strength ("Reopen" with "\u{2318}Z", #346).
+  public var shortcut: String?
+  /// What VoiceOver says instead of `text` (the key spelled out); nil: `text`.
+  public var announcement: String?
   /// Persistent toasts (recovery notices) stay until dismissed or replaced by another persistent one.
   public var isPersistent: Bool
+  /// A polite live region: announced without interrupting (the Peek's "Peek closed", #346). Otherwise announced with
+  /// high priority.
+  public var isPolite: Bool
 
-  public init(text: String, actionTitle: String? = nil, isPersistent: Bool = false) {
+  public init(text: String, actionTitle: String? = nil, shortcut: String? = nil, announcement: String? = nil,
+              isPersistent: Bool = false, isPolite: Bool = false) {
     self.text = text
     self.actionTitle = actionTitle
+    self.shortcut = shortcut
+    self.announcement = announcement
     self.isPersistent = isPersistent
+    self.isPolite = isPolite
   }
+
+  /// What VoiceOver announces when the toast shows.
+  public var spokenText: String { announcement ?? text }
 }
 
 /// Injected time: `Task.sleep(for:)` in the app, a manual sleeper in tests.
@@ -66,6 +80,12 @@ public final class ToastPresenter {
   public func dismiss() {
     if transient != nil { transient = nil } else { persistent = nil }
     update()
+  }
+
+  /// Dismisses `toast` when it is the one shown; any other toast stays up.
+  public func dismiss(_ toast: Toast) {
+    guard current == toast else { return }
+    dismiss()
   }
 
   /// The action button of the visible toast.

@@ -1,7 +1,8 @@
 import AppKit
 
-/// Draws a `Toast`: a rounded, layer-backed pill with one label and an optional borderless action button.
-/// `ContentCardView.layout()` sets its frame from `preferredSize(maxWidth:)`; the subviews are laid out here.
+/// Draws a `Toast`: a rounded, layer-backed pill with one label and an optional borderless action button (with its
+/// key after the title, #346). `ContentCardView.layout()` sets its frame from `preferredSize(maxWidth:)`; the subviews
+/// are laid out here. It comes and goes with `ToastMotion`.
 @MainActor
 final class ToastView: NSView {
   static let maxWidth: CGFloat = 480
@@ -9,7 +10,9 @@ final class ToastView: NSView {
   static let height: CGFloat = 36
   private static let horizontalPadding: CGFloat = 14
   private static let buttonSpacing: CGFloat = 12
-  private static let fadeDuration: CFTimeInterval = 0.15
+  /// Layer animation keys of the entrance and exit.
+  static let transformKey = "toastTransform"
+  static let fadeKey = "fade"
 
   let label = NSTextField(labelWithString: "")
   let actionButton = NSButton(title: "", target: nil, action: nil)
@@ -21,6 +24,11 @@ final class ToastView: NSView {
   }
   /// True while a toast is displayed (a fade-out may still be running after it turns false).
   private(set) var isShowingToast = false
+  /// Reduce Motion, read when the toast comes or goes. Tests set it.
+  var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// The action's key ("\u{2318}Z"), drawn after its title.
+  private var shortcut: String?
+  private var actionTitle: String?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -68,6 +76,9 @@ final class ToastView: NSView {
     label.stringValue = toast.text
     actionButton.title = toast.actionTitle ?? ""
     actionButton.isHidden = toast.actionTitle == nil
+    actionButton.setAccessibilityLabel(toast.actionTitle)
+    shortcut = toast.shortcut
+    actionTitle = toast.actionTitle
     applyColors()
     setAccessibilityLabel(toast.text)
     setAccessibilityValue(toast.isPersistent ? AXID.Toast.persistent : AXID.Toast.timed)
@@ -76,10 +87,14 @@ final class ToastView: NSView {
     isHidden = false
     superview?.needsLayout = true
     needsLayout = true
-    if !wasShowing { fade(to: 1, animated: animated) }
+    if !wasShowing {
+      superview?.layoutSubtreeIfNeeded()            // the entrance scales about the pill's center at its new size
+      enter(animated: animated)
+    }
+    let priority: NSAccessibilityPriorityLevel = toast.isPolite ? .medium : .high
     NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [
-      .announcement: toast.text,
-      .priority: NSAccessibilityPriorityLevel.high.rawValue,
+      .announcement: toast.spokenText,
+      .priority: priority.rawValue,
     ])
   }
 
@@ -120,8 +135,11 @@ final class ToastView: NSView {
   private func hide(animated: Bool) {
     guard isShowingToast else { return }
     isShowingToast = false
-    guard animated else {
+    guard animated, let layer else {
+      layer?.removeAnimation(forKey: Self.transformKey)
+      layer?.removeAnimation(forKey: Self.fadeKey)
       layer?.opacity = 0
+      layer?.transform = CATransform3DIdentity
       isHidden = true
       return
     }
@@ -130,23 +148,80 @@ final class ToastView: NSView {
       MainActor.assumeIsolated {
         guard let self, !self.isShowingToast else { return }
         self.isHidden = true
+        self.layer?.transform = CATransform3DIdentity
       }
     }
-    fade(to: 0, animated: true)
+    exit(layer)
     CATransaction.commit()
   }
 
-  /// Opacity-only fade; layout never animates. Drives `layer.opacity` directly: never mix in `alphaValue`.
-  private func fade(to opacity: Float, animated: Bool) {
+  // MARK: - Motion (alerts design, section 7)
+
+  /// Rises into place and fades in. Starts from where a running exit left the pill, so a toast shown again while it
+  /// leaves turns around instead of jumping.
+  private func enter(animated: Bool) {
     guard let layer else { return }
-    if animated {
-      let animation = CABasicAnimation(keyPath: "opacity")
-      animation.fromValue = layer.presentation()?.opacity ?? layer.opacity
-      animation.toValue = opacity
-      animation.duration = Self.fadeDuration
-      layer.add(animation, forKey: "fade")
+    let step = ToastMotion.enter(reduceMotion: reduceMotion())
+    let leaving = layer.animation(forKey: Self.fadeKey) != nil
+    let presentation = layer.presentation()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer.opacity = 1
+    layer.transform = CATransform3DIdentity
+    CATransaction.commit()
+    guard animated else {
+      layer.removeAnimation(forKey: Self.transformKey)
+      layer.removeAnimation(forKey: Self.fadeKey)
+      return
     }
-    layer.opacity = opacity
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = leaving ? (presentation?.opacity ?? 0) : 0
+    fade.toValue = 1
+    fade.duration = step.fadeDuration
+    fade.timingFunction = ToastMotion.easeOut
+    layer.add(fade, forKey: Self.fadeKey)
+    guard let spring = step.spring else {
+      layer.removeAnimation(forKey: Self.transformKey)
+      return
+    }
+    let start = leaving ? (presentation?.transform ?? restingStart(step))
+      : restingStart(step)
+    let motion = CASpringAnimation(keyPath: "transform")
+    motion.mass = CGFloat(spring.mass)
+    motion.stiffness = CGFloat(spring.stiffness)
+    motion.damping = CGFloat(spring.damping)
+    motion.fromValue = NSValue(caTransform3D: start)
+    motion.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+    motion.duration = max(spring.settlingDuration(), motion.settlingDuration)
+    layer.add(motion, forKey: Self.transformKey)
+  }
+
+  private func restingStart(_ step: ToastMotion.Step) -> CATransform3D {
+    ToastMotion.transform(offset: step.offset, scale: step.scale, bounds: bounds, anchor: layer?.anchorPoint ?? .zero)
+  }
+
+  /// Sinks a little and fades out, from wherever the entrance is (an interrupted entrance reverses from there).
+  private func exit(_ layer: CALayer) {
+    let step = ToastMotion.exit(reduceMotion: reduceMotion())
+    let presentation = layer.presentation()
+    let end = ToastMotion.transform(offset: step.offset, scale: step.scale, bounds: bounds, anchor: layer.anchorPoint)
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = presentation?.opacity ?? layer.opacity
+    fade.toValue = 0
+    fade.duration = step.fadeDuration
+    fade.timingFunction = ToastMotion.easeOut
+    let move = CABasicAnimation(keyPath: "transform")
+    move.fromValue = NSValue(caTransform3D: presentation?.transform ?? layer.transform)
+    move.toValue = NSValue(caTransform3D: end)
+    move.duration = step.fadeDuration
+    move.timingFunction = ToastMotion.easeOut
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer.opacity = 0
+    layer.transform = end
+    CATransaction.commit()
+    layer.add(fade, forKey: Self.fadeKey)
+    layer.add(move, forKey: Self.transformKey)
   }
 
   private func applyColors() {
@@ -154,5 +229,18 @@ final class ToastView: NSView {
     let text = ShellTokens.toastText.resolve(flavor).nsColor()
     label.textColor = text
     actionButton.contentTintColor = text
+    applyActionTitle(color: text)
+  }
+
+  /// "Reopen" in the action's weight, then its key at half strength (the Peek's toast, #346).
+  private func applyActionTitle(color: NSColor) {
+    guard let shortcut, let actionTitle else { return }
+    let title = NSMutableAttributedString(string: actionTitle, attributes: [
+      .font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: color,
+    ])
+    title.append(NSAttributedString(string: " " + shortcut, attributes: [
+      .font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: color.withAlphaComponent(0.5),
+    ]))
+    actionButton.attributedTitle = title
   }
 }
