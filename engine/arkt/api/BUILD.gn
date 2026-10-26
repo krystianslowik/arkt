@@ -26,6 +26,7 @@ source_set("embedder") {
   ]
   public_deps = [ ":api" ]
   deps = [
+    "//arkt/browser:link_activation",
     "//arkt/browser:window",
     "//base",
     "//chrome/app:command_ids",

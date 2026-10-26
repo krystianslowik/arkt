@@ -5,3 +5,4 @@
 0005-Arkt-tolerate-a-non-BrowserView-window-in-tab-featur.patch
 0006-Arkt-tolerate-a-non-BrowserView-window-in-dialogs.patch
 0007-Arkt-let-Arkt-show-extension-dialogs-as-native-sheet.patch
+0008-Arkt-add-the-link-activation-throttle.patch

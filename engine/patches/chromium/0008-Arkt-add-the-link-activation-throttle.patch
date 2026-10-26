@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Mon, 26 Oct 2026 02:35:41 +0100
+Subject: [PATCH] Arkt: add the link activation throttle
+
+Adds arkt::MaybeAddLinkActivationThrottle (//arkt/browser) to Chrome's navigation throttles so Arkt can answer a user link click before the navigation starts (Peek).
+---
+ .../chrome_content_browser_client_navigation_throttles.cc    | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/chrome/browser/chrome_content_browser_client_navigation_throttles.cc b/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
+index dfa341dccc..beeb9cee29 100644
+--- a/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
++++ b/chrome/browser/chrome_content_browser_client_navigation_throttles.cc
+@@ -169,6 +169,7 @@
+ #endif  // BUILDFLAG(SAFE_BROWSING_AVAILABLE)
+ 
+ #if BUILDFLAG(IS_MAC)
++#include "arkt/browser/arkt_link_activation.h"
+ #include "chrome/browser/mac/auth_session_request.h"
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+@@ -637,6 +638,10 @@ void CreateAndAddChromeThrottlesForNavigation(
+   glic::GlicGuestNavigationThrottle::MaybeCreateAndAdd(registry);
+ 
+   pwc::PwcNavigationThrottle::MaybeCreateAndAdd(registry);
++
++#if BUILDFLAG(IS_MAC)
++  arkt::MaybeAddLinkActivationThrottle(registry);
++#endif  // BUILDFLAG(IS_MAC)
+ }
+ 
+ void CreateAndAddChromeThrottlesForCommitWithoutUrlLoader(

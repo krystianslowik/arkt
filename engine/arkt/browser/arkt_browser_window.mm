@@ -1408,13 +1408,39 @@ bool ArktBrowserWindow::HandleKeyboardEvent(
     return false;
   }
   NSEvent* ns_event = event.os_event.Get();
-  if (ns_event.type != NSEventTypeKeyDown ||
-      !(ns_event.modifierFlags & NSEventModifierFlagCommand)) {
+  if (ns_event.type != NSEventTypeKeyDown) {
     return false;
+  }
+  if (!(ns_event.modifierFlags & NSEventModifierFlagCommand)) {
+    return ForwardUnhandledKeyDown(ns_event);
   }
   // Chrome's main menu dispatches the command to the browser of the key
   // window, which is found through GetNativeWindow().
   return [NSApp.mainMenu performKeyEquivalent:ns_event];
+}
+
+bool ArktBrowserWindow::ForwardUnhandledKeyDown(NSEvent* event) {
+  // Only Esc for now (#313: Esc goes to the page first, then to a Peek).
+  constexpr unsigned short kEscapeKeyCode = 53;
+  if (event.keyCode != kEscapeKeyCode ||
+      ![host_ respondsToSelector:@selector(unhandledKeyDown:inTab:)]) {
+    return false;
+  }
+  // Posted: the host may close the tab whose event this is.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(
+                     [](base::WeakPtr<ArktBrowserWindow> window, NSEvent* key) {
+                       if (!window) {
+                         return;
+                       }
+                       id<ArktWindowHost> host = window->host();
+                       if ([host respondsToSelector:@selector
+                                 (unhandledKeyDown:inTab:)]) {
+                         [host unhandledKeyDown:key inTab:nil];
+                       }
+                     },
+                     weak_factory_.GetWeakPtr(), event));
+  return true;
 }
 
 ui::AcceleratorProvider* ArktBrowserWindow::GetAcceleratorProvider() {
