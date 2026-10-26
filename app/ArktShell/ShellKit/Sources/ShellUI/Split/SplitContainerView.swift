@@ -223,7 +223,7 @@ public final class SplitContainerView: NSView {
   }
 
   private func layoutToast() {
-    guard let toastView else { return }
+    guard let toastView, !toastView.isHidden else { return }       // laid out again when it shows
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     toastView.frame = toastView.frame(centeredIn: bounds)

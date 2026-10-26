@@ -93,7 +93,8 @@ extension ShellWindowController {
   }
 
   private func showPinToast(pinned: Bool, space: SpaceID) {
-    toasts.show(Toast(text: Self.pinToastText(pinned: pinned, spaceTitle: sidebar.space(space)?.title ?? "")))
+    toasts.show(Toast(text: Self.pinToastText(pinned: pinned, spaceTitle: sidebar.space(space)?.title ?? ""),
+                      glyph: pinned ? "pin" : "pin.slash"))
   }
 
   // MARK: Reset (BH-057, KB-041)

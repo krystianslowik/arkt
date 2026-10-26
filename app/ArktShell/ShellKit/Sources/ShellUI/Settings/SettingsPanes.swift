@@ -50,8 +50,8 @@ extension SettingsWindowController {
   private func pill(_ pane: SettingsPane, _ setting: String, _ title: String, primary: Bool = false,
                     small: Bool = false, action: @escaping @MainActor () -> Void) -> ArchivePillButton {
     let button = ArchivePillButton(style: primary ? .primary : .neutral, title: title,
-                                   height: small ? 24 : 28,
-                                   font: .systemFont(ofSize: small ? 12 : 13, weight: .semibold))
+                                   metrics: .init(height: small ? 24 : 28, fontSize: small ? 12 : 13,
+                                                  weight: .semibold, padding: 16, minWidth: nil, pressScale: 0.97))
     button.setArchiveAccessibilityLabel(title.replacingOccurrences(of: "...", with: ""))
     let target = SettingsActionTarget(action)
     actionTargets.append(target)                 // targets are weak

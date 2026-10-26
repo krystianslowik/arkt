@@ -21,13 +21,6 @@ public enum SettingsTokens {
   public static let disabledControlAlpha: CGFloat = 0.42
 }
 
-/// Colors shared by alerts, sheets and destructive actions (docs/design/alerts-sheets-toasts.md).
-public enum AlertTokens {
-  /// Destructive links and button titles: 6.20:1 on porcelain, 8.71:1 on graphite, and at least 4.5:1 on the neutral
-  /// button fills and the Settings group field. Destructive buttons never use the pressed fill.
-  public static let destructiveText = TokenPair(light: .srgb(hex: 0xB3261E), dark: .srgb(hex: 0xFFAAA2))
-}
-
 /// Geometry of the Settings window, in points (docs/design/settings.md, section 4). Content views are flipped.
 public enum SettingsMetrics {
   public static let windowWidth: CGFloat = 680

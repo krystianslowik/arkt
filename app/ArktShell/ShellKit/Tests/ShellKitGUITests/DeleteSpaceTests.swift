@@ -179,10 +179,63 @@ final class DeleteSpaceTests: XCTestCase {
     empty.controller.close()
   }
 
-  /// The default confirmation is a sheet on the window; its second button (Cancel) keeps the Space and its first
-  /// (Delete Space) removes it. Delete Space has no key, Escape answers Cancel, and while the sheet is open the item is
-  /// disabled and a second request opens no second sheet.
-  func testDefaultConfirmationIsASheetOnTheWindow() throws {
+  /// The default confirmation is the shared Arkt sheet on the window (decision 1): the Space's swatch, the counts
+  /// line, Cancel and a quiet red Delete Space with no key; focus starts on Cancel. While the sheet is open the item
+  /// is disabled and a second request opens no second sheet. Cancel keeps the Space, Delete Space removes it.
+  func testDefaultConfirmationIsTheSharedSheetOnTheWindow() throws {
+    var sidebar = SidebarModel.Sidebar()
+    let work = sidebar.addSpace(title: "Work")
+    _ = try sidebar.addTab(url: Self.url("p"), title: "P", in: .pinned(work))
+    for index in 0..<3 { _ = try sidebar.addTab(url: Self.url("t\(index)"), title: "T", in: .today(work)) }
+    let source = ModelSidebarSource(sidebar: sidebar, now: { Self.now })
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: source)
+    let window = try XCTUnwrap(controller.window)
+    window.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 800), display: false)
+    var removed: [UUID] = []
+    controller.onRemoveSpace = { id in removed.append(id); _ = source.removeSpace(id, at: Self.now) }
+
+    controller.deleteSpace(nil)
+    waitUntil("the confirmation sheet") { window.attachedSheet != nil }
+    let sheet = try XCTUnwrap(controller.spaceRemovalSheet)
+    XCTAssertTrue(window.attachedSheet === sheet.window)
+    let view = sheet.view
+    XCTAssertEqual(view.titleField.stringValue, "Delete the Space \u{201C}Work\u{201D}?")
+    XCTAssertEqual(view.paragraphFields.map(\.stringValue), [
+      "Its pinned tabs, folders and Today tabs move to the Archive, where you can restore them.",
+      "1 pinned tab, 3 Today tabs",
+    ])
+    guard case .spaceSwatch? = view.iconView?.icon else { return XCTFail("the Space's swatch is the icon") }
+    let delete = view.primaryButton
+    let cancel = try XCTUnwrap(view.cancelButton)
+    XCTAssertEqual(delete.title, "Delete Space")
+    XCTAssertEqual(delete.style, .destructive)
+    XCTAssertTrue(delete.hasDestructiveAction)
+    XCTAssertEqual(delete.keyEquivalent, "")
+    XCTAssertEqual(cancel.keyEquivalent, "")
+    XCTAssertEqual(delete.displayedTitleColor, AlertTokens.destructiveText.resolve(delete.archiveFlavor))
+    XCTAssertTrue(sheet.window?.firstResponder === cancel, "focus starts on Cancel")
+    XCTAssertEqual(view.accessibilityLabel(), "Delete the Space \u{201C}Work\u{201D}?")
+    XCTAssertEqual(delete.accessibilityHelp(), "Deletes the Space")
+    XCTAssertFalse(controller.validateMenuItem(Self.deleteItem()))
+    controller.deleteSpace(nil)
+    XCTAssertTrue(window.attachedSheet === sheet.window)
+    XCTAssertEqual(window.sheets.count, 1, "no second sheet queued")
+
+    cancel.performClick(nil)
+    waitUntil("the sheet closed") { window.attachedSheet == nil }
+    XCTAssertTrue(removed.isEmpty)
+    XCTAssertNil(controller.spaceRemovalSheet)
+
+    controller.deleteSpace(nil)
+    waitUntil("the confirmation sheet again") { window.attachedSheet != nil }
+    try XCTUnwrap(controller.spaceRemovalSheet).view.primaryButton.performClick(nil)
+    waitUntil("the Space removed") { removed == [work] }
+    XCTAssertTrue(controller.isShowingEmptyState)
+    controller.close()
+  }
+
+  /// A stray Return on the sheet deletes nothing, and Escape answers Cancel (keys sent to the sheet window).
+  func testAStrayReturnDeletesNothingAndEscapeCancels() throws {
     var sidebar = SidebarModel.Sidebar()
     let work = sidebar.addSpace(title: "Work")
     let source = ModelSidebarSource(sidebar: sidebar, now: { Self.now })
@@ -194,36 +247,23 @@ final class DeleteSpaceTests: XCTestCase {
 
     controller.deleteSpace(nil)
     waitUntil("the confirmation sheet") { window.attachedSheet != nil }
-    let alert = try XCTUnwrap(window.attachedSheet)
-    let delete = try XCTUnwrap(alert.contentView?.firstDescendant(of: NSButton.self) { $0.title == "Delete Space" })
-    let cancel = try XCTUnwrap(alert.contentView?.firstDescendant(of: NSButton.self) { $0.title == "Cancel" })
-    XCTAssertTrue(delete.hasDestructiveAction)
-    XCTAssertEqual(delete.keyEquivalent, "")
-    XCTAssertEqual(cancel.keyEquivalent, "\u{1b}")
-    XCTAssertFalse(controller.validateMenuItem(Self.deleteItem()))
-    controller.deleteSpace(nil)
-    XCTAssertTrue(window.attachedSheet === alert)
-    XCTAssertEqual(window.sheets.count, 1, "no second sheet queued")
-    window.endSheet(alert, returnCode: .alertSecondButtonReturn)
+    let sheetWindow = try XCTUnwrap(window.attachedSheet)
+    for (characters, code) in [("\r", UInt16(36)), ("\u{3}", UInt16(76))] {     // Return, keypad Enter
+      let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                 windowNumber: sheetWindow.windowNumber, context: nil,
+                                                 characters: characters, charactersIgnoringModifiers: characters,
+                                                 isARepeat: false, keyCode: code))
+      if !sheetWindow.performKeyEquivalent(with: event) { sheetWindow.sendEvent(event) }
+    }
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+    XCTAssertTrue(removed.isEmpty, "Return deleted nothing")
+    XCTAssertNotNil(source.space(work))
+    XCTAssertTrue(window.attachedSheet === sheetWindow, "the sheet is still up")
+
+    sheetWindow.cancelOperation(nil)
     waitUntil("the sheet closed") { window.attachedSheet == nil }
     XCTAssertTrue(removed.isEmpty)
-
-    controller.deleteSpace(nil)
-    waitUntil("the confirmation sheet again") { window.attachedSheet != nil }
-    window.endSheet(try XCTUnwrap(window.attachedSheet), returnCode: .alertFirstButtonReturn)
-    waitUntil("the Space removed") { removed == [work] }
-    XCTAssertTrue(controller.isShowingEmptyState)
+    XCTAssertNotNil(source.space(work))
     controller.close()
-  }
-}
-
-private extension NSView {
-  /// The first view of type `T` in this view's subtree, this view included, that `matches`.
-  func firstDescendant<T: NSView>(of type: T.Type, where matches: (T) -> Bool) -> T? {
-    if let view = self as? T, matches(view) { return view }
-    for subview in subviews {
-      if let found = subview.firstDescendant(of: type, where: matches) { return found }
-    }
-    return nil
   }
 }

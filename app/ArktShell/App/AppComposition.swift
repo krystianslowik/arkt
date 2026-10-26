@@ -64,7 +64,9 @@ final class AppComposition {
   /// its callbacks.
   private static func askAfterLaunchFailure(_ error: any Error) async -> Bool {
     AppSession.log.error("launch failed \(String(describing: type(of: error)), privacy: .public)")
-    let text = LaunchFailureText(error)
+    // Resolved off the main actor, before the alert: Show Data Folder never waits on disk.
+    let folder = try? await AppEnvironment.databaseLocation().directory
+    let text = LaunchFailureText(error, dataFolder: folder)
     return await withCheckedContinuation { (answer: CheckedContinuation<Bool, Never>) in
       RunLoop.main.perform(inModes: [.common]) {
         MainActor.assumeIsolated { answer.resume(returning: text.runAlert()) }
@@ -105,34 +107,33 @@ final class AppComposition {
   func flushBlocking() -> Bool { session?.flushBlocking() ?? true }
 }
 
-/// What the launch-failure alert says; plain values, so the alert can be built in a run-loop callout.
+/// What the launch-failure alert says; plain values, so the alert can be built in a run-loop callout. The shared Arkt
+/// alert (alerts design 3.3, 3.4): the plain app icon, Try Again (Return), Quit and Show Data Folder; a newer schema
+/// offers Quit only.
 private struct LaunchFailureText: Sendable {
-  let message: String
-  let information: String
+  let content: DialogContent
   let canRetry: Bool
+  let dataFolder: URL?
 
-  init(_ error: any Error) {
+  init(_ error: any Error, dataFolder: URL?) {
+    self.dataFolder = dataFolder
     if case ArktDatabaseError.newerSchema = error {
-      message = "This data was saved by a newer version of Arkt."
-      information = "Update Arkt to open it. Nothing was changed."
+      content = .newerSchema
       canRetry = false
     } else {
-      message = "Arkt couldn't open its data."
-      information = "Nothing was changed. (\(type(of: error)) \((error as NSError).code))"
+      content = .launchFailure(errorCode: "\(type(of: error)) \((error as NSError).code)")
       canRetry = true
     }
   }
 
-  /// Runs the alert modally; true for Try Again.
+  /// Runs the alert modally; true for Try Again. Show Data Folder reveals the folder and leaves the alert up.
   @MainActor
   func runAlert() -> Bool {
-    let alert = NSAlert()
-    alert.alertStyle = .critical
-    alert.messageText = message
-    alert.informativeText = information
-    if canRetry { alert.addButton(withTitle: "Try Again") }
-    alert.addButton(withTitle: "Quit")
-    let response = alert.runModal()
-    return canRetry && response == .alertFirstButtonReturn
+    let alert = DialogAlert(content: content)
+    alert.onFooterLink = { [dataFolder] in
+      guard let dataFolder else { return }
+      NSWorkspace.shared.activateFileViewerSelecting([dataFolder])
+    }
+    return canRetry && alert.runModal() == .primary
   }
 }

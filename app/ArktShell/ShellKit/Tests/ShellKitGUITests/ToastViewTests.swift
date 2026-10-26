@@ -1,4 +1,5 @@
 import AppKit
+import CoreBridge
 import EngineAPITestSupport
 import XCTest
 @testable import ShellUI
@@ -52,7 +53,7 @@ final class ToastViewTests: XCTestCase {
   func testDismissHidesTheViewAfterTheFade() throws {
     let controller = makeController()
     let view = try toastView(controller)
-    controller.toasts.show(Toast(text: "Saved", isPersistent: true))
+    controller.toasts.show(Toast(text: "Saved", kind: .persistent))
     controller.toasts.dismiss()
     XCTAssertNil(controller.toasts.current)
     let hidden = expectation(description: "hidden after fade")
@@ -68,7 +69,7 @@ final class ToastViewTests: XCTestCase {
     let controller = makeController()
     let view = try toastView(controller)
     var calls = 0
-    controller.toasts.show(Toast(text: "Restored", actionTitle: "Show Files", isPersistent: true)) { calls += 1 }
+    controller.toasts.show(Toast(text: "Restored", kind: .persistent, actionTitle: "Show Files")) { calls += 1 }
     XCTAssertFalse(view.actionButton.isHidden)
     XCTAssertEqual(view.actionButton.title, "Show Files")
     XCTAssertTrue(view.isAccessibilityElement())
@@ -110,6 +111,162 @@ final class ToastViewTests: XCTestCase {
     _ = stub.addSpace(title: "Dark", theme: SpaceThemeInfo(baseColors: [.black(1)], isDark: true))
     let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: stub)
     XCTAssertEqual(try toastView(controller).flavor, .dark)
+    controller.close()
+  }
+}
+
+/// The restyled toast (alerts design 4.2): glyph, action pill, the multi-line persistent variant, the Space tint,
+/// timers that wait for hover and key, and replacement.
+@MainActor
+final class ToastLayoutTests: XCTestCase {
+  override func setUp() async throws {
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.accessory)
+  }
+
+  private func makeController(theme: SpaceThemeInfo? = nil) -> ShellWindowController {
+    let stub = StubSidebar.sample()
+    if let theme, let space = stub.spaceOrder.first { stub.setTheme(space, to: theme) }
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: stub)
+    controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 800), display: false)
+    controller.rootView.layoutSubtreeIfNeeded()
+    return controller
+  }
+
+  private func shown(_ controller: ShellWindowController, _ toast: Toast) throws -> ToastView {
+    controller.toasts.show(toast)
+    controller.rootView.card.layoutSubtreeIfNeeded()
+    let view = try XCTUnwrap(controller.toasts.view)
+    view.layoutSubtreeIfNeeded()
+    return view
+  }
+
+  /// One line: 36 high, the glyph 16 x 16 at 12 from the leading edge, the action a 24 pt pill 6 from the trailing
+  /// edge, no key hint on Undo.
+  func testTheUndoToastHasAGlyphAndASmallPill() throws {
+    let controller = makeController()
+    let view = try shown(controller, Toast(text: "Archived 3 tabs", kind: .undo, actionTitle: "Undo"))
+    XCTAssertEqual(view.frame.height, 36)
+    XCTAssertFalse(view.glyphView.isHidden)
+    XCTAssertEqual(view.glyphView.frame, NSRect(x: 12, y: 10, width: 16, height: 16))
+    XCTAssertEqual(view.actionButton.frame.height, 24)
+    XCTAssertEqual(view.actionButton.frame.maxX, view.bounds.width - 6, accuracy: 0.5)
+    XCTAssertEqual(view.actionButton.displayedTitleText, "Undo")
+    XCTAssertTrue(view.dismissButton.isHidden)
+    XCTAssertEqual(view.layer?.cornerRadius, 18)
+    XCTAssertTrue(view.showsWholeText)
+    XCTAssertGreaterThanOrEqual(view.label.frame.minX, view.glyphView.frame.maxX + 6)
+    XCTAssertLessThanOrEqual(view.label.frame.maxX, view.actionButton.frame.minX)
+    controller.close()
+  }
+
+  /// No glyph: the text starts at the leading padding.
+  func testANoticeWithoutAGlyphStartsAtThePadding() throws {
+    let controller = makeController()
+    let view = try shown(controller, Toast(text: "New Tab Created"))
+    XCTAssertTrue(view.glyphView.isHidden)
+    XCTAssertEqual(view.label.frame.minX + 2, 12, accuracy: 0.5)
+    XCTAssertTrue(view.actionButton.isHidden)
+    controller.close()
+  }
+
+  /// None of the four recovery texts truncates: they wrap to at most three lines in a 300 pt column, at most 480 pt
+  /// wide, with Show Files and the dismiss button top-aligned.
+  func testNoRecoveryNoticeTruncates() throws {
+    let notices: [RecoveryNotice] = [.restoredFromBackup(liveFileWasDamaged: true),
+                                     .restoredFromBackup(liveFileWasDamaged: false),
+                                     .recreatedEmpty(liveFileWasDamaged: true),
+                                     .recreatedEmpty(liveFileWasDamaged: false)]
+    for notice in notices {
+      let controller = makeController()
+      let view = try shown(controller, notice.toast)
+      XCTAssertTrue(view.showsWholeText, "truncated: \(notice)")
+      XCTAssertLessThanOrEqual(view.frame.width, ToastView.maxWidth)
+      XCTAssertLessThanOrEqual(view.label.frame.width, ToastView.textColumnWidth + 2)
+      XCTAssertLessThanOrEqual(view.label.frame.height, ToastView.lineHeight * 3)
+      XCTAssertGreaterThan(view.frame.height, ToastView.height, "the long text wraps")
+      XCTAssertEqual(view.layer?.cornerRadius, ToastView.multiLineRadius)
+      XCTAssertFalse(view.dismissButton.isHidden)
+      XCTAssertEqual(view.actionButton.frame.midY, view.dismissButton.frame.midY, accuracy: 0.5)
+      XCTAssertLessThan(view.actionButton.frame.midY, view.bounds.midY, "actions sit on the first line")
+      XCTAssertEqual(view.frame.minY, ToastView.bottomInset)
+      controller.close()
+    }
+  }
+
+  /// The dismiss button takes a persistent toast down without running its action; it never takes focus.
+  func testTheDismissButtonClosesAPersistentToast() throws {
+    let controller = makeController()
+    var calls = 0
+    controller.toasts.show(RecoveryNotice.recreatedEmpty(liveFileWasDamaged: true).toast) { calls += 1 }
+    let view = try XCTUnwrap(controller.toasts.view)
+    XCTAssertTrue(view.dismissButton.refusesFirstResponder)
+    XCTAssertEqual(view.dismissButton.accessibilityIdentifier(), AXID.Toast.dismiss)
+    view.dismissButton.performClick(nil)
+    XCTAssertNil(controller.toasts.current)
+    XCTAssertEqual(calls, 0)
+    controller.close()
+  }
+
+  /// Decision 2: the surface takes the Space theme's first stop; Reduce Transparency makes it opaque.
+  func testTheSurfaceFollowsTheSpaceTheme() throws {
+    let blue = SpaceThemeInfo(baseColors: [.srgb(hex: 0x3B82F6)], isDark: false)
+    let controller = makeController(theme: blue)
+    controller.toasts.view?.reduceTransparency = { false }         // the runner's own setting must not decide
+    let view = try shown(controller, Toast(text: "Pinned to Work"))
+    XCTAssertEqual(view.theme, blue)
+    XCTAssertEqual(view.layer?.backgroundColor, AlertTokens.toastSurface(theme: blue).cgColor)
+    view.reduceTransparency = { true }
+    view.theme = nil
+    view.theme = blue
+    XCTAssertEqual(view.layer?.backgroundColor?.alpha, 1)
+    XCTAssertEqual(view.layer?.borderWidth, 0.5)
+    XCTAssertGreaterThan(view.layer?.shadowRadius ?? 0, 0)
+    controller.close()
+  }
+
+  /// Timers wait while the pointer is over the toast and while the window is not key.
+  func testHoverAndAResignedKeyPauseTheTimer() throws {
+    let controller = makeController()
+    let view = try shown(controller, Toast(text: "Archived 3 tabs", kind: .undo, actionTitle: "Undo"))
+    XCTAssertFalse(controller.toasts.isPaused)
+    let window = try XCTUnwrap(controller.window)
+    let enter = try XCTUnwrap(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [],
+                                                     timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                                     eventNumber: 0, trackingNumber: 0, userData: nil))
+    view.mouseEntered(with: enter)
+    XCTAssertTrue(controller.toasts.isPaused)
+    view.mouseExited(with: enter)
+    XCTAssertFalse(controller.toasts.isPaused)
+    NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+    XCTAssertTrue(controller.toasts.isPaused)
+    NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+    XCTAssertFalse(controller.toasts.isPaused)
+    controller.close()
+  }
+
+  /// A new toast replaces the shown one: the old one leaves as a snapshot while the new one enters at its own width.
+  func testAReplacedToastLeavesWhileTheNewOneEnters() throws {
+    let controller = makeController()
+    let view = try shown(controller, Toast(text: "Pinned to Work"))
+    view.reduceMotion = { false }
+    controller.toasts.show(Toast(text: "Archived 3 tabs", kind: .undo, actionTitle: "Undo"))
+    let ghost = try XCTUnwrap(view.leavingSnapshot)
+    XCTAssertTrue(ghost.superlayer === view.superview?.layer)
+    XCTAssertNotNil(ghost.animation(forKey: ToastView.fadeKey))
+    XCTAssertTrue(view.layer?.animation(forKey: ToastView.transformKey) is CASpringAnimation)
+    XCTAssertEqual(view.label.stringValue, "Archived 3 tabs")
+    controller.close()
+  }
+
+  /// VoiceOver: a group labelled with the text; the action and dismiss buttons are its children.
+  func testVoiceOverReachesTheDismissButton() throws {
+    let controller = makeController()
+    let view = try shown(controller, RecoveryNotice.restoredFromBackup(liveFileWasDamaged: false).toast)
+    let exposed = NSAccessibility.unignoredChildren(from: view.accessibilityChildren() ?? []).map { $0 as AnyObject }
+    XCTAssertTrue(exposed.contains { $0 === view.dismissButton || $0 === view.dismissButton.cell })
+    XCTAssertTrue(exposed.contains { $0 === view.actionButton || $0 === view.actionButton.cell })
+    XCTAssertFalse(exposed.contains { $0 === view.glyphView || $0 === view.glyphView.cell })
     controller.close()
   }
 }

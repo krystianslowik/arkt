@@ -397,9 +397,9 @@ final class ArchiveSearchWindowTests: XCTestCase {
     XCTAssertEqual(sheet.titleField.stringValue, "Clear the Archive?")
     XCTAssertEqual(sheet.bodyField.stringValue,
                    "All 42 archived items are permanently deleted. This cannot be undone.")
-    XCTAssertTrue(sheet.noteField.isHidden)
+    XCTAssertNil(sheet.noteField)
     XCTAssertEqual(sheet.clearButton.keyEquivalent, "", "the destructive button has no Return key")
-    XCTAssertEqual(sheet.cancelButton.keyEquivalent, "")
+    XCTAssertEqual(sheet.cancelButton?.keyEquivalent, "")
     XCTAssertTrue(sheet.window?.firstResponder === sheet.cancelButton, "focus starts on Cancel")
     XCTAssertEqual(sheet.clearButton.displayedTitleColor,
                    ArchiveTokens.destructiveText.resolve(sheet.clearButton.archiveFlavor))
@@ -437,8 +437,7 @@ final class ArchiveSearchWindowTests: XCTestCase {
     controller.confirmClearArchive()
 
     let sheet = try XCTUnwrap(controller.clearSheet)
-    XCTAssertFalse(sheet.noteField.isHidden)
-    XCTAssertEqual(sheet.noteField.stringValue, "This includes items hidden by the current filters.")
+    XCTAssertEqual(try XCTUnwrap(sheet.noteField).stringValue, "This includes items hidden by the current filters.")
     XCTAssertTrue(sheet.bodyField.stringValue.contains("42"), "the whole archive is cleared")
   }
 
