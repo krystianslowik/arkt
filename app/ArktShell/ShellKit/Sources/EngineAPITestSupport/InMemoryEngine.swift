@@ -5,8 +5,8 @@ import EngineAPI
 /// which makes event order fully deterministic. Every event is emitted synchronously.
 ///
 /// Windows, activation and held closes follow contract rules 11-16; the engine-side test drivers
-/// (`engineCreateTab`, `engineCloseTab`, `engineActivate`, `holdClose`, `answerDialog`, `openEngineWindow`,
-/// `setExtensionActions`) stand in for what a page, an extension or the user does in a real engine.
+/// (`engineCreateTab`, `engineCloseTab`, `engineCloseWindow`, `engineActivate`, `holdClose`, `answerDialog`,
+/// `openEngineWindow`, `setExtensionActions`) stand in for what a page, an extension or the user does in a real engine.
 @MainActor
 public final class InMemoryEngine: EngineClient, EngineExtensions {
   /// A close waiting on a leave-site dialog.
@@ -14,7 +14,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     /// One tab, closed by the client or the engine, with the reason it will report.
     case tab(CloseReason)
     /// The tab's window is closing.
-    case window(EngineWindowID)
+    case window(EngineWindowID, WindowCloseReason)
   }
 
   private var snapshots: [TabID: TabSnapshot] = [:]
@@ -145,7 +145,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     setActive(id)
     let left = tabs(in: source)
     if left.isEmpty {
-      finishWindowClose(source)
+      finishWindowClose(source, reason: .lastTabClosed)
     } else if activeTabs[source] == nil, let successor = left.last {
       setActive(successor)
       lastActiveWindow = window
@@ -198,16 +198,18 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   }
 
   /// A window close already waiting on a dialog is not started again.
-  public func closeWindow(_ id: EngineWindowID) {
+  public func closeWindow(_ id: EngineWindowID) { closeWindow(id, reason: .userClose) }
+
+  private func closeWindow(_ id: EngineWindowID, reason: WindowCloseReason) {
     guard windowIDs.contains(id) else { return }
     let tabs = tabs(in: id)
     guard !tabs.contains(where: { snapshots[$0]?.isClosing == true }) else { return }
     let holding = tabs.filter { snapshots[$0]?.wouldHoldClose == true }
     guard holding.isEmpty else {
-      for tab in holding { hold(tab, .window(id)) }
+      for tab in holding { hold(tab, .window(id, reason)) }
       return
     }
-    finishWindowClose(id)
+    finishWindowClose(id, reason: reason)
   }
 
   public func activateTab(_ id: TabID) { setActive(id) }
@@ -283,6 +285,14 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     if current.wouldHoldClose { hold(id, .tab(reason)) } else { removeTab(id, reason: reason) }
   }
 
+  /// Test driver: the engine closes the window on its own, with `reason` (#401): an extension (`.extension`,
+  /// `chrome.windows.remove`), quitting (`.appQuit`), the engine's own Close Window (`.userClose`), or the window
+  /// emptied by its last tab (`.lastTabClosed`, as Chromium closes a `Browser` with its last tab). Unload processing
+  /// first, as `closeWindow`; its tabs close with `.extension`, `.appTerminating` or `.windowClosing`.
+  public func engineCloseWindow(_ id: EngineWindowID, reason: WindowCloseReason) {
+    closeWindow(id, reason: reason)
+  }
+
   /// Test driver: the engine activates the tab (an extension's `chrome.tabs.update`).
   public func engineActivate(_ id: TabID) { setActive(id) }
 
@@ -327,10 +337,10 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     case (.tab, false):
       snapshots[id]?.isClosing = false
       hub.emit(.closeCancelled(id))
-    case (.window(let window), true):
-      let waiting = heldCloses.values.contains { if case .window(window) = $0 { true } else { false } }
-      if !waiting { finishWindowClose(window) }
-    case (.window(let window), false):
+    case (.window(let window, let reason), true):
+      let waiting = heldCloses.values.contains { if case .window(window, _) = $0 { true } else { false } }
+      if !waiting { finishWindowClose(window, reason: reason) }
+    case (.window(let window, _), false):
       for tab in tabs(in: window) where snapshots[tab]?.isClosing == true {
         heldCloses[tab] = nil
         snapshots[tab]?.isClosing = false
@@ -443,8 +453,13 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     if let successor { setActive(successor) }
   }
 
-  private func finishWindowClose(_ id: EngineWindowID) {
-    for tab in tabs(in: id) { removeTab(tab, reason: .windowClosing, reactivate: false) }
+  private func finishWindowClose(_ id: EngineWindowID, reason: WindowCloseReason) {
+    let tabReason: CloseReason = switch reason {
+    case .extension: .extension
+    case .appQuit: .appTerminating
+    case .userClose, .lastTabClosed: .windowClosing
+    }
+    for tab in tabs(in: id) { removeTab(tab, reason: tabReason, reactivate: false) }
     windowIDs.removeAll { $0 == id }
     activeTabs[id] = nil
     actions[id] = nil
@@ -453,7 +468,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
       host.forward = nil
     }
     if lastActiveWindow == id { lastActiveWindow = windowIDs.last }
-    hub.emit(.windowClosed(id))
+    hub.emit(.windowClosed(id, reason: reason))
   }
 }
 

@@ -10,6 +10,7 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case historyAvailabilityIsReported, historyEntriesAndOffsetNavigation, duplicateTabCopiesURLTitleAndHistory
   // Rules 11-16
   case windowIsListedAndAnnounced, closeWindowClosesItsTabsThenReportsWindowClosed, hostCloseRequestClosesTheWindow
+  case emptiedWindowReportsLastTabClosed, extensionWindowCloseReportsExtension
   case activationIsOneTabPerWindow, engineCreatedTabIsAnnounced, engineCloseIsTerminal
   case windowlessCreateTabLandsInMostRecentlyActiveWindow, heldCloseKeepsTheTabUntilAnswered
   case skipUnloadHandlersNeverHolds, cancelledWindowCloseKeepsTheWindow
@@ -30,7 +31,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .historyEntriesAndOffsetNavigation: 9
     case .duplicateTabCopiesURLTitleAndHistory: 10
     case .windowIsListedAndAnnounced, .closeWindowClosesItsTabsThenReportsWindowClosed,
-         .hostCloseRequestClosesTheWindow: 11
+         .hostCloseRequestClosesTheWindow, .emptiedWindowReportsLastTabClosed,
+         .extensionWindowCloseReportsExtension: 11
     case .activationIsOneTabPerWindow: 12
     case .engineCreatedTabIsAnnounced: 13
     case .engineCloseIsTerminal: 14
@@ -61,6 +63,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .closeWindowClosesItsTabsThenReportsWindowClosed:
       try await EngineContract.closeWindowClosesItsTabsThenReportsWindowClosed(h)
     case .hostCloseRequestClosesTheWindow: try await EngineContract.hostCloseRequestClosesTheWindow(h)
+    case .emptiedWindowReportsLastTabClosed: try await EngineContract.emptiedWindowReportsLastTabClosed(h)
+    case .extensionWindowCloseReportsExtension: try await EngineContract.extensionWindowCloseReportsExtension(h)
     case .activationIsOneTabPerWindow: try await EngineContract.activationIsOneTabPerWindow(h)
     case .engineCreatedTabIsAnnounced: try await EngineContract.engineCreatedTabIsAnnounced(h)
     case .engineCloseIsTerminal: try await EngineContract.engineCloseIsTerminal(h)

@@ -41,7 +41,7 @@ struct ChromiumMoveTabTests {
     #expect(engine.activeTab(in: main) == tab)
     #expect(engine.contentView(for: tab) === view)
     #expect(inMain == [.activeTabChanged(tab)])
-    #expect(recorder.windowEvents == [.windowClosed(little)])
+    #expect(recorder.windowEvents == [.windowClosed(little, reason: .lastTabClosed)])
     #expect(!recorder.events.contains { if case .tabClosed = $0 { true } else { false } })
   }
 

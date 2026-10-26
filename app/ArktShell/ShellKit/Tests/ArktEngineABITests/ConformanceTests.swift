@@ -79,6 +79,7 @@ final class TestEvent: NSObject, ArktEngineEvent {
   let tab: (any ArktTabHandle)?
   let browser: (any ArktBrowserHandle)?
   var closeReason: ArktCloseReason = .none
+  var windowCloseReason: ArktWindowCloseReason = .none
   var url: URL?
   var title: String?
   var faviconPNG: Data?
@@ -261,7 +262,9 @@ final class TestEngine: NSObject, ArktEngine {
   func closeBrowser(_ browser: TestBrowser) {
     browserList.removeAll { $0 === browser }
     browser.host.closeRequested = nil
-    record(TestEvent(.windowClosed, tab: nil, browser: browser))
+    let event = TestEvent(.windowClosed, tab: nil, browser: browser)
+    event.windowCloseReason = .user
+    record(event)
   }
 
   func extensionActions(in browser: any ArktBrowserHandle) -> [any ArktExtensionAction] {
@@ -430,9 +433,11 @@ struct ConformanceTests {
     let engine = TestEngine()
     var kinds: [ArktEngineEventKind] = []
     var reasons: [ArktCloseReason] = []
+    var windowReasons: [ArktWindowCloseReason] = []
     _ = engine.addEventSink { batch in
       kinds += batch.map(\.kind)
       reasons += batch.filter { $0.kind == .tabClosed }.map(\.closeReason)
+      windowReasons += batch.map(\.windowCloseReason)
     }
     let host = TestWindowHost()
     let browser = engine.createBrowser(host: host)
@@ -440,6 +445,7 @@ struct ConformanceTests {
     _ = browser.createTab(url: nil, active: false)
     engine.flush()
     kinds = []
+    windowReasons = []
 
     // The host never closes its window itself: it calls the block the engine set.
     let closeRequested = try #require(host.closeRequested)
@@ -447,6 +453,8 @@ struct ConformanceTests {
     engine.flush()
     #expect(kinds == [.tabClosed, .tabClosed, .windowClosed])
     #expect(reasons == [.windowClosing, .windowClosing])
+    // #401: only WindowClosed carries a window close reason; the host's request is the user's.
+    #expect(windowReasons == [.none, .none, .user])
     #expect(engine.browsers.isEmpty && host.closeRequested == nil)
   }
 
@@ -545,6 +553,8 @@ struct ConformanceTests {
     #expect([ArktCloseResult.closed, .held].map(\.rawValue) == [0, 1])
     #expect([ArktCloseReason.none, .client, .page, .extension, .windowClosing, .appTerminating].map(\.rawValue)
       == Array(0...5))
+    #expect([ArktWindowCloseReason.none, .user, .extension, .lastTabClosed, .appTerminating].map(\.rawValue)
+      == Array(0...4))
     #expect([ArktTabOrigin.client, .engine].map(\.rawValue) == [0, 1])
     #expect([ArktEngineEventKind.tabCreated, .tabClosed, .activeTabChanged, .closeCancelled, .urlChanged,
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,

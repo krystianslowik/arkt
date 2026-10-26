@@ -206,6 +206,14 @@ final class EngineContractRunner {
         guard state == .string("running") else {
           throw RunnerError("the tone did not start: \(String(describing: state))")
         }
+      },
+      engineCloseWindow: { [unowned self] engine, window in
+        // `chrome.windows.remove` from the probe's own context, so the engine sees an extension call (#401).
+        let chromium = try chromium(engine)
+        guard let tab = EngineContractRunner.firstTab(of: chromium, in: window) else {
+          throw RunnerError("no tab in \(window) to find its Chromium window by")
+        }
+        try await probeTab(engine, tab, action: "await chrome.windows.remove(t.windowId)")
       }
     )
   }

@@ -68,6 +68,11 @@ enum ScriptedHarness {
       },
       makeAudible: { engine, id in
         _ = try await chromium(engine).evaluateScript(EngineContract.toneScript, in: id, userGesture: true)
+      },
+      engineCloseWindow: { engine, window in
+        let chromium = try chromium(engine)
+        try scriptedBrowser(chromium, window).closeByExtension()
+        try await delivered(chromium)
       }
     )
   }

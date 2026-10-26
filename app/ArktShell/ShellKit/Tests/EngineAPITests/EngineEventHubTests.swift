@@ -81,7 +81,7 @@ struct EngineEventHubTests {
     var log: [String] = []
     let tabs = hub.add { event in
       log.append("tab \(event)")
-      if case .tabClosed = event { hub.emit(EngineWindowEvent.windowClosed(window)) }
+      if case .tabClosed = event { hub.emit(EngineWindowEvent.windowClosed(window, reason: .userClose)) }
     }
     let windows = hub.addWindowObserver { log.append("window \($0)") }
     let late = hub.add { log.append("late \($0)") }
@@ -89,7 +89,7 @@ struct EngineEventHubTests {
     #expect(log == [
       "tab \(EngineEvent.tabClosed(tab, reason: .windowClosing))",
       "late \(EngineEvent.tabClosed(tab, reason: .windowClosing))",
-      "window \(EngineWindowEvent.windowClosed(window))",
+      "window \(EngineWindowEvent.windowClosed(window, reason: .userClose))",
     ])
     tabs.cancel(); windows.cancel(); late.cancel()
   }
@@ -100,10 +100,10 @@ struct EngineEventHubTests {
     var events: [EngineWindowEvent] = []
     let token = hub.addWindowObserver { events.append($0) }
     hub.emit(EngineWindowEvent.windowOpened(window))
-    hub.emit(EngineWindowEvent.windowClosed(window))
+    hub.emit(EngineWindowEvent.windowClosed(window, reason: .userClose))
     hub.emit(EngineWindowEvent.extensionActionsChanged(window))
-    hub.emit(EngineWindowEvent.windowClosed(window))
-    #expect(events == [.windowOpened(window), .windowClosed(window)])
+    hub.emit(EngineWindowEvent.windowClosed(window, reason: .userClose))
+    #expect(events == [.windowOpened(window), .windowClosed(window, reason: .userClose)])
     token.cancel()
   }
 

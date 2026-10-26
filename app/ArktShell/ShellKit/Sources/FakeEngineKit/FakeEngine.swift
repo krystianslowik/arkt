@@ -265,7 +265,11 @@ public final class FakeEngine: EngineClient {
     return id
   }
 
-  public func closeWindow(_ id: EngineWindowID) {
+  public func closeWindow(_ id: EngineWindowID) { closeWindow(id, reason: .userClose) }
+
+  /// Closes never hold here, so the window goes at once; its tabs close with `.windowClosing` (#401: FakeEngine has
+  /// no extensions, so a window closes as the user's or as emptied by its last tab).
+  private func closeWindow(_ id: EngineWindowID, reason: WindowCloseReason) {
     guard windowIDs.contains(id) else { return }
     for tab in tabs(in: id) { removeTab(tab, reason: .windowClosing, reactivate: false) }
     windowIDs.removeAll { $0 == id }
@@ -275,7 +279,7 @@ public final class FakeEngine: EngineClient {
       host.forward = nil
     }
     if lastActiveWindow == id { lastActiveWindow = windowIDs.last }
-    hub.emit(.windowClosed(id))
+    hub.emit(.windowClosed(id, reason: reason))
   }
 
   public func activateTab(_ id: TabID) { setActive(id) }
@@ -293,7 +297,7 @@ public final class FakeEngine: EngineClient {
     setActive(id)
     let left = tabs(in: source)
     if left.isEmpty {
-      closeWindow(source)
+      closeWindow(source, reason: .lastTabClosed)
     } else if activeTabs[source] == nil, let successor = left.last {
       setActive(successor)
       lastActiveWindow = window

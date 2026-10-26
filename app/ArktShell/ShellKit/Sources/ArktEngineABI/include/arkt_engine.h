@@ -70,6 +70,21 @@ typedef NS_ENUM(NSInteger, ArktCloseReason) {
   ArktCloseReasonAppTerminating = 5,
 };
 
+// Why a window closed (#401). None on every event other than WindowClosed.
+typedef NS_ENUM(NSInteger, ArktWindowCloseReason) {
+  ArktWindowCloseReasonNone = 0,
+  // The user or this client closed it: the host's closeRequested, -close on
+  // the handle, Chromium's own Close Window command.
+  ArktWindowCloseReasonUser = 1,
+  // An extension closed it (chrome.windows.remove).
+  ArktWindowCloseReasonExtension = 2,
+  // Its last tab closed or moved to another window, and Chromium closed the
+  // emptied window.
+  ArktWindowCloseReasonLastTabClosed = 3,
+  // The application is quitting.
+  ArktWindowCloseReasonAppTerminating = 4,
+};
+
 // Who created a tab.
 typedef NS_ENUM(NSInteger, ArktTabOrigin) {
   // createTabWithURL:active: or duplicate on a handle.
@@ -107,7 +122,8 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   ArktEngineEventKindTabMoved = 10,
   // A window was created and is listed in -[ArktEngine browsers].
   ArktEngineEventKindWindowOpened = 11,
-  // A window is gone, after the TabClosed events of its tabs.
+  // A window is gone, after the TabClosed events of its tabs. Values:
+  // windowCloseReason.
   ArktEngineEventKindWindowClosed = 12,
   // The extension action list of `browser` changed.
   ArktEngineEventKindExtensionActionsChanged = 13,
@@ -139,7 +155,7 @@ typedef NS_ENUM(NSInteger, ArktLinkDecision) {
 };
 
 // One recorded engine change, as plain values. Fields that do not apply to
-// the kind are nil, NO or ArktCloseReasonNone.
+// the kind are nil, NO, ArktCloseReasonNone or ArktWindowCloseReasonNone.
 NS_SWIFT_UI_ACTOR
 @protocol ArktEngineEvent <NSObject>
 @property(nonatomic, readonly) ArktEngineEventKind kind;
@@ -157,6 +173,7 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL isActive;
 @property(nonatomic, readonly) BOOL isAudible;
 @property(nonatomic, readonly) BOOL isMuted;
+@property(nonatomic, readonly) ArktWindowCloseReason windowCloseReason;
 @end
 
 // A request for a window the engine creates on its own, after

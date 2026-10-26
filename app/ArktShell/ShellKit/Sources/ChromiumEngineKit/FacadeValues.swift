@@ -28,6 +28,21 @@ extension CloseReason {
   }
 }
 
+extension WindowCloseReason {
+  /// `ArktWindowCloseReasonNone` never arrives on a `WindowClosed` from the real facade. A close it did not classify
+  /// is treated as one somebody asked for, so the shell window goes with it rather than staying on a page that
+  /// might come back (#401).
+  init(facade reason: ArktWindowCloseReason) {
+    switch reason {
+    case .user, .none: self = .userClose
+    case .extension: self = .extension
+    case .lastTabClosed: self = .lastTabClosed
+    case .appTerminating: self = .appQuit
+    @unknown default: self = .userClose
+    }
+  }
+}
+
 extension TabOrigin {
   init(facade origin: ArktTabOrigin) {
     self = origin == .engine ? .engine : .client

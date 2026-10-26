@@ -90,7 +90,7 @@ extension ChromiumEngine {
     windowByBrowser[ObjectIdentifier(browser)] = nil
     windowIDs.removeAll { $0 == id }
     if recentWindow == id { recentWindow = windowIDs.last }
-    hub.emit(.windowClosed(id))
+    hub.emit(.windowClosed(id, reason: WindowCloseReason(facade: event.windowCloseReason)))
   }
 
   // MARK: Tab lifetime
