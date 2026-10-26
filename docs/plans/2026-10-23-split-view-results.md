@@ -15,7 +15,8 @@ As recorded in PR #141 at `9bf54f2`: ArktCore 316 Swift Testing tests, ShellKit 
 - `swift test --skip-build --filter SpacePagerTests` (before merging main): 22 executed, 1 skipped, 0 failures. The frame-pacing test was not measurable under load.
 - `swift test --skip-build --filter SplitPacingTests.testDividerDragCommitsOnce`, 20 consecutive runs under load: 20 passed; load immediately after was 17.62 on 12 cores. Removing the `onCommitFactors` call in `SplitContainerView.endDividerDrag` made that test fail (observed 0 writes, expected 1); restoring it made the test pass.
 - FakeEngine informational (`split-divider-webkit`): screen maximum 240 Hz, 29 intervals, 0 over 8.6 ms, max and p99 8.33 ms, load 22.83 on 12 cores. This is not a gated timing result.
-- Full ShellKit GUI suite: not run. All GUI checks must be rerun on the merged tree; the three quiet-machine pacing measurements and the complete GUI suite remain required before the pull request is ready.
+- Post-merge `swift test -j 2 --filter SplitPacingTests`: 5 executed, 3 skipped, 0 failures. The gated cases were NOT-MEASURABLE at load 22.20 on 12 cores; FakeEngine reported 29 intervals, 0 over 8.6 ms, max 8.33 ms, 240 Hz (informational only).
+- Post-merge `swift test -j 2 --filter ShellKitGUITests`: 1,088 executed, 20 skipped, 0 failures. The three divider gates were NOT-MEASURABLE at load 19.09 on 12 cores; the SpacePager timing test also skipped. The three quiet-machine pacing measurements remain required before the pull request is ready.
 
 ### Plan deviation
 
