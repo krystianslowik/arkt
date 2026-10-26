@@ -28,7 +28,8 @@ struct PeekAnimatorSteppedRunTests {
     animator.jump(to: PeekMotion.openStart(linkOffset: .zero, reduceMotion: false))
     animator.run(PeekMotion.targets(for: .open, reduceMotion: false), label: "open", in: NSView())
 
+    #expect(frames.count == 2, "the jump to the start scene, then the run's first frame")
     #expect(frames.last?[.cardOpacity] == 0, "no time has passed in the run's first frame")
-    #expect(frames.last?[.cardScale] == 0.90)
+    #expect(abs((frames.last?[.cardScale] ?? 0) - 0.90) < 1e-9)
   }
 }
