@@ -1209,3 +1209,27 @@ held the loopback host after every relaunch. The notification dialog query found
   Out of process the button exposes those words as its title. It is never clicked.
 
 Known issues used: #269 (outline rows).
+
+## U9: Archive scenarios (#174)
+
+Added UI coverage for hover X, Cmd-W, the last Today tab, the Archive menu and restoring a tab with its View toast.
+The search scenario remains an explicit skip as specified by U9, although #111 is now closed. The in-process menu
+inventory checks the empty key equivalent because XCUITest exposes the menu title but not its key equivalent.
+
+Checks after updating to main at `90a442e`:
+
+- `cd app/ArktCore && nice -n 20 swift test -j 2 --scratch-path /private/tmp/arkt-174-core`: 428 tests in 29 suites passed.
+- `cd app/ArktShell/ShellKit && nice -n 20 swift test -j 2 --scratch-path /private/tmp/arkt-174-shell --skip ShellKitGUITests`: 1,237 tests in 156 suites passed.
+- `cd app/ArktShell/ShellKit && nice -n 20 swift test -j 2 --scratch-path /private/tmp/arkt-174-shell --filter MainMenuInventoryTests/testShellItemsAndTheirKeys`: 1 test, 0 failures.
+- `cd app/ArktShell && nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath /private/tmp/arkt-174-derived -resultBundlePath /private/tmp/arkt-174-ui-main.xcresult -collect-test-diagnostics never -jobs 2 -only-testing:ArktShellUITests/ArchiveTests test`: 6 tests, 1 skipped, 0 failures.
+
+The initial UI run failed the restore case because clicking the accessibility proxy row did not select it, and the
+menu case queried the label instead of the title. The test now confirms selection and enabled state, using Down if
+needed, and reads the menu title. A targeted rerun of the two corrected tests passed, 2 tests, 0 failures. The first
+build under Desktop could not be signed because of Finder metadata; using temporary derived data resolved that.
+No product code changed. The full ShellKit GUI suite and full XCUITest suite were not run; the changed menu test and
+all U9 scenarios were run directly. No screenshot is needed for test-only changes.
+
+The menu assertion was checked against a deliberate regression: temporarily assigning `x` to Show Archive in
+`MainMenu.swift` made the targeted menu test fail (1 test, 1 failure); restoring the original empty key made it pass
+again (1 test, 0 failures). The temporary change was not committed.
