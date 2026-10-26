@@ -118,6 +118,13 @@ Cmd-W, and dragging the card down. After a close, a "Peek closed" toast with "Re
 Cmd-Shift-T and Cmd-Z reopen it (BH-150, KB-079), with its history; a reopened Peek opens at the same place, without
 the travel from the link.
 
+How the history survives the close (decided on #346): just before the Peek's tab closes, the shell parks an engine
+duplicate of it (`EngineClient.duplicateTab`, back and forward entries included) that is never shown. Chromium loads
+a cloned tab only when it is first shown, so the parked copy plays no audio and runs no page; keeping the Peek's own
+tab alive instead would keep its audio playing. Reopen shows the copy. Closed tabs and Peeks share one reopen stack
+per window (20 entries [I]); Cmd-Z reopens only when no text is being edited, and only after the page passed on the
+key. A reopen while the close still runs turns the card around where it is.
+
 Esc goes to the page first (maintainer decision, 2026-10-25). If the page uses it (closes its own dialog, leaves full
 screen, cancels a field), the Peek stays and the next Esc closes the Peek. An Esc the page does not use closes the
 Peek at once. PARITY(NEEDS-RUNTIME-CHECK): Arc's order is not documented.
@@ -161,6 +168,8 @@ with the Peek over the whole content area.
 
 - Switching tab or Space while a Peek is open: the Peek stays attached to its source tab, hidden, and comes back
   when the tab is shown again. It is not saved and does not survive quit (BH-152). PARITY(NEEDS-RUNTIME-CHECK).
+  Implemented differently for now (#349): the switch closes the Peek, and Cmd-Shift-T or Cmd-Z brings it back over
+  its source (#346).
 - Window resize while a Peek is open: the Peek frame follows the layout directly, without animation.
 - Sidebar hidden (Cmd-S): the content card is wider and Peek follows it; nothing else changes.
 - Full screen video inside a Peek goes full screen from the Peek; leaving full screen returns to the Peek.
