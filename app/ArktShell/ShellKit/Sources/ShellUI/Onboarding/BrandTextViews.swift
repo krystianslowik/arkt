@@ -68,8 +68,12 @@ enum OnboardingMotion {
 /// halo (section 3) is drawn into the image, so it is static and never animated.
 @MainActor
 enum BrandTextRenderer {
-  /// Room around the glyphs for the widest halo shadow.
+  /// Room around the glyphs for the widest halo shadow, and for glyphs that reach past a display line's fixed
+  /// line height (counts at 0.86, titles at 0.92).
   static let haloPadding: CGFloat = 36
+
+  /// The padding of an image whose glyph box is `size`.
+  static func padding(for size: NSSize) -> CGFloat { max(haloPadding, ceil(size.height * 0.4)) }
 
   /// The text's size when wrapped at `maxWidth`.
   static func measure(_ text: NSAttributedString, maxWidth: CGFloat) -> NSSize {
@@ -78,12 +82,18 @@ enum BrandTextRenderer {
     return NSSize(width: ceil(rect.width), height: ceil(rect.height))
   }
 
-  /// An image of `text` laid out in `size`, padded by `haloPadding` on every side when `halo` is given.
+  /// An image of `text` laid out in `size`, padded by `padding(for:)` on every side.
   static func image(_ text: NSAttributedString, size: NSSize, halo: [NSShadow]) -> NSImage {
-    let pad = halo.isEmpty ? 0 : haloPadding
+    let pad = padding(for: size)
     let full = NSSize(width: size.width + pad * 2, height: size.height + pad * 2)
+    var shift: CGFloat = 0
+    if text.length > 0, let font = text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont,
+       let paragraph = text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle,
+       paragraph.maximumLineHeight > 0 {
+      shift = BrandType.cssShift(font: font, lineHeight: paragraph.maximumLineHeight)
+    }
     return NSImage(size: full, flipped: true) { _ in
-      let rect = NSRect(x: pad, y: pad, width: size.width, height: size.height)
+      let rect = NSRect(x: pad, y: pad + shift, width: size.width, height: size.height)
       for shadow in halo {
         NSGraphicsContext.saveGraphicsState()
         shadow.set()
@@ -95,12 +105,15 @@ enum BrandTextRenderer {
     }
   }
 
-  /// Puts `image` into `layer` at the window's scale, offset so the glyph box sits at the layer's origin.
+  /// Puts `image` into `layer` at the window's scale. The anchor point is the glyph box's top-left corner, so the
+  /// layer's `position` places the glyphs, whatever the padding.
   static func apply(_ image: NSImage, to layer: CALayer, glyphSize: NSSize, halo: Bool, scale: CGFloat) {
-    let pad = halo ? haloPadding : 0
+    let pad = padding(for: glyphSize)
+    let full = CGSize(width: glyphSize.width + pad * 2, height: glyphSize.height + pad * 2)
     layer.contentsScale = scale
     layer.contents = image.layerContents(forContentsScale: scale)
-    layer.bounds = CGRect(x: 0, y: 0, width: glyphSize.width + pad * 2, height: glyphSize.height + pad * 2)
+    layer.bounds = CGRect(origin: .zero, size: full)
+    layer.anchorPoint = CGPoint(x: pad / full.width, y: pad / full.height)
   }
 }
 
@@ -133,7 +146,6 @@ final class BrandLabel: NSView {
     super.init(frame: .zero)
     wantsLayer = true
     layer?.masksToBounds = false
-    textLayer.anchorPoint = .zero
     layer?.addSublayer(textLayer)
     setAccessibilityElement(true)
     setAccessibilityRole(.staticText)
@@ -187,13 +199,12 @@ final class BrandLabel: NSView {
     let image = BrandTextRenderer.image(attributedText, size: size, halo: halo)
     OnboardingMotion.set {
       BrandTextRenderer.apply(image, to: textLayer, glyphSize: size, halo: !halo.isEmpty, scale: scale)
-      let pad = halo.isEmpty ? 0 : BrandTextRenderer.haloPadding
       let x: CGFloat = switch alignment {
       case .center: (bounds.width - size.width) / 2
       case .right: bounds.width - size.width
       default: 0
       }
-      textLayer.position = CGPoint(x: x - pad, y: -pad)
+      textLayer.position = CGPoint(x: x, y: 0)
     }
   }
 
@@ -299,15 +310,13 @@ final class WordRevealTitle: NSView {
     wordLayers = []
     let result = layoutResult
     let scale = window?.backingScaleFactor ?? 2
-    let pad = halo.isEmpty ? 0 : BrandTextRenderer.haloPadding
     let offsetX = (bounds.width - result.size.width) / 2
     OnboardingMotion.set {
       for (word, frame) in result.words {
         let wordLayer = CALayer()
-        wordLayer.anchorPoint = .zero
         let image = BrandTextRenderer.image(attributed(word), size: frame.size, halo: halo)
         BrandTextRenderer.apply(image, to: wordLayer, glyphSize: frame.size, halo: !halo.isEmpty, scale: scale)
-        wordLayer.position = CGPoint(x: offsetX + frame.minX - pad, y: frame.minY - pad)
+        wordLayer.position = CGPoint(x: offsetX + frame.minX, y: frame.minY)
         layer?.addSublayer(wordLayer)
         wordLayers.append(wordLayer)
       }

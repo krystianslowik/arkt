@@ -143,8 +143,7 @@ final class PillButton: NSButton {
       body.cornerRadius = bounds.height / 2
       edge.frame = body.bounds
       edge.cornerRadius = bounds.height / 2
-      let size = label.bounds.size
-      label.anchorPoint = .zero
+      let size = titleSize
       label.position = CGPoint(x: ((bounds.width - size.width) / 2).rounded(),
                                y: ((bounds.height - size.height) / 2).rounded())
       let outset = 3 + appearanceModel.focusRingWidth / 2

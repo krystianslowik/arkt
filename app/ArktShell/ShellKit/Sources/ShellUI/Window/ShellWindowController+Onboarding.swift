@@ -49,3 +49,10 @@ extension ShellWindowController {
     onboarding?.windowVisibilityChanged(false)
   }
 }
+
+extension ShellWindowController {
+  /// A link another app opened with Arkt (FakeEngine; Chromium opens them itself): a new Today tab on top, shown.
+  public func openFromOtherApp(_ url: URL) {
+    open(url, inNewTab: true)
+  }
+}

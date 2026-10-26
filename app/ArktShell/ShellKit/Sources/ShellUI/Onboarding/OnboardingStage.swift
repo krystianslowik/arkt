@@ -234,7 +234,6 @@ enum TourDrawing {
     let text = NSAttributedString(string: glyph, attributes: [.font: font, .foregroundColor: ink])
     let size = BrandTextRenderer.measure(text, maxWidth: 200)
     let label = CALayer()
-    label.anchorPoint = .zero
     BrandTextRenderer.apply(BrandTextRenderer.image(text, size: size, halo: []), to: label, glyphSize: size,
                             halo: false, scale: scale)
     label.position = CGPoint(x: ((capSize - size.width) / 2).rounded(), y: ((capSize - size.height) / 2 - 2).rounded())

@@ -111,6 +111,13 @@ public enum BrandType {
     }
   }
 
+  /// Where a display line's glyphs sit, the CSS way: with a fixed line height below the font's own (titles at 0.92,
+  /// counts at 0.86) CSS splits the overlap evenly above and below, while AppKit lets it all spill above the line.
+  /// The renderer moves the glyphs down by this much to match the website.
+  public static func cssShift(font: NSFont, lineHeight: CGFloat) -> CGFloat {
+    max(0, ((font.ascender - font.descender) - lineHeight) / 2)
+  }
+
   public static func font(for style: Style) -> NSFont {
     style.tabular ? tabularFont(style.weight, size: style.size) : font(style.weight, size: style.size)
   }
@@ -128,10 +135,13 @@ public enum BrandType {
     let paragraph = NSMutableParagraphStyle()
     paragraph.alignment = alignment
     paragraph.lineBreakMode = .byWordWrapping
+    let font = font(for: style)
+    var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .kern: style.kern]
     if let lineHeight = style.lineHeight {
       paragraph.minimumLineHeight = lineHeight
       paragraph.maximumLineHeight = lineHeight
     }
-    return [.font: font(for: style), .foregroundColor: color, .kern: style.kern, .paragraphStyle: paragraph]
+    attributes[.paragraphStyle] = paragraph
+    return attributes
   }
 }

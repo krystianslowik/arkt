@@ -54,17 +54,33 @@ final class SpaceNameField: NSView, NSTextFieldDelegate {
 
   func configure(name: String, placeholder: String) {
     self.placeholder = placeholder
+    field.setAccessibilityPlaceholderValue(placeholder)
     if field.stringValue != name { field.stringValue = name }
     restyle()
   }
 
+  /// The field's text attributes: the face, size and tracking, centred, at the font's own line height (the frame
+  /// places the baseline; a fixed line height would push the glyphs above the field).
+  private func fieldAttributes(color: NSColor) -> [NSAttributedString.Key: Any] {
+    var attributes = BrandType.attributes(style, color: color)
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .center
+    attributes[.paragraphStyle] = paragraph
+    return attributes
+  }
+
   private func restyle() {
-    var attributes = BrandType.attributes(style, color: appearanceModel.textPrimary)
-    field.font = attributes[.font] as? NSFont
-    field.textColor = appearanceModel.textPrimary
+    // The field's font and placeholder change only while no field editor is attached: changing them mid-edit ends
+    // the edit.
+    var attributes = fieldAttributes(color: appearanceModel.textPrimary)
+    if field.currentEditor() == nil {
+      field.font = attributes[.font] as? NSFont
+      field.textColor = appearanceModel.textPrimary
+    }
     attributes[.foregroundColor] = isEditing ? appearanceModel.textSecondary.withAlphaComponent(0.5)
       : appearanceModel.textPrimary
-    field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: attributes)
+    (field.cell as? NameFieldCell)?.placeholder = NSAttributedString(string: placeholder, attributes: attributes)
+    field.needsDisplay = true
     applyTypingAttributes()
     OnboardingMotion.set {
       underline.backgroundColor = (isEditing ? appearanceModel.accent : appearanceModel.hairline).cgColor
@@ -73,18 +89,21 @@ final class SpaceNameField: NSView, NSTextFieldDelegate {
 
   private func applyTypingAttributes() {
     guard let editor = field.currentEditor() as? NSTextView else { return }
-    var attributes = BrandType.attributes(style, color: appearanceModel.textPrimary)
-    attributes.removeValue(forKey: .paragraphStyle)
-    editor.typingAttributes = attributes
+    editor.typingAttributes = fieldAttributes(color: appearanceModel.textPrimary)
     editor.insertionPointColor = appearanceModel.accentText
   }
 
   override func layout() {
     super.layout()
-    field.frame = NSRect(x: 0, y: 0, width: bounds.width, height: lineHeight + 8)
+    // The field draws at the font's own line height; it is moved up so its baseline sits where the website's
+    // 1.02 line box puts it, and the underline sits 4 pt under that box (section 6.3).
+    let font = BrandType.font(for: style)
+    let natural = ceil(font.ascender - font.descender + font.leading)
+    let shift = BrandType.cssShift(font: font, lineHeight: lineHeight)
+    field.frame = NSRect(x: 0, y: -shift - 1, width: bounds.width, height: natural + 4)
     OnboardingMotion.set {
       underline.bounds = CGRect(x: 0, y: 0, width: 180, height: 2)
-      underline.position = CGPoint(x: bounds.midX, y: lineHeight + 12)
+      underline.position = CGPoint(x: bounds.midX, y: lineHeight + 5)
       if !isEditing { underline.transform = CATransform3DMakeScale(120.0 / 180.0, 1, 1) }
     }
   }
@@ -99,11 +118,17 @@ final class SpaceNameField: NSView, NSTextFieldDelegate {
                              duration: appearanceModel.reduceMotion ? 0 : 0.3)
   }
 
+  /// The caret colour and typing attributes go to the field editor once it is attached.
+  fileprivate func fieldEditorAttached() {
+    applyTypingAttributes()
+  }
+
   func controlTextDidBeginEditing(_ obj: Notification) {
     applyTypingAttributes()
   }
 
   func controlTextDidChange(_ obj: Notification) {
+    field.needsDisplay = true                         // the placeholder shows only while the field is empty
     if field.stringValue.count > OnboardingTheme.maximumNameLength {
       field.stringValue = String(field.stringValue.prefix(OnboardingTheme.maximumNameLength))
     }
@@ -130,11 +155,17 @@ final class SpaceNameField: NSView, NSTextFieldDelegate {
 final class NameTextField: NSTextField {
   weak var owner: SpaceNameField?
 
+  override class var cellClass: AnyClass? {
+    get { NameFieldCell.self }
+    set {}
+  }
+
   override var mouseDownCanMoveWindow: Bool { false }
 
   override func becomeFirstResponder() -> Bool {
+    owner?.editingChanged(true)                      // before the field editor attaches
     let became = super.becomeFirstResponder()
-    if became { owner?.editingChanged(true) }
+    if became { owner?.fieldEditorAttached() } else { owner?.editingChanged(false) }
     return became
   }
 
@@ -171,7 +202,6 @@ final class SpacePreviewView: NSView {
     gradient.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
     layer?.addSublayer(gradient)
     for sublayer in dots + favorites + rows + [nameLayer, page] { gradient.addSublayer(sublayer) }
-    nameLayer.anchorPoint = .zero
     layer?.shadowColor = NSColor.black.cgColor
     layer?.shadowOpacity = 0.45
     layer?.shadowRadius = 24
@@ -249,5 +279,46 @@ final class SpacePreviewView: NSView {
       page.borderWidth = 0.5
       page.borderColor = NSColor.black.withAlphaComponent(0.1).cgColor
     }
+  }
+}
+
+/// Draws and edits the name at the font's own line height from the top of the field, so the frame alone places the
+/// baseline (the default cell lays a display-size single line out above its frame).
+final class NameFieldCell: NSTextFieldCell {
+  /// Drawn by the cell itself, so the field editor never draws one of its own.
+  var placeholder: NSAttributedString?
+  private func lineRect(_ rect: NSRect) -> NSRect {
+    guard let font else { return rect }
+    let height = ceil(font.ascender - font.descender + font.leading)
+    return NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: max(height, rect.height))
+  }
+
+  override func drawingRect(forBounds rect: NSRect) -> NSRect { lineRect(super.drawingRect(forBounds: rect)) }
+  override func titleRect(forBounds rect: NSRect) -> NSRect { lineRect(super.titleRect(forBounds: rect)) }
+
+  override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?,
+                     event: NSEvent?) {
+    super.edit(withFrame: titleRect(forBounds: rect), in: controlView, editor: textObj, delegate: delegate,
+               event: event)
+  }
+
+  override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?,
+                       start selStart: Int, length selLength: Int) {
+    super.select(withFrame: titleRect(forBounds: rect), in: controlView, editor: textObj, delegate: delegate,
+                 start: selStart, length: selLength)
+  }
+
+  override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
+    drawInterior(withFrame: cellFrame, in: controlView)
+  }
+
+  /// The value when not editing; the placeholder whenever the value is empty, editing or not (the field editor
+  /// draws the typed text).
+  override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+    guard let field = controlView as? NSTextField else { return }
+    let editing = field.currentEditor() != nil
+    let empty = (editing ? (field.currentEditor()?.string ?? "") : stringValue).isEmpty
+    let text = empty ? placeholder : (editing ? nil : attributedStringValue)
+    text?.draw(with: titleRect(forBounds: cellFrame), options: [.usesLineFragmentOrigin])
   }
 }

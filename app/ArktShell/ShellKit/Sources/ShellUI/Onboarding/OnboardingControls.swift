@@ -385,13 +385,13 @@ final class AppearanceSegment: NSView {
   let title: String
   var onPress: (@MainActor (ThemeFlavor) -> Void)?
   private let label = CALayer()
+  private var glyphSize = NSSize.zero
 
   init(flavor: ThemeFlavor, title: String, identifier: String) {
     self.flavor = flavor
     self.title = title
     super.init(frame: .zero)
     wantsLayer = true
-    label.anchorPoint = .zero
     layer?.addSublayer(label)
     setAccessibilityElement(true)
     setAccessibilityRole(.radioButton)
@@ -412,6 +412,7 @@ final class AppearanceSegment: NSView {
     let text = NSAttributedString(string: title, attributes: BrandType.attributes(
       style, color: checked ? appearance.textPrimary : appearance.textSecondary))
     let size = BrandTextRenderer.measure(text, maxWidth: 1000)
+    glyphSize = size
     let image = BrandTextRenderer.image(text, size: size, halo: [])
     OnboardingMotion.set {
       BrandTextRenderer.apply(image, to: label, glyphSize: size, halo: false, scale: window?.backingScaleFactor ?? 2)
@@ -422,8 +423,8 @@ final class AppearanceSegment: NSView {
   override func layout() {
     super.layout()
     OnboardingMotion.set {
-      label.position = CGPoint(x: ((bounds.width - label.bounds.width) / 2).rounded(),
-                               y: ((bounds.height - label.bounds.height) / 2).rounded())
+      label.position = CGPoint(x: ((bounds.width - glyphSize.width) / 2).rounded(),
+                               y: ((bounds.height - glyphSize.height) / 2).rounded())
     }
   }
 
@@ -468,7 +469,6 @@ final class OptionPillView: NSView {
     tick.lineCap = .round
     tick.lineJoin = .round
     tick.opacity = 0
-    label.anchorPoint = .zero
     check.addSublayer(tick)
     body.addSublayer(check)
     body.addSublayer(label)
@@ -536,7 +536,7 @@ final class OptionPillView: NSView {
       path.addLine(to: CGPoint(x: 14.5, y: 6.8))
       tick.path = path
       tick.frame = check.bounds
-      label.position = CGPoint(x: 46, y: ((bounds.height - label.bounds.height) / 2).rounded())
+      label.position = CGPoint(x: 46, y: ((bounds.height - titleSize.height) / 2).rounded())
       let ringRect = bounds.insetBy(dx: -3 - appearanceModel.focusRingWidth / 2, dy: -3 - appearanceModel.focusRingWidth / 2)
       focus.path = CGPath(roundedRect: ringRect, cornerWidth: ringRect.height / 2, cornerHeight: ringRect.height / 2,
                           transform: nil)
