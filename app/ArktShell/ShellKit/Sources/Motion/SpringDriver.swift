@@ -36,6 +36,10 @@ public final class SpringDriver {
 
   public var isRunning: Bool { run != nil }
 
+  /// Tests turn this off to step a run by hand with `tick(at:)`: `animate` then sets the run up without a display
+  /// link, so what a test reads does not depend on how long the machine took to get there.
+  var drivesDisplayLink = true
+
   public init(now: @escaping @MainActor () -> CFTimeInterval = { CACurrentMediaTime() },
               reduceMotion: @escaping @MainActor () -> Bool = {
                 NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -69,6 +73,7 @@ public final class SpringDriver {
     let threshold = 0.5 / max(window.backingScaleFactor, 1)   // half a device pixel, in points
     guard start(from: from, to: to, initialVelocity: initialVelocity, parameters: parameters,
                 threshold: threshold, onUpdate: onUpdate, completion: completion) else { return }
+    guard drivesDisplayLink else { return }
     let proxy = WeakTarget(driver: self)
     let link = view.displayLink(target: proxy, selector: #selector(WeakTarget.tick(_:)))
     link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)

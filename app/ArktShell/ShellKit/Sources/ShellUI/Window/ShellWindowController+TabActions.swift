@@ -109,8 +109,8 @@ extension ShellWindowController {
     closeAll(SidebarContextMenu.todayNodesBelow(id, sidebar))
   }
 
-  /// Clear Today Tabs (BH-075): every Today row of the Space, minus the rows whose page plays media (BH-076); a Today
-  /// folder goes to the Archive whole. The folders and rows come back together, by Undo or Cmd-Z.
+  /// Clear Today Tabs (BH-075): the Today rows of the Space, minus the rows whose page plays media (BH-076) and the
+  /// rows any window shows (#429); a Today folder goes to the Archive whole. The folders and rows come back together, by Undo or Cmd-Z.
   func clearToday(_ space: SpaceID) {
     archiveToday(todayRows(of: space, scope: .all))
   }

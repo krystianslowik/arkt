@@ -256,6 +256,9 @@ public final class ShellWindowSet {
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
     }
     controller.onDragOutToNewWindow = { [weak self] node, point in self?.openWindow(showing: node, at: point) }
+    controller.otherWindowsVisibleNodes = { [weak self, weak controller] in
+      (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
+    }
     windows.append(controller)
     trackMain(controller)
     configure?(controller)

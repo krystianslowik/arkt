@@ -30,7 +30,8 @@ extension ShellWindowController {
     updateTodayBarMenu(menu)
   }
 
-  /// File > Clear Today Tabs (Shift-Cmd-K, KB-019, BH-075): every Today row of the current Space goes to the Archive.
+  /// File > Clear Today Tabs (Shift-Cmd-K, KB-019, BH-075): the Today rows of the current Space go to the Archive,
+  /// except the ones a window shows (#429).
   @objc public func clearTodayTabs(_ sender: Any?) {
     guard let space = currentSpace else { return }
     clearToday(space)
@@ -54,10 +55,10 @@ extension ShellWindowController {
     archiveToday(rows)
   }
 
-  /// True when the current Space has Today rows: the menu bar item's enabled rule.
+  /// True when a Clear would take a row: the menu bar item's enabled rule.
   var canClearToday: Bool {
     guard let space = currentSpace else { return false }
-    return !sidebar.children(of: .today(space)).isEmpty
+    return !todayRows(of: space, scope: .all).isEmpty
   }
 
   /// True when the menu's second item would clear something: a Today row is selected, and at least one row would go
@@ -69,20 +70,23 @@ extension ShellWindowController {
                              tabs: { self.tabs(in: $0) })
   }
 
-  /// The rows a Clear takes, in Today order (BH-075, BH-076, BH-078). A row counts as selected when it or any tab
+  /// The rows a Clear takes, in Today order (BH-075, BH-076, BH-078, #429). A row showing in this window (the current
+  /// tab, both panes of a shown Split View) or in another window stays, whatever the scope. A row counts as selected when it or any tab
   /// inside it is (a selected tab in a folder keeps the folder), and as playing when any of its pages plays media.
   /// The row holding the current tab always reads as selected (as `SidebarSelection` seeds it), so Clear unselected
   /// never archives the shown page, nor tears its Split View apart, even after a Cmd-click deselected it.
   func todayRows(of space: SpaceID, scope: TodayClearPolicy.Scope) -> [NodeID] {
     let selected = Set(sidebarController.selectedNodes)
     let current = currentNode
+    let shown = visibleNodes.union(current.map { [$0] } ?? []).union(otherWindowsVisibleNodes?() ?? [])
     return TodayClearPolicy.rows(
       sidebar.children(of: .today(space)), scope: scope,
       isSelected: { row in
         Self.holdsSelection([row], selected, tabs: { self.tabs(in: $0) })
           || current.map(self.tabs(in: row).contains) == true
       },
-      playsMedia: { row in self.tabs(in: row).contains { self.pagePlaysMedia($0) } })
+      playsMedia: { row in self.tabs(in: row).contains { self.pagePlaysMedia($0) } },
+      isShown: { row in self.tabs(in: row).contains(where: shown.contains) })
   }
 
   /// Whether a page plays media now (BH-076): the engine's audible state, which Chromium also reports for a muted
