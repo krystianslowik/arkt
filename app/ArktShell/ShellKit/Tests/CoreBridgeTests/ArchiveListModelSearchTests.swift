@@ -27,6 +27,8 @@ struct ArchiveListModelSearchTests {
     let coordinator: ArchiveCoordinator
     let model: ArchiveListModel
     let work: UUID
+    /// Never resumed: the coordinator's flush deadline cannot fire, so a flush waits for the write chain itself.
+    let sleeper = ManualSleeper()
 
     init(items: [ArchivedItem] = [], work: UUID? = nil) throws {
       let source = ModelSidebarSource(now: { ArchiveListModelSearchTests.now })
@@ -34,7 +36,8 @@ struct ArchiveListModelSearchTests {
       self.work = try source.addSpace(title: "Work")
       store = PagedArchiveStore(items: items)
       state = FakeArchiveState()
-      coordinator = ArchiveCoordinator(source: source, store: store, now: { ArchiveListModelSearchTests.now })
+      coordinator = ArchiveCoordinator(source: source, store: store, now: { ArchiveListModelSearchTests.now },
+                                       sleep: sleeper.sleep)
       model = ArchiveListModel(
         source: source, store: store, coordinator: coordinator, banner: state, archiveState: state,
         now: { ArchiveListModelSearchTests.now }, locale: ArchiveListModelSearchTests.locale,
@@ -192,8 +195,11 @@ struct ArchiveListModelSearchTests {
                                         in: .today(harness.work))
     await harness.store.holdAdds()
     harness.coordinator.archive([tab], reason: .manual)
+    await eventuallyTrue { await harness.store.heldAddCount == 1 }           // the write is in flight, not landed
 
     let clearing = Task { await harness.model.clearArchive() }
+    await eventuallyTrue { harness.sleeper.parkedCount == 1 }                // the flush waits on that write
+    #expect(await harness.store.removeAllCount == 0, "the clear has not run past the pending write")
     await harness.store.releaseAdds()
     #expect(await clearing.value)
 
