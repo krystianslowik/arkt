@@ -137,9 +137,17 @@ void MountActiveTab(int attempt) {
 
 std::unique_ptr<BrowserWindow, BrowserWindowDeleter> CreateArktBrowserWindow(
     BrowserWindowInterface* browser) {
-  // Popups, app, DevTools and picture-in-picture windows stay Views windows.
-  if (browser->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
-    return nullptr;
+  // Normal windows and popups (a page's window.open with window features, an
+  // extension's popup window) are Arkt windows: the shell shows popups in
+  // Little Arkt (#314, decided on #123). App, DevTools and picture-in-picture
+  // windows stay Views windows.
+  switch (browser->GetType()) {
+    case BrowserWindowInterface::Type::TYPE_NORMAL:
+    case BrowserWindowInterface::Type::TYPE_POPUP:
+    case BrowserWindowInterface::Type::TYPE_APP_POPUP:
+      break;
+    default:
+      return nullptr;
   }
   // The embedder's host first: the one passed to createBrowser(host:), or,
   // once the embedder is ready, its answer for an engine-initiated window
