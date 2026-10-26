@@ -99,14 +99,43 @@ final class SpaceSwitchTextTests: XCTestCase {
     await swipe(-1, to: 1)
   }
 
+  /// A still pointer over the sidebar mid-swipe: the incoming page is parked in the outgoing page's geometry, so its
+  /// row under the pointer there must not light up; once the swipe settles the row under the pointer does.
+  func testAParkedPageDoesNotHoverTheRowUnderAStillPointer() async throws {
+    let window = try XCTUnwrap(controller.window)
+    let incoming = try XCTUnwrap(pager.pages[1] as? SpacePageView)
+    pager.beginTracking()
+    pager.track(delta: -1, at: 0.01)
+    XCTAssertFalse(incoming.isHidden)
+    let row = try XCTUnwrap(incoming.outlineView.rowView(atRow: 0, makeIfNecessary: false) as? SidebarRowView)
+    let pointer = HoverPointerStub(window: window)
+    pointer.move(toCenterOf: row)
+    XCTAssertTrue(pager.bounds.contains(pager.convert(pointer.pointInWindow, from: nil)),
+                  "the parked row sits under the pointer in AppKit's geometry")
+    incoming.outlineView.hoverPointerLookup = pointer.lookup
+
+    incoming.outlineView.resyncHoverWithPointer()
+    XCTAssertFalse(row.isHovered, "a parked page's row does not light up under a still pointer")
+
+    pager.track(delta: -0.6 * pager.bounds.width, at: 0.02)
+    await awaitSettle { pager.endTracking() }
+    XCTAssertEqual(pager.index, 1)
+    incoming.outlineView.resyncHoverWithPointer()
+    XCTAssertTrue(row.isHovered, "at rest the row under the pointer is hovered")
+    // The stub's lookup holds it unowned: a resync queued by the settle reads it, so it stays until the system's is back.
+    XCTAssertGreaterThan(pointer.windowServerQueries, 0)
+    incoming.outlineView.hoverPointerLookup = .system
+  }
+
   /// Ctrl-N and the keyboard: every presented frame of the settle, from the first, draws both pages' text.
   func testAKeyboardSwitchShowsTheTitlesOnEveryFrame() throws {
     pager.reduceMotionForTesting = false
     for target in [1, 2, 0] {
       var time = CACurrentMediaTime()
       pager.go(to: target)
+      let deadline = time + 3
       var frames = 0
-      while pager.isSettling, time < CACurrentMediaTime() + 3 {
+      while pager.isSettling, time < deadline {
         time += 1.0 / 120
         pager.driver.tick(at: time)
         frames += 1

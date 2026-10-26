@@ -111,12 +111,27 @@ public final class SidebarRowView: NSTableRowView {
   }
 
   /// Sets the hover state from a pointer location in window coordinates (nil: the pointer is not over this
-  /// window).
+  /// window). A row shown away from its view frame reads as outside: its frame does not say what is under the pointer.
   func syncHover(pointerInWindow point: NSPoint?) {
-    guard let point else { isHovered = false; isPressed = false; return }
+    guard let point, !isShownAwayFromFrame else { isHovered = false; isPressed = false; return }
     let inside = bounds.contains(convert(point, from: nil))
     isHovered = inside
     if !inside { isPressed = false }
+  }
+
+  /// Mid-motion the Space strip, or a page parked in its visible slot, shows on a layer translation (#24, #415), so
+  /// a parked incoming page would otherwise light the row that sits under a still pointer in the outgoing page's
+  /// geometry. Only translations between the row and its pager count (a row outside a pager is never affected); at
+  /// rest they are identity and the frames are current again.
+  private var isShownAwayFromFrame: Bool {
+    var shifted = false
+    var view = superview
+    while let current = view {
+      if current is SpacePagerView { return shifted }
+      if let layer = current.layer, !layer.affineTransform().isIdentity { shifted = true }
+      view = current.superview
+    }
+    return false
   }
 
   /// The tab cell this row hosts (nil for divider rows).

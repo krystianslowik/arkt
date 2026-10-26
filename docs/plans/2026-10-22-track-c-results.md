@@ -2086,6 +2086,11 @@ titles and no Space name.
 - **Limit.** A geometry sync in the middle of a motion (a click, a pointer move over the strip, a finger touch-down)
   puts the pages back where AppKit's geometry is current; a page the motion shows after that is parked again from
   the new frame.
+- **Hover while parked.** A parked page shares AppKit's geometry with the outgoing page, so a hover resync under a
+  still pointer would light the incoming page's row there (and feed Folder Preview's hover). `SidebarRowView` reads a
+  row as not hovered while the strip or its page carries a layer translation; the sync at rest moves the tracking
+  areas and the resync then hovers the row under the pointer. Accessibility frames of a parked page are stale only
+  mid-motion, like the strip's own (#24).
 - **Rejected.** Moving the strip frame to the incoming page instead blanks the outgoing page the same way; drawing the
   page while it is prepared does not survive the hide; `prepareContent(in:)` on the strip has no effect.
 - **Content card.** The empty content card in the report did not reproduce with the FakeEngine (the card shows the
