@@ -1216,12 +1216,12 @@ Added UI coverage for hover X, Cmd-W, the last Today tab, the Archive menu and r
 The search scenario remains an explicit skip as specified by U9, although #111 is now closed. The in-process menu
 inventory checks the empty key equivalent because XCUITest exposes the menu title but not its key equivalent.
 
-Checks after updating to main at `90a442e`:
+Checks after updating to main at `7940026`:
 
 - `cd app/ArktCore && nice -n 20 swift test -j 2 --scratch-path /private/tmp/arkt-174-core`: 428 tests in 29 suites passed.
-- `cd app/ArktShell/ShellKit && nice -n 20 swift test -j 2 --scratch-path /private/tmp/arkt-174-shell --skip ShellKitGUITests`: 1,237 tests in 156 suites passed.
+- `cd app/ArktShell/ShellKit && nice -n 20 swift test -j 2 --scratch-path /private/tmp/arkt-174-shell --skip ShellKitGUITests`: 1,287 tests in 162 suites passed.
 - `cd app/ArktShell/ShellKit && nice -n 20 swift test -j 2 --scratch-path /private/tmp/arkt-174-shell --filter MainMenuInventoryTests/testShellItemsAndTheirKeys`: 1 test, 0 failures.
-- `cd app/ArktShell && nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath /private/tmp/arkt-174-derived -resultBundlePath /private/tmp/arkt-174-ui-main.xcresult -collect-test-diagnostics never -jobs 2 -only-testing:ArktShellUITests/ArchiveTests test`: 6 tests, 1 skipped, 0 failures.
+- `cd app/ArktShell && nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath /private/tmp/arkt-174-derived -resultBundlePath /private/tmp/arkt-174-ui-latest.xcresult -collect-test-diagnostics never -jobs 2 -only-testing:ArktShellUITests/ArchiveTests test`: 6 tests, 1 skipped, 0 failures.
 
 The initial UI run failed the restore case because clicking the accessibility proxy row did not select it, and the
 menu case queried the label instead of the title. The test now confirms selection and enabled state, using Down if
