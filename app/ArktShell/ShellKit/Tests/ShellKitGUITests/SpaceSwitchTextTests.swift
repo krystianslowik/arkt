@@ -131,6 +131,28 @@ final class SpaceSwitchTextTests: XCTestCase {
     incoming.outlineView.hoverPointerLookup = .system
   }
 
+  /// #295: a geometry sync from a pointer move unparks the pages so hit tests are exact. The next presented frame
+  /// must park the shown pages again, or the incoming page's text (drawn only from a parked frame, #415) disappears
+  /// for the rest of the motion.
+  func testAPointerSyncMidMotionKeepsTheShownPagesTextDrawn() throws {
+    let window = try XCTUnwrap(controller.window)
+    pager.reduceMotionForTesting = false
+    pager.go(to: 1)
+    var time = CACurrentMediaTime()
+    time += 1.0 / 120
+    pager.driver.tick(at: time)
+    XCTAssertEqual(assertShownPagesDrawText("first frame"), 2)
+    let move = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved,
+                                                location: pager.convert(NSPoint(x: 10, y: 10), to: nil),
+                                                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                                context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+    pager.mouseMoved(with: move)
+    time += 1.0 / 120
+    pager.driver.tick(at: time)
+    assertShownPagesDrawText("after the pointer sync and the next frame")
+    pager.stopInteraction()
+  }
+
   /// Ctrl-N and the keyboard: every presented frame of the settle, from the first, draws both pages' text.
   func testAKeyboardSwitchShowsTheTitlesOnEveryFrame() throws {
     pager.reduceMotionForTesting = false

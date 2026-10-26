@@ -155,6 +155,7 @@ public final class SpacePagerView: NSView {
       strip.layer?.setAffineTransform(CGAffineTransform(translationX: shift, y: 0))
     }
     updatePageVisibility()
+    parkShownPagesIfNeeded()
     onPosition?(position)
   }
 
@@ -187,6 +188,10 @@ public final class SpacePagerView: NSView {
   /// translation that shows them at their own place in the strip.
   private var parkedPages: [NSView] = []
 
+  /// Pages that were parked when a sync unpacked them and still need parking again: the sync is exact for the hit
+  /// test or hover that asked for it, and the next presented frame restores the text drawing of #415 (#295).
+  private var pagesToRepark: Set<Int> = []
+
   /// Shows page `i` mid-motion where AppKit draws it (#415). The strip moves on its layer, so its view frame still
   /// says where it last rested: a page that comes into view lies outside the pager in AppKit's geometry, its text
   /// fields have an empty visible rect, and AppKit draws no text there (images, which are layer contents, still
@@ -206,14 +211,36 @@ public final class SpacePagerView: NSView {
   /// Returns parked pages to their own slots and clears their translations; a page that left the strip only loses
   /// its translation.
   private func unparkPages() {
-    guard !parkedPages.isEmpty else { return }
+    guard !parkedPages.isEmpty else {
+      if !(isTracking || driver.isRunning) { pagesToRepark.removeAll() }
+      return
+    }
     for page in parkedPages {
       if let i = pages.firstIndex(where: { $0 === page }) {
         page.setFrameOrigin(NSPoint(x: CGFloat(i) * pageWidth, y: page.frame.origin.y))
       }
       page.layer?.setAffineTransform(.identity)
     }
+    // The sync that asked for this is exact for its hit test or hover. A motion goes on from the new frame, and its
+    // next pass parks these pages again so their text keeps drawing (#415, #295).
+    if isTracking || driver.isRunning {
+      pagesToRepark = Set(parkedPages.compactMap { page in
+        pages.firstIndex(where: { $0 === page })
+      })
+    } else {
+      pagesToRepark.removeAll()
+    }
     parkedPages.removeAll()
+  }
+
+  /// Parks the pages a sync unpacked, on the next presented frame (#295). The page that was visible before the
+  /// motion is not in the set: it draws in its own frame, which the sync made current.
+  private func parkShownPagesIfNeeded() {
+    guard isTracking || driver.isRunning, !pagesToRepark.isEmpty else { return }
+    for i in pagesToRepark where pages.indices.contains(i) && !pages[i].isHidden {
+      parkInVisibleSlot(pages[i], at: i)
+    }
+    pagesToRepark.removeAll()
   }
 
   /// Pages whose visible rows were built already. Legitimately tiled rows survive being parked again; a page

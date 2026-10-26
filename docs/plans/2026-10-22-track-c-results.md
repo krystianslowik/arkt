@@ -2167,6 +2167,12 @@ appended at the end rather than inside the #24 section because the file is share
   pixels while tracking or settling. Before, a sync mid-motion left a fractional origin and every later translation
   was rounded relative to it, so the strip stayed off the pixel grid for the rest of the motion (#282 review). At
   rest the exact offset is kept.
+- **Parked pages after a mid-motion sync.** On the branch rebased onto #415, `syncStripFrame()` unparks the pages
+  #415 parks in the strip's visible slot. A page stays visible after the sync, so it is not parked again when the
+  motion goes on, and its text stops drawing for the rest of the motion. `unparkPages()` now remembers the pages it
+  unpacked during a motion and the next `apply` parks them again; the sync itself stays exact, so the hit test or
+  hover that asked for it still sees the geometry on screen. This is a stacking interaction, not one of the four
+  #282 notes.
 - **Probe deinit.** `MainThreadBusyProbe` has an `isolated deinit` that stops a still-running probe, so its run loop
   observer is invalidated when the probe is freed while running.
 - **CPU gate through `PacingEnvironment`.** `PacingEnvironment.skipIfScreenBelow120Hz(fps:)` is the screen-only gate
@@ -2189,29 +2195,36 @@ the first red. With the implementation in place they pass:
   after a running probe is released.
 - `SpaceSwipeHitchTests.testScreenOnlyPacingGateIgnoresLoad` (GUI): 60 Hz is NOT-MEASURABLE, 120 Hz is measurable,
   and the helper has no load term.
+- `SpaceSwitchTextTests.testAPointerSyncMidMotionKeepsTheShownPagesTextDrawn` (GUI, on the #415 branch): the first
+  frame of a settle draws the incoming page, one `mouseMoved` syncs, and the next frame still draws the header and
+  every row title. It fails on #415's head (`Work header title is drawn`) and passes with the re-park.
 - `testAHitTestMidSettleFindsTheViewShownUnderThePoint` and `testAPointerMoveMidSettleSyncsTheStripFrame` now assert
   a frame within a backing pixel (and pixel alignment) instead of exact equality with the fractional offset.
 
 ### Verification
 
-- `cd app/ArktShell/ShellKit && nice -n 10 swift test --filter ShellKitGUITests`: 1015 tests executed, 14 skipped,
-  0 failures (166 s). Skips: 4 NOT-MEASURABLE under load 50-76 on 12 cores (`ParticleFieldTests.testFrameBudgetAt2x`,
+- `cd app/ArktShell/ShellKit && nice -n 10 swift test --filter ShellKitGUITests` on the branch rebased onto #415:
+  1028 tests executed, 14 skipped, 0 failures (184 s). Skips: 4 NOT-MEASURABLE (`ParticleFieldTests.testFrameBudgetAt2x`,
   `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`, `SidebarHideTests.testRevealPacing`,
-  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`), 7 `FakeEngineContractTests` cases the harness has no
-  driver for, and 3 `AlertScreenshotTests` that need `ARKT_ALERT_SHOTS_DIR`. The CPU gate did not skip: it ran at
-  load 165.78 and passed, worst non-flavor pass 1.73 ms, the two light/dark flavor legs reported but not gated
-  (#275), as before.
-- `cd app/ArktShell/ShellKit && nice -n 10 swift test --skip ShellKitGUITests`: Swift Testing 1147 tests, 0 failures;
-  XCTest 0. This includes the new probe test (baseline +1).
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`; load 36-48 on 12 cores in the passing run), 7
+  `FakeEngineContractTests` cases the harness has no driver for, and 3 `AlertScreenshotTests` that need
+  `ARKT_ALERT_SHOTS_DIR`. The CPU gate did not skip: it passed in the final full run at load 25.07 and in three
+  focused reruns at load 96-120 (worst gated pass 2.9 ms; the two light/dark flavor legs are reported, not gated,
+  #275). One earlier full run at load 154 failed the gate once (a key-previous pass at 12.85 ms of thread CPU); it
+  did not reproduce in the three focused runs or the next full run. The failure is recorded rather than hidden.
+- `cd app/ArktShell/ShellKit && nice -n 10 swift test --skip ShellKitGUITests`: Swift Testing 1165 tests, 0 failures
+  (main 1164 + the new probe test); XCTest 0.
 - `cd app/ArktCore && nice -n 10 swift test`: 423 tests, 0 failures.
 - `cd app/ArktShell && xcodegen generate && nice -n 10 xcodebuild -project ArktShell.xcodeproj -scheme ArktShell
-  -configuration Debug -derivedDataPath build build`: BUILD SUCCEEDED.
-- Profile build for the acceptance runs: the same `xcodebuild` with `-configuration Profile` failed in `CodeSign`
-  with `resource fork, Finder information, or similar detritus not allowed`. The worktree is on an iCloud-synced
-  Desktop and FileProvider re-adds `com.apple.FinderInfo` to the freshly copied `.bundle` directories as codesign
-  walks them (the Debug product kept its old signature and did not hit it). Workaround for the runs below: `ditto`
-  the product to the local temp directory, `xattr -cr` it there, ad-hoc `codesign --force --deep --sign -`, and run
-  that copy. No source or project change was needed.
+  -configuration Debug -derivedDataPath build build`: the build compiles and links, then fails in `CodeSign` with
+  `resource fork, Finder information, or similar detritus not allowed`. The same command with
+  `CODE_SIGNING_ALLOWED=NO` prints `** BUILD SUCCEEDED **`, and a manual
+  `codesign --force --sign - --entitlements ... --generate-entitlement-der` of the product succeeds. The worktree is
+  on an iCloud-synced Desktop and FileProvider re-adds `com.apple.FinderInfo` while codesign walks the bundle; no
+  source or project change was needed.
+- Profile build for the acceptance runs: `xcodebuild ... -configuration Profile -jobs 4 CODE_SIGNING_ALLOWED=NO`
+  prints `** BUILD SUCCEEDED **`; then `ditto` to the local temp directory, `xattr -cr`, ad-hoc
+  `codesign --force --deep --sign -`, and run that copy.
 
 ### Acceptance: WindowServer trace (#24 criterion 1)
 
@@ -2232,6 +2245,9 @@ the first red. With the implementation in place they pass:
   reported `pacingVerdict = NOT-MEASURABLE (load 60.18 on 12 cores)`. So the trace shows no WindowServer-side hitch
   row, but it was recorded under load 39-66 and the app's own pacer still saw four late intervals at frame 9. It is
   not a quiet-machine confirmation; a trace on an idle machine is still needed if the maintainer wants one.
+- The trace predates the rebase onto #415, which draws the incoming pages' text during the motion on the main
+  thread. #295's changes only remove work from the pointer-move path, so the WindowServer-side result still applies
+  to them, but a trace of the final merged tree is a separate maintainer step.
 
 ### Acceptance: idle smoke (#24 criterion 4)
 
