@@ -149,6 +149,7 @@ public final class ArchiveListModel: ArchiveListDataSource {
     generation += 1                                  // a load in flight must not list what is being cleared
     guard await coordinator.flush() else { return false }
     do { try await store.removeAll() } catch { return false }
+    coordinator.forgetRecentlyArchived()            // a cleared tab does not come back with Cmd-Shift-T (#110)
     generation += 1
     rows = []
     items = [:]
