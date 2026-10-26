@@ -14,6 +14,8 @@ public final class AppSettings {
     public static let windowTopLeft = "settingsWindowTopLeft"
     public static let excludeFavoritesInSwitchToNthTab = "excludeFavoritesInSwitchToNthTab"
     public static let switchToNinthSidebarItemEnabled = "switchToNinthSidebarItemEnabled"
+    /// Arc's key for the system-wide Little Arkt hotkey (BH-131, KB-045).
+    public static let globalLittleBrowserHotkeyEnabled = "globalLittleBrowserHotkeyEnabled"
   }
 
   /// Show Toolbar and Show the full URL: the instance every window observes.
@@ -67,6 +69,28 @@ public final class AppSettings {
       set(newValue.opensShiftClickedLinks, PeekLinkSettings.shiftClickKey)
       notifyObservers()
     }
+  }
+
+  /// Settings > Links: "Open Little Arkt when I press ⌥⌘N" (BH-130, BH-131, KB-045), off by default (decision
+  /// 2026-10-25). The app registers the system-wide hotkey from this value.
+  public var opensLittleArktWithHotKey: Bool {
+    get { bool(Key.globalLittleBrowserHotkeyEnabled, default: false) }
+    set {
+      guard newValue != opensLittleArktWithHotKey else { return }
+      set(newValue, Key.globalLittleBrowserHotkeyEnabled)
+      notifyObservers()
+    }
+  }
+
+  /// Another app holds the combination. Runtime state of the registration, never persisted: Settings shows
+  /// "⌥⌘N is used by another app." under the switch while it is on.
+  public private(set) var littleArktHotKeyTaken = false
+
+  /// The app reports each registration answer; a change reaches the Settings window through the observers.
+  public func setLittleArktHotKeyTaken(_ taken: Bool) {
+    guard taken != littleArktHotKeyTaken else { return }
+    littleArktHotKeyTaken = taken
+    notifyObservers()
   }
 
   /// The pane Settings shows when it opens. Window state, so observers are not told.

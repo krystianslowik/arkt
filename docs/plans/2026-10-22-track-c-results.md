@@ -2065,6 +2065,56 @@ title, parentheses in the URL). `CopyLinkTests` (GUI, 8) drives the actions: the
 toast, the current-URL toast, the multi-selection copy, the Peek's page, Markdown, Quote, Paste URL as New Tab and
 the ignored non-URL clipboard. `ReservedKeysTests` covers the four keys; `MainMenuKeyEquivalentTests` the Edit menu
 items and keys.
+## Little Arkt quick lookup: the bar, Cmd-Opt-N and the system-wide hotkey (#354, BH-130, BH-131, KB-044, KB-045) (2026-10-26)
+
+The lookup path of `docs/design/little-arkt.md` ("Quick lookup", `la-lookup-*`): File > New Little Arkt Window on
+Cmd-Opt-N opens the command bar with the "Little Arkt" tag, Return opens the result in a new Little Arkt window, and
+the same bar is reachable system-wide from the Option-Command-N hotkey, off until the user turns it on in
+Settings > Links.
+
+- **The bar.** `LittleArktLookupController` (ShellUI) is a screen-anchored floating panel, not a parent-window bar: the
+  hotkey must work with no browser window and over another app's full-screen Space, and the shell's bar is tied to its
+  parent window's Space. It reuses `CommandBarGeometry` (766 pt, 34 % of the screen, 60 pt input, 50 pt rows),
+  `CommandBarResults`, `CommandBarSelection` and the result row views; no `CommandBar/*` file changes, so the command
+  bar work in #322 keeps its hunks. The "Little Arkt" tag is the design's `accent` / `onAccent` pill before the field;
+  the field keeps "Search or Enter URL..." and is labelled "Little Arkt: Search or Enter URL". Esc closes with
+  nothing opened; a "Switch to Tab" result fronts the main window's tab; the panel has no open or close animation
+  (`animationBehavior = .none`, one alpha step, `.statusBar` level with `.canJoinAllSpaces` /
+  `.fullScreenAuxiliary`). It closes when the app loses activation.
+- **The result window.** `ShellWindowSet.openLittleArkt(url:)` builds the window through the same placement and wiring
+  as the engine's own Little Arkt windows (cascaded 28 pt from the frontmost, remembered size, top-right of the main
+  screen), creates its engine window and adopts it, then opens the page. The engine-request path is unchanged: the
+  request's frame is computed and handed to the shared `makeLittleArkt(isPopup:frame:)`.
+- **The hotkey.** `LittleArktHotKeyMonitor` (ShellUI) registers `RegisterEventHotKey` (kVK_ANSI_N with Command and
+  Option) on the app event target, so no accessibility permission is needed and the press arrives while another app is
+  frontmost. Off by default (decision 2026-10-25); `AppSettings.opensLittleArktWithHotKey` (`globalLittleBrowserHotkeyEnabled`,
+  Arc's key) applies from the app launch and on every change. `eventHotKeyExistsErr` becomes `.taken`, which the app
+  reports into `AppSettings` and Settings > Links shows as "⌥⌘N is used by another app." under the switch; the setting
+  stays on, the in-app menu item keeps working, and turning the switch off and on registers again.
+- **Settings.** One row, "Open Little Arkt when I press ⌥⌘N", in the existing General > Links section. The row and its
+  live update live in `SettingsPanes+LittleArktLookup.swift`; the Links section gains one `littleArktLookupRow()` line,
+  so a parallel Peek edit to the same section merges around it. `SettingsRowView.setCaption` replaces a caption in
+  place (the conflict line).
+
+Deviations: the bar is a separate screen-anchored controller instead of a mode of `CommandBarController` (the shell bar
+positions over its parent and follows its Space; the lookup has no parent and must reach another app's Space). The
+Settings row sits in General > Links, the pane copy the settings design uses for the Peek switches, not a new top-level
+Links pane (Arkt has none; `docs/design/settings.md` section 9). Placing the bar over another app's full-screen Space and
+a real Carbon press are runtime checks (the tests inject the registrar and cannot switch Spaces): follow-up issue
+#416.
+
+Tests (written first, failing before the change): Swift Testing +12 (`LittleArktLookupTests`: copy, panel geometry on
+a wide and a narrow screen, off-by-default and Arc's key, runtime-only conflict state, the monitor's off/active/taken/
+failed states, one registration per change, retry after off and on, the press, one state report). ShellKitGUITests +11
+(`LittleArktLookupBarTests`: the File menu item on Cmd-Opt-N after New Window, the tag/placeholder/field label and the
+34 % frame, the tag before the input, Return opening the URL and closing the bar, Esc through the field's delegate,
+a Switch to Tab result, the result's Little Arkt window with its page, two windows cascading, the Links switch off by
+default, the conflict line, the switch writing the setting). ShellKit unit 1158 Swift Testing tests passed (baseline
+1146 + 12). ShellKitGUITests 1025 run (baseline 1012 + 13: 11 `LittleArktLookupBarTests` and the 2 optional
+`LittleArktLookupScreenshotTests`, which skip unless `ARKT_LOOKUP_SHOTS_DIR` is set), 16 skipped, 0 failures, 176 s.
+Debug app build succeeds. ArktCore untouched, not run. XCUITests not run: the new identifiers have no existing flow,
+and the suite drives the real pointer and keyboard while two other issues run GUI suites on this machine.
+
 ## Archive actions: bottom bar menu, Clear unselected, media exemption, Cmd-Shift-K (#110) (2026-10-26)
 
 Audited on `main` before writing code. Already shipped: BH-072 (multi-selection Cmd-W), BH-074 / KB-010 / KB-011
