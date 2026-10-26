@@ -271,7 +271,10 @@ final class AppSession {
 
   // MARK: - Arc import (E4c)
 
-  var canImportFromArc: Bool { isArcImportAvailable && !importer.isRunning }
+  /// Off while a first run covers a window: it runs its own import, and a second one would collide with it.
+  var canImportFromArc: Bool {
+    isArcImportAvailable && !importer.isRunning && !windows.controllers.contains(where: \.isShowingOnboarding)
+  }
 
   /// Re-checks whether Arc's sidebar file exists, off the main actor, unless a check is already running. The menu
   /// validation that calls it returns the cached answer; the fresh one applies from the next validation and updates

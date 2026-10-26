@@ -405,6 +405,24 @@ final class OnboardingTests: XCTestCase {
     window.close()
   }
 
+  func testResumeAfterMakeItYoursEditsTheSpaceItMadeOnBack() throws {
+    let stub = StubSidebar()
+    let made = stub.addSpace(title: "Work", theme: SpaceThemeCatalog.families[3].dark)   // Sage, before the quit
+    let window = makeWindow(stub)
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: false)
+    let onboarding = present(window, services,
+                             resume: OnboardingFlow.Snapshot(step: "default", imported: false, importSkipped: 0))
+    onboarding.performBack()
+    XCTAssertEqual(onboarding.flow.step, .theme)
+    XCTAssertEqual(onboarding.theme?.placeholder, "Work")
+    XCTAssertEqual(onboarding.theme?.selectedTitle, "Sage")
+    onboarding.performPrimary()                                           // Continue
+    XCTAssertEqual(stub.spaceOrder, [made], "the resumed run edits the Space it made")
+    XCTAssertEqual(stub.space(made)?.title, "Work")
+    XCTAssertEqual(stub.space(made)?.theme, SpaceThemeCatalog.families[3].dark)
+    window.close()
+  }
+
   func testReentryEditsTheCurrentSpaceAndReturnsWithoutANewTab() throws {
     let stub = StubSidebar.sample()
     let window = makeWindow(stub)

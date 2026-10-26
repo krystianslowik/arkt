@@ -701,6 +701,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     commandBar.invalidate()
     rootView.sidebarOverlay.invalidate()
     pager.stopInteraction()        // a closed window's views keep their display links
+    onboarding?.windowVisibilityChanged(false)   // a first run closed mid-flow stops its stage's frames
     window?.contentView?.removeToolTipsInSubtree()   // a tool tip shown at the close goes with the window (#301)
   }
 }

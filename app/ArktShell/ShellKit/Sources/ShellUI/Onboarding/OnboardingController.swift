@@ -137,7 +137,13 @@ public final class OnboardingController {
     root.addSubview(view)
     view.layoutSubtreeIfNeeded()                      // the stage builds its first shape from the laid-out views
     hideBrowser(true)
-    if case .imported = flow.importPhase { importedSpaces = Array(window.sidebar.spaceOrder.prefix(1)) }
+    if case .imported = flow.importPhase {
+      importedSpaces = Array(window.sidebar.spaceOrder.prefix(1))
+    } else if options.mode == .firstRun, options.resume != nil {
+      // A run left after Make it yours on the fresh path: the profile's only Space is the one it made (the window's
+      // menus are off during the flow), so a later visit edits it instead of adding another.
+      createdSpace = window.sidebar.spaceOrder.first
+    }
     showStep(animated: false, firstReveal: options.resume == nil)
     window.window?.makeFirstResponder(view)
     Task { [weak self, services] in
@@ -489,6 +495,8 @@ public final class OnboardingController {
       if theme?.swatches.first?.isOwn != true {
         theme = .imported(theme: info.theme, name: info.title, appearance: systemFlavor)
       }
+    } else if theme == nil, let created = createdSpace, let info = window.sidebar.space(created) {
+      theme = .current(theme: info.theme, name: info.title, appearance: systemFlavor)   // resumed: what it was given
     } else if theme == nil || theme?.swatches.first?.isOwn == true {
       theme = .fresh(appearance: systemFlavor, placeholder: "\(ShellWindowController.newSpaceTitle) 1")
     }
