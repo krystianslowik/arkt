@@ -21,8 +21,19 @@ public final class ThemeBackgroundView: WindowDragView {
   private var suppressSnap = false
   private static let crossfadeKey = "themeCrossfade"
 
+  /// Another theme background that shows the same Space theme (the hidden sidebar's overlay backdrop, #102). It
+  /// follows `themes` and `setPosition` and snaps where this one crossfades.
+  weak var mirror: ThemeBackgroundView? {
+    didSet {
+      guard let mirror else { return }
+      mirror.themes = themes
+      mirror.setPosition(position)
+    }
+  }
+
   public var themes: [SpaceThemeInfo] = [] {
     didSet {
+      if let mirror, mirror.themes != themes { mirror.themes = themes }
       guard !suppressSnap else { return }
       cancelCrossfade()
       lowerIndex = -1
@@ -104,6 +115,7 @@ public final class ThemeBackgroundView: WindowDragView {
 
   /// position 1.25 = theme 1 blended 25% toward theme 2. An in-flight theme crossfade stops here.
   public func setPosition(_ newPosition: CGFloat) {
+    mirror?.setPosition(newPosition)
     position = newPosition
     cancelCrossfade()
     guard !themes.isEmpty else { return }

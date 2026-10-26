@@ -130,7 +130,8 @@ enum MainMenu {
     ]
   }
 
-  /// KB-018, BH-032: Cmd-Shift-D (`ShellWindowController.validateMenuItem` titles it Show / Hide Toolbar). Split View
+  /// KB-017, BH-001: Cmd-S and KB-018, BH-032: Cmd-Shift-D (`ShellWindowController.validateMenuItem` titles them
+  /// Show / Hide Sidebar and Show / Hide Toolbar). Split View
   /// (S5): Arc's four View menu items plus a Split View submenu, built by ShellUI's SplitMenu.
   private static func viewItems() -> [NSMenuItem] {
     let developer = submenu(title: "Developer", items: [                                   // KB-049, KB-050
@@ -140,6 +141,7 @@ enum MainMenu {
       page("JavaScript Console", .console, "j", [.command, .option]),
     ])
     return [
+      item("Hide Sidebar", #selector(ShellWindowController.toggleSidebarVisibility(_:)), "s"),
       item("Show Toolbar", #selector(ShellWindowController.toggleToolbar(_:)), "D"),
       .separator(),
     ] + SplitMenu.items() + [

@@ -101,6 +101,7 @@ extension ShellWindowController {
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)
     replay(snapshot, into: node)
+    announceCreation(.tab)                                          // BH-006
   }
 
   /// The first Space, created for an engine tab on a first run (#327). Showing the new, still empty Space runs

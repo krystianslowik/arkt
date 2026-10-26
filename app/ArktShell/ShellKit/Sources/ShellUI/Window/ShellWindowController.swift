@@ -338,6 +338,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     let title = entry.title.isEmpty ? (entry.url.host() ?? entry.url.absoluteString) : entry.title
     do {
       _ = try sidebar.addTab(url: entry.url, title: title, in: .today(space))
+      announceCreation(.tab)                                        // BH-006
     } catch {
       onError?(.addTab, error)
     }
@@ -364,6 +365,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
         if let copySnapshot = engine.snapshot(of: copyTab) { replay(copySnapshot, into: copyNode) }
       }
       activate(node: copyNode)
+      announceCreation(.tab)                                        // BH-006
     } catch {
       onError?(.addTab, error)
     }
@@ -494,6 +496,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
         // New Today tabs go on top (BH-079, decision on #293).
         let node = try sidebar.addTab(url: url, title: url.host() ?? url.absoluteString, in: .today(space), at: 0)
         activate(node: node)
+        announceCreation(.tab)                                      // BH-006
       } catch {
         onError?(.addTab, error)
       }
@@ -649,7 +652,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   private func reapplyTrafficLights() {
-    (window as? ShellWindow)?.layoutTrafficLights(sidebarWidth: rootView.effectiveSidebarWidth)
+    rootView.reapplyTrafficLights()
   }
 
   // AppKit resets the standard buttons on each of these.
@@ -688,17 +691,19 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
     commandBar.invalidate()
+    rootView.sidebarOverlay.invalidate()
     pager.stopInteraction()        // a closed window's views keep their display links
     window?.contentView?.removeToolTipsInSubtree()   // a tool tip shown at the close goes with the window (#301)
   }
 }
 
 extension ShellWindowController: NSMenuItemValidation {
-  /// Titles the Toggle Toolbar item for the current state (KB-018) and validates the Split View items (S5) and Delete
+  /// Titles the Toggle Toolbar and Show / Hide Sidebar items for the current state (KB-018, KB-017) and validates the Split View items (S5) and Delete
   /// Space (#206). Every other item stays enabled, as it was before this controller validated menu items.
   public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     if let enabled = validateSplitMenuItem(menuItem) { return enabled }
     if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
+    if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
     }

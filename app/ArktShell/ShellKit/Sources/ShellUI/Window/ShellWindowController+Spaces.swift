@@ -74,6 +74,8 @@ extension ShellWindowController {
   @objc public func newSpace(_ sender: Any?) {
     guard let space = createSpace() else { return }
     sidebarController.showSpace(space)
+    // A hidden sidebar has no header to type into: the toast says the Space exists instead (BH-006).
+    guard isSidebarVisible else { return announceCreation(.space) }
     page(of: space)?.beginRename()
   }
 

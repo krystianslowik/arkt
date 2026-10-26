@@ -22,6 +22,9 @@ public struct TokenPair: Sendable, Equatable {
 public enum ShellTokens {
   public static let cardBorder = TokenPair(light: .black(0.10), dark: .white(0.20))       // FloatingScrimBorder
   public static let cardShadow = TokenPair(light: .black(0.20), dark: .black(0))           // Shadow
+  /// The hover-revealed sidebar floating over the page (BH-004). Unlike the card it needs a shadow in dark too: its
+  /// edge sits on page content, not on the theme. TODO(measure): RT-10.
+  public static let sidebarOverlayShadow = TokenPair(light: .black(0.22), dark: .black(0.45))
   /// Icon-only (idle page dots, bottom-bar symbols, the hover close X): WCAG non-text 3:1 over every shipped
   /// Space theme and row fill. Raised from Arc's 0.30 / 0.45 (#72); worst cases are the close X on a hovered row
   /// over the sample pink stop (light) and on `tabCurrent` over the Dev theme's light stop (dark).
