@@ -282,19 +282,13 @@ jobs:
           print "$XCODEGEN_SHA256  $dir/xcodegen.zip" | shasum -a 256 -c -
           unzip -q $dir/xcodegen.zip -d $dir
           print "$dir/xcodegen/bin" >> $GITHUB_PATH
+      # Package checkouts only. A DerivedData cache was measured (#431): the Debug build went from 76 s to 45 s, for
+      # 436 MB per commit, which would push the SwiftPM caches out of the repository's 10 GB cache quota.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: app/ArktShell/build/SourcePackages
           key: app-spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/ArktCore/Package.resolved', 'app/ArktShell/ShellKit/Package.resolved') }}
           restore-keys: app-spm-${{ runner.os }}-${{ runner.arch }}-
-      # Experiment: DerivedData without the package checkouts, keyed per commit so it refreshes.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            app/ArktShell/build
-            !app/ArktShell/build/SourcePackages
-          key: app-deriveddata-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktCore/Package.resolved', 'app/ArktShell/ShellKit/Package.resolved') }}-${{ github.sha }}
-          restore-keys: app-deriveddata-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktCore/Package.resolved', 'app/ArktShell/ShellKit/Package.resolved') }}-
       - name: xcodegen generate
         working-directory: app/ArktShell
         run: xcodegen --version && xcodegen generate
