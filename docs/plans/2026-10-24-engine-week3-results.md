@@ -3317,7 +3317,7 @@ the first of three slices (JavaScript dialogs, then permission prompts, then inf
   not exhaustive). With `javaScriptDialogs.refresh()` taken out of `ShellWindowController.setShown`,
   `JavaScriptDialogWindowTests.testSwitchingTabsHidesTheDialogWithoutAnsweringAndShowingTheTabBringsItBack` failed
   (the panel stayed up), then passed.
-- ShellKit `swift test --skip ShellKitGUITests`: 1327 passed (baseline 1300 + 27: 9 `JavaScriptDialogTests`, 5
+- ShellKit `swift test --skip ShellKitGUITests`: 1339 passed after merging `main` at `6c5a9cd` (baseline 1312 + 27: 9 `JavaScriptDialogTests`, 5
   `JavaScriptDialogContentTests`, 6 `ChromiumDialogTests`, 1 `JavaScriptDialogABITests`, 4 contract checks over the two
   scripted orders, 2 in-memory contract checks; the baseline is the total minus the new tests, not a run on `main`).
   ArktCore `swift test`: 429 passed (unchanged).
