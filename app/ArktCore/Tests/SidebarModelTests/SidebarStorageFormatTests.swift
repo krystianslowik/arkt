@@ -83,32 +83,116 @@ struct SidebarStorageFormatTests {
     return try Data(contentsOf: url)
   }
 
-  /// Version 1 has no Space icon. Reading it is the migration: every icon stays nil, and writing it back stores
-  /// version 2. Compared as JSON values, not bytes.
-  @Test func reencodingVersion1FixtureMigratesToVersion2WithoutIcons() throws {
+  /// `json` with every Space theme given the version 3 fields as the migration fills them: `noiseFactor` 0.5 with a
+  /// texture and 0 without, `opacity` 1.
+  static func addingMigratedThemeFields(_ json: [String: Any]) throws -> [String: Any] {
+    var json = json
+    var spaces = try #require(json["spaces"] as? [[String: Any]])
+    for index in spaces.indices {
+      var space = try #require(spaces[index]["space"] as? [String: Any])
+      guard var theme = space["theme"] as? [String: Any] else { continue }
+      theme["noiseFactor"] = theme["texture"] == nil ? 0 : 0.5
+      theme["opacity"] = 1
+      space["theme"] = theme
+      spaces[index]["space"] = space
+    }
+    json["spaces"] = spaces
+    return json
+  }
+
+  /// Version 1 has no Space icon and no theme `noiseFactor` or `opacity`. Reading it is the migration: every icon
+  /// stays nil, themes take the version 3 defaults, and writing it back stores version 3. Compared as JSON values,
+  /// not bytes.
+  @Test func reencodingVersion1FixtureMigratesToTheCurrentVersion() throws {
     let fixture = try Self.fixtureData()
     let sidebar = try SidebarStorageFormat.decode(fixture)
     #expect(sidebar.spaces.values.allSatisfy { $0.icon == nil })
     let reencoded = try SidebarStorageFormat.encode(sidebar)
-    var expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+    var expected = try Self.addingMigratedThemeFields(
+      try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any]))
     expected["version"] = SidebarStorageFormat.currentVersion
     let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
-    #expect(SidebarStorageFormat.currentVersion == 2)
+    #expect(SidebarStorageFormat.currentVersion == 3)
     #expect(actual == (expected as NSDictionary))
   }
 
-  /// Golden test: decoding and re-encoding the frozen v2 fixture reproduces it (compared as JSON values, not bytes).
-  @Test func reencodingVersion2FixtureReproducesIt() throws {
+  /// Version 2 themes have no `noiseFactor` or `opacity`. The migration keeps them as they drew: a textured theme at
+  /// the 0.5 the bridge used to supply, an untextured one at 0, both fully opaque. Icons are kept.
+  @Test func reencodingVersion2FixtureMigratesToTheCurrentVersion() throws {
     let fixture = try Self.fixtureData(version: "sidebar-v2")
     let sidebar = try SidebarStorageFormat.decode(fixture)
     let alpha = try #require(UUID(uuidString: "D1000000-0000-4000-8000-0000000000A1"))
     #expect(sidebar.spaces[alpha]?.icon == .symbol("star"))
+    #expect(sidebar.spaces[alpha]?.theme?.noiseFactor == 0.5)
+    #expect(sidebar.spaces[alpha]?.theme?.opacity == 1)
     let beta = try #require(UUID(uuidString: "D1000000-0000-4000-8000-0000000000B1"))
     #expect(sidebar.spaces[beta]?.icon == .emoji("\u{1F680}"))
+    let reencoded = try SidebarStorageFormat.encode(sidebar)
+    var expected = try Self.addingMigratedThemeFields(
+      try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any]))
+    expected["version"] = SidebarStorageFormat.currentVersion
+    let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
+    #expect(actual == (expected as NSDictionary))
+  }
+
+  /// Golden test: decoding and re-encoding the frozen v3 fixture reproduces it (compared as JSON values, not bytes),
+  /// including a theme's `noiseFactor` and `opacity`.
+  @Test func reencodingVersion3FixtureReproducesIt() throws {
+    let fixture = try Self.fixtureData(version: "sidebar-v3")
+    let sidebar = try SidebarStorageFormat.decode(fixture)
+    let alpha = try #require(UUID(uuidString: "D1000000-0000-4000-8000-0000000000A1"))
+    let theme = try #require(sidebar.spaces[alpha]?.theme)
+    #expect(theme.noiseFactor == 0.35)
+    #expect(theme.opacity == 0.8)
+    #expect(sidebar.spaces[alpha]?.icon == .symbol("star"))
     let reencoded = try SidebarStorageFormat.encode(sidebar)
     let expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? NSDictionary)
     let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
     #expect(actual == expected)
+  }
+
+  /// Version 3 always writes both theme fields, so a version 3 theme without them is not a version 3 document.
+  @Test(arguments: ["noiseFactor", "opacity"])
+  func version3ThemeWithoutANewFieldFailsToDecode(field: String) throws {
+    var json = try #require(
+      try JSONSerialization.jsonObject(with: Self.fixtureData(version: "sidebar-v3")) as? [String: Any])
+    var spaces = try #require(json["spaces"] as? [[String: Any]])
+    var space = try #require(spaces[0]["space"] as? [String: Any])
+    var theme = try #require(space["theme"] as? [String: Any])
+    theme[field] = nil
+    space["theme"] = theme
+    spaces[0]["space"] = space
+    json["spaces"] = spaces
+    let data = try JSONSerialization.data(withJSONObject: json)
+    #expect(throws: DecodingError.self) { try SidebarStorageFormat.decode(data) }
+  }
+
+  /// A `noiseFactor` or `opacity` key inside a version 2 theme is not part of version 2 and is ignored.
+  @Test func version2DocumentIgnoresTheVersion3ThemeKeys() throws {
+    var json = try #require(
+      try JSONSerialization.jsonObject(with: Self.fixtureData(version: "sidebar-v3")) as? [String: Any])
+    json["version"] = 2
+    let sidebar = try SidebarStorageFormat.decode(try JSONSerialization.data(withJSONObject: json))
+    let plain = try SidebarStorageFormat.decode(Self.fixtureData(version: "sidebar-v2"))
+    #expect(sidebar == plain)
+  }
+
+  /// The theme initializer's defaults are the migration's: 0.5 with a texture, 0 without, opacity 1.
+  @Test func spaceThemeDefaultsMatchTheMigration() {
+    #expect(SpaceTheme(baseColors: [], texture: "sand").noiseFactor == 0.5)
+    #expect(SpaceTheme(baseColors: []).noiseFactor == 0)
+    #expect(SpaceTheme(baseColors: []).opacity == 1)
+    let custom = SpaceTheme(baseColors: [], texture: nil, noiseFactor: 0.4, opacity: 0.8)
+    #expect(custom.noiseFactor == 0.4 && custom.opacity == 0.8)
+  }
+
+  /// A theme's new fields round-trip through the current format.
+  @Test func noiseFactorAndOpacityRoundTrip() throws {
+    var sidebar = Sidebar()
+    let theme = SpaceTheme(baseColors: [RGBA(red: 0.1, green: 0.2, blue: 0.3)], texture: "tweed", noiseFactor: 0.25,
+                           opacity: 0.6, isDark: false)
+    let id = sidebar.addSpace(title: "Studio", theme: theme)
+    #expect(try Self.roundTrip(sidebar).spaces[id]?.theme == theme)
   }
 
   /// The stored icon shape is explicit and tagged, like `NodeKind`: one key names the case, one holds its value.

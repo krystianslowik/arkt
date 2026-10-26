@@ -16,6 +16,10 @@ final class AppCommands: NSObject {
   /// File > New Window (Cmd-N, KB-005): a window on the same Spaces, without a page until the user picks one.
   @objc func newWindow(_ sender: Any?) { session?.windows.openWindow(opensFirstTab: false) }
 
+  /// File > New Little Arkt Window (Cmd-Opt-N, KB-044): the quick lookup bar; Return opens the result in a new Little
+  /// Arkt window. The same bar as the system-wide hotkey (KB-045).
+  @objc func newLittleArktWindow(_ sender: Any?) { session?.showLittleArktLookup() }
+
   /// Arkt Shell > Settings... (Cmd-, KB-066): opens the Settings window, or brings it forward (#307).
   @objc func showSettings(_ sender: Any?) { session?.showSettings() }
 

@@ -102,6 +102,7 @@ extension SettingsWindowController {
       section("Links", [
         row(PeekLinkCopy.crossSite, PeekLinkCopy.crossSiteNote, [crossSite]),
         row(PeekLinkCopy.shiftClick, nil, [shift]),
+        littleArktLookupRow(),                     // #354
       ]),
       section("Updates", [
         // Decision 6: shown disabled and off until the release work (#128).

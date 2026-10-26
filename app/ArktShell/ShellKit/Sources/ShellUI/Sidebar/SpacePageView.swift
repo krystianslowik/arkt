@@ -55,6 +55,9 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   /// Header tool tips installed so far (for tests: a layout that changes nothing installs none).
   private(set) var headerToolTipInstallsForTesting = 0
   static let reorderToolTip = "Drag to Reorder Space"
+  /// Theme > Edit Theme... (#410): the sidebar opens the theme creator anchored to this page's title.
+  public var onEditTheme: (@MainActor (SpacePageView) -> Void)?
+  static let editThemeItemTitle = "Edit Theme\u{2026}"
   /// The press in the header, from mouse down to mouse up.
   private var headerPress: HeaderPress?
   /// How far the title is drawn from its resting place while it follows a header drag or springs back.
@@ -484,8 +487,16 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
       item.state = SpaceThemeCatalog.isCurrent(choice, for: current) ? .on : .off
       menu.addItem(item)
     }
+    menu.addItem(.separator())
+    let edit = NSMenuItem(title: Self.editThemeItemTitle, action: #selector(editTheme(_:)), keyEquivalent: "")
+    edit.target = self
+    edit.isEnabled = onEditTheme != nil
+    menu.addItem(edit)
     return menu
   }
+
+  /// Theme > Edit Theme...: opens the theme creator (#410).
+  @objc func editTheme(_ sender: Any?) { onEditTheme?(self) }
 
   @objc func pickIcon(_ sender: NSMenuItem) {
     guard SpaceIconCatalog.choices.indices.contains(sender.tag) else { return }

@@ -148,6 +148,44 @@ struct SpaceEditingContractTests {
     #expect(fixture.changes.count == 4)
   }
 
+  /// The theme creator (#410) writes a texture strength and an opacity; both are stored and read back, and an
+  /// untextured theme keeps its strength for when a texture is chosen again.
+  @Test(arguments: SourceKind.allCases)
+  func noiseFactorAndOpacityRoundTrip(kind: SourceKind) throws {
+    let fixture = try Fixture(kind)
+    let id = fixture.ids[0]
+    let created = SpaceThemeInfo(baseColors: [.srgb(hex: 0x264A7A), .srgb(hex: 0xD69A6E)], texture: "sand",
+                                 noiseFactor: 0.4, opacity: 0.8, isDark: true)
+    fixture.source.setTheme(id, to: created)
+    #expect(fixture.source.space(id)?.theme == created)
+    var untextured = created
+    untextured.texture = nil
+    fixture.source.setTheme(id, to: untextured)
+    #expect(fixture.source.space(id)?.theme == untextured)
+    #expect(fixture.source.space(id)?.theme.noiseFactor == 0.4)
+  }
+
+  /// The bridge stores both fields in the model and no longer supplies a fixed 0.5.
+  @Test func theModelKeepsTheCreatorsFields() throws {
+    let source = ModelSidebarSource()
+    let id = try source.addSpace(title: "A")
+    source.setTheme(id, to: SpaceThemeInfo(baseColors: [.srgb(hex: 0x264A7A)], texture: "grain", noiseFactor: 0.15,
+                                           opacity: 0.6, isDark: true))
+    let stored = try #require(source.sidebar.spaces[id]?.theme)
+    #expect(stored.noiseFactor == 0.15 && stored.opacity == 0.6)
+  }
+
+  /// A theme saved before the fields existed reads back as it drew: 0.5 with a texture, opacity 1.
+  @Test func aMigratedThemeReadsBackAsItDrew() throws {
+    let source = ModelSidebarSource()
+    let id = try source.addSpace(title: "A")
+    source.mutate { $0.setTheme(id, to: SidebarModel.SpaceTheme(baseColors: [SidebarModel.RGBA(red: 0.2, green: 0.4,
+                                                                                                  blue: 0.6)],
+                                                                texture: "grain", isDark: true)) }
+    let theme = try #require(source.space(id)?.theme)
+    #expect(theme.noiseFactor == 0.5 && theme.opacity == 1)
+  }
+
   /// D2 on #279: "Default" clears the Space's theme; the Space then draws the source's default and says so.
   @Test(arguments: SourceKind.allCases)
   func setThemeToNilGoesBackToTheDefaultTheme(kind: SourceKind) throws {

@@ -148,12 +148,16 @@ def is_run:
   .nodeType == "Test Case Run" or .nodeType == "Repetition";
 def has_run_below:
   [ .children[]? | walk_objects | select(is_run) ] | length > 0;
-# Skip and expected-failure reasons only. xcresulttool (Xcode 26.6, CI) gives an "Expected Failure" test one
-# "Failure Message" node per matched XCTExpectFailure, named by its reason ("... (#269)"); a skip reason is taken the
-# same way. The failure text of a failed test is never a reason.
+# Skip and expected-failure reasons only. The node type differs by Xcode: a skip reason is a "Failure Message" node in
+# Xcode 26.6 (CI) and a "Skip Message" node in Xcode 27.1 (local). An "Expected Failure" test gets one "Failure
+# Message" node per matched XCTExpectFailure, named by its reason ("... (#269)"). The failure text of a failed test is
+# never a reason.
 def reasons_in($result):
   [ walk_objects
-    | select(($result == "Skipped" or $result == "Expected Failure") and .nodeType == "Failure Message")
+    | select(
+        ($result == "Skipped" and (.nodeType == "Failure Message" or .nodeType == "Skip Message"))
+        or ($result == "Expected Failure" and .nodeType == "Failure Message")
+      )
     | (.name // empty), (.details // empty)
   ];
 if type != "object" or (.testNodes | type? != "array") then
