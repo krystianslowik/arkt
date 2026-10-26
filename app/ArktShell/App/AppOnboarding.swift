@@ -145,12 +145,8 @@ extension AppSession {
   }
 
   /// A link from another app (FakeEngine; the Chromium engine opens them itself): a new Today tab in the primary
-  /// window.
+  /// window. The routing is `ShellWindowSet.openFromOtherApp`, which the ShellKit tests drive.
   func openFromOtherApp(_ urls: [URL]) {
-    let window = windows.primary ?? windows.openWindow()
-    window.showWindow(nil)
-    for url in urls where ["http", "https"].contains(url.scheme?.lowercased() ?? "") || url.isFileURL {
-      window.openFromOtherApp(url)
-    }
+    windows.openFromOtherApp(urls)
   }
 }
