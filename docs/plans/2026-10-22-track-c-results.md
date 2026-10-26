@@ -2203,6 +2203,15 @@ the first red. With the implementation in place they pass:
   after a layout's unpark and left the page at the old slot; remembering only a sync's unpark fixes it.
 - `testAHitTestMidSettleFindsTheViewShownUnderThePoint` and `testAPointerMoveMidSettleSyncsTheStripFrame` now assert
   a frame within a backing pixel (and pixel alignment) instead of exact equality with the fractional offset.
+- The row check #415 wrote required every realized row title to be drawn. On the macOS 26 CI runner the window lays
+  out shorter, so Work's last row (`Preview`, row 10) is realized as a sliver at the bottom of the scroll view: only
+  the top few points of the row are inside the clip and the vertically centered title is wholly below it, so AppKit
+  draws no title. That is right, but the check read it as a title-drawing regression. PR #423's first GUI run failed
+  203 assertions in `SpaceSwitchTextTests` (4 of its 5 tests), all `Work row 10 title is drawn`; #422's rerun failed
+  the same check 201 times. Reproduced locally by shrinking the window content to 670-700 pt, where `Preview` is the
+  sliver. #422 fixed the helper at `8862847` (skip a title outside the scroll view's own clip); #295 rebased onto it
+  and dropped its identical local fix. A page the pager shifted out of its geometry still fails the check for every
+  row, which is what it is for.
 
 ### Verification
 
