@@ -313,6 +313,33 @@ final class SidebarDragDropTests: XCTestCase {
     XCTAssertTrue(outline.isFolderOpen(world.folder))
   }
 
+  /// A cancelled drag restores the page: a folder the drag sprang open closes again. One the drop lands in stays open.
+  func testACancelledDragClosesTheFolderItSprangOpen() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let outline = try harness.outline()
+    outline.toggleFolder(world.folder, animated: false)
+    let drop = try harness.drop()
+    let point = try harness.point(world.folder, y: 0.5)
+    drop.update(at: point, payload: harness.payload([world.today[0]]))
+    harness.motionTime += FolderSpringLoad.dwell + 0.01
+    drop.update(at: point, payload: harness.payload([world.today[0]]))
+    XCTAssertTrue(outline.isFolderOpen(world.folder))
+    drop.exit()
+    XCTAssertFalse(outline.isFolderOpen(world.folder), "the cancel closes it again")
+
+    drop.update(at: point, payload: harness.payload([world.today[0]]))
+    harness.motionTime += FolderSpringLoad.dwell + 0.01
+    drop.update(at: point, payload: harness.payload([world.today[0]]))
+    XCTAssertTrue(outline.isFolderOpen(world.folder))
+    let inside = try harness.point(world.foldered, y: 0.9)
+    XCTAssertTrue(drop.perform(payload: harness.payload([world.today[0]]), at: inside, duplicate: false,
+                               fromOtherWindow: false))
+    drop.exit()                                                    // the session's end after the drop
+    XCTAssertEqual(harness.source.children(of: .folder(world.folder)), [world.foldered, world.today[0]])
+    XCTAssertTrue(outline.isFolderOpen(world.folder), "the folder the drop landed in stays open")
+  }
+
   func testAMovedFolderKeepsItsClosedState() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
@@ -335,6 +362,19 @@ final class SidebarDragDropTests: XCTestCase {
     }
     XCTAssertEqual(harness.source.children(of: .split(split)), [world.today[2], world.today[0]])
     XCTAssertEqual(harness.controller.sidebarController.current, world.today[2], "the dropped tab is shown")
+  }
+
+  /// The stale-URL bug class through a Split View drop: a navigated pin dropped on a Today tab's half joins a split
+  /// in Today, so it is a Today tab from then on and stores the page it shows, not its pinned URL.
+  func testANavigatedPinDroppedOnATodayTabsHalfStoresItsLiveURL() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    try harness.navigate(world.pinned[0], to: "p0/elsewhere")
+    harness.clock.date = Self.start.addingTimeInterval(60)
+    XCTAssertTrue(try harness.drag([world.pinned[0]], to: harness.point(world.today[0], y: 0.5, x: 0.8)))
+    XCTAssertEqual(harness.source.section(containing: world.pinned[0]), .today(world.space))
+    XCTAssertEqual(harness.tab(world.pinned[0])?.url, Self.url("p0/elsewhere"), "no stale pinned URL saved")
+    XCTAssertEqual(harness.tab(world.pinned[0])?.lastActiveAt, harness.clock.date)
   }
 
   func testAPaneDraggedOutLeavesNoOnePaneSplit() throws {
@@ -500,6 +540,27 @@ final class SidebarDragDropTests: XCTestCase {
     harness.motionTime += 2
     drop.update(at: point, payload: harness.payload([world.today[0]]))
     XCTAssertEqual(abs(try XCTUnwrap(rowView.layer).sublayerTransform.m42), SidebarMetrics.rowPitch, accuracy: 0.01)
+  }
+
+  /// The drop-target bug class: hit-testing follows the rows where they are shown. With a gap open, pointing at the
+  /// line keeps the target, and pointing at a shifted row acts on that row, not on the one laid out under it.
+  func testHitTestingFollowsTheShiftedRows() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    let payload = harness.payload([world.today[0]])
+    let target = drop.update(at: try harness.point(world.today[1], y: 0.1), payload: payload)
+    harness.motionTime += 2
+    drop.preview.tick(at: harness.motionTime)
+    let x = try harness.point(world.today[1], y: 0.5).x
+    XCTAssertEqual(drop.update(at: NSPoint(x: x, y: drop.preview.indicatorY), payload: payload), target,
+                   "pointing at the line keeps the gap")
+
+    let shown = try harness.point(world.today[1], y: 0.5, x: 0.8)
+    let shifted = NSPoint(x: shown.x, y: shown.y + SidebarMetrics.rowPitch)
+    XCTAssertEqual(drop.update(at: shifted, payload: payload),
+                   .split(target: world.today[1], before: false, row: try harness.row(world.today[1])),
+                   "the middle of the shifted row is that row")
   }
 
   func testReduceMotionShowsTheIndicatorWithoutMovingRows() throws {

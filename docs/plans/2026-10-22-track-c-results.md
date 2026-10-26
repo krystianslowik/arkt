@@ -1593,3 +1593,11 @@ Tests (rebased on main with #367 and #368): ArktCore 423 (405 + 18). ShellKit un
 839 run (806 + 33), 8 skipped; 1 failure, the load-dependent Space pager frame-time gate
 (`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) at load 5 to 7. Debug app build succeeds; the app
 was launched with throwaway directories. UI tests (XCUITest) not run here.
+
+Review fixes (each with a GUI test): hit-testing follows the rows where the open gap shows them (a point in the gap
+keeps the target, a point below it moves up one row pitch), so pointing at the line no longer turns the drop into a
+Split View on the row laid out under it. A pin dropped on a Today tab's half joins a Today split through
+`didEnterToday` (live URL, restarted idle clock), as a move does. A cancelled drag closes the folders it sprang
+open; a drop keeps open the folders it lands in. A navigated pin dropped in another window's Today was checked to
+store its live URL. Follow-up: move `DropGapSprings` into `Motion` and give `SpringField` (#109) its envelope
+settling, so one spring type serves both.

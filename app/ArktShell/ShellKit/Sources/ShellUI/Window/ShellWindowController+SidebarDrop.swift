@@ -88,12 +88,16 @@ extension ShellWindowController {
       activate(node: node)
       return true
     }
-    do {
-      try sidebar.addToSplit(.existing(node), target: target, at: index, orientation: .horizontal)
-    } catch {
-      onError?(.addPane, error)
-      return false
+    let joined = enteringToday([node]) {             // a pin joining a Today split becomes a Today tab
+      do {
+        try sidebar.addToSplit(.existing(node), target: target, at: index, orientation: .horizontal)
+        return true
+      } catch {
+        onError?(.addPane, error)
+        return false
+      }
     }
+    guard joined else { return false }
     activate(node: node)
     return true
   }

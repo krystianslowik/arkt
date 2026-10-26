@@ -39,14 +39,23 @@ extension ShellWindowController {
   /// Every node arriving in Today from another section goes through `didEnterToday(_:)`, as one moved alone does.
   @discardableResult
   func move(_ nodes: [NodeID], to location: SidebarLocation, at index: Int) -> Bool {
-    let entering = Self.isToday(location) ? nodes.filter { !Self.isToday(sidebar.section(containing: $0)) } : []
-    do {
-      try sidebar.moveNodes(nodes, to: location, at: index)
-    } catch {
-      onError?(.moveNode, error)
-      return false
+    enteringToday(nodes) {
+      do {
+        try sidebar.moveNodes(nodes, to: location, at: index)
+        return true
+      } catch {
+        onError?(.moveNode, error)
+        return false
+      }
     }
-    for node in entering { didEnterToday(node) }
+  }
+
+  /// Runs `write`, then sends each of `nodes` that it brought into Today from another section, directly or inside a
+  /// folder or a split, through `didEnterToday(_:)`. Returns what `write` returns.
+  func enteringToday(_ nodes: [NodeID], _ write: () -> Bool) -> Bool {
+    let outside = nodes.filter { !Self.isToday(sidebar.section(containing: $0)) }
+    guard write() else { return false }
+    for node in outside where Self.isToday(sidebar.section(containing: node)) { didEnterToday(node) }
     return true
   }
 

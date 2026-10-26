@@ -63,6 +63,8 @@ public final class SidebarOutlineDrop {
   /// The rows as the resolver sees them, read once per hover: a drag changes no row until it drops.
   private var rows: [SidebarDropRow]?
   private var lastTarget: SidebarDropTarget?
+  /// Folders this drag opened by resting on them: a cancel closes them again, a drop keeps open the ones it lands in.
+  private var springOpened: [NodeID] = []
 
   init(controller: SidebarOutlineController) {
     self.controller = controller
@@ -94,18 +96,46 @@ public final class SidebarOutlineDrop {
     if case .folder(let folder, _)? = target, !controller.isFolderOpen(folder) { closed = folder }
     guard let folder = springLoad.update(closedFolder: closed, at: t) else { return }
     controller.toggleFolder(folder, animated: true)
+    springOpened.append(folder)
     rows = nil
     lastTarget = nil
     preview.show(nil, at: t)
   }
 
-  /// The drag left this outline or was cancelled over it: the rows spring back.
+  /// The drag left this outline or was cancelled over it: the rows spring back, and the folders it opened close.
   public func exit() {
     rows = nil
     lastTarget = nil
     dwell.reset()
     springLoad.reset()
-    preview.clear(dropped: false, at: now())
+    // Closing a folder changes which row is where, so the rows drop their shifts at once and the folder's own
+    // close animation is the motion.
+    let closedFolder = closeSpringOpenedFolders(keeping: [])
+    preview.clear(dropped: closedFolder, at: now())
+  }
+
+  /// Closes the folders this drag opened, except `keep`; true when one closed.
+  private func closeSpringOpenedFolders(keeping keep: Set<NodeID>) -> Bool {
+    let closing = springOpened.filter { !keep.contains($0) && controller.isFolderOpen($0) }
+    springOpened = []
+    for folder in closing.reversed() { controller.toggleFolder(folder, animated: true) }
+    return !closing.isEmpty
+  }
+
+  /// The folders a drop at `target` lands in, the innermost first and every folder above it.
+  private func folders(holding target: SidebarDropTarget?) -> Set<NodeID> {
+    var location: SidebarLocation?
+    switch target {
+    case .insert(let at, _, _, _)?: location = at
+    case .folder(let folder, _)?: location = .folder(folder)
+    case .split(let node, _, _)?: location = controller.source.parent(of: node)
+    case nil: location = nil
+    }
+    var found: Set<NodeID> = []
+    while let container = location?.containerNode, found.insert(container).inserted {
+      location = controller.source.parent(of: container)
+    }
+    return found
   }
 
   /// Drops `payload` at `point`: the window performs it. The preview closes at once either way.
@@ -114,6 +144,7 @@ public final class SidebarOutlineDrop {
     -> Bool {
     rows = nil                                        // read fresh: the source may have changed during the drag
     let target = resolve(at: point, payload: payload)
+    _ = closeSpringOpenedFolders(keeping: folders(holding: target))
     endHover(dropped: true)
     guard let target else { return false }
     return onDrop?(SidebarDropRequest(nodes: payload.nodes, target: target, duplicate: duplicate,
@@ -125,6 +156,7 @@ public final class SidebarOutlineDrop {
   public func performText(_ text: String, at point: NSPoint) -> Bool {
     rows = nil
     let target = resolve(at: point, payload: SidebarDragPayload(nodes: [], isSingleTab: false))
+    _ = closeSpringOpenedFolders(keeping: folders(holding: target))
     endHover(dropped: true)
     guard let url = SidebarTextDrop.url(for: text) else { return false }
     let placement = SidebarTextDrop.location(for: target, space: controller.spaceID)
@@ -143,6 +175,7 @@ public final class SidebarOutlineDrop {
   private func resolve(at point: NSPoint, payload: SidebarDragPayload) -> SidebarDropTarget? {
     let rows = self.rows ?? displayedRows()
     self.rows = rows
+    guard let point = laidOutPoint(forShown: point) else { return lastTarget }
     let row = outline.row(at: point)
     var fractionY: CGFloat = 0
     var fractionX: CGFloat = 0
@@ -156,6 +189,19 @@ public final class SidebarOutlineDrop {
     return SidebarDropResolver.target(
       rows: rows, row: row >= 0 ? row : nil, fractionY: fractionY, fractionX: fractionX, payload: payload,
       space: controller.spaceID, todayCount: controller.source.children(of: .today(controller.spaceID)).count)
+  }
+
+  /// Where `point`, over the rows as they are shown, falls in the outline's layout. An open gap shows every row from
+  /// its row on one pitch lower (the settled preview, so the answer does not depend on the spring's frame): a point
+  /// in the gap is nil, which keeps the current target, and a point below it moves up one pitch.
+  private func laidOutPoint(forShown point: NSPoint) -> NSPoint? {
+    guard case .insert(_, _, let gapRow, _)? = lastTarget, !reduceMotion(), gapRow >= 0,
+          gapRow < outline.numberOfRows else { return point }
+    let gapTop = outline.rect(ofRow: gapRow).minY
+    let pitch = SidebarMetrics.rowPitch
+    if point.y < gapTop { return point }
+    if point.y < gapTop + pitch { return nil }
+    return NSPoint(x: point.x, y: point.y - pitch)
   }
 
   /// Every displayed row, described from the source.

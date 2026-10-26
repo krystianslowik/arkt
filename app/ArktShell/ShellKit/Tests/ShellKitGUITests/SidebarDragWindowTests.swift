@@ -102,4 +102,28 @@ final class SidebarDragWindowTests: XCTestCase {
     XCTAssertEqual(engine.tabIDs, tabsBefore)
     XCTAssertNotNil(first.handoffPlaceholder, "the window the page left shows the placeholder")
   }
+
+  /// The stale-URL bug class across windows: a navigated pin live in one window, dropped in another window's Today,
+  /// stores the page it shows. Its live page was in the other window when the drop landed.
+  func testANavigatedPinDroppedInAnotherWindowsTodayStoresItsLiveURL() throws {
+    let (set, engine, source, world) = try makeSet()
+    let first = set.openWindow(opensFirstTab: false)
+    let second = set.openWindow(opensFirstTab: false)
+    first.activate(node: world.pinned)
+    let tab = try XCTUnwrap(first.engineTab(of: world.pinned))
+    engine.navigate(tab, to: EngineWorld.url("p/elsewhere"))
+
+    let drop = try drop(of: second)
+    let outline = try XCTUnwrap(second.sidebarController.currentPage?.outlineController)
+    let rect = outline.outlineView.rect(ofRow: outline.row(for: world.today[0]))
+    let point = NSPoint(x: rect.midX, y: rect.minY + rect.height * 0.1)
+    let payload = SidebarDragPayload(nodes: [world.pinned], isSingleTab: true)
+    drop.update(at: point, payload: payload)
+    XCTAssertTrue(drop.perform(payload: payload, at: point, duplicate: false, fromOtherWindow: true))
+
+    XCTAssertEqual(source.children(of: .today(world.space)).first, world.pinned)
+    guard case .tab(_, let url, _)? = source.node(world.pinned) else { return XCTFail("not a tab") }
+    XCTAssertEqual(url, EngineWorld.url("p/elsewhere"), "no stale pinned URL saved")
+    XCTAssertEqual(second.engineTab(of: world.pinned), tab, "the page moved over")
+  }
 }
