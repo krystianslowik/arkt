@@ -2147,3 +2147,98 @@ text is now drawn on that frame); `SpacePagerTests.testFramePacingDuringSwipeAnd
 NOT-MEASURABLE (load average 23 on 10 cores). The Debug app's scripted smoke (`-ArktSmoke YES -ArktSmokeRepeat 3`)
 passes functionally, and window captures through every swipe and key switch show the titles on both pages, where
 they were missing before. Debug app build succeeds.
+
+## Space swipe follow-ups (#295) (2026-10-26)
+
+Follow-up to #24 (fixed in #282): the four review notes from #282 and the two #24 acceptance runs. This section is
+appended at the end rather than inside the #24 section because the file is shared with other open results sections
+(#322, and #415 before this one); #24's numbers above are unchanged.
+
+### Changes
+
+- **Pointer-move sync rate limit.** `SpacePagerView.mouseMoved(with:)` used to call `syncStripFrame()` on the first
+  pointer move after every presented frame of a settle: a `setFrameOrigin`, a tracking-area rebuild and the
+  window-server pointer query behind the hover resync, the per-frame path #24 removed. The first move of a settle or
+  swipe still syncs; after that at most one move per `pointerSyncFrameInterval` (3) presented motion frames syncs,
+  about 25 ms at 120 Hz. A hit test never waits (a click or gesture start must find the view drawn under the point),
+  and a backing change and the settle-at-rest sync are unchanged. At rest the settle's sync already put the exact
+  frame in place, so a pointer move there does no work.
+- **Pixel alignment after a mid-motion sync.** `syncStripFrame()` rounds the strip frame origin to whole backing
+  pixels while tracking or settling. Before, a sync mid-motion left a fractional origin and every later translation
+  was rounded relative to it, so the strip stayed off the pixel grid for the rest of the motion (#282 review). At
+  rest the exact offset is kept.
+- **Probe deinit.** `MainThreadBusyProbe` has an `isolated deinit` that stops a still-running probe, so its run loop
+  observer is invalidated when the probe is freed while running.
+- **CPU gate through `PacingEnvironment`.** `PacingEnvironment.skipIfScreenBelow120Hz(fps:)` is the screen-only gate
+  for tests that measure thread CPU time. `SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU`
+  uses it instead of the raw `XCTSkip` and no longer skips on load; the wall-clock pacing tests keep the screen-and-
+  load gate.
+
+### Tests
+
+Written first; against the old code they did not compile (they use the new test hooks and the new helper), which was
+the first red. With the implementation in place they pass:
+
+- `SpaceSwipeHitchTests.testAPointerMovingEveryFrameMidSettleSyncsAtMostOncePerFewFrames` (GUI): the first pointer
+  move of a settle syncs; moves on the next two presented frames do not; the third syncs; at rest a move does not
+  sync and the frame is the exact page offset.
+- `SpaceSwipeHitchTests.testASyncMidMotionRoundsTheStripFrameToBackingPixels` (GUI): a tracked offset of -100.3 pt
+  (fractional at 2x) syncs to a frame origin on a whole backing pixel, and the next translation stays on whole
+  pixels.
+- `MainThreadBusyProbeTests.freeingARunningProbeRemovesItsObserver` (unit): `CFRunLoopContainsObserver` is false
+  after a running probe is released.
+- `SpaceSwipeHitchTests.testScreenOnlyPacingGateIgnoresLoad` (GUI): 60 Hz is NOT-MEASURABLE, 120 Hz is measurable,
+  and the helper has no load term.
+- `testAHitTestMidSettleFindsTheViewShownUnderThePoint` and `testAPointerMoveMidSettleSyncsTheStripFrame` now assert
+  a frame within a backing pixel (and pixel alignment) instead of exact equality with the fractional offset.
+
+### Verification
+
+- `cd app/ArktShell/ShellKit && nice -n 10 swift test --filter ShellKitGUITests`: 1015 tests executed, 14 skipped,
+  0 failures (166 s). Skips: 4 NOT-MEASURABLE under load 50-76 on 12 cores (`ParticleFieldTests.testFrameBudgetAt2x`,
+  `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`, `SidebarHideTests.testRevealPacing`,
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`), 7 `FakeEngineContractTests` cases the harness has no
+  driver for, and 3 `AlertScreenshotTests` that need `ARKT_ALERT_SHOTS_DIR`. The CPU gate did not skip: it ran at
+  load 165.78 and passed, worst non-flavor pass 1.73 ms, the two light/dark flavor legs reported but not gated
+  (#275), as before.
+- `cd app/ArktShell/ShellKit && nice -n 10 swift test --skip ShellKitGUITests`: Swift Testing 1147 tests, 0 failures;
+  XCTest 0. This includes the new probe test (baseline +1).
+- `cd app/ArktCore && nice -n 10 swift test`: 423 tests, 0 failures.
+- `cd app/ArktShell && xcodegen generate && nice -n 10 xcodebuild -project ArktShell.xcodeproj -scheme ArktShell
+  -configuration Debug -derivedDataPath build build`: BUILD SUCCEEDED.
+- Profile build for the acceptance runs: the same `xcodebuild` with `-configuration Profile` failed in `CodeSign`
+  with `resource fork, Finder information, or similar detritus not allowed`. The worktree is on an iCloud-synced
+  Desktop and FileProvider re-adds `com.apple.FinderInfo` to the freshly copied `.bundle` directories as codesign
+  walks them (the Debug product kept its old signature and did not hit it). Workaround for the runs below: `ditto`
+  the product to the local temp directory, `xattr -cr` it there, ad-hoc `codesign --force --deep --sign -`, and run
+  that copy. No source or project change was needed.
+
+### Acceptance: WindowServer trace (#24 criterion 1)
+
+- Machine: MacBook Pro (M4 Pro, 12 cores), built-in display reporting 240 Hz, macOS 27.0.1. No Chromium build was
+  running (`pgrep -fl 'chromium|ninja'` empty). Load was not idle: load1 39.48 at trace start, 65.69 when the app
+  exited.
+- Command: `xcrun xctrace record --template 'Animation Hitches' --all-processes --time-limit 14s --window 12s
+  --no-prompt --output c1-all.trace`, recording from 14:51:14.733 to 14:51:29.759 (15.03 s). The app
+  (`ArktShell -ArktSmoke YES -ArktSmokeRepeat 3`, pid 97800) ran from 14:51:14.251 to 14:51:24, so the trace covers
+  the whole smoke. `xctrace` 16.0 makes `--attach` and `--all-processes` mutually exclusive, so the trace was started
+  machine-wide before the app instead of attached; the trace's target is `<all-processes/>`.
+- Export: `xcrun xctrace export --input c1-all.trace --xpath
+  '/trace-toc/run[@number="1"]/data/table[@schema="hitches"]'`. Result: 0 rows. The other hitch tables
+  (`hitches-frame-lifetimes`, `hitches-renders`, `hitches-framewait`, `hitches-gpu`, `hitches-updates`) also export
+  0 rows. Both ArktShell (pid 97800) and WindowServer (pid 607) are in the trace's process list.
+- Concurrent app-side pacer in the same smoke: 12 interactions, 755 frames, 4 late display-link intervals, all at
+  frame 9 of a swipe (10.14 ms on the first swipe-back, 16.66 ms on swipe-next/swipe-back/swipe-back); the smoke
+  reported `pacingVerdict = NOT-MEASURABLE (load 60.18 on 12 cores)`. So the trace shows no WindowServer-side hitch
+  row, but it was recorded under load 39-66 and the app's own pacer still saw four late intervals at frame 9. It is
+  not a quiet-machine confirmation; a trace on an idle machine is still needed if the maintainer wants one.
+
+### Acceptance: idle smoke (#24 criterion 4)
+
+Three `-ArktSmokeRepeat 25` runs of the Profile copy, sequentially, hands off the pointer and keyboard, each after
+waiting for load1 below 11. Each run was launched as the app binary with an `osascript` frontmost call two seconds in:
+a bare direct launch leaves the app inactive and the smoke's own KB-003 check fails (`bar key true, hidden false`,
+exit 2); `open -W` activates it but does not propagate the app's exit status. With the activation step the functional
+checks pass and the binary's exit code is captured.
+
+Wait for results.
