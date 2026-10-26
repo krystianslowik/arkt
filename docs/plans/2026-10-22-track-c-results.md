@@ -2194,3 +2194,35 @@ Contrast), `ThemePadTests`, `ThemeCreatorModelTests`, `ThemeHapticGateTests`, th
 average near 30. Debug app build succeeds. XCUITest not run: no existing flow or identifier changed. The pad field
 and texture previews took about 250 ms and 530 ms to synthesize in Debug, so they are built off the main thread when
 the window opens (`ThemeCreatorImages`).
+
+## Favorites grid: adaptive columns (#337) (2026-10-26)
+
+Built to the maintainer decision on #337, which replaces the RT-15 runtime check for BH-050 (copied into the plan's
+Decisions). The grid takes 1 to 4 columns by sidebar width and fills its rows evenly.
+
+- **Math** (`FavoritesLayout`, pure). Column capacity is how many 52 pt tiles (the measured default tile) fit with
+  9 pt gaps, clamped to 1...4: 2 at the 150 pt minimum sidebar, 3 at the default 190 pt, 4 from 251 pt. The columns
+  for N Favorites are the fewest rows the capacity allows, filled evenly: `rows = ceil(N / capacity)`,
+  `columns = ceil(N / rows)`. So 4 in a wide sidebar make one row of 4; 4 at the default width make 2 + 2; 5 in a
+  wide sidebar make 3 + 2; a short last row keeps the grid's columns. Tiles grow to fill the row, edges on whole
+  points. One column only happens for a single Favorite (no supported width is that narrow).
+- **Grid.** The flow layout is replaced by `FavoritesCollectionLayout`, a small `NSCollectionViewLayout` that
+  places each item at the grid's frame for it (the half-point floor that kept three tiles from wrapping is gone).
+  The sidebar asks the grid for its columns at the content width before it reads the height.
+- **Column spring** (`FavoritesColumnMotion`). A resize that changes the column count moves every tile on the
+  `firm` spring (no visible overshoot, about 0.3 s), one interruptible spring per tile slot (left, width and row as
+  shares of the row), so the tiles keep following a sidebar that is still being dragged and a resize back mid-flight
+  reverses from where each tile is, with its velocity. The grid height follows the rows the tiles span, and the Space
+  page below follows it. Reduce Motion, the first width, an off-screen grid and Favorite additions or removals switch
+  at once.
+- **Keyboard** (#343). Arrows use the current columns. Down over the gap of a short last row takes that row's last
+  tile; Down from the last row still leaves for the outline.
+- **Drop band** (#104). Unchanged code: the band is the grid's frame, so it covers every row of the new layout.
+  The unload limit (#376) does not read the layout.
+
+Tests (written first; baselines are this run minus the new tests): ShellKit unit 1243 passed (baseline 1234 + 9 in `FavoritesLayoutTests`: capacity, columns
+and frames for 1 to 12 Favorites at the narrow, default and wide widths (36 cases each), slots, fractional height,
+keyboard neighbors). ShellKitGUITests 1070 run (baseline 1063 + 7: `FavoritesGridColumnsTests` 6, one Ctrl-Space
+case in `TabKeyboardNavigationTests`), 17 skipped, 0 failures. `FavoriteTileCloseTests` moved its pointer in the
+removed-Favorite hover test: with two Favorites left the grid now takes two wider columns. Debug app build succeeds.
+XCUITest not run: no identifier or covered flow changed.
