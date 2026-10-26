@@ -196,6 +196,12 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     endDialog(of: tab)
   }
 
+  /// Chromium answers a hidden tab's `confirm()` or `prompt()` false or null (`kTabHidden`); an `alert()` stays pending.
+  private func endHiddenDialog(of tab: TabID) {
+    guard let kind = pendingDialogs[tab]?.kind, kind != .alert else { return }
+    endDialog(of: tab)
+  }
+
   /// Reports the end of the tab's pending dialog, if any.
   private func endDialog(of tab: TabID) {
     guard let dialog = pendingDialogs.removeValue(forKey: tab) else { return }
@@ -494,7 +500,10 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     lastActiveWindow = window
     let previous = activeTabs[window]
     guard previous != id else { return }
-    if let previous { snapshots[previous]?.isActive = false }
+    if let previous {
+      snapshots[previous]?.isActive = false
+      endHiddenDialog(of: previous)
+    }
     snapshots[id]?.isActive = true
     activeTabs[window] = id
     hub.emit(.activeTabChanged(id))

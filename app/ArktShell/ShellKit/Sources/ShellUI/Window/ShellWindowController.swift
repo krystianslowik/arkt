@@ -185,6 +185,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
     root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
+    root.onLayout = { [weak self] in self?.javaScriptDialogs.layoutDidFinish() }      // #400
     engineHost.controller = self
     window.commandHost = engineHost
     let toastView = ToastView(frame: .zero)

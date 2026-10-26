@@ -55,6 +55,9 @@ struct InMemoryEngineContractTests {
   @Test func pendingDialogEndsBeforeItsTabCloses() async throws {
     try await EngineContract.pendingDialogEndsBeforeItsTabCloses(harness)
   }
+  @Test func hiddenTabEndsItsConfirmAndPrompt() async throws {
+    try await EngineContract.hiddenTabEndsItsConfirmAndPrompt(harness)
+  }
 
   /// A harness without engine drivers reports rules 13, 14, 16 and 17's audible check as not applicable, never as passed.
   @Test func missingDriversAreNotApplicable() async throws {

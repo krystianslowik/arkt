@@ -107,8 +107,12 @@ public final class ShellRootView: NSView {
 
   public override var isFlipped: Bool { true }
 
+  /// Called at the end of each layout pass.
+  var onLayout: (@MainActor () -> Void)?
+
   public override func layout() {
     super.layout()
+    defer { onLayout?() }
     let l = ShellLayout.compute(bounds: bounds, sidebarWidth: sidebarWidth, sidebarVisible: sidebarVisible,
                                 metrics: metrics)
     CATransaction.begin()

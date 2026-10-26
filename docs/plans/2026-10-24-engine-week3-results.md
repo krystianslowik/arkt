@@ -3309,7 +3309,7 @@ the first of three slices (JavaScript dialogs, then permission prompts, then inf
 | Long `alert()` (40 lines) | PASS | the body is capped and scrolls; OK stays visible |
 | One panel, no Chromium dialog | PASS | window list of the browser pid while a dialog was up: the main window plus exactly one 420 pt panel; none after the answer |
 | Stderr | PASS | `facade dialog requested kind=0,1,1,2,2,0,1` for the seven dialogs raised, one `DialogEnded` batch per answer |
-| Confirm, then switch tab | NOT CHECKED | the synthetic clicks on the sidebar and the Previous Tab shortcut did not switch tabs while the dialog was up; whether they work with no dialog was not tried in this run, so the engine's end of a hidden confirm (`kTabHidden`) was not seen on real Chromium; it is covered by the scripted facade only |
+| Confirm, then switch tab | PASS (re-checked, see "Review follow-up") | see the follow-up below; the first run only lacked a pointer move before its synthetic clicks |
 
 ### Verification
 
@@ -3338,9 +3338,7 @@ the first of three slices (JavaScript dialogs, then permission prompts, then inf
   rule 19 is reported as not applicable there; real Chromium is covered by the checks above.
 - `ArktJavaScriptDialog::GetUserInput` returns the default text; it is read only when the engine itself accepts the
   dialog without an override (the test API passes one).
-- The sidebar and the tab shortcut did not react to synthetic input while a dialog panel was up in this run (see the
-  unchecked row). Whether the panel or the synthetic input is the cause is not known; the maintainer's manual check
-  should include switching tabs with a dialog up.
+- The first run's synthetic clicks on the sidebar did not switch tabs; the cause was the input, not the panel (see "Review follow-up").
 
 ### Left open
 
@@ -3349,6 +3347,46 @@ the first of three slices (JavaScript dialogs, then permission prompts, then inf
 - `beforeunload` stays Chromium's app-modal dialog (#265).
 - Cleanup: test copy, throwaway data, embed folder and derived data removed; `lsregister -u` was run, and records for the
   deleted `dev.arkt.Arkt.try400` path are still listed (LaunchServices drops them itself, as noted for #128).
+
+### Review follow-up (head after 1f5e4cd)
+
+- **Decision (also on #400):** JavaScript dialogs keep Chromium's behaviour. Return accepts at once, with no
+  input-protection delay, as in Chrome and Safari. The 0.5 s protection is only for permission prompts (slice 2).
+- **Tab switch with a dialog up: no behaviour change was needed.** Real app (below): one click on a sidebar row and the
+  Previous Tab shortcut switch tabs with an alert up and with a confirm up. The earlier failures came from `cliclick`
+  pressing without moving the pointer first (such a press is also lost with no dialog up); with `m:x,y w:300` before
+  the press every click lands. The panel is key, so the shell window is not, and the sidebar outline accepts the first
+  click (`acceptsFirstMouse` is true for `NSOutlineView`); a test pins it (`testOneClickOnARowSwitchesTabsWithADialogUp`,
+  alert and confirm, `NSWindow.sendEvent` level). A confirm ends false on switch-away (`kTabHidden`), an alert stays
+  attached and reappears on return.
+- **Bug found by the real-app run, fixed:** after a mouse answer (a click on OK) the panel stayed ordered in at opacity 0
+  over the page, because the 0.10 s fade's completion block held the `DialogPanel` weakly and the presenter drops it at
+  the answer. Keyboard answers (instant) never showed it, and the unit tests held the panel strongly. The completion now
+  captures the window. Test: `testAMouseAnswerLeavesNoPanelBehind` (red before the fix, 5 s timeout).
+- **Dialog that arrives with nothing to show it on:** the presenter refreshes on `didDeminiaturize`,
+  `didChangeOcclusionState`, `NSApplication.didUnhide`, and after the next layout of the window when a pending dialog
+  found no page view (`ShellRootView.onLayout`). The window state is injected (`windowIsVisible`); a test per event.
+- **Contract rule 19, third check** `hiddenTabEndsItsConfirmAndPrompt`: a confirm or prompt ends when its tab stops
+  being active. `InMemoryEngine` ends it; the scripted facade models `kTabHidden`; FakeEngine reports it not
+  applicable. Red first with `InMemoryEngine`'s end taken out (timeout). The `Task.sleep(100 ms)` in
+  `dialogIsReportedAnsweredAndEndedOnce` is replaced by waiting for the end, then for a later request: events arrive in
+  order, so a second end would show up before it.
+- **Reduce Motion:** `testReduceMotionPanelFadesWithoutTravel` (fade without a transform animation, against the usual
+  entrance with one).
+- Not done: finding 3 (a tab moved to another window with a pending alert) and finding 6 (panel width fixed at
+  creation); left for a later slice.
+
+#### Real-app check (`dev.arkt.Arkt.try400`, Engine configuration on `out/Spike`, throwaway profile and data folders,
+`--use-mock-keychain`, a loopback page on `127.0.0.1:18400`, real `cliclick` input with a pointer move first)
+
+| Check | Result |
+|---|---|
+| Baseline, no dialog: one click on a row | PASS, three of three switched (window key) |
+| Confirm up, one click on a row | PASS: switched, the confirm ended false (`A confirm-false`), no panel left |
+| Alert up, one click on a row | PASS: switched, panel hidden, back on the tab the panel reappears |
+| Previous Tab shortcut with an alert, and with a confirm, up | PASS: switched, panel gone |
+| Click on OK (mouse), before the fix | FAIL: invisible panel left (4 after four dialogs) |
+| Click on OK (mouse), after the fix | PASS: no panel window left |
 
 ## #352: Little Arkt's Open in flight
 

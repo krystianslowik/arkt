@@ -271,7 +271,9 @@ public final class DialogPanel {
     let duration = DialogMotion.panelOut(keyboard: keyboard, reduceMotion: reduceMotion())
     guard duration > 0, let layer = container.layer else { return remove() }
     CATransaction.begin()
-    CATransaction.setCompletionBlock { [weak self] in MainActor.assumeIsolated { self?.remove() } }
+    // The window, not `self`: the owner lets go of this object at the answer, and the fade must still take it down.
+    let window = panel
+    CATransaction.setCompletionBlock { MainActor.assumeIsolated { Self.remove(window) } }
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = layer.presentation()?.opacity ?? 1
     fade.toValue = 0
@@ -282,9 +284,11 @@ public final class DialogPanel {
     CATransaction.commit()
   }
 
-  private func remove() {
-    panel.parent?.removeChildWindow(panel)
-    panel.orderOut(nil)
+  private func remove() { Self.remove(panel) }
+
+  private static func remove(_ window: NSPanel) {
+    window.parent?.removeChildWindow(window)
+    window.orderOut(nil)
   }
 
   private func finish(_ answer: DialogContent.Answer) {

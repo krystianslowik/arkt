@@ -19,7 +19,7 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   // Rule 18
   case pageImageFitsTheCaps, pageImageOfAClosedTabIsNil
   // Rule 19
-  case dialogIsReportedAnsweredAndEndedOnce, pendingDialogEndsBeforeItsTabCloses
+  case dialogIsReportedAnsweredAndEndedOnce, pendingDialogEndsBeforeItsTabCloses, hiddenTabEndsItsConfirmAndPrompt
 
   /// The contract rule (1-19) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
@@ -44,7 +44,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .heldCloseKeepsTheTabUntilAnswered, .skipUnloadHandlersNeverHolds, .cancelledWindowCloseKeepsTheWindow: 16
     case .muteIsReportedOnce, .audibleStateIsReported: 17
     case .pageImageFitsTheCaps, .pageImageOfAClosedTabIsNil: 18
-    case .dialogIsReportedAnsweredAndEndedOnce, .pendingDialogEndsBeforeItsTabCloses: 19
+    case .dialogIsReportedAnsweredAndEndedOnce, .pendingDialogEndsBeforeItsTabCloses,
+         .hiddenTabEndsItsConfirmAndPrompt: 19
     }
   }
 
@@ -85,6 +86,7 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .pageImageOfAClosedTabIsNil: try await EngineContract.pageImageOfAClosedTabIsNil(h)
     case .dialogIsReportedAnsweredAndEndedOnce: try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(h)
     case .pendingDialogEndsBeforeItsTabCloses: try await EngineContract.pendingDialogEndsBeforeItsTabCloses(h)
+    case .hiddenTabEndsItsConfirmAndPrompt: try await EngineContract.hiddenTabEndsItsConfirmAndPrompt(h)
     }
   }
 }

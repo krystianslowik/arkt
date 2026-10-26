@@ -88,6 +88,9 @@ final class FakeEngineContractTests: XCTestCase {
   func testPendingDialogEndsBeforeItsTabCloses() async throws {
     try await notApplicable { try await EngineContract.pendingDialogEndsBeforeItsTabCloses(harness) }
   }
+  func testHiddenTabEndsItsConfirmAndPrompt() async throws {
+    try await notApplicable { try await EngineContract.hiddenTabEndsItsConfirmAndPrompt(harness) }
+  }
 
   /// FakeEngine only: a tab that is not in a window has nothing to snapshot.
   func testPageImageOfAnUnshownTabIsNil() async throws {

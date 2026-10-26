@@ -175,6 +175,13 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     return dialog
   }
 
+  /// The tab stopped being its window's active tab: Chromium's manager answers a confirm or prompt false or null
+  /// (`kTabHidden`) and closes it; an alert already ran its callback and stays.
+  func hidden() {
+    guard let kind = jsDialog?.kind, kind != .alert else { return }
+    endJSDialog()
+  }
+
   /// The engine ends the pending dialog (a navigation, a later dialog, the tab closing).
   func endJSDialog() { jsDialog?.end() }
 
@@ -521,8 +528,10 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
 
   func activate(_ tab: ScriptedTab) {
     guard active !== tab, tabList.contains(where: { $0 === tab }) else { return }
+    let previous = active
     active = tab
     facade.record(ScriptedEvent(.activeTabChanged, tab: tab, browser: self))
+    previous?.hidden()
   }
 
   /// Removes a tab; closing the active tab activates its right neighbour, else the left one.

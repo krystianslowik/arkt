@@ -44,6 +44,12 @@ public final class JavaScriptDialogPresenter {
 
   private let engine: any EngineClient
   private let anchor: @MainActor (TabID) -> Anchor?
+  /// Whether a window can show a panel now: false while it is minimized or its app is hidden. Tests inject it.
+  private let windowIsVisible: @MainActor (NSWindow) -> Bool
+  /// Observers of the events that bring a window back; a dialog that arrived while it was away shows then.
+  private var returnObservers: [NSObjectProtocol] = []
+  /// The last refresh found a pending dialog with no page view to point at; the next layout tries again.
+  private var retryOnLayout = false
   /// The unanswered dialog of each tab.
   public private(set) var pending: [TabID: JavaScriptDialog] = [:]
   private var entries: [TabID: Entry] = [:]
@@ -51,9 +57,22 @@ public final class JavaScriptDialogPresenter {
   var reduceMotion: (@MainActor () -> Bool)?
 
   /// `anchor` returns the view of a tab that is on screen in a window, nil for one that is not.
-  public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> Anchor?) {
+  public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> Anchor?,
+              windowIsVisible: @escaping @MainActor (NSWindow) -> Bool = { $0.isVisible }) {
     self.engine = engine
     self.anchor = anchor
+    self.windowIsVisible = windowIsVisible
+    let names: [Notification.Name] = [NSWindow.didDeminiaturizeNotification, NSWindow.didChangeOcclusionStateNotification,
+                                      NSApplication.didUnhideNotification]
+    returnObservers = names.map { name in
+      NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.refresh() }
+      }
+    }
+  }
+
+  isolated deinit {
+    for observer in returnObservers { NotificationCenter.default.removeObserver(observer) }
   }
 
   /// The tab whose panel is up, for tests and accessibility.
@@ -76,7 +95,14 @@ public final class JavaScriptDialogPresenter {
 
   /// Shows the panels of tabs that came on screen, moves those whose page moved, and takes down those whose tab left.
   public func refresh() {
+    retryOnLayout = false
     for tab in pending.keys { present(tab) }
+  }
+
+  /// The window finished a layout pass: a dialog that found no page view to point at tries again, since the view may
+  /// have arrived with it. Nothing pending, or every dialog placed: nothing happens.
+  public func layoutDidFinish() {
+    if retryOnLayout { refresh() }
   }
 
   /// Takes every panel down without answering, as the window goes away.
@@ -86,8 +112,13 @@ public final class JavaScriptDialogPresenter {
 
   private func present(_ tab: TabID) {
     guard let dialog = pending[tab] else { return }
-    guard let view = anchor(tab), let window = view.window, window.isVisible else {
+    guard let view = anchor(tab) else {
+      retryOnLayout = true
       dismissPanel(of: tab)
+      return
+    }
+    guard let window = view.window, windowIsVisible(window) else {
+      dismissPanel(of: tab)                  // a window coming back (deminiaturize, unhide, occlusion) refreshes
       return
     }
     let frame = Self.screenFrame(of: view)

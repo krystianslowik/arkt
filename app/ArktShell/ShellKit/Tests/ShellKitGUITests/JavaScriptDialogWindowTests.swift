@@ -74,4 +74,58 @@ final class JavaScriptDialogWindowTests: XCTestCase {
     XCTAssertNil(panel.panel.parent)
     XCTAssertNil(controller.javaScriptDialogs.panel(for: tab))
   }
+
+  // MARK: Tab switching with the panel key
+
+  /// A real click on a sidebar row, through the window's own event dispatch (the first-click rule included).
+  private func clickRow(of node: NodeID) throws {
+    let window = try XCTUnwrap(controller.window)
+    let outline = try XCTUnwrap(controller.sidebarController.currentPage?.outlineController)
+    let view = outline.outlineView
+    window.contentView?.layoutSubtreeIfNeeded()
+    view.layoutSubtreeIfNeeded()
+    let rect = view.rect(ofRow: outline.row(for: node))
+    let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    func event(_ type: NSEvent.EventType) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1,
+        pressure: type == .leftMouseUp ? 0 : 1))
+    }
+    window.postEvent(try event(.leftMouseUp), atStart: true)
+    window.sendEvent(try event(.leftMouseDown))
+    window.discardEvents(matching: [.leftMouseUp], before: nil)
+  }
+
+  /// The panel is key while a dialog is up, so the shell window is not: the first click on a row must still be the
+  /// click, not only a re-key (the real app: one click switched with an alert and with a confirm up). The window is
+  /// not key in this runner either, so the event goes through `NSWindow.sendEvent` as a first click does.
+  func testOneClickOnARowSwitchesTabsWithADialogUp() throws {
+    let outline = try XCTUnwrap(controller.sidebarController.currentPage?.outlineController).outlineView
+    let probe = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+      windowNumber: controller.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    XCTAssertTrue(outline.acceptsFirstMouse(for: probe), "a click on a row while another of our windows is key")
+
+    for kind in [JavaScriptDialog.Kind.alert, .confirm] {
+      controller.activate(node: first)
+      let tab = try XCTUnwrap(controller.currentTab)
+      let id = try XCTUnwrap(engine.raiseDialog(in: tab, kind: kind, message: "Now?"))
+      XCTAssertNotNil(controller.javaScriptDialogs.panel(for: tab), "\(kind): the dialog is up")
+
+      try clickRow(of: second)
+
+      XCTAssertEqual(controller.currentTab, controller.engineTab(of: second), "\(kind): one click switches")
+      XCTAssertNil(controller.javaScriptDialogs.panel(for: tab), "\(kind): the page is off screen: no panel")
+      if kind == .alert {
+        XCTAssertEqual(controller.javaScriptDialogs.pending[tab]?.id, id, "an alert stays attached")
+        controller.activate(node: first)
+        XCTAssertNotNil(controller.javaScriptDialogs.panel(for: tab), "and reappears on return")
+        engine.respond(to: id, accepted: true, userInput: nil)
+      } else {
+        XCTAssertNil(controller.javaScriptDialogs.pending[tab], "a confirm ends on switch-away, as in Chromium")
+        XCTAssertEqual(engine.dialogAnswers.count, 1, "only the alert was answered: the engine ended the confirm")
+      }
+    }
+  }
 }

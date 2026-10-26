@@ -178,7 +178,9 @@ public struct EngineHarness {
 /// 19. A page's `alert()`, `confirm()` or `prompt()` is reported with `.dialogRequested` carrying the engine's strings
 ///     (an alert has no cancel title, a prompt its default text); `respond(to:accepted:userInput:)` ends it with one
 ///     `.dialogEnded` and a second answer does nothing; a dialog still pending when its tab closes ends before the
-///     tab's `.tabClosed` (#400). Needs `raiseDialog`.
+///     tab's `.tabClosed` (#400); a `confirm()` or `prompt()` still pending when its tab stops being the window's
+///     active tab ends with `.dialogEnded`, as Chromium answers it false or null when the tab is hidden (an `alert()`
+///     stays). Needs `raiseDialog`.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
@@ -531,11 +533,12 @@ public enum EngineContract {
                   && dialog.cancelTitle?.isEmpty == false, "the dialog must carry the engine's values: \(dialog)")
     engine.respond(to: dialog.id, accepted: true, userInput: "Grace")
     engine.respond(to: dialog.id, accepted: false, userInput: nil)
-    try await Task.sleep(for: .milliseconds(100))
-    try require(endedDialogs(recorder, id) == [dialog.id], "an answered dialog must end once: \(recorder.events(for: id))")
+    try await waitUntil(timeout: .seconds(10)) { !endedDialogs(recorder, id).isEmpty }
 
+    // Events arrive in order: if the second answer had ended it again, that end would come before this request.
     try await raise(engine, id, .alert, "Saved", nil)
     try await waitUntil(timeout: .seconds(10)) { requestedDialogs(recorder, id).count == 2 }
+    try require(endedDialogs(recorder, id) == [dialog.id], "an answered dialog must end once: \(recorder.events(for: id))")
     let alert = try requireValue(requestedDialogs(recorder, id).last, "alert")
     try require(alert.kind == .alert && alert.cancelTitle == nil && alert.defaultPromptText == nil,
                 "an alert has OK only: \(alert)")
@@ -557,6 +560,30 @@ public enum EngineContract {
     try require(tail == [.dialogEnded(id, dialog.id), .tabClosed(id, reason: .client)],
                 "the dialog must end before the tab closes: \(tail)")
     engine.respond(to: dialog.id, accepted: true, userInput: nil)    // ended: nothing happens
+  }
+
+  public static func hiddenTabEndsItsConfirmAndPrompt(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raiseDialog, "raiseDialog")
+    let engine = h.makeEngine()
+    let window = engine.createWindow(host: h.makeWindowHost())
+    let shown = engine.createTab(url: try h.pageURL("Dialog"), in: window)
+    let other = engine.createTab(url: try h.pageURL("Other"), in: window)
+    try await h.settle(engine, shown)
+    try await h.settle(engine, other)
+    try await wait("the first tab to be active") { engine.activeTab(in: window) == shown }
+    let recorder = EventRecorder(engine)
+    for (kind, message) in [(JavaScriptDialog.Kind.confirm, "Leave?"), (.prompt, "Name?")] {
+      try await raise(engine, shown, kind, message, kind == .prompt ? "Ada" : nil)
+      try await waitUntil(timeout: .seconds(10)) { requestedDialogs(recorder, shown).count == (kind == .confirm ? 1 : 2) }
+      let dialog = try requireValue(requestedDialogs(recorder, shown).last, "dialog")
+      engine.activateTab(other)
+      try await waitUntil(timeout: .seconds(10)) { endedDialogs(recorder, shown).contains(dialog.id) }
+      try require(endedDialogs(recorder, shown).filter { $0 == dialog.id }.count == 1,
+                  "a hidden tab's \(kind) must end once: \(recorder.events(for: shown))")
+      engine.respond(to: dialog.id, accepted: true, userInput: nil)           // ended: nothing happens
+      engine.activateTab(shown)
+      try await wait("the tab to be active again") { engine.activeTab(in: window) == shown }
+    }
   }
 
   /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.
