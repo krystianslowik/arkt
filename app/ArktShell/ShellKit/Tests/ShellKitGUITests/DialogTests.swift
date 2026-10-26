@@ -104,15 +104,16 @@ final class DialogTests: XCTestCase {
   /// The anchored panel: top-leading corner 12 pt inside the anchor, a non-activating child of the window, 12 pt
   /// corners, a spring entrance; Escape answers Cancel and leaves at once.
   func testTheAnchoredPanel() throws {
-    let parent = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 900, height: 700), styleMask: [.titled],
-                          backing: .buffered, defer: false)
+    // Both inside the screen: on a CI runner's small screen AppKit moves a parent that does not fit, and its child
+    // panel moves with it.
+    let screen = try XCTUnwrap(NSScreen.main?.visibleFrame)
+    let parent = NSWindow(contentRect: NSRect(x: screen.minX, y: screen.minY, width: 700, height: screen.height / 2),
+                          styleMask: [.titled], backing: .buffered, defer: false)
     parent.isReleasedWhenClosed = false
     let content = DialogContent(title: "example.com wants to", paragraphs: [.init("Know your location")],
                                 primaryTitle: "Allow", cancelTitle: "Never Allow", defaultButton: .none, width: 320)
     let panel = DialogPanel(content: content)
     panel.reduceMotion = { false }
-    // Inside the screen: a CI runner's small screen would otherwise move the panel down (constrained frame).
-    let screen = try XCTUnwrap(NSScreen.main?.visibleFrame)
     let anchor = NSRect(x: screen.minX + 40, y: screen.minY + 20, width: 600, height: min(600, screen.height - 40))
     panel.show(over: parent, anchoredTo: anchor)
     XCTAssertEqual(panel.panel.frame.minX, anchor.minX + 12)
