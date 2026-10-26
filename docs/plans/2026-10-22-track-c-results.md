@@ -1498,3 +1498,45 @@ child windows taking key keep the sidebar lit. ShellKitGUITests 734 run (730 + 4
 the load-dependent frame-time gates noted above. Disabled items now tracked: Share (#362), Edit Pinned URL and
 Favorite rename (#363), Mute (#364); Change Icon (#339, #109), the Undo toast (#308), Copy Link keys and tracker
 stripping (#118), Clear Today Tabs key (#110), Split Tab rename (#27, BH-115).
+
+## Folders: create, rename, nest, collapse all, Folder Preview (#109) (2026-10-26)
+
+Built on the folder menu, New Folder and rename that #105 shipped; spec section 2.6.
+
+- **Open and close on a spring.** A pointer toggle runs one interruptible spring per folder (`FolderMotion`, on
+  `SpringField`, a new keyed spring set in Motion; `SpringPreset.firm`, no visible overshoot, about 0.3 s). The
+  rows that come and go slide in under the folder row and fade; every row below follows by the height still missing
+  (`FolderMotionLayout`). Frames go to the row views as layer transform and opacity, never as frame changes. A
+  closing folder keeps its rows in the outline until its spring settles (`FolderDisplay.closing`), so a second click
+  mid-close reverses from where the rows are, with their velocity. Reduce Motion: the change applies at once and the
+  rows a folder shows fade in (0.15 s); keyboard toggles (Return on a focused folder, Ctrl-Space reveals) never
+  animate. A page that is not on screen changes at once.
+- **Peeking rows (BH-092, BH-105, BH-093).** `FolderDisplay` decides what a folder lists: everything while open;
+  while closed only the rows peeking out of it, with the path of folders down to them. A tab moved into a closed
+  folder peeks out and the folder stays closed (the model side of BH-091); the current tab peeks out of the closed
+  folders around it (switched to from the command bar, the tab switcher, Cmd-1 to Cmd-9, Folder Preview, or
+  closing its own folder [I]); the peek ends when another tab becomes current. A pane peeks through its split.
+- **Collapse All / Expand All Folders (BH-097), New Folder (KB-040).** In the Tabs menu, no keys: KB-040 stays
+  unbound until RT-04 (#78), and Cmd-Shift-N stays New Incognito Window (CF-02). Collapse / Expand All act on every
+  Space page of the window; only the page on screen moves, nested folders ride their outer folder's spring, and the
+  current tab keeps peeking [I]. They are disabled in a Space without folders. New Folder takes a multi-selection,
+  else adds an empty pinned folder, open for naming [I].
+- **Per window (BH-098).** Every outline keeps its own `FolderDisplay`; two windows on one sidebar open and close
+  folders independently. Keeping them across a relaunch waits on session restore (#116).
+- **Nested New Folder (BH-094).** Rows that all sit in one folder form a new folder nested there, at the first
+  one's place; any other selection still gets a new pinned folder. Splits move whole.
+- **Rename commit (BH-096).** The rename field already commits whenever it loses focus; a test now covers a folder
+  losing focus outside the sidebar.
+- **Folder Preview (BH-093, GS-019).** Hovering a closed folder's row for 0.5 s [I] shows its tabs (nested folders'
+  tabs and panes included [I]) beside the sidebar, in the window's root view, with the tab switcher's surface,
+  edge, shadow and highlight tokens. Its search field takes the keyboard: typing filters by title or host and
+  selects the first match, Up and Down move, Return or a click activates the tab, which then peeks out under the
+  still-closed folder. Esc, leaving both the row and the preview (0.25 s grace [I]), the field losing focus, the
+  folder opening or a Space switch close it, and focus goes back where it was. Motion: a 0.15 s fade and scale from
+  0.97 at its leading edge on the strong ease-out, a 0.10 s fade out; Reduce Motion keeps the fades only. Always on
+  [I]: Arc's `folderPreviewEnabled` switch waits for Settings.
+
+Deferred: the drag gesture of BH-091 (sidebar drag and drop, #104; dropping into a closed folder will get the peek
+above); Change Icon (#366, blocked on the picker, #304 and #339); Share (#362); GitHub Live Folders, BH-099 (scope
+decision #124); the KB-040 key (RT-04, #78); expanded folders across relaunch (#116). Deleting a folder still
+closes its pages without leave-site prompts, the same as Delete Space and Clear Today; that gap is unchanged.
