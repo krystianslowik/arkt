@@ -5,6 +5,9 @@ merged, so that two or more people can work in parallel without stepping on each
 plans (`docs/plans/*`, "Rules" sections) still apply; this file collects the ones every change needs and adds the
 team workflow around them.
 
+Contributor workflow skills in `.claude/skills/` turn this guide into short step-by-step checklists that
+assistants can follow.
+
 Contents:
 
 1. Roles and ownership
