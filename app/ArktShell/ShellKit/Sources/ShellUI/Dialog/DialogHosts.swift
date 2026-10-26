@@ -225,12 +225,24 @@ public final class DialogPanel {
                   width: size.width, height: size.height)
   }
 
-  /// Shows the panel over `parent`, anchored to `anchor` (screen coordinates), without taking focus. VoiceOver hears
-  /// its title.
-  public func show(over parent: NSWindow, anchoredTo anchor: NSRect) {
+  /// The text in the prompt's field; nil when the content has none.
+  public var inputText: String? { view.inputText }
+
+  /// Moves the panel to `anchor` (screen coordinates) again, when the page it points at moved or resized.
+  public func reposition(anchoredTo anchor: NSRect) {
+    panel.setFrame(frame(anchoredTo: anchor), display: true)
+  }
+
+  /// Shows the panel over `parent`, anchored to `anchor` (screen coordinates). It takes no focus unless
+  /// `takesFocus` (a page's dialog, which blocks the page: the answer keys go to it). VoiceOver hears its title.
+  public func show(over parent: NSWindow, anchoredTo anchor: NSRect, takesFocus: Bool = false) {
     panel.setFrame(frame(anchoredTo: anchor), display: false)
     parent.addChildWindow(panel, ordered: .above)
     panel.orderFront(nil)
+    if takesFocus {
+      panel.makeKey()
+      panel.makeFirstResponder(view.initialFocus)            // a field starts editing with its text selected
+    }
     enter()
     NSAccessibility.post(element: panel, notification: .announcementRequested, userInfo: [
       .announcement: content.title, .priority: NSAccessibilityPriorityLevel.high.rawValue,

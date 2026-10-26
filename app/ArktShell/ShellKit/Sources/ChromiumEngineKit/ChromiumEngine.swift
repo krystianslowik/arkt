@@ -85,6 +85,15 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   /// The window that last got `createWindow`, `createTab(url:in:)` or an activation (contract rule 15).
   var recentWindow: EngineWindowID?
 
+  /// A JavaScript dialog the shell has been told about and nothing has ended yet (#400, contract rule 19).
+  struct PendingDialog {
+    let id: DialogID
+    let tab: TabID
+    let handle: any ArktJavaScriptDialog
+  }
+  var pendingDialogs: [DialogID: PendingDialog] = [:]
+  var dialogByHandle: [ObjectIdentifier: DialogID] = [:]
+
   /// Builds the shell window for a window the engine creates on its own (Decision 2). Must not call the engine; the
   /// window is usable after its `.windowOpened`.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -322,6 +331,8 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   }
 
   func removeTab(_ id: TabID) {
+    guard tabs[id] != nil else { return }
+    endDialogs(of: id)             // contract rule 19: before the tab's `.tabClosed`
     guard let record = tabs.removeValue(forKey: id) else { return }
     tabIDs.removeAll { $0 == id }
     tabByHandle[ObjectIdentifier(record.handle)] = nil

@@ -43,6 +43,8 @@ public enum AXID {
     public static let secondary = "dialog.secondary"
     public static let cancel = "dialog.cancel"
     public static let footerLink = "dialog.footerLink"
+    /// The prompt's text field (a page's `prompt()`); value: the text.
+    public static let input = "dialog.input"
   }
 
   /// The toast over the bottom of the content card (`ToastView`); absent while no toast shows.

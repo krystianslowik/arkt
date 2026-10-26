@@ -81,6 +81,13 @@ final class FakeEngineContractTests: XCTestCase {
   // Rule 18 (#370): WKWebView's takeSnapshot of a page shown in a window.
   func testPageImageFitsTheCaps() async throws { try await EngineContract.pageImageFitsTheCaps(harness) }
   func testPageImageOfAClosedTabIsNil() async throws { try await EngineContract.pageImageOfAClosedTabIsNil(harness) }
+  // Rule 19 (#400): WKWebView dialogs go through its own UI delegate; the FakeEngine raises none.
+  func testDialogIsReportedAnsweredAndEndedOnce() async throws {
+    try await notApplicable { try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(harness) }
+  }
+  func testPendingDialogEndsBeforeItsTabCloses() async throws {
+    try await notApplicable { try await EngineContract.pendingDialogEndsBeforeItsTabCloses(harness) }
+  }
 
   /// FakeEngine only: a tab that is not in a window has nothing to snapshot.
   func testPageImageOfAnUnshownTabIsNil() async throws {

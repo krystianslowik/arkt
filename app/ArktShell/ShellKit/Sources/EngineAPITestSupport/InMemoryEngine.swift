@@ -167,6 +167,41 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
 
   public func snapshot(of id: TabID) -> TabSnapshot? { snapshots[id] }
 
+  // MARK: - JavaScript dialogs (#400, contract rule 19)
+
+  /// The pending dialog of each tab, with the host it names in its title.
+  private var pendingDialogs: [TabID: JavaScriptDialog] = [:]
+  /// Answers the shell gave, in order: what the page's `alert()`, `confirm()` or `prompt()` would return.
+  public private(set) var dialogAnswers: [(id: DialogID, accepted: Bool, userInput: String?)] = []
+
+  /// Test driver: the page raises an `alert()`, `confirm()` or `prompt()`. Ends the tab's pending dialog first.
+  /// Nil for an unknown or closed tab. The strings are Chromium's: "host says", OK, Cancel (an alert has OK only).
+  @discardableResult
+  public func raiseDialog(in tab: TabID, kind: JavaScriptDialog.Kind, message: String,
+                          defaultPromptText: String? = nil) -> DialogID? {
+    guard let current = snapshots[tab], !current.isClosing else { return nil }
+    endDialog(of: tab)
+    let dialog = JavaScriptDialog(
+      id: DialogID(), tab: tab, kind: kind, title: "\(current.url?.host() ?? "This page") says", message: message,
+      defaultPromptText: kind == .prompt ? (defaultPromptText ?? "") : nil, acceptTitle: "OK",
+      cancelTitle: kind == .alert ? nil : "Cancel")
+    pendingDialogs[tab] = dialog
+    hub.emit(.dialogRequested(dialog))
+    return dialog.id
+  }
+
+  public func respond(to dialog: DialogID, accepted: Bool, userInput: String?) {
+    guard let tab = pendingDialogs.first(where: { $0.value.id == dialog })?.key else { return }
+    dialogAnswers.append((dialog, accepted, userInput))
+    endDialog(of: tab)
+  }
+
+  /// Reports the end of the tab's pending dialog, if any.
+  private func endDialog(of tab: TabID) {
+    guard let dialog = pendingDialogs.removeValue(forKey: tab) else { return }
+    hub.emit(.dialogEnded(tab, dialog.id))
+  }
+
   // MARK: - Page images (#370, #352, contract rule 18)
 
   /// The size of an in-memory page's frame: a 600 x 360 pt page at 2x.
@@ -430,6 +465,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   }
 
   private func load(_ id: TabID, _ url: URL, title: String?, previous: TabSnapshot) {
+    endDialog(of: id)       // Chromium closes the dialog when a navigation starts
     snapshots[id]?.url = url
     if let title, !title.isEmpty { snapshots[id]?.title = title }
     snapshots[id]?.isLoading = true
@@ -474,6 +510,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   private func removeTab(_ id: TabID, reason: CloseReason, reactivate: Bool = true) {
     framesUnavailable.remove(id)
     guard let removed = snapshots[id] else { return }
+    endDialog(of: id)
     var successor: TabID?
     if let window = removed.window, activeTabs[window] == id {
       activeTabs[window] = nil

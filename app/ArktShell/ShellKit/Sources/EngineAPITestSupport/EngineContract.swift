@@ -27,6 +27,9 @@ public struct EngineHarness {
   /// Answers the pending leave-site dialog of `id`: stay (`false`) or leave (`true`).
   public typealias AnswerDialog = @MainActor (_ engine: any EngineClient, _ id: TabID, _ accept: Bool) async throws
     -> Void
+  /// Makes the page of `id` raise an `alert()`, `confirm()` or `prompt()` with `message` (and a prompt's default text).
+  public typealias RaiseDialog = @MainActor (_ engine: any EngineClient, _ id: TabID, _ kind: JavaScriptDialog.Kind,
+                                             _ message: String, _ defaultText: String?) async throws -> Void
 
   public let makeEngine: @MainActor () -> any EngineClient
   /// A URL whose page has `<title>title</title>` and needs no network.
@@ -55,6 +58,9 @@ public struct EngineHarness {
   /// Shows the page of `id` on screen at a real size, as the shell mounts a window's active tab (rule 18). An engine
   /// that draws without being shown passes a closure that does nothing.
   public let showPage: EngineTabAction?
+  /// Makes the page raise a JavaScript dialog (rule 19). An engine that cannot (a real engine needs its tab
+  /// foremost) leaves it nil.
+  public let raiseDialog: RaiseDialog?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -69,13 +75,15 @@ public struct EngineHarness {
               answerDialog: AnswerDialog? = nil,
               makeAudible: EngineTabAction? = nil,
               engineCloseWindow: EngineWindowAction? = nil,
-              showPage: EngineTabAction? = nil) {
+              showPage: EngineTabAction? = nil,
+              raiseDialog: RaiseDialog? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
     self.engineActivate = engineActivate; self.holdClose = holdClose; self.answerDialog = answerDialog
     self.makeAudible = makeAudible; self.engineCloseWindow = engineCloseWindow
     self.showPage = showPage
+    self.raiseDialog = raiseDialog
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -106,7 +114,11 @@ public struct EngineHarness {
       makeAudible: { engine, id in try inMemory(engine).setAudible(id, true) },
       engineCloseWindow: { engine, window in try inMemory(engine).engineCloseWindow(window, reason: .extension) },
       // In-memory pages draw without a window.
-      showPage: { _, _ in }
+      showPage: { _, _ in },
+      raiseDialog: { engine, id, kind, message, defaultText in
+        guard try inMemory(engine).raiseDialog(in: id, kind: kind, message: message, defaultPromptText: defaultText)
+          != nil else { throw ContractViolation(description: "no dialog raised in \(id)") }
+      }
     )
   }
 
@@ -163,6 +175,10 @@ public struct EngineHarness {
 /// 18. `pageImage(of:_:)` gives a loaded, shown tab's image within the request's pixel and byte caps, decodable at the
 ///     size it reports; `.fullFrame` is at least as large as `.thumbnail`. An unknown or closed tab gives nil (#370,
 ///     #352). Needs `showPage`.
+/// 19. A page's `alert()`, `confirm()` or `prompt()` is reported with `.dialogRequested` carrying the engine's strings
+///     (an alert has no cancel title, a prompt its default text); `respond(to:accepted:userInput:)` ends it with one
+///     `.dialogEnded` and a second answer does nothing; a dialog still pending when its tab closes ends before the
+///     tab's `.tabClosed` (#400). Needs `raiseDialog`.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
@@ -489,6 +505,58 @@ public enum EngineContract {
     try require(recorder.events(for: id).contains(.audibleChanged(id, isAudible: true)),
                 "the audible start must be reported: \(recorder.events(for: id))")
     engine.closeTab(id, mode: .skipUnloadHandlers)
+  }
+
+  // MARK: Rule 19 (#400)
+
+  static func requestedDialogs(_ recorder: EventRecorder, _ id: TabID) -> [JavaScriptDialog] {
+    recorder.events(for: id).compactMap { if case .dialogRequested(let dialog) = $0 { dialog } else { nil } }
+  }
+
+  static func endedDialogs(_ recorder: EventRecorder, _ id: TabID) -> [DialogID] {
+    recorder.events(for: id).compactMap { if case .dialogEnded(_, let dialog) = $0 { dialog } else { nil } }
+  }
+
+  public static func dialogIsReportedAnsweredAndEndedOnce(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raiseDialog, "raiseDialog")
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Dialog"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try await raise(engine, id, .prompt, "Your name?", "Ada")
+    try await waitUntil(timeout: .seconds(10)) { !requestedDialogs(recorder, id).isEmpty }
+    let dialog = try requireValue(requestedDialogs(recorder, id).first, "dialog")
+    try require(dialog.tab == id && dialog.kind == .prompt && dialog.message == "Your name?"
+                  && dialog.defaultPromptText == "Ada" && !dialog.title.isEmpty && !dialog.acceptTitle.isEmpty
+                  && dialog.cancelTitle?.isEmpty == false, "the dialog must carry the engine's values: \(dialog)")
+    engine.respond(to: dialog.id, accepted: true, userInput: "Grace")
+    engine.respond(to: dialog.id, accepted: false, userInput: nil)
+    try await Task.sleep(for: .milliseconds(100))
+    try require(endedDialogs(recorder, id) == [dialog.id], "an answered dialog must end once: \(recorder.events(for: id))")
+
+    try await raise(engine, id, .alert, "Saved", nil)
+    try await waitUntil(timeout: .seconds(10)) { requestedDialogs(recorder, id).count == 2 }
+    let alert = try requireValue(requestedDialogs(recorder, id).last, "alert")
+    try require(alert.kind == .alert && alert.cancelTitle == nil && alert.defaultPromptText == nil,
+                "an alert has OK only: \(alert)")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+  }
+
+  public static func pendingDialogEndsBeforeItsTabCloses(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raiseDialog, "raiseDialog")
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Dialog"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try await raise(engine, id, .confirm, "Leave?", nil)
+    try await waitUntil(timeout: .seconds(10)) { !requestedDialogs(recorder, id).isEmpty }
+    let dialog = try requireValue(requestedDialogs(recorder, id).first, "dialog")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+    try await waitUntil(timeout: .seconds(10)) { recorder.events(for: id).contains { if case .tabClosed = $0 { true } else { false } } }
+    let tail = Array(recorder.events(for: id).suffix(2))
+    try require(tail == [.dialogEnded(id, dialog.id), .tabClosed(id, reason: .client)],
+                "the dialog must end before the tab closes: \(tail)")
+    engine.respond(to: dialog.id, accepted: true, userInput: nil)    // ended: nothing happens
   }
 
   /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.

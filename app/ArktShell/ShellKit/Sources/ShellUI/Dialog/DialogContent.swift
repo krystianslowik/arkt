@@ -7,7 +7,8 @@ import QuartzCore
 /// engine's prompts. One content model, three hosts (`DialogSheet`, `DialogPanel`, `DialogAlert`).
 ///
 /// Not mirrored from the engine model, because no shell dialog uses them yet: the checkbox, the primary enable delay,
-/// stacked buttons and a neutral primary.
+/// stacked buttons and a neutral primary. The text field and the capped, scrolling body are for a page's `prompt()` and
+/// long `alert()` messages (#400).
 public struct DialogContent: Equatable, Sendable {
   public enum Icon: Equatable, Sendable {
     case none
@@ -38,6 +39,18 @@ public struct DialogContent: Equatable, Sendable {
   /// How a dialog was answered.
   public enum Answer: Equatable, Sendable { case primary, secondary, cancel }
 
+  /// A one-line text field under the body (a page's `prompt()`); focus starts in it, with its text selected.
+  public struct Input: Equatable, Sendable {
+    public var text: String
+    /// What VoiceOver calls the field.
+    public var accessibilityLabel: String
+
+    public init(text: String, accessibilityLabel: String) {
+      self.text = text
+      self.accessibilityLabel = accessibilityLabel
+    }
+  }
+
   public var title: String
   public var icon: Icon
   public var iconPlacement: IconPlacement
@@ -60,12 +73,16 @@ public struct DialogContent: Equatable, Sendable {
   /// VoiceOver help on the primary button ("Deletes the Space").
   public var primaryHelp: String?
   public var width: CGFloat
+  public var input: Input?
+  /// The body (all paragraphs) scrolls inside this height when it needs more; nil: it takes the height it needs.
+  public var bodyMaxHeight: CGFloat?
 
   public init(title: String, icon: Icon = .none, iconPlacement: IconPlacement = .beside, subtitle: String? = nil,
               paragraphs: [Paragraph] = [], listHeading: String? = nil, listItems: [String] = [],
               footerLink: String? = nil, primaryTitle: String, secondaryTitle: String? = nil,
               cancelTitle: String? = nil, defaultButton: DefaultButton = .primary, isDestructive: Bool = false,
-              escapeAnswersCancel: Bool = true, primaryHelp: String? = nil, width: CGFloat = 420) {
+              escapeAnswersCancel: Bool = true, primaryHelp: String? = nil, width: CGFloat = 420,
+              input: Input? = nil, bodyMaxHeight: CGFloat? = nil) {
     self.title = title
     self.icon = icon
     self.iconPlacement = iconPlacement
@@ -83,6 +100,8 @@ public struct DialogContent: Equatable, Sendable {
     self.escapeAnswersCancel = escapeAnswersCancel
     self.primaryHelp = primaryHelp
     self.width = width
+    self.input = input
+    self.bodyMaxHeight = bodyMaxHeight
   }
 
   /// The body as VoiceOver describes the dialog: the paragraphs in order, then the list.

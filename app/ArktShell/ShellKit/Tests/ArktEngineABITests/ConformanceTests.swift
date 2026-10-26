@@ -91,6 +91,7 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var isActive = false
   var isAudible = false
   var isMuted = false
+  var dialog: (any ArktJavaScriptDialog)?
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -567,8 +568,10 @@ struct ConformanceTests {
     #expect([ArktTabOrigin.client, .engine].map(\.rawValue) == [0, 1])
     #expect([ArktEngineEventKind.tabCreated, .tabClosed, .activeTabChanged, .closeCancelled, .urlChanged,
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
-             .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged].map(\.rawValue)
-      == Array(0...15))
+             .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged,
+             .dialogRequested, .dialogEnded].map(\.rawValue)
+      == Array(0...17))
+    #expect([ArktDialogKind.alert, .confirm, .prompt].map(\.rawValue) == [0, 1, 2])
     #expect([ArktWindowRequestKind.extension, .page, .reopen, .startupURL].map(\.rawValue) == Array(0...3))
     #expect([ArktLinkDecision.navigate, .cancel].map(\.rawValue) == [0, 1])
   }
@@ -635,5 +638,46 @@ struct FrameCopyABITests {
     #expect(result.1 == NSSize(width: 2, height: 1))
     #expect(result.2 == 1)
     #expect((tab as? TestTab)?.copyRequests == [NSSize(width: 600, height: 360)])
+  }
+}
+
+/// JavaScript dialogs (#400): the event carries the dialog, the dialog carries the engine's strings and takes one
+/// answer, and an answer after the end is refused.
+@MainActor
+struct JavaScriptDialogABITests {
+  final class Dialog: NSObject, ArktJavaScriptDialog {
+    let kind: ArktDialogKind = .prompt
+    let tab: any ArktTabHandle
+    let title = "example.com says"
+    let message = "Name?"
+    let defaultPromptText: String? = "Ada"
+    let acceptTitle = "OK"
+    let cancelTitle: String? = "Cancel"
+    private(set) var isEnded = false
+    private(set) var answers: [(Bool, String?)] = []
+    init(tab: any ArktTabHandle) { self.tab = tab }
+    func respond(accepted: Bool, userInput: String?) -> Bool {
+      guard !isEnded else { return false }
+      isEnded = true
+      answers.append((accepted, userInput))
+      return true
+    }
+  }
+
+  @Test func theEventCarriesTheDialogAndItTakesOneAnswer() throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+    let dialog = Dialog(tab: tab)
+    let event = TestEvent(.dialogRequested, tab: tab, browser: browser)
+    event.dialog = dialog
+
+    let carried = try #require(event.dialog)
+    #expect(carried.kind == .prompt && carried.title == "example.com says" && carried.message == "Name?")
+    #expect(carried.defaultPromptText == "Ada" && carried.acceptTitle == "OK" && carried.cancelTitle == "Cancel")
+    #expect(carried.tab === tab)
+    #expect(carried.respond(accepted: true, userInput: "Grace"))
+    #expect(!carried.respond(accepted: false, userInput: nil), "the answer after the end is refused")
+    #expect(carried.isEnded && dialog.answers.count == 1 && dialog.answers.first?.1 == "Grace")
   }
 }

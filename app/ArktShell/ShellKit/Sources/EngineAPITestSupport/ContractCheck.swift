@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-18), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-19), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -18,8 +18,10 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case muteIsReportedOnce, audibleStateIsReported
   // Rule 18
   case pageImageFitsTheCaps, pageImageOfAClosedTabIsNil
+  // Rule 19
+  case dialogIsReportedAnsweredAndEndedOnce, pendingDialogEndsBeforeItsTabCloses
 
-  /// The contract rule (1-18) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The contract rule (1-19) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -42,6 +44,7 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .heldCloseKeepsTheTabUntilAnswered, .skipUnloadHandlersNeverHolds, .cancelledWindowCloseKeepsTheWindow: 16
     case .muteIsReportedOnce, .audibleStateIsReported: 17
     case .pageImageFitsTheCaps, .pageImageOfAClosedTabIsNil: 18
+    case .dialogIsReportedAnsweredAndEndedOnce, .pendingDialogEndsBeforeItsTabCloses: 19
     }
   }
 
@@ -80,6 +83,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .audibleStateIsReported: try await EngineContract.audibleStateIsReported(h)
     case .pageImageFitsTheCaps: try await EngineContract.pageImageFitsTheCaps(h)
     case .pageImageOfAClosedTabIsNil: try await EngineContract.pageImageOfAClosedTabIsNil(h)
+    case .dialogIsReportedAnsweredAndEndedOnce: try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(h)
+    case .pendingDialogEndsBeforeItsTabCloses: try await EngineContract.pendingDialogEndsBeforeItsTabCloses(h)
     }
   }
 }
