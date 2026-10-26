@@ -1790,3 +1790,45 @@ log. Esc then closed it with the "Peek closed" toast.
 
 Still open on #348: Settings > Links toggles, the source card hidden from VoiceOver and the Tab loop, XCUITest flows,
 and the Instruments trace at 120 Hz.
+
+## Settings window (#307, design #305) (2026-10-26)
+
+Built from the restyled design (`docs/design/settings.md`, `design/settings/`): one window, seven panes, width 680,
+the height fitting the pane up to the screen's visible height minus 120 (the content scrolls past that), the last pane
+and the window's top-left corner restored. Arkt > Settings... (Cmd-,) is enabled and opens it or brings it forward.
+
+- **Keys.** Cmd-1 to Cmd-7 switch panes instantly (frame and tab plate in one step); Go to Sidebar Item validates
+  false while Settings is key. Cmd-W and Escape close it; File > Archive Tab reads "Close Window" there (the title is
+  restored when Settings resigns key). Escape in the Shortcuts search clears a non-empty search first.
+- **Look.** The restyle, not the first pass: unified 84 pt chrome, the selected pane item lifted in `tabCurrent`
+  (no mustard), recessed groups, sidebar rows, graphite switches, one mustard primary per pane (Make Default; none
+  once Arkt is the default), destructive actions as red text links. New tokens: `SettingsTokens.groupField`,
+  `switchOn`, `toolbarMaterial`, `separatorIncreasedContrast`, and `AlertTokens.destructiveText` (the Archive's
+  destructive red now points at it). The chrome shows its material only while content is scrolled under it; Reduce
+  Transparency keeps it opaque.
+- **Motion.** A click switch resizes the window (0.25 s, the strong ease-out), fades a snapshot of the old pane out
+  over 0.08 s and fades and raises the new one on `firm`; a second click retargets. Switches: knob on `springyFast`,
+  on fill cross-fade 0.15 s, press stretch 1.12. Pane item press 0.96. Reduce Motion: no translate, no animated
+  frame, 0.15 s cross-fade.
+- **Wired rows.** Default browser (Make Default / Default capsule, read again when the app becomes active), Show
+  Toolbar and Show the full URL (the shared `ToolbarSetting`, both directions, with the live preview), Settings >
+  General > Links (the Peek switches; the window now reads them from the app's defaults suite, it read the standard
+  defaults before), Count Favorites and Command-9 (pushed into every window's `tabNavigationSettings`), the read-only
+  Shortcuts list with search (exact match for typed shortcuts such as "Command-T"), Import browser data, Show in
+  Finder, and the Spaces with their theme swatch and counts. Every other designed row is shown disabled with
+  "Not available yet." (decision 4); no ad blocking row (decision 3).
+- **Store.** `AppSettings` (ShellUI) over the app's defaults suite, weak observers; Arc's key names
+  (`excludeFavoritesInSwitchToNthTab` inverted, `switchToNinthSidebarItemEnabled`); `ToolbarSetting` and
+  `PeekLinkSettings` keys unchanged. The window position is kept there (`settingsWindowTopLeft`), not in AppKit's frame
+  autosave, which always writes the standard defaults.
+- Debug only: `ARKT_APPEARANCE=light|dark` pins the app appearance for window screenshots.
+
+Tests: ShellKit unit 1072 (baseline 1047, +25: tokens and contrast, the store, panes, the shortcut catalog and
+search, Space summaries, the appearance override), all passed. ShellKitGUITests 905 run (baseline 880, +25
+`SettingsWindowTests`), 9 skipped, 0 failures. Debug app build succeeds. New XCUITest
+`ToolbarTests.test_KB066_settingsShowToolbarFlipsTheToolbar` (Cmd-, then Cmd-3, flip Show Toolbar, Escape) not run
+here: other Debug builds of the app were running on the machine and the harness refuses to start next to them.
+
+Not done here: the sidebar width and hidden state (#331) have no designed row and are per-window state; the Favorites
+unload limit (#376) has no designed row; "Websites use" waits for an engine appearance bridge; the shortcut recorder,
+conflicts and priority modes are #119.
