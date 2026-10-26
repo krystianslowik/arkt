@@ -222,6 +222,25 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertFalse(controller.window?.isVisible == true)
   }
 
+  /// A real Escape key event (not a direct `cancelOperation`), with no control focused and with a switch focused,
+  /// reaches the window controller and closes Settings.
+  func testEscapeKeyEventCloses() throws {
+    for focusesSwitch in [false, true] {
+      let controller = make()
+      controller.show(pane: .appearance)
+      let window = try XCTUnwrap(controller.window)
+      if focusesSwitch {
+        let toggle = try find(AXID.Settings.control("appearance", "showToolbar"), in: controller)
+        window.makeFirstResponder(toggle)
+      }
+      let escape = try XCTUnwrap(NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+        context: nil, characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}", isARepeat: false, keyCode: 53))
+      window.sendEvent(escape)
+      XCTAssertFalse(window.isVisible, "Escape closes Settings (switch focused: \(focusesSwitch))")
+    }
+  }
+
   /// In the Shortcuts search field Escape first clears a non-empty search; with an empty field it closes Settings.
   func testEscapeInTheShortcutsSearchClearsFirst() throws {
     let controller = make()

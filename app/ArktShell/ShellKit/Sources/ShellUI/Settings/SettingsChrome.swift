@@ -314,6 +314,23 @@ final class SettingsWindow: NSWindow {
     return super.performKeyEquivalent(with: event)
   }
 
+  /// Escape that no view took (the Shortcuts search field handles its own first): the controller clears the search or
+  /// closes the window. AppKit's default ends in a beep here, never reaching the window controller.
+  override func keyDown(with event: NSEvent) {
+    let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+    if event.keyCode == Self.escapeKeyCode, flags.isEmpty {
+      cancelOperation(self)
+      return
+    }
+    super.keyDown(with: event)
+  }
+
+  override func cancelOperation(_ sender: Any?) {
+    if let controller = windowController { controller.cancelOperation(sender) } else { super.cancelOperation(sender) }
+  }
+
+  private static let escapeKeyCode: UInt16 = 53
+
   /// Close, minimize and zoom at x 20, 40 and 60, centered 20 pt from the top, level with the title.
   func layoutTrafficLights() {
     guard !styleMask.contains(.fullScreen), let close = standardWindowButton(.closeButton),
