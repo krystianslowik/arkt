@@ -9,13 +9,29 @@ public struct ArchiveFilter: Hashable, Sendable {
 
   public var source: Source?
   public var reason: ArchiveReason?
-  /// Case-insensitive (ASCII) substring of the title or URL. LIKE wildcards in it are matched literally.
+  /// A substring of the title or URL of the item or of any node inside it (folder children, split panes), matched
+  /// without case, diacritics or width (`ArchiveSearch.fold`) after trimming whitespace. Matched literally: no
+  /// wildcards. Empty or blank text does not filter.
   public var text: String?
 
   public init(source: Source? = nil, reason: ArchiveReason? = nil, text: String? = nil) {
     self.source = source
     self.reason = reason
     self.text = text
+  }
+}
+
+extension ArchiveFilter {
+  /// The store's matching rule, in memory: for test stores and for entries not yet written (the outbox).
+  public func matches(_ item: ArchivedItem) -> Bool {
+    switch source {
+    case .space(let id)?: guard item.source == .space(id) else { return false }
+    case .littleArc?: guard item.source == .littleArc else { return false }
+    case nil: break
+    }
+    if let reason, item.reason != reason { return false }
+    if let query = ArchiveSearch.query(text), !ArchiveSearch.matches(item.snapshot, query: query) { return false }
+    return true
   }
 }
 

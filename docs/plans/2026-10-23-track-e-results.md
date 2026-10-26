@@ -247,3 +247,46 @@ Debug app build: `** BUILD SUCCEEDED **`.
 |---|---|---|---|
 | ArktCore `swift test` | 343 | 345 | +2 `FlushRaceTests` |
 | ShellKit `swift test --skip ShellKitGUITests` | 457 | 457 | 0 |
+
+## Archive search, filters, Clear Archive and the education banner (#111)
+
+Built against `design/archive-search/archive-search.md` (merged in #318), following its proposals for the open
+questions in section 14.
+
+- Store: `archived_item.search_text` (migration `v4-archive-search`, existing rows filled from their snapshot; a row
+  whose snapshot does not decode keeps its title and URL) holds `ArchiveSearch.searchText(of:)`: titles and URLs of
+  the item and every node inside it, folded without case, diacritics or width. `ArchiveFilter.text` matches it with
+  `instr`, so the query needs no escaping. `ArchiveStoring` gains `count(matching:)` and `removeAll()`;
+  `SettingsStore` records the education banner's dismissal (`ArchiveState.educationBannerDismissed`).
+- `ArchiveListModel`: `setQuery` (search text, Space or Little Arkt, close type), total and matching counts, the
+  tabs inside a folder that matched only through them (worked out off the main actor), place marks and compact
+  times, Clear Archive (the outbox is sent first, so a pending entry cannot land after the clear) and the banner
+  (due once an auto-archived item exists, worded with the Default profile's threshold).
+- Archive window: unified 52 pt title bar with the title, the search field (150 ms debounce, Cmd-F, Escape clears
+  then closes, Down moves to the list) and the filter button (native menu with section headers); Space-tinted chips
+  with Clear Filters; sidebar-style rows at a 37 pt pitch with the match highlighted; auto-load near the end of the
+  list (no Load More); Clear Archive link with a confirmation sheet and a cleared toast; Restore as the one mustard
+  pill (Return restores); the one-time banner above the list. `AXID.Archive.loadMore` is gone; `filter`, `chip.*`,
+  `clearFilters`, `banner`, `clear` and `clearConfirm` are new.
+- Command bar: up to three archived matches after the open tabs, captioned "Restore from Archive"; Enter restores
+  (`ArchiveCommandBarSearch`). Window > Clear Archive... (unbound) fronts the Archive window and asks there.
+
+Deviations: Open Settings in the banner is hidden until a Settings window exists (Got It still dismisses); the
+dialog is a window sheet with the alerts design's pill buttons, without the custom 14 pt bottom corners; the compact
+date follows the locale ("Sep 22" in en_US, "22 Sep" in en_GB) and reads "now" under a minute; Cmd-W closes the
+Archive window but the File menu item is not retitled; the cleared toast is the shared text toast (no archivebox
+glyph); the command bar's archived subtitle names the Space in text ("host, Space, archived ...") without a color dot;
+Clear Archive is not rebindable yet (there is no key binding registry). The open questions of design section 14 were
+built to the design's own proposals and wait for the maintainer's confirmation.
+
+| Suite | Baseline (`751efac`) | Final | Delta |
+|---|---|---|---|
+| ArktCore `swift test` | 387 | 399 | +12 (`ArchiveSearchTests`, `ArchiveStoreSearchTests`) |
+| ShellKit `swift test --skip ShellKitGUITests` | 862 | 888 | +26 (`ArchiveListModelSearchTests`, `ArchiveCommandBarSearchTests`, `CommandBarArchivedResultsTests`, `ArchiveTokensContrastTests`) |
+| ShellKit `ShellKitGUITests` | 702 | 730 | +28 (`ArchiveSearchWindowTests`, `CommandBarArchivedTests`) |
+
+Counts are the sums of the per-target Swift Testing runs (XCTest for the GUI suite: 730 run, 5 skipped). In the full
+GUI run under load (load average about 5), the frame-time gates `PeekMotionOnScreenTests` and
+`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` missed by a few frames; both pass when run alone, and
+neither touches the Archive.
+

@@ -408,7 +408,6 @@ final class AccessibilityIdentifierTests: XCTestCase {
   // MARK: Archive window (U4c)
 
   func testArchiveWindowTableRowsButtonsAndFooterHaveIdentifiers() async throws {
-    XCTAssertEqual(AXID.Archive.search, "archive.search", "reserved constant for #111")
 
     @MainActor
     final class FixedArchiveDataSource: ArchiveListDataSource {
@@ -455,11 +454,17 @@ final class AccessibilityIdentifierTests: XCTestCase {
     XCTAssertEqual(restore.accessibilityRole(), .button)
     XCTAssertTrue(restore.isAccessibilityEnabled())
 
-    let loadMore = try XCTUnwrap(inArchive(AXID.Archive.loadMore).first)
-    XCTAssertEqual(loadMore.accessibilityRole(), .button)
+    // #111: the search field, the filter button and Clear Archive.
+    XCTAssertEqual(inArchive(AXID.Archive.search).count, 1)
+    let filter = try XCTUnwrap(inArchive(AXID.Archive.filter).first)
+    XCTAssertEqual(filter.accessibilityRole(), .button)
+    XCTAssertEqual(filter.accessibilityLabel(), "Filter")
+    let clear = try XCTUnwrap(inArchive(AXID.Archive.clear).first)
+    XCTAssertEqual(clear.accessibilityRole(), .button, "a button for the rotor, not a link")
+    XCTAssertEqual(clear.accessibilityLabel(), "Clear Archive")
 
     let footer = try XCTUnwrap(inArchive(AXID.Archive.footer).first)
-    XCTAssertEqual(footer.accessibilityValue() as? String, "2 items could not be read")
+    XCTAssertEqual(footer.accessibilityValue() as? String, "2 items, 2 items could not be read")
     archive.close()
   }
 

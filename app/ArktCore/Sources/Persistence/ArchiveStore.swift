@@ -40,13 +40,13 @@ public struct ArchiveStore: Sendable {
         archived_at = excluded.archived_at, source_kind = excluded.source_kind,
         source_space_id = excluded.source_space_id, section_kind = excluded.section_kind,
         section_profile = excluded.section_profile, title = excluded.title, url = excluded.url,
-        snapshot = excluded.snapshot
+        snapshot = excluded.snapshot, search_text = excluded.search_text
       """
     }
     let sql = """
       INSERT INTO archived_item (id, format_version, reason, archived_at, source_kind, source_space_id,
-        section_kind, section_profile, title, url, snapshot)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        section_kind, section_profile, title, url, snapshot, search_text)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       \(conflictClause)
       """
     let addedIDs = policy == .replace ? items.map(\.id) : []
@@ -58,6 +58,7 @@ public struct ArchiveStore: Sendable {
           arguments: [
             row.id, Self.snapshotFormatVersion, row.reason, row.archivedAt, row.sourceKind,
             row.sourceSpaceID, row.sectionKind, row.sectionProfile, row.title, row.url, row.snapshot,
+            row.searchText,
           ])
         written += db.changesCount
       }
@@ -104,6 +105,16 @@ public struct ArchiveStore: Sendable {
   public func count() async throws -> Int {
     dispatchPrecondition(condition: .notOnQueue(.main))
     return try await database.writer.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM archived_item") ?? 0 }
+  }
+
+  /// How many rows match `filter`, readable or not (the Archive window's "3 of 42 items").
+  @concurrent
+  public func count(matching filter: ArchiveFilter) async throws -> Int {
+    dispatchPrecondition(condition: .notOnQueue(.main))
+    let (clauses, arguments) = Self.whereClauses(filter)
+    let sql = "SELECT COUNT(*) FROM archived_item"
+      + (clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND "))
+    return try await database.writer.read { try Int.fetchOne($0, sql: sql, arguments: arguments) ?? 0 }
   }
 
   /// Deletes entries, for example after a restore, in one transaction. Unknown ids are ignored.
@@ -158,6 +169,24 @@ public struct ArchiveStore: Sendable {
   private static func fetchRows(
     _ db: Database, filter: ArchiveFilter, after cursor: Cursor?, limit: Int?
   ) throws -> [FetchedRow] {
+    var (clauses, arguments) = whereClauses(filter)
+    if let cursor {
+      clauses.append("(archived_at < ? OR (archived_at = ? AND id > ?))")
+      arguments += [cursor.archivedAt, cursor.archivedAt, cursor.id]
+    }
+    var sql = """
+      SELECT id, format_version, reason, archived_at, source_kind, source_space_id, section_kind, section_profile,
+        snapshot FROM archived_item
+      """
+    if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
+    sql += " ORDER BY archived_at DESC, id"
+    if let limit { sql += " LIMIT \(limit)" }
+    return try Row.fetchAll(db, sql: sql, arguments: arguments).map(FetchedRow.init)
+  }
+
+  /// The filter as SQL. Text matches the folded `search_text` column with `instr`: a plain substring test, so the
+  /// query needs no escaping and has no wildcards.
+  private static func whereClauses(_ filter: ArchiveFilter) -> ([String], StatementArguments) {
     var clauses: [String] = []
     var arguments: StatementArguments = []
     switch filter.source {
@@ -173,29 +202,11 @@ public struct ArchiveStore: Sendable {
       clauses.append("reason = ?")
       arguments += [reason.rawValue]
     }
-    if let text = filter.text, !text.isEmpty {
-      let pattern = "%" + escapeLike(text) + "%"
-      clauses.append("(title LIKE ? ESCAPE '\\' OR url LIKE ? ESCAPE '\\')")
-      arguments += [pattern, pattern]
+    if let query = ArchiveSearch.query(filter.text) {
+      clauses.append("instr(search_text, ?) > 0")
+      arguments += [query]
     }
-    if let cursor {
-      clauses.append("(archived_at < ? OR (archived_at = ? AND id > ?))")
-      arguments += [cursor.archivedAt, cursor.archivedAt, cursor.id]
-    }
-    var sql = """
-      SELECT id, format_version, reason, archived_at, source_kind, source_space_id, section_kind, section_profile,
-        snapshot FROM archived_item
-      """
-    if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
-    sql += " ORDER BY archived_at DESC, id"
-    if let limit { sql += " LIMIT \(limit)" }
-    return try Row.fetchAll(db, sql: sql, arguments: arguments).map(FetchedRow.init)
-  }
-
-  static func escapeLike(_ text: String) -> String {
-    text.replacingOccurrences(of: "\\", with: "\\\\")
-      .replacingOccurrences(of: "%", with: "\\%")
-      .replacingOccurrences(of: "_", with: "\\_")
+    return (clauses, arguments)
   }
 }
 
@@ -210,6 +221,7 @@ private struct InsertRow: Sendable {
   var title: String
   var url: String?
   var snapshot: Data
+  var searchText: String
 
   init(_ item: ArchivedItem, encoder: JSONEncoder) throws {
     id = item.id.uuidString
@@ -229,6 +241,7 @@ private struct InsertRow: Sendable {
     title = item.title
     url = item.url?.absoluteString
     snapshot = try encoder.encode(item.snapshot)
+    searchText = ArchiveSearch.searchText(of: item.snapshot)
   }
 }
 

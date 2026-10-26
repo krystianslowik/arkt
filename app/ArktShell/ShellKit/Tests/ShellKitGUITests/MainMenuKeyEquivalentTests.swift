@@ -11,6 +11,7 @@ final class AppCommands: NSObject {
   @objc func showSettings(_ sender: Any?) {}
   @objc func importFromArc(_ sender: Any?) {}
   @objc func showArchive(_ sender: Any?) {}
+  @objc func clearArchive(_ sender: Any?) {}
   @objc func showWelcome(_ sender: Any?) {}
 }
 
@@ -218,6 +219,7 @@ final class MainMenuInventoryTests: XCTestCase {
       ("Settings...", #selector(AppCommands.showSettings(_:))),
       ("Import Browser Data...", #selector(AppCommands.importFromArc(_:))),
       ("Show Archive", #selector(AppCommands.showArchive(_:))),
+      ("Clear Archive...", #selector(AppCommands.clearArchive(_:))),   // KB-043, unbound
     ]
     for (title, action) in toCommands {
       let item = try item(title)

@@ -97,14 +97,22 @@ struct SettingsStoreTests {
       do {
         let queue = try DatabaseQueue(path: location.databaseURL.path)
         try ArktDatabase.migrator.migrate(queue, upTo: "v2-archive")
-        let v2 = ArktDatabase(writer: queue)
-        _ = try await ArchiveStore(database: v2).add([item], onConflict: .replace)
-        try v2.close()
+        // The v2 columns only: today's `ArchiveStore.add` also writes the later `search_text` column.
+        let body = try SidebarStorageFormat.makeEncoder().encode(item.snapshot)
+        try await queue.write { db in
+          try db.execute(
+            sql: """
+              INSERT INTO archived_item (id, format_version, reason, archived_at, source_kind, title, url, snapshot)
+              VALUES (?, 1, 'manual', ?, 'unknown', 'A', 'https://example.com/a', ?)
+              """,
+            arguments: [item.id.uuidString, Self.date.timeIntervalSinceReferenceDate, body])
+        }
+        try queue.close()
       }
       let state = try await ArktLaunch.openAndLoad(location, now: Self.date)
       #expect(state.outcome == .opened)
       #expect(try await state.database.writer.read { try ArktDatabase.migrator.completedMigrations($0) }
-        == ["v1-sidebar", "v2-archive", "v3-settings"])
+        == ["v1-sidebar", "v2-archive", "v3-settings", "v4-archive-search"])
       #expect(try await ArchiveStore(database: state.database).items().items == [item])
       try state.database.close()
 

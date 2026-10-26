@@ -154,6 +154,10 @@ public final class ArchiveCoordinator {
   /// too, the first Space is used. Returns nil and changes nothing when `item.id` was already restored and not
   /// archived again since (a repeated click). Throws `.noSpaceForRestore` when the sidebar has no Space, and the
   /// model's `SidebarError`s; nothing changes on throw.
+  /// True when `id` was restored and not archived again since: the store may still hold it until the queued remove
+  /// lands, so searches leave it out.
+  public func isRestored(_ id: NodeID) -> Bool { restoredIDs.contains(id) }
+
   @discardableResult
   public func restore(_ item: ArchivedItem, fallbackSpace: UUID?) throws -> RestoredItem? {
     guard !restoredIDs.contains(item.id) else { return nil }

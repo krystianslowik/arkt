@@ -295,7 +295,7 @@ struct ArchiveStoreTests {
       #expect(first.outcome == .opened)
       #expect(first.sidebar == sidebar)
       #expect(try await first.database.writer.read { try ArktDatabase.migrator.completedMigrations($0) }
-        == ["v1-sidebar", "v2-archive", "v3-settings"])
+        == ["v1-sidebar", "v2-archive", "v3-settings", "v4-archive-search"])
       try first.database.close()
 
       let made = try Backups.list(in: location.backupsDirectory)

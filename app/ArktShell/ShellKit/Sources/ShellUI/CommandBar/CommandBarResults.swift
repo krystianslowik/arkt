@@ -15,16 +15,30 @@ public enum CommandBarResults {
     }
   }
 
+  /// An archived item matching the query (#111, BH-087, BH-104), already worded: its title and "host, Space,
+  /// archived <when>". `id` is the archived root node; Enter restores it.
+  public struct ArchivedMatch: Sendable, Equatable {
+    public let id: UUID
+    public let title: String
+    public let subtitle: String
+    public init(id: UUID, title: String, subtitle: String) {
+      self.id = id; self.title = title; self.subtitle = subtitle
+    }
+  }
+
   public enum Kind: Sendable, Equatable {
     case open(URL)
     case switchTo(NodeID)
     case search(URL)
+    /// An archived item; Enter restores it (BH-086) instead of opening a duplicate.
+    case restore(UUID)
 
     public var name: String {
       switch self {
       case .open: "open"
       case .switchTo: "switch"
       case .search: "search"
+      case .restore: "restore"
       }
     }
   }
@@ -41,6 +55,7 @@ public enum CommandBarResults {
       case .open: "Open"
       case .switchTo: trailingHint ?? CommandBarResults.switchHint
       case .search: "Search"
+      case .restore: CommandBarResults.restoreHint
       }
     }
   }
@@ -49,8 +64,14 @@ public enum CommandBarResults {
   public static let switchHint = "Switch to Tab"
   /// The caption of an open tab that is a split pane (BH-104, [S] string).
   public static let switchToSplitHint = "Switch to Split View"
+  /// The caption of an archived match (#111).
+  public static let restoreHint = "Restore from Archive"
+  /// Archived matches shown at most (#111, design section 7).
+  public static let maxArchivedResults = 3
 
-  public static func make(query raw: String, openTabs: [OpenTab]) -> [Result] {
+  /// `archived`: matches the archive store found for `raw`, newest first; listed after open tabs (switching to an
+  /// open tab beats restoring a closed one) and before the search row (which restoring beats).
+  public static func make(query raw: String, openTabs: [OpenTab], archived: [ArchivedMatch] = []) -> [Result] {
     let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     var results: [Result] = []
 
@@ -67,6 +88,13 @@ public enum CommandBarResults {
     for tab in matching.prefix(maxSwitchResults) {
       results.append(Result(kind: .switchTo(tab.node), title: tab.title, subtitle: tab.url.host() ?? tab.url.absoluteString,
                             trailingHint: tab.isSplitPane ? switchToSplitHint : switchHint))
+    }
+
+    if !query.isEmpty {
+      for match in archived.prefix(maxArchivedResults) {
+        results.append(Result(kind: .restore(match.id), title: match.title, subtitle: match.subtitle,
+                              trailingHint: restoreHint))
+      }
     }
 
     // #96: an explicit http(s) scheme makes the input a URL for certain (Cmd-L prefills one), so a search row

@@ -138,6 +138,7 @@ public actor FakeArchiveStore: ArchiveStoring {
   public enum Call: Equatable, Sendable {
     case add([NodeID])
     case remove([NodeID])
+    case removeAll
   }
 
   public private(set) var calls: [Call] = []
@@ -179,7 +180,7 @@ public actor FakeArchiveStore: ArchiveStoring {
   }
 
   public func items(matching filter: ArchiveFilter, limit: Int?) async throws -> ArchivePage {
-    let items = stored.values.sorted { $0.archivedAt > $1.archivedAt }
+    let items = stored.values.filter(filter.matches).sorted { $0.archivedAt > $1.archivedAt }
     return ArchivePage(items: limit.map { Array(items.prefix($0)) } ?? items, unreadable: 0)
   }
 
@@ -189,12 +190,23 @@ public actor FakeArchiveStore: ArchiveStoring {
     if failsRemoves { throw FakeStoreError() }
     for id in ids { stored[id] = nil }
   }
+
+  public func count(matching filter: ArchiveFilter) async throws -> Int {
+    stored.values.filter(filter.matches).count
+  }
+
+  public func removeAll() async throws {
+    calls.append(.removeAll)
+    if failsRemoves { throw FakeStoreError() }
+    stored = [:]
+  }
 }
 
 /// In-memory `ArchiveStateStoring` that records every clock reset. The resolved start is the last reset, else the
 /// stored start (`setStarted`), else `now` (which is then stored, like `SettingsStore`).
 public actor FakeArchiveState: ArchiveStateStoring {
   public private(set) var resets: [Date] = []
+  public private(set) var educationBannerDismissed = false
   private var started: Date?
   private var settings = ArchiveSettings()
   private var failsResets = false
@@ -274,4 +286,10 @@ public final class FakeSidebarPersist {
     saved.append(sidebar)
     return succeeds
   }
+}
+
+/// BH-089: the education banner flag, in memory.
+extension FakeArchiveState: ArchiveBannerStoring {
+  public func isEducationBannerDismissed() async throws -> Bool { educationBannerDismissed }
+  public func dismissEducationBanner(at date: Date) async throws { educationBannerDismissed = true }
 }

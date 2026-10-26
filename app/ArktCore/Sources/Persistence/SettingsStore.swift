@@ -100,6 +100,26 @@ public struct SettingsStore: Sendable {
     }
   }
 
+  /// BH-089: true once the auto-archive education banner was dismissed. An unreadable stored state counts as not
+  /// dismissed.
+  @concurrent
+  public func isEducationBannerDismissed() async throws -> Bool {
+    try await load(ArchiveState.self).educationBannerDismissed
+  }
+
+  /// BH-089: records the banner's dismissal, keeping the other `ArchiveState` fields, in one transaction.
+  @concurrent
+  public func dismissEducationBanner(at date: Date) async throws {
+    dispatchPrecondition(condition: .notOnQueue(.main))
+    let key = ArchiveState.storageKey
+    let updatedAt = date.timeIntervalSinceReferenceDate
+    try await database.writer.write { db in
+      var state = Self.decode(ArchiveState.self, from: try Self.fetchValue(db, key: key))
+      state.educationBannerDismissed = true
+      try Self.store(db, key: key, value: try Self.encode(state), updatedAt: updatedAt)
+    }
+  }
+
   /// The stored `ArchiveSettings`, or the defaults.
   @concurrent
   public func loadArchiveSettings() async throws -> ArchiveSettings { try await load(ArchiveSettings.self) }
@@ -133,3 +153,5 @@ public struct SettingsStore: Sendable {
 extension SettingsStore: ArchiveStateStoring {}
 
 extension SettingsStore: ArcImportRecordStoring {}
+
+extension SettingsStore: ArchiveBannerStoring {}

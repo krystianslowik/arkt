@@ -345,7 +345,8 @@ counts-only breakdown of decode failures (by failing field) is a follow-up.
 | C7 Smoke + pacing | PASS (with open items) | functional smoke PASS; SF Symbol bitmap cache, changed-row pushes, command bar ordered-in + reload-only-on-change; warm-show p95 15-18 ms; swipe 0 hitches/700 interactions on a quieter machine. Merged 38ca799. Open: one late frame per ~100 interactions under load (cause not named), command bar makeKey latency tail, manual checks for the user (10 trackpad swipes, Cmd-T in fullscreen and on a 2nd desktop, 1x/2x display move). Details: track-c-results.md |
 
 ### Track D review follow-ups (later)
-- Unicode case/diacritic-insensitive archive search (search_text or FTS5), incl. tabs inside archived folders (BH-087).
+- Done in #111: Unicode case/diacritic-insensitive archive search (`search_text` column, migration
+  `v4-archive-search`), incl. tabs inside archived folders (BH-087). See track-e-results.md.
 - Deterministic launch-only leftover-sweep test.
 - Counts-only breakdown of the 8 archive decodeFailed entries by DecodingError case (allowlisted keys only).
 - Pin ImportCheckSummary.caseName assumption (summarized enums must not be CustomStringConvertible).

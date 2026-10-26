@@ -482,6 +482,8 @@ actor PagedArchiveStore: ArchiveStoring {
   private var heldReads: [CheckedContinuation<Void, Never>] = []
   private(set) var limits: [Int?] = []
   private(set) var removed: [[NodeID]] = []
+  private(set) var filters: [ArchiveFilter] = []
+  private(set) var removeAllCount = 0
 
   init(items: [ArchivedItem] = [], unreadable: Int = 0) {
     self.items = items
@@ -531,8 +533,9 @@ actor PagedArchiveStore: ArchiveStoring {
 
   func items(matching filter: ArchiveFilter, limit: Int?) async throws -> ArchivePage {
     limits.append(limit)
+    filters.append(filter)
     if fails { throw FakeStoreError() }
-    let sorted = items.sorted { $0.archivedAt > $1.archivedAt }
+    let sorted = items.filter(filter.matches).sorted { $0.archivedAt > $1.archivedAt }
     let page = ArchivePage(items: limit.map { Array(sorted.prefix($0)) } ?? sorted, unreadable: unreadable)
     if holdsReads { await withCheckedContinuation { heldReads.append($0) } }
     return page
@@ -543,6 +546,17 @@ actor PagedArchiveStore: ArchiveStoring {
     removed.append(ids)
     let gone = Set(ids)
     items.removeAll { gone.contains($0.id) }
+  }
+
+  func count(matching filter: ArchiveFilter) async throws -> Int {
+    if fails { throw FakeStoreError() }
+    return items.filter(filter.matches).count + (filter == ArchiveFilter() ? unreadable : 0)
+  }
+
+  func removeAll() async throws {
+    if fails { throw FakeStoreError() }
+    removeAllCount += 1
+    items = []
   }
 }
 
