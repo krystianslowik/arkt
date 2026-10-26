@@ -750,7 +750,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     let flavor = content.archiveFlavor
     titleLabel.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     footerLabel.textColor = ShellTokens.secondaryText.resolve(flavor).nsColor()
-    toastView.flavor = flavor
+    toastView.theme = ToastView.plainTheme(flavor)       // the Archive window follows the system, untinted
     searchField.restyle()
     tableView.reloadData(forRowIndexes: IndexSet(integersIn: 0..<entries.count), columnIndexes: [0])
   }

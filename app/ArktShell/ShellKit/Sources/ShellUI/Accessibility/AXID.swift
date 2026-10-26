@@ -41,6 +41,8 @@ public enum AXID {
     public static let root = "toast"
     /// The action button; present only while the toast has an action.
     public static let action = "toast.action"
+    /// The dismiss button of a persistent toast.
+    public static let dismiss = "toast.dismiss"
     /// Value of `root` for a toast that stays until dismissed (recovery notices).
     public static let persistent = "persistent"
     /// Value of `root` for a toast that hides after its duration.
