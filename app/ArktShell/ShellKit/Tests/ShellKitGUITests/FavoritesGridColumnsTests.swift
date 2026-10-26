@@ -171,7 +171,6 @@ final class FavoritesGridColumnsTests: XCTestCase {
     let reversed = try tileFrames(grid, ids)
     XCTAssertEqual(reversed[2].minY, mid[2].minY, accuracy: 0.5, "the reversal starts where the tile is")
 
-
     for _ in 0..<60 { advance(grid, by: 1.0 / 60) }
     XCTAssertFalse(grid.columnMotion.isRunning)
     let settled = try tileFrames(grid, ids)
