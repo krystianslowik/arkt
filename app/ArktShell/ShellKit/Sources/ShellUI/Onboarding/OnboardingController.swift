@@ -667,8 +667,8 @@ public final class OnboardingController {
     if options.mode == .firstRun { services.markCompleted() }
     let landing = landingSpace(skipped: skipped, window: window)
     let reduceMotion = view.appearanceModel.reduceMotion
-    view.stepView?.conceal(duration: 0.16)
-    view.setFooter(showsBack: false, progress: nil, showsSkip: false, animated: true)
+    view.stepView?.conceal(duration: OnboardingStepView.finishConcealDuration)
+    view.concealFooter(reduceMotion: reduceMotion)
     let card = window.rootView.convert(window.rootView.card.frame, to: view)
     // The stage folds onto the card and fades on its own clock (P9); the overlay leaves once it is done and the
     // command bar is up. The fold can outlast the controller (the window lets it go once the browser shows), so the

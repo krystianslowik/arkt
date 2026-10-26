@@ -122,6 +122,22 @@ final class OnboardingView: NSView {
     rebuildKeyLoop()
   }
 
+  /// The finish (M8, #375): the whole footer leaves with the step content as the fold begins, so the ribbon never
+  /// passes behind it. Its text stays while it fades; Back and Skip setup stop taking clicks and leave VoiceOver at
+  /// once. Under Reduce Motion it goes at once, like the browser's reveal.
+  func concealFooter(reduceMotion: Bool) {
+    for button in [backButton, skipButton] {
+      button.isEnabled = false
+      button.cell?.setAccessibilityElement(false)
+    }
+    progressLabel.setAccessibilityElement(false)
+    setAccessibilityValue("")
+    for layer in [backButton.layer, progressLabel.layer, skipButton.layer].compactMap({ $0 }) {
+      OnboardingMotion.conceal(layer, duration: reduceMotion ? 0 : OnboardingStepView.finishConcealDuration)
+    }
+    rebuildKeyLoop()
+  }
+
   /// "Step {n} of {total}", set by the controller with the footer.
   var stepValue = ""
 

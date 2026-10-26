@@ -283,6 +283,9 @@ final class OnboardingStepView: NSView {
     }
   }
 
+  /// M8: the content and the footer leave in 160 ms as the fold begins.
+  static let finishConcealDuration: CFTimeInterval = 0.16
+
   /// Outgoing (M2): opacity to 0 in 200 ms, from where it is.
   func conceal(duration: CFTimeInterval = 0.2) {
     if let layer { OnboardingMotion.conceal(layer, duration: duration) }
