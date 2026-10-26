@@ -1,31 +1,39 @@
-<a href="https://arkt.dev">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="design/brand/social/readme-header-dark.png">
-    <img src="design/brand/social/readme-header-light.png" alt="arkt: A native macOS browser." width="800">
-  </picture>
-</a>
+<p align="center">
+  <a href="https://arkt.dev">
+    <img src="design/readme/particle-mark.png" alt="Arkt particle mark" width="180" height="180">
+  </a>
+</p>
 
-# arkt
+<h1 align="center">arkt</h1>
 
-**Keep the way you browse.**
+<p align="center"><strong>Keep the way you browse.</strong></p>
 
-Arkt is a native macOS browser built around a familiar sidebar: Spaces, pinned tabs and Today, with a path to bring
-your Arc data across.
+<p align="center">
+  Arkt is a native macOS browser built around a familiar sidebar: Spaces, pinned tabs and Today,<br>
+  with a path to bring your Arc data across.
+</p>
 
-[Official website: arkt.dev](https://arkt.dev) ·
-[Join the waitlist](https://arkt.dev/#get) ·
-[Contributing](CONTRIBUTING.md) ·
-[Buy me a coffee](https://buymeacoffee.com/krystianslowik)
-
-## Status
+<p align="center">
+  <a href="https://arkt.dev">Official website: arkt.dev</a> ·
+  <a href="https://arkt.dev/#get">Join the waitlist</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="https://buymeacoffee.com/krystianslowik">Buy me a coffee</a>
+</p>
 
 **Pre-alpha. Not ready for daily use.** [Join the waitlist](https://arkt.dev/#get) to hear when Arkt is ready for you.
 
-The default Debug build is a development shell using `FakeEngine`, backed by WKWebView. A separate `Engine`
-configuration connects the shell to Arkt's Chromium framework; that integration is still in progress. The Debug
-shell is useful for UI development, but does not demonstrate Chromium or Chrome extension support.
+## Interface previews
 
-[See the interface on arkt.dev](https://arkt.dev/#parity).
+Captures of Arkt’s interactive design prototypes. Features and details may change during implementation.
+
+<p align="center">
+  <a href="design/readme/screens/peek-open-light.png">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="design/readme/screens/peek-open-dark.png">
+      <img src="design/readme/screens/peek-open-light.png" alt="Arkt design prototype: a city guide opens in Peek over an inbox, alongside its Personal sidebar." width="800">
+    </picture>
+  </a>
+</p>
 
 ## What we're building
 
@@ -39,7 +47,52 @@ The goal is to preserve the habits you already have in Arc:
 This is the product direction, not a list of release-ready features. The [roadmap](https://github.com/krystianslowik/arkt/issues/30)
 and [implementation plans](docs/plans) track the work.
 
-## Build the development shell
+<table>
+  <tr>
+    <th>Split View</th>
+    <th>Little Arkt</th>
+  </tr>
+  <tr>
+    <td width="50%">
+      <a href="design/readme/screens/peek-split-light.png">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="design/readme/screens/peek-split-dark.png">
+          <img src="design/readme/screens/peek-split-light.png" alt="Arkt design prototype: an inbox and a city guide share one window in Split View." width="400">
+        </picture>
+      </a>
+    </td>
+    <td width="50%">
+      <a href="design/readme/screens/la-idle-light.png">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="design/readme/screens/la-idle-dark.png">
+          <img src="design/readme/screens/la-idle-light.png" alt="Arkt design prototype: a link from Messages opens in a separate Little Arkt window while the main browser stays on a calendar." width="400">
+        </picture>
+      </a>
+    </td>
+  </tr>
+</table>
+
+### Bring your structure across
+
+The importer is designed to carry your Spaces, pinned tabs, folders and Favorites from Arc into Arkt.
+
+<p align="center">
+  <a href="design/readme/screens/advanced-light.png">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="design/readme/screens/advanced-dark.png">
+      <img src="design/readme/screens/advanced-light.png" alt="Arkt design prototype: Advanced settings with download options, page behavior and an Import from Arc control." width="560">
+    </picture>
+  </a>
+</p>
+
+[Explore the interface on arkt.dev](https://arkt.dev/#parity).
+
+<details>
+<summary>Build the development shell</summary>
+
+The default Debug build is a development shell using `FakeEngine`, backed by WKWebView. A separate `Engine`
+configuration connects the shell to Arkt's Chromium framework; that integration is still in progress. The Debug
+shell is useful for UI development, but does not demonstrate Chromium or Chrome extension support.
 
 The app targets **macOS 15+**. Building it requires Xcode with **Swift 6.2+** and
 [XcodeGen](https://github.com/yonaskolb/XcodeGen), on a macOS version supported by your Xcode release.
@@ -71,6 +124,9 @@ checks. While a Chromium build is running, use `nice -n 20` and two jobs for Swi
 the [capacity rules](CONTRIBUTING.md#7-code-rules).
 
 For the Chromium toolchain, framework setup and engine build, follow the [engine guide](engine/README.md).
+
+
+</details>
 
 ## Contributing
 
