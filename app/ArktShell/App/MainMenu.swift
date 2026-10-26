@@ -80,7 +80,7 @@ enum MainMenu {
     return [
       item("About Arkt Shell", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),
       .separator(),
-      // KB-066. Disabled until Arkt has a Settings window; it keeps Cmd-, from Chromium's settings page.
+      // KB-066: Arkt's Settings window (#307); it keeps Cmd-, from Chromium's settings page (decision 9).
       item("Settings...", #selector(AppCommands.showSettings(_:)), ",", target: commands),
       .separator(),
       holder(for: services),
