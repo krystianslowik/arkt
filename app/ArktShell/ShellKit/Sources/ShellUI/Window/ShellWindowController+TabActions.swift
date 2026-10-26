@@ -12,6 +12,7 @@ extension ShellWindowController {
   func wireTabActions() {
     sidebarController.onMenuAction = { [weak self] action in self?.perform(action) }
     sidebarController.onEmptyAreaDoubleClick = { [weak self] in self?.newTab(nil) }
+    wireTodayBarMenu()                                    // BH-033: the bottom bar's Clear menu (#110)
   }
 
   /// Runs a context menu action of any Space page.
@@ -108,10 +109,15 @@ extension ShellWindowController {
     closeAll(SidebarContextMenu.todayNodesBelow(id, sidebar))
   }
 
-  /// Clear Today Tabs (BH-075): every Today row of the Space; a Today folder goes to the Archive whole. The folders
-  /// and rows come back together, by Undo or Cmd-Z.
+  /// Clear Today Tabs (BH-075): every Today row of the Space, minus the rows whose page plays media (BH-076); a Today
+  /// folder goes to the Archive whole. The folders and rows come back together, by Undo or Cmd-Z.
   func clearToday(_ space: SpaceID) {
-    let rows = sidebar.children(of: .today(space))
+    archiveToday(todayRows(of: space, scope: .all))
+  }
+
+  /// Archives `rows`, the top-level Today rows a Clear took: a folder goes whole, the rest row by row, as one undo
+  /// unit. Shares Clear Today Tabs' counting and toast.
+  func archiveToday(_ rows: [NodeID]) {
     let folders = rows.filter { if case .folder? = sidebar.node($0) { true } else { false } }
     let others = rows.filter { !folders.contains($0) }
     archiveAsOneUndo {

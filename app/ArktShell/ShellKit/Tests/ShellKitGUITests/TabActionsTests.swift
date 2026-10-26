@@ -681,6 +681,124 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// #110: the bottom bar's archive button offers Clear Today Tabs (BH-033, BH-075) and Clear unselected Today tabs
+  /// (BH-078); the second needs a selection of Today rows.
+  func testTheBottomBarOffersTheClearActions() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    let menu = try XCTUnwrap(harness.controller.sidebarController.view.archiveButton.menu)
+    menu.delegate?.menuNeedsUpdate?(menu)
+    XCTAssertEqual(menu.items.map(\.title), ["Clear Today Tabs", "Clear unselected Today tabs"])
+    XCTAssertTrue(menu.items[0].isEnabled, "the Space has Today tabs")
+    XCTAssertFalse(menu.items[1].isEnabled, "nothing is selected")
+
+    try harness.click(world.today[2], .command)
+    menu.delegate?.menuNeedsUpdate?(menu)
+    XCTAssertTrue(menu.items[1].isEnabled)
+
+    menu.performActionForItem(at: 0)
+    XCTAssertEqual(harness.children(.today(world.work)), [])
+    menu.delegate?.menuNeedsUpdate?(menu)
+    XCTAssertFalse(menu.items[0].isEnabled, "the Space has no Today tabs left")
+    XCTAssertFalse(menu.items[1].isEnabled, "the cleared rows left the selection with them")
+    harness.controller.close()
+  }
+
+  /// BH-078: only the Today rows with nothing selected go; the selected rows stay, selected.
+  func testClearUnselectedTodayTabsArchivesOnlyTheUnselectedRows() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.split, .command)                 // t0 and the split are selected
+
+    let menu = try XCTUnwrap(harness.controller.sidebarController.view.archiveButton.menu)
+    menu.delegate?.menuNeedsUpdate?(menu)
+    XCTAssertTrue(menu.items[1].isEnabled)
+    menu.performActionForItem(at: 1)
+
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[0], world.split])
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 3 tabs")
+    XCTAssertEqual(try harness.outline().selectedNodes, [world.today[0], world.split],
+                   "the rows that stayed keep their selection")
+    XCTAssertEqual(harness.current, world.today[0], "the current tab stays too")
+    harness.controller.close()
+  }
+
+  /// A selected tab inside a Today folder keeps the whole folder: the folder holds a selection.
+  func testClearUnselectedKeepsAFolderWithASelectedTabInside() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "F", in: .today(world.work))
+    let inside = try world.sidebar.addTab(url: Self.url("f0"), title: "F0", in: .folder(folder))
+    let harness = Harness(world.sidebar)
+    harness.controller.showWindow(nil)
+    defer { harness.controller.close() }
+    harness.controller.activate(node: world.today[0])
+    try harness.click(inside, .command)              // folders start open, so the tab has a row
+
+    let menu = try XCTUnwrap(harness.controller.sidebarController.view.archiveButton.menu)
+    menu.delegate?.menuNeedsUpdate?(menu)
+    menu.performActionForItem(at: 1)
+
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[0], folder])
+    XCTAssertEqual(harness.children(.folder(folder)), [inside])
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 5 tabs")
+    harness.controller.close()
+  }
+
+  /// BH-076: Clear leaves a Today tab whose page plays media where it is.
+  func testClearTodayTabsKeepsATabPlayingMedia() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[1])
+    harness.engine.setAudible(try XCTUnwrap(harness.tab(world.today[1])), true)
+
+    try harness.choose("Clear Today Tabs", on: nil)
+
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[1]])
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 5 tabs", "the playing tab is not counted")
+    XCTAssertEqual(harness.current, world.today[1])
+    harness.controller.close()
+  }
+
+  /// BH-076 through a container: a folder holding a playing tab stays whole, its page never closes.
+  func testClearTodayTabsKeepsAFolderHoldingAPlayingTab() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "F", in: .today(world.work))
+    let inside = try world.sidebar.addTab(url: Self.url("f0"), title: "F0", in: .folder(folder))
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: inside)
+    harness.engine.setAudible(try XCTUnwrap(harness.tab(inside)), true)
+    harness.controller.activate(node: world.today[0])
+
+    try harness.choose("Clear Today Tabs", on: nil)
+
+    XCTAssertEqual(harness.children(.today(world.work)), [folder])
+    XCTAssertEqual(harness.children(.folder(folder)), [inside])
+    XCTAssertNotNil(harness.tab(inside), "its page stays open")
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 6 tabs")
+    harness.controller.close()
+  }
+
+  /// KB-019: the menu bar item clears the current Space's Today tabs, and goes quiet once it has none.
+  func testClearTodayTabsFromTheMenuBar() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "F", in: .today(world.work))
+    _ = try world.sidebar.addTab(url: Self.url("f0"), title: "F0", in: .folder(folder))
+    let harness = Harness(world.sidebar)
+    let item = NSMenuItem(title: "Clear Today Tabs",
+                          action: #selector(ShellWindowController.clearTodayTabs(_:)), keyEquivalent: "k")
+    XCTAssertTrue(harness.controller.validateMenuItem(item))
+    harness.controller.activate(node: world.today[0])
+
+    harness.controller.clearTodayTabs(nil)
+
+    XCTAssertEqual(harness.children(.today(world.work)), [])
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 7 tabs")
+    XCTAssertFalse(harness.controller.validateMenuItem(item))
+    harness.controller.close()
+  }
+
   func testCopyLinkAndItsMarkdownAlternate() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
