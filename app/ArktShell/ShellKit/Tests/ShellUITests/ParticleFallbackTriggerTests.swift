@@ -4,7 +4,7 @@ import Testing
 /// The particle field's fallback trigger (onboarding spec, section 7.4; decision of #375): the 8,192-mote 60 Hz tier
 /// takes over when 30 of the last 60 frames went over 2 ms of GPU time, a sliding window rather than a streak.
 struct ParticleFallbackTriggerTests {
-  typealias Window = ParticleRenderer.GPUBudgetWindow
+  typealias Window = GPUBudgetWindow
 
   private static func window(_ frames: [Double]) -> Window {
     var window = Window()
@@ -48,7 +48,7 @@ struct ParticleFallbackTriggerTests {
   }
 
   @Test func gpuTimesExposeTheWindowAndResetIt() {
-    let times = ParticleRenderer.GPUTimes()
+    let times = GPUFrameTimes(budgetMilliseconds: 2)
     for frame in 0..<60 { times.record(frame.isMultiple(of: 2) ? 2.6 : 0.4) }
     #expect(times.tripsFallback)
     times.reset()

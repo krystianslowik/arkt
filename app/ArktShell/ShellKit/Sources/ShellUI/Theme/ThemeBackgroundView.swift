@@ -1,21 +1,35 @@
 import AppKit
 
-/// Full-window Space theme behind the sidebar and the card: a diagonal gradient per Space plus a tiled
-/// grain layer, crossfaded on the GPU as the pager moves (design section 2). Per frame `setPosition`
-/// changes only layer opacities; gradient colors change only when the pair of neighbouring Spaces does.
-/// Core Animation for now; a Metal renderer (Arc: N gradient layers + texture overlay) can replace it
-/// behind the same `themes` / `setPosition` API. Empty areas drag the window.
+/// Full-window Space theme behind the sidebar and the card: a diagonal gradient per Space plus a tiled texture
+/// (grain, sand, denim or tweed), crossfaded on the GPU as the pager moves (design section 2). Per frame
+/// `setPosition` changes only layer opacities; gradient colors change only when the pair of neighbouring Spaces does.
+///
+/// Textures (#120): one layer per texture in use, composited as a multiply at the theme's overlay alpha
+/// (`gradient * mix(1, texel, alpha)`). With Metal, `ThemeGrainRenderer` draws one 100 pt tile per
+/// texture into a `CAMetalLayer` once per backing scale (deferred while the view cannot be seen) and replicator
+/// layers repeat it; without Metal, a Core Animation pattern of the same synthesized tile. Neither draws per frame
+/// or per resize. Empty areas drag the window.
 @MainActor
 public final class ThemeBackgroundView: WindowDragView {
   private let base = CAGradientLayer()
   private let overlay = CAGradientLayer()
-  private let grain = CALayer()
+  private let grainRenderer: ThemeGrainRenderer?
+  /// Texture layers, created when a theme first uses the texture; above the gradients, in creation order (a
+  /// multiply commutes).
+  private var grainLayers: [ThemeTexture: CALayer] = [:]
+  /// The Metal tier's tile per texture, and the backing scale it was last drawn at.
+  private var grainTiles: [ThemeTexture: CAMetalLayer] = [:]
+  private var grainDrawnScale: [ThemeTexture: CGFloat] = [:]
+  private var occlusionObserver: (any NSObjectProtocol)?
   private var lowerIndex = -1
   public private(set) var position: CGFloat = 0
   /// TODO(measure): Arc's Space theme crossfade.
   public var crossfadeDuration: TimeInterval = 0.28
   /// Read when a theme is replaced. Tests replace it; Reduce Motion snaps.
   public var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// Whether the window can be seen (not occluded, not miniaturized); a texture draw waits until it can. Tests
+  /// replace it.
+  var windowIsVisible: @MainActor (NSWindow) -> Bool = { $0.occlusionState.contains(.visible) && !$0.isMiniaturized }
   private var crossfadeToken = 0
   private var crossfadeActive = false
   private var suppressSnap = false
@@ -34,6 +48,7 @@ public final class ThemeBackgroundView: WindowDragView {
   public var themes: [SpaceThemeInfo] = [] {
     didSet {
       if let mirror, mirror.themes != themes { mirror.themes = themes }
+      ensureGrainLayers()
       guard !suppressSnap else { return }
       cancelCrossfade()
       lowerIndex = -1
@@ -41,11 +56,17 @@ public final class ThemeBackgroundView: WindowDragView {
     }
   }
 
-  public override init(frame: NSRect) {
+  public convenience override init(frame: NSRect) {
+    self.init(frame: frame, grainRenderer: ThemeGrainRenderer.shared)
+  }
+
+  /// `grainRenderer` nil: the Core Animation texture tier.
+  init(frame: NSRect, grainRenderer: ThemeGrainRenderer?) {
+    self.grainRenderer = grainRenderer
     super.init(frame: frame)
     wantsLayer = true
-    let none: [String: CAAction] = ["colors": NSNull(), "opacity": NSNull(), "bounds": NSNull(),
-                                    "position": NSNull(), "backgroundColor": NSNull()]
+    layer?.masksToBounds = true                     // the last row and column of tiles overhang
+    let none = Self.noActions
     for g in [base, overlay] {
       g.startPoint = CGPoint(x: 0, y: 1)          // top-left to bottom-right (layer y points up)
       g.endPoint = CGPoint(x: 1, y: 0)
@@ -53,12 +74,11 @@ public final class ThemeBackgroundView: WindowDragView {
       layer?.addSublayer(g)
     }
     overlay.opacity = 0
-    grain.actions = none
-    grain.backgroundColor = GrainTexture.patternColor
-    grain.compositingFilter = "softLightBlendMode"   // mid-gray noise adds texture without shifting the tone
-    grain.opacity = 0
-    layer?.addSublayer(grain)
   }
+
+  private static let noActions: [String: CAAction] = ["colors": NSNull(), "opacity": NSNull(), "bounds": NSNull(),
+                                                      "position": NSNull(), "backgroundColor": NSNull(),
+                                                      "hidden": NSNull(), "contents": NSNull()]
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -67,8 +87,37 @@ public final class ThemeBackgroundView: WindowDragView {
     super.layout()
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    for sublayer in [base, overlay, grain] { sublayer.frame = bounds }
+    for sublayer in [base, overlay] { sublayer.frame = bounds }
+    for layer in grainLayers.values { layoutGrain(layer) }
     CATransaction.commit()
+    drawGrainIfNeeded()
+  }
+
+  public override func viewWillMove(toWindow newWindow: NSWindow?) {
+    super.viewWillMove(toWindow: newWindow)
+    if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
+    occlusionObserver = nil
+  }
+
+  public override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    guard let window else { return }
+    occlusionObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.drawGrainIfNeeded() }
+    }
+    drawGrainIfNeeded()
+  }
+
+  public override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    drawGrainIfNeeded()
+  }
+
+  public override func viewDidUnhide() {
+    super.viewDidUnhide()
+    drawGrainIfNeeded()
   }
 
   /// Replaces `themes`. `crossfade` fades the settled Space from its old theme to the new one. Anything else (a
@@ -94,9 +143,13 @@ public final class ThemeBackgroundView: WindowDragView {
     overlay.colors = Self.gradientColors(newThemes[index])
     overlay.opacity = 1
     lowerIndex = index
-    let grainFrom = Float(old[index].textureOpacity)
-    let grainTo = Float(newThemes[index].textureOpacity)
-    grain.opacity = grainTo
+    let grainFrom = Self.grainAlphas(old[index], old[index], t: 0)
+    let grainTo = Self.grainAlphas(newThemes[index], newThemes[index], t: 0)
+    for (texture, layer) in grainLayers {
+      let from = grainFrom[texture] ?? 0, to = grainTo[texture] ?? 0
+      layer.opacity = to
+      layer.isHidden = from == 0 && to == 0
+    }
     CATransaction.commit()
     crossfadeActive = true
     // The settle is tied to the animations themselves (#296): the completion block runs when they finish (or are
@@ -109,7 +162,10 @@ public final class ThemeBackgroundView: WindowDragView {
       }
     }
     fade(overlay, from: 0, to: 1, duration: duration)
-    if grainFrom != grainTo { fade(grain, from: grainFrom, to: grainTo, duration: duration) }
+    for (texture, layer) in grainLayers {
+      let from = grainFrom[texture] ?? 0, to = grainTo[texture] ?? 0
+      if from != to { fade(layer, from: from, to: to, duration: duration) }
+    }
     CATransaction.commit()
   }
 
@@ -131,8 +187,12 @@ public final class ThemeBackgroundView: WindowDragView {
       lowerIndex = lower
     }
     overlay.opacity = Float(t)
-    let grainFrom = themes[lower].textureOpacity, grainTo = themes[upper].textureOpacity
-    grain.opacity = Float(grainFrom + (grainTo - grainFrom) * Double(t))
+    let alphas = Self.grainAlphas(themes[lower], themes[upper], t: Double(t))
+    for (texture, layer) in grainLayers {
+      let alpha = alphas[texture] ?? 0
+      layer.opacity = alpha
+      layer.isHidden = alpha == 0                      // nothing to composite
+    }
     CATransaction.commit()
   }
 
@@ -149,7 +209,7 @@ public final class ThemeBackgroundView: WindowDragView {
     crossfadeActive = false
     crossfadeToken &+= 1
     overlay.removeAnimation(forKey: Self.crossfadeKey)
-    grain.removeAnimation(forKey: Self.crossfadeKey)
+    for layer in grainLayers.values { layer.removeAnimation(forKey: Self.crossfadeKey) }
     lowerIndex = -1
   }
 
@@ -175,34 +235,101 @@ public final class ThemeBackgroundView: WindowDragView {
     return colors.isEmpty ? [CGColor.white, CGColor.white] : colors
   }
 
+  // MARK: - Textures
+
+  /// Each texture's overlay alpha at `t` between two themes (a texture both use adds up).
+  private static func grainAlphas(_ lower: SpaceThemeInfo, _ upper: SpaceThemeInfo, t: Double) -> [ThemeTexture: Float] {
+    var alphas: [ThemeTexture: Float] = [:]
+    if let texture = lower.textureKind { alphas[texture, default: 0] += Float(lower.textureOpacity * (1 - t)) }
+    if let texture = upper.textureKind { alphas[texture, default: 0] += Float(upper.textureOpacity * t) }
+    return alphas
+  }
+
+  /// A layer for every texture the themes use, drawn (Metal) as soon as the view can be seen.
+  private func ensureGrainLayers() {
+    for texture in Set(themes.compactMap(\.textureKind)).sorted(by: { $0.rawValue < $1.rawValue })
+    where grainLayers[texture] == nil {
+      let layer: CALayer
+      if let grainRenderer {
+        let tile = grainRenderer.makeLayer()
+        tile.actions = Self.noActions
+        let row = CAReplicatorLayer()            // the tile repeated across
+        row.actions = Self.noActions
+        row.addSublayer(tile)
+        let grid = CAReplicatorLayer()           // the row repeated down
+        grid.addSublayer(row)
+        grainTiles[texture] = tile
+        layer = grid
+      } else {
+        layer = CALayer()
+        layer.backgroundColor = ThemeGrainPattern.color(texture)
+      }
+      layer.actions = Self.noActions
+      layer.compositingFilter = "multiplyBlendMode"   // gradient * mix(1, texel, opacity)
+      layer.opacity = 0
+      layer.isHidden = true
+      self.layer?.addSublayer(layer)
+      grainLayers[texture] = layer
+      layoutGrain(layer)
+    }
+    drawGrainIfNeeded()
+  }
+
+  /// The texture layer fills the view. On the Metal tier it is a grid of one `tilePoints` tile anchored at the top
+  /// left: a resize changes only the replica counts, so it never draws and the tiles never shift under the pointer.
+  private func layoutGrain(_ layer: CALayer) {
+    layer.frame = bounds
+    guard let grid = layer as? CAReplicatorLayer, let row = grid.sublayers?.first as? CAReplicatorLayer,
+          let tile = row.sublayers?.first else { return }
+    let edge = CGFloat(ThemeTexture.tilePoints)
+    row.frame = bounds
+    tile.frame = CGRect(x: 0, y: isFlipped ? 0 : bounds.height - edge, width: edge, height: edge)
+    row.instanceCount = max(1, Int((bounds.width / edge).rounded(.up)))
+    row.instanceTransform = CATransform3DMakeTranslation(edge, 0, 0)
+    grid.instanceCount = max(1, Int((bounds.height / edge).rounded(.up)))
+    grid.instanceTransform = CATransform3DMakeTranslation(0, isFlipped ? edge : -edge, 0)
+  }
+
+  /// Draws each Metal tile once per backing scale, only while the view can be seen: in a window that is not
+  /// occluded or miniaturized, not hidden. A skipped draw happens on the next unhide, occlusion change or layout.
+  private func drawGrainIfNeeded() {
+    guard let grainRenderer, let window, !isHiddenOrHasHiddenAncestor, windowIsVisible(window) else { return }
+    let scale = window.backingScaleFactor
+    let used = Set(themes.compactMap(\.textureKind))
+    for (texture, tile) in grainTiles where used.contains(texture) && grainDrawnScale[texture] != scale {
+      let drawn = grainRenderer.draw(texture, into: tile, scale: scale) { [weak self] in self?.drawGrainIfNeeded() }
+      if drawn { grainDrawnScale[texture] = scale }
+    }
+  }
+
   var overlayOpacityForTesting: Float { overlay.opacity }
-  var grainOpacityForTesting: Float { grain.opacity }
+  /// The texture layers' alphas, summed.
+  var grainOpacityForTesting: Float { grainLayers.values.reduce(0) { $0 + $1.opacity } }
+  func grainOpacityForTesting(_ texture: ThemeTexture) -> Float { grainLayers[texture]?.opacity ?? 0 }
+  func grainLayerForTesting(_ texture: ThemeTexture) -> CALayer? { grainLayers[texture] }
+  func grainTileForTesting(_ texture: ThemeTexture) -> CAMetalLayer? { grainTiles[texture] }
+  func grainFadeForTesting(_ texture: ThemeTexture) -> CABasicAnimation? {
+    grainLayers[texture]?.animation(forKey: Self.crossfadeKey) as? CABasicAnimation
+  }
   var baseColorsForTesting: [CGColor] { (base.colors as? [CGColor]) ?? [] }
 }
 
-/// Procedural stand-in for Arc's `grain` tile: deterministic monochrome noise, tiled through a pattern color.
+/// The Core Animation texture tier: the synthesized 2x tile as a pattern color, 100 pt per repeat.
 @MainActor
-enum GrainTexture {
-  static let pixels = 256
+enum ThemeGrainPattern {
+  private static var colors: [ThemeTexture: CGColor] = [:]
 
-  static let image: CGImage? = {
-    var state: UInt32 = 0x9E37_79B9
-    var bytes = [UInt8](repeating: 0, count: pixels * pixels)          // 8-bit gray, opaque
-    for i in bytes.indices {
-      state ^= state << 13; state ^= state >> 17; state ^= state << 5    // xorshift32
-      bytes[i] = UInt8(truncatingIfNeeded: state >> 24)
-    }
-    guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
-    return CGImage(width: pixels, height: pixels, bitsPerComponent: 8, bitsPerPixel: 8,
-                   bytesPerRow: pixels, space: CGColorSpaceCreateDeviceGray(),
-                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                   provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
-  }()
-
-  static let patternColor: CGColor? = {
-    guard let image else { return nil }
-    let tile = ShellTokens.themeGrainTile
-    let nsImage = NSImage(cgImage: image, size: NSSize(width: tile, height: tile))
-    return NSColor(patternImage: nsImage).cgColor
-  }()
+  static func color(_ texture: ThemeTexture) -> CGColor? {
+    if let cached = colors[texture] { return cached }
+    let tile = texture.tile(scale: 2)
+    guard let provider = CGDataProvider(data: Data(tile.bytes) as CFData),
+          let image = CGImage(width: tile.pixels, height: tile.pixels, bitsPerComponent: 8, bitsPerPixel: 8,
+                              bytesPerRow: tile.pixels, space: CGColorSpaceCreateDeviceGray(),
+                              bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue), provider: provider,
+                              decode: nil, shouldInterpolate: false, intent: .defaultIntent) else { return nil }
+    let points = CGFloat(ThemeTexture.tilePoints)
+    let color = NSColor(patternImage: NSImage(cgImage: image, size: NSSize(width: points, height: points))).cgColor
+    colors[texture] = color
+    return color
+  }
 }

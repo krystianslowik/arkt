@@ -1,6 +1,5 @@
 import Metal
 import QuartzCore
-import Synchronization
 import simd
 
 /// The particle field's GPU side (section 7.4): one compute pass per frame springs every mote toward its target,
@@ -17,6 +16,7 @@ final class ParticleRenderer {
     var preferredFrameRate: Float { self == .full ? 120 : 60 }
   }
 
+<<<<<<< HEAD
   /// Which of the last 60 frames went over 2 ms of GPU time (section 7.4): a sliding window, so a sustained
   /// alternating overload trips the fallback tier while a lone spike does not. Bit 0 is the newest frame.
   struct GPUBudgetWindow: Equatable, Sendable {
@@ -55,10 +55,13 @@ final class ParticleRenderer {
     func reset() { state.withLock { $0 = (0, .init(), []) } }
   }
 
+=======
+>>>>>>> origin/main
   let device: any MTLDevice
   let tier: Tier
   let count: Int
-  let gpuTimes = GPUTimes()
+  /// GPU milliseconds per frame; 2 ms is the budget the fallback tier watches.
+  let gpuTimes = GPUFrameTimes(budgetMilliseconds: 2)
   private let queue: any MTLCommandQueue
   private let stepPipeline: any MTLComputePipelineState
   private let alphaPipeline: any MTLRenderPipelineState

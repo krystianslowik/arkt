@@ -13,7 +13,8 @@ import Testing
 ///   read through sRGB coefficients.
 /// - Gradients are sampled between every pair of stops, because the luminance of a component-wise blend can dip
 ///   below both ends.
-/// - The grain layer (soft light, at most `ShellTokens.themeTextureMaxOpacity`) is mean-preserving and ignored.
+/// - The texture multiplies the gradient (#120), so it darkens: each sample is also measured multiplied by the
+///   theme's mean texture factor (`SpaceThemeInfo.meanTextureFactor`, encoded components).
 /// - Arc-imported themes are user data and not covered; the measured set is what ships: the bridge default, the
 ///   empty-theme fallback and the sample Spaces.
 enum ShellContrastProbe {
@@ -45,9 +46,13 @@ enum ShellContrastProbe {
 
   static func sampleGradient(_ theme: SpaceThemeInfo) -> [RGBA] {
     let stops = theme.baseColors.map(toP3)
-    guard stops.count > 1 else { return stops }
-    return zip(stops, stops.dropFirst()).flatMap { a, b in
+    let samples = stops.count > 1 ? zip(stops, stops.dropFirst()).flatMap { a, b in
       (0...samplesPerSegment).map { RGBA.mix(a, b, Double($0) / Double(samplesPerSegment)) }
+    } : stops
+    let factor = theme.meanTextureFactor
+    guard factor < 1 else { return samples }
+    return samples + samples.map {
+      RGBA(red: $0.red * factor, green: $0.green * factor, blue: $0.blue * factor, alpha: $0.alpha, space: $0.space)
     }
   }
 
