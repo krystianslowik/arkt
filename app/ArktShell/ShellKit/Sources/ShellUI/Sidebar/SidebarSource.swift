@@ -201,6 +201,12 @@ public protocol SidebarSource: AnyObject {
   /// location whose child order changed. Throws `SidebarMoveError.favoritesFull` when the destination is a full
   /// Favorites section (BH-046), `.invalid` for a move the model refuses otherwise. `StubSidebar` never throws.
   func moveNode(_ id: NodeID, to location: SidebarLocation, at index: Int) throws
+  /// Moves a dragged set (#104) to `location` so that it lands together at `index` (measured before removal,
+  /// clamped), in the order given; repeated ids and nodes under another moved node move once. A pane that leaves its
+  /// split shrinks the split, which never keeps a single pane; `.split` is not a destination (`addToSplit`,
+  /// `movePane`). Throws like `moveNode`, and a throw moves nothing. The default runs `moveNode` once per node, for
+  /// sources that forward to another one.
+  func moveNodes(_ ids: [NodeID], to location: SidebarLocation, at index: Int) throws
 
   // Split writes (BH-115, BH-116, BH-120). Each applies as one step: observers get its changes once, and a throw
   // leaves the source untouched. A full split throws `SplitEditError.splitFull`; ids that do not fit the edit throw `.invalid`.
@@ -281,6 +287,16 @@ public final class SidebarChangeHub {
 }
 
 extension SidebarSource {
+  public func moveNodes(_ ids: [NodeID], to location: SidebarLocation, at index: Int) throws {
+    var target = index
+    for id in ids {
+      let siblings = children(of: location)
+      let landsAfterItself = siblings.firstIndex(of: id).map { $0 < target } ?? false
+      try moveNode(id, to: location, at: target)
+      if !landsAfterItself { target += 1 }
+    }
+  }
+
   /// Appending add, the common case; positional inserts name `index`.
   @discardableResult
   public func addTab(url: URL, title: String, in location: SidebarLocation) throws -> NodeID {
