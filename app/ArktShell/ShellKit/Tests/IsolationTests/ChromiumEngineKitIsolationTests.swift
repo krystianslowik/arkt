@@ -71,6 +71,136 @@ struct ChromiumEngineKitIsolationTests {
     }
   }
 
+  // MARK: - Engine-only link (#268)
+
+  /// Package products the app builds in every configuration but links only in the Engine configuration: their only
+  /// importers are `App/Engine` files, so the Debug, Release and Profile binaries carry none of their code.
+  static let engineOnlyProducts: Set = ["ChromiumEngineKit", "EngineAPITestSupport"]
+
+  /// The `- package:` entries of project.yml with their product and whether they say `link: false`.
+  static func packageDependencies(in spec: String) -> [(product: String, linked: Bool)] {
+    let entries = spec.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+      .split { $0.hasPrefix("- ") && !$0.hasPrefix("- package:") }
+    var found: [(String, Bool)] = []
+    for lines in entries {
+      var current: (product: String?, linked: Bool)?
+      for line in lines {
+        if line.hasPrefix("- package:") {
+          if let product = current?.product { found.append((product, current?.linked ?? true)) }
+          current = (nil, true)
+        } else if current != nil, let value = Self.value(of: "product", in: line) {
+          current?.product = value
+        } else if current != nil, Self.value(of: "link", in: line) == "false" {
+          current?.linked = false
+        }
+      }
+      if let product = current?.product { found.append((product, current?.linked ?? true)) }
+    }
+    return found
+  }
+
+  /// The value of `key: value` on one YAML line, without a trailing comment.
+  static func value(of key: String, in line: String) -> String? {
+    guard line.hasPrefix(key + ":") else { return nil }
+    let rest = line.dropFirst(key.count + 1)
+    let value = rest.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first ?? rest
+    return value.trimmingCharacters(in: .whitespaces)
+  }
+
+  /// Configuration keys, by their lowercased spelling: XcodeGen matches `configs:` keys ignoring case.
+  static let configurationKeys = ["debug": "Debug", "release": "Release", "profile": "Profile", "engine": "Engine",
+                                  "base": "base"]
+
+  /// Each `setting:` line of project.yml with the configuration key (`Engine:` and the like) it sits under, spelled
+  /// canonically. A line indented no deeper than the key ends that key's block.
+  static func settingLines(_ setting: String, in spec: String) -> [(configuration: String?, value: String)] {
+    var current: (name: String, indent: Int)?
+    var found: [(String?, String)] = []
+    for raw in spec.split(separator: "\n") {
+      let line = raw.trimmingCharacters(in: .whitespaces)
+      guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+      let indent = raw.prefix { $0 == " " }.count
+      if let block = current, indent <= block.indent { current = nil }
+      if let match = line.wholeMatch(of: #/(\w+):/#),
+         let name = Self.configurationKeys[String(match.output.1).lowercased()] {
+        current = (name, indent)
+      } else if let value = Self.value(of: setting, in: line) {
+        found.append((current?.name, value))
+      }
+    }
+    return found
+  }
+
+  @Test func settingLinesFollowConfigurationBlocks() {
+    let sample = """
+      settings:
+        configs:
+          Engine:
+            OTHER_LDFLAGS: engine
+          debug:
+            OTHER_LDFLAGS: lowercase
+          RELEASE:
+            # a comment
+            OTHER_LDFLAGS: uppercase
+        OTHER_LDFLAGS: dedented
+      OTHER_LDFLAGS: top
+      """
+    let lines = Self.settingLines("OTHER_LDFLAGS", in: sample)
+    #expect(lines.map(\.value) == ["engine", "lowercase", "uppercase", "dedented", "top"])
+    #expect(lines.map(\.configuration) == ["Engine", "Debug", "Release", nil, nil])
+  }
+
+  @Test func packageDependenciesAreReadWithTheirLinkFlag() {
+    let sample = """
+      dependencies:
+        - package: ShellKit
+          product: ShellUI
+        - package: ShellKit
+          product: ChromiumEngineKit
+          link: false   # Engine only
+        - target: Other
+      """
+    let dependencies = Self.packageDependencies(in: sample)
+    #expect(dependencies.map(\.product) == ["ShellUI", "ChromiumEngineKit"])
+    #expect(dependencies.map(\.linked) == [true, false])
+  }
+
+  /// Debug, Release and Profile must not link the kit (#268): Xcode builds the product for the Engine configuration's
+  /// compile, but only the Engine configuration's linker flags pull its object in.
+  @Test func engineOnlyProductsAreNotLinkedByThePackageDependency() throws {
+    let spec = try String(contentsOf: WebKitIsolationTests.projectSpec, encoding: .utf8)
+    let dependencies = Self.packageDependencies(in: spec)
+    let products = Set(dependencies.map(\.product))
+    #expect(Self.engineOnlyProducts.isSubset(of: products), "project.yml dependencies: \(products.sorted())")
+    let unlinked = Set(dependencies.filter { !$0.linked }.map(\.product))
+    #expect(unlinked == Self.engineOnlyProducts, "products with link: false: \(unlinked.sorted())")
+  }
+
+  @Test func onlyTheEngineConfigurationLinksTheEngineOnlyObjects() throws {
+    let spec = try String(contentsOf: WebKitIsolationTests.projectSpec, encoding: .utf8)
+    let flags = Self.settingLines("OTHER_LDFLAGS", in: spec)
+    for product in Self.engineOnlyProducts {
+      let object = "$(BUILT_PRODUCTS_DIR)/\(product).o"
+      let users = flags.filter { $0.value.contains(object) }
+      #expect(users.count == 1 && users.first?.configuration == "Engine",
+              "\(object) must be in exactly one OTHER_LDFLAGS, under Engine: \(users.map(\.configuration))")
+    }
+  }
+
+  @Test func engineOnlyProductsAreImportedOnlyByEngineFiles() throws {
+    let appRoot = WebKitIsolationTests.appRoot.appending(path: "App")
+    let files = try #require(FileManager.default.enumerator(at: appRoot, includingPropertiesForKeys: nil))
+    let pattern = CoreIsolationTests.importPattern
+    var offenders: [String] = []
+    for case let url as URL in files where url.pathExtension == "swift" {
+      let source = try String(contentsOf: url, encoding: .utf8)
+      let imported = Set(CoreIsolationTests.importedModules(in: source, matching: pattern))
+      let relative = WebKitIsolationTests.relativeComponents(url).joined(separator: "/")
+      if !imported.isDisjoint(with: Self.engineOnlyProducts), !Self.isAllowed(relative) { offenders.append(relative) }
+    }
+    #expect(offenders.isEmpty, "engine-only products imported outside App/Engine: \(offenders)")
+  }
+
   @Test func noShellKitTargetDependsOnTheKit() throws {
     let manifest = CoreIsolationTests.strippingLineComments(
       try String(contentsOf: WebKitIsolationTests.packageManifest, encoding: .utf8))

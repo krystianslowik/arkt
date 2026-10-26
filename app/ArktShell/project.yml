@@ -83,6 +83,14 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.arkt.Arkt
         PRODUCT_NAME: ArktShell
+      configs:
+        Engine:
+          # The engine-only products (`link: false` below): Xcode builds them for every configuration, but only the
+          # Engine binary links their objects, so Debug, Release and Profile carry no engine kit code (#268).
+          OTHER_LDFLAGS: "$(inherited) $(BUILT_PRODUCTS_DIR)/ChromiumEngineKit.o $(BUILT_PRODUCTS_DIR)/EngineAPITestSupport.o"
+          # The facade header's module map, which a linked product would have passed: the kit's swiftmodule loads
+          # that module when App/Engine imports the kit. Not an import; App never imports the facade module.
+          OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -fmodule-map-file=$(SRCROOT)/ShellKit/Sources/ArktEngineABI/include/module.modulemap"
     # Engine only: where the engine app is (Engine.xcconfig, which includes the uncommitted Local.xcconfig when it
     # exists, and says where to build the bundle).
     configFiles:
@@ -143,12 +151,16 @@ targets:
         product: EngineAPI
       - package: ShellKit
         product: CoreBridge
-      # ChromiumEngine and the typed ArktShellEmbedder; only App/Engine (Engine configuration) imports it.
+      # ChromiumEngine and the typed ArktShellEmbedder; only App/Engine (Engine configuration) imports it. Not
+      # linked here: the Engine configuration's OTHER_LDFLAGS links its object (settings above).
       - package: ShellKit
         product: ChromiumEngineKit
-      # The shared engine contract, for the Engine configuration's contract runner (App/Engine, W3-9).
+        link: false
+      # The shared engine contract, for the Engine configuration's contract runner (App/Engine, W3-9). Engine-only
+      # link, like ChromiumEngineKit.
       - package: ShellKit
         product: EngineAPITestSupport
+        link: false
       - package: ArktCore
         product: Persistence      # composition root only: the one GRDB link
       - package: ArktCore
