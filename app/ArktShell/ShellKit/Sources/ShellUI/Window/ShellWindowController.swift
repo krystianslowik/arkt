@@ -111,6 +111,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var reopenStack = ReopenStack()
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
+  /// The reopen batch the visible undo toast belongs to; nil without one.
+  var undoToastBatch: UUID?
   /// Removes a Space (the app's ArchiveCoordinator: its pinned and Today items are archived, decision on #86); Delete
   /// Space calls it once `confirmSpaceRemoval` said yes. Nil: Delete Space is disabled.
   public var onRemoveSpace: (@MainActor (SpaceID) -> Void)?
@@ -169,7 +171,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     root.card.toastView = toastView
     toasts.view = toastView
     onError = { [weak self] mutation, error in
-      self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error)))
+      self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error), kind: .error))
     }
     onNewSpace = { [weak self] in self?.newSpace(nil) }
     wireSpaceEntryPoints()
