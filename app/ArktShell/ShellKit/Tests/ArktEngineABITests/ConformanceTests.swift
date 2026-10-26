@@ -66,9 +66,11 @@ final class TestWindowRequest: NSObject, ArktWindowRequest {
   let hasBounds: Bool
   let profileId = "Default"
   let initialURL: URL?
-  init(kind: ArktWindowRequestKind, opener: (any ArktBrowserHandle)?, bounds: NSRect?, initialURL: URL?) {
+  let isPopup: Bool
+  init(kind: ArktWindowRequestKind, opener: (any ArktBrowserHandle)?, bounds: NSRect?, initialURL: URL?,
+       isPopup: Bool = false) {
     self.kind = kind; self.opener = opener; self.bounds = bounds ?? .zero; self.hasBounds = bounds != nil
-    self.initialURL = initialURL
+    self.initialURL = initialURL; self.isPopup = isPopup
   }
 }
 
@@ -148,6 +150,8 @@ final class TestTab: NSObject, ArktTabHandle {
     return .closed
   }
   func focus() {}
+  private(set) var movedTo: [any ArktBrowserHandle] = []
+  func move(to browser: any ArktBrowserHandle) { movedTo.append(browser) }
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }
     let copy = owner.insertTab(url: url, active: false, opener: self, origin: .client)
@@ -536,5 +540,21 @@ struct ConformanceTests {
              .windowOpened, .windowClosed, .extensionActionsChanged].map(\.rawValue) == Array(0...13))
     #expect([ArktWindowRequestKind.extension, .page, .reopen, .startupURL].map(\.rawValue) == Array(0...3))
     #expect([ArktLinkDecision.navigate, .cancel].map(\.rawValue) == [0, 1])
+  }
+}
+
+/// Little Arkt (#314): the request's popup flag and the tab move are part of the ABI.
+@MainActor
+struct LittleArktABITests {
+  @Test func popupRequestAndTabMoveAreReachable() {
+    let engine = TestEngine()
+    let source = engine.createBrowser(host: TestWindowHost())
+    let target = engine.createBrowser(host: TestWindowHost())
+    let request: any ArktWindowRequest = TestWindowRequest(kind: .page, opener: source, bounds: nil,
+                                                           initialURL: nil, isPopup: true)
+    #expect(request.kind == .page && request.isPopup)
+    let tab = source.createTab(url: nil, active: true)
+    tab.move(to: target)
+    #expect((tab as? TestTab)?.movedTo.first === target)
   }
 }

@@ -117,7 +117,7 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
 typedef NS_ENUM(NSInteger, ArktWindowRequestKind) {
   // chrome.windows.create, or a tab an extension moves to a new window.
   ArktWindowRequestKindExtension = 0,
-  // A page asked (window.open with window features).
+  // A page asked (window.open with window features: a popup Browser).
   ArktWindowRequestKindPage = 1,
   // Dock reopen, or a new window from a Chromium menu command.
   ArktWindowRequestKindReopen = 2,
@@ -163,6 +163,9 @@ NS_SWIFT_UI_ACTOR
 // The requested frame in screen coordinates; meaningful only when hasBounds.
 @property(nonatomic, readonly) NSRect bounds;
 @property(nonatomic, readonly) BOOL hasBounds;
+// A popup window: always for a page's request, and for an extension's
+// chrome.windows.create({type: "popup"}). NO for a normal window.
+@property(nonatomic, readonly) BOOL isPopup;
 // Opaque profile identifier (one profile in week 3).
 @property(nonatomic, readonly, copy) NSString* profileId;
 @property(nonatomic, readonly, nullable, copy) NSURL* initialURL;
@@ -295,6 +298,11 @@ NS_SWIFT_UI_ACTOR
 // (EngineClient.duplicateTab(_:), contract rule 10); nil when the tab cannot
 // be duplicated.
 - (nullable id<ArktTabHandle>)duplicate;
+// Moves the tab, with its contents, history and container, to the end of
+// `browser`'s tabs and makes it active there, without a reload. Reported
+// with TabMoved (same handle). A window left without tabs closes. A no-op for
+// a closed tab, a closed `browser` or the tab's own window.
+- (void)moveToBrowser:(id<ArktBrowserHandle>)browser NS_SWIFT_NAME(move(to:));
 @end
 
 // An engine window (one Browser).

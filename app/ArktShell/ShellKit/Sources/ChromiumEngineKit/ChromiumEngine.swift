@@ -185,6 +185,16 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   /// The container is not the page: the facade focuses the tab's contents (`WebContents::Focus`).
   public func focusPage(of id: TabID) { tabs[id]?.handle.focus() }
 
+  /// The facade moves the tab's model between the two Browsers; its `TabMoved` (same handle) reassigns the tab here
+  /// and its `ActiveTabChanged` follows. Chromium closes the emptied Browser (`WindowClosed`).
+  public func moveTab(_ id: TabID, to window: EngineWindowID) {
+    guard let record = tabs[id], !record.snapshot.isClosing, !record.handle.isClosing,
+          let source = record.snapshot.window, source != window,
+          let target = windows[window]?.browser else { return }
+    recentWindow = window
+    record.handle.move(to: target)
+  }
+
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
     hub.add(handler)
   }
@@ -269,7 +279,8 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
       openerWindow: request.opener.flatMap { windowByBrowser[ObjectIdentifier($0)] },
       bounds: request.hasBounds ? request.bounds : nil,
       profile: EngineProfileID(request.profileId),
-      initialURL: request.initialURL)
+      initialURL: request.initialURL,
+      isPopup: request.isPopup)
   }
 
   // MARK: - Tables

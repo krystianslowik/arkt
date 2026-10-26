@@ -133,6 +133,25 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     return copy
   }
 
+  public func moveTab(_ id: TabID, to window: EngineWindowID) {
+    guard let moved = snapshots[id], !moved.isClosing, let source = moved.window, source != window,
+          windowIDs.contains(window) else { return }
+    if activeTabs[source] == id { activeTabs[source] = nil }
+    snapshots[id]?.window = window
+    snapshots[id]?.isActive = false
+    tabIDs.removeAll { $0 == id }
+    tabIDs.append(id)
+    hub.assign(id, to: window)
+    setActive(id)
+    let left = tabs(in: source)
+    if left.isEmpty {
+      finishWindowClose(source)
+    } else if activeTabs[source] == nil, let successor = left.last {
+      setActive(successor)
+      lastActiveWindow = window
+    }
+  }
+
   public func reload(_ id: TabID) {
     guard let current = snapshots[id], current.url != nil, !current.isLoading else { return }
     snapshots[id]?.isLoading = true
