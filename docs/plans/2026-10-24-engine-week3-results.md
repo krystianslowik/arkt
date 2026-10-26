@@ -70,14 +70,14 @@ native window default), #261 (tab-modal attachment, #207).
 
 | Issue | Gap | Status |
 |---|---|---|
-| #328 | A URL from another app while Arkt runs with no window reports `kind=reopen`; telling it apart needs `creation_source` in `OpenStartupTabsInBrowserWithProfile` (a patch) or another signal | open, `status:ready` |
+| #328 | A URL from another app while Arkt runs with no window reports `kind=reopen`; telling it apart needs `creation_source` in `OpenStartupTabsInBrowserWithProfile` (a patch) or another signal | open, no status label |
 | #334 | Release configuration without `EngineAPITestSupport`, `--arkt-engine-contract`, `--arkt-engine-test-api` and the `ARKT_*` overrides | open, `status:ready` |
 | #331 | Sidebar width and hidden state are not persisted per window | open, `status:ready` |
 | #268 | `ChromiumEngineKit` is linked in every configuration; it should link only in the Engine configuration | open, no labels |
 | #265 | Permission prompt follow-ups, leave-site sheet, pinned hint and tab events | open, `status:ready` |
 | #313, #314 | Peek and Little Arkt: out of scope for week 3 | open, `status:ready` |
 | #128 | Product bundle id (`dev.arkt.Arkt`), data folder, engine user-data-dir, branding; bundle ids are mixed today (app `dev.arkt.ArktShell`, framework and helpers `com.arkt.Arkt.*`) | open, `status:ready` |
-| #300 | Selecting a row that is live in another window loads the page a second time | open |
+| #300 | Selecting a row that is live in another window loads the page a second time | open, `status:ready` |
 | #121, #122 | Extension context menus, pinning, keyboard commands, install sheet (#121); native replacements for the remaining Views surfaces, including the page context menu, tab sharing and sign-in QR (#122) | open, `status:blocked` |
 
 Open items on #33 (its acceptance boxes are still unticked; the maintainer closes them on review):
@@ -132,7 +132,7 @@ Posted on #33, #9, #21, #121, #122, #128 and #207 with the outcome for each.
 |---|---|---|---|
 | `arkt-wt/103-tab-switcher` | `feat/103-tab-switcher` | merged into `main`; clean when checked, then modified files appeared (in use) | kept |
 | `arkt-wt/engine` | detached, now `engine/33-w3-12-results` | clean | kept (shared engine worktree) |
-| `arkt-wt/website` | `codex/arkt-website` | merged into `main`, 3 uncommitted files | kept |
+| `arkt-wt/website` | website branch | merged into `main`, 3 uncommitted files | kept |
 | `arkt-wt/107-favorites` | `feat/107-favorites` | 2 commits ahead, 6 uncommitted files | kept |
 | `arkt-wt/112-command-bar` | `feat/112-command-bar` | pull request #322 open, 8 commits ahead | kept |
 | `arkt-wt/310-onboarding` | `feat/310-onboarding` | 5 commits ahead, 17 uncommitted files | kept |
