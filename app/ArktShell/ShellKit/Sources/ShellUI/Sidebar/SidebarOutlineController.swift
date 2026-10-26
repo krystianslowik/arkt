@@ -232,6 +232,8 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   var onKeyboardEscape: (@MainActor () -> Void)?
   /// Up or Down moved the focus row; the window scrolls it into view the way every keyboard reveal does.
   var onKeyboardFocusMoved: (@MainActor (Int) -> Void)?
+  /// Up passed the first focusable row; the window hands focus to the Favorites grid above (#343).
+  var onKeyboardFocusAbove: (@MainActor () -> Void)?
 
   /// The focused row's fill, where the ring is drawn.
   func keyboardFocusRect(_ row: Int) -> NSRect {
@@ -267,7 +269,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     case kVK_UpArrow: moveKeyboardFocus(from: row, by: -1)
     case kVK_Return, kVK_ANSI_KeypadEnter: onKeyboardReturn?(row)
     case kVK_Escape: onKeyboardEscape?()
-    case kVK_LeftArrow, kVK_RightArrow: break                         // the Favorites grid's keys, not built yet
+    case kVK_LeftArrow, kVK_RightArrow: break                         // horizontal movement belongs to the grid
     default: super.keyDown(with: event)
     }
   }
@@ -275,7 +277,10 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   private func moveKeyboardFocus(from row: Int, by step: Int) {
     var next = row + step
     while next >= 0, next < numberOfRows, !isKeyboardFocusable(next) { next += step }
-    guard next >= 0, next < numberOfRows else { return }
+    guard next >= 0, next < numberOfRows else {
+      if step < 0 { onKeyboardFocusAbove?() }
+      return
+    }
     keyboardFocusRow = next
     onKeyboardFocusMoved?(next)
   }
@@ -1540,6 +1545,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 @MainActor
 final class KeyboardFocusRingView: NSView {
   static let lineWidth: CGFloat = 3
+  var cornerRadius = SidebarMetrics.rowCornerRadius { didSet { needsDisplay = true } }
   let ring = CAShapeLayer()
 
   override init(frame frameRect: NSRect) {
@@ -1572,7 +1578,7 @@ final class KeyboardFocusRingView: NSView {
     CATransaction.setDisableActions(true)
     let inset = Self.lineWidth / 2
     let rect = bounds.insetBy(dx: inset, dy: inset)
-    let radius = max(SidebarMetrics.rowCornerRadius - inset, 0)
+    let radius = max(cornerRadius - inset, 0)
     ring.frame = bounds
     ring.path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
     ring.strokeColor = strokeColor
