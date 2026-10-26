@@ -1,7 +1,8 @@
 import AppKit
 
-/// The window side of Favorites add and remove (BH-046, BH-047): "Move To > Favorites" and the sidebar drop.
-/// Every add lands appended; a refusal reports `.moveNode` ("Favorites are full." on a full section).
+/// The window side of Favorites add and remove (BH-046, BH-047): "Move To > Favorites", the sidebar drop, and
+/// the BH-049 unload. Every add lands appended; a refusal reports `.moveNode` ("Favorites are full." on a full
+/// section).
 extension ShellWindowController {
   /// Wires the sidebar's Favorites entry points.
   func wireFavorites() {
@@ -12,6 +13,7 @@ extension ShellWindowController {
     sidebarController.onSidebarDrop = { [weak self] node, location in
       self?.move(node, to: location) ?? false
     }
+    sidebarController.onFavoriteUnload = { [weak self] node in self?.close(node: node) }
   }
 
   /// Moves `node` to `location`, appended. False when the model refused; the failure reports `.moveNode`.

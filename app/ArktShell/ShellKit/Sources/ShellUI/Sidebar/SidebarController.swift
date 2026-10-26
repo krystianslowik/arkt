@@ -34,6 +34,8 @@ public final class SidebarController {
   public var onSidebarDrop: (@MainActor (_ node: NodeID, _ location: SidebarLocation) -> Bool)?
   /// A row's "Move To > Favorites" (BH-047); the window moves the node.
   public var onMoveToFavorites: (@MainActor (NodeID) -> Void)?
+  /// A loaded Favorite past the recency limit should unload (BH-049); the window closes its page like the X does.
+  public var onFavoriteUnload: (@MainActor (NodeID) -> Void)?
   /// The "+" button in the bottom bar.
   public var onNewTab: (@MainActor () -> Void)?
   /// The pane to focus when a split row is activated (decision 7: the split's last focused pane). Nil, or a node
@@ -62,6 +64,8 @@ public final class SidebarController {
   /// the window calls `deactivate(node:)` when any page closes; nodes that leave the source are dropped like
   /// favicons. Decides whether a Favorite tile shows its X (#82).
   private(set) var loadedNodes: Set<NodeID> = []
+  /// Loaded Favorites, least to most recently used (BH-049); activations append, closes and removals drop.
+  private var favoriteLoadOrder: [NodeID] = []
   /// The drop overlay over the Favorites band and the Space page, shown during a sidebar drag (BH-047).
   private(set) var dropOverlay: FavoritesDropOverlayView?
   /// Tabs the window shows besides the current one (the other panes of a shown split), drawn as `.contentVisible`.
@@ -253,6 +257,13 @@ public final class SidebarController {
     if let space, space != currentSpace { showSpace(space) }
     if let space { lastActive[space] = tab }
     let loadedNow = loadedNodes.insert(tab).inserted
+    let isFavorite = source.section(containing: tab).map {
+      if case .favorites = $0 { true } else { false }
+    } ?? false
+    if isFavorite {
+      favoriteLoadOrder.removeAll { $0 == tab }
+      favoriteLoadOrder.append(tab)
+    }
     if tab != current {
       previous = current
       current = tab
@@ -261,6 +272,7 @@ public final class SidebarController {
       view.favorites.reload(node: tab)
     }
     onActivate?(tab)
+    if isFavorite { unloadOverflowFavorites() }
   }
 
   /// The window created `node`'s page without activating it (a background pane of a shown split, #156 review).
@@ -284,6 +296,7 @@ public final class SidebarController {
   public func deactivate(node: NodeID) {
     setClosing(node, false)
     if source.node(node) == nil { favicons[node] = nil }
+    favoriteLoadOrder.removeAll { $0 == node }
     let wasLoaded = loadedNodes.remove(node) != nil
     guard node == current || node == previous else {
       if wasLoaded { view.favorites.reload(node: node) }   // a background Favorite drops its X
@@ -341,6 +354,18 @@ public final class SidebarController {
     dropOverlay = overlay
   }
 
+  // MARK: Unloading (BH-049)
+
+  /// After an activation loaded a Favorite past the recency limit, asks the window to unload the least recently
+  /// used ones. The current tab, visible panes and held closes never unload.
+  private func unloadOverflowFavorites() {
+    var exempt = visible.union(closingNodes)
+    if let current { exempt.insert(current) }
+    for id in FavoritesUnloadPolicy.evictions(loadedOrder: favoriteLoadOrder, exempt: exempt) {
+      onFavoriteUnload?(id)
+    }
+  }
+
   // MARK: Updates
 
   /// Caches a favicon (nil = back to the letter placeholder) and refreshes only that row or tile.
@@ -369,6 +394,7 @@ public final class SidebarController {
   private func pruneRemovedNodes() {
     for node in favicons.keys where source.node(node) == nil { favicons[node] = nil }
     loadedNodes = loadedNodes.filter { source.node($0) != nil }
+    favoriteLoadOrder = favoriteLoadOrder.filter { source.node($0) != nil }
   }
 
   private func apply(_ change: SidebarChange) {
