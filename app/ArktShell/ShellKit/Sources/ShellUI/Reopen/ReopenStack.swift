@@ -2,8 +2,8 @@ import CoreGraphics
 import EngineAPI
 import Foundation
 
-/// A Peek that closed (the user, a tab or Space switch, its source's close), as Cmd-Shift-T and Cmd-Z bring it back
-/// (BH-150, KB-079).
+/// A Peek that closed (the user, a new Peek, its source's close or Tab Handoff), as Cmd-Shift-T and Cmd-Z bring it
+/// back (BH-150, KB-079). A tab or Space switch only hides a Peek (#348).
 public struct ClosedPeek: Equatable, Sendable {
   /// An unloaded copy of the Peek's tab, made at the close, that holds its back and forward history; nil when the
   /// engine could not copy it or the copy closed since (the Peek then reopens its URL without history).

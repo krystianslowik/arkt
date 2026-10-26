@@ -154,8 +154,8 @@ extension ShellWindowController {
     if let snapshot = engine.snapshot(of: tab) { replay(snapshot, into: node) }
   }
 
-  /// A closed Peek over its source: the source row is shown first (a tab or Space switch closed it, #349), else the
-  /// Peek comes back over the current tab. False when there is no tab to put it over.
+  /// A closed Peek over its source: the source row is shown first (the Peek closed with it, or Tab Handoff moved it),
+  /// else the Peek comes back over the current tab. False when there is no tab to put it over.
   @discardableResult
   private func reopen(_ closed: ClosedPeek) -> Bool {
     if let source = closed.sourceNode, sidebar.node(source) != nil, currentNode != source,

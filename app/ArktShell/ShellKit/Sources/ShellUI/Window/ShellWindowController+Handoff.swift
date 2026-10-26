@@ -43,6 +43,7 @@ extension ShellWindowController {
     guard let snapshot = engine.snapshot(of: tab), !snapshot.isClosing else { return .held }
     tabsByNode[node] = nil
     nodeByTab[tab] = nil
+    peek.sourceWillLeave(tab)                      // its hidden Peek closes here (#348)
     let wasCurrent = currentTab == tab
     let wasShown = visibleNodes.contains(node)
     if wasCurrent { currentTab = nil }
