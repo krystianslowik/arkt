@@ -59,6 +59,7 @@ public final class SidebarOutlineDrop {
   private unowned let controller: SidebarOutlineController
   private var outline: SidebarOutlineView { controller.outlineView }
   private var dwell = SpaceEdgeDwell()
+  private var springLoad = FolderSpringLoad()
   /// The rows as the resolver sees them, read once per hover: a drag changes no row until it drops.
   private var rows: [SidebarDropRow]?
   private var lastTarget: SidebarDropTarget?
@@ -81,9 +82,21 @@ public final class SidebarOutlineDrop {
       if target != nil { haptic() }
     }
     preview.show(target, at: t)
+    springLoadFolder(under: target, at: t)
     let visible = outline.visibleRect
     if let step = dwell.update(x: point.x - visible.minX, width: visible.width, at: t) { onEdgeDwell?(step) }
     return target
+  }
+
+  /// Opens a closed folder the drag rests on, on #109's folder spring. The rows change, so they are read again.
+  private func springLoadFolder(under target: SidebarDropTarget?, at t: Double) {
+    var closed: NodeID?
+    if case .folder(let folder, _)? = target, !controller.isFolderOpen(folder) { closed = folder }
+    guard let folder = springLoad.update(closedFolder: closed, at: t) else { return }
+    controller.toggleFolder(folder, animated: true)
+    rows = nil
+    lastTarget = nil
+    preview.show(nil, at: t)
   }
 
   /// The drag left this outline or was cancelled over it: the rows spring back.
@@ -91,6 +104,7 @@ public final class SidebarOutlineDrop {
     rows = nil
     lastTarget = nil
     dwell.reset()
+    springLoad.reset()
     preview.clear(dropped: false, at: now())
   }
 
@@ -122,6 +136,7 @@ public final class SidebarOutlineDrop {
     rows = nil
     lastTarget = nil
     dwell.reset()
+    springLoad.reset()
     preview.clear(dropped: dropped, at: now())
   }
 
@@ -156,7 +171,7 @@ public final class SidebarOutlineDrop {
       let index = source.children(of: location).firstIndex(of: id) ?? 0
       let kind: SidebarDropRow.Kind
       switch source.node(id) {
-      case .folder?: kind = .folder(expanded: outline.isItemExpanded(item))
+      case .folder?: kind = .folder(expanded: controller.isFolderOpen(id))   // a closed folder may show a peek row
       case .split?: kind = .split
       case .tab?, nil:
         if case .split(let split) = location { kind = .pane(split: split) } else { kind = .tab }

@@ -448,6 +448,7 @@ public final class SidebarController {
   private func nodeDragBegan(_ id: NodeID) {
     let payload = pages.values.lazy.compactMap { $0.outlineController.drop.sourcePayload }.first
     dragNodes = payload.map(\.nodes) ?? [id]
+    folderPreview.hide(animated: false)                                             // BH-093: a drag ends it
     showDropOverlay(for: id)
     onNodeDragBegan?(id)
   }

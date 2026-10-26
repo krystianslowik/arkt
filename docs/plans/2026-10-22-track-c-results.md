@@ -1554,3 +1554,42 @@ skipped; 3 failed assertions in two load-dependent frame-time gates at load 10 t
 `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`, skips itself on rerun at that load); the run
 before the review fixes had 0 failures. ArktCore untouched: 405, all pass. Debug app build succeeds. UI tests
 (XCUITest) not run here; no existing accessibility identifier changed.
+
+## Sidebar drag and drop: reorder, pin, favorite, folder, Split View, Space and window (#104) (2026-10-26)
+
+- **Model.** `Sidebar.moveNodes(_:to:at:)` moves a dragged set as one step: the set keeps its order and lands at one
+  index (measured before removal), descendants of a moved node move with it, a refused move changes nothing, and a
+  pane that leaves its split shrinks the split (a split never keeps one pane). A split is not a destination there;
+  panes join through `addToSplit` and reorder through `movePane`. `SidebarSource.moveNodes` (one mutation, one save)
+  and `moveNode` of a pane now go through it.
+- **Rules.** `SidebarDropResolver` (pure): a row's top and bottom quarter insert before or after it, the middle half
+  acts on the row: a folder takes the nodes (GS-009), a tab or split row takes one dragged tab into a Split View, its
+  left half putting the dragged tab first (GS-010, BH-118). The divider's halves end Pinned and start Today (GS-007);
+  below the last row is the end of Today; drops into a dragged node are refused. Every node row is draggable now
+  (folders and splits too), and a row of a multi-selection carries the whole selection (#105).
+- **Window.** `ShellWindowController+SidebarDrop` performs drops through the existing paths: `move(_:to:at:)` (nodes
+  arriving in Today take the live URL and restart their idle clock), `addToSplit` and `movePane`. The shown tab moved
+  to another Space stays shown. Opt-drag duplicates (GS-014). Dropped text or a link opens a tab at the indicator
+  (GS-015). A Favorite dropped on the page lands at the indicator (BH-047). Resting at a page's edge turns to the
+  previous or next Space (GS-012), resting on a closed folder opens it on the folder spring (#109). A tab released
+  over no window opens in a new window at that point, and a row dropped on another window's sidebar is shown there;
+  both move the live page without a reload (#300, GS-013). Folder drops go through `folderDropPlacement` (#109 seam).
+- **Motion.** Rows below the drop point make room on a `springyFast` spring through their layer's
+  `sublayerTransform` (no view frames move); retargets start from each row's value and velocity, and an exit or
+  cancel springs them back (`firm`). A 2 pt accent line rides the gap; folder and tab targets get a highlight. Both
+  fade in 120 ms. Reduce Motion: no row moves, the line sits on the row boundary. BH-024 haptic tick on each new
+  place. `DropGapSprings` settles by the solver's envelopes instead of `SpringRun`'s settling scan (about 0.9 ms per
+  run in Debug), which kept a page-wide retarget inside the frame budget: worst preview frame 0.2 ms of main-thread
+  CPU in the sweep gate.
+
+Deviations: BH-039 (reorder Spaces) was already on main (Space header drag). The Favorites overlay now covers only
+its band, so the page's outline takes everything below it (two `FavoritesMoveTests` page tests were rewritten and
+`SplitDragTests.testPasteboardWriterOnlyForTabs` became `testPasteboardWriterForNodeRowsAndTabTiles`). Opt-drag
+copies on the sidebar rows only; the band and the content overlay refuse a copy. GS-012 has no Profile prompt
+(windows show one profile). GS-013 tells Escape from a miss by the current event. Haptics are not gated by
+`tabReorderingHapticsDisabled` yet (no setting). Band sizes, dwell times and folder end placement are [I].
+
+Tests (rebased on main with #367 and #368): ArktCore 423 (405 + 18). ShellKit unit 998 (958 + 40). ShellKitGUITests
+839 run (806 + 33), 8 skipped; 1 failure, the load-dependent Space pager frame-time gate
+(`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) at load 5 to 7. Debug app build succeeds; the app
+was launched with throwaway directories. UI tests (XCUITest) not run here.

@@ -38,6 +38,26 @@ struct SidebarDragRulesTests {
     #expect(dwell.update(x: 198, width: 200, at: 2 * SpaceEdgeDwell.dwell) == 1)
   }
 
+  // MARK: Spring-loaded folders
+
+  @Test func hoveringAClosedFolderOpensItAfterTheDwell() {
+    var load = FolderSpringLoad()
+    let folder = UUID()
+    #expect(load.update(closedFolder: folder, at: 0) == nil)
+    #expect(load.update(closedFolder: folder, at: FolderSpringLoad.dwell - 0.01) == nil)
+    #expect(load.update(closedFolder: folder, at: FolderSpringLoad.dwell) == folder)
+    #expect(load.update(closedFolder: folder, at: 2 * FolderSpringLoad.dwell) == nil, "once per hover")
+  }
+
+  @Test func movingOffTheFolderRestartsTheDwell() {
+    var load = FolderSpringLoad()
+    let folder = UUID()
+    _ = load.update(closedFolder: folder, at: 0)
+    #expect(load.update(closedFolder: nil, at: 0.3) == nil)
+    #expect(load.update(closedFolder: folder, at: 0.4) == nil)
+    #expect(load.update(closedFolder: folder, at: 0.4 + FolderSpringLoad.dwell) == folder)
+  }
+
   // MARK: GS-013 drag out
 
   @Test func aSingleTabReleasedOutsideEveryWindowOpensOne() {

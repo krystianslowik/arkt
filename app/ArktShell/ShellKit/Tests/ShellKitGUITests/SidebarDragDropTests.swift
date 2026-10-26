@@ -291,22 +291,37 @@ final class SidebarDragDropTests: XCTestCase {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     let outline = try harness.outline()
-    outline.handleClick(row: try harness.row(world.folder), modifiers: [])      // close it
-    XCTAssertFalse(outline.outlineView.isItemExpanded(outline.item(for: world.folder)))
+    outline.toggleFolder(world.folder, animated: false)                     // close it
+    XCTAssertFalse(outline.isFolderOpen(world.folder))
     XCTAssertTrue(try harness.drag([world.today[0]], to: harness.point(world.folder, y: 0.5)))
     XCTAssertEqual(harness.source.children(of: .folder(world.folder)), [world.foldered, world.today[0]])
-    XCTAssertFalse(outline.outlineView.isItemExpanded(outline.item(for: world.folder)), "the folder stays closed")
+    XCTAssertFalse(outline.isFolderOpen(world.folder), "the folder stays closed")
+  }
+
+  /// A drag resting on a closed folder opens it on the folder spring, so the drop can land between its rows.
+  func testRestingOnAClosedFolderOpensIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let outline = try harness.outline()
+    outline.toggleFolder(world.folder, animated: false)
+    XCTAssertFalse(outline.isFolderOpen(world.folder))
+    let drop = try harness.drop()
+    let point = try harness.point(world.folder, y: 0.5)
+    drop.update(at: point, payload: harness.payload([world.today[0]]))
+    harness.motionTime += FolderSpringLoad.dwell + 0.01
+    drop.update(at: point, payload: harness.payload([world.today[0]]))
+    XCTAssertTrue(outline.isFolderOpen(world.folder))
   }
 
   func testAMovedFolderKeepsItsClosedState() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     let outline = try harness.outline()
-    outline.handleClick(row: try harness.row(world.folder), modifiers: [])
+    outline.toggleFolder(world.folder, animated: false)
     let divider = outline.dividerRow
     XCTAssertTrue(try harness.drag([world.folder], to: harness.point(row: divider, y: 0.8)))
     XCTAssertEqual(harness.source.parent(of: world.folder), .today(world.space))
-    XCTAssertFalse(outline.outlineView.isItemExpanded(outline.item(for: world.folder)))
+    XCTAssertFalse(outline.isFolderOpen(world.folder))
   }
 
   // MARK: Split View (GS-010, BH-118, and the broken-split bug class)
@@ -399,7 +414,7 @@ final class SidebarDragDropTests: XCTestCase {
     let width = try harness.outline().outlineView.bounds.width
     let edge = NSPoint(x: width - 2, y: try harness.point(world.today[0], y: 0.5).y)
     drop.update(at: edge, payload: harness.payload([world.today[0]]))
-    harness.motionTime += SpaceEdgeDwell.dwell
+    harness.motionTime += SpaceEdgeDwell.dwell + 0.01
     drop.update(at: edge, payload: harness.payload([world.today[0]]))
     XCTAssertEqual(harness.controller.sidebarController.view.pager.targetIndex, 1, "the pager heads to Home")
   }

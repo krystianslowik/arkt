@@ -38,6 +38,40 @@ public struct SpaceEdgeDwell: Sendable {
   public mutating func reset() { edge = nil }
 }
 
+// MARK: - Spring-loaded folders
+
+/// A drag that rests on a closed folder's row opens the folder (#109's spring), so the drop can land between its
+/// rows. Once per hover: moving off the folder and back starts a new dwell. Pure: time is passed in.
+/// PARITY(NEEDS-RUNTIME-CHECK [I]): whether and when Arc opens a folder under a drag is unmeasured.
+public struct FolderSpringLoad: Sendable {
+  public static let dwell: Double = 0.6
+
+  private var folder: NodeID?
+  private var since: Double = 0
+  private var fired = false
+
+  public init() {}
+
+  /// The pointer rests on `closedFolder`'s row (nil: on anything else) at `t`. Returns the folder to open now.
+  public mutating func update(closedFolder: NodeID?, at t: Double) -> NodeID? {
+    guard let closedFolder else {
+      folder = nil
+      return nil
+    }
+    if folder != closedFolder {
+      folder = closedFolder
+      since = t
+      fired = false
+      return nil
+    }
+    guard !fired, t - since >= Self.dwell else { return nil }
+    fired = true
+    return closedFolder
+  }
+
+  public mutating func reset() { folder = nil }
+}
+
 // MARK: - GS-013: drag a tab out to a new window
 
 /// A tab dragged out of the sidebar and released over no window opens in a new window there (GS-013, BH-029). The
@@ -122,8 +156,8 @@ public enum SidebarDropMotion {
 /// points a second), checked when sampled. That makes a retarget O(1) per key: `SpringRun` scans for its settling
 /// time up front, about a millisecond per run in a Debug build, and a page of rows retargets at once.
 ///
-/// Overlap: #109 adds `Motion.SpringField`, the same primitive for folder motion; once both are on main this
-/// collapses onto it.
+/// Not `Motion.SpringField` (#109): that one is built on `SpringRun`, whose up-front settling scan a page-wide
+/// retarget cannot afford inside the frame budget.
 public struct DropGapSprings<Key: Hashable & Sendable>: Sendable {
   private struct Run: Sendable {
     var solver: SpringSolver
