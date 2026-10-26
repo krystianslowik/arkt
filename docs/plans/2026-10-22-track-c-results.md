@@ -2194,3 +2194,45 @@ Contrast), `ThemePadTests`, `ThemeCreatorModelTests`, `ThemeHapticGateTests`, th
 average near 30. Debug app build succeeds. XCUITest not run: no existing flow or identifier changed. The pad field
 and texture previews took about 250 ms and 530 ms to synthesize in Debug, so they are built off the main thread when
 the window opens (`ThemeCreatorImages`).
+
+## Space titles drawn while the strip moves (#415) (2026-10-26)
+
+Maintainer report: after swiping between Spaces, the target Space showed its favicons and folder glyphs but no row
+titles and no Space name.
+
+- **Root cause.** The strip moves on its layer during a swipe or a Space switch (#24); its view frame stays where it
+  last rested. A page the motion brings into view therefore lies outside the pager in AppKit's view geometry, so its
+  text fields have an empty visible rect. AppKit draws a `draw(_:)` view (every `NSTextField`) only inside its visible
+  rect, so the page came in with no text, while its favicons and glyphs (layer contents set directly) showed. The
+  text appeared only once the strip's frame caught up at rest, and not at all where nothing redrew it afterwards.
+  The page realization from #297 and #324 and the title cell sizing from #301 are not involved: the rows exist, are laid
+  out and have their titles; they are just never drawn.
+- **Fix.** `SpacePagerView` parks a page that a moving strip shows in the strip's visible slot: the page's view frame
+  takes the place of the page the strip rests on, so AppKit sees it inside the pager and draws its text, and a layer
+  translation on the page shows it at its own place in the strip. The strip frame and the resting page keep their
+  geometry, so the outgoing page keeps its text too. `syncStripFrame()` (rest, hit test, pointer move, touch-down,
+  backing change) and `layout()` put parked pages back. Cost: one page frame move per page a motion shows (the shown
+  range only grows), never per frame.
+- **Limit.** A geometry sync in the middle of a motion (a click, a pointer move over the strip, a finger touch-down)
+  puts the pages back where AppKit's geometry is current; a page the motion shows after that is parked again from
+  the new frame.
+- **Hover while parked.** A parked page shares AppKit's geometry with the outgoing page, so a hover resync under a
+  still pointer would light the incoming page's row there (and feed Folder Preview's hover). `SidebarRowView` reads a
+  row as not hovered while the strip or its page carries a layer translation; the sync at rest moves the tracking
+  areas and the resync then hovers the row under the pointer. Accessibility frames of a parked page are stale only
+  mid-motion, like the strip's own (#24).
+- **Rejected.** Moving the strip frame to the incoming page instead blanks the outgoing page the same way; drawing the
+  page while it is prepared does not survive the hide; `prepareContent(in:)` on the strip has no effect.
+- **Content card.** The empty content card in the report did not reproduce with the FakeEngine (the card shows the
+  page through every swipe and key switch); tracked separately.
+
+Tests (written first, failing before the change: the incoming page's header title and every row title had an empty
+visible rect on every frame of a key switch and from the first frame of a swipe): `SpaceSwitchTextTests` (GUI, 3) -
+a swipe to the next Space from its first frame, swipes back and forth (the reported case), and every presented frame
+of key switches 0 to 1, 1 to 2 and 2 to 0. ShellKit unit 1146 Swift Testing tests passed. ShellKitGUITests 1015 run,
+14 skipped, 0 failures. The #24 gates: `SpaceSwipeHitchTests` (10) pass, including the main-thread CPU gate
+(non-flavor legs max 3.14 ms per pass, swipe frame 0 median 2.26 ms against 0.63 ms before: the incoming page's
+text is now drawn on that frame); `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` skipped as
+NOT-MEASURABLE (load average 23 on 10 cores). The Debug app's scripted smoke (`-ArktSmoke YES -ArktSmokeRepeat 3`)
+passes functionally, and window captures through every swipe and key switch show the titles on both pages, where
+they were missing before. Debug app build succeeds.
