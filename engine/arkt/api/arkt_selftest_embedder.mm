@@ -576,6 +576,14 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
         }
         break;
       }
+      case ArktEngineEventKindAudibleChanged:
+        LOG(WARNING) << "ARKT selftest audibleChanged tab=" << tab
+                     << " audible=" << (event.isAudible ? "yes" : "no");
+        break;
+      case ArktEngineEventKindMutedChanged:
+        LOG(WARNING) << "ARKT selftest mutedChanged tab=" << tab
+                     << " muted=" << (event.isMuted ? "yes" : "no");
+        break;
       case ArktEngineEventKindExtensionActionsChanged:
         LOG(WARNING) << "ARKT selftest extensionActionsChanged window="
                      << window;

@@ -152,6 +152,13 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     }
   }
 
+  /// Mute is engine state only: the in-memory page plays nothing.
+  public func setMuted(_ id: TabID, muted: Bool) {
+    guard let current = snapshots[id], current.isMuted != muted else { return }
+    snapshots[id]?.isMuted = muted
+    hub.emit(.mutedChanged(id, isMuted: muted))
+  }
+
   public func reload(_ id: TabID) {
     guard let current = snapshots[id], current.url != nil, !current.isLoading else { return }
     snapshots[id]?.isLoading = true
@@ -229,6 +236,13 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   }
 
   // MARK: - Test drivers
+
+  /// Test hook: the page started or stopped playing sound (rule 17). A muted page stays audible, as in Chromium.
+  public func setAudible(_ id: TabID, _ audible: Bool) {
+    guard let current = snapshots[id], current.isAudible != audible else { return }
+    snapshots[id]?.isAudible = audible
+    hub.emit(.audibleChanged(id, isAudible: audible))
+  }
 
   /// Test hook: the page changed `document.title` after loading.
   public func setDocumentTitle(_ id: TabID, _ title: String) {

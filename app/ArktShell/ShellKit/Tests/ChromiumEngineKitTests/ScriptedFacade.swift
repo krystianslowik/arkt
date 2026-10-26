@@ -1,5 +1,6 @@
 import AppKit
 import ArktEngineABI
+import EngineAPITestSupport
 
 // A scripted Swift implementation of the facade protocols (arkt_engine.h), modelled on the real facade's recorded
 // behaviour (week-3 results, W3-3 to W3-5 and #258): events are recorded as plain values and delivered in one batch
@@ -21,6 +22,8 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var opener: (any ArktTabHandle)?
   var origin: ArktTabOrigin = .client
   var isActive = false
+  var isAudible = false
+  var isMuted = false
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -90,6 +93,9 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   var isClosing = false
   /// A `beforeunload` handler registered with sticky user activation.
   var wouldHoldClose = false
+  /// Sound (#364). Set directly, they model a tab that was already playing or muted when it was inserted.
+  var isAudible = false
+  var isMuted = false
   var dialog: PendingDialog?
   /// Inserted later (a deferred createTab); calls queue until then.
   var isPending = false
@@ -250,6 +256,27 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     }
     owner.remove(self, reason: .client)
     return .closed
+  }
+
+  /// `WebContents::SetAudioMuted`: `MutedChanged` only when the state changes.
+  func setMuted(_ muted: Bool) {
+    whenInserted { [self] in
+      guard owner != nil, isMuted != muted else { return }
+      isMuted = muted
+      record(.mutedChanged) { $0.isMuted = muted }
+    }
+  }
+
+  /// The page starts or stops playing sound (`OnAudioStateChanged`).
+  func setAudible(_ audible: Bool) {
+    guard isAudible != audible else { return }
+    recordAudible(audible)
+  }
+
+  /// Records `AudibleChanged` whatever the last report was.
+  func recordAudible(_ audible: Bool) {
+    isAudible = audible
+    record(.audibleChanged) { $0.isAudible = audible }
   }
 
   /// How often the client asked for focus.
@@ -601,6 +628,12 @@ final class ScriptedFacade: NSObject, ArktEngine {
       let opened = owner.insertTab(opener: tab, origin: .engine, active: true)
       opened.startLoad(url, title: nil)
       return true
+    }
+    if script == EngineContract.toneScript {
+      // The autoplay policy lets a page start sound only with a user gesture.
+      guard userGesture else { return "suspended" }
+      tab.setAudible(true)
+      return "running"
     }
     if script == "window.close()" {
       engineCloseTab(tab, reason: .page)

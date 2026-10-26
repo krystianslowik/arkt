@@ -292,6 +292,8 @@ public final class SidebarController {
     drop.onDragOut = { [weak self] node, point in self?.onSidebarDragOut?(node, point) }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
     page.outlineController.closingProvider = { [weak self] node in self?.closingNodes.contains(node) ?? false }
+    page.outlineController.audioProvider = { [weak self] node in self?.audio[node] ?? .silent }
+    page.outlineController.loadedProvider = { [weak self] node in self?.loadedNodes.contains(node) ?? false }
     page.outlineController.onFolderHover = { [weak self, weak page] folder, hovered in
       guard let self, page === self.currentPage else { return }
       self.folderPreview.folderHoverChanged(folder, hovered: hovered)
@@ -410,10 +412,21 @@ public final class SidebarController {
     for page in pages.values { page.outlineController.reload(node: node) }
   }
 
+  /// The sound of tabs whose page plays or is muted (#364); a silent tab has no entry.
+  public private(set) var audio: [NodeID: TabAudio] = [:]
+
+  /// Shows a row's sound (#364): only that row's audio button changes, in place, and only when the state changed.
+  public func setAudio(_ state: TabAudio, for node: NodeID) {
+    guard (audio[node] ?? .silent) != state else { return }
+    audio[node] = state == .silent ? nil : state
+    for page in pages.values { page.outlineController.audioChanged(node: node) }
+  }
+
   /// Forgets a node that no longer has a tab (engine tab closed): its loaded state, any current/previous role, its
-  /// closing state, and its favicon only when the node itself is gone from the source.
+  /// closing state and sound, and its favicon only when the node itself is gone from the source.
   public func deactivate(node: NodeID) {
     setClosing(node, false)
+    setAudio(.silent, for: node)
     if source.node(node) == nil { favicons[node] = nil }
     favoriteLoadOrder.removeAll { $0 == node }
     let wasLoaded = loadedNodes.remove(node) != nil
@@ -529,6 +542,7 @@ public final class SidebarController {
   private func pruneRemovedNodes() {
     for node in favicons.keys where source.node(node) == nil { favicons[node] = nil }
     loadedNodes = loadedNodes.filter { source.node($0) != nil }
+    audio = audio.filter { source.node($0.key) != nil }
     favoriteLoadOrder = favoriteLoadOrder.filter { source.node($0) != nil }
   }
 

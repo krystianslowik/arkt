@@ -65,6 +65,9 @@ enum ScriptedHarness {
         guard try chromium(engine).answerDialog(in: id, accept: accept) else {
           throw HarnessError("no pending dialog in \(id)")
         }
+      },
+      makeAudible: { engine, id in
+        _ = try await chromium(engine).evaluateScript(EngineContract.toneScript, in: id, userGesture: true)
       }
     )
   }

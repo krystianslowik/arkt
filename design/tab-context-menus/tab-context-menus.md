@@ -124,7 +124,7 @@ already shipped (BH-121, BH-123).
 
 | Item (Arc title) | Key | Enabled | Covers | Evidence |
 |---|---|---|---|---|
-| Mute | | always | BH-126 | title PARITY (OQ1: "Mute" vs "Mute Site"); toggles to Unmute while the pane is muted |
+| Mute | | the pane's page is open | BH-126 | title PARITY (OQ1: "Mute" vs "Mute Site"); toggles to Unmute while the pane is muted (#364) |
 | Duplicate Split View | | always | BH-126 | [I] title, already shipped |
 | Archive Below | | a pane sits below this one in the split | BH-126 | CONFIRMED title |
 | Share | | disabled until share support exists | BH-126 | (OQ6) |
@@ -249,6 +249,10 @@ Reduce Transparency reaches the menus through AppKit, not through us.
   Close and Keep Pinned as a menu item, Remove from Favorites, Pin Tabs, Copy Links (plural), Mute,
   Close and Keep Favorite; the Move To submenu contents; key equivalents printed in context menus; Copy Link's
   Option-alternates on tab rows; the empty-area menu's contents.
+- Mute on tab rows (#364): BH-126 confirms Mute for panes only, so the Today and pinned tab menus (3.1, 3.2) show
+  Mute / Unmute, in its own group after Move To, only while the tab's page plays or is muted; a silent tab keeps the
+  menus above. The row shows the same state as an audio button left of the hover close slot (a click mutes or
+  unmutes). Favorites have neither; their playing indicator (BH-051) is #117's. PARITY(NEEDS-RUNTIME-CHECK).
 - CF-02 stands: New Folder shows no key equivalent because the default menu's Cmd-Shift-N is claimed by New
   Incognito Window (KB-007).
 - The pin/unpin toasts (BH-055) and the multi-archive undo toast (BH-072) are already designed in

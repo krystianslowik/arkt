@@ -5,7 +5,7 @@ import EngineAPI
 /// Development stand-in for the Chromium engine. Renders with WKWebView.
 /// Windows and activation follow contract rules 11, 12 and 15. Every tab has `origin == .client` (WKWebView opens no
 /// tabs of its own here) and closes never hold (`wouldHoldClose` is always false, so both close modes close at once);
-/// rules 13, 14 and 16 are not applicable.
+/// rules 13, 14 and 16 are not applicable, and so is rule 17's audible state (no public WebKit signal).
 /// Nothing outside this file may import WebKit, and the import is `internal`, so the compiler
 /// rejects any WebKit type in the public surface (EngineAPI types and NSView only).
 @MainActor
@@ -167,6 +167,14 @@ public final class FakeEngine: EngineClient {
   }
 
   public func reload(_ id: TabID) { entries[id]?.webView.reload() }
+
+  /// WKWebView has no public mute: a muted tab suspends its media playback (HTML media, not Web Audio) until it is
+  /// unmuted. `isAudible` is never reported here; WKWebView has no public audible signal.
+  public func setMuted(_ id: TabID, muted: Bool) {
+    guard let entry = entries[id], entry.snapshot.isMuted != muted else { return }
+    entry.webView.setAllMediaPlaybackSuspended(muted, completionHandler: nil)
+    update(id) { $0.isMuted = muted } event: { .mutedChanged(id, isMuted: muted) }
+  }
   public func goBack(_ id: TabID) { goToHistory(id, offset: -1) }
   public func goForward(_ id: TabID) { goToHistory(id, offset: 1) }
 

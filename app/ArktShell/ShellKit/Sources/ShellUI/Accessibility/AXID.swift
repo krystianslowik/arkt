@@ -81,6 +81,8 @@ public enum AXID {
     public static let divider = "sidebar.divider"
     /// Present only while the row's close button is shown. Label: tooltip.
     public static let rowClose = "sidebar.row.close"
+    /// A row's audio button (#364): mutes or unmutes the page.
+    public static let rowAudio = "sidebar.row.audio"
   }
 
   /// Favorites grid and tiles at the top of the sidebar (group U4b).
