@@ -73,8 +73,10 @@ public enum ThemePad {
     while hueStep > 1e-4 || toneStep > 1e-7 {
       var improved = false
       let candidates = [
-        ThemePadPoint(hue: best.hue - hueStep, tone: best.tone), ThemePadPoint(hue: best.hue + hueStep, tone: best.tone),
-        ThemePadPoint(hue: best.hue, tone: best.tone - toneStep), ThemePadPoint(hue: best.hue, tone: best.tone + toneStep),
+        ThemePadPoint(hue: best.hue - hueStep, tone: best.tone),
+        ThemePadPoint(hue: best.hue + hueStep, tone: best.tone),
+        ThemePadPoint(hue: best.hue, tone: best.tone - toneStep),
+        ThemePadPoint(hue: best.hue, tone: best.tone + toneStep),
       ]
       for candidate in candidates where abs(candidate.hue - center) <= nearestHueWindow {
         let point = ThemePadPoint(hue: candidate.hue, tone: clampedTone(candidate.tone))
