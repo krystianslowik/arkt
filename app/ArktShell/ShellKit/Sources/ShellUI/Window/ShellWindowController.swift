@@ -5,6 +5,8 @@ import EngineAPI
 public enum SidebarMutation: Hashable, Sendable {
   case addTab
   case addSpace
+  /// A node moved between sections (BH-047: to Favorites, or a Favorite back to Pinned).
+  case moveNode
   /// A pane was added to a split, or a split created (`SidebarSource.addToSplit`).
   case addPane
   /// Any other split write: separate, expand, reorder, widths, orientation, duplicate.
@@ -149,6 +151,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onEmptySpace = { [weak self] in self?.showEmptySpace() }
     sidebarController.onClose = { [weak self] node in self?.close(node: node) }       // hover X (GS-043)
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
+    wireFavorites()                                   // Move To, the sidebar drop and the BH-049 unload
     commandBar.onOpen = { [weak self] url, target in
       switch target {
       case .currentTab, .newTab: self?.open(url, inNewTab: target == .newTab)
@@ -222,6 +225,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     switch mutation {
     case .addTab: "Couldn't add the tab."
     case .addSpace: "Couldn't create a Space."
+    case .moveNode:
+      // A full Favorites section names itself [I] (BH-046); every other failed move is generic.
+      error as? SidebarMoveError == .favoritesFull ? "Favorites are full." : "Couldn't move the tab."
     case .addPane, .editSplit:
       // Arc's toast for a full split; the generic text is [I].
       error as? SplitEditError == .splitFull ? "Cannot Add New Pane" : "Couldn't change the Split View."

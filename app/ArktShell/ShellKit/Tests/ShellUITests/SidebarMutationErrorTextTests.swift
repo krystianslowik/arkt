@@ -21,4 +21,14 @@ struct SidebarMutationErrorTextTests {
     #expect(ShellWindowController.errorText(for: .addSpace, error: CocoaError(.featureUnsupported))
       == "Couldn't create a Space.")
   }
+
+  /// BH-046: a move into a full Favorites section says so [I]; every other failed move is generic.
+  @Test func fullFavoritesAndOtherMoveTexts() {
+    #expect(ShellWindowController.errorText(for: .moveNode, error: SidebarMoveError.favoritesFull)
+      == "Favorites are full.")
+    #expect(ShellWindowController.errorText(for: .moveNode, error: SidebarMoveError.invalid)
+      == "Couldn't move the tab.")
+    #expect(ShellWindowController.errorText(for: .moveNode, error: CocoaError(.featureUnsupported))
+      == "Couldn't move the tab.")
+  }
 }

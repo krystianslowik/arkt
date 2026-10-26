@@ -177,6 +177,8 @@ public enum SidebarError: Error, Hashable, Sendable {
   case nestingTooDeep(NodeID)
   /// The split already holds `Sidebar.maximumSplitPanes` panes (BH-116, CF-06). Carries the split's id.
   case splitFull(NodeID)
+  /// The profile already holds `Sidebar.maximumFavorites` Favorites (BH-046, CF-17). Carries the profile.
+  case favoritesFull(String)
   /// A split operation got input it cannot apply: a wrong pane count, a node that is not a tab (or not a split, or
   /// not a pane), a repeated id, or bad width factors. Carries the offending node, or the split for bad factors.
   case invalidSplit(NodeID)
@@ -192,6 +194,10 @@ public struct Sidebar: Hashable, Sendable {
   /// The most panes a split holds (CF-06). The split operations and `move` into a split enforce it; `insert` does
   /// not, so stored and imported trees with more panes still load.
   public static let maximumSplitPanes = 4
+
+  /// The most Favorites a profile holds (BH-046, CF-17). The add methods and `move` into a Favorites section
+  /// enforce it; snapshot `insert(_:in:at:)` does not, so stored and imported trees with more items still load.
+  public static let maximumFavorites = 12
 
   public private(set) var spaces: [SpaceID: Space] = [:]
   public private(set) var spaceOrder: [SpaceID] = []
@@ -305,6 +311,11 @@ public struct Sidebar: Hashable, Sendable {
       children(of: location).count >= Self.maximumSplitPanes
     {
       throw SidebarError.splitFull(split)
+    }
+    if case .favorites(let profile) = location, node.parent != location,
+      children(of: location).count >= Self.maximumFavorites
+    {
+      throw SidebarError.favoritesFull(profile)
     }
     if isInSubtree(location, of: id) { throw SidebarError.cycle }
     if depth(ofChildIn: location) + height(of: id) - 1 > Self.maximumNestingDepth {
@@ -451,6 +462,9 @@ public struct Sidebar: Hashable, Sendable {
   /// `index` is the position in the location's child order, clamped; nil appends (BH-079: Cmd-T passes 0).
   mutating func insert(_ kind: NodeKind, in location: Location, at index: Int? = nil, createdAt: Date) throws -> NodeID {
     try validate(location, accepting: kind)
+    if case .favorites(let profile) = location, children(of: location).count >= Self.maximumFavorites {
+      throw SidebarError.favoritesFull(profile)
+    }
     let node = Node(kind: kind, parent: location, createdAt: createdAt)
     guard depth(ofChildIn: location) <= Self.maximumNestingDepth else { throw SidebarError.nestingTooDeep(node.id) }
     nodes[node.id] = node

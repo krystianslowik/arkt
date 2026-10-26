@@ -191,6 +191,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public var onDuplicateSplit: (@MainActor (NodeID) -> Void)?
   /// Opt-click on the current plain tab: duplicate it into a split (GS-032).
   public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
+  /// Move To > Favorites on a tab row's context menu (BH-047); the window moves the node.
+  public var onMoveToFavorites: (@MainActor (NodeID) -> Void)?
   /// A tab row started a drag (S7, GS-011); the window shows its drop overlay above the page.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   /// The drag that `onNodeDragBegan` reported ended, dropped or not.
@@ -685,9 +687,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
   }
 
-  /// The context menu of `row`, nil for rows without one (plain tabs, folders, the divider). A split row: Separate
+  /// The context menu of `row`, nil for rows without one (folders, the divider). A split row: Separate
   /// All Tabs, Convert to Vertical / Horizontal Split View and Duplicate Split View (BH-120, BH-121, BH-126); a pane
-  /// row: Remove Tab from Split View (BH-121, [S] string). Mute, Share and Archive Below are deferred (BH-126).
+  /// row: Remove Tab from Split View (BH-121, [S] string); any other tab row: Move To > Favorites (BH-047).
+  /// Mute, Share and Archive Below are deferred (BH-126); the full menu set is #105.
   func menu(forRow row: Int) -> NSMenu? {
     guard row >= 0, let id = (outlineView.item(atRow: row) as? OutlineItem)?.nodeID else { return nil }
     let menu = NSMenu()
@@ -699,10 +702,22 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       menu.addItem(menuItem("Duplicate Split View", #selector(duplicateSplitChosen(_:)), id))   // [I] title
     case .tab? where isPane(id):
       menu.addItem(menuItem("Remove Tab from Split View", #selector(removePaneChosen(_:)), id))
+    case .tab?:
+      menu.addItem(moveToItem(id))
     default:
       return nil
     }
     return menu
+  }
+
+  /// "Move To" with its submenu (BH-047): Favorites; the Spaces join it with #105 (BH-042).
+  private func moveToItem(_ id: NodeID) -> NSMenuItem {
+    let item = NSMenuItem(title: "Move To", action: nil, keyEquivalent: "")
+    let submenu = NSMenu()
+    submenu.autoenablesItems = false
+    submenu.addItem(menuItem("Favorites", #selector(moveToFavoritesChosen(_:)), id))
+    item.submenu = submenu
+    return item
   }
 
   private func menuItem(_ title: String, _ action: Selector, _ id: NodeID) -> NSMenuItem {
@@ -716,6 +731,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   @objc private func convertSplitChosen(_ sender: NSMenuItem) { chosen(sender, onConvertSplit) }
   @objc private func duplicateSplitChosen(_ sender: NSMenuItem) { chosen(sender, onDuplicateSplit) }
   @objc private func removePaneChosen(_ sender: NSMenuItem) { chosen(sender, onRemovePane) }
+  @objc private func moveToFavoritesChosen(_ sender: NSMenuItem) { chosen(sender, onMoveToFavorites) }
 
   private func chosen(_ item: NSMenuItem, _ handler: (@MainActor (NodeID) -> Void)?) {
     guard let id = item.representedObject as? NodeID, source.node(id) != nil else { return }

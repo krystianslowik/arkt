@@ -64,6 +64,33 @@ struct ModelSidebarSourceTests {
     #expect(recorder.saved.isEmpty)
   }
 
+  /// BH-046: the model's `.favoritesFull` crosses the adapter as `SidebarMoveError.favoritesFull`; nothing is
+  /// reported for a refused move.
+  @Test func moveNodeIntoFullFavoritesThrowsFavoritesFull() throws {
+    let recorder = Recorder()
+    for index in 0..<SidebarModel.Sidebar.maximumFavorites {
+      _ = try recorder.source.addTab(url: Self.url, title: "F\(index)", in: .favorites(profile: "default"))
+    }
+    let space = try recorder.source.addSpace(title: "S")
+    let tab = try recorder.source.addTab(url: Self.url, title: "T", in: .today(space))
+    recorder.reset()
+    #expect(throws: SidebarMoveError.favoritesFull) {
+      try recorder.source.moveNode(tab, to: .favorites(profile: "default"), at: 0)
+    }
+    #expect(recorder.source.children(of: .today(space)) == [tab])
+    #expect(recorder.changes.isEmpty)
+    #expect(recorder.saved.isEmpty)
+  }
+
+  @Test func moveNodeWithUnknownIDThrowsInvalid() {
+    let recorder = Recorder()
+    #expect(throws: SidebarMoveError.invalid) {
+      try recorder.source.moveNode(UUID(), to: .favorites(profile: "default"), at: 0)
+    }
+    #expect(recorder.changes.isEmpty)
+    #expect(recorder.saved.isEmpty)
+  }
+
   @Test func everySuccessfulMutationReportsTheNewValueOnce() throws {
     let recorder = Recorder()
     let space = try recorder.source.addSpace(title: "S")
