@@ -1540,3 +1540,17 @@ Deferred: the drag gesture of BH-091 (sidebar drag and drop, #104; dropping into
 above); Change Icon (#366, blocked on the picker, #304 and #339); Share (#362); GitHub Live Folders, BH-099 (scope
 decision #124); the KB-040 key (RT-04, #78); expanded folders across relaunch (#116). Deleting a folder still
 closes its pages without leave-site prompts, the same as Delete Space and Clear Today; that gap is unchanged.
+
+Review fixes: a tab moved into a folder nested in a closed folder shows with the path to it, and a moved folder no
+longer peeks itself (the current tab inside it does); the Pinned / Today divider moves with the rows around it; a
+keyboard toggle mid-spring stops the spring; a folder removed mid-spring leaves no row offset; opening a folder ends
+its moved-in peeks; a page leaving the screen settles its springs; the Reduce Motion fade reaches rows realized
+after the change; moving the pointer from one closed folder to another keeps Folder Preview up with its field
+focused.
+
+Tests (rebased on main with #360 and #365): ShellKit unit 950 (929 + 21). ShellKitGUITests 799 run (771 + 28), 7
+skipped; 3 failed assertions in two load-dependent frame-time gates at load 10 to 12 on 10 cores
+(`CommandBarTests.testAppearsUnder16ms`, 17.6 ms against a 17.5 ms bar, passes on rerun;
+`PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`, skips itself on rerun at that load); the run
+before the review fixes had 0 failures. ArktCore untouched: 405, all pass. Debug app build succeeds. UI tests
+(XCUITest) not run here; no existing accessibility identifier changed.
