@@ -2313,3 +2313,156 @@ keyboard neighbors). ShellKitGUITests 1070 run (baseline 1063 + 7: `FavoritesGri
 case in `TabKeyboardNavigationTests`), 17 skipped, 0 failures. `FavoriteTileCloseTests` moved its pointer in the
 removed-Favorite hover test: with two Favorites left the grid now takes two wider columns. Debug app build succeeds.
 XCUITest not run: no identifier or covered flow changed.
+
+## Space swipe follow-ups (#295) (2026-10-26)
+
+Follow-up to #24 (fixed in #282): the four review notes from #282 and the two #24 acceptance runs. This section is
+appended at the end rather than inside the #24 section because the file is shared with other open results sections
+(#322, and #415 before this one); #24's numbers above are unchanged.
+
+### Changes
+
+- **Pointer-move sync rate limit.** `SpacePagerView.mouseMoved(with:)` used to call `syncStripFrame()` on the first
+  pointer move after every presented frame of a settle: a `setFrameOrigin`, a tracking-area rebuild and the
+  window-server pointer query behind the hover resync, the per-frame path #24 removed. The first move of a settle or
+  swipe still syncs; after that at most one move per `pointerSyncFrameInterval` (3) presented motion frames syncs,
+  about 25 ms at 120 Hz. A hit test is never rate-limited (a click or gesture start must find the view drawn under
+  the point), and a backing change and the settle-at-rest sync are unchanged. At rest the settle's sync already put
+  the exact frame in place, so a pointer move there does no work.
+- **Pixel alignment after a mid-motion sync.** `syncStripFrame()` rounds the strip frame origin to whole backing
+  pixels while tracking or settling. Before, a sync mid-motion left a fractional origin and every later translation
+  was rounded relative to it, so the strip stayed off the pixel grid for the rest of the motion (#282 review). At
+  rest the exact offset is kept.
+- **Parked pages after a mid-motion sync.** On the branch rebased onto #415, `syncStripFrame()` unparks the pages
+  #415 parks in the strip's visible slot. A page stays visible after the sync, so it is not parked again when the
+  motion goes on, and its text stops drawing for the rest of the motion. `unparkPages(rememberForRepark:)` now
+  remembers the pages a sync unpacked during a motion and the next `apply` parks them again; the sync itself stays
+  exact, so the hit test or hover that asked for it still sees the geometry on screen. A layout's unpark is the
+  sidebar-resize path, which sets every page frame to the new width after it, so it does not remember. This is a
+  stacking interaction, not one of the four #282 notes.
+- **Probe deinit.** `MainThreadBusyProbe` has an `isolated deinit` that stops a still-running probe, so its run loop
+  observer is invalidated when the probe is freed while running.
+- **CPU gate through `PacingEnvironment`.** `PacingEnvironment.skipIfScreenBelow120Hz(fps:)` is the screen-only gate
+  for tests that measure thread CPU time. `SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU`
+  uses it instead of the raw `XCTSkip` and no longer skips on load; the wall-clock pacing tests keep the screen-and-
+  load gate.
+
+### Tests
+
+Written first; against the old code they did not compile (they use the new test hooks and the new helper), which was
+the first red. With the implementation in place they pass:
+
+- `SpaceSwipeHitchTests.testAPointerMovingEveryFrameMidSettleSyncsAtMostOncePerFewFrames` (GUI): the first pointer
+  move of a settle syncs; moves on the next two presented frames do not; the third syncs; at rest a move does not
+  sync and the frame is the exact page offset.
+- `SpaceSwipeHitchTests.testASyncMidMotionRoundsTheStripFrameToBackingPixels` (GUI): a tracked offset of -100.3 pt
+  (fractional at 2x) syncs to a frame origin on a whole backing pixel, and the next translation stays on whole
+  pixels.
+- `MainThreadBusyProbeTests.freeingARunningProbeRemovesItsObserver` (unit): `CFRunLoopContainsObserver` is false
+  after a running probe is released.
+- `SpaceSwipeHitchTests.testScreenOnlyPacingGateIgnoresLoad` (GUI): 60 Hz is NOT-MEASURABLE, 120 Hz is measurable,
+  and the helper has no load term.
+- `SpaceSwitchTextTests.testAPointerSyncMidMotionKeepsTheShownPagesTextDrawn` (GUI, on the #415 branch): the first
+  frame of a settle draws the incoming page, one `mouseMoved` syncs, and the next frame still draws the header and
+  every row title. It fails on #415's head (`Work header title is drawn`) and passes with the re-park. The existing
+  `SpacePagerTests.testPageWidthFollowsASidebarResizeDuringASwipe` caught the first version, which also re-parked
+  after a layout's unpark and left the page at the old slot; remembering only a sync's unpark fixes it.
+- `testAHitTestMidSettleFindsTheViewShownUnderThePoint` and `testAPointerMoveMidSettleSyncsTheStripFrame` now assert
+  a frame within a backing pixel (and pixel alignment) instead of exact equality with the fractional offset.
+- The row check #415 wrote required every realized row title to be drawn. On the macOS 26 CI runner the window lays
+  out shorter, so Work's last row (`Preview`, row 10) is realized as a sliver at the bottom of the scroll view: only
+  the top few points of the row are inside the clip and the vertically centered title is wholly below it, so AppKit
+  draws no title. That is right, but the check read it as a title-drawing regression. PR #423's first GUI run failed
+  203 assertions in `SpaceSwitchTextTests` (4 of its 5 tests), all `Work row 10 title is drawn`; #422's rerun failed
+  the same check 201 times. Reproduced locally by shrinking the window content to 670-700 pt, where `Preview` is the
+  sliver. #422 fixed the helper at `8862847` (skip a title outside the scroll view's own clip); #295 rebased onto it
+  and dropped its identical local fix. A page the pager shifted out of its geometry still fails the check for every
+  row, which is what it is for.
+
+### Verification
+
+- `cd app/ArktShell/ShellKit && swift test --filter ShellKitGUITests` on the branch rebased onto #415 and then
+  fixed: 1029 tests executed, 14 skipped, 0 failures (179 s). Skips: 4 NOT-MEASURABLE
+  (`ParticleFieldTests.testFrameBudgetAt2x`, `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`,
+  `SidebarHideTests.testRevealPacing`, `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`; load
+  17.08-18.96 on 12 cores in the passing run), 7 `FakeEngineContractTests` cases the harness has no driver for, and
+  3 `AlertScreenshotTests` that need `ARKT_ALERT_SHOTS_DIR`. The CPU gate did not skip: the final full run passed at
+  load 17.94 with worst gated pass 2.83 ms (the two light/dark flavor legs, 24.92 and 27.96 ms, are reported, not
+  gated, #275), and a focused `SpaceSwipeHitchTests` run at load 23.17 passed with worst gated pass 3.66 ms. A full
+  run on the first rebased tree failed twice: the existing `testPageWidthFollowsASidebarResizeDuringASwipe` caught
+  the first `rememberForRepark` version re-parking after a layout's unpark (remember only a sync's unpark now), and
+  a key-previous pass took 10.34 ms of thread CPU at load 41.5. The fixed full run passed. An earlier pre-rebase run
+  at load 154 failed the same key-previous gate at 12.85 ms; it did not reproduce in focused runs. Both failures are
+  recorded rather than hidden.
+- `cd app/ArktShell/ShellKit && nice -n 10 swift test --skip ShellKitGUITests`: Swift Testing 1165 tests, 0 failures
+  (main 1164 + the new probe test); XCTest 0.
+- `cd app/ArktCore && nice -n 10 swift test`: 423 tests, 0 failures.
+- `cd app/ArktShell && xcodebuild -project ArktShell.xcodeproj -scheme ArktShell -configuration Debug
+  -derivedDataPath build -jobs 6 CODE_SIGNING_ALLOWED=NO build`: `** BUILD SUCCEEDED **`. Without
+  `CODE_SIGNING_ALLOWED=NO` the build compiles and links, then fails in `CodeSign` with
+  `resource fork, Finder information, or similar detritus not allowed`. A manual
+  `codesign --force --sign - --entitlements ... --generate-entitlement-der` of the product succeeds. The worktree is
+  on an iCloud-synced Desktop and FileProvider re-adds `com.apple.FinderInfo` while codesign walks the bundle; no
+  source or project change was needed.
+- Profile build for the acceptance runs: `xcodebuild ... -configuration Profile -jobs 4 CODE_SIGNING_ALLOWED=NO`
+  prints `** BUILD SUCCEEDED **`; then `ditto` to the local temp directory, `xattr -cr`, ad-hoc
+  `codesign --force --deep --sign -`, and run that copy.
+
+### Acceptance: WindowServer trace (#24 criterion 1)
+
+- Machine: MacBook Pro (M4 Pro, 12 cores), built-in display reporting 240 Hz, macOS 27.0.1. No Chromium build was
+  running (`pgrep -fl 'chromium|ninja'` empty). Load was not idle: load1 39.48 at trace start, 65.69 when the app
+  exited.
+- Command: `xcrun xctrace record --template 'Animation Hitches' --all-processes --time-limit 14s --window 12s
+  --no-prompt --output c1-all.trace`, recording from 14:51:14.733 to 14:51:29.759 (15.03 s). The app
+  (`ArktShell -ArktSmoke YES -ArktSmokeRepeat 3`, pid 97800) ran from 14:51:14.251 to 14:51:24, so the trace covers
+  the whole smoke. `xctrace` 16.0 makes `--attach` and `--all-processes` mutually exclusive, so the trace was started
+  machine-wide before the app instead of attached; the trace's target is `<all-processes/>`.
+- Export: `xcrun xctrace export --input c1-all.trace --xpath
+  '/trace-toc/run[@number="1"]/data/table[@schema="hitches"]'`. Result: 0 rows. The other hitch tables
+  (`hitches-frame-lifetimes`, `hitches-renders`, `hitches-framewait`, `hitches-gpu`, `hitches-updates`) also export
+  0 rows. Both ArktShell (pid 97800) and WindowServer (pid 607) are in the trace's process list.
+- Concurrent app-side pacer in the same smoke: 12 interactions, 755 frames, 4 late display-link intervals, all at
+  frame 9 of a swipe (10.14 ms on the first swipe-back, 16.66 ms on swipe-next/swipe-back/swipe-back); the smoke
+  reported `pacingVerdict = NOT-MEASURABLE (load 60.18 on 12 cores)`. So the trace shows no WindowServer-side hitch
+  row, but it was recorded under load 39-66 and the app's own pacer still saw four late intervals at frame 9. It is
+  not a quiet-machine confirmation; a trace on an idle machine is still needed if the maintainer wants one.
+- The trace predates the rebase onto #415, which draws the incoming pages' text during the motion on the main
+  thread. #295's changes only remove work from the pointer-move path, so the WindowServer-side result still applies
+  to them, but a trace of the final merged tree is a separate maintainer step.
+- A second trace on the final tree: `/tmp/295-final-c1c.trace`, recorded at 16:13 with the same
+  `xctrace record --template 'Animation Hitches' --all-processes --time-limit 14s --window 12s --no-prompt`
+  command against the signed Profile copy of the final build, while `-ArktSmoke YES -ArktSmokeRepeat 6` ran
+  (ArktShell pid 82231; the smoke reported `functional = PASS`). Load was 43.36 at trace start and 21.43 when the
+  file was saved. The same export xpath on all six hitch tables (`hitches`, `-frame-lifetimes`, `-renders`,
+  `-framewait`, `-gpu`, `-updates`) gives 0 rows. The app pacer in that run saw 3 late display-link intervals in 24
+  interactions: swipe-next frame 4 at 13.19 ms, swipe-next frame 65 at 16.66 ms, key-next frame 48 at 16.66 ms; the
+  other 21 interactions had none. Its verdict is still `NOT-MEASURABLE (load 43.36 on 12 cores)`, so this is a
+  final-tree trace but not a quiet-machine one either.
+
+### Acceptance: idle smoke (#24 criterion 4)
+
+Three `-ArktSmokeRepeat 25` runs of the Profile copy, sequentially, hands off the pointer and keyboard, each after
+waiting for load1 below 11. Each run was launched as the app binary with an `osascript` frontmost call one second in:
+a bare direct launch leaves the app inactive and the smoke's own KB-003 check fails (`bar key true, hidden false`,
+exit 2); `open -W` activates it but does not propagate the app's exit status. With the activation step the functional
+checks pass and the binary's exit code is captured.
+
+Two sets were run. The first set hit a bug in the harness's retry condition (shell arithmetic outside `(( ))`), so a
+NOT-MEASURABLE and a functional-FAIL attempt were not retried; it is recorded anyway. Loads are the app's own
+`load1` sample, and "late" is the number of display-link intervals over 8.6 ms in 100 interactions.
+
+| set | run | load1 | functional | pacing | late intervals |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 11.11 | PASS | FAIL | 6 (swipe-back 62 at 17.65 ms; swipe-next 4 at 13.77, 5 at 11.22; three more interactions at frame 9, 16.66 ms each) |
+| 1 | 2 | 14.34 | PASS | NOT-MEASURABLE | 6 |
+| 1 | 3 | 10.77 | FAIL (KB-003) | FAIL | 0 late; the command bar's warm p95 was 31.05 ms against a 12.33 ms bound |
+| 2 | 1 | 6.35 | PASS | FAIL | 37 (key-previous 1-20; swipe-next 39-45 up to 59.11 ms; swipe-back 42-55) |
+| 2 | 2 | 4.86 | PASS | FAIL | 1 (key-next 59 at 16.66 ms) |
+| 2 | 3 | 6.29 | PASS | FAIL | 28 (one 16.66 ms interval at frame 9 of almost every swipe, plus swipe-back 7 at 12.50 and 62 at 16.91) |
+
+No set passed 3 of 3, so criterion 4 is not met. Set 2 is the closer one: run 2 missed by a single interval, and
+run 3's dominant hitch is one 16.66 ms interval at frame 9 of a swipe, the same frame the pre-#415 trace saw late
+under load. The machine was not idle even at load 4.9: WindowServer ran at 23-70% CPU, `searchpartyd` at up to 86%,
+`bird` at up to 62%, and `coreaudiod` and browser helpers stayed busy. A 3 of 3 run on a quiet machine is still
+needed; it is a maintainer step, not something this tree can force from a shared machine.

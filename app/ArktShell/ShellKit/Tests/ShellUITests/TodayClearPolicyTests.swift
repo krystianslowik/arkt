@@ -34,6 +34,18 @@ struct TodayClearPolicyTests {
                                   playsMedia: { $0 == b }).isEmpty)
   }
 
+  @Test func aShownRowStaysInEveryScope() {
+    #expect(TodayClearPolicy.rows([a, b, c], scope: .all, isSelected: { _ in false },
+                                  playsMedia: { _ in false }, isShown: { $0 == b }) == [a, c])
+    #expect(TodayClearPolicy.rows([a, b, c], scope: .unselected, isSelected: { $0 == a },
+                                  playsMedia: { _ in false }, isShown: { $0 == b }) == [c])
+  }
+
+  @Test func shownAndPlayingRowsAreBothKept() {
+    #expect(TodayClearPolicy.rows([a, b, c], scope: .all, isSelected: { _ in false },
+                                  playsMedia: { $0 == a }, isShown: { $0 == b }) == [c])
+  }
+
   @Test func theRowsKeepTheirOrder() {
     #expect(TodayClearPolicy.rows([c, a, b], scope: .all, isSelected: { _ in false },
                                   playsMedia: { _ in false }) == [c, a, b])

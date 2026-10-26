@@ -9,8 +9,7 @@ import XCTest
 enum PacingEnvironment {
   /// Why timing cannot be measured here, or nil when it can.
   static func notMeasurableReason(screen: NSScreen? = NSScreen.main) -> String? {
-    let fps = screen?.maximumFramesPerSecond ?? 0
-    if fps < 120 { return "screen \(fps) Hz" }
+    if let reason = screenNotMeasurableReason(fps: screen?.maximumFramesPerSecond ?? 0) { return reason }
     var load = [0.0]
     let cores = ProcessInfo.processInfo.activeProcessorCount
     if getloadavg(&load, 1) != 1 || load[0] >= Double(cores) {
@@ -22,6 +21,21 @@ enum PacingEnvironment {
   /// Skips the test as NOT-MEASURABLE when this machine cannot measure timing.
   static func skipIfNotMeasurable(screen: NSScreen? = NSScreen.main) throws {
     if let reason = notMeasurableReason(screen: screen) {
+      throw XCTSkip("NOT-MEASURABLE (\(reason))")
+    }
+  }
+
+  /// Why this screen cannot drive the scripted 120 Hz frames, or nil when it can. Only the screen is checked: a test
+  /// that measures thread CPU time holds under load, so it must not skip on it.
+  static func screenNotMeasurableReason(fps: Int) -> String? {
+    fps < 120 ? "screen \(fps) Hz" : nil
+  }
+
+  /// Skips the test as NOT-MEASURABLE when the screen cannot drive the scripted 120 Hz frames, for a test that
+  /// measures thread CPU time. Unlike `skipIfNotMeasurable`, a loaded machine is measurable: CPU time does not
+  /// depend on what else runs.
+  static func skipIfScreenBelow120Hz(fps: Int) throws {
+    if let reason = screenNotMeasurableReason(fps: fps) {
       throw XCTSkip("NOT-MEASURABLE (\(reason))")
     }
   }
