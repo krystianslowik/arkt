@@ -73,7 +73,10 @@ struct SpaceOptionsMenuTests {
     #expect(icons.item(withTitle: "None")?.state == .off)
     #expect(icons.item(withTitle: SpacePageView.emojiItemTitle)?.state == .off)
     let themes = try #require(menu.item(withTitle: "Theme")?.submenu)
-    #expect(themes.items.map(\.title) == ["Default", "Paper", "Dusk"])
+    // The presets, then Edit Theme... after a separator (#410); a page that nobody hosts cannot open the creator.
+    #expect(themes.items.map(\.title) == ["Default", "Paper", "Dusk", "", SpacePageView.editThemeItemTitle])
+    #expect(themes.items[3].isSeparatorItem)
+    #expect(themes.item(withTitle: SpacePageView.editThemeItemTitle)?.isEnabled == false)
     #expect(themes.item(withTitle: "Paper")?.state == .on)
     #expect(themes.item(withTitle: "Default")?.state == .off)
 
