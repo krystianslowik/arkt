@@ -145,6 +145,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public internal(set) var onboarding: OnboardingController?
   /// Peek (#313): link activations, the Peek over the source tab and its closes, Open as Tab and Add to Split View.
   public private(set) lazy var peek = PeekController(shell: self)
+  /// A page's `alert()`, `confirm()` and `prompt()` as panels over the page (#400); see `+JavaScriptDialogs`.
+  private(set) lazy var javaScriptDialogs = makeJavaScriptDialogPresenter()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
@@ -183,6 +185,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
     root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
+    root.onLayout = { [weak self] in self?.javaScriptDialogs.layoutDidFinish() }      // #400
     engineHost.controller = self
     window.commandHost = engineHost
     let toastView = ToastView(frame: .zero)
@@ -636,6 +639,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.visible = Set(nodes)
     for node in hidden { onTabHidden?(node) }
     peek.shownTabsDidChange()
+    javaScriptDialogs.refresh()
   }
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -656,6 +660,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   /// Events of this window's tabs (`observe(window:)`).
   func handle(_ event: EngineEvent) {
+    switch event {
+    case .dialogRequested, .dialogEnded:
+      javaScriptDialogs.handle(event)                               // #400
+      return
+    default:
+      break
+    }
     guard let node = nodeByTab[event.tabID] else {
       if handleParkedTabEvent(event) { return }                     // a closed page's copy (#346)
       if case .tabCreated(let tab) = event { engineDidCreateTab(tab) }
@@ -689,8 +700,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       closeWasCancelled(tab, node: node)
     case .audibleChanged(let tab, _), .mutedChanged(let tab, _):
       audioChanged(tab, node: node)                                 // #364
-    case .tabCreated, .titleChanged, .loadingChanged:
-      break
+    case .tabCreated, .titleChanged, .loadingChanged, .dialogRequested, .dialogEnded:
+      break                                                         // dialogs: `handle` routed them above
     }
   }
 
@@ -794,6 +805,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     isClosed = true
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
+    javaScriptDialogs.closeAll()
     peek.invalidate()
     commandBar.invalidate()
     rootView.sidebarOverlay.invalidate()

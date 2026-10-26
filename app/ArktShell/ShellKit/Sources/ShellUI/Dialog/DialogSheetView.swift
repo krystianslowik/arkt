@@ -32,6 +32,11 @@ final class DialogSheetView: NSView {
   let titleField = NSTextField(wrappingLabelWithString: "")
   let subtitleField: NSTextField?
   let paragraphFields: [NSTextField]
+  /// The paragraphs inside a scroll view, when the content caps the body's height.
+  let bodyScroll: NSScrollView?
+  private let bodyContainer = FlippedView()
+  /// The prompt's field, when the content has one.
+  let inputView: DialogInputView?
   let listField: DialogListView?
   let footerLinkButton: ArchiveLinkButton?
   let primaryButton: ArchivePillButton
@@ -49,6 +54,8 @@ final class DialogSheetView: NSView {
       ? Self.stackedIconSize : Self.besideIconSize)
     subtitleField = content.subtitle.map { NSTextField(wrappingLabelWithString: $0) }
     paragraphFields = content.paragraphs.map { NSTextField(wrappingLabelWithString: $0.text) }
+    bodyScroll = content.bodyMaxHeight == nil ? nil : NSScrollView()
+    inputView = content.input.map { DialogInputView(input: $0) }
     listField = content.listItems.isEmpty ? nil : DialogListView(heading: content.listHeading, items: content.listItems)
     footerLinkButton = content.footerLink.map { ArchiveLinkButton(style: .secondary, title: $0, fontSize: 13) }
     primaryButton = ArchivePillButton(style: content.isDestructive ? .destructive : .primary,
@@ -87,8 +94,19 @@ final class DialogSheetView: NSView {
     }
     for field in [titleField] + [subtitleField].compactMap({ $0 }) + paragraphFields {
       field.isSelectable = false
-      addSubview(field)
+      if bodyScroll == nil || field === titleField || field === subtitleField { addSubview(field) }
     }
+    if let bodyScroll {
+      for field in paragraphFields { bodyContainer.addSubview(field) }
+      bodyScroll.documentView = bodyContainer
+      bodyScroll.drawsBackground = false
+      bodyScroll.hasVerticalScroller = true
+      bodyScroll.autohidesScrollers = true
+      bodyScroll.scrollerStyle = .overlay
+      bodyScroll.borderType = .noBorder
+      addSubview(bodyScroll)
+    }
+    if let inputView { addSubview(inputView) }
     if let listField { addSubview(listField) }
     if let footerLinkButton {
       footerLinkButton.target = self
@@ -122,7 +140,8 @@ final class DialogSheetView: NSView {
     secondaryButton?.setAccessibilityIdentifierWithCell(AXID.Dialog.secondary)
     footerLinkButton?.setAccessibilityIdentifierWithCell(AXID.Dialog.footerLink)
     // Tab cycles footer link, then the buttons in order.
-    let loop: [NSView] = [footerLinkButton, cancelButton, secondaryButton, primaryButton].compactMap { $0 }
+    let loop: [NSView] = [inputView?.field, footerLinkButton, cancelButton, secondaryButton, primaryButton]
+      .compactMap { $0 }
     for (index, view) in loop.enumerated() { view.nextKeyView = loop[(index + 1) % loop.count] }
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
@@ -132,9 +151,10 @@ final class DialogSheetView: NSView {
     restyle()
   }
 
-  /// Where focus starts: the default button when there is one, otherwise Cancel (section 9).
+  /// Where focus starts: the prompt's field when there is one, else the default button, otherwise Cancel (section 9).
   var initialFocus: NSView {
-    switch content.defaultButton {
+    if let field = inputView?.field { return field }
+    return switch content.defaultButton {
     case .primary: primaryButton
     case .cancel, .none: cancelButton ?? primaryButton
     }
@@ -182,8 +202,23 @@ final class DialogSheetView: NSView {
     y += besideIcon ? 5 : 0
     y = place(titleField, x: textX, y: y, width: textWidth)
     if let subtitleField { y = place(subtitleField, x: textX, y: y + 3, width: textWidth) }
-    for (index, field) in paragraphFields.enumerated() {
-      y = place(field, x: textX, y: y + (index == 0 ? 10 : Self.paragraphGap), width: textWidth)
+    if let bodyScroll, let maxHeight = content.bodyMaxHeight {
+      // Fields stack inside the scroll view's document; the view shows at most `maxHeight` of them.
+      var inner: CGFloat = 0
+      for (index, field) in paragraphFields.enumerated() {
+        inner = place(field, x: 0, y: inner + (index == 0 ? 0 : Self.paragraphGap), width: textWidth)
+      }
+      bodyContainer.frame = NSRect(x: 0, y: 0, width: textWidth, height: inner)
+      bodyScroll.frame = NSRect(x: textX, y: y + 10, width: textWidth, height: min(inner, maxHeight))
+      y = bodyScroll.frame.maxY
+    } else {
+      for (index, field) in paragraphFields.enumerated() {
+        y = place(field, x: textX, y: y + (index == 0 ? 10 : Self.paragraphGap), width: textWidth)
+      }
+    }
+    if let inputView {
+      inputView.frame = NSRect(x: textX, y: y + Self.paragraphGap, width: textWidth, height: DialogInputView.height)
+      y = inputView.frame.maxY
     }
     if let listField {
       let height = min(listField.fittingHeight(width: textWidth), Self.listMaxHeight)
@@ -219,6 +254,9 @@ final class DialogSheetView: NSView {
     _ = layoutContent(width: bounds.width)
   }
 
+  /// What the prompt's field holds now; nil without a field.
+  var inputText: String? { inputView?.field.stringValue }
+
   // MARK: - Answers
 
   @objc func primaryPressed(_ sender: Any?) { onAnswer?(.primary) }
@@ -231,6 +269,59 @@ final class DialogSheetView: NSView {
     guard content.escapeAnswersCancel else { return false }
     onAnswer?(.cancel)
     return true
+  }
+}
+
+/// A flipped container, so stacked fields keep a top-down origin.
+final class FlippedView: NSView {
+  override var isFlipped: Bool { true }
+}
+
+/// The prompt's field: a recessed rounded field (the Archive's `listField`, radius 8) holding a plain text field.
+@MainActor
+final class DialogInputView: NSView {
+  static let height: CGFloat = 28
+  let field = NSTextField(string: "")
+
+  init(input: DialogContent.Input) {
+    super.init(frame: .zero)
+    wantsLayer = true
+    layer?.cornerRadius = 8
+    layer?.cornerCurve = .continuous
+    field.stringValue = input.text
+    field.isBordered = false
+    field.isBezeled = false
+    field.drawsBackground = false
+    field.focusRingType = .none
+    field.font = .systemFont(ofSize: 13)
+    field.lineBreakMode = .byTruncatingTail
+    field.cell?.usesSingleLineMode = true
+    field.setAccessibilityLabel(input.accessibilityLabel)
+    field.setAccessibilityIdentifier(AXID.Dialog.input)
+    addSubview(field)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override var isFlipped: Bool { true }
+  override var wantsUpdateLayer: Bool { true }
+
+  override func updateLayer() {
+    layer?.backgroundColor = ArchiveTokens.listField.resolve(archiveFlavor).cgColor
+    field.textColor = ShellTokens.primaryText.resolve(archiveFlavor).nsColor()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func layout() {
+    super.layout()
+    let height = ceil(field.intrinsicContentSize.height)
+    field.frame = NSRect(x: 10, y: ((bounds.height - height) / 2).rounded(), width: max(0, bounds.width - 20),
+                         height: height)
   }
 }
 

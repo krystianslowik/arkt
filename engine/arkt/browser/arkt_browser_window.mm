@@ -12,6 +12,7 @@
 #include "arkt/browser/arkt_extensions_menu.h"
 #import "arkt/browser/arkt_infobar_view.h"
 #include "arkt/browser/arkt_infobars.h"
+#include "arkt/browser/arkt_javascript_dialog.h"
 #include "arkt/browser/arkt_permission_prompt.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
 #import "arkt/browser/arkt_tab_container_view.h"
@@ -1131,6 +1132,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
         CHECK_LE(static_cast<size_t>(inserted.index), entries_.size());
         entries_.insert(entries_.begin() + inserted.index, TabEntry());
         arkt::UseArktPermissionPrompts(inserted.contents);
+        arkt::UseArktJavaScriptDialogs(inserted.contents);
         AddInfobarPresenter(inserted.contents);
         [events addObject:EntryEvent(ArktTabEventKindInserted,
                                      inserted.contents, inserted.index, -1)];
@@ -1176,6 +1178,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
       tab_modal_dialog_hosts_.erase(replace->old_contents);
       infobar_presenters_.erase(replace->old_contents);
       arkt::UseArktPermissionPrompts(replace->new_contents);
+      arkt::UseArktJavaScriptDialogs(replace->new_contents);
       AddInfobarPresenter(replace->new_contents);
       [events
           addObject:EntryEvent(ArktTabEventKindUpdated, replace->new_contents,

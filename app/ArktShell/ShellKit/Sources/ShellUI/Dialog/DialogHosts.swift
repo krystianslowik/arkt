@@ -225,12 +225,24 @@ public final class DialogPanel {
                   width: size.width, height: size.height)
   }
 
-  /// Shows the panel over `parent`, anchored to `anchor` (screen coordinates), without taking focus. VoiceOver hears
-  /// its title.
-  public func show(over parent: NSWindow, anchoredTo anchor: NSRect) {
+  /// The text in the prompt's field; nil when the content has none.
+  public var inputText: String? { view.inputText }
+
+  /// Moves the panel to `anchor` (screen coordinates) again, when the page it points at moved or resized.
+  public func reposition(anchoredTo anchor: NSRect) {
+    panel.setFrame(frame(anchoredTo: anchor), display: true)
+  }
+
+  /// Shows the panel over `parent`, anchored to `anchor` (screen coordinates). It takes no focus unless
+  /// `takesFocus` (a page's dialog, which blocks the page: the answer keys go to it). VoiceOver hears its title.
+  public func show(over parent: NSWindow, anchoredTo anchor: NSRect, takesFocus: Bool = false) {
     panel.setFrame(frame(anchoredTo: anchor), display: false)
     parent.addChildWindow(panel, ordered: .above)
     panel.orderFront(nil)
+    if takesFocus {
+      panel.makeKey()
+      panel.makeFirstResponder(view.initialFocus)            // a field starts editing with its text selected
+    }
     enter()
     NSAccessibility.post(element: panel, notification: .announcementRequested, userInfo: [
       .announcement: content.title, .priority: NSAccessibilityPriorityLevel.high.rawValue,
@@ -259,7 +271,9 @@ public final class DialogPanel {
     let duration = DialogMotion.panelOut(keyboard: keyboard, reduceMotion: reduceMotion())
     guard duration > 0, let layer = container.layer else { return remove() }
     CATransaction.begin()
-    CATransaction.setCompletionBlock { [weak self] in MainActor.assumeIsolated { self?.remove() } }
+    // The window, not `self`: the owner lets go of this object at the answer, and the fade must still take it down.
+    let window = panel
+    CATransaction.setCompletionBlock { MainActor.assumeIsolated { Self.remove(window) } }
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = layer.presentation()?.opacity ?? 1
     fade.toValue = 0
@@ -270,9 +284,11 @@ public final class DialogPanel {
     CATransaction.commit()
   }
 
-  private func remove() {
-    panel.parent?.removeChildWindow(panel)
-    panel.orderOut(nil)
+  private func remove() { Self.remove(panel) }
+
+  private static func remove(_ window: NSPanel) {
+    window.parent?.removeChildWindow(window)
+    window.orderOut(nil)
   }
 
   private func finish(_ answer: DialogContent.Answer) {

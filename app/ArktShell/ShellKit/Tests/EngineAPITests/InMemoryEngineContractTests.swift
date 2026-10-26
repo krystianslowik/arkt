@@ -48,6 +48,16 @@ struct InMemoryEngineContractTests {
   // Rule 18
   @Test func pageImageFitsTheCaps() async throws { try await EngineContract.pageImageFitsTheCaps(harness) }
   @Test func pageImageOfAClosedTabIsNil() async throws { try await EngineContract.pageImageOfAClosedTabIsNil(harness) }
+  // Rule 19
+  @Test func dialogIsReportedAnsweredAndEndedOnce() async throws {
+    try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(harness)
+  }
+  @Test func pendingDialogEndsBeforeItsTabCloses() async throws {
+    try await EngineContract.pendingDialogEndsBeforeItsTabCloses(harness)
+  }
+  @Test func hiddenTabEndsItsConfirmAndPrompt() async throws {
+    try await EngineContract.hiddenTabEndsItsConfirmAndPrompt(harness)
+  }
 
   /// A harness without engine drivers reports rules 13, 14, 16 and 17's audible check as not applicable, never as passed.
   @Test func missingDriversAreNotApplicable() async throws {
@@ -60,6 +70,7 @@ struct InMemoryEngineContractTests {
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.cancelledWindowCloseKeepsTheWindow(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.audibleStateIsReported(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.pageImageFitsTheCaps(bare) }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(bare) }
     await #expect(throws: ContractNotApplicable.self) {
       try await EngineContract.extensionWindowCloseReportsExtension(bare)
     }

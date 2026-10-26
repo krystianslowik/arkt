@@ -31,6 +31,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
 @protocol ArktHistoryEntry;
+@protocol ArktJavaScriptDialog;
 @protocol ArktLinkActivation;
 @protocol ArktTabHandle;
 @protocol ArktWindowHost;
@@ -131,6 +132,14 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   ArktEngineEventKindAudibleChanged = 14,
   // The tab was muted or unmuted (#364). Values: isMuted.
   ArktEngineEventKindMutedChanged = 15,
+  // The page raised an alert, confirm or prompt in a window whose host
+  // presents it (#400). Values: dialog. At most one is pending per tab; a
+  // later one ends the earlier first.
+  ArktEngineEventKindDialogRequested = 16,
+  // The dialog is over: the shell answered it, or the engine ended it (a
+  // navigation, a later dialog, the tab closing, a confirm or prompt in a
+  // tab that was hidden). Values: dialog. Exactly one per request.
+  ArktEngineEventKindDialogEnded = 17,
 };
 
 // Why the engine asks the embedder for a window host.
@@ -154,6 +163,14 @@ typedef NS_ENUM(NSInteger, ArktLinkDecision) {
   ArktLinkDecisionCancel = 1,
 };
 
+// What a page's JavaScript dialog is (#400). beforeunload is not one: it
+// keeps Chromium's app-modal Leave site dialog (#265).
+typedef NS_ENUM(NSInteger, ArktDialogKind) {
+  ArktDialogKindAlert = 0,
+  ArktDialogKindConfirm = 1,
+  ArktDialogKindPrompt = 2,
+};
+
 // One recorded engine change, as plain values. Fields that do not apply to
 // the kind are nil, NO, ArktCloseReasonNone or ArktWindowCloseReasonNone.
 NS_SWIFT_UI_ACTOR
@@ -174,6 +191,35 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL isAudible;
 @property(nonatomic, readonly) BOOL isMuted;
 @property(nonatomic, readonly) ArktWindowCloseReason windowCloseReason;
+// DialogRequested and DialogEnded; nil on every other kind.
+@property(nonatomic, readonly, nullable) id<ArktJavaScriptDialog> dialog;
+@end
+
+// A page's alert, confirm or prompt, held until the shell answers it or the
+// engine ends it (#400). Every string is Chromium's.
+NS_SWIFT_UI_ACTOR
+@protocol ArktJavaScriptDialog <NSObject>
+@property(nonatomic, readonly) ArktDialogKind kind;
+// The tab whose page raised it; stays valid after the tab has closed.
+@property(nonatomic, readonly) id<ArktTabHandle> tab;
+// "example.com says".
+@property(nonatomic, readonly, copy) NSString* title;
+@property(nonatomic, readonly, copy) NSString* message;
+// A prompt's initial text; nil for an alert or a confirm.
+@property(nonatomic, readonly, nullable, copy) NSString* defaultPromptText;
+// OK.
+@property(nonatomic, readonly, copy) NSString* acceptTitle;
+// Cancel; nil for an alert, which only has OK.
+@property(nonatomic, readonly, nullable, copy) NSString* cancelTitle;
+// The dialog is over, however it ended.
+@property(nonatomic, readonly) BOOL isEnded;
+// Answers the page's call: `accepted` is OK, `userInput` a prompt's text.
+// Returns NO, and does nothing, when the dialog is already over (the engine
+// ended it first), so an answer that races the end is harmless. Reported with
+// one DialogEnded.
+- (BOOL)respondAccepted:(BOOL)accepted
+              userInput:(nullable NSString*)userInput
+    NS_SWIFT_NAME(respond(accepted:userInput:));
 @end
 
 // A request for a window the engine creates on its own, after

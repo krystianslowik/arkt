@@ -3264,6 +3264,130 @@ still listed and will be dropped by LaunchServices' own cleanup. It cannot take 
 - Existing installs of the placeholder id: none ship; the maintainer's `~/Applications/ArktTest` bundle keeps its old id
   until it is rebuilt.
 
+## #400: slice 1, JavaScript alert, confirm and prompt in the shell's dialog panel
+
+Date 2026-10-26. Branch `engine/400-dialog-restyle` off `main` at `db420d5`. Plan: the engine plan comment on #400. This is
+the first of three slices (JavaScript dialogs, then permission prompts, then infobars); the pull request is `Refs #400`.
+
+### What landed
+
+- **Hook, no patch.** `TabModalDialogManager` decides everything about a page's dialog (foremost tab, a background
+  `alert()` staying pending, auto-dismissal of a confirm or prompt when its tab is hidden, a navigation, a later dialog,
+  the tab closing). Its delegate is private and set when `TabHelpers` creates the manager, but
+  `JavaScriptTabModalDialogManagerDelegateDesktop::CreateNewDialog` is virtual and `RemoveUserData(UserDataKey())` plus
+  `CreateForWebContents` are public. `arkt_javascript_dialog.{h,mm}` subclasses the desktop delegate and swaps it in per
+  tab where `UseArktPermissionPrompts` is called (insert and contents replacement; a marker makes a second call a no-op).
+  Per request the subclass hands the dialog to the facade when the tab is in an embedder-host window and the facade
+  takes it; every other case falls back to Chromium's own Views dialog. The dialog object (`ArktJavaScriptDialog`) is the
+  manager's `TabModalDialogView`, owns itself, holds the tab's `ScopedTabModalUI` as the Views dialog does, and ends once.
+  `.patches` stays 9 = `git rev-list --count 156.0.8078.48..arkt` 9.
+- **Facade header (both copies, additive; `cmp` identical).** `ArktDialogKind`, event kinds `DialogRequested` (16) and
+  `DialogEnded` (17), `dialog` on `ArktEngineEvent`, and the `ArktJavaScriptDialog` protocol (kind, tab, title,
+  message, default prompt text, accept and cancel titles, `isEnded`, `-respondAccepted:userInput:`). The strings are
+  Chromium's (`IDS_APP_OK`, `IDS_APP_CANCEL`, the manager's "origin says" title). One `DialogEnded` per request, however
+  it ends; an answer after the end returns NO and does nothing.
+- **EngineAPI.** `JavaScriptDialog`, `DialogID`, `EngineEvent.dialogRequested` / `.dialogEnded`, and
+  `EngineClient.respond(to:accepted:userInput:)` (default no-op). Contract rule 19 (two checks): a request carries the
+  engine's strings, an answer ends it once, and a pending dialog ends before its tab's `.tabClosed`. `ChromiumEngine`
+  ends a tab's pending dialog before it reports the tab closed even when the facade reports the end after `TabClosed`
+  (the real order, scripted in `ScriptedFacade`). `InMemoryEngine` gains the `raiseDialog` driver and `dialogAnswers`.
+- **ShellUI.** `JavaScriptDialogPresenter` shows each pending dialog of a shown tab as the anchored `DialogPanel`
+  (top-leading corner 12 pt inside the page, key focus on show, since the page is blocked) and answers the engine. A tab
+  that is not on screen keeps its dialog pending without a panel and gets it back when shown (`setShown` calls
+  `refresh()`); the engine's own end closes the panel with no answer. `DialogContent` gains an optional text field (a
+  prompt: focus starts in it, text selected) and `bodyMaxHeight` (the body scrolls past 240 pt, since Chromium allows 24
+  lines of 80 characters). Escape answers Cancel; an `alert()` has only OK, so Escape accepts it as Chrome does.
+
+### Checks (Engine app on the rebuilt `out/Arkt`, bundle id `dev.arkt.Arkt.try400` (own id), copy on the internal disk, throwaway data folders and defaults suite, `--use-mock-keychain`, a loopback page on `127.0.0.1` with one button per dialog, keys and clicks only into the app's own frontmost window)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `alert()` | PASS | panel "127.0.0.1:18400 says" with OK as the focused mustard default; Return; the page continued (title `alert-returned`) |
+| `confirm()` Escape / Return | PASS | Escape: page got `false`; Return: `true` |
+| `prompt()` typed text, Return | PASS | field started with the default text selected; typing "Grace" and pressing Return while editing: page got `Grace` |
+| `prompt()` Escape | PASS | page got `null` |
+| Long `alert()` (40 lines) | PASS | the body is capped and scrolls; OK stays visible |
+| One panel, no Chromium dialog | PASS | window list of the browser pid while a dialog was up: the main window plus exactly one 420 pt panel; none after the answer |
+| Stderr | PASS | `facade dialog requested kind=0,1,1,2,2,0,1` for the seven dialogs raised, one `DialogEnded` batch per answer |
+| Confirm, then switch tab | PASS (re-checked, see "Review follow-up") | see the follow-up below; the first run only lacked a pointer move before its synthetic clicks |
+
+### Verification
+
+- Red first: `JavaScriptDialogTests` did not compile before the engine types existed (the shell's event switch was
+  not exhaustive). With `javaScriptDialogs.refresh()` taken out of `ShellWindowController.setShown`,
+  `JavaScriptDialogWindowTests.testSwitchingTabsHidesTheDialogWithoutAnsweringAndShowingTheTabBringsItBack` failed
+  (the panel stayed up), then passed.
+- ShellKit `swift test --skip ShellKitGUITests`: 1339 passed after merging `main` at `6c5a9cd` (baseline 1312 + 27: 9 `JavaScriptDialogTests`, 5
+  `JavaScriptDialogContentTests`, 6 `ChromiumDialogTests`, 1 `JavaScriptDialogABITests`, 4 contract checks over the two
+  scripted orders, 2 in-memory contract checks; the baseline is the total minus the new tests, not a run on `main`).
+  ArktCore `swift test`: 429 passed (unchanged).
+- GUI tests run: `JavaScriptDialogPresenterTests` (11), `JavaScriptDialogWindowTests` (3), `DialogTests`,
+  `DeleteSpaceTests`, `AccessibilityIdentifierTests`, `FakeEngineContractTests` (rule 19 not applicable to FakeEngine, 2
+  skipped); 0 failures. The rest of the GUI suite was not run.
+- `nice -n 15 autoninja -C out/Spike chrome -j 4` and `-C out/Arkt chrome -j 4`: `The build has finished successfully.`
+  Engine app: `xcodebuild -scheme ArktShell -configuration Engine` with `PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try400`:
+  `BUILD SUCCEEDED` (after `xcodegen generate`: the ignored project was older than `main`).
+
+### Deviations
+
+- The self-test embedder (`--arkt-facade-selftest`) is an embedder host with a sink, so it receives `DialogRequested`
+  and draws nothing; the page waits until the self-test's `answer` command ends it. The plan said the engine-drawn UI
+  stays the fallback while no embedder presents a surface; for this slice the Views dialog is the fallback only when
+  the window has no embedder host or the facade has no sink.
+- The in-app contract runner has no `raiseDialog` driver (a real tab must be foremost for Chromium to show it), so
+  rule 19 is reported as not applicable there; real Chromium is covered by the checks above.
+- `ArktJavaScriptDialog::GetUserInput` returns the default text; it is read only when the engine itself accepts the
+  dialog without an override (the test API passes one).
+- The first run's synthetic clicks on the sidebar did not switch tabs; the cause was the input, not the panel (see "Review follow-up").
+
+### Left open
+
+- Slice 2: permission prompts through the facade (same panel, `PermissionRequested` / `PermissionEnded`).
+- Slice 3: infobars (`InfobarsChanged`, a shell row from the design's `infobar` state).
+- `beforeunload` stays Chromium's app-modal dialog (#265).
+- Cleanup: test copy, throwaway data, embed folder and derived data removed; `lsregister -u` was run, and records for the
+  deleted `dev.arkt.Arkt.try400` path are still listed (LaunchServices drops them itself, as noted for #128).
+
+### Review follow-up (head after 1f5e4cd)
+
+- **Decision (also on #400):** JavaScript dialogs keep Chromium's behaviour. Return accepts at once, with no
+  input-protection delay, as in Chrome and Safari. The 0.5 s protection is only for permission prompts (slice 2).
+- **Tab switch with a dialog up: no behaviour change was needed.** Real app (below): one click on a sidebar row and the
+  Previous Tab shortcut switch tabs with an alert up and with a confirm up. The earlier failures came from `cliclick`
+  pressing without moving the pointer first (such a press is also lost with no dialog up); with `m:x,y w:300` before
+  the press every click lands. The panel is key, so the shell window is not, and the sidebar outline accepts the first
+  click (`acceptsFirstMouse` is true for `NSOutlineView`); a test pins it (`testOneClickOnARowSwitchesTabsWithADialogUp`,
+  alert and confirm, `NSWindow.sendEvent` level). A confirm ends false on switch-away (`kTabHidden`), an alert stays
+  attached and reappears on return.
+- **Bug found by the real-app run, fixed:** after a mouse answer (a click on OK) the panel stayed ordered in at opacity 0
+  over the page, because the 0.10 s fade's completion block held the `DialogPanel` weakly and the presenter drops it at
+  the answer. Keyboard answers (instant) never showed it, and the unit tests held the panel strongly. The completion now
+  captures the window. Test: `testAMouseAnswerLeavesNoPanelBehind` (red before the fix, 5 s timeout).
+- **Dialog that arrives with nothing to show it on:** the presenter refreshes on `didDeminiaturize`,
+  `didChangeOcclusionState`, `NSApplication.didUnhide`, and after the next layout of the window when a pending dialog
+  found no page view (`ShellRootView.onLayout`). The window state is injected (`windowIsVisible`); a test per event.
+- **Contract rule 19, third check** `hiddenTabEndsItsConfirmAndPrompt`: a confirm or prompt ends when its tab stops
+  being active. `InMemoryEngine` ends it; the scripted facade models `kTabHidden`; FakeEngine reports it not
+  applicable. Red first with `InMemoryEngine`'s end taken out (timeout). The `Task.sleep(100 ms)` in
+  `dialogIsReportedAnsweredAndEndedOnce` is replaced by waiting for the end, then for a later request: events arrive in
+  order, so a second end would show up before it.
+- **Reduce Motion:** `testReduceMotionPanelFadesWithoutTravel` (fade without a transform animation, against the usual
+  entrance with one).
+- Not done: finding 3 (a tab moved to another window with a pending alert) and finding 6 (panel width fixed at
+  creation); left for a later slice.
+
+#### Real-app check (`dev.arkt.Arkt.try400`, Engine configuration on `out/Spike`, throwaway profile and data folders,
+`--use-mock-keychain`, a loopback page on `127.0.0.1:18400`, real `cliclick` input with a pointer move first)
+
+| Check | Result |
+|---|---|
+| Baseline, no dialog: one click on a row | PASS, three of three switched (window key) |
+| Confirm up, one click on a row | PASS: switched, the confirm ended false (`A confirm-false`), no panel left |
+| Alert up, one click on a row | PASS: switched, panel hidden, back on the tab the panel reappears |
+| Previous Tab shortcut with an alert, and with a confirm, up | PASS: switched, panel gone |
+| Click on OK (mouse), before the fix | FAIL: invisible panel left (4 after four dialogs) |
+| Click on OK (mouse), after the fix | PASS: no panel window left |
+
 ## #352: Little Arkt's Open in flight
 
 Branch `feat/352-little-arkt-flight`. Design: `docs/design/little-arkt.md`, Motion (`la-kf-promote-*`,

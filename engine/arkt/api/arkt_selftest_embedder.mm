@@ -585,6 +585,14 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
         LOG(WARNING) << "ARKT selftest mutedChanged tab=" << tab
                      << " muted=" << (event.isMuted ? "yes" : "no");
         break;
+      case ArktEngineEventKindDialogRequested:
+        // Nobody draws it here; the self-test's `answer` command ends it.
+        LOG(WARNING) << "ARKT selftest dialogRequested tab=" << tab
+                     << " kind=" << event.dialog.kind;
+        break;
+      case ArktEngineEventKindDialogEnded:
+        LOG(WARNING) << "ARKT selftest dialogEnded tab=" << tab;
+        break;
       case ArktEngineEventKindExtensionActionsChanged:
         LOG(WARNING) << "ARKT selftest extensionActionsChanged window="
                      << window;

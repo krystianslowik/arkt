@@ -122,13 +122,23 @@ public enum EngineEvent: Equatable, Sendable {
   case audibleChanged(TabID, isAudible: Bool)
   /// The tab was muted or unmuted (contract rule 17).
   case mutedChanged(TabID, isMuted: Bool)
+  /// The page raised an `alert()`, `confirm()` or `prompt()` (contract rule 19). At most one is pending per tab; a
+  /// later one ends the earlier first.
+  case dialogRequested(JavaScriptDialog)
+  /// The dialog is over, however it ended: the shell answered it, or the engine ended it (a navigation, a later
+  /// dialog, the tab closing, a confirm or prompt in a tab that was hidden). Exactly one per request, and before the
+  /// `.tabClosed` of its tab (contract rule 19).
+  case dialogEnded(TabID, DialogID)
 
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id, _), .urlChanged(let id, _), .titleChanged(let id, _),
          .faviconChanged(let id, _), .loadingChanged(let id, _), .historyChanged(let id, _, _),
-         .activeTabChanged(let id), .closeCancelled(let id), .audibleChanged(let id, _), .mutedChanged(let id, _):
+         .activeTabChanged(let id), .closeCancelled(let id), .audibleChanged(let id, _), .mutedChanged(let id, _),
+         .dialogEnded(let id, _):
       return id
+    case .dialogRequested(let dialog):
+      return dialog.tab
     }
   }
 }
@@ -197,6 +207,10 @@ public protocol EngineClient: AnyObject {
   /// `.mutedChanged` per change; setting the state the tab already has reports nothing. The page keeps playing and
   /// keeps its `isAudible`. A no-op for an unknown or closed tab.
   func setMuted(_ id: TabID, muted: Bool)
+  /// Answers a pending JavaScript dialog (#400, contract rule 19): `accepted` is OK (true) or Cancel (false); `userInput`
+  /// is a prompt's text. Reported with one `.dialogEnded`. A no-op for a dialog that already ended, so a click that
+  /// races the engine's own end does nothing. Default: a no-op, for an engine that raises no dialogs.
+  func respond(to dialog: DialogID, accepted: Bool, userInput: String?)
   /// An image of the tab's current frame within `request`'s caps (#370 thumbnails, #352 Little Arkt's flight; contract
   /// rule 18). The copy, scale and encode run off the main thread; the caller only awaits. Nil for an unknown or closed
   /// tab and for a tab with no frame to copy (not drawn yet, hidden long enough to be evicted, discarded); the tab is
@@ -242,6 +256,8 @@ extension EngineClient {
   }
 
   public func moveTab(_ id: TabID, to window: EngineWindowID) {}
+
+  public func respond(to dialog: DialogID, accepted: Bool, userInput: String?) {}
 
   public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? { nil }
 

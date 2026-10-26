@@ -77,7 +77,12 @@ enum ScriptedHarness {
         try await delivered(chromium)
       },
       // A scripted tab has a frame once its load finished; nothing to show.
-      showPage: { _, _ in }
+      showPage: { _, _ in },
+      raiseDialog: { engine, id, kind, message, defaultText in
+        let (chromium, tab) = try parts(engine, id)
+        tab.raiseDialog(ArktDialogKind(kind), message: message, defaultText: defaultText)
+        try await delivered(chromium)
+      }
     )
   }
 
@@ -119,5 +124,15 @@ enum ScriptedHarness {
   static func delivered(_ engine: ChromiumEngine) async throws {
     let facade = scripted(engine)
     try await ScriptedWait.until("the facade to deliver its batch") { facade.isIdle }
+  }
+}
+
+extension ArktDialogKind {
+  init(_ kind: JavaScriptDialog.Kind) {
+    switch kind {
+    case .alert: self = .alert
+    case .confirm: self = .confirm
+    case .prompt: self = .prompt
+    }
   }
 }

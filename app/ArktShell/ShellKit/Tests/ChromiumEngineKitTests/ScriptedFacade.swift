@@ -26,9 +26,45 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var isActive = false
   var isAudible = false
   var isMuted = false
+  var dialog: (any ArktJavaScriptDialog)?
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
+  }
+}
+
+/// A page's alert, confirm or prompt (#400): plain values and the one answer. `answers` records what the page's call
+/// would have returned.
+final class ScriptedDialog: NSObject, ArktJavaScriptDialog {
+  let kind: ArktDialogKind
+  let tab: any ArktTabHandle
+  let title: String
+  let message: String
+  let defaultPromptText: String?
+  let acceptTitle = "OK"
+  let cancelTitle: String?
+  private(set) var isEnded = false
+  private(set) var answer: (accepted: Bool, userInput: String?)?
+  var onEnd: (() -> Void)?
+
+  init(kind: ArktDialogKind, tab: any ArktTabHandle, title: String, message: String, defaultPromptText: String?) {
+    self.kind = kind; self.tab = tab; self.title = title; self.message = message
+    self.defaultPromptText = kind == .prompt ? (defaultPromptText ?? "") : nil
+    cancelTitle = kind == .alert ? nil : "Cancel"
+  }
+
+  func respond(accepted: Bool, userInput: String?) -> Bool {
+    guard !isEnded else { return false }
+    answer = (accepted, userInput)
+    end()
+    return true
+  }
+
+  /// The engine's own end, or the end after an answer: once, reported with `DialogEnded`.
+  func end() {
+    guard !isEnded else { return }
+    isEnded = true
+    onEnd?()
   }
 }
 
@@ -118,6 +154,37 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   private var current: (url: URL, title: String)? { url.map { ($0, title) } }
 
+  // MARK: JavaScript dialogs (#400)
+
+  /// The pending alert, confirm or prompt.
+  private(set) var jsDialog: ScriptedDialog?
+
+  /// The page raises a dialog: the earlier one ends first, as Chromium's manager closes it.
+  @discardableResult
+  func raiseDialog(_ kind: ArktDialogKind, message: String, defaultText: String? = nil) -> ScriptedDialog {
+    endJSDialog()
+    let dialog = ScriptedDialog(kind: kind, tab: self, title: "\(url?.host() ?? "This page") says", message: message,
+                                defaultPromptText: defaultText)
+    dialog.onEnd = { [weak self, unowned dialog] in
+      guard let self else { return }
+      if jsDialog === dialog { jsDialog = nil }
+      record(.dialogEnded) { $0.dialog = dialog }
+    }
+    jsDialog = dialog
+    record(.dialogRequested) { $0.dialog = dialog }
+    return dialog
+  }
+
+  /// The tab stopped being its window's active tab: Chromium's manager answers a confirm or prompt false or null
+  /// (`kTabHidden`) and closes it; an alert already ran its callback and stays.
+  func hidden() {
+    guard let kind = jsDialog?.kind, kind != .alert else { return }
+    endJSDialog()
+  }
+
+  /// The engine ends the pending dialog (a navigation, a later dialog, the tab closing).
+  func endJSDialog() { jsDialog?.end() }
+
   private func record(_ kind: ArktEngineEventKind, _ fill: (ScriptedEvent) -> Void = { _ in }) {
     let event = ScriptedEvent(kind, tab: self, browser: owner)
     fill(event)
@@ -193,6 +260,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   func navigate(to target: URL) {
     whenInserted { [self] in
       guard owner != nil else { return }
+      endJSDialog()                 // Chromium closes it when the navigation starts
       if let current, current.url != target, !isInitialBlank {
         back.insert(current, at: 0)
         forward = []
@@ -460,8 +528,10 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
 
   func activate(_ tab: ScriptedTab) {
     guard active !== tab, tabList.contains(where: { $0 === tab }) else { return }
+    let previous = active
     active = tab
     facade.record(ScriptedEvent(.activeTabChanged, tab: tab, browser: self))
+    previous?.hidden()
   }
 
   /// Removes a tab; closing the active tab activates its right neighbour, else the left one.
@@ -474,6 +544,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     let closed = ScriptedEvent(.tabClosed, tab: tab, browser: self)
     closed.closeReason = reason
     facade.record(closed)
+    tab.endJSDialog()           // the manager goes with the contents, after the tab strip reported the removal
     if active === tab {
       active = nil
       if reactivate, !tabList.isEmpty { activate(tabList[min(index, tabList.count - 1)]) }

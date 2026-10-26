@@ -15,6 +15,7 @@
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
+#include "arkt/browser/arkt_javascript_dialog.h"
 #include "arkt/browser/arkt_link_activation.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
@@ -65,6 +66,8 @@
 #include "content/public/common/isolated_world_ids.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/strings/grit/ui_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -302,6 +305,10 @@ const char* KindName(ArktEngineEventKind kind) {
       return "AudibleChanged";
     case ArktEngineEventKindMutedChanged:
       return "MutedChanged";
+    case ArktEngineEventKindDialogRequested:
+      return "DialogRequested";
+    case ArktEngineEventKindDialogEnded:
+      return "DialogEnded";
   }
   return "unknown";
 }
@@ -329,6 +336,7 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic) BOOL isAudible;
 @property(nonatomic) BOOL isMuted;
 @property(nonatomic) ArktWindowCloseReason windowCloseReason;
+@property(nonatomic, nullable) id<ArktJavaScriptDialog> dialog;
 @end
 
 @implementation ArktFacadeEvent
@@ -348,6 +356,86 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize isAudible = _isAudible;
 @synthesize isMuted = _isMuted;
 @synthesize windowCloseReason = _windowCloseReason;
+@synthesize dialog = _dialog;
+@end
+
+// A page's alert, confirm or prompt (#400): plain values read once when the
+// request arrives, and the shell's one answer. The request is the overlay's
+// self-owned ArktJavaScriptDialog, reached through a weak pointer that
+// Chromium's manager invalidates when it ends the dialog.
+@interface ArktFacadeJavaScriptDialog : NSObject <ArktJavaScriptDialog>
+- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktJavaScriptDialog>)request
+                            tab:(id<ArktTabHandle>)tab;
+// The request is over (answered or ended by the engine).
+- (void)markEnded;
+@end
+
+@implementation ArktFacadeJavaScriptDialog {
+  base::WeakPtr<arkt::ArktJavaScriptDialog> _request;
+  BOOL _ended;
+}
+
+@synthesize kind = _kind;
+@synthesize tab = _tab;
+@synthesize title = _title;
+@synthesize message = _message;
+@synthesize defaultPromptText = _defaultPromptText;
+@synthesize acceptTitle = _acceptTitle;
+@synthesize cancelTitle = _cancelTitle;
+
+- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktJavaScriptDialog>)request
+                            tab:(id<ArktTabHandle>)tab {
+  if ((self = [super init])) {
+    _request = request;
+    _tab = tab;
+    switch (request->type()) {
+      case content::JAVASCRIPT_DIALOG_TYPE_ALERT:
+        _kind = ArktDialogKindAlert;
+        break;
+      case content::JAVASCRIPT_DIALOG_TYPE_CONFIRM:
+        _kind = ArktDialogKindConfirm;
+        break;
+      case content::JAVASCRIPT_DIALOG_TYPE_PROMPT:
+        _kind = ArktDialogKindPrompt;
+        break;
+    }
+    _title = base::SysUTF16ToNSString(request->title());
+    _message = base::SysUTF16ToNSString(request->message());
+    if (_kind == ArktDialogKindPrompt) {
+      _defaultPromptText =
+          base::SysUTF16ToNSString(request->default_prompt_text());
+    }
+    // The strings the Views dialog's buttons use (DialogDelegate): an alert
+    // only has OK.
+    _acceptTitle = base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_OK));
+    if (_kind != ArktDialogKindAlert) {
+      _cancelTitle =
+          base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_CANCEL));
+    }
+  }
+  return self;
+}
+
+- (BOOL)isEnded {
+  return _ended || !_request;
+}
+
+- (void)markEnded {
+  _ended = YES;
+}
+
+- (BOOL)respondAccepted:(BOOL)accepted userInput:(NSString*)userInput {
+  arkt::CheckFacadeEntry();
+  if (self.isEnded) {
+    return NO;
+  }
+  const std::u16string input =
+      userInput ? base::SysNSStringToUTF16(userInput) : std::u16string();
+  // The manager runs the page's callback; the ended callback then reports
+  // DialogEnded.
+  return _request->Respond(accepted, input);
+}
+
 @end
 
 // A link activation as plain values (#313).
@@ -458,6 +546,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   void Start() {
     SetLinkActivationDecider(base::BindRepeating(
         &Facade::DecideLinkActivation, base::Unretained(this)));
+    SetJavaScriptDialogPresenter(base::BindRepeating(
+        &Facade::PresentJavaScriptDialog, base::Unretained(this)));
     observation_.Observe(GlobalBrowserCollection::GetInstance());
     GlobalBrowserCollection::GetInstance()->ForEach(
         [this](BrowserWindowInterface* browser) {
@@ -498,6 +588,40 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
               << static_cast<int>(link.disposition) << ") answered "
               << (decision == ArktLinkDecisionCancel ? "cancel" : "navigate");
     return decision == ArktLinkDecisionCancel;
+  }
+
+  // A page's alert, confirm or prompt in an Arkt window with an embedder host
+  // (#400), called by Chromium's TabModalDialogManager from inside
+  // RunJavaScriptDialog (or when a pending alert's tab comes forward). True
+  // takes the dialog: DialogRequested goes to the shell, which answers with
+  // -respondAccepted:userInput: or lets the engine end it. False leaves it to
+  // Chromium's Views dialog: the tab has no handle, or its window's host is
+  // the placeholder (nobody would show the dialog).
+  bool PresentJavaScriptDialog(content::WebContents* contents,
+                               base::WeakPtr<ArktJavaScriptDialog> request) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil;
+    ArktFacadeBrowser* browser = handle.browser;
+    if (!request || !handle || !browser || sinks_.count == 0) {
+      return false;
+    }
+    ArktFacadeJavaScriptDialog* dialog =
+        [[ArktFacadeJavaScriptDialog alloc] initWithRequest:request
+                                                        tab:handle];
+    request->SetEndedCallback(base::BindOnce(
+        &Facade::DialogEnded, base::Unretained(this),
+        base::Owned(new DialogReference(dialog))));
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindDialogRequested;
+    event.tab = handle;
+    event.browser = browser;
+    event.dialog = dialog;
+    LOG(WARNING) << "ARKT: facade dialog requested kind="
+                 << static_cast<int>(dialog.kind);
+    RecordFromNotification(event);
+    return true;
   }
 
   // The modifiers Blink derived a link's disposition from
@@ -580,6 +704,25 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     posted_ = true;
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&Facade::Deliver, base::Unretained(this)));
+  }
+
+  // Keeps the Objective-C dialog alive until its request ends.
+  struct DialogReference {
+    explicit DialogReference(ArktFacadeJavaScriptDialog* dialog)
+        : dialog(dialog) {}
+    ArktFacadeJavaScriptDialog* __strong dialog;
+  };
+
+  // The request is over, answered or ended by the engine: one DialogEnded.
+  void DialogEnded(DialogReference* reference) {
+    ArktFacadeJavaScriptDialog* dialog = reference->dialog;
+    [dialog markEnded];
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindDialogEnded;
+    event.tab = dialog.tab;
+    event.browser = dialog.tab.browser;
+    event.dialog = dialog;
+    RecordFromNotification(event);
   }
 
   // Records an event from inside a Chromium notification (a WebContents or
