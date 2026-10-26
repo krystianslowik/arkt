@@ -100,8 +100,8 @@ extension SettingsWindowController {
             [toggle(.general, "warnBeforeQuitting", on: false)], planned: true),
       ]),
       section("Links", [
-        row("Open a Peek for links to other sites", "From Favorites and pinned tabs only.", [crossSite]),
-        row("Shift-click a link to open it in a Peek", nil, [shift]),
+        row(PeekLinkCopy.crossSite, PeekLinkCopy.crossSiteNote, [crossSite]),
+        row(PeekLinkCopy.shiftClick, nil, [shift]),
         littleArktLookupRow(),                     // #354
       ]),
       section("Updates", [

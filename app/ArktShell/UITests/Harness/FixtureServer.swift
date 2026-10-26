@@ -6,6 +6,8 @@ import Synchronization
 /// network. It listens on `127.0.0.1` only, on an ephemeral port, and answers one request per connection
 /// (`Connection: close`):
 /// - `/p/<name>`: a page titled `Fixture <name>` with a link to `/p/<name>-next`;
+/// - `/x/<name>`: the same page, but its link goes to `localhost` instead of `127.0.0.1`, so it is a link to another
+///   site and the Peek rules apply (BH-144, #348);
 /// - `/favicon.ico`: 404, so the engine's favicon fetch stays on loopback and finds nothing;
 /// - any other path: a generic page titled after the path, so rewritten Arc fixture URLs always load.
 ///
@@ -30,6 +32,9 @@ final class FixtureServer: Sendable {
 
   /// The URL of the `/p/<name>` page.
   func page(_ name: String) -> String { "\(base)/p/\(name)" }
+
+  /// The URL of the `/x/<name>` page: the same page, whose link goes to another site.
+  func crossSitePage(_ name: String) -> String { "\(base)/x/\(name)" }
 
   /// The title of the `/p/<name>` page.
   static func title(ofPage name: String) -> String { titlePrefix + name }
@@ -100,12 +105,21 @@ final class FixtureServer: Sendable {
       let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
       let path = request.split(separator: " ", maxSplits: 2).dropFirst().first.map(String.init) ?? "/"
       log.paths.withLock { $0.append(path) }
-      let response = Self.response(for: path)
+      let response = response(for: path, crossSiteBase: crossSiteBase(of: request))
       var bytes = Data(("HTTP/1.1 \(response.status) \(response.status == 200 ? "OK" : "Not Found")\r\n"
         + "Content-Type: \(response.mime)\r\nContent-Length: \(response.body.count)\r\nConnection: close\r\n\r\n").utf8)
       bytes.append(response.body)
       connection.send(content: bytes, completion: .contentProcessed { _ in connection.cancel() })
     }
+  }
+
+  /// `localhost` on the port the request came to: another host, so a link to it is a link to another site (BH-144).
+  private static func crossSiteBase(of request: String) -> String {
+    let host = request.split(separator: "\r\n")
+      .first { $0.lowercased().hasPrefix("host:") }?
+      .split(separator: ":", maxSplits: 1).last?
+      .trimmingCharacters(in: .whitespaces) ?? ""
+    return "http://localhost:\(host.split(separator: ":").last ?? "80")"
   }
 
   private struct Response {
@@ -114,9 +128,13 @@ final class FixtureServer: Sendable {
     var body: Data
   }
 
-  private static func response(for path: String) -> Response {
+  private static func response(for path: String, crossSiteBase: String) -> Response {
     if path == "/favicon.ico" {
       return Response(status: 404, mime: "text/plain", body: Data("not found".utf8))
+    }
+    if path.hasPrefix("/x/"), path.count > 3 {
+      let name = String(path.dropFirst(3))
+      return Response(body: html(title: title(ofPage: name), link: "\(crossSiteBase)/p/\(name)-next"))
     }
     if path.hasPrefix("/p/"), path.count > 3 {
       let name = String(path.dropFirst(3))

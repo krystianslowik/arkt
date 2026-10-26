@@ -28,6 +28,8 @@ public final class PeekOverlayView: NSView {
   /// Called on layout with the overlay's bounds; answers the geometry for them (the controller knows the panes).
   var geometryProvider: (@MainActor (CGRect) -> PeekGeometry)?
   public private(set) var geometry: PeekGeometry?
+  /// The window's automatic key loop value before the Peek took the loop over; nil while it does not own it.
+  private var windowKeyLoopWasAutomatic: Bool?
   /// The last scene applied.
   public private(set) var scene = PeekScene.rest
   /// Where the card expands to (Open as Tab, Add to Split View), in overlay coordinates; nil when it does not.
@@ -112,6 +114,27 @@ public final class PeekOverlayView: NSView {
     card.beginExpand(from: geometry.card, to: target)
     CATransaction.commit()
     apply(scene)
+  }
+
+  // MARK: Keyboard loop (#348)
+
+  /// Tab and Shift-Tab move through the page, then the three controls, then back to the page; focus never leaves the
+  /// Peek while it is open (docs/design/peek.md, Keyboard). AppKit derives Shift-Tab from the same `nextKeyView`
+  /// chain, and the window's own loop is off for the duration so a relayout cannot rewire it.
+  func installKeyLoop(page: NSView) {
+    guard let window, windowKeyLoopWasAutomatic == nil else { return }
+    windowKeyLoopWasAutomatic = window.autorecalculatesKeyViewLoop
+    window.autorecalculatesKeyViewLoop = false
+    let loop: [NSView] = [page, closeButton, expandButton, splitButton]
+    for (view, next) in zip(loop, loop.dropFirst() + [loop[0]]) { view.nextKeyView = next }
+  }
+
+  /// Puts the window's own key loop back (the page may have moved into the content card or a pane by now).
+  func restoreKeyLoop() {
+    guard let window, let wasAutomatic = windowKeyLoopWasAutomatic else { return }
+    windowKeyLoopWasAutomatic = nil
+    window.autorecalculatesKeyViewLoop = wasAutomatic
+    if wasAutomatic { window.recalculateKeyViewLoop() }
   }
 
   // MARK: Frames
@@ -445,7 +468,11 @@ public final class PeekControlButton: NSButton {
     title = ""
     wantsLayer = true
     layer?.cornerRadius = PeekLayout.controlSize / 2
+    // The system focus ring, which AppKit draws only for keyboard focus; mustard is a fill only (hard rule).
+    focusRingType = .default
     self.toolTip = toolTip
+    setAccessibilityElement(true)
+    setAccessibilityRole(.button)
     setAccessibilityLabel(label)
     setAccessibilityHelp(help)
     setAccessibilityIdentifier(identifier)
@@ -456,6 +483,13 @@ public final class PeekControlButton: NSButton {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   public override var mouseDownCanMoveWindow: Bool { false }
+
+  /// The system focus ring follows the circle, not the glyph.
+  public override func drawFocusRingMask() {
+    NSBezierPath(ovalIn: bounds).fill()
+  }
+
+  public override var focusRingMaskBounds: NSRect { bounds }
 
   public override var isEnabled: Bool { didSet { refreshColors() } }
 
