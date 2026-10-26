@@ -1292,3 +1292,48 @@ machine) had 1 to 2 late frames (16.8 to 20.8 ms) in the second reveal; in the s
 Tests (after rebasing on main with #312 and #324): ShellKit unit 612 (599 + 13 new), ShellKitGUITests 538 (515 + 23 new:
 22 in `SidebarHideTests`, 1 in `MainMenuKeyEquivalentTests`); `WindowChromeTests.testResizeHandleClampsSidebarWidth` now
 drags to 100 pt (10 pt hides). ArktCore is not touched.
+
+## Favorites: add, remove, limit and unloading (#107) (2026-10-26)
+
+Spec section 2.3 (BH-046 to BH-053).
+
+- **BH-046 (limit).** `Sidebar.maximumFavorites = 12` per profile (CF-17). The add methods and `move` into a
+  Favorites section throw `SidebarError.favoritesFull(profile)`; snapshot `insert(_:in:at:)` is exempt, the same
+  rule as the split pane cap, so stored trees over the cap still load. The refusal crosses the adapter as
+  `SidebarMoveError.favoritesFull` and toasts "Favorites are full." [I].
+- **BH-047 (add and remove).** Three parts. (a) Menu: plain tab rows (Today, Pinned, inside folders) get
+  "Move To > Favorites"; split and pane rows keep their own menus, and the full menu set stays with #105. The move
+  goes through the new `SidebarSource.moveNode(_:to:at:)`, appended. (b) Drag on: a tab dragged onto the Favorites
+  band above the Space title becomes a Favorite; the band keeps a one-tile-row drop target at zero Favorites.
+  (c) Drag off: a Favorite dragged below the Space title (onto the Space page) is pinned in the current Space,
+  appended to Pinned [I] (the drop position inside Pinned is not modeled). Both zones live in
+  `FavoritesDropOverlayView`, shown only during a sidebar drag (the `SplitDropOverlayView` pattern); the zone math
+  is pure (`FavoritesDrop`). The command-bar actions ("Favorite Tab" / "Move To Favorites") are deferred: the
+  command bar has no actions infrastructure on main yet - it lands with #112 (PR #322), and wiring the two actions
+  then is a small follow-up.
+- **BH-048.** Already held: a Favorite keeps its pinned URL (activation opens the node's URL) and Favorites are
+  never auto-archived (`AutoArchivePolicy`, covered there). The Peek part (cross-site links open in Peek) is
+  deferred: Peek is design-only (#304) and needs an engine link-activation hook that does not exist.
+- **BH-049 (unloading).** Loading a Favorite past `FavoritesUnloadPolicy.maximumLoadedFavorites` closes the least
+  recently used one's page (same close as the tile's X), so the row stays and the page - and with it any playback
+  (BH-053) - is gone. Activations track recency per window; the current tab, visible panes and held closes never
+  unload. The threshold (4) is [I] PARITY(NEEDS-RUNTIME-CHECK): Arc's count is unpublished (BH-049 is
+  single-source).
+- **BH-050 / RT-15 (grid above 4).** Deferred: NEEDS-RUNTIME-CHECK. The exact layout above 4 Favorites is
+  unpublished; RT-15 measures it against the reference browser (add 1..12 Favorites, screenshot at each count and
+  two sidebar widths), a maintainer runtime step. The 3-column grid stays for all counts meanwhile.
+- **BH-051 (badges, music notes, Live Calendar).** Deferred: needs engine media state (`TabSnapshot` has no
+  audio/PiP fields; the same gap sits behind BH-076 in `AutoArchiveTimer`) and per-site unread-badge sources.
+- **BH-052 (custom icon).** Deferred: the Favorite tile context menu is #105's scope, and the icon picker plus its
+  storage are a product decision.
+- **BH-053.** Satisfied by the close path: closing a loaded Favorite destroys its engine page
+  (`FavoriteTileCloseTests`), so playback stops with it; there is no media/PiP state yet to test the media side
+  (deferred with BH-051).
+
+Tests: ArktCore 98 (89 + 9 new in `FavoritesLimitTests`); ShellKit unit 619 (604 + 15 new cases; 14 new test
+functions, one parameterized over both sources); ShellKitGUITests 554 executed, 5 skipped (540 + 14 new:
+`FavoritesMoveTests` 11, `FavoritesUnloadTests` 3). The full run's only failures were
+`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` (1 to 2 late frames) and
+`SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU`, both at load1 about 5 to 8 with
+another worktree's build running; isolated reruns passed (2 of 3 and 1 of 1) with every frame at 8.33 ms - the
+flake mode the #102 section records.
