@@ -10,6 +10,8 @@ final class ToastView: NSView {
   static let height: CGFloat = 36
   private static let horizontalPadding: CGFloat = 14
   private static let buttonSpacing: CGFloat = 12
+  /// The text field cell's inset on each side of its text.
+  private static let labelInset: CGFloat = 2
   /// Layer animation keys of the entrance and exit.
   static let transformKey = "toastTransform"
   static let fadeKey = "fade"
@@ -100,7 +102,10 @@ final class ToastView: NSView {
 
   /// Size for the current text, capped at `maxWidth`.
   func preferredSize(maxWidth: CGFloat) -> NSSize {
-    let labelWidth = ceil(label.intrinsicContentSize.width)
+    // The text's own width as well as the field's: in the Engine build the field's intrinsic width came out a few
+    // points short and the text truncated ("Peek clos...", #346).
+    let textWidth = ceil(label.attributedStringValue.size().width) + 2 * Self.labelInset
+    let labelWidth = max(ceil(label.intrinsicContentSize.width), textWidth)
     let buttonWidth = actionButton.isHidden ? 0 : ceil(actionButton.intrinsicContentSize.width) + Self.buttonSpacing
     let width = labelWidth + buttonWidth + 2 * Self.horizontalPadding
     return NSSize(width: min(width, min(maxWidth, Self.maxWidth)), height: Self.height)
