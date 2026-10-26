@@ -1601,3 +1601,56 @@ Split View on the row laid out under it. A pin dropped on a Today tab's half joi
 open; a drop keeps open the folders it lands in. A navigated pin dropped in another window's Today was checked to
 store its live URL. Follow-up: move `DropGapSprings` into `Motion` and give `SpringField` (#109) its envelope
 settling, so one spring type serves both.
+
+## Reopen closed tabs and Peeks, the Peek closed toast (#346, reopen part of #110) (2026-10-26)
+
+One reopen stack per window for closed tabs and closed Peeks (BH-074, BH-150, KB-010, KB-011, KB-079). Cmd-Shift-T
+(File > Reopen Closed Tab, reserved before the page) and Cmd-Z take the most recent close back; repeating walks back
+further.
+
+- **History.** Decided on #346: just before a page closes, the window parks an engine duplicate of it
+  (`EngineClient.duplicateTab`, back and forward entries included) that is never shown, and the page closes as
+  before. Chromium loads a cloned tab only when it is first shown, so a parked copy runs no page and plays no audio;
+  keeping the closed tab alive would keep its audio playing. Reopen maps the copy to the row again or puts it back in
+  the Peek. No Chromium change: no new patch, `.patches` unchanged. The stack keeps 20 closes [I]; the oldest one's
+  copy closes when it falls off, and older closes stay in the Archive. A copy that closes on its own (its window
+  closed) leaves its item to reopen without history.
+- **What goes on the stack.** User closes only: Cmd-W, the row's X, Archive Below, Clear Today and a multi-selection
+  Cmd-W (each row its own item). A Today row comes back from the archive record (`ArchiveCoordinator.restoreRecent`,
+  the latest 50 archive entries [I], without a store read) at the place it had; a pinned tab or Favorite gets its page
+  back. A close cancelled at a leave-site prompt never happened and leaves nothing. Auto-archive, a page closing
+  itself and Delete Space do not go on the stack. Clear Archive forgets the archive entries, so a cleared tab does not
+  come back.
+- **Peek.** Every close (the Close control, the scrim, Esc, Cmd-W, a fling) shows "Peek closed" with "Reopen" and
+  its key (`ToastView`, 16 above the card bottom, 4 s), 140 ms into the close, a polite live region that says "Peek
+  closed. Press Command-Z to reopen." A Peek closed by a tab or Space switch (#349) or by a new Peek is on the stack
+  too, without a toast, and comes back over its source, which is shown first. Closing the source tab closes its Peek,
+  and one item brings both back. A reopen while the close still runs turns the card around where it is. The motion
+  table's Reopen row: from scale 0.96 and opacity 0 at its frame, `firm`; controls after 60 ms, grabber after 90 ms;
+  Reduce Motion fades in over 0.20 s. A later close of a reopened Peek still goes back towards the original link.
+- **Cmd-Z.** Edit > Undo targets `ReopenUndoRouter`: it reopens when the key browser window has something to reopen
+  and no text is being edited there (a text view, or a page view whose focused field has a text input type, a password field
+  included; any other view with an input context); otherwise it sends `undo:` down the responder chain as before. A page keeps
+  Cmd-Z first: the engine gives the main menu only the key equivalents the page did not handle, so a web app's own
+  undo keeps working.
+- **Toast motion** (alerts design, section 7): in, 12 pt up and from 0.96 on `springyFast` with a 0.16 s ease-out
+  fade; out, 6 pt down to 0.98 in 0.15 s; Reduce Motion keeps the 0.15 s fades. Layer transform and opacity only;
+  an exit started during the entrance leaves from where the pill is.
+- **Toast width.** In the Engine build the text field's intrinsic width came out a few points short and toasts
+  truncated ("Pinned Tab to Spac...", "Peek clos..."); `ToastView` now sizes the pill by the text's own width too.
+
+Not on the stack yet (rest of #110): the bottom bar menu (BH-033), media-playing tabs exempt from Clear (BH-076, needs
+the engine's audio state), Clear unselected Today tabs (BH-078) and the Cmd-Shift-K key (KB-019). The rest of the
+toast system (#308: glyph, hairline, shadow, timers that pause) is unchanged.
+
+Tests (rebased on main with #374): ArktCore not touched. ShellKit unit 1019 (998 + 21). ShellKitGUITests 857 run
+(839 + 18), 5 skipped; 4 failed assertions in the two load-dependent frame-time gates
+(`PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`,
+`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) at load 12 to 18 on 10 cores while another
+worktree's GUI tests ran; both pass on rerun at load 6, with the Peek and reopen suites (45 tests, 0 failures).
+Debug and Engine app builds succeed. Real-app check on the Engine build (out/Spike, throwaway profile and data
+folder, synthetic pages on a local server): Cmd-W archived a tab whose history was A then B, the parked copy made no
+request; Cmd-Shift-T put the row back with the page on B, `history.length` 2, and Back (Cmd-[) went to A. A Peek
+navigated from one page to a second closed with Esc and showed "Peek closed / Reopen ⌘Z"; Cmd-Z brought it back on
+the second page with `history.length` 2. A Peek closed with its Close control came back with Cmd-Shift-T; its page
+was requested only when it was shown again. UI tests (XCUITest) not run here.

@@ -434,7 +434,8 @@ final class SplitWindowTests: XCTestCase {
     XCTAssertTrue(harness.split.isHidden)
     XCTAssertNil(harness.controller.rootView.card.contentView)
     XCTAssertEqual(harness.controller.visibleNodes, [])
-    XCTAssertTrue(harness.engine.tabIDs.isEmpty, "both pane pages are closed")
+    XCTAssertTrue(harness.engine.tabIDs.allSatisfy(harness.controller.reopenStack.isParked),
+                  "both pane pages are closed; only their parked copies are left (#346)")
 
     harness.controller.activate(node: world.split)
     XCTAssertNotNil(harness.tab(world.panes[0]), "with every pane closed, the split opens afresh")

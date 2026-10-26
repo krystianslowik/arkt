@@ -89,6 +89,8 @@ public enum PeekTransition: Equatable, Sendable {
   case snapBack(velocity: Double)
   /// Reduce Motion's second half of Open as Tab and Add to Split View: the card fades in at its new frame.
   case fadeIn
+  /// A closed Peek comes back (BH-150, #346): from `PeekMotion.reopenStart`, in place, without the travel.
+  case reopen
 }
 
 /// The Peek's motion table (docs/design/peek.md, Motion), as data.
@@ -122,6 +124,12 @@ public enum PeekMotion {
       scene[.cardScale] = 0.90
     }
     return scene
+  }
+
+  /// Where a reopen starts: at the card's frame, scale 0.96, transparent; nothing around it yet. Reduce Motion: at
+  /// full size, transparent.
+  public static func reopenStart(reduceMotion: Bool) -> PeekScene {
+    PeekScene([.scrim: 0, .recede: 1, .controls: 0, .grabber: 0, .cardOpacity: 0, .cardScale: reduceMotion ? 1 : 0.96])
   }
 
   public static func targets(for transition: PeekTransition, reduceMotion: Bool) -> [PeekTarget] {
@@ -158,6 +166,13 @@ public enum PeekMotion {
         PeekTarget(.scrim, 0, firmSlow), PeekTarget(.recede, 1, firmSlow),
         PeekTarget(.controls, 0, springyFast), PeekTarget(.grabber, 0, springyFast),
       ]
+    case .reopen:
+      let firm = SpringPreset.firm.parameters
+      return [
+        PeekTarget(.cardScale, 1, firm), PeekTarget(.cardOpacity, 1, critical(0.16)), PeekTarget(.scrim, 1, firm),
+        PeekTarget(.recede, recededScale, firm),
+        PeekTarget(.controls, 1, springyFast, delay: 0.06), PeekTarget(.grabber, 1, springyFast, delay: 0.09),
+      ]
     case .fling(let velocity):
       let firm = SpringPreset.firm.parameters
       return [
@@ -188,7 +203,7 @@ public enum PeekMotion {
     let fadeIn = critical(0.20)
     let fadeOut = critical(0.12)
     switch transition {
-    case .open, .fadeIn:
+    case .open, .fadeIn, .reopen:
       return [
         PeekTarget(.cardOpacity, 1, fadeIn), PeekTarget(.scrim, 1, fadeIn), PeekTarget(.controls, 1, fadeIn),
         PeekTarget(.grabber, 1, fadeIn),

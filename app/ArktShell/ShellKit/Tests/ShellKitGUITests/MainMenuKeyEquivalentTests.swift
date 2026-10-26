@@ -13,6 +13,7 @@ final class AppCommands: NSObject {
   @objc func showArchive(_ sender: Any?) {}
   @objc func clearArchive(_ sender: Any?) {}
   @objc func showWelcome(_ sender: Any?) {}
+  let undoRouter = ReopenUndoRouter()
 }
 
 /// `CommandBarPanel.sendEvent` takes Cmd-Return and Opt-Return before anything else in the panel (KB-085). That
@@ -228,6 +229,15 @@ final class MainMenuInventoryTests: XCTestCase {
     }
   }
 
+  /// Edit > Undo (Cmd-Z, KB-011) goes to the reopen router, which passes `undo:` on unless it reopens (#346).
+  func testUndoTargetsTheReopenRouter() throws {
+    let undo = try item("Undo")
+    XCTAssertTrue(undo.target === commands.undoRouter)
+    XCTAssertEqual(undo.action, #selector(ReopenUndoRouter.undo(_:)))
+    XCTAssertEqual(undo.keyEquivalent, "z")
+    XCTAssertEqual(undo.keyEquivalentModifierMask, .command)
+  }
+
   /// AppController answers these at the end of the responder chain with Chromium's behaviour.
   func testNoNilTargetItemReachesChromiumsAppController() {
     let chromiumOnly: Set<String> = ["showPreferences:", "orderFrontStandardAboutPanel:", "toggleConfirmToQuit:",
@@ -291,6 +301,7 @@ final class MainMenuInventoryTests: XCTestCase {
       ("New Window", #selector(AppCommands.newWindow(_:)), "n", .command),
       ("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l", .command),
       ("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w", .command),
+      ("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift]),   // KB-010
       ("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
       ("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
       ("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m", .command),
@@ -319,6 +330,7 @@ final class MainMenuInventoryTests: XCTestCase {
       (kVK_RightArrow, [.maskCommand, .maskAlternate], "Next Space"),
       (kVK_LeftArrow, [.maskCommand, .maskAlternate], "Previous Space"),
       (kVK_ANSI_D, .maskCommand, "Pin Tab"),                                    // KB-012 (#108)
+      (kVK_ANSI_T, [.maskCommand, .maskShift], "Reopen Closed Tab"),            // KB-010 (#346)
     ]
     let source = CGEventSource(stateID: .privateState)
     for (keyCode, flags, title) in cases {

@@ -115,7 +115,8 @@ final class CloseTabTests: XCTestCase {
     XCTAssertEqual(harness.controller.visibleNodes, [])
     XCTAssertEqual(harness.controller.currentSpace, world.space)
     XCTAssertEqual(harness.controller.window?.isVisible, true)
-    XCTAssertTrue(harness.engine.tabIDs.isEmpty)
+    XCTAssertEqual(harness.engine.tabIDs, harness.controller.reopenStack.parkedTabs,
+                   "only the closed page's parked copy is left (#346)")
     harness.controller.close()
   }
 
@@ -192,7 +193,8 @@ final class CloseTabTests: XCTestCase {
     harness.controller.closeTab(nil)
 
     XCTAssertEqual(harness.archived, [])
-    XCTAssertEqual(harness.engine.tabIDs, [left])
+    XCTAssertEqual(harness.engine.tabIDs.filter { !harness.controller.reopenStack.isParked($0) }, [left],
+                   "besides the closed page's parked copy (#346)")
     XCTAssertFalse(harness.engine.tabIDs.contains(right))
     XCTAssertEqual(harness.source.children(of: .split(split)), panes)
     harness.controller.close()

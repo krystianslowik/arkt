@@ -58,7 +58,7 @@ enum MainMenu {
     let help = NSMenu(title: "Help")
     main.addItem(submenu(title: "Arkt Shell", items: appItems(commands: commands, services: services)))
     main.addItem(submenu(title: "File", items: fileItems(commands: commands)))
-    main.addItem(submenu(title: "Edit", items: editItems()))
+    main.addItem(submenu(title: "Edit", items: editItems(commands: commands)))
     main.addItem(submenu(title: "View", items: viewItems()))
     main.addItem(submenu(title: "History", items: historyItems()))
     main.addItem(submenu(title: "Spaces", items: spaceItems()))
@@ -103,6 +103,8 @@ enum MainMenu {
       item("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l"),    // KB-002
       .separator(),
       item("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w"),             // KB-008
+      // KB-010, BH-074 (#346): also reopens a closed Peek. PARITY(NEEDS-RUNTIME-CHECK): Arc's title and place.
+      item("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift]),
       item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]), // KB-009
       .separator(),
       item("Pin Tab", #selector(ShellWindowController.pinTab(_:)), "d"),                   // KB-012, BH-055
@@ -116,7 +118,9 @@ enum MainMenu {
     ]
   }
 
-  private static func editItems() -> [NSMenuItem] {
+  /// Undo targets the router (KB-011): it reopens a closed tab or Peek when no text is being edited, and otherwise
+  /// sends `undo:` down the responder chain as a nil-target item would.
+  private static func editItems(commands: AppCommands) -> [NSMenuItem] {
     let find = submenu(title: "Find", items: [
       page("Find...", .find, "f"),                                                         // KB-058
       page("Find Next", .findNext, "g"),                                                   // KB-059
@@ -125,7 +129,7 @@ enum MainMenu {
       item("Jump to Selection", #selector(NSResponder.centerSelectionInVisibleArea(_:)), "j"),   // KB-058
     ])
     return [
-      item("Undo", Selector(("undo:")), "z"),
+      item("Undo", #selector(ReopenUndoRouter.undo(_:)), "z", target: commands.undoRouter),
       item("Redo", Selector(("redo:")), "Z"),
       .separator(),
       item("Cut", #selector(NSText.cut(_:)), "x"),

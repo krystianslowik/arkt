@@ -146,6 +146,13 @@ final class AppSession {
   private func wire(_ window: ShellWindowController) {
     window.onImportFromArc = { [weak self] in self?.importFromArc() }
     window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
+    window.onReopenArchived = { [weak self, weak window] id in                                // Cmd-Shift-T, BH-074
+      guard let self, let restored = try? self.archive.restoreRecent(id, fallbackSpace: window?.currentSpace) else {
+        return nil
+      }
+      self.loadFavicons(of: restored.nodeID)
+      return restored.nodeID
+    }
     window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
     window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
     window.onFaviconChanged = { [weak self] id, data in self?.faviconWriter?.record(data, for: id) }
@@ -301,7 +308,12 @@ final class AppSession {
       window.showWindow(nil)
       window.activate(node: restored.nodeID)
     }
-    guard let writer = faviconWriter, let snapshot = source.sidebar.snapshot(of: restored.nodeID) else { return }
+    loadFavicons(of: restored.nodeID)
+  }
+
+  /// A restored item's favicons come back from the favicon folder (the sidebar dropped them when the item left).
+  private func loadFavicons(of node: NodeID) {
+    guard let writer = faviconWriter, let snapshot = source.sidebar.snapshot(of: node) else { return }
     let load = writer.loadStored(Set(FaviconRetention.ids(in: snapshot)))
     Task { [weak self] in
       let loaded = await load.value

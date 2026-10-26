@@ -157,4 +157,49 @@ struct PeekMotionTests {
     let back = PeekMotion.targets(for: .fadeIn, reduceMotion: true)
     #expect(back.first { $0.channel == .cardOpacity }?.value == 1)
   }
+
+  // MARK: Reopen (BH-150, #346)
+
+  /// A reopened Peek opens at the same place, without the travel from the link: scale 0.96 and transparent at its
+  /// frame, nothing around it yet.
+  @Test func reopenStartsInPlaceSlightlySmallAndTransparent() {
+    let start = PeekMotion.reopenStart(reduceMotion: false)
+    #expect(start[.cardX] == 0 && start[.cardY] == 0)
+    #expect(start[.cardScale] == 0.96 && start[.cardOpacity] == 0)
+    #expect(start[.scrim] == 0 && start[.recede] == 1 && start[.controls] == 0 && start[.grabber] == 0)
+    let reduced = PeekMotion.reopenStart(reduceMotion: true)
+    #expect(reduced[.cardScale] == 1 && reduced[.cardOpacity] == 0)
+  }
+
+  /// The motion table's Reopen row: `firm` for the card and around it; the controls after 60 ms, the grabber after
+  /// 90 ms (the prototype's values).
+  @Test func reopenUsesFirmAndSettlesAtRest() {
+    let targets = PeekMotion.targets(for: .reopen, reduceMotion: false)
+    func target(_ c: PeekChannel) -> PeekTarget? { targets.first { $0.channel == c } }
+    #expect(target(.cardScale)?.parameters == SpringPreset.firm.parameters)
+    #expect(target(.scrim)?.parameters == SpringPreset.firm.parameters)
+    #expect(target(.recede)?.value == PeekMotion.recededScale)
+    #expect(target(.controls)?.delay == 0.06)
+    #expect(target(.grabber)?.delay == 0.09)
+    #expect(target(.cardX) == nil && target(.cardY) == nil, "no travel")
+    var set = PeekSpringSet(scene: PeekMotion.reopenStart(reduceMotion: false))
+    set.apply(targets, at: 0)
+    #expect(settled(set) == .rest)
+  }
+
+  /// The keyframe `peek-kf-reopen-60ms`: on its way, still below full scale, more than half visible.
+  @Test func reopenAtSixtyMillisecondsIsOnItsWay() {
+    var set = PeekSpringSet(scene: PeekMotion.reopenStart(reduceMotion: false))
+    set.apply(PeekMotion.targets(for: .reopen, reduceMotion: false), at: 0)
+    let frame = set.scene(at: 0.06)
+    #expect(frame[.cardScale] > 0.96 && frame[.cardScale] < 1)
+    #expect(frame[.cardOpacity] > 0.3 && frame[.cardOpacity] < 1)
+    #expect(frame[.controls] == 0)
+  }
+
+  @Test func reduceMotionReopensWithAFadeOnly() {
+    let targets = PeekMotion.targets(for: .reopen, reduceMotion: true)
+    #expect(Set(targets.map(\.channel)).isDisjoint(with: [.cardX, .cardY, .cardScale, .recede]))
+    #expect(targets.first { $0.channel == .cardOpacity }?.parameters == SpringParameters(dampingRatio: 1, response: 0.20))
+  }
 }

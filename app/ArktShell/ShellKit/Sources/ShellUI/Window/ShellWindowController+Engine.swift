@@ -218,6 +218,7 @@ extension ShellWindowController {
     isWindowCloseRequested = false
     stampsShownTabsOnWindowClose = false                  // the tabs stayed visible: nothing to stamp
     sidebarController.setClosing(node, false)
+    forgetClose(of: node)                                           // nothing to reopen (#346)
     for (target, pending) in pendingArchives where pending.tabs.contains(tab) {
       pendingArchives[target] = nil
       for other in pending.tabs { if let node = nodeByTab[other] { sidebarController.setClosing(node, false) } }

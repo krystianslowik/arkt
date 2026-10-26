@@ -104,6 +104,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
   /// does nothing.
   public var onArchive: (@MainActor ([NodeID]) -> Void)?
+  /// Puts a Today row the user closed back from the Archive (the app's ArchiveCoordinator) and returns its node, for
+  /// Reopen Closed Tab (#110, BH-074). Nil, or nil returned: the row stays in the Archive.
+  public var onReopenArchived: (@MainActor (NodeID) -> NodeID?)?
+  /// Closed tabs and Peeks, most recent on top (#346, #110); see `ShellWindowController+Reopen.swift`.
+  var reopenStack = ReopenStack()
+  /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
+  var parkedTabs: Set<TabID> = []
   /// Removes a Space (the app's ArchiveCoordinator: its pinned and Today items are archived, decision on #86); Delete
   /// Space calls it once `confirmSpaceRemoval` said yes. Nil: Delete Space is disabled.
   public var onRemoveSpace: (@MainActor (SpaceID) -> Void)?
@@ -463,6 +470,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     switch sidebar.section(containing: node) {
     case .today?:
       guard pendingArchives[node] == nil else { return }
+      rememberClose(of: node, pages: tabs, archived: true)               // BH-074: Cmd-Shift-T brings it back
       let holdsCurrent = currentNode.map(tabs.contains) ?? false
       guard !open.isEmpty else {
         archive(node, heldCurrent: holdsCurrent)
@@ -473,6 +481,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
                                              space: sidebar.spaceID(containing: node))
       for tab in open { engine.closeTab(tab, mode: .honourUnloadHandlers) }
     case .pinned?, .favorites?:
+      if !open.isEmpty { rememberClose(of: node, pages: tabs, archived: false) }
       for tab in open {
         engine.closeTab(tab, mode: .honourUnloadHandlers)   // `.tabClosed` clears the card and the row state
       }
@@ -621,6 +630,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Events of this window's tabs (`observe(window:)`).
   func handle(_ event: EngineEvent) {
     guard let node = nodeByTab[event.tabID] else {
+      if handleParkedTabEvent(event) { return }                     // a closed page's copy (#346)
       if case .tabCreated(let tab) = event { engineDidCreateTab(tab) }
       if case .activeTabChanged(let tab) = event {      // a tab without a row took it
         guard let engineWindow, engine.latestActiveTab(in: engineWindow) == tab else { return }
@@ -767,6 +777,7 @@ extension ShellWindowController: NSMenuItemValidation {
     if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
     if let enabled = validatePinnedMenuItem(menuItem) { return enabled }
+    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed }
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
     }
