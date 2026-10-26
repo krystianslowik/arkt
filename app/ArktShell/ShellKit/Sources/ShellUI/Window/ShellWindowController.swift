@@ -144,6 +144,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public private(set) lazy var peek = PeekController(shell: self)
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
+  /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
+  var pasteboard: NSPasteboard = .general
   /// Where the sidebar width and hidden state are saved on change (#331).
   let sidebarStateStore: SidebarWindowStateStore
   /// False for a window that is not the one a relaunch restores: its changes must not overwrite the saved state.
@@ -803,6 +805,7 @@ extension ShellWindowController: NSMenuItemValidation {
   /// Space (#206). Every other item stays enabled, as it was before this controller validated menu items.
   public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     if onboarding != nil { return false }               // the first run covers the browser
+    if let enabled = validateCopyLinkMenuItem(menuItem) { return enabled }
     if let enabled = validateSplitMenuItem(menuItem) { return enabled }
     if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }

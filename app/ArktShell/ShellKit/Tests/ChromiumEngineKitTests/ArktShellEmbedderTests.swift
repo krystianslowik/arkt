@@ -18,7 +18,8 @@ final class RecordingDelegate: ChromiumEmbedderDelegate {
   func start(engine: ChromiumEngine) async throws {
     started = engine
     log.append("start")
-    try await Task.sleep(for: .milliseconds(20))
+    // A suspension, not a sleep: the test only needs `start` to be in flight before it sees the result.
+    await Task.yield()
     if failStart { throw Failure() }
   }
 
@@ -37,7 +38,7 @@ final class RecordingDelegate: ChromiumEmbedderDelegate {
   func engineDidCancelTerminating() { log.append("didCancel") }
 
   func engineWillTerminate() async {
-    try? await Task.sleep(for: .milliseconds(20))
+    await Task.yield()
     log.append("flushed")
   }
 }
@@ -61,13 +62,13 @@ struct ArktShellEmbedderTests {
     ArktShellEmbedder.shared.engineDidStart(facade)
     let engine = try #require(ChromiumEmbedding.engine)
     #expect(!facade.ready, "embedderReady waits for the shell's start")
-    try await EngineContract.waitUntil(timeout: .seconds(5)) { facade.ready }
+    try await ScriptedWait.until("the embedder's start to finish") { facade.ready }
     #expect(delegate.started === engine && delegate.log == ["start"])
 
     facade.hostProvider = { ArktShellEmbedder.shared.host(for: $0) }
     facade.openEngineWindow(ScriptedRequest(kind: .startupURL, initialURL: URL(string: "arkt-test://page.test/S")))
     #expect(delegate.log.last == "host startupURL")
-    try await EngineContract.waitUntil(timeout: .seconds(5)) { engine.windowIDs.count == 1 }
+    try await ScriptedWait.until("the requested window to be listed") { engine.windowIDs.count == 1 }
     #expect(engine.host(of: engine.windowIDs[0]) === delegate.hosts.first)
 
     let other = try #require(ChromiumEmbedding.makeEngine())
@@ -80,9 +81,9 @@ struct ArktShellEmbedderTests {
     ChromiumEmbedding.install(delegate)
     let facade = ScriptedFacade()
     ArktShellEmbedder.shared.engineDidStart(facade)
-    try await EngineContract.waitUntil(timeout: .seconds(5)) { facade.failed }
+    try await ScriptedWait.until("the embedder to report the failed start") { facade.failed }
     #expect(!facade.ready)
-    try await EngineContract.waitUntil(timeout: .seconds(5)) { delegate.log.count == 2 }
+    try await ScriptedWait.until("the run-loop startFailed callout") { delegate.log.count == 2 }
     #expect(delegate.log.last?.hasPrefix("startFailed") == true)
   }
 
@@ -95,7 +96,7 @@ struct ArktShellEmbedderTests {
     var completed = false
     embedder.engineWillTerminate { completed = true }
     #expect(!completed)
-    try await EngineContract.waitUntil(timeout: .seconds(5)) { completed }
+    try await ScriptedWait.until("the termination completion") { completed }
     #expect(delegate.log == ["willBegin", "didCancel", "flushed"])
   }
 }
