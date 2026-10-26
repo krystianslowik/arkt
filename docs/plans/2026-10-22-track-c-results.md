@@ -1640,7 +1640,8 @@ Tiles are 100 pt (200 px masters; 1x is the master box-downsampled), anchored at
   100 pt tile per texture into a `CAMetalLayer`, once per texture and backing scale; two nested `CAReplicatorLayer`s
   repeat it across the view. The pager, crossfades and resizes change only opacities and replica counts: no display
   link, no draw per frame or per resize, no draw while the window is occluded or miniaturized or the view is hidden
-  (deferred to the next occlusion change, unhide or layout).
+  (deferred to the next occlusion change, unhide or layout). Tiles are synthesized in a `@concurrent` task, never
+  on the main thread; the first draw lands when the upload is done.
 - Fallback tier (no Metal): a Core Animation pattern of the same synthesized tile.
 - `GPUFrameTimes` (ShellUI/Metal) is the particle renderer's GPU time recorder, extracted so both renderers share it.
 
@@ -1653,7 +1654,7 @@ Numbers (`ThemeGrainRendererTests`, 2x, M2 Pro, load 6 to 20 on 10 cores):
 | Main thread per resize layout, 2 textures in use | p50 0.04 ms, p95 0.07 ms, max 0.08 ms |
 | GPU per tile draw | at most 0.02 ms |
 | Footprint of two textures in use | +2.0 MB |
-| Space swipe pacing (#24 gate), load1 6.0 | swipe, key and flavor swipe: 0 frames over 8.6 ms, max 8.33 ms, asserted=yes |
+| Space swipe pacing (#24 gate), run alone, load1 5.6 to 6.3, 4 runs | swipe, key and flavor swipe: 0 frames over 8.6 ms, max 8.33 ms, asserted=yes |
 
 A first version drew a window-sized drawable per texture; it cost 18 MB per drawable and a redraw per resize step
 (6.6 ms main thread for two textures), which is why the tiles are replicated instead.
@@ -1689,11 +1690,13 @@ factor. `secondaryText` light fell to 4.49:1 (hovered URL bar over the Personal 
 interpolation stay out: both change every theme's pixels and the contrast sampling, so they get their own issue.
 Reduce Transparency and Increase Contrast: the spec says nothing about the theme texture, so no behavior was added.
 
-Tests (written first; the new ones failed to compile before the code existed): ShellKit unit 972 Swift Testing tests
-(958 + 14: `ThemeTextureTests`, parameterized over the four textures), all pass. ShellKitGUITests 813 run (806 + 7:
-`ThemeGrainRendererTests`), 5 skipped; in that full run two load-sensitive frame-time gates failed at load1 7.4 on 10
-cores (`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`, two late frames in the keyboard and flavor
-switches; `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`); both passed 3 of 3 when rerun alone
-at load1 5.6 to 6.3, the pager gate with 0 frames over 8.6 ms in all three passes. ArktCore untouched: 405, all pass.
-The GUI test windows were covered by other windows on the test desktop, so their texture tiles were deferred
-(occluded); the pager and resize do not draw either way.
+Tests (written first; the new ones failed to compile before the code existed), rebased on main with #374: ShellKit
+unit 1012 Swift Testing tests (998 + 14: `ThemeTextureTests`, parameterized over the four textures), all pass.
+ShellKitGUITests 852 run (844 + 8: `ThemeGrainRendererTests`), 5 skipped, all new tests pass. In the full GUI run
+two frame-time gates fail at load1 5 to 7 on 10 cores: `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`
+(late frames 9 and 10 of the keyboard and flavor switches, about 21 ms) and
+`PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`. main (ccc4d43) fails the same two gates the same
+way in a full run at load1 5.8 (844 run, frames 9 and 10 at 20.8 and 21.7 ms), so it is not this change; both pass
+alone on this branch (4 of 4 for the pager gate). ArktCore untouched: 405, all pass. Debug app build succeeds.
+The GUI test windows were covered by other windows on the test desktop, so their tiles were deferred (occluded);
+the pager and resizes do not draw either way.
