@@ -309,7 +309,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     }
     flight.onRoom = { [weak destination] room, row in destination?.presentArrival(of: node, room: room, appear: row) }
     flight.onLand = { [weak self, weak destination] in
-      self?.landFlight(tab, node: node, space: space, destination: destination, spaceName: spaceName)
+      self?.landFlight(tab, node: node, destination: destination, spaceName: spaceName)
     }
     flight.onFinish = { [weak self] in self?.flightFinished() }
     self.flight = flight
@@ -336,17 +336,17 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   /// At rest: the page moves once, into the main card at its final size; the snapshot stays over it until its
   /// first frame there.
-  private func landFlight(_ tab: TabID, node: NodeID, space: SpaceID?,
+  private func landFlight(_ tab: TabID, node: NodeID,
                           destination: (any LittleArktFlightDestination)?, spaceName: String?) {
     guard phase == .flying else { return }
     snapshotTask?.cancel()
     snapshotTask = nil
     card.releaseContent()                                   // the main window's card takes the page's view
-    if destination?.finishReceiving(tab, node: node) == true || onOpenIn(tab, space) {
+    if destination?.finishReceiving(tab, node: node) == true {
       handedOff(spaceName: spaceName)
       return
     }
-    // The main window went away mid-flight and none could take the page: it stays here.
+    // The main window went away mid-flight: the page stays here (another window would add a second row for it).
     phase = .open
     window.ignoresMouseEvents = false
     if let view = engine.contentView(for: tab) { card.setContent(view) }

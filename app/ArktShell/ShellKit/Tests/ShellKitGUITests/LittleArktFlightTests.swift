@@ -257,6 +257,38 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertEqual(scene.main.sidebarController.current, arrived, "selected once the page is there")
   }
 
+  /// The chooser (Cmd-Opt-O) names another Space, empty or not: that Space shows at the start, and the page still
+  /// moves only at rest.
+  func testOpenInAnotherSpaceMovesThePageOnlyAtRest() throws {
+    for filled in [false, true] {
+      let scene = try makeScene(todayTabs: 1)
+      let first = try XCTUnwrap(scene.main.currentSpace)
+      let other = try XCTUnwrap(scene.main.createSpace())
+      if filled {
+        _ = try scene.main.sidebar.addTab(url: try XCTUnwrap(URL(string: "arkt-test://page/Other")), title: "Other",
+                                          in: .today(other), at: nil)
+      }
+      XCTAssertEqual(scene.main.currentSpace, first)
+      let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+      scene.little.openIn(space: other)
+      let flight = try XCTUnwrap(scene.little.flight)
+      var t = 0.0
+      flight.tick(at: t)
+      XCTAssertEqual(scene.main.currentSpace, other, "the chosen Space shows at the start (filled \(filled))")
+      while flight.stage == .flying, t < 5 {
+        XCTAssertTrue(page.isDescendant(of: scene.little.card), "the page stays put at \(t) (filled \(filled))")
+        XCTAssertEqual(scene.engine.snapshot(of: scene.tab)?.window, scene.littleWindow, "no move at \(t)")
+        t += Self.frame
+        flight.tick(at: t)
+      }
+      XCTAssertEqual(flight.stage, .landed)
+      XCTAssertTrue(page.isDescendant(of: scene.main.rootView.card))
+      XCTAssertEqual(scene.main.sidebar.children(of: .today(other)).first.flatMap { scene.main.tabsByNode[$0] },
+                     scene.tab, "the first Today tab of the chosen Space")
+      XCTAssertEqual(scene.main.currentTab, scene.tab)
+    }
+  }
+
   // MARK: No flight
 
   /// A minimized, other-desktop or full-screen main window, or Reduce Motion: today's path. The small window fades
