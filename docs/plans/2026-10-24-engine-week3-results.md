@@ -2819,7 +2819,7 @@ hand with a trackpad. Reduce Motion was not toggled on the shared machine; cover
 - ShellKit `swift test --skip ShellKitGUITests`: 823 passed (798 + 25). `swift test --filter ShellKitGUITests`:
   659 run (645 + 14), 5 skipped (not applicable to FakeEngine). The frame-time gates `PeekMotionOnScreenTests` and
   `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` failed in the full run beside two app builds and
-  intermittently alone at load 6 on 10 cores (other agents' builds); both passed in a run alone. Neither touches
+  intermittently alone at load 6 on 10 cores (other builds); both passed in a run alone. Neither touches
   Little Arkt. ArktCore is not touched.
 - Red first: the engine seams, the pure models and the window tests were written first and run failing (compile
   errors, then the close race and the test timing). The checks for the chevron title, the http lock and the chooser
