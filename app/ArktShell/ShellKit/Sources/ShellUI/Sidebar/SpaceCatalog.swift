@@ -22,7 +22,7 @@ enum SpaceIconCatalog {
 
 /// Themes offered on the Space header (BH-034). "Default" clears the Space's own theme, so it draws the source's
 /// default (D2 on #279). The others have no texture and sRGB colors: storing one and reading it back compares equal,
-/// because the bridge does not keep `noiseFactor` and reads components as sRGB.
+/// because the bridge stores `noiseFactor` and `opacity` as they are and reads components back as sRGB.
 public enum SpaceThemeCatalog {
   struct Choice: Equatable, Sendable {
     var title: String
