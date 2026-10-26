@@ -3309,7 +3309,7 @@ the first of three slices (JavaScript dialogs, then permission prompts, then inf
 | Long `alert()` (40 lines) | PASS | the body is capped and scrolls; OK stays visible |
 | One panel, no Chromium dialog | PASS | window list of the browser pid while a dialog was up: the main window plus exactly one 420 pt panel; none after the answer |
 | Stderr | PASS | `facade dialog requested kind=0,1,1,2,2,0,1` for the seven dialogs raised, one `DialogEnded` batch per answer |
-| Confirm, then switch tab | NOT CHECKED | the synthetic clicks and the Previous Tab shortcut did not switch tabs in this run (nothing to do with the dialog: the sidebar row clicks never took effect), so the engine's end of a hidden confirm (`kTabHidden`) was not seen on real Chromium; it is covered by the scripted facade only |
+| Confirm, then switch tab | NOT CHECKED | the synthetic clicks on the sidebar and the Previous Tab shortcut did not switch tabs while the dialog was up; whether they work with no dialog was not tried in this run, so the engine's end of a hidden confirm (`kTabHidden`) was not seen on real Chromium; it is covered by the scripted facade only |
 
 ### Verification
 
@@ -3338,8 +3338,9 @@ the first of three slices (JavaScript dialogs, then permission prompts, then inf
   rule 19 is reported as not applicable there; real Chromium is covered by the checks above.
 - `ArktJavaScriptDialog::GetUserInput` returns the default text; it is read only when the engine itself accepts the
   dialog without an override (the test API passes one).
-- Window-level shortcuts and the sidebar did not react to synthetic input while a dialog panel was up in this run
-  (see the unchecked row); not investigated.
+- The sidebar and the tab shortcut did not react to synthetic input while a dialog panel was up in this run (see the
+  unchecked row). Whether the panel or the synthetic input is the cause is not known; the maintainer's manual check
+  should include switching tabs with a dialog up.
 
 ### Left open
 
