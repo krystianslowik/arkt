@@ -319,11 +319,13 @@ public enum SidebarContextMenu {
 
   // MARK: Shared items
 
-  /// Mute / Unmute (BH-126): enabled while the tab's page is open, "Unmute" while it is muted.
+  /// Mute / Unmute (BH-126): enabled while the tab's page is open, "Unmute" while it is muted. A row that shows
+  /// sound has a page whatever the loaded set says, so its item is never disabled: a disabled item takes the click
+  /// and sends nothing.
   private static func muteItem(_ id: NodeID, _ context: SidebarMenuContext) -> SidebarMenuEntry {
     let audio = context.audio[id] ?? .silent
     return SidebarMenuEntry(title: audio.toggleTitle, action: .toggleMute(id),
-                            isEnabled: context.loadedTabs.contains(id))
+                            isEnabled: audio != .silent || context.loadedTabs.contains(id))
   }
 
   /// A tab row's Mute group, only while its page plays or is muted: the design's tab menus have no Mute item

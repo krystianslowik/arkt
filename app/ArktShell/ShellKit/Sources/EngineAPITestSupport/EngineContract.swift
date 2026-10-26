@@ -429,7 +429,6 @@ public enum EngineContract {
     try require(engine.snapshot(of: id)?.url == second, "original tab must stay on second")
   }
 
-  /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.
   // MARK: Rule 17 (#364)
 
   /// A page that plays a tone through Web Audio, for the `makeAudible` driver of a real engine. It needs a user
@@ -473,6 +472,7 @@ public enum EngineContract {
     engine.closeTab(id, mode: .skipUnloadHandlers)
   }
 
+  /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.
   static func expectHistory(_ engine: any EngineClient, _ recorder: EventRecorder, _ id: TabID,
                             back: Bool, forward: Bool, _ when: String) async throws {
     do {

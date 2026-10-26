@@ -216,6 +216,20 @@ struct SidebarContextMenuTests {
     #expect(try entry("Unmute", in: entries(.rows([tab]), playing)).isEnabled)
   }
 
+  /// A row that shows sound has a page, so its Mute is never shown disabled: a disabled item takes the click and
+  /// sends nothing (#364, menu clicks that did not reach the shell).
+  @Test(arguments: [TabAudio.playing, .muted])
+  func soundingRowMuteIsEnabledWithoutLoadedState(_ audio: TabAudio) throws {
+    let tab = sidebar.addTab(url: url, title: "T", in: .today(work))
+    let split = sidebar.addSplit(in: .today(work))
+    let pane = sidebar.addTab(url: url, title: "L", in: .split(split))
+    sidebar.addTab(url: url, title: "R", in: .split(split))
+    var sounding = context
+    sounding.audio = [tab: audio, pane: audio]
+    #expect(try entry(audio.toggleTitle, in: entries(.rows([tab]), sounding)).isEnabled)
+    #expect(try entry(audio.toggleTitle, in: entries(.rows([pane]), sounding)).isEnabled)
+  }
+
   @Test func pinnedTabOffersMuteWhilePlaying() throws {
     let tab = sidebar.addTab(url: url, title: "P", in: .pinned(work))
     var playing = context
