@@ -50,7 +50,7 @@ Date 2026-10-26. Branch `engine/33-w3-11-signed-bundle` off `main` at `22a2b12`.
   priority (`-j 4` because swap was already at 15.5 GB), **1 min 27 s**, `The build has finished successfully.`,
   0 `FAILED:`; 22 `//arkt` objects recompiled and `Arkt Framework` relinked (448 MB); a second run had nothing to do;
   `gn check out/Arkt '//arkt/*'`: `Header dependency check OK`. Internal disk 34 GiB free before, 30 GiB after the
-  task; swap 15.5 GB used before, 18.6 GB at the end (other agents' Swift builds ran at the same time).
+  task; swap 15.5 GB used before, 18.6 GB at the end (Swift builds of other tracks ran at the same time).
 - **Engine configuration on the release framework:** `xcodebuild -scheme ArktShell -configuration Engine
   ARKT_ENGINE_APP=$REL/Arkt.app CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-w3-11 -derivedDataPath
   $CHROMIUM_ROOT/arkt-shell-dd/w3-11 build` (no change to `Local.xcconfig`, which keeps `out/Spike` for
