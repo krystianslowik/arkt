@@ -2956,3 +2956,68 @@ Date 2026-10-26. Branch `feat/345-peek-modifier-links` off `main` at `55fb137`. 
   every tab insert, detach and replace, so a forwarding delegate the facade installed would be overwritten on every
   tab strip change and would have to forward the whole `WebContentsDelegate` interface.
 
+
+## #364: tab and pane Mute (BH-126), and a hidden Peek's sound (#348)
+
+Date 2026-10-26. Branch `feat/364-tab-mute` off `main` at `6fd5738`, rebased on `4e15213`. Design:
+`design/tab-context-menus/tab-context-menus.md` (3.6, section 10), `docs/design/peek.md` (Edge cases).
+
+### What landed
+
+- **Engine API.** `EngineClient.setMuted(_:muted:)`; `TabSnapshot.isAudible` and `isMuted`; events
+  `.audibleChanged(_, isAudible:)` and `.mutedChanged(_, isMuted:)`, each reported once per change. Contract rule 17:
+  `muteIsReportedOnce` (no driver) and `audibleStateIsReported` (driver `makeAudible`: `EngineContract.toneScript`, a
+  Web Audio oscillator run with a user gesture). Chromium keeps reporting a muted page that plays as audible; the shell
+  shows muted first.
+- **Facade header (both copies, additive).** Event kinds `AudibleChanged = 14` and `MutedChanged = 15`; `isAudible`
+  and `isMuted` on `ArktEngineEvent` and `ArktTabHandle`; `-[ArktTabHandle setMuted:]`. Justification: the frozen
+  header had no way to report sound or mute (this file, W3-5a: "Audible state is not reported: the frozen header has no
+  event kind for it"), and both #364 and #348 need it. Existing values and members are unchanged.
+- **Facade.** `TabObserver` reports `WebContentsObserver::OnAudioStateChanged` and `DidUpdateAudioMutingState` (and
+  re-reports both on a contents replacement); `setMuted:` calls `WebContents::SetAudioMuted` through `runOrQueue`.
+  The self-test embedder logs both kinds. **No Chromium patch**; `.patches` 9 = `rev-list --count` 9.
+- **ChromiumEngine** lists a tab with the handle's live sound state and drops a facade report of the value it already
+  has. **InMemoryEngine** gains the `setAudible` driver. **FakeEngine** keeps `isMuted` and suspends media playback
+  while muted (`setAllMediaPlaybackSuspended`; HTML media only, WKWebView has no public mute) and reports no audible
+  state (no public signal).
+- **Shell.** A row whose page plays or is muted shows an audio button (`speaker.wave.2.fill` / `speaker.slash.fill`,
+  12 pt in a 20 pt box) left of the hover close slot, so the hover X never moves it; it fades in and out over 0.18 s
+  when the sound starts or stops (at once under Reduce Motion) and swaps its glyph at once on a click. A click, the
+  row's VoiceOver action ("Mute" / "Unmute") and the menu item all flip the tab's mute through the engine. The pane
+  menu's Mute is enabled for a loaded pane and reads Unmute while muted. Today and pinned tab menus show Mute / Unmute
+  only while the tab plays or is muted (see Deviations). Mute toggles are logged (`dev.arkt.shell`, category `audio`).
+- **Peek (#348).** Hiding a Peek records its mute and mutes it; restoring puts the recorded mute back, so a Peek the
+  user muted stays muted. A parked copy (`WebContents::Clone`) starts unmuted.
+
+### Checks (Engine app on `out/Spike`, `$CHROMIUM_ROOT/embed-364`, profile `$PROF/364-try`, scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and defaults suite, tabs probe loaded, loopback pages on `127.0.0.1` and `localhost`, tone started through CDP with a user gesture, state read with `chrome.tabs.query` in the probe's worker)
+
+| Check | Result | Evidence |
+|---|---|---|
+| A playing tab shows the audio button | PASS | `sidebar.row.audio` with label "Mute" on the Tone row; `audible: true` |
+| Mute from the row's context menu | PASS | the menu shows Mute in its own group; `mute toggle: muted true`, `muted: true`, label "Unmute" |
+| Unmute from the menu | PASS | the menu reads Unmute; `muted: false` |
+| Mute from the menu of a row that is not the current tab | PASS | `muted: true` |
+| The audio button mutes (AXPress) | PASS | `muted: true`, label "Unmute"; the engine keeps `audible: true` |
+| A hidden Peek goes silent | PASS | Shift-click opened a Peek on the `localhost` tone page; after a tab switch `muted: true`, no `peek.card` |
+| Restoring the Peek unmutes it | PASS | back on the source: `peek.card` again, `muted: false`, `audible: true` |
+| A Peek muted before it was hidden stays muted | PASS | muted by `chrome.tabs.update`; hidden and restored: `muted: true` |
+| Contract on real Chromium | PASS | `--arkt-engine-contract --arkt-engine-test-api` with the tabs probe: `ARKT_CONTRACT result 17/17` |
+
+The first menu attempts in the session did not reach the shell while another worktree's UI test run had windows on
+the same screen; with the screen free every menu attempt worked.
+
+### Verification
+
+- `nice -n 10 autoninja -C out/Spike -j 4 chrome`: `The build has finished successfully.` `git -C $CR rev-list --count
+  156.0.8078.48..arkt` 9 = `.patches` 9.
+- Debug and Engine apps: `BUILD SUCCEEDED`.
+- Red first: the new tests failed to compile (`setMuted`, the event cases, `TabAudio`, `audioButton`,
+  `HiddenPeek.wasMuted` missing), then passed.
+- ShellKit `swift test --skip ShellKitGUITests`: 1066 passed (1047 + 19).
+
+### Deviations
+
+- Tab rows: BH-126 confirms Mute only on panes; the Today and pinned menus offer it only while the tab plays or is
+  muted, and Favorites not at all (their playing indicator, BH-051, and the media tray, BH-184, stay with #117).
+  PARITY(NEEDS-RUNTIME-CHECK) for the audio button's place and glyphs.
+- A hidden Peek's video keeps decoding, muted; pausing it would need the page.
