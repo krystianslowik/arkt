@@ -59,8 +59,8 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleName: Arkt Shell
-        CFBundleDisplayName: Arkt Shell
+        CFBundleName: Arkt
+        CFBundleDisplayName: Arkt
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "15.0"
@@ -81,7 +81,7 @@ targets:
             LSItemContentTypes: [public.html, public.xhtml]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.arkt.ArktShell
+        PRODUCT_BUNDLE_IDENTIFIER: dev.arkt.Arkt
         PRODUCT_NAME: ArktShell
       configs:
         Engine:
@@ -98,8 +98,8 @@ targets:
     # Engine only (the script exits at once in every other configuration). Runs after the Info.plist is processed
     # (its input) and before Xcode signs the app. Copies the engine framework into Contents/Frameworks when it changed (an APFS
     # clone when on the same volume) and writes ArktEngineFrameworkName and ArktEngineFrameworkVersion from the
-    # framework's own Info.plist and Versions/Current, plus CrProductDirName (Decision 8). The framework is in no
-    # embed phase, so Xcode never re-signs it.
+    # framework's own Info.plist and Versions/Current, plus CrProductDirName from ARKT_PRODUCT_DIR_NAME (Engine.xcconfig,
+    # Decision 8, #128). The framework is in no embed phase, so Xcode never re-signs it.
     postBuildScripts:
       - name: Embed the engine framework (Engine only)
         basedOnDependencyAnalysis: false
@@ -110,6 +110,10 @@ targets:
         shell: /bin/zsh
         script: |
           [[ $CONFIGURATION == Engine ]] || exit 0
+          if [[ -z $ARKT_PRODUCT_DIR_NAME ]]; then
+            print -u2 "error: ARKT_PRODUCT_DIR_NAME is empty (Engine.xcconfig sets it)"
+            exit 1
+          fi
           if [[ -z $ARKT_ENGINE_APP || ! -d $ARKT_ENGINE_APP ]]; then
             print -u2 "error: set ARKT_ENGINE_APP in app/ArktShell/Local.xcconfig to a built engine app (out/Spike/Chromium.app)"
             exit 1
@@ -137,7 +141,7 @@ targets:
           plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
           plutil -replace ArktEngineFrameworkName -string "$name" "$plist" || exit 1
           plutil -replace ArktEngineFrameworkVersion -string "$version" "$plist" || exit 1
-          plutil -replace CrProductDirName -string "Arkt Dev Engine" "$plist" || exit 1
+          plutil -replace CrProductDirName -string "$ARKT_PRODUCT_DIR_NAME" "$plist" || exit 1
     dependencies:
       - package: ShellKit
         product: ShellUI

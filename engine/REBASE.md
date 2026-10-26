@@ -212,7 +212,7 @@ A failed check blocks the merge. Fix it on the rebase branch, or roll back (sect
    staples before install.
 2. Keep the previous installed bundle for rollback, then replace it (W10 Step 1):
 
-       codesign -dv /Applications/Arkt.app 2>&1 | grep Identifier=com.arkt.Arkt
+       codesign -dv /Applications/Arkt.app 2>&1 | grep Identifier=dev.arkt.Arkt
        mkdir -p $CHROMIUM_ROOT/releases && ditto /Applications/Arkt.app $CHROMIUM_ROOT/releases/Arkt-$OLD.app
        rm -rf /Applications/Arkt.app && ditto $CR/out/Arkt/Arkt.app /Applications/Arkt.app
 
