@@ -16,11 +16,12 @@ extension ShellWindowController {
     sidebarController.onFavoriteUnload = { [weak self] node in self?.close(node: node) }
   }
 
-  /// Moves `node` to `location`, appended. False when the model refused; the failure reports `.moveNode`.
+  /// Moves `node` to `location` at `index` (nil appends). False when the model refused; the failure reports
+  /// `.moveNode`.
   @discardableResult
-  func move(_ node: NodeID, to location: SidebarLocation) -> Bool {
+  func move(_ node: NodeID, to location: SidebarLocation, at index: Int? = nil) -> Bool {
     do {
-      try sidebar.moveNode(node, to: location, at: sidebar.children(of: location).count)
+      try sidebar.moveNode(node, to: location, at: index ?? sidebar.children(of: location).count)
       return true
     } catch {
       onError?(.moveNode, error)

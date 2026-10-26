@@ -30,8 +30,8 @@ public struct ReservedKeys: Sendable {
 
   public init(_ keys: [Key]) { self.keys = keys }
 
-  /// Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-Opt-Right, Cmd-Opt-Left. Reopen (Shift-Cmd-T), the tab
-  /// switcher (Ctrl-Tab) and Incognito (Shift-Cmd-N) join when Arkt has them.
+  /// Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-D (KB-012, #108), Cmd-Opt-Right, Cmd-Opt-Left. Reopen
+  /// (Shift-Cmd-T), the tab switcher (Ctrl-Tab) and Incognito (Shift-Cmd-N) join when Arkt has them.
   public static let arkt = ReservedKeys([
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: .command),
     Key(keyCode: kVK_ANSI_L, character: "l", modifiers: .command),
@@ -39,6 +39,7 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_ANSI_W, character: "w", modifiers: [.command, .shift]),
     Key(keyCode: kVK_ANSI_N, character: "n", modifiers: .command),
     Key(keyCode: kVK_ANSI_Q, character: "q", modifiers: .command),
+    Key(keyCode: kVK_ANSI_D, character: "d", modifiers: .command),
     Key(keyCode: kVK_RightArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_LeftArrow, character: "", modifiers: [.command, .option]),
   ])

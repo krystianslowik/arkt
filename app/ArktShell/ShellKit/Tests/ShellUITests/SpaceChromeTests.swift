@@ -59,7 +59,8 @@ struct SpaceOptionsMenuTests {
 
     let menu = page.makeOptionsMenu()
     #expect(menu.accessibilityIdentifier() == AXID.Sidebar.spaceMenu)
-    #expect(menu.items.map(\.title) == ["Icon", "Theme", "Profile"])
+    // Collapse Pinned (BH-065) ends the menu; with no pinned tabs it is disabled.
+    #expect(menu.items.map(\.title) == ["Icon", "Theme", "Profile", "", "Collapse Pinned"])
     let profile = menu.items[2]
     #expect(profile.isEnabled == false)
     #expect(profile.action == nil)

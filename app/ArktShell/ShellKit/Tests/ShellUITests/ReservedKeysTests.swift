@@ -14,6 +14,7 @@ struct ReservedKeysTests {
     (kVK_ANSI_W, "w", NSEvent.ModifierFlags([.command, .shift]).rawValue),
     (kVK_ANSI_N, "n", NSEvent.ModifierFlags.command.rawValue),
     (kVK_ANSI_Q, "q", NSEvent.ModifierFlags.command.rawValue),
+    (kVK_ANSI_D, "d", NSEvent.ModifierFlags.command.rawValue),    // KB-012 (#108)
   ])
   func `every reserved letter key matches`(keyCode: Int, character: String, modifiers: UInt) {
     #expect(keys.matches(keyCode: UInt16(keyCode), character: character,
@@ -71,8 +72,9 @@ struct ReservedKeysTests {
     #expect(!keys.matches(keyCode: UInt16(kVK_LeftArrow), character: nil, modifiers: [.option, .function]))
   }
 
-  /// Pages keep every other shortcut, as in Chrome: Cmd-S, Cmd-D, Cmd-Z, Cmd-F, Cmd-R.
-  @Test(arguments: [(kVK_ANSI_S, "s"), (kVK_ANSI_D, "d"), (kVK_ANSI_Z, "z"), (kVK_ANSI_F, "f"), (kVK_ANSI_R, "r")])
+  /// Pages keep every other shortcut, as in Chrome: Cmd-S, Cmd-Z, Cmd-F, Cmd-R. Cmd-D left this list with
+  /// KB-012 (#108): it pins the current tab (BH-055).
+  @Test(arguments: [(kVK_ANSI_S, "s"), (kVK_ANSI_Z, "z"), (kVK_ANSI_F, "f"), (kVK_ANSI_R, "r")])
   func `other command keys are not reserved`(keyCode: Int, character: String) {
     #expect(!keys.matches(keyCode: UInt16(keyCode), character: character, modifiers: .command))
   }

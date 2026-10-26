@@ -181,7 +181,11 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertEqual(view.newTabButton.frame, CGRect(x: 150, y: 9, width: 32, height: 32))
     let page = try XCTUnwrap(controller.currentPage)
     XCTAssertEqual(page.titleLabel.stringValue, "Personal")
-    XCTAssertEqual(page.titleLabel.frame.minX, 16)
+    // Personal has pinned tabs: the Collapse Pinned caret (BH-065) takes the measured leading and the title
+    // starts right of it (16 + 20 + 2).
+    XCTAssertFalse(page.collapsePinnedButton.isHidden)
+    XCTAssertEqual(page.collapsePinnedButton.frame.minX, 16)
+    XCTAssertEqual(page.titleLabel.frame.minX, 16 + 20 + 2)
     XCTAssertEqual(page.titleLabel.font?.pointSize, 12)
     XCTAssertEqual(page.scrollView.frame.minX, 8)
     XCTAssertGreaterThan(view.pagesHost.frame.minY, view.favorites.frame.maxY)

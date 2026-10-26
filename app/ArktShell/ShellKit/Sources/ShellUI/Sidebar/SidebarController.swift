@@ -34,6 +34,18 @@ public final class SidebarController {
   public var onSidebarDrop: (@MainActor (_ node: NodeID, _ location: SidebarLocation) -> Bool)?
   /// A row's "Move To > Favorites" (BH-047); the window moves the node.
   public var onMoveToFavorites: (@MainActor (NodeID) -> Void)?
+  /// Pin / Unpin Tab on a row's context menu (BH-055); the window moves the node.
+  public var onPinToggle: (@MainActor (NodeID) -> Void)?
+  /// Back to Pinned URL on a pinned row (BH-057).
+  public var onResetPinned: (@MainActor (NodeID) -> Void)?
+  /// Replace Pin with Current Page on a pinned row (BH-060).
+  public var onReplacePin: (@MainActor (NodeID) -> Void)?
+  /// Separate From Pinned Tab on a pinned row (BH-061).
+  public var onSeparateFromPinned: (@MainActor (NodeID) -> Void)?
+  /// A pinned row's favicon was clicked (GS-005), with the click's modifiers (BH-058).
+  public var onPinnedFaviconClick: (@MainActor (NodeID, NSEvent.ModifierFlags) -> Void)?
+  /// Whether a pinned tab sits away from its pinned URL (the window knows the live page's URL).
+  public var pinnedNavigatedProvider: (@MainActor (NodeID) -> Bool)?
   /// A loaded Favorite past the recency limit should unload (BH-049); the window closes its page like the X does.
   public var onFavoriteUnload: (@MainActor (NodeID) -> Void)?
   /// The "+" button in the bottom bar.
@@ -158,6 +170,8 @@ public final class SidebarController {
       onEmptySpace?()
     }
     page.outlineController.setRowStates(resolver)
+    // BH-065: a collapsed Pinned section bolds the Space title while one of its tabs is shown [I].
+    page.setCurrentTabInPinned(current.flatMap { source.section(containing: $0) } == .pinned(page.spaceID))
     view.setCurrent(page: page)
     view.setFlavor(info.theme.flavor)
     view.spaceDots.selectedIndex = index
@@ -237,6 +251,16 @@ public final class SidebarController {
     page.outlineController.onDuplicateSplit = { [weak self] node in self?.onDuplicateSplit?(node) }
     page.outlineController.onDuplicateIntoSplit = { [weak self] node in self?.onDuplicateIntoSplit?(node) }
     page.outlineController.onMoveToFavorites = { [weak self] node in self?.onMoveToFavorites?(node) }
+    page.outlineController.onPinToggle = { [weak self] node in self?.onPinToggle?(node) }
+    page.outlineController.onResetPinned = { [weak self] node in self?.onResetPinned?(node) }
+    page.outlineController.onReplacePin = { [weak self] node in self?.onReplacePin?(node) }
+    page.outlineController.onSeparateFromPinned = { [weak self] node in self?.onSeparateFromPinned?(node) }
+    page.outlineController.onPinnedFaviconClick = { [weak self] node, modifiers in
+      self?.onPinnedFaviconClick?(node, modifiers)
+    }
+    page.outlineController.pinnedNavigatedProvider = { [weak self] node in
+      self?.pinnedNavigatedProvider?(node) ?? false
+    }
     page.outlineController.onNodeDragBegan = { [weak self] node in self?.nodeDragBegan(node) }
     page.outlineController.onNodeDragEnded = { [weak self] in self?.nodeDragEnded() }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
@@ -316,7 +340,11 @@ public final class SidebarController {
 
   private func applyRowStates() {
     let states = resolver
-    for page in pages.values { page.outlineController.setRowStates(states) }
+    for page in pages.values {
+      page.outlineController.setRowStates(states)
+      // BH-065: a collapsed Pinned section bolds the Space title while one of its tabs is shown [I].
+      page.setCurrentTabInPinned(current.flatMap { source.section(containing: $0) } == .pinned(page.spaceID))
+    }
     view.favorites.setRowStates(states)       // refreshes the visible tiles, this one's X included
   }
 
@@ -412,7 +440,10 @@ public final class SidebarController {
       if case .favorites = location {
         if view.favorites.apply(structure: location) { view.needsLayout = true }
       } else {
-        for page in pages.values { page.outlineController.apply(structure: location) }
+        for page in pages.values {
+          page.outlineController.apply(structure: location)
+          if case .pinned = location { page.refreshCollapseAffordance() }
+        }
       }
     case .node(let id):
       for page in pages.values { page.outlineController.reload(node: id) }

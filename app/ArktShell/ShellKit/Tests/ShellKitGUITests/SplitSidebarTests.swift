@@ -110,7 +110,8 @@ final class SplitSidebarTests: XCTestCase {
 
     XCTAssertEqual(try harness.menuTitles(world.split),
                    ["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"])
-    XCTAssertEqual(try harness.menuTitles(world.today[0]), ["Move To"], "a plain tab row has no split items")
+    XCTAssertEqual(try harness.menuTitles(world.today[0]), ["Move To", "Pin Tab"],
+                   "a plain tab row has no split items; the pin item is BH-055's")
     harness.controller.close()
   }
 
@@ -134,7 +135,8 @@ final class SplitSidebarTests: XCTestCase {
     XCTAssertEqual(try rightClick(world.split),
                    ["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"])
     XCTAssertEqual(try rightClick(world.panes[0]), ["Remove Tab from Split View"])
-    XCTAssertEqual(try rightClick(world.today[0]), ["Move To"], "a plain tab row gets Move To (BH-047)")
+    XCTAssertEqual(try rightClick(world.today[0]), ["Move To", "Pin Tab"],
+                   "a plain tab row gets Move To (BH-047) and Pin Tab (BH-055)")
     harness.controller.close()
   }
 
@@ -369,7 +371,7 @@ final class SplitSidebarTests: XCTestCase {
   /// On a plain tab row a Ctrl-click gets the same menu a right-click gets
   /// (`testRightClickFillsTheMenuForTheClickedRow`), and does not activate the row.
   func testCtrlClickOnAPlainTabRowDoesNotActivateIt() throws {
-    try assertCtrlClickAsksForTheMenu(of: { $0.today[1] }, titles: ["Move To"])
+    try assertCtrlClickAsksForTheMenu(of: { $0.today[1] }, titles: ["Move To", "Pin Tab"])
   }
 
   func testPlainClickOnASplitRowActivatesIt() throws {

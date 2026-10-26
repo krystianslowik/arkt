@@ -316,6 +316,7 @@ final class MainMenuInventoryTests: XCTestCase {
       (kVK_ANSI_Q, .maskCommand, "Quit Arkt Shell"),
       (kVK_RightArrow, [.maskCommand, .maskAlternate], "Next Space"),
       (kVK_LeftArrow, [.maskCommand, .maskAlternate], "Previous Space"),
+      (kVK_ANSI_D, .maskCommand, "Pin Tab"),                                    // KB-012 (#108)
     ]
     let source = CGEventSource(stateID: .privateState)
     for (keyCode, flags, title) in cases {
@@ -368,6 +369,27 @@ final class MainMenuInventoryTests: XCTestCase {
     XCTAssertEqual(first.action, #selector(AppCommands.showWelcome(_:)))
     XCTAssertTrue(first.target === commands)
     XCTAssertEqual(first.keyEquivalent, "")
+  }
+
+  /// KB-012 and KB-041 (#108): Pin Tab sits in the File menu on Cmd-D; Back to Pinned URL is unbound, as in Arc.
+  /// Reset Space joins the Spaces menu's Space actions, without a key.
+  func testPinnedTabItemsSitInTheFileAndSpacesMenus() throws {
+    let menu = built.menu
+    let file = try XCTUnwrap(menu.items.first { $0.title == "File" }?.submenu)
+    let pin = try XCTUnwrap(file.items.first { $0.title == "Pin Tab" })
+    XCTAssertEqual(pin.action, #selector(ShellWindowController.pinTab(_:)))
+    XCTAssertEqual(pin.keyEquivalent, "d")
+    XCTAssertEqual(pin.keyEquivalentModifierMask, [.command])
+    XCTAssertNil(pin.target, "reaches the main window's controller through the responder chain")
+    let reset = try XCTUnwrap(file.items.first { $0.title == "Back to Pinned URL" })
+    XCTAssertEqual(reset.action, #selector(ShellWindowController.resetTab(_:)))
+    XCTAssertEqual(reset.keyEquivalent, "")
+    let spaces = try XCTUnwrap(menu.items.first { $0.title == "Spaces" }?.submenu)
+    let resetSpace = try XCTUnwrap(spaces.items.first { $0.title == "Reset Space" })
+    XCTAssertEqual(resetSpace.action, #selector(ShellWindowController.resetSpace(_:)))
+    XCTAssertEqual(resetSpace.keyEquivalent, "")
+    let commandD = allItems().filter { $0.keyEquivalent == "d" && $0.keyEquivalentModifierMask == [.command] }
+    XCTAssertEqual(commandD.count, 1, "no other item binds Cmd-D")
   }
 
   /// Decision 9: no menu item names Arc.

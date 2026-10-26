@@ -66,6 +66,8 @@ public enum AXID {
     public static let spaceOptions = "sidebar.spaceOptions"
     /// The menu that button opens: Icon, Theme, and a disabled Profile.
     public static let spaceMenu = "sidebar.spaceMenu"
+    /// The Space header's Collapse / Expand Pinned caret (BH-065); present only while the Space has pinned tabs.
+    public static let spaceCollapsePinned = "sidebar.spaceCollapsePinned"
     /// The current Space page's outline of pinned and Today rows (a proxy element, #269).
     public static let outline = "sidebar.outline"
     /// Label: row title. Selected: row state is `current`.
