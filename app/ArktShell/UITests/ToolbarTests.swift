@@ -26,6 +26,27 @@ final class ToolbarTests: ArktUITestCase {
     XCTAssertTrue(waitUntilGone(toolbar))
   }
 
+  /// #307: Arkt > Settings... (Cmd-,) opens the Settings window on General; Cmd-3 shows Appearance; flipping Show
+  /// Toolbar there shows the Toolbar in the browser window; Escape closes Settings.
+  func test_KB066_settingsShowToolbarFlipsTheToolbar() throws {
+    let app = try launch(try Sandbox())
+    try createFirstSpace(in: app)
+    let toolbar = Shell.element(app, AXID.Toolbar.root)
+    XCTAssertFalse(toolbar.exists, "a fresh sandbox starts with the Toolbar off")
+
+    app.typeKey(",", modifierFlags: [.command])
+    let settings = app.windows[AXID.Settings.window]
+    XCTAssertTrue(waitFor(settings))
+    app.typeKey("3", modifierFlags: [.command])
+    let showToolbar = Shell.element(app, AXID.Settings.control("appearance", "showToolbar"))
+    XCTAssertTrue(waitFor(showToolbar))
+    showToolbar.click()
+
+    XCTAssertTrue(waitFor(toolbar))
+    app.typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(waitUntilGone(settings))
+  }
+
   func test_BH031_GS042_sidebarURLBarContextMenuShowsToolbar() async throws {
     let server = try await fixtureServer()
     let app = try launch(try Sandbox())

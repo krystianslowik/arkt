@@ -215,4 +215,17 @@ public enum AXID {
     /// "3 more above" / "2 more below" after a keyboard reveal; absent otherwise.
     public static let overflowPill = "sidebar.overflowPill"
   }
+
+  /// The Settings window (#307, docs/design/settings.md, section 7).
+  public enum Settings {
+    public static let window = "settings.window"
+    /// A pane item: a radio button in the "Settings" tab group, labelled with the pane's short name.
+    public static func tab(_ pane: String) -> String { "settings.tab.\(pane)" }
+    /// A row's control: `settings.<pane>.<setting>`, labelled with the row's label, its caption as help.
+    public static func control(_ pane: String, _ setting: String) -> String { "settings.\(pane).\(setting)" }
+    /// Settings > Shortcuts: the search field.
+    public static let shortcutsSearch = "settings.shortcuts.search"
+    /// Settings > Spaces and Profiles: a Space's row, by the Space's id.
+    public static func spaceRow(_ id: String) -> String { "settings.spaces.space.\(id)" }
+  }
 }

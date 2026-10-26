@@ -25,6 +25,9 @@ final class AppSession {
   let windows: ShellWindowSet
   /// One instance for every window, so Show / Hide Toolbar reaches all of them.
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
+  /// The app-level settings the Settings window edits (#307), over the same defaults and Toolbar setting; every
+  /// browser window applies them.
+  private(set) lazy var settings = AppSettings(defaults: AppEnvironment.userDefaults, toolbar: toolbarSetting)
   let archiveStore: ArchiveStore
   let settingsStore: SettingsStore
   let importer: ArcImportCoordinator
@@ -101,6 +104,7 @@ final class AppSession {
     archiveSearch.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
+    settings.addObserver(self)
   }
 
   /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine
@@ -164,6 +168,9 @@ final class AppSession {
     window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
     window.onFaviconChanged = { [weak self] id, data in self?.faviconWriter?.record(data, for: id) }
     window.isArcImportAvailable = isArcImportAvailable
+    // Settings (#307): Cmd-1 ... Cmd-9 counting, and the Peek link switches read from the app's defaults suite.
+    window.tabNavigationSettings = settings.tabNavigation
+    window.peek.linkSettings = { [weak self] in self?.settings.peekLinks ?? PeekLinkSettings() }
     window.commandBar.archivedProvider = { [weak self] query in await self?.archiveSearch.matches(for: query) ?? [] }
     window.commandBar.onRestoreArchived = { [weak self] id in self?.archiveSearch.restore(id) }   // BH-104
     guard let writer = faviconWriter else { return }
@@ -280,6 +287,7 @@ final class AppSession {
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     model.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
     let controller = ArchiveWindowController(dataSource: model)
+    controller.onOpenSettings = { [weak self] in self?.showSettings(pane: .spaces) }   // the education banner
     archiveWindow = controller
     controller.show()
   }
@@ -329,6 +337,33 @@ final class AppSession {
       let loaded = await load.value
       self?.setFavicons(loaded)
     }
+  }
+
+  // MARK: - Settings window (#307)
+
+  private var settingsWindow: SettingsWindowController?
+
+  /// Arkt > Settings... (Cmd-,): creates the window on first use, then fronts it, on `pane` or the last one shown.
+  func showSettings(pane: SettingsPane? = nil) {
+    let controller = settingsWindow ?? SettingsWindowController(settings: settings, services: settingsServices())
+    settingsWindow = controller
+    controller.show(pane: pane)
+  }
+
+  /// What Settings asks the app for: the default browser (LaunchServices; `ARKT_DEFAULT_BROWSER` in Debug runs), the
+  /// import (File > Import Browser Data...), the data folder and the Spaces.
+  private func settingsServices() -> SettingsServices {
+    var services = SettingsServices()
+    services.isDefaultBrowser = { DefaultBrowser.isDefault() }
+    services.makeDefaultBrowser = { await DefaultBrowser.makeDefault() }
+    services.canImportBrowserData = { [weak self] in
+      self?.refreshArcImportAvailability()            // off main; applies from the next check
+      return self?.canImportFromArc ?? false
+    }
+    services.importBrowserData = { [weak self] in self?.importFromArc() }
+    services.showDataFolder = { [location] in NSWorkspace.shared.activateFileViewerSelecting([location.directory]) }
+    services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
+    return services
   }
 
   // MARK: - Arc import (E4c)
@@ -543,3 +578,12 @@ extension AppSession {
   }
 }
 #endif
+
+// MARK: - Settings
+
+extension AppSession: AppSettingsObserver {
+  /// A Settings change reaches every browser window at once (the Toolbar has its own observer).
+  func appSettingsDidChange(_ settings: AppSettings) {
+    for window in windows.controllers { window.tabNavigationSettings = settings.tabNavigation }
+  }
+}

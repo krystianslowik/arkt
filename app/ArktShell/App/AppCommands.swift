@@ -16,8 +16,8 @@ final class AppCommands: NSObject {
   /// File > New Window (Cmd-N, KB-005): a window on the same Spaces, without a page until the user picks one.
   @objc func newWindow(_ sender: Any?) { session?.windows.openWindow(opensFirstTab: false) }
 
-  /// Arkt Shell > Settings... (Cmd-, KB-066): no Settings window yet, so the item stays disabled.
-  @objc func showSettings(_ sender: Any?) {}
+  /// Arkt Shell > Settings... (Cmd-, KB-066): opens the Settings window, or brings it forward (#307).
+  @objc func showSettings(_ sender: Any?) { session?.showSettings() }
 
   /// File > Import from Arc... (E4c).
   @objc func importFromArc(_ sender: Any?) { session?.importFromArc() }
@@ -40,7 +40,7 @@ extension AppCommands: NSMenuItemValidation {
       session.refreshArcImportAvailability()           // off main; applies from the next validation
       return session.canImportFromArc
     case #selector(showSettings(_:)):
-      return false
+      return true
     case #selector(showWelcome(_:)):
       return session.canShowWelcome
     case #selector(clearArchive(_:)):

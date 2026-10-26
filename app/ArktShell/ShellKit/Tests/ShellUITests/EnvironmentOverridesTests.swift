@@ -36,6 +36,15 @@ import Testing
     #expect(overrides(["ARKT_DEFAULT_BROWSER": "yes"]).defaultBrowser == nil)
   }
 
+  /// `ARKT_APPEARANCE=light|dark` pins the app's appearance (window screenshots in both, without changing the
+  /// system setting); anything else follows the system.
+  @Test func appearanceOverride() {
+    #expect(overrides(["ARKT_APPEARANCE": "light"]).appearance == .light)
+    #expect(overrides(["ARKT_APPEARANCE": "dark"]).appearance == .dark)
+    #expect(overrides([:]).appearance == nil)
+    #expect(overrides(["ARKT_APPEARANCE": "Dark"]).appearance == nil)
+  }
+
   /// A UI-test run never touches the real default browser, whatever it sets.
   @Test func uiTestModeFakesTheDefaultBrowser() {
     #expect(overrides(complete).defaultBrowser == .notDefault)
