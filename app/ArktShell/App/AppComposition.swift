@@ -1,4 +1,5 @@
 import AppKit
+import CoreBridge
 import EngineAPI
 import Persistence
 import ShellUI

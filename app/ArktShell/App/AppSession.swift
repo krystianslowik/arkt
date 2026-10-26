@@ -56,6 +56,13 @@ final class AppSession {
   private(set) var lastBackup: Task<Void, Never>?
   /// The first run's saved state, loaded with the data folder (`AppComposition.start`); see `AppOnboarding.swift`.
   var onboardingRecord = OnboardingRecord.defaultValue
+  /// One writer for the whole session: Help > Welcome cannot replace a writer whose completion save is pending (#344).
+  private(set) lazy var onboardingRecords = OnboardingRecordStore(record: onboardingRecord) {
+    [settingsStore, log = Self.log] value in
+    do { try await settingsStore.save(value, at: .now) } catch {
+      log.error("onboarding record not saved \(String(describing: type(of: error)), privacy: .public)")
+    }
+  }
 
   /// `hostLookup` pairs the engine's own windows with the windows built for them (`ChromiumEngine.host(of:)`); nil
   /// for an engine that never asks for a window (FakeEngine).
@@ -400,10 +407,11 @@ final class AppSession {
 
   // MARK: - Termination
 
-  /// True while a sidebar change is unsaved or being written, an archived entry is not yet in the archive store, or a
-  /// favicon batch is pending.
+  /// True while a sidebar change is unsaved or being written, an archived entry is not yet in the archive store, a
+  /// favicon batch is pending, or the onboarding record is being written (#344).
   var needsFlush: Bool {
     autosaver.needsFlush || archive.hasPendingWrites || (faviconWriter?.needsFlush ?? false)
+      || onboardingRecords.needsFlush
   }
 
   /// Runs before the termination flush: stops the auto-archive timer, then stamps every window's visible tabs
@@ -422,16 +430,20 @@ final class AppSession {
   }
 
   /// Writes what is pending: the archive outbox first (#213: the on-disk sidebar never gets ahead of the archive
-  /// store), then the sidebar, each bounded by its own flush timeout (1 s, decision 11); favicons get at most
-  /// `faviconFlushTimeout` more (they are re-fetched by the engine anyway).
+  /// store), then the sidebar, each bounded by its own flush timeout (1 s, decision 11); favicons and the onboarding
+  /// record flush concurrently, each with its own bound (#344).
   func flush() async -> Bool {
     let favicons = Task { [faviconWriter] in
       if let faviconWriter { await faviconWriter.flush() }
     }
+    let onboarding = Task { [onboardingRecords] in
+      await onboardingRecords.flush(atMost: Self.onboardingFlushTimeout)
+    }
     let archived = await archive.flush()
     let sidebar = archived ? await autosaver.flush() : false
     await Self.wait(for: favicons, atMost: Self.faviconFlushTimeout)
-    return sidebar && archived
+    let onboardingSaved = await onboarding.value
+    return sidebar && archived && onboardingSaved
   }
 
   /// `flush()` for a quit whose main thread never runs again (#298: Chromium's SIGTERM path blocks the main thread
@@ -443,6 +455,7 @@ final class AppSession {
   }
 
   static let faviconFlushTimeout: Duration = .seconds(1)
+  static let onboardingFlushTimeout: Duration = .seconds(1)
 
   private static func wait(for task: Task<Void, Never>, atMost timeout: Duration) async {
     await withTaskGroup(of: Void.self) { group in

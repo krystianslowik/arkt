@@ -4,25 +4,9 @@ import Persistence
 import ShellUI
 import os
 
-/// The first run's saved state, with the profile's data (onboarding spec, section 13): the version of the flow the
-/// user finished (written on Start browsing and on a confirmed Skip setup) and the step reached so far.
-struct OnboardingRecord: SettingsGroup, Equatable {
-  static let storageKey = "onboarding.state"
-  static var defaultValue: OnboardingRecord { OnboardingRecord() }
-  /// The flow's version; a record below it shows the first run on a profile with no Space.
-  static let currentVersion = 1
-
-  var onboardingCompletedVersion = 0
-  /// The step reached, saved as the user moves on; nil once finished.
-  var progress: OnboardingFlow.Snapshot?
-
-  var isCompleted: Bool { onboardingCompletedVersion >= Self.currentVersion }
-
-  /// Shown automatically only when the flow was never finished and the profile has no Space, or a run was left
-  /// mid-flow (an import may have added Spaces since).
-  func showsAutomatically(profileHasSpaces: Bool) -> Bool {
-    !isCompleted && (!profileHasSpaces || progress != nil)
-  }
+extension OnboardingRecord: SettingsGroup {
+  public static let storageKey = "onboarding.state"
+  public static var defaultValue: OnboardingRecord { OnboardingRecord() }
 }
 
 /// Whether Arkt is the default browser, and asking macOS to make it so (section 15, item 3). Debug runs with
@@ -67,15 +51,12 @@ enum DefaultBrowser {
 @MainActor
 final class AppOnboardingServices: OnboardingServices {
   private weak var session: AppSession?
-  private let settings: SettingsStore
-  private(set) var record: OnboardingRecord
-  /// Saves run one after the other, so the last one written is the last one asked for.
-  private var lastSave: Task<Void, Never>?
+  private let records: OnboardingRecordStore
+  var record: OnboardingRecord { records.record }
 
-  init(session: AppSession, settings: SettingsStore, record: OnboardingRecord) {
+  init(session: AppSession, records: OnboardingRecordStore) {
     self.session = session
-    self.settings = settings
-    self.record = record
+    self.records = records
   }
 
   func checkArc() async -> Bool {
@@ -114,27 +95,9 @@ final class AppOnboardingServices: OnboardingServices {
   func isDefaultBrowser() -> Bool { DefaultBrowser.isDefault() }
   func makeDefaultBrowser() async { await DefaultBrowser.makeDefault() }
 
-  func saveProgress(_ snapshot: OnboardingFlow.Snapshot) {
-    guard !record.isCompleted else { return }
-    record.progress = snapshot
-    save()
-  }
+  func saveProgress(_ snapshot: OnboardingFlow.Snapshot) { records.saveProgress(snapshot) }
 
-  func markCompleted() {
-    record.onboardingCompletedVersion = OnboardingRecord.currentVersion
-    record.progress = nil
-    save()
-  }
-
-  private func save() {
-    let (value, settings, previous) = (record, settings, lastSave)
-    lastSave = Task {
-      await previous?.value
-      do { try await settings.save(value, at: .now) } catch {
-        AppSession.log.error("onboarding record not saved \(String(describing: type(of: error)), privacy: .public)")
-      }
-    }
-  }
+  func markCompleted() { records.markCompleted() }
 }
 
 // MARK: - Presenting
@@ -173,7 +136,7 @@ extension AppSession {
 
   private func presentOnboarding(on window: ShellWindowController, mode: OnboardingMode,
                                  resume: OnboardingFlow.Snapshot?) {
-    let services = AppOnboardingServices(session: self, settings: settingsStore, record: onboardingRecord)
+    let services = AppOnboardingServices(session: self, records: onboardingRecords)
     let controller = window.presentOnboarding(
       services: services,
       options: .init(mode: mode, includesExtensions: Self.onboardingIncludesExtensions, resume: resume))
