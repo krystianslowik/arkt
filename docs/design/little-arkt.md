@@ -263,15 +263,15 @@ as usual (Personal sample theme in light, Dev in dark).
 
 ## Implementation notes
 
-- A Little Arkt window is a second `EngineWindowHosting` implementation (`LittleArktWindowController`), chosen in
-  `ShellWindowSet.host(for:)` by request kind and destination: `.startupURL` when the link route resolves to Little
-  Arkt, and `.page` / `.extension` popups once the engine reports them as such (today a page's new window arrives as
-  `.reopen`, week-3 W3-4).
-- Missing engine pieces: an image snapshot of a tab's current frame (for the Open in flight; Chromium can copy it
-  from the compositor surface); moving a tab between engine windows once, at the end of the flight, without a
-  reload; reporting `.page`
-  window requests with the opener and the requested bounds; letting the shell close a popup when its page calls
-  `window.close()` (already a window close event).
+- A Little Arkt window is a second `EngineWindowHosting` implementation (`LittleArktWindowController`, through
+  `LittleArktEngineHost`), chosen in `ShellWindowSet.host(for:)` by `LittleArktRouting`: a `.page` request and any
+  request with `isPopup` (#314). `.startupURL` joins when the link route resolves to Little Arkt (#353).
+- Engine pieces in place (#314): popup Browsers are Arkt windows and are reported by their Browser type
+  (`TYPE_POPUP` as `.page`, `TYPE_APP_POPUP` as `.extension`, both `isPopup`) with the requested bounds, a size-only
+  request centered over the last active window; `EngineClient.moveTab(_:to:)` moves a tab between engine windows
+  without a reload (`ArktTabHandle.move(to:)`); a page's `window.close()` arrives as `.windowClosed`.
+- Missing engine piece: an image snapshot of a tab's current frame for the Open in flight (#352). The request does
+  not carry the opener window yet.
 - Missing shell pieces: open-URL events and default-browser registration (#135); link routing (#113) for the
   destination; a global hotkey (`RegisterEventHotKey`, no Accessibility permission needed); the Archive's Little Arkt
   source and its threshold in auto-archive.
