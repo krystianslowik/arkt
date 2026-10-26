@@ -811,6 +811,7 @@ extension ShellWindowController: NSMenuItemValidation {
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
     if let enabled = validatePinnedMenuItem(menuItem) { return enabled }
     if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed }
+    if menuItem.action == #selector(clearTodayTabs(_:)) { return canClearToday }       // KB-019 (#110)
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
     }

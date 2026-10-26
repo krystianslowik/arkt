@@ -288,6 +288,8 @@ struct SidebarContextMenuTests {
     #expect(try entry("New Folder", in: menu).action == .newEmptyFolder(work))
     #expect(try entry("Paste URL as New Tab", in: menu).action == .pasteURLAsNewTab(.today(work)))
     #expect(try !entry("Clear Today Tabs", in: menu).isEnabled, "the Space has no Today tabs")
+    #expect(try entry("Clear Today Tabs", in: menu).keyEquivalent == "k", "KB-019 (#110)")
+    #expect(try entry("Clear Today Tabs", in: menu).modifiers == [.command, .shift])
     sidebar.addTab(url: url, title: "T", in: .today(work))
     let filled = try entry("Clear Today Tabs", in: entries(.empty(work)))
     #expect(filled.isEnabled)
@@ -301,6 +303,6 @@ struct SidebarContextMenuTests {
   @Test func onlyMenuBarKeysAreShown() {
     let tab = sidebar.addTab(url: url, title: "T", in: .today(work))
     let keys = Set((entries(.rows([tab])) + entries(.empty(work))).map(\.keyEquivalent).filter { !$0.isEmpty })
-    #expect(keys == ["d", "w", "t"])
+    #expect(keys == ["d", "w", "t", "k"])       // KB-019 (#110): Clear Today Tabs
   }
 }
