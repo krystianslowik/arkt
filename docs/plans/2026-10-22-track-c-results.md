@@ -2057,11 +2057,12 @@ fixture pairs 0.0 with an active overlay; needs a runtime check). No display lin
 Core Animation commits once per frame.
 
 Tests (written first): ArktCore 428 passed (baseline 423 + 5: v1 and v2 migrations, v3 golden, v3 without a new key
-fails, v2 ignores the v3 keys, defaults, round-trip). ShellKit unit 1183 passed (baseline 1133 + 50: `ThemeContrastTests`
+fails, v2 ignores the v3 keys, defaults, round-trip). ShellKit unit 1196 passed (baseline 1146 + 50: `ThemeContrastTests`
 (every preset unchanged in both appearances, pale in dark, deep in light, the blue and copper example, Increase
 Contrast), `ThemePadTests`, `ThemeCreatorModelTests`, `ThemeHapticGateTests`, the popover surface pair in
 `ShellTokensContrastTests`, the spring crossfade and preview in `ThemeCrossfadeTests`, three bridge round-trips in
-`SpaceEditingContractTests`). ShellKitGUITests 1015 run (baseline 998 + 17: `ThemeCreatorTests` 16 and the
-env-gated `ThemeCreatorScreenshotTests`), 14 skipped, 0 failures; the baseline run on this machine had 5 frame-time
-gate failures under load and this run skipped them as not measurable (load average near 40). Debug app build
-succeeds. XCUITest not run: no existing flow or identifier changed.
+`SpaceEditingContractTests`). ShellKitGUITests 1031 run (baseline 1013 + 18: `ThemeCreatorTests` 17 and the env-gated
+`ThemeCreatorScreenshotTests`), 15 skipped, 0 failures, with frame-time gates skipped as not measurable at a load
+average near 30. Debug app build succeeds. XCUITest not run: no existing flow or identifier changed. The pad field
+and texture previews took about 250 ms and 530 ms to synthesize in Debug, so they are built off the main thread when
+the window opens (`ThemeCreatorImages`).
