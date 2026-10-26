@@ -165,6 +165,8 @@ final class TabKeyboardNavigationTests: XCTestCase {
   /// With motion the reveal springs, and Reduce Motion jumps (the other tests).
   func testWithMotionTheRevealScrollSprings() {
     controller.sidebarReveal.reduceMotion = { false }
+    // Taller than most screens: `showWindow` constrains it, as on CI, and the reveal must measure after that.
+    controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 1100), display: false)
     controller.showWindow(nil)
     controller.goToSidebarItem(menuItem(tag: 9))
     XCTAssertTrue(controller.sidebarReveal.isScrolling)

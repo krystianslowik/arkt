@@ -55,9 +55,12 @@ extension ShellWindowController {
     revealInSidebar(currentNode ?? node)
   }
 
-  /// Scrolls the current Space's outline to `node`'s row (opening folders that hold it) and returns that row.
+  /// Scrolls the current Space's outline to `node`'s row (opening folders that hold it) and returns that row. The
+  /// whole window is laid out first, not only the page: a pending window resize or a Space switch the command caused
+  /// changes the visible height the scroll target is measured against.
   @discardableResult
   func revealInSidebar(_ node: NodeID) -> Int? {
+    rootView.layoutSubtreeIfNeeded()
     guard let page = sidebarController.currentPage,
           let row = page.outlineController.expandAncestors(of: node) else { return nil }
     page.layoutSubtreeIfNeeded()
