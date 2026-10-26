@@ -129,6 +129,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A tab stopped being visible in this window: another tab became current, or the window closed (decision 10; the
   /// app stamps `lastActiveAt`).
   public var onTabHidden: (@MainActor (NodeID) -> Void)?
+  /// The tabs the other windows of the set show, so Clear Today Tabs leaves them (#429). Set by the window set; nil
+  /// (a lone window) reads as none.
+  var otherWindowsVisibleNodes: (@MainActor () -> Set<NodeID>)?
   /// The tabs this window shows: the current one, every pane with a page of a shown split, or none.
   public var visibleNodes: Set<NodeID> { Set(shownNodes) }
   /// `visibleNodes` in pane order; changed only through `setShown(_:)` and `.tabClosed`.
