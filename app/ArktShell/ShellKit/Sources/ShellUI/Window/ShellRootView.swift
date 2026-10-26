@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 /// Window content view. Owns (back to front) the theme background, the content card, the split container (shown
 /// instead of the card for a split, `showsSplit`), the sidebar overlay that hosts the sidebar column, and the sidebar
@@ -40,6 +41,7 @@ public final class ShellRootView: NSView {
   public var showsSplit = false {
     didSet {
       guard showsSplit != oldValue else { return }
+      if showsSplit { endCardReflow() }
       card.isHidden = showsSplit
       split.isHidden = !showsSplit
       let toast = card.toastView ?? split.toastView
@@ -48,6 +50,15 @@ public final class ShellRootView: NSView {
       if showsSplit { split.toastView = toast } else { card.toastView = toast }
     }
   }
+
+  /// Read when the single card reflows; tests replace it. Reduce Motion swaps the spring for a short crossfade.
+  var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// The single card is growing from the last pane's frame into its own (#388).
+  public var isCardReflowing: Bool { cardReflow != nil }
+  private var cardReflow: (from: CGRect, distance: Double, progress: CGFloat)?
+  private lazy var cardReflowDriver = SpringDriver(reduceMotion: { [weak self] in self?.reduceMotion() ?? true })
+  /// The card's frame in the layout, kept for the reflow's frames between layout passes.
+  private var cardTarget = CGRect.zero
 
   private var revealEdgeArea: NSTrackingArea?
   private var revealEdgeFrame = CGRect.zero
@@ -97,7 +108,8 @@ public final class ShellRootView: NSView {
     CATransaction.setDisableActions(true)
     themeBackground.frame = bounds
     if sidebarOverlay.frame != l.sidebarFrame { sidebarOverlay.frame = l.sidebarFrame }
-    card.frame = l.cardFrame
+    cardTarget = l.cardFrame
+    card.frame = presentedCardFrame
     split.frame = l.cardFrame
     resizeHandle.frame = l.resizeHandleFrame
     CATransaction.commit()
@@ -106,6 +118,57 @@ public final class ShellRootView: NSView {
       updateTrackingAreas()
     }
     reapplyTrafficLights()
+  }
+
+  // MARK: Card reflow (#388)
+
+  /// A split ended because a pane closed by its X: the page left alone grows from `frame` (its pane's frame, in this
+  /// view's coordinates) into the single card on the reflow spring, retargeted by any layout meanwhile. Reduce Motion
+  /// sets the frame at once under a short crossfade.
+  func reflowCard(from frame: CGRect) {
+    endCardReflow()
+    layoutSubtreeIfNeeded()
+    if reduceMotion() {
+      SplitReflow.crossfade(layer)
+      return
+    }
+    let distance = SplitReflow.distance(from: [frame], to: [cardTarget])
+    guard distance >= 0.5 else { return }
+    cardReflow = (frame, distance, 0)
+    applyCardFrame()
+    cardReflowDriver.animate(in: self, from: 0, to: distance, initialVelocity: 0,
+                             parameters: SplitReflow.parameters) { [weak self] value in
+      guard let self, self.cardReflow != nil else { return }
+      self.cardReflow?.progress = CGFloat(value / distance)
+      self.applyCardFrame()
+    } completion: { [weak self] finished in
+      guard finished, let self else { return }
+      self.cardReflow = nil
+      self.applyCardFrame()
+    }
+  }
+
+  /// Puts the card at its layout frame now, ending a running reflow.
+  private func endCardReflow() {
+    guard cardReflow != nil else { return }
+    cardReflow = nil
+    cardReflowDriver.stop()
+    applyCardFrame()
+  }
+
+  private var presentedCardFrame: CGRect {
+    guard let cardReflow else { return cardTarget }
+    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    return SplitReflow.frame(from: cardReflow.from, to: cardTarget, progress: cardReflow.progress, scale: scale)
+  }
+
+  private func applyCardFrame() {
+    let frame = presentedCardFrame
+    guard card.frame != frame else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    card.frame = frame
+    CATransaction.commit()
   }
 
   /// Sidebar width as laid out (clamped; 0 when hidden).
