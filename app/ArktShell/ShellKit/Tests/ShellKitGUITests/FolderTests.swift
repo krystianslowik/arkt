@@ -126,6 +126,9 @@ final class FolderTests: XCTestCase {
     XCTAssertTrue((0.01..<0.99).contains(child.alpha), "the child fades: \(child.alpha)")
     XCTAssertLessThan(below.offsetY, 0, "the row below rises")
     XCTAssertEqual(below.alpha, 1)
+    let outlineController = try harness.outline()
+    XCTAssertEqual(outlineController.rowStyle(atRow: outlineController.dividerRow).offsetY, below.offsetY,
+                   "the Pinned / Today divider moves with the rows around it")
     XCTAssertEqual(try harness.rowLayer(world.pinnedTab).transform.m42, below.offsetY,
                    "the frame reaches the row view as a layer transform, not a frame change")
     XCTAssertEqual(CGFloat(try harness.rowLayer(world.folderTabs[1]).opacity), child.alpha, accuracy: 0.001)
@@ -230,7 +233,91 @@ final class FolderTests: XCTestCase {
     XCTAssertFalse(outline.folderMotion.isRunning)
   }
 
+  // MARK: Review fixes
+
+  /// A keyboard toggle mid-spring applies at once and stops the spring.
+  func testAKeyboardToggleMidSpringStopsIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    try harness.click(world.folder)
+    try harness.advance(by: 0.06)
+    let outline = try harness.outline()
+    outline.toggleFolder(world.folder, animated: false)
+    XCTAssertTrue(outline.isFolderOpen(world.folder))
+    XCTAssertFalse(outline.folderMotion.isRunning)
+    XCTAssertEqual(try harness.style(world.pinnedTab), .rest)
+    XCTAssertEqual(try harness.style(world.folderTabs[0]), .rest)
+    try harness.advance(by: 2)
+    XCTAssertGreaterThanOrEqual(try harness.row(world.folderTabs[0]), 0, "the rows stay")
+  }
+
+  /// Archiving a folder mid-close leaves no row offset behind.
+  func testRemovingAFolderMidSpringRestsTheRowsBelow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    try harness.click(world.folder)
+    try harness.advance(by: 0.06)
+    XCTAssertLessThan(try harness.style(world.pinnedTab).offsetY, 0)
+    _ = harness.source.archive([world.folder], reason: .manual, at: Self.now)
+    XCTAssertFalse(try harness.outline().folderMotion.isRunning)
+    XCTAssertEqual(try harness.style(world.pinnedTab), .rest)
+    XCTAssertEqual(try harness.rowLayer(world.pinnedTab).transform.m42, 0)
+  }
+
   // MARK: Peeking rows (BH-092, BH-105)
+
+  /// A tab moved into a folder nested in a closed folder shows with the path to it.
+  func testATabMovedIntoANestedFolderOfAClosedFolderPeeksWithItsPath() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    try harness.outline().toggleFolder(world.folder, animated: false)
+    try harness.source.moveNode(world.today[1], to: .folder(world.inner), at: 0)
+    XCTAssertEqual(try harness.row(world.inner), try harness.row(world.folder) + 1)
+    XCTAssertEqual(try harness.row(world.today[1]), try harness.row(world.folder) + 2)
+    XCTAssertEqual(try harness.row(world.innerTab), -1)
+
+    try harness.source.moveNode(world.today[1], to: .today(world.work), at: 0)
+    XCTAssertEqual(try harness.row(world.inner), -1, "the path goes with the last peeking row")
+  }
+
+  /// A folder moved into a closed folder does not peek itself; the current tab inside it does.
+  func testAFolderMovedIntoAClosedFolderShowsOnlyTheCurrentTab() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let moved = try harness.source.addFolder(title: "Moved", in: .today(world.work), at: nil)
+    let current = try harness.source.addTab(url: Self.url("m0"), title: "M0", in: .folder(moved), at: nil)
+    let other = try harness.source.addTab(url: Self.url("m1"), title: "M1", in: .folder(moved), at: nil)
+    try harness.show(current: current)
+    try harness.outline().toggleFolder(world.folder, animated: false)
+
+    try harness.source.moveNode(moved, to: .folder(world.folder), at: 0)
+    XCTAssertEqual(try harness.row(moved), try harness.row(world.folder) + 1)
+    XCTAssertEqual(try harness.row(current), try harness.row(world.folder) + 2)
+    XCTAssertEqual(try harness.row(other), -1)
+  }
+
+  /// Opening a folder takes its peeking rows back; closing it again leaves only the current tab out.
+  func testOpeningAFolderEndsItsMovedInPeek() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    let outline = try harness.outline()
+    outline.toggleFolder(world.folder, animated: false)
+    try harness.source.moveNode(world.today[1], to: .folder(world.folder), at: 0)
+    XCTAssertGreaterThanOrEqual(try harness.row(world.today[1]), 0)
+    outline.toggleFolder(world.folder, animated: false)
+    outline.toggleFolder(world.folder, animated: false)
+    XCTAssertEqual(try harness.row(world.today[1]), -1)
+  }
+
 
   /// Switching to a tab inside a closed folder shows that tab alone under the folder, which stays closed; switching
   /// to another tab puts it back.
@@ -492,6 +579,26 @@ final class FolderTests: XCTestCase {
     editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
     XCTAssertNil(preview.shownFolder)
     XCTAssertEqual(harness.controller.sidebarController.current, world.today[0], "nothing was chosen")
+  }
+
+  /// Moving from one closed folder to the next keeps the preview up and the keyboard in its field.
+  func testMovingToAnotherClosedFolderSwitchesThePreview() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let second = try harness.source.addFolder(title: "Second", in: .pinned(world.work), at: nil)
+    try harness.source.addTab(url: Self.url("s0"), title: "S0", in: .folder(second), at: nil)
+    let preview = try hoverClosedFolder(harness, world)
+    try harness.outline().toggleFolder(second, animated: false)
+    preview.firePendingTimer()
+
+    preview.folderHoverChanged(world.folder, hovered: false)
+    preview.folderHoverChanged(second, hovered: true)
+    preview.firePendingTimer()
+
+    XCTAssertEqual(preview.shownFolder, second)
+    XCTAssertEqual(preview.view.rowViews.prefix(preview.view.rowCount).map(\.titleField.stringValue), ["S0"])
+    XCTAssertTrue((harness.controller.window?.firstResponder as? NSTextView)?.delegate === preview.view.searchField)
   }
 
   /// An open folder shows its tabs already: no preview.

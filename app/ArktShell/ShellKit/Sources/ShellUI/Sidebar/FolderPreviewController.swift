@@ -132,7 +132,9 @@ final class FolderPreviewController: NSObject, NSTextFieldDelegate {
       let current = window.firstResponder
       previousResponder = isOurs(current) ? previousResponder : current
     }
-    window.makeFirstResponder(view.searchField)
+    // Already typing in the field (moving from one closed folder to the next): taking it again would end the
+    // editing, and that closes the preview.
+    if !isOurs(window.firstResponder) { window.makeFirstResponder(view.searchField) }
     if !wasShown { view.animateIn(reduceMotion: reduceMotion()) }
   }
 
@@ -200,6 +202,7 @@ final class FolderPreviewController: NSObject, NSTextFieldDelegate {
   private func chooseHighlighted() {
     guard let node = session?.highlightedNode else { return }
     hide(animated: true)
+    guard source.node(node) != nil else { return }      // closed while the preview was open
     onChoose?(node)
   }
 

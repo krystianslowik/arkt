@@ -168,6 +168,8 @@ public final class SidebarController {
     let changed = currentSpace != id
     if changed, let old = currentSpace { pages[old]?.outlineController.clearSelection() }   // design 6
     if changed { folderPreview.hide(animated: false) }                              // BH-093: the page left
+    // The page leaving the screen ends its folder springs, so no closed folder's rows wait there for its return.
+    if changed, let old = currentSpace { pages[old]?.outlineController.folderMotion.settleNow() }
     currentSpace = id
     if changed, tabToRestore(in: id) == nil {
       previous = current
