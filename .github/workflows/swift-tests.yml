@@ -1,18 +1,27 @@
 # Swift tests for the two packages and a Debug build of the app against the FakeEngine.
 # Chromium is never built here (hours and over 100 GB); engine changes are verified locally (CONTRIBUTING, section 12).
 # The check to require on main is "Swift tests" (the gate job at the end).
+#
+# Only the jobs a change needs run (CONTRIBUTING, section 12): the "Changes" job diffs the change and the macOS jobs
+# skip themselves when none of their inputs changed. Hosted macOS runners are capped at 5 at once, so every skipped
+# macOS job shortens the queue for everyone. The UI tests run nightly and by hand, never on a pull request.
 name: Swift tests
 
 on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    # Nightly on main: every job, including the UI tests and the GUI tests.
+    - cron: "23 2 * * *"
+  workflow_dispatch:
 
-# A new push to a pull request cancels the run it supersedes. Push runs on main get one group per commit: GitHub keeps
-# only one pending run per group, so a shared group would drop queued runs, and they always finish.
+# A newer push cancels the run it supersedes, on a pull request and on main. A cancelled main run leaves its areas
+# untested on main until the next push that touches them; the nightly run covers everything. Nightly and manual runs
+# have their own group so they never cancel, or get cancelled by, a push to main.
 concurrency:
-  group: swift-tests-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -28,11 +37,97 @@ defaults:
     shell: zsh -eo pipefail {0}
 
 jobs:
+  # Which areas the change touched, and from them which jobs run. Pull request: the merge commit against its first
+  # parent, the base tip (the pull request's own changes, not what main gained since it branched). Push to main: the
+  # pushed range. Nightly and manual runs run everything.
+  #   core   app/ArktCore
+  #   shell  app/ArktShell/ShellKit (ChromiumEngineKit and ArktEngineABI live here too)
+  #   app    the rest of app/ArktShell: App, project.yml, Engine.xcconfig, UITests
+  #   engine engine/ (EngineABIIsolationTests compares engine/arkt/api/arkt_engine.h with ShellKit's copy)
+  #   design design/ (BrandTokensTests reads design/brand/tokens/brand-tokens.json)
+  #   ci     .github/ (a workflow change runs every required job once)
+  # Anything else (docs/, README.md, CONTRIBUTING.md, scripts/) is docs only: no macOS job. scripts/ is covered by the
+  # lint job, which always runs.
+  # ShellKit depends on ArktCore (Package.swift), and its IsolationTests read every Swift file under app/ArktShell, so
+  # app changes run the ShellKit tests too.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      core: ${{ steps.areas.outputs.core }}
+      shellkit: ${{ steps.areas.outputs.shellkit }}
+      app: ${{ steps.areas.outputs.app }}
+      gui: ${{ steps.areas.outputs.gui }}
+      ui: ${{ steps.areas.outputs.ui }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Changed areas
+        id: areas
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          core=false shell=false app=false engine=false design=false ci=false all=false
+          case $EVENT in
+            pull_request)
+              files=$(git diff --name-only --no-renames HEAD^1 HEAD) || all=true ;;
+            push)
+              # A new branch or a range not reachable within the fetch depth: run everything.
+              if [[ $BEFORE =~ ^0+$ ]] || ! git fetch --no-tags --depth=1 origin "$BEFORE" \
+                || ! files=$(git diff --name-only --no-renames "$BEFORE" HEAD); then
+                all=true
+              fi ;;
+            *) all=true ;;
+          esac
+          if [[ $all == false ]]; then
+            echo "Changed files:"
+            echo "${files:-(none)}"
+            while IFS= read -r f; do
+              case $f in
+                app/ArktCore/*) core=true ;;
+                app/ArktShell/ShellKit/*) shell=true ;;
+                app/ArktShell/*) app=true ;;
+                engine/*) engine=true ;;
+                design/*) design=true ;;
+                .github/*) ci=true ;;
+              esac
+            done <<< "${files:-}"
+          fi
+          any() { for a in "$@"; do [[ $a == true ]] && { echo true; return; }; done; echo false; }
+          {
+            echo "core=$(any $all $core $ci)"
+            echo "shellkit=$(any $all $shell $core $app $engine $design $ci)"
+            echo "app=$(any $all $app $shell $core $ci)"
+            # Informative jobs: GUI tests on pull requests that touch the shell or the app, both on nightly and manual
+            # runs. Push runs on main run the required jobs alone.
+            case $EVENT in
+              pull_request) echo "gui=$(any $shell $app $ci)"; echo "ui=false" ;;
+              push) echo "gui=false"; echo "ui=false" ;;
+              *) echo "gui=true"; echo "ui=true" ;;
+            esac
+          } | tee -a "$GITHUB_OUTPUT"
+          echo "Areas: core=$core shell=$shell app=$app engine=$engine design=$design ci=$ci all=$all"
+
+  # Source-only checks, cheap enough to run on every change, on Linux so they never wait for a macOS runner.
   isolation:
-    name: Isolation greps
-    runs-on: macos-26
+    name: Isolation greps and lint
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Install zsh
+        shell: bash
+        run: |
+          command -v zsh && exit 0
+          sudo apt-get install -y -qq --no-install-recommends zsh \
+            || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends zsh; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -63,9 +158,38 @@ jobs:
           fi
           (( failed == 0 )) && print "Import layering OK"
           exit $failed
+      # Moved here from the UI tests job so it still runs on every pull request (plan, Rules "No sleeps" and
+      # "No network"): no file under
+      # app/ArktShell/UITests waits on time or names an http(s) URL other than the loopback fixture server
+      # (http://127.0.0.1) and the Arc fixture placeholder (https://example.com, only in Harness/ArcFixture.swift,
+      # which rewrites it to the loopback server). Each grep succeeds only when it prints an offending line.
+      - name: Check UI test sources
+        working-directory: app/ArktShell/UITests
+        run: |
+          failed=0
+          if grep -rnE 'sleep\(|usleep\(|Thread\.sleep|Task\.sleep' .; then
+            print -r -- "Sleeps in UI tests above (wait on accessibility state instead)"
+            failed=1
+          fi
+          if grep -rnoE 'https?://[^[:space:]"'\''<>()\\`]*' . \
+            | grep -vE '^[^:]+:[0-9]+:http://127\.0\.0\.1([:/]|$)' \
+            | grep -vE '^\./Harness/ArcFixture\.swift:[0-9]+:https://example\.com([:/]|$)' \
+            | grep -vE '^\./Harness/FixtureServer\.swift:[0-9]+:http://localhost:$'; then
+            # FixtureServer's cross-site page links to `localhost` on its own port: loopback, another host (#348).
+            print -r -- "URLs other than http://127.0.0.1 in UI tests above (the network is never touched)"
+            failed=1
+          fi
+          (( failed )) && exit 1
+          print "UI test sources OK"
+      # The report script against synthetic fixtures, with a stub xcrun: classification, partial deferral, issue
+      # source, repetitions, unknown row ids, xcresulttool errors and jq from PATH.
+      - name: Parity report script tests
+        run: scripts/ui-tests/parity-report-test.sh
 
   arktcore:
     name: ArktCore tests
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -87,6 +211,8 @@ jobs:
 
   shellkit:
     name: ShellKit tests
+    needs: changes
+    if: needs.changes.outputs.shellkit == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -112,6 +238,8 @@ jobs:
   # count); on a developer machine they assert (CONTRIBUTING, section 7). Results are informative, not required.
   shellkit-gui:
     name: ShellKit GUI tests (informative)
+    needs: changes
+    if: needs.changes.outputs.gui == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     continue-on-error: true
@@ -134,6 +262,8 @@ jobs:
 
   app:
     name: App build (Debug)
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -157,6 +287,14 @@ jobs:
           path: app/ArktShell/build/SourcePackages
           key: app-spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/ArktCore/Package.resolved', 'app/ArktShell/ShellKit/Package.resolved') }}
           restore-keys: app-spm-${{ runner.os }}-${{ runner.arch }}-
+      # Experiment: DerivedData without the package checkouts, keyed per commit so it refreshes.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            app/ArktShell/build
+            !app/ArktShell/build/SourcePackages
+          key: app-deriveddata-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktCore/Package.resolved', 'app/ArktShell/ShellKit/Package.resolved') }}-${{ github.sha }}
+          restore-keys: app-deriveddata-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('app/ArktCore/Package.resolved', 'app/ArktShell/ShellKit/Package.resolved') }}-
       - name: xcodegen generate
         working-directory: app/ArktShell
         run: xcodegen --version && xcodegen generate
@@ -168,9 +306,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO build
 
   # XCUITest suite against the Debug app with the FakeEngine. Informative until promoted (UI test plan, decision 8):
-  # not in the gate's needs. The runner needs the ad-hoc signature, so no CODE_SIGNING_ALLOWED=NO here.
+  # not in the gate's needs. Nightly on main and by hand only (about 20 minutes of a macOS runner); its source lint
+  # runs in the isolation job on every change. The runner needs the ad-hoc signature, so no CODE_SIGNING_ALLOWED=NO here.
   ui-tests:
     name: UI tests (informative)
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
     runs-on: macos-26
     timeout-minutes: 40
     continue-on-error: true
@@ -178,30 +319,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # First, before anything is built (plan, Rules "No sleeps" and "No network"): no file under
-      # app/ArktShell/UITests waits on time or names an http(s) URL other than the loopback fixture server
-      # (http://127.0.0.1) and the Arc fixture placeholder (https://example.com, only in Harness/ArcFixture.swift,
-      # which rewrites it to the loopback server). Each grep succeeds only when it prints an offending line.
-      - name: Check UI test sources
-        working-directory: app/ArktShell/UITests
-        run: |
-          failed=0
-          if grep -rnE 'sleep\(|usleep\(|Thread\.sleep|Task\.sleep' .; then
-            print -r -- "Sleeps in UI tests above (wait on accessibility state instead)"
-            failed=1
-          fi
-          if grep -rnoE 'https?://[^[:space:]"'\''<>()\\`]*' . \
-            | grep -vE '^[^:]+:[0-9]+:http://127\.0\.0\.1([:/]|$)' \
-            | grep -vE '^\./Harness/ArcFixture\.swift:[0-9]+:https://example\.com([:/]|$)'; then
-            print -r -- "URLs other than http://127.0.0.1 in UI tests above (the network is never touched)"
-            failed=1
-          fi
-          (( failed )) && exit 1
-          print "UI test sources OK"
-      # The report script against synthetic fixtures, with a stub xcrun: classification, partial deferral, issue
-      # source, repetitions, unknown row ids, xcresulttool errors and jq from PATH.
-      - name: Parity report script tests
-        run: scripts/ui-tests/parity-report-test.sh
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
@@ -269,11 +386,13 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # The one check to require on main: passes only when every required job above passed.
+  # The one check to require on main. "Changes" and the isolation job always run and must pass; the macOS jobs pass or
+  # are skipped because none of their inputs changed. A failed or cancelled job fails the gate, so a docs-only change
+  # goes green without a macOS runner and a broken "Changes" job can never skip its way to green.
   gate:
     name: Swift tests
     if: ${{ always() }}
-    needs: [isolation, arktcore, shellkit, app]
+    needs: [changes, isolation, arktcore, shellkit, app]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
@@ -282,7 +401,12 @@ jobs:
     steps:
       - name: Check required jobs
         env:
+          CHANGES: ${{ needs.changes.result }}
+          ISOLATION: ${{ needs.isolation.result }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "Results: $RESULTS"
-          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+          [ "$CHANGES" = success ] && [ "$ISOLATION" = success ] || exit 1
+          for r in $RESULTS; do
+            case $r in success|skipped) ;; *) exit 1 ;; esac
+          done
