@@ -27,7 +27,10 @@
 #include "base/no_destructor.h"
 #include "base/scoped_observation.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
+#include "base/time/time.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/tab_list/tab_removed_reason.h"
@@ -49,10 +52,12 @@
 #include "components/favicon/core/favicon_driver_observer.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents.h"
@@ -63,6 +68,8 @@
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
@@ -1211,6 +1218,106 @@ class TabObserver : public content::WebContentsObserver,
 namespace arkt {
 namespace {
 
+// -----------------------------------------------------------------------------
+// Frame copy (#370 thumbnails, #352 Little Arkt's flight).
+
+using FrameCompletion = void (^)(NSData* png, NSSize pixelSize, CGFloat scale);
+
+// The copy may give up after this long in viz (a frame that never comes).
+constexpr base::TimeDelta kFrameCopyTimeout = base::Seconds(2);
+
+void AnswerNoFrame(FrameCompletion completion) {
+  completion(nil, NSZeroSize, 0);
+}
+
+// Posts the empty answer, so the completion never runs inside the call.
+void PostNoFrame(FrameCompletion completion) {
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&AnswerNoFrame, completion));
+}
+
+// On the UI thread: hands the bitmap to the thread pool for the PNG encode and
+// answers on the UI thread with the PNG, its size and its pixels per point.
+void OnFrameCopied(FrameCompletion completion,
+                   int point_width,
+                   const content::CopyFromSurfaceResult& result) {
+  if (!result.has_value() || result->bitmap.drawsNothing() ||
+      result->bitmap.colorType() != kN32_SkColorType || point_width <= 0) {
+    VLOG(1) << "ARKT: facade copyFrame: no frame ("
+            << (result.has_value() ? "empty or unsupported bitmap"
+                                   : "copy failed")
+            << ")";
+    AnswerNoFrame(completion);
+    return;
+  }
+  SkBitmap bitmap = result->bitmap;
+  bitmap.setImmutable();
+  const NSSize size = NSMakeSize(bitmap.width(), bitmap.height());
+  const CGFloat scale = static_cast<CGFloat>(bitmap.width()) / point_width;
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE,
+      {base::TaskPriority::USER_VISIBLE,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(
+          [](SkBitmap bitmap) {
+            return gfx::PNGCodec::FastEncodeBGRASkBitmap(
+                bitmap, /*discard_transparency=*/true);
+          },
+          std::move(bitmap)),
+      base::BindOnce(
+          [](FrameCompletion completion, NSSize size, CGFloat scale,
+             std::optional<std::vector<uint8_t>> png) {
+            if (!png || png->empty()) {
+              AnswerNoFrame(completion);
+              return;
+            }
+            completion([NSData dataWithBytes:png->data() length:png->size()],
+                       size, scale);
+          },
+          completion, size, scale));
+}
+
+// Starts the copy of `contents`' current frame, scaled by viz to fit
+// `max_pixel_size` (empty: the full frame). Never shows or wakes the tab: a
+// discarded tab, or one without a surface to copy, answers nil.
+void CopyFrame(content::WebContents* contents,
+               NSSize max_pixel_size,
+               FrameCompletion completion) {
+  content::RenderWidgetHostView* view =
+      contents && !contents->WasDiscarded()
+          ? contents->GetRenderWidgetHostView()
+          : nullptr;
+  if (!view || !view->IsSurfaceAvailableForCopy()) {
+    PostNoFrame(completion);
+    return;
+  }
+  const gfx::Size points = view->GetViewBounds().size();
+  const double device_scale = view->GetDeviceScaleFactor();
+  if (points.IsEmpty() || device_scale <= 0) {
+    PostNoFrame(completion);
+    return;
+  }
+  // An empty output size copies at the surface's own (device pixel) size.
+  gfx::Size output;
+  if (max_pixel_size.width > 0 && max_pixel_size.height > 0) {
+    const double width = points.width() * device_scale;
+    const double height = points.height() * device_scale;
+    const double factor = std::min({1.0, max_pixel_size.width / width,
+                                    max_pixel_size.height / height});
+    if (factor < 1.0) {
+      output = gfx::Size(std::max(1, static_cast<int>(width * factor)),
+                         std::max(1, static_cast<int>(height * factor)));
+    }
+  }
+  // CopyFromSurface may answer on another sequence; the answer is posted
+  // back to this one (the UI thread).
+  view->CopyFromSurface(
+      gfx::Rect(), output, kFrameCopyTimeout,
+      base::BindPostTask(
+          base::SequencedTaskRunner::GetCurrentDefault(),
+          base::BindOnce(&OnFrameCopied, completion, points.width())));
+}
+
 // Runs `insert` with `handle` bound to the next inserted tab (createTab,
 // duplicate). A handle whose insert did not happen gets its terminal
 // TabClosed (#256 review); one that was inserted runs the calls queued
@@ -1629,6 +1736,18 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                          }
                        },
                        self, static_cast<bool>(muted))];
+}
+
+- (void)copyFrameWithMaxPixelSize:(NSSize)maxPixelSize
+                       completion:(void (^)(NSData* _Nullable png,
+                                            NSSize pixelSize,
+                                            CGFloat scale))completion {
+  // A read: nothing about the tab changes, so it is not queued or deferred
+  // like the mutators; a pending or closed tab has no contents and answers
+  // nil.
+  arkt::CheckFacadeEntry();
+  arkt::CopyFrame(_pending ? nullptr : self.contents, maxPixelSize,
+                  completion);
 }
 
 - (void)navigateToURL:(NSURL*)url {
