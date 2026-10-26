@@ -137,7 +137,7 @@ struct SidebarStoreTests {
       let database = try ArktDatabase.open(at: url)
       defer { try? database.close() }
       let applied = try await database.writer.read { try ArktDatabase.migrator.completedMigrations($0) }
-      #expect(applied == ["v1-sidebar", "v2-archive", "v3-settings"])
+      #expect(applied == ["v1-sidebar", "v2-archive", "v3-settings", "v4-archive-search"])
     }
   }
 
@@ -213,7 +213,7 @@ struct SidebarStoreTests {
       defer { try? v2.close() }
       #expect(
         try await v2.writer.read { try migrator.completedMigrations($0) }
-          == ["v1-sidebar", "v2-archive", "v3-settings", "v2-test"])
+          == ["v1-sidebar", "v2-archive", "v3-settings", "v4-archive-search", "v2-test"])
 
       let made = try Backups.list(in: backups)
       #expect(made.count == 1)

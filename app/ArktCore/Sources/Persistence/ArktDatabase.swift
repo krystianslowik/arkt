@@ -1,5 +1,7 @@
+import Archive
 import Foundation
 import GRDB
+import SidebarModel
 
 /// Arkt's single SQLite database: sidebar snapshot, archive and settings.
 ///
@@ -130,6 +132,28 @@ public struct ArktDatabase: Sendable {
           updated_at REAL NOT NULL
         ) STRICT
         """)
+    }
+    // Opening an existing v1, v2 or v3 file runs this after `open`'s pre-migration backup.
+    migrator.registerMigration("v4-archive-search") { db in
+      // #111: `search_text` holds `ArchiveSearch.searchText(of:)` (folded titles and URLs of the item and every node
+      // inside it), so the Archive search is Unicode case- and diacritic-insensitive and finds folder children.
+      // Existing rows are filled from their snapshot; a row whose snapshot does not decode keeps its title and URL.
+      try db.execute(sql: "ALTER TABLE archived_item ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
+      let decoder = SidebarStorageFormat.makeDecoder()
+      let rows = try Row.fetchAll(db, sql: "SELECT id, title, url, snapshot FROM archived_item")
+      for row in rows {
+        let id: String? = row["id"]
+        let body: Data? = row["snapshot"]
+        let text: String
+        if let body, let snapshot = try? decoder.decode(NodeSnapshot.self, from: body) {
+          text = ArchiveSearch.searchText(of: snapshot)
+        } else {
+          let title: String? = row["title"]
+          let url: String? = row["url"]
+          text = [title, url].compactMap { $0 }.map(ArchiveSearch.fold).joined(separator: "\n")
+        }
+        try db.execute(sql: "UPDATE archived_item SET search_text = ? WHERE id = ?", arguments: [text, id])
+      }
     }
     return migrator
   }
