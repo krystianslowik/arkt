@@ -1337,3 +1337,59 @@ functions, one parameterized over both sources); ShellKitGUITests 554 executed, 
 `SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU`, both at load1 about 5 to 8 with
 another worktree's build running; isolated reruns passed (2 of 3 and 1 of 1) with every frame at 8.33 ms - the
 flake mode the #102 section records.
+
+## Pinned tabs: pin, reset to pinned URL, replace pin (#108) (2026-10-26)
+
+Spec section 2.4 (BH-055 to BH-066).
+
+- **The pinned URL is the node's `url`.** Pinned and Favorite nodes no longer track the page's URL on navigation
+  (`writesLiveURL(toSection:)`, one rule behind `.urlChanged` and the create-tab replay); the title still follows
+  the page (BH-062). That matches the reference browser's own model (`savedURL`), needs no storage-format change,
+  and makes reopening a closed pin load the pinned URL (BH-068's direction; BH-068 itself stays
+  NEEDS-RUNTIME-CHECK). Reset (BH-057) navigates the live engine tab back to the node URL; Replace Pin (BH-060)
+  writes the page's URL into the node.
+- **BH-055 (pin / unpin).** Cmd-D (KB-012, File > Pin / Unpin Tab, newly reserved so a focused page cannot
+  swallow it) and the rows' context menu: a tab directly in Today pins (appended to Pinned [I]) with the [S]
+  toast "Pinned Tab to <Space>"; a pinned tab unpins (on top of Today [I]) with "Un-Pinned Tab from <Space>". A
+  focused pane pins its whole Split View (BH-115); panes are never moved alone, and Favorites and foldered tabs
+  have no toggle (a foldered tab is pinned through its folder). The page never closes and the row never archives
+  on a toggle. Dragging above the divider is #104 (GS-007); the command bar actions land with #112's action
+  search.
+- **BH-056.** Holds on main: same-site links navigate in place, and a cross-site link in a pinned tab opens a
+  Peek over it - #349's link-activation routing (`PeekRouting` gates on the pinned / Favorites section), merged
+  while this branch was open; nothing was left to do here.
+- **BH-057.** File > Back to Pinned URL (KB-041, unbound as in the reference browser) and the row context menu
+  reset a navigated pinned tab; a favicon click on a navigated pinned row resets it (GS-005), a click anywhere
+  else on the row still activates it. The reset-family items are enabled only while the tab sits away from its
+  pinned URL.
+- **BH-058.** Cmd-click on the favicon resets the pin and opens the page it was on in a new background [I] Today
+  tab.
+- **BH-059.** Spaces > Reset Space navigates every loaded, navigated pinned tab of the current Space (foldered
+  tabs and split panes included) back to its pinned URL; disabled with nothing to reset.
+- **BH-060.** Replace Pin with Current Page on the pinned row's context menu. "Edit Pinned URL" (the variant
+  with a text field) waits on the design pass (#304).
+- **BH-061.** Separate From Pinned Tab: the page detaches into a new Today tab on top (focused [I]) and the pin
+  resets; the page loads again in the new tab [I] - moving the live page across tabs is the same handoff BH-066
+  needs (#300). The hover affordance waits on the design pass (#304); the action lives on the context menu
+  meanwhile.
+- **BH-063.** Deferred per the issue (RT-16, a maintainer runtime check).
+- **BH-064.** Holds trivially: no rename prompt exists on main (rename is #105); when #105 lands, its prompt must
+  not open on a pin.
+- **BH-065.** The Space header grows a caret (shown while the Space has pinned tabs) plus "Collapse Pinned" /
+  "Expand Pinned" in the Space options menu ([S] names): the pinned rows leave the outline and the divider stays
+  [I] (the collapsed look is unmeasured). The state is per window (DM 3.1), kept in the page - not persisted
+  across launches [I] (window-state persistence is #331's shape). While collapsed the title draws bold when the
+  window shows one of the section's tabs [I] (PARITY: "the last pinned tab is in view"). The title click keeps
+  opening the rename field (BH-038; TB24's title-toggle variant is not taken).
+- **BH-066.** Two windows already show the same Space's pinned and Today tabs (one source). The one-loaded-copy
+  handoff is deferred to #300 (the known bug: selecting a row that is live in another window loads the page a
+  second time).
+
+Tests (after rebasing on main with #349): ArktCore 387 (not touched). ShellKit non-GUI 798 passed (791 + 7 new:
+`PinnedTabLogicTests`; `ReservedKeysTests` moves Cmd-D into the reserved set); ShellKitGUITests 636 executed, 9
+skipped, 0 failures (610 + 26 new: `PinnedTabTests` 25, `MainMenuKeyEquivalentTests` 1). Existing expectations
+updated for the new menu items and the header caret: `SpaceChromeTests` (options menu), `SplitSidebarTests` (3 menu
+assertions), `SidebarViewTests.testContainerLayout` (title leading with the caret). The Debug app builds.
+`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` flaked as documented in the #102 and #107 sections in
+an earlier loaded run (1 to 2 frames over 8.6 ms at load15 5.4 with other worktrees' builds running); the final
+full run is green.
