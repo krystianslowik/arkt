@@ -28,11 +28,13 @@ public enum TrackerStripping {
   /// The URL without its tracker parameters, and whether anything was dropped (`false`: the URL is unchanged, and
   /// the copy says "Current URL").
   public static func clean(_ url: URL) -> (url: URL, stripped: Bool) {
+    // The percent-encoded items keep every kept parameter byte for byte: the decoded `queryItems` would write
+    // `%2B` back as `+` (a space to the server) and `%2F` as `/`.
     guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-          let items = components.queryItems, !items.isEmpty else { return (url, false) }
-    let kept = items.filter { !isTracker($0.name) }
+          let items = components.percentEncodedQueryItems, !items.isEmpty else { return (url, false) }
+    let kept = items.filter { !isTracker($0.name.removingPercentEncoding ?? $0.name) }
     guard kept.count != items.count else { return (url, false) }
-    components.queryItems = kept.isEmpty ? nil : kept
+    components.percentEncodedQueryItems = kept.isEmpty ? nil : kept
     guard let cleaned = components.url else { return (url, false) }
     return (cleaned, true)
   }

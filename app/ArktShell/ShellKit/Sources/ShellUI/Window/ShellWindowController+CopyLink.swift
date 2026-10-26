@@ -34,7 +34,7 @@ extension ShellWindowController {
     guard !targets.isEmpty else { return }
     write(targets.map { target in
       let url = TrackerStripping.clean(target.url).url.absoluteString
-      return "[\(target.title)](\(url))"
+      return LinkFormat.markdown(title: target.title, url: url)
     }.joined(separator: "\n"))
     toasts.show(Toast(text: targets.count == 1 ? "Copied as Markdown" : "Copied as Markdown links"))
   }
@@ -46,7 +46,7 @@ extension ShellWindowController {
     guard !targets.isEmpty else { return }
     write(targets.map { target in
       let url = TrackerStripping.clean(target.url).url.absoluteString
-      return "> [\(target.title)](\(url))"
+      return LinkFormat.quote(title: target.title, url: url)
     }.joined(separator: "\n"))
     toasts.show(Toast(text: targets.count == 1 ? "Copied as Quote" : "Copied as Quote links"))
   }

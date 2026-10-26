@@ -77,4 +77,19 @@ struct TrackerStrippingTests {
     #expect(url.absoluteString == "https://example.com/p?page=1")
     #expect(stripped)
   }
+
+  /// The kept parameters are copied byte for byte: an encoded `+`, `/`, `?`, `&` or `=` stays encoded, so the server
+  /// reads the same values.
+  @Test func keptParametersKeepTheirPercentEncoding() {
+    let (url, stripped) = clean("https://example.com/s?q=1%2B1&utm_source=x&r=%2Fx%3Fy&t=a%26b%3Dc&s=a+b")
+    #expect(url.absoluteString == "https://example.com/s?q=1%2B1&r=%2Fx%3Fy&t=a%26b%3Dc&s=a+b")
+    #expect(stripped)
+  }
+
+  /// A percent-encoded tracker name is still a tracker.
+  @Test func anEncodedTrackerNameIsDropped() {
+    let (url, stripped) = clean("https://example.com/p?utm%5Fsource=x&keep=1")
+    #expect(url.absoluteString == "https://example.com/p?keep=1")
+    #expect(stripped)
+  }
 }
