@@ -29,7 +29,8 @@ final class ArchiveWindowTests: XCTestCase {
 
   private static func rows(_ count: Int, from start: Int = 0) -> [ArchiveRow] {
     (start..<start + count).map {
-      ArchiveRow(id: UUID(), title: "Item \($0)", detail: "a.example - Work - 1 hour ago", reason: "Closed")
+      ArchiveRow(id: UUID(), title: "Item \($0)", detail: "a.example - Work - 1 hour ago", reason: "Closed",
+                 kind: .tab(URL(string: "https://a.example")), place: .space(color: nil), time: "1h")
     }
   }
 
@@ -44,8 +45,13 @@ final class ArchiveWindowTests: XCTestCase {
     let controller = makeWindow(StubArchiveSource())
     let window = try XCTUnwrap(controller.window)
     XCTAssertEqual(window.title, "Archive")
-    XCTAssertEqual(window.contentRect(forFrameRect: window.frame).size, NSSize(width: 600, height: 480))
+    let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
+    XCTAssertEqual(window.frame.size,
+                   NSWindow.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 600, height: 480), styleMask: style).size,
+                   "600 x 480 below the title bar, as before the unified bar")
     XCTAssertTrue(window.styleMask.contains(.titled))
+    XCTAssertTrue(window.styleMask.contains(.fullSizeContentView), "one unified bar")
+    XCTAssertTrue(window.titlebarAppearsTransparent)
     XCTAssertFalse(window.isReleasedWhenClosed, "the app fronts the same window again")
     XCTAssertTrue(controller.tableView.enclosingScrollView != nil)
   }
@@ -73,14 +79,15 @@ final class ArchiveWindowTests: XCTestCase {
     XCTAssertEqual(source.calls, [.loadPage])
     XCTAssertEqual(controller.tableView.numberOfRows, 3)
     let first = try cell(controller, row: 0)
-    XCTAssertEqual(first.titleField.stringValue, "Item 0")
-    XCTAssertEqual(first.detailField.stringValue, "a.example - Work - 1 hour ago - Closed")
+    XCTAssertEqual(first.title, "Item 0")
+    XCTAssertEqual(first.timeField.stringValue, "1h")
+    first.frame.size.width = 560
     first.layoutSubtreeIfNeeded()
-    XCTAssertGreaterThanOrEqual(first.titleField.frame.minY, first.detailField.frame.maxY, "title above detail")
-    XCTAssertGreaterThan(first.detailField.frame.width, 0)
+    XCTAssertLessThan(first.titleView.frame.maxX, first.placeView.frame.minX, "one line: title, then the dot")
+    XCTAssertLessThan(first.placeView.frame.maxX, first.timeField.frame.minX, "then the time")
     XCTAssertFalse(controller.footerLabel.isHidden)
-    XCTAssertEqual(controller.footerLabel.stringValue, "3 items could not be read")
-    XCTAssertFalse(controller.loadMoreButton.isHidden)
+    XCTAssertEqual(controller.footerLabel.stringValue, "3 items, 3 items could not be read")
+    XCTAssertTrue(controller.mayHaveMore)
   }
 
   /// #91: VoiceOver reads a row in one announcement (title, place, date, reason); the two text fields are not read
@@ -96,9 +103,10 @@ final class ArchiveWindowTests: XCTestCase {
     XCTAssertTrue(row.isAccessibilityElement())
     XCTAssertEqual(row.accessibilityLabel(), "Item 0, a.example - Work - 1 hour ago, Closed")
     let children = NSAccessibility.unignoredChildren(from: row.accessibilityChildren() ?? [])
-    for field in [row.titleField, row.detailField] {
+    for field in [row.countField, row.timeField] {
       XCTAssertFalse(children.contains { ($0 as AnyObject) === field || ($0 as AnyObject) === field.cell })
     }
+    XCTAssertFalse(children.contains { ($0 as AnyObject) === row.titleView })
   }
 
   /// Accessibility rows come from the loaded page through `AXProxyRows`, not from row views: the window content
@@ -136,15 +144,21 @@ final class ArchiveWindowTests: XCTestCase {
                    ["Item 10", "Item 11", "Item 12"])
   }
 
-  func testFooterAndLoadMoreHiddenWhenNothingIsMissing() async throws {
+  /// The footer counts the archive; an empty archive shows no count.
+  func testFooterCountsTheItems() async throws {
     let source = StubArchiveSource()
-    source.pages = [ArchiveListPage(rows: Self.rows(2), unreadable: 0, mayHaveMore: false)]
+    source.pages = [
+      ArchiveListPage(rows: Self.rows(2), unreadable: 0, mayHaveMore: false, total: 42, matching: 42),
+      ArchiveListPage(rows: [], unreadable: 0, mayHaveMore: false, total: 0, matching: 0),
+    ]
     let controller = makeWindow(source)
 
     await controller.reload()
+    XCTAssertEqual(controller.footerLabel.stringValue, "42 items")
+    XCTAssertFalse(controller.mayHaveMore)
 
+    await controller.reload()
     XCTAssertTrue(controller.footerLabel.isHidden)
-    XCTAssertTrue(controller.loadMoreButton.isHidden)
   }
 
   func testOneUnreadableItemUsesTheSingular() async throws {
@@ -182,23 +196,25 @@ final class ArchiveWindowTests: XCTestCase {
 
     XCTAssertEqual(source.calls, [.loadPage, .loadMore])
     XCTAssertEqual(controller.tableView.numberOfRows, 3)
-    XCTAssertTrue(controller.loadMoreButton.isHidden)
+    XCTAssertFalse(controller.mayHaveMore)
   }
 
-  func testLoadMoreButtonAsksTheSource() async throws {
+  /// No Load More button (design section 5): a shown list whose end is in view loads the next page by itself.
+  func testTheNextPageLoadsWhenTheEndOfTheListIsInView() async throws {
     let source = StubArchiveSource()
     source.pages = [
       ArchiveListPage(rows: Self.rows(1), unreadable: 0, mayHaveMore: true),
       ArchiveListPage(rows: Self.rows(2), unreadable: 0, mayHaveMore: false),
     ]
     let controller = makeWindow(source)
-    await controller.reload()
 
-    controller.loadMoreButton.performClick(nil)
+    controller.show()
+    await controller.pendingLoad?.value
     await controller.pendingLoad?.value
 
     XCTAssertEqual(source.calls, [.loadPage, .loadMore])
     XCTAssertEqual(controller.tableView.numberOfRows, 2)
+    XCTAssertFalse(controller.isLoadingMore)
   }
 
   func testShowingAgainReloads() async throws {

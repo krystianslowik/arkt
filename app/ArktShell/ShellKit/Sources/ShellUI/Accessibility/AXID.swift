@@ -106,18 +106,30 @@ public enum AXID {
     public static let closed = "closed"
   }
 
-  /// Archive window, table, rows, buttons and footer (group U4c).
+  /// Archive window, table, rows, search, filters, buttons and footer (group U4c, #111).
   public enum Archive {
     public static let window = "archive.window"
     public static let table = "archive.table"
     /// Label: archived item title.
     public static let row = "archive.row"
     public static let restore = "archive.restore"
-    public static let loadMore = "archive.loadMore"
     /// Value: footer text.
     public static let footer = "archive.footer"
-    /// Reserved for #111 (Archive search); unused until #111 lands.
+    /// The search field (#111). Label "Search Archive".
     public static let search = "archive.search"
+    /// The filter button. Value: "N filters active" while any filter is on.
+    public static let filter = "archive.filter"
+    /// A filter chip: `archive.chip.<name>` (`chip(_:)`), a group with a "Remove filter" button.
+    public static let chipPrefix = "archive.chip."
+    public static func chip(_ name: String) -> String { chipPrefix + name }
+    /// The "Clear Filters" link of the chip strip.
+    public static let clearFilters = "archive.clearFilters"
+    /// The one-time auto-archive education banner (BH-089).
+    public static let banner = "archive.banner"
+    /// The Clear Archive link in the footer.
+    public static let clear = "archive.clear"
+    /// The confirmation sheet's Clear Archive button.
+    public static let clearConfirm = "archive.clearConfirm"
   }
 
   /// Split View container, pane cards, dividers and closed-pane reopen button (group U4c).
