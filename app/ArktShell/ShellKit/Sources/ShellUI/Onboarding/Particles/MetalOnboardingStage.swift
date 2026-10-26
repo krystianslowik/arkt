@@ -85,8 +85,20 @@ public final class MetalOnboardingStage: NSObject, OnboardingStage {
     fadeStart = time + 0.9
     finishCompletion = completion
     settleDeadline = .greatestFiniteMagnitude
+    guard visible else {
+      release()                                        // nothing on screen to fold: done at once
+      return
+    }
     start()
+    // The fold takes about 1.7 s on the field's clock; a window that stops ticking (occluded, ordered out) must not
+    // keep the overlay up.
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.finishTimeout) { [weak self] in
+      guard let self, !self.isReleased else { return }
+      self.release()
+    }
   }
+
+  static let finishTimeout: TimeInterval = 2.5
 
   public func setVisible(_ visible: Bool) {
     self.visible = visible

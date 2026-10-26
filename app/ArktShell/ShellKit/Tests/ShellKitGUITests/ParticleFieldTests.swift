@@ -2,6 +2,7 @@ import AppKit
 import Metal
 import QuartzCore
 import XCTest
+import simd
 @testable import ShellUI
 
 /// The particle field on the GPU (onboarding spec, section 7.4): the kernel springs motes onto their targets, Reduce
