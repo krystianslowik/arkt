@@ -85,7 +85,12 @@ final class ArchiveChipView: NSView {
   private func restyle() {
     let flavor = archiveFlavor
     let scale = window?.backingScaleFactor ?? 2
-    ArchiveMotion.set { layer?.backgroundColor = displayedFill.cgColor }
+    let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+    ArchiveMotion.set {
+      layer?.backgroundColor = displayedFill.cgColor
+      layer?.borderWidth = increased ? 1 : 0
+      layer?.borderColor = ArchiveTokens.increasedContrastEdge.resolve(flavor).cgColor
+    }
     label.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     switch mark {
     case .dot(let color):

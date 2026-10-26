@@ -240,6 +240,10 @@ final class ArchiveRowView: NSTableRowView {
       let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
       fillLayer.shadowColor = shadow.cgColor
       fillLayer.shadowOpacity = isInteractive && isSelected && shadow.alpha > 0 ? 1 : 0
+      // Increase Contrast: the selected row gets the 1 pt edge (in dark it has no shadow to lift it).
+      let edged = isInteractive && isSelected && NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+      fillLayer.borderWidth = edged ? 1 : 0
+      fillLayer.borderColor = ArchiveTokens.increasedContrastEdge.resolve(flavor).cgColor
       fillLayer.shadowPath = CGPath(roundedRect: CGRect(origin: .zero, size: fillRect.size),
                                     cornerWidth: SidebarMetrics.rowCornerRadius,
                                     cornerHeight: SidebarMetrics.rowCornerRadius, transform: nil)

@@ -298,7 +298,11 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
 
   @objc func filterButtonPressed(_ sender: Any?) {
     let menu = makeFilterMenu()
-    menu.popUp(positioning: nil, at: NSPoint(x: 0, y: filterButton.bounds.height + 4), in: filterButton)
+    // Below the button, its trailing edge on the button's (the button sits at the window's trailing edge).
+    let bounds = filterButton.bounds
+    let x = bounds.width - menu.size.width
+    let y = filterButton.isFlipped ? bounds.height + 4 : -4
+    menu.popUp(positioning: nil, at: NSPoint(x: x, y: y), in: filterButton)
   }
 
   /// One chip per active filter, plus Clear Filters; the strip fades in and out (layout never animates).

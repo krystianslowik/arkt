@@ -426,6 +426,8 @@ final class ArchiveSearchField: NSSearchField {
     ])
     guard let cell = cell as? ArchiveSearchFieldCell else { return }
     cell.fill = ShellTokens.sidebarItemBackground.resolve(flavor)
+    cell.edge = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+      ? ArchiveTokens.increasedContrastEdge.resolve(flavor) : nil
     cell.searchButtonCell?.image = SymbolImageCache.shared.symbol(
       "magnifyingglass", box: 14, color: ShellTokens.sidebarForeground.resolve(flavor), scale: scale)
     cell.searchButtonCell?.alternateImage = nil
@@ -455,10 +457,20 @@ final class ArchiveSearchFieldCell: NSSearchFieldCell {
   private static let trailing: CGFloat = 8
   private static let cancel: CGFloat = 16
 
+  /// Increase Contrast: a 1 pt edge around the pill.
+  var edge: RGBA?
+
   override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
     fill.nsColor().setFill()
     let radius = ArchiveMetrics.fieldRadius
     NSBezierPath(roundedRect: cellFrame, xRadius: radius, yRadius: radius).fill()
+    if let edge {
+      edge.nsColor().setStroke()
+      let path = NSBezierPath(roundedRect: cellFrame.insetBy(dx: 0.5, dy: 0.5), xRadius: radius - 0.5,
+                              yRadius: radius - 0.5)
+      path.lineWidth = 1
+      path.stroke()
+    }
     drawInterior(withFrame: cellFrame, in: controlView)
   }
 
