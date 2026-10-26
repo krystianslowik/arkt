@@ -64,7 +64,20 @@ struct ChromiumMoveTabTests {
 
     #expect(!engine.windowIDs.contains(left))
     #expect(browser.host.window !== host.window)
-    #expect(!browser.host.window.isVisible)
+    let stand = browser.host.window
+    #expect(!stand.isVisible)
+    #expect(!stand.canBecomeKey && !stand.canBecomeMain)
+    #expect(stand.isExcludedFromWindowsMenu)
+    #expect(stand.collectionBehavior.isSuperset(of: [.transient, .ignoresCycle]))
+  }
+
+  /// One stand-in per engine window: a second detach keeps it.
+  @Test func detachingTwiceKeepsOneStandInWindow() {
+    let adapter = WindowHostAdapter(host: StubWindowHost())
+    adapter.detach()
+    let stand = adapter.window
+    adapter.detach()
+    #expect(adapter.window === stand)
   }
 
   @Test func ownWindowAndUnknownWindowAreNoOps() {

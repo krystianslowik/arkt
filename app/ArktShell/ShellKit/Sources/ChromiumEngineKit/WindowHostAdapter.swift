@@ -71,6 +71,8 @@ final class WindowHostAdapter: NSObject, ArktWindowHost {
     if detachedWindow == nil {
       let stand = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: true)
       stand.isReleasedWhenClosed = false
+      stand.isExcludedFromWindowsMenu = true                 // never listed, cycled or shown in Mission Control
+      stand.collectionBehavior = [.transient, .ignoresCycle]
       detachedWindow = stand
     }
     closeRequested = nil
