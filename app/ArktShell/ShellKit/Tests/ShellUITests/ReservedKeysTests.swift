@@ -20,6 +20,7 @@ struct ReservedKeysTests {
     (kVK_ANSI_C, "c", NSEvent.ModifierFlags([.command, .shift, .option]).rawValue),    // KB-014 (#118)
     (kVK_ANSI_C, "c", NSEvent.ModifierFlags([.command, .shift, .control]).rawValue),   // KB-015 (#118)
     (kVK_ANSI_V, "v", NSEvent.ModifierFlags([.command, .option]).rawValue),            // KB-016 (#118)
+    (kVK_ANSI_K, "k", NSEvent.ModifierFlags([.command, .shift]).rawValue),             // KB-019 (#110): clear Today
   ])
   func `every reserved letter key matches`(keyCode: Int, character: String, modifiers: UInt) {
     #expect(keys.matches(keyCode: UInt16(keyCode), character: character,
@@ -89,5 +90,12 @@ struct ReservedKeysTests {
     #expect(keys.matches(keyCode: UInt16(kVK_Tab), character: "\t", modifiers: .control))
     #expect(keys.matches(keyCode: UInt16(kVK_Tab), character: "\t", modifiers: [.control, .shift]))
     #expect(!keys.matches(keyCode: UInt16(kVK_Tab), character: "\t", modifiers: []))
+  }
+
+  /// KB-019 (#110): Shift-Cmd-K clears the current Space's Today tabs; Cmd-K alone stays the page's.
+  @Test func `clear today is reserved with shift only`() {
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_K), character: "k", modifiers: [.command, .shift]))
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_K), character: "K", modifiers: [.command, .shift]))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_K), character: "k", modifiers: .command))
   }
 }
