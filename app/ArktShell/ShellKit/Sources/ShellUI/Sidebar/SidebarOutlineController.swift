@@ -168,7 +168,6 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
       guard keyboardFocusRow != oldValue else { return }
       focusRingType = keyboardFocusRow == nil ? .none : .default
       noteFocusRingMaskChanged()
-      if let keyboardFocusRow { scrollRowToVisible(keyboardFocusRow) }
     }
   }
   /// Whether Up and Down may stop on a row (the divider may not).
@@ -177,6 +176,8 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   var onKeyboardReturn: (@MainActor (Int) -> Void)?
   /// Esc: focus goes back to the page.
   var onKeyboardEscape: (@MainActor () -> Void)?
+  /// Up or Down moved the focus row; the window scrolls it into view the way every keyboard reveal does.
+  var onKeyboardFocusMoved: (@MainActor (Int) -> Void)?
 
   /// The focused row's fill, where the ring is drawn.
   func keyboardFocusRect(_ row: Int) -> NSRect {
@@ -216,6 +217,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     while next >= 0, next < numberOfRows, !isKeyboardFocusable(next) { next += step }
     guard next >= 0, next < numberOfRows else { return }
     keyboardFocusRow = next
+    onKeyboardFocusMoved?(next)
   }
 
   /// Only Ctrl-Space makes the outline the key view (a click never did: selection is off), so it accepts first

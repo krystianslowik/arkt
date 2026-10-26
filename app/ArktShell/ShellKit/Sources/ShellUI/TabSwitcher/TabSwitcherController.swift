@@ -21,6 +21,8 @@ public final class TabSwitcherController {
   var currentNode: @MainActor () -> NodeID? = { nil }
   /// What a row shows; nil leaves the tab out (it is gone from the sidebar).
   var row: @MainActor (NodeID) -> TabSwitcherRow? = { _ in nil }
+  /// Whether a tab can still be listed; cheap, so a sidebar change does not build rows.
+  var isAlive: @MainActor (NodeID) -> Bool = { _ in false }
   /// The flavor of the window's current Space.
   var flavor: @MainActor () -> ThemeFlavor = { .light }
   /// Ctrl released: show this tab.
@@ -51,13 +53,13 @@ public final class TabSwitcherController {
   /// The sidebar changed: tabs that left it leave the list, and an open switcher collapses their rows as if they
   /// were closed with W.
   public func sourceDidChange() {
-    recent.prune { self.row($0) != nil }
+    recent.prune { self.isAlive($0) }
     guard let session else { return }
-    if let openedOn, row(openedOn) == nil {
+    if let openedOn, !isAlive(openedOn) {
       cancel(announce: false)
       return
     }
-    for node in session.rows where row(node) == nil { removeRow(node) }
+    for node in session.rows where !isAlive(node) { removeRow(node) }
   }
 
   /// The window stopped being key: the switcher cancels.
@@ -120,7 +122,7 @@ public final class TabSwitcherController {
   /// does not beep or reach the page).
   func open(_ direction: TabSwitcherSession.Direction) {
     let current = currentNode()
-    recent.prune { self.row($0) != nil }
+    recent.prune { self.isAlive($0) }
     let candidates = recent.previous(excluding: current, limit: TabSwitcherSession.maximumRows)
     let filled = candidates.compactMap { row($0) }
     guard let session = TabSwitcherSession(rows: filled.map(\.node), direction: direction),

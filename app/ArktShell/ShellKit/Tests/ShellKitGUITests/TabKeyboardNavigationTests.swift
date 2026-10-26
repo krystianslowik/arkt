@@ -227,6 +227,33 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertFalse(controller.window?.firstResponder === outline)
   }
 
+  /// With motion, Ctrl-Space on an off-screen row scrolls once, by the reveal spring: no jump before it.
+  func testCtrlSpaceWithMotionScrollsOnlyThroughTheRevealSpring() throws {
+    controller.sidebarReveal.reduceMotion = { false }
+    controller.showWindow(nil)
+    controller.activate(node: try XCTUnwrap(today.last))
+    page.scrollView.contentView.scroll(to: .zero)
+    page.scrollView.reflectScrolledClipView(page.scrollView.contentView)
+
+    controller.revealCurrentTab(nil)
+
+    XCTAssertTrue(controller.sidebarReveal.isScrolling)
+    XCTAssertEqual(page.scrollView.contentView.bounds.minY, 0, "nothing jumped ahead of the spring")
+    waitUntil("the reveal settled") { !self.controller.sidebarReveal.isScrolling }
+    let row = try XCTUnwrap(outline.keyboardFocusRow)
+    XCTAssertTrue(page.scrollView.contentView.bounds.contains(outline.keyboardFocusRect(row)))
+  }
+
+  /// Arrow keys past the visible rows scroll the focus row into view.
+  func testArrowKeysScrollTheFocusRowIntoView() throws {
+    controller.activate(node: today[0])
+    controller.revealCurrentTab(nil)
+    for _ in 0..<25 { outline.keyDown(with: try key(kVK_DownArrow)) }
+    let row = try XCTUnwrap(outline.keyboardFocusRow)
+    XCTAssertEqual(row, page.outlineController.row(for: today[25]))
+    XCTAssertTrue(page.scrollView.contentView.bounds.contains(outline.keyboardFocusRect(row)))
+  }
+
   func testCtrlSpaceShowsAHiddenSidebar() {
     controller.activate(node: pinned)
     controller.rootView.sidebarVisible = false

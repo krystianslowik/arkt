@@ -127,10 +127,9 @@ public final class TabSwitcherView: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     layer?.opacity = 1
-    if self.flavor != flavor || surface.backgroundColor == nil {
-      self.flavor = flavor
-      applyColors()
-    }
+    ghost.isHidden = true                           // a W fade still running from the last session ends here
+    self.flavor = flavor
+    applyColors()                                   // also picks up a Reduce Transparency change
     self.frame = frame
     fill(rows)
     setHighlight(index: highlight, animated: false)

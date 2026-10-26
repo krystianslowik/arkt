@@ -11,6 +11,7 @@ extension ShellWindowController {
     rootView.addSubview(switcher.view)
     switcher.currentNode = { [weak self] in self?.currentNode }
     switcher.row = { [weak self] node in self?.switcherRow(for: node) }
+    switcher.isAlive = { [weak self] node in self?.isSwitchable(node) ?? false }
     switcher.flavor = { [weak self] in self?.currentFlavor ?? .light }
     switcher.onCommit = { [weak self] node in self?.activateByKeyboard(node) }
     switcher.onClose = { [weak self] node in self?.close(node: node) }
@@ -25,14 +26,19 @@ extension ShellWindowController {
     currentSpace.flatMap { sidebar.space($0)?.theme.flavor } ?? .light
   }
 
+  /// A tab of this window's profile that is still in the sidebar (cheap: no row is built).
+  func isSwitchable(_ node: NodeID) -> Bool {
+    guard case .tab? = sidebar.node(node) else { return false }
+    if let space = sidebar.spaceID(containing: node) {
+      return sidebar.space(space)?.profile == sidebarController.profile
+    }
+    return sidebar.section(containing: node) == .favorites(profile: sidebarController.profile)
+  }
+
   /// A switcher row for a tab of this window's profile; nil for anything else (gone, a folder, another profile).
   func switcherRow(for node: NodeID) -> TabSwitcherRow? {
-    guard case .tab(_, let url, let title)? = sidebar.node(node) else { return nil }
+    guard isSwitchable(node), case .tab(_, let url, let title)? = sidebar.node(node) else { return nil }
     let spaceInfo = sidebar.spaceID(containing: node).flatMap { sidebar.space($0) }
-    if let spaceInfo, spaceInfo.profile != sidebarController.profile { return nil }
-    if spaceInfo == nil, sidebar.section(containing: node) != .favorites(profile: sidebarController.profile) {
-      return nil
-    }
     let favicon = sidebarController.favicons[node]
       ?? SidebarGlyphs.letter(for: title, url: url, flavor: currentFlavor, size: SidebarMetrics.faviconSize,
                               scale: window?.backingScaleFactor ?? 2)
@@ -111,6 +117,10 @@ extension ShellWindowController {
       ?? (0..<page.outlineView.numberOfRows).first { controller.isKeyboardFocusable(row: $0) }
     guard let row else { return }
     controller.onKeyboardFocusExit = { [weak self] in self?.returnFocusToPage() }
+    page.outlineView.onKeyboardFocusMoved = { [weak self, weak page] row in
+      guard let self, let page else { return }
+      self.sidebarReveal.reveal(row: row, in: page, flavor: self.currentFlavor)
+    }
     controller.focusKeyboard(on: row)
     guard window?.makeFirstResponder(page.outlineView) == true, window?.firstResponder === page.outlineView else {
       page.outlineView.keyboardFocusRow = nil
