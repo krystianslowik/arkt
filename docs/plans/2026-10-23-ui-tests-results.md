@@ -962,8 +962,9 @@ Base: `origin/main` at `98a8445`, branch `chore/181-parity-report`. The counts a
 tests and #54 to #58 and #111 were open. It now has 45 tests, those issues are closed, and U16's deferred rows were
 checked one by one against `main`.
 
-Deferred rows: 25, none added and none dropped. Each of the 25 ids still has no naming test in
-`app/ArktShell/UITests` (`grep -rn "func test_"`), so every line still records a real gap.
+Deferred rows: 25, none added and none dropped. None of the 25 ids has a passing naming test in
+`app/ArktShell/UITests` (`grep -rn "func test_"`): 24 have no naming test at all, and GS-001's only one,
+`test_GS001_twoFingerSwipeMovesSpace`, skips itself (#26). So every line still records a real gap.
 
 | Rows | Was | Now | Why |
 |---|---|---|---|
