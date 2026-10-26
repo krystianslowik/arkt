@@ -239,8 +239,50 @@ final class FavoritesCollectionView: NSCollectionView {
   }
 }
 
-/// Favorites grid: an NSCollectionView with a flow layout (3 columns, 9 pt gaps). Not inside a scrolling clip;
-/// its height is `FavoritesLayout.height(itemCount:)`. Shared by every Space of the same profile (BH-045).
+/// Places each Favorite at the frame the grid answers (`FavoritesLayout`, or the column spring's frame while it runs).
+/// Every item is answered for any rect, so the grid keeps every Favorite realized (see `tileViews()`).
+@MainActor
+final class FavoritesCollectionLayout: NSCollectionViewLayout {
+  /// The frame of an item for a content width.
+  var frameProvider: (@MainActor (_ item: Int, _ contentWidth: CGFloat) -> CGRect)?
+  private var attributes: [NSCollectionViewLayoutAttributes] = []
+  private var contentSize: NSSize = .zero
+  private var preparedWidth: CGFloat = 0
+
+  override func prepare() {
+    super.prepare()
+    guard let collectionView, collectionView.numberOfSections > 0 else {
+      attributes = []
+      contentSize = .zero
+      return
+    }
+    let width = collectionView.bounds.width
+    preparedWidth = width
+    attributes = (0..<collectionView.numberOfItems(inSection: 0)).map { item in
+      let attribute = NSCollectionViewLayoutAttributes(forItemWith: IndexPath(item: item, section: 0))
+      attribute.frame = frameProvider?(item, width) ?? .zero
+      return attribute
+    }
+    contentSize = NSSize(width: width, height: attributes.map(\.frame.maxY).max() ?? 0)
+  }
+
+  override var collectionViewContentSize: NSSize { contentSize }
+
+  override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] { attributes }
+
+  override func layoutAttributesForItem(at indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+    attributes.indices.contains(indexPath.item) ? attributes[indexPath.item] : nil
+  }
+
+  override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool {
+    newBounds.width != preparedWidth
+  }
+}
+
+/// Favorites grid: an NSCollectionView placing 1 to 4 columns of tiles by width, rows filled evenly, 9 pt gaps
+/// (#337). Not inside a scrolling clip; its height is `preferredHeight(contentWidth:)`. A sidebar resize that changes
+/// the column count moves the tiles on a spring (`FavoritesColumnMotion`). Shared by every Space of the same profile
+/// (BH-045).
 @MainActor
 public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSCollectionViewDelegate, HoverResyncHost {
   public let source: any SidebarSource
@@ -280,7 +322,16 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   private var didDragInMouseDown = false
   private var isDragging = false
 
-  private let flowLayout = NSCollectionViewFlowLayout()
+  private static var defaultContentWidth: CGFloat {
+    FavoritesLayout.contentWidth(sidebarWidth: ShellMetrics.standard.sidebarDefaultWidth)
+  }
+  private let gridLayout = FavoritesCollectionLayout()
+  /// The columns the tiles are in, or heading to while the column spring runs; the keyboard cursor follows it.
+  public private(set) var columns: Int
+  /// The content width `columns` was chosen for; nil until the grid first learns its width.
+  private var columnsWidth: CGFloat?
+  /// The spring of a width-driven column change; tests drive its clock.
+  let columnMotion = FavoritesColumnMotion()
   private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
     for case let item as FavoriteTileItem in collectionView.visibleItems() {
       item.tileView.syncHover(pointerInWindow: pointer)
@@ -295,14 +346,15 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   public init(source: any SidebarSource, profile: String) {
     self.source = source
     self.profile = profile
-    self.nodeIDs = source.children(of: .favorites(profile: profile))
+    let nodeIDs = source.children(of: .favorites(profile: profile))
+    self.nodeIDs = nodeIDs
+    self.columns = FavoritesLayout.columns(itemCount: nodeIDs.count, contentWidth: Self.defaultContentWidth)
     super.init(frame: .zero)
-    flowLayout.minimumInteritemSpacing = FavoritesLayout.gap
-    flowLayout.minimumLineSpacing = FavoritesLayout.gap
-    flowLayout.sectionInset = NSEdgeInsetsZero
-    flowLayout.itemSize = FavoritesLayout.itemSize(
-      contentWidth: FavoritesLayout.contentWidth(sidebarWidth: ShellMetrics.standard.sidebarDefaultWidth))
-    collectionView.collectionViewLayout = flowLayout
+    gridLayout.frameProvider = { [weak self] item, contentWidth in
+      self?.tileFrame(item, contentWidth: contentWidth) ?? .zero
+    }
+    collectionView.collectionViewLayout = gridLayout
+    columnMotion.onFrame = { [weak self] in self?.columnMotionPresentedFrame() }
     collectionView.register(FavoriteTileItem.self, forItemWithIdentifier: FavoriteTileItem.reuseIdentifier)
     collectionView.isSelectable = true
     collectionView.allowsMultipleSelection = false
@@ -357,8 +409,46 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
 
   public override var isFlipped: Bool { true }
 
-  /// Height for the current item count.
-  public var preferredHeight: CGFloat { FavoritesLayout.height(itemCount: nodeIDs.count) }
+  /// Height for the current item count and columns, or for the rows the tiles span while the column spring moves
+  /// them. The sidebar calls `updateColumns(contentWidth:)` for its width before reading it.
+  public var preferredHeight: CGFloat {
+    guard !nodeIDs.isEmpty else { return 0 }
+    if columnMotion.isRunning {
+      let lastRow = nodeIDs.indices.map { columnMotion.slot(ofItem: $0)?.row ?? 0 }.max() ?? 0
+      return FavoritesLayout.height(rows: CGFloat(lastRow) + 1).rounded()
+    }
+    return FavoritesLayout.height(rows: CGFloat(FavoritesLayout.rows(itemCount: nodeIDs.count, columns: columns)))
+  }
+
+  /// Picks the columns for `contentWidth` (the sidebar's layout calls it before it reads `preferredHeight`). A change
+  /// at a new width of a grid on screen runs the column spring; the first width, Reduce Motion and an off-screen grid
+  /// switch at once.
+  public func updateColumns(contentWidth: CGFloat) {
+    defer { columnsWidth = contentWidth }
+    let target = FavoritesLayout.columns(itemCount: nodeIDs.count, contentWidth: contentWidth)
+    guard target != columns else { return }
+    let old = columns
+    columns = target
+    if columnsWidth != nil, columnsWidth != contentWidth, !nodeIDs.isEmpty, columnMotion.canAnimate(in: self) {
+      columnMotion.run(itemCount: nodeIDs.count, from: old, to: target, in: self)
+    } else {
+      columnMotion.settleNow()
+    }
+    gridLayout.invalidateLayout()
+  }
+
+  /// The frame of tile `item`: its slot in the current columns, or where the column spring has it now.
+  private func tileFrame(_ item: Int, contentWidth: CGFloat) -> CGRect {
+    let slot = columnMotion.slot(ofItem: item) ?? FavoritesLayout.slot(ofItem: item, columns: columns)
+    return FavoritesLayout.frame(of: slot, contentWidth: contentWidth)
+  }
+
+  /// A column spring frame: the tiles move, and the sidebar lays out again for the height they span.
+  private func columnMotionPresentedFrame() {
+    gridLayout.invalidateLayout()
+    needsLayout = true
+    superview?.needsLayout = true
+  }
 
   /// Letter tiles are bitmaps per backing scale; re-render the visible tiles when the window's scale changes.
   public override func viewDidChangeBackingProperties() {
@@ -368,12 +458,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
 
   public override func layout() {
     super.layout()
-    var size = FavoritesLayout.itemSize(contentWidth: bounds.width)
-    size.width = (size.width * 2).rounded(.down) / 2      // half-point floor so three tiles never wrap
-    if flowLayout.itemSize != size {
-      flowLayout.itemSize = size
-      flowLayout.invalidateLayout()
-    }
+    updateColumns(contentWidth: bounds.width)
     collectionView.frame = bounds
   }
 
@@ -510,10 +595,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   /// Outside that mode the original direct navigation (#94) still activates the destination.
   private func moveKeyboardFocus(deltaColumns: Int, deltaRows: Int) {
     guard !nodeIDs.isEmpty else { return }
-    let step = deltaColumns + deltaRows * FavoritesLayout.columns
+    let step = deltaColumns + deltaRows * columns
+    func neighbor(of index: Int) -> Int? {
+      FavoritesLayout.neighbor(of: index, deltaColumns: deltaColumns, deltaRows: deltaRows, itemCount: nodeIDs.count,
+                               columns: columns)
+    }
     if let focused = keyboardFocusID, let currentIndex = nodeIDs.firstIndex(of: focused) {
-      let proposed = currentIndex + step
-      if nodeIDs.indices.contains(proposed) {
+      if let proposed = neighbor(of: currentIndex) {
         keyboardFocusID = nodeIDs[proposed]
         onKeyboardFocusMoved?(nodeIDs[proposed])
       } else if deltaRows > 0 {
@@ -523,8 +611,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     }
     let targetIndex: Int
     if let current = resolver.current, let currentIndex = nodeIDs.firstIndex(of: current) {
-      let proposed = currentIndex + step
-      guard nodeIDs.indices.contains(proposed) else { return }
+      guard let proposed = neighbor(of: currentIndex) else { return }
       targetIndex = proposed
     } else {
       targetIndex = step >= 0 ? 0 : nodeIDs.count - 1
@@ -585,13 +672,18 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     configure(item, id: id)
   }
 
-  /// Targeted update for a `.favorites` structure change. Returns true when the grid height changed.
+  /// Targeted update for a `.favorites` structure change. Returns true when the grid height changed. The columns
+  /// follow the new count at once (only a resize runs the column spring).
   @discardableResult
   public func apply(structure location: SidebarLocation) -> Bool {
     guard location == .favorites(profile: profile) else { return false }
     let old = nodeIDs
     let new = source.children(of: location)
+    let oldHeight = preferredHeight
+    columnMotion.settleNow()
     nodeIDs = new
+    columns = FavoritesLayout.columns(itemCount: new.count, contentWidth: columnsWidth ?? Self.defaultContentWidth)
+    let heightChanged = preferredHeight != oldHeight
     if let keyboardFocusID, !new.contains(keyboardFocusID) { self.keyboardFocusID = nil }
     if let lastKeyboardFocusID, !new.contains(lastKeyboardFocusID) { self.lastKeyboardFocusID = nil }
     let difference = new.difference(from: old)
@@ -603,7 +695,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     // its layout for every Favorite in its next layout pass, when the grid has its new height.
     if collectionView.bounds.isEmpty {
       collectionView.reloadData()
-      return FavoritesLayout.height(itemCount: old.count) != FavoritesLayout.height(itemCount: new.count)
+      return heightChanged
     }
     collectionView.performBatchUpdates({
       var removed = Set<IndexPath>(), inserted = Set<IndexPath>()
@@ -616,6 +708,6 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       if !removed.isEmpty { collectionView.deleteItems(at: removed) }
       if !inserted.isEmpty { collectionView.insertItems(at: inserted) }
     })
-    return FavoritesLayout.height(itemCount: old.count) != FavoritesLayout.height(itemCount: new.count)
+    return heightChanged
   }
 }
