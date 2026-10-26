@@ -20,11 +20,16 @@ public final class ShellWindowSet {
   public let engine: any EngineClient
   public let sidebar: any SidebarSource
   public let toolbarSetting: ToolbarSetting
+  /// The saved sidebar width and hidden state (#331); `make` hands it to every window, and the first window adopts
+  /// the stored state.
+  public let sidebarStateStore: SidebarWindowStateStore
   /// The app's hooks on a new window (archive, stamps, favicons, import); runs before the window is shown.
   public var configure: (@MainActor (ShellWindowController) -> Void)?
 
   private let hostLookup: HostLookup?
   private var windows: [ShellWindowController] = []
+  /// True once the session's first window adopted the saved sidebar state (#331); later windows keep the defaults.
+  private var adoptedSavedSidebarState = false
   /// Built for an engine request, waiting for their window's `.windowOpened`.
   private var awaitingAdoption: [ShellWindowController] = []
   /// Most recently main last.
@@ -41,10 +46,11 @@ public final class ShellWindowSet {
   /// `hostLookup` is needed only for an engine that asks for windows of its own (a host provider); FakeEngine never
   /// does.
   public init(engine: any EngineClient, sidebar: any SidebarSource, toolbarSetting: ToolbarSetting = .ephemeral(),
-              hostLookup: HostLookup? = nil) {
+              sidebarStateStore: SidebarWindowStateStore = .ephemeral(), hostLookup: HostLookup? = nil) {
     self.engine = engine
     self.sidebar = sidebar
     self.toolbarSetting = toolbarSetting
+    self.sidebarStateStore = sidebarStateStore
     self.hostLookup = hostLookup
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
@@ -225,7 +231,7 @@ public final class ShellWindowSet {
 
   private func make(opensFirstTab: Bool) -> ShellWindowController {
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
-                                           opensFirstTab: opensFirstTab)
+                                           sidebarStateStore: sidebarStateStore, opensFirstTab: opensFirstTab)
     controller.onNewWindow = { [weak self] in self?.openWindow(opensFirstTab: false) }
     controller.onTakeOverLiveTab = { [weak self, weak controller] node in
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
@@ -234,6 +240,14 @@ public final class ShellWindowSet {
     windows.append(controller)
     trackMain(controller)
     configure?(controller)
+    // #331: the session's first window is the one a relaunch restores; it opens on the saved sidebar state. Later
+    // windows (New Window, a Dock reopen) keep the defaults.
+    if !adoptedSavedSidebarState {
+      adoptedSavedSidebarState = true
+      controller.adoptSavedSidebarState()
+    } else {
+      controller.savesSidebarState = false
+    }
     return controller
   }
 
