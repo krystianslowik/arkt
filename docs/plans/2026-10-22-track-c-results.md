@@ -1490,3 +1490,11 @@ Tests (rebased on main with #357): ArktCore 393 (387 + 6). ShellKit unit 900 (86
 (`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) at load 7 to 8 on 10 cores, which fails the same way
 on `main` at that load. The Peek frame-time gate failed once at that load and passed 2 of 3 reruns. Debug app build
 succeeds. UI tests (XCUITest) not run here.
+
+Review fixes: committing the rename field unchanged stores no custom title (an accidental double-click no longer
+freezes the page title); another tab coming forward or a plain press on empty sidebar space ends the
+multi-selection, so a later Cmd-W closes the tab on screen; a right-click commits a rename in progress; sheets and
+child windows taking key keep the sidebar lit. ShellKitGUITests 734 run (730 + 4), 5 skipped; the only failures are
+the load-dependent frame-time gates noted above. Disabled items now tracked: Share (#362), Edit Pinned URL and
+Favorite rename (#363), Mute (#364); Change Icon (#339, #109), the Undo toast (#308), Copy Link keys and tracker
+stripping (#118), Clear Today Tabs key (#110), Split Tab rename (#27, BH-115).
