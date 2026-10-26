@@ -257,6 +257,14 @@ shadow becomes that edge in dark.
   first build enables General (default browser, startup if
   window restoration exists), Appearance (Toolbar, full URL), Shortcuts (read-only list) and Advanced (Import browser data,
   data folder) rows; the rest are disabled. Each later feature enables its row and adds its UI test.
+- As built (#307): panes are frame-laid-out blocks (`SettingsPaneView`, `SettingsGroupView`, `SettingsRowView`) rather
+  than `NSStackView`s, so the window height is exact for each pane; the pane bar is custom item views in a tab group
+  rather than an `NSToolbar` (section 1: no toolbar strip). The store is `AppSettings` in ShellUI (next to
+  `ToolbarSetting` and `PeekLinkSettings`, which it wraps unchanged), so its tests run without the app; the app passes
+  its defaults suite. Besides the rows above, the first build also enables Settings > General > Links (the Peek
+  switches, #348) and Appearance > Count Favorites and Command-9 (#351), whose features exist. The window position is
+  kept in the same suite (`settingsWindowTopLeft`) instead of AppKit's frame autosave, which writes the standard
+  defaults.
 
 ## 9. Parity notes
 

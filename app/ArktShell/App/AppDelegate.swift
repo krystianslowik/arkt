@@ -29,6 +29,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     #endif
     MainMenu.install(commands: composition.commands)
+    #if DEBUG
+    switch EnvironmentOverrides(environment: ProcessInfo.processInfo.environment).appearance {
+    case .light?: NSApp.appearance = NSAppearance(named: .aqua)
+    case .dark?: NSApp.appearance = NSAppearance(named: .darkAqua)
+    case nil: break
+    }
+    #endif
     NSApp.activate()
     #if DEBUG || ARKT_SMOKE_BUILD
     // Only the command line counts (`-ArktSmoke YES`), never a persisted default.

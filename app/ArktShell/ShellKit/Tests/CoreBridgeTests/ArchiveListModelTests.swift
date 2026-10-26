@@ -182,7 +182,7 @@ struct ArchiveListModelTests {
     let page = await harness.model.loadPage()
 
     #expect(page.rows.map(\.title) == ["Pending", "Stored"])
-    #expect(page.rows.first?.detail.hasPrefix("p.example - Work - ") == true)
+    #expect(page.rows.first?.detail.hasPrefix("p.example - Work -") == true)
     #expect(!page.mayHaveMore)
     await harness.store.releaseAdds()
   }
@@ -242,7 +242,7 @@ struct ArchiveListModelTests {
     #expect(harness.source.children(of: .today(space)) == [queued])
     #expect(harness.coordinator.pendingItems.map(\.id) == [sent])
     #expect(harness.model.rows.map(\.id) == [sent])
-    #expect(harness.restored.first?.1 == "Tab restored to Work. Click to view.")
+    #expect(harness.restored.first?.1 == "Tab restored to Work")
     await harness.store.releaseAdds()
     await eventually { !harness.coordinator.hasPendingWrites }
     #expect(await harness.store.removed.isEmpty)
@@ -381,7 +381,7 @@ struct ArchiveListModelTests {
     #expect(harness.model.rows.map(\.id) == [items[0].id])
     #expect(harness.restored.count == 1)
     #expect(harness.restored.first?.0.nodeID == items[1].id)
-    #expect(harness.restored.first?.1 == "Tab restored to Work. Click to view.")
+    #expect(harness.restored.first?.1 == "Tab restored to Work")
     await eventually { await harness.store.removed == [[items[1].id]] }
   }
 
@@ -418,7 +418,7 @@ struct ArchiveListModelTests {
 
     #expect(source.children(of: .today(current)) == [item.id])
     #expect(source.children(of: .today(first)).isEmpty)
-    #expect(texts == ["Tab restored to Current. Click to view."])
+    #expect(texts == ["Tab restored to Current"])
   }
 
   @Test func withoutASpaceNothingIsRestored() async throws {

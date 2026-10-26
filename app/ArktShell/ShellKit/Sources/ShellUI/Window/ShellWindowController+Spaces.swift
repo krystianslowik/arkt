@@ -18,6 +18,27 @@ public struct SpaceRemovalPrompt: Equatable, Sendable {
       ? "Its pinned tabs, folders and Today tabs move to the Archive, where you can restore them."
       : "This cannot be undone."
   }
+
+  /// "3 pinned tabs, 3 Today tabs": counts only, a part at zero left out; nil when both are zero (alerts design 3.4).
+  public static func countsLine(pinnedTabs: Int, todayTabs: Int) -> String? {
+    func count(_ n: Int, _ noun: String) -> String? { n > 0 ? "\(n) \(noun) \(n == 1 ? "tab" : "tabs")" : nil }
+    let parts = [count(pinnedTabs, "pinned"), count(todayTabs, "Today")].compactMap { $0 }
+    return parts.isEmpty ? nil : parts.joined(separator: ", ")
+  }
+
+  /// The shared Arkt sheet (decision 1): the Space's swatch and mark as the icon, the question, where the items go,
+  /// the counts, then Cancel and a quiet red Delete Space without a key.
+  public func dialogContent(pinnedTabs: Int, todayTabs: Int, theme: SpaceThemeInfo?,
+                            icon: SpaceIconInfo?) -> DialogContent {
+    var paragraphs = [DialogContent.Paragraph(information)]
+    if let counts = Self.countsLine(pinnedTabs: pinnedTabs, todayTabs: todayTabs) {
+      paragraphs.append(.init(counts, secondary: true))
+    }
+    let swatch = theme.map { DialogContent.Icon.spaceSwatch(colors: $0.baseColors, isDark: $0.isDark, mark: icon) }
+    return DialogContent(title: message, icon: swatch ?? .spaceSwatch(colors: [], isDark: false, mark: icon),
+                         paragraphs: paragraphs, primaryTitle: Self.confirmTitle, cancelTitle: "Cancel",
+                         defaultButton: .none, isDestructive: true, primaryHelp: "Deletes the Space")
+  }
 }
 
 // MARK: - Delete Space
@@ -37,19 +58,24 @@ extension ShellWindowController {
     }
   }
 
-  /// The default `confirmSpaceRemoval`: an alert sheet on this window, Delete Space first and marked destructive.
-  /// Delete Space has no key, so a stray Return never deletes a Space; Escape answers Cancel (AppKit's key for a
-  /// button titled Cancel).
+  /// The default `confirmSpaceRemoval`: the shared Arkt sheet on this window (decision 1), with the Space's swatch and
+  /// mark and the counts of what goes to the Archive. Delete Space is a quiet red pill without a key, so a stray
+  /// Return never deletes a Space; focus starts on Cancel and Escape answers Cancel.
   func presentSpaceRemovalSheet(_ prompt: SpaceRemovalPrompt, answer: @escaping @MainActor (Bool) -> Void) {
     guard let window else { return answer(false) }
-    let alert = NSAlert()
-    alert.messageText = prompt.message
-    alert.informativeText = prompt.information
-    let delete = alert.addButton(withTitle: SpaceRemovalPrompt.confirmTitle)
-    delete.hasDestructiveAction = true
-    delete.keyEquivalent = ""
-    alert.addButton(withTitle: "Cancel")
-    alert.beginSheetModal(for: window) { response in answer(response == .alertFirstButtonReturn) }
+    let info = sidebar.space(prompt.space)
+    let count = { (location: SidebarLocation) in
+      self.sidebar.children(of: location).reduce(0) { $0 + self.tabs(in: $1).count }
+    }
+    let content = prompt.dialogContent(pinnedTabs: count(.pinned(prompt.space)), todayTabs: count(.today(prompt.space)),
+                                       theme: info?.theme, icon: info?.icon)
+    let sheet = DialogSheet(content: content)
+    sheet.onAnswer = { [weak self] response in
+      self?.spaceRemovalSheet = nil
+      answer(response == .primary)
+    }
+    spaceRemovalSheet = sheet
+    sheet.begin(on: window)
   }
 
   private var canDeleteSpace: Bool { onRemoveSpace != nil && window?.attachedSheet == nil }
@@ -106,6 +132,12 @@ extension ShellWindowController {
       menu.addItem(item)
     }
     sidebarController.view.newTabButton.menu = menu
+  }
+
+  /// What the Spaces menu lists for this window (#387): its profile's Spaces in sidebar order, the order
+  /// `goToSpace(_:)` indexes.
+  public var spaceMenuEntries: [SpacesMenu.Entry] {
+    sidebarController.spaces.map { SpacesMenu.Entry(id: $0, title: sidebar.space($0)?.title ?? "") }
   }
 
   private func page(of space: SpaceID) -> SpacePageView? {

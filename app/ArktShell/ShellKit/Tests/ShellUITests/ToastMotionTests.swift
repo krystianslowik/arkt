@@ -63,9 +63,9 @@ struct ToastMotionTests {
   @Test func `the action shows its key after the title`() {
     let view = ToastView(frame: CGRect(x: 0, y: 0, width: 200, height: 36))
     view.display(Toast(text: "Peek closed", actionTitle: "Reopen", shortcut: "\u{2318}Z"), animated: false)
-    #expect(view.actionButton.attributedTitle.string == "Reopen \u{2318}Z")
+    #expect(view.actionButton.displayedTitleText == "Reopen \u{2318}Z")
     #expect(view.actionButton.accessibilityLabel() == "Reopen")
     view.display(Toast(text: "Restored", actionTitle: "View"), animated: false)
-    #expect(view.actionButton.attributedTitle.string == "View")
+    #expect(view.actionButton.displayedTitleText == "View")
   }
 }

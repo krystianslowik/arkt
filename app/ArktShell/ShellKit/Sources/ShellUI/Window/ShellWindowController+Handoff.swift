@@ -22,7 +22,7 @@ extension ShellWindowController {
   /// caller shows it.
   func adoptHandedOffTab(_ tab: TabID, for node: NodeID) -> TabID {
     let target = ensureEngineWindow()
-    handsOffEngineWindow = false
+    keepsWindowWithoutEngine = false
     tabsByNode[node] = tab
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)
@@ -52,7 +52,7 @@ extension ShellWindowController {
       if !tabsByNode.isEmpty { expectEngineReactivation() }
     }
     // The engine closes a window whose last tab moved out; this window stays open without one (as after New Window).
-    if tabsByNode.isEmpty { handsOffEngineWindow = true }
+    if tabsByNode.isEmpty { keepsWindowWithoutEngine = true }
     sidebarController.deactivate(node: node)
     if wasShown { setShown(shownNodes.filter { $0 != node }) }
     if splitState.panes.contains(node) {

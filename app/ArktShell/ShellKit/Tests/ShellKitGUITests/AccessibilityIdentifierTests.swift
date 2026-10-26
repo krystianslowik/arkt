@@ -162,7 +162,7 @@ final class AccessibilityIdentifierTests: XCTestCase {
 
   func testPersistentToastWithActionHasActionButton() throws {
     let controller = makeController()
-    controller.toasts.show(Toast(text: "Could not save", actionTitle: "Retry", isPersistent: true))
+    controller.toasts.show(Toast(text: "Could not save", kind: .persistent, actionTitle: "Retry"))
     controller.rootView.layoutSubtreeIfNeeded()
     let toast = try element(AXID.Toast.root, in: controller)
     XCTAssertEqual(toast.accessibilityLabel(), "Could not save")
@@ -497,6 +497,11 @@ final class AccessibilityIdentifierTests: XCTestCase {
     XCTAssertEqual(divider.accessibilityRole(), .splitter)
     XCTAssertEqual((divider.accessibilityValue() as? NSNumber)?.doubleValue ?? 0, 0.4, accuracy: 0.001)
     XCTAssertEqual(try elements(AXID.Split.reopen, in: controller).count, 0, "both panes are open")
+    // #388: every pane with a page has its X in the tree, hover or not.
+    let closeButtons = try elements(AXID.Split.close, in: controller)
+    XCTAssertEqual(closeButtons.count, 2)
+    XCTAssertEqual(closeButtons.map { $0.accessibilityRole() }, [.button, .button])
+    XCTAssertEqual(closeButtons.map { $0.accessibilityLabel() }, ["Close Pane", "Close Pane"])
 
     controller.activate(node: pane1)
     controller.rootView.layoutSubtreeIfNeeded()
@@ -508,6 +513,7 @@ final class AccessibilityIdentifierTests: XCTestCase {
     let reopen = try element(AXID.Split.reopen, in: controller)
     XCTAssertEqual(reopen.accessibilityRole(), .button)
     XCTAssertEqual(reopen.accessibilityLabel(), "Reopen page")
+    XCTAssertEqual(try elements(AXID.Split.close, in: controller).count, 1, "a placeholder has no X")
     controller.close()
   }
 }

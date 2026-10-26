@@ -203,6 +203,15 @@ extension ChromiumEngine {
       tabs[id]?.snapshot.canGoBack = event.canGoBack
       tabs[id]?.snapshot.canGoForward = event.canGoForward
       hub.emit(.historyChanged(id, canGoBack: event.canGoBack, canGoForward: event.canGoForward))
+    case .audibleChanged:
+      // The listed snapshot read the handle's live state, so a report of the value it already has is dropped.
+      guard tabs[id]?.snapshot.isAudible != event.isAudible else { break }
+      tabs[id]?.snapshot.isAudible = event.isAudible
+      hub.emit(.audibleChanged(id, isAudible: event.isAudible))
+    case .mutedChanged:
+      guard tabs[id]?.snapshot.isMuted != event.isMuted else { break }
+      tabs[id]?.snapshot.isMuted = event.isMuted
+      hub.emit(.mutedChanged(id, isMuted: event.isMuted))
     default:
       // TabReplaced: the handle and its container stay (Decision 5, 6); nothing changes for the shell.
       break

@@ -36,8 +36,11 @@ struct InMemoryEngineContractTests {
   @Test func heldCloseKeepsTheTabUntilAnswered() async throws { try await EngineContract.heldCloseKeepsTheTabUntilAnswered(harness) }
   @Test func skipUnloadHandlersNeverHolds() async throws { try await EngineContract.skipUnloadHandlersNeverHolds(harness) }
   @Test func cancelledWindowCloseKeepsTheWindow() async throws { try await EngineContract.cancelledWindowCloseKeepsTheWindow(harness) }
+  // Rule 17
+  @Test func muteIsReportedOnce() async throws { try await EngineContract.muteIsReportedOnce(harness) }
+  @Test func audibleStateIsReported() async throws { try await EngineContract.audibleStateIsReported(harness) }
 
-  /// A harness without engine drivers reports rules 13, 14 and 16 as not applicable, never as passed.
+  /// A harness without engine drivers reports rules 13, 14, 16 and 17's audible check as not applicable, never as passed.
   @Test func missingDriversAreNotApplicable() async throws {
     let bare = EngineHarness(makeEngine: harness.makeEngine, pageURL: harness.pageURL, settle: harness.settle,
                              retitle: harness.retitle, pagesOnTwoHosts: harness.pagesOnTwoHosts)
@@ -46,6 +49,7 @@ struct InMemoryEngineContractTests {
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.heldCloseKeepsTheTabUntilAnswered(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.skipUnloadHandlersNeverHolds(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.cancelledWindowCloseKeepsTheWindow(bare) }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.audibleStateIsReported(bare) }
   }
 }
 

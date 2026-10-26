@@ -43,6 +43,19 @@ struct EnvironmentOverrides {
   static let uiTestKey = "ARKT_UITEST"
   static let skipOnboardingKey = "ARKT_SKIP_ONBOARDING"
   static let defaultBrowserKey = "ARKT_DEFAULT_BROWSER"
+  static let appearanceKey = "ARKT_APPEARANCE"
+
+  /// A pinned app appearance (`ARKT_APPEARANCE=light|dark`), for window screenshots in both appearances without
+  /// changing the system setting; nil follows the system.
+  enum Appearance: Equatable { case light, dark }
+
+  var appearance: Appearance? {
+    switch value(Self.appearanceKey) {
+    case "light": .light
+    case "dark": .dark
+    default: nil
+    }
+  }
 
   /// The first run is not shown (`ARKT_SKIP_ONBOARDING=1`): UI tests that start from the empty state.
   var skipsOnboarding: Bool { environment[Self.skipOnboardingKey] == "1" }

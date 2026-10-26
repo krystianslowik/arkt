@@ -31,6 +31,7 @@ final class TabActionsTests: XCTestCase {
     let controller: ShellWindowController
     let pasteboard = NSPasteboard(name: NSPasteboard.Name("dev.arkt.tests.\(UUID().uuidString)"))
     var archived: [UUID] = []
+    var archivedItems: [ArchivedItem] = []
 
     init(_ sidebar: SidebarModel.Sidebar) {
       let source = ModelSidebarSource(sidebar: sidebar, now: { TabActionsTests.now })
@@ -41,7 +42,16 @@ final class TabActionsTests: XCTestCase {
       controller.window?.contentView?.layoutSubtreeIfNeeded()
       controller.onArchive = { [unowned self] ids in
         archived += ids
-        _ = source.archive(ids, reason: .manual, at: TabActionsTests.now)
+        archivedItems += source.archive(ids, reason: .manual, at: TabActionsTests.now)
+      }
+      // Reopen and Undo bring a row back from what this harness archived, as the app's coordinator does.
+      controller.onReopenArchived = { [unowned self] id in
+        guard let index = archivedItems.lastIndex(where: { $0.id == id }),
+              let space = source.spaceOrder.first,
+              let restored = try? source.restore(archivedItems.remove(at: index), fallbackSpace: space) else {
+          return nil
+        }
+        return restored.nodeID
       }
       try? outline().clipboardURL = { [pasteboard] in
         pasteboard.string(forType: .string).flatMap { URL(string: $0) }
@@ -450,6 +460,95 @@ final class TabActionsTests: XCTestCase {
     XCTAssertTrue(harness.engine.answerDialog(held, accept: true))
     XCTAssertEqual(harness.archived, [world.today[1], world.today[2]])
     XCTAssertEqual(harness.current, world.panes[0])
+    harness.controller.close()
+  }
+
+  /// Decision 3: a bulk archive shows "Archived N tabs" with Undo (no key hint, 6 s); Undo brings every row back at
+  /// its place, as one unit, and takes the toast down.
+  func testUndoOnTheToastRestoresTheWholeSelection() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let before = harness.children(.today(world.work))
+    harness.controller.activate(node: world.today[1])
+    try harness.click(world.split, .shift)              // t1, t2, split
+
+    let rows = [world.today[1], world.today[2]] + world.panes          // the archived ones
+    let loadedBefore = Set(rows.filter { harness.tab($0) != nil })
+    harness.controller.closeTab(nil)
+    let toast = try XCTUnwrap(harness.controller.toasts.current)
+    XCTAssertEqual(toast.kind, .undo)
+    XCTAssertEqual(toast.actionTitle, "Undo")
+    XCTAssertNil(toast.shortcut)
+    XCTAssertEqual(toast.glyph, "archivebox")
+    XCTAssertEqual(toast.duration, .seconds(6))
+
+    harness.controller.toasts.performActionForTesting()
+
+    XCTAssertEqual(harness.children(.today(world.work)), before)
+    XCTAssertEqual(harness.current, world.today[1], "the tab that was current comes back current")
+    XCTAssertTrue(Set(rows.filter { harness.tab($0) != nil }).isSubset(of: loadedBefore),
+                  "no page loads for rows that were not loaded")
+    XCTAssertNil(harness.controller.toasts.current)
+    XCTAssertFalse(harness.controller.reopenClosed(), "the batch left the stack with the Undo")
+    harness.controller.close()
+  }
+
+  /// Cmd-Z after a bulk archive restores the same rows the Undo would, in one step, and dismisses the undo toast.
+  func testCommandZRestoresTheSameRowsAsUndo() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let before = harness.children(.today(world.work))
+    harness.controller.activate(node: world.today[1])
+    try harness.click(world.split, .shift)
+
+    harness.controller.closeTab(nil)
+    XCTAssertTrue(harness.controller.reopenClosed())
+
+    XCTAssertEqual(harness.children(.today(world.work)), before)
+    XCTAssertNil(harness.controller.toasts.current, "the undo toast goes with its batch")
+    harness.controller.close()
+  }
+
+  /// Clear Today Tabs comes back whole with one Undo, its rows in their order.
+  func testUndoAfterClearTodayRestoresEveryRow() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "F", in: .today(world.work))
+    _ = try world.sidebar.addTab(url: Self.url("f"), title: "F0", in: .folder(folder))
+    let harness = Harness(world.sidebar)
+    let before = harness.children(.today(world.work))
+    harness.controller.activate(node: world.today[0])
+    try harness.choose("Clear Today Tabs", on: nil)
+    XCTAssertEqual(harness.children(.today(world.work)), [])
+
+    harness.controller.toasts.performActionForTesting()
+
+    XCTAssertEqual(harness.children(.today(world.work)), before)
+    harness.controller.close()
+  }
+
+  /// An auto-archive pass is its own undo unit: its toast's Undo brings back exactly the rows the pass took, not an
+  /// earlier Cmd-W, which Cmd-Z then takes back on its own.
+  func testUndoAfterAutoArchiveRestoresExactlyThatPass() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[1])
+    harness.controller.closeTab(nil)                                   // a single Cmd-W first
+    harness.controller.activate(node: world.today[0])
+    let pass = [world.today[2], world.today[3]]
+    harness.controller.onArchive?(pass)                                // what the auto-archive coordinator does
+    harness.controller.rememberAutoArchived(pass, toast: ToastText.autoArchiveToast(count: pass.count))
+    XCTAssertTrue(Set(harness.children(.today(world.work))).isDisjoint(with: pass + [world.today[1]]))
+    XCTAssertEqual(harness.controller.toasts.current?.kind, .undo)
+
+    harness.controller.toasts.performActionForTesting()
+
+    let restored = Set(harness.children(.today(world.work)))
+    XCTAssertTrue(restored.isSuperset(of: pass), "the pass comes back")
+    XCTAssertFalse(restored.contains(world.today[1]), "the earlier Cmd-W stays undone")
+    XCTAssertEqual(harness.current, world.today[0], "undoing a pass changes no current tab")
+    XCTAssertTrue(harness.controller.reopenClosed())
+    XCTAssertTrue(Set(harness.children(.today(world.work))).contains(world.today[1]), "Cmd-Z takes the Cmd-W back")
+    XCTAssertFalse(harness.controller.reopenClosed(), "nothing is left to undo")
     harness.controller.close()
   }
 

@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 /// Lays out the pane cards of one split side by side or stacked, with a `SplitDividerView` in each gap. Each pane is
 /// a `ContentCardView` (its own rounded clip, hairline, shadow and Toolbar). Frames come from `SplitLayout` and are
@@ -36,6 +37,14 @@ public final class SplitContainerView: NSView {
   public var onCommitFactors: (@MainActor ([Double]) -> Void)?
   /// A click asked to focus (or, on a closed pane's placeholder, to reopen) pane N.
   public var onFocusRequest: (@MainActor (Int) -> Void)?
+  /// Pane N's close button was clicked or pressed (#388).
+  public var onCloseRequest: (@MainActor (Int) -> Void)?
+  /// Read when a reflow starts; tests replace it. Reduce Motion swaps the spring for a short crossfade.
+  var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion } {
+    didSet { for card in cards { card.closeButton?.reducesMotion = reduceMotion } }
+  }
+  /// A reflow is moving the panes to their frames.
+  public var isReflowing: Bool { reflow != nil }
 
   let pacer = FramePacer()
   private var pacerSession = 0
@@ -46,6 +55,13 @@ public final class SplitContainerView: NSView {
   private var draggingIndex: Int?
   /// `liveFactors` when the running drag began; a drag that ends there commits nothing.
   private var factorsAtDragStart: [Double] = []
+  /// The running reflow (#388): where each shown pane started (nil: already at its target), the spring's length in
+  /// points and how far along it is.
+  private var reflow: (from: [CGRect?], distance: Double, progress: CGFloat)?
+  /// The reflow's clock; tests freeze it and step the driver themselves.
+  var reflowClock: @MainActor () -> CFTimeInterval = { CACurrentMediaTime() }
+  private(set) lazy var reflowDriver = SpringDriver(now: { [weak self] in self?.reflowClock() ?? CACurrentMediaTime() },
+                                                    reduceMotion: { [weak self] in self?.reduceMotion() ?? true })
 
   /// The gap between pane cards; it is the divider's hit area. TODO(measure) PARITY(NEEDS-RUNTIME-CHECK RT-37)
   public var gap: CGFloat { metrics.cardInsetRight }
@@ -74,8 +90,15 @@ public final class SplitContainerView: NSView {
 
   /// Shows `panes` (at most `SplitLayoutInfo.maximumPanes`) along `axis` with `factors` (normalized here). A nil
   /// pane is a closed pane and shows a placeholder (decision 6). Ends any running drag without committing.
-  public func show(panes: [NSView?], axis: SplitAxis, factors: [Double]) {
+  ///
+  /// `animated` (a pane closed by its X, #388): every page still shown moves from where it is on screen to its new
+  /// frame on one interruptible spring; a reflow still running hands over its position and speed. The model state
+  /// (`paneCount`, `liveFactors`, the cards' pages) changes at once; only the presented frames move. Reduce Motion
+  /// sets the frames at once under a short crossfade.
+  public func show(panes: [NSView?], axis: SplitAxis, factors: [Double], animated: Bool = false) {
     cancelDrag()
+    let onScreen = animated ? framesOnScreen() : [:]
+    let handover = endReflow()
     let panes = Array(panes.prefix(SplitLayoutInfo.maximumPanes))
     // Detach pages that move to another card first: `setContent` on their old card would otherwise pull them out
     // of the new one.
@@ -90,6 +113,7 @@ public final class SplitContainerView: NSView {
       card.isHidden = !shown
       card.setContent(shown ? panes[index] : nil)
       card.setEmptyState(shown && panes[index] == nil ? placeholder(at: index) : nil)
+      card.allowsClose = shown && panes[index] != nil
     }
     for (index, divider) in dividerViews.enumerated() {
       divider.isHidden = index >= panes.count - 1
@@ -100,7 +124,59 @@ public final class SplitContainerView: NSView {
     liveFactors = SplitLayout.normalized(factors, count: panes.count)
     focusedIndex = min(max(focusedIndex, 0), max(0, panes.count - 1))
     updateBorderEmphasis()
+    if animated { beginReflow(from: onScreen, handover: handover) }
     applyFrames()
+  }
+
+  // MARK: Reflow (#388)
+
+  /// Each shown page's card frame as it is on screen now, by page.
+  private func framesOnScreen() -> [ObjectIdentifier: CGRect] {
+    var frames: [ObjectIdentifier: CGRect] = [:]
+    for card in paneCards {
+      guard let page = card.contentView else { continue }
+      frames[ObjectIdentifier(page)] = card.frame
+    }
+    return frames
+  }
+
+  /// Starts the spring from `onScreen` (by page) to the current layout. A page new to the split starts at its target.
+  private func beginReflow(from onScreen: [ObjectIdentifier: CGRect],
+                           handover: (value: Double, velocity: Double, distance: Double)?) {
+    guard paneCount > 0, bounds.width > 0, bounds.height > 0 else { return }
+    if reduceMotion() {
+      SplitReflow.crossfade(layer)
+      return
+    }
+    let targets = targetFrames().panes
+    let from: [CGRect?] = paneCards.map { card in card.contentView.flatMap { onScreen[ObjectIdentifier($0)] } }
+    let distance = SplitReflow.distance(from: zip(from, targets).map { $0 ?? $1 }, to: targets)
+    guard distance >= 0.5 else { return }
+    let velocity = handover.map {
+      SplitReflow.carriedVelocity($0.velocity, distance: $0.distance, progress: $0.value / max($0.distance, 1),
+                                  newDistance: distance)
+    } ?? 0
+    reflow = (from, distance, 0)
+    reflowDriver.animate(in: self, from: 0, to: distance, initialVelocity: velocity,
+                         parameters: SplitReflow.parameters) { [weak self] value in
+      guard let self, self.reflow != nil else { return }
+      self.reflow?.progress = CGFloat(value / distance)
+      self.applyFrames()
+    } completion: { [weak self] finished in
+      guard finished, let self else { return }
+      self.reflow = nil
+      self.applyFrames()
+    }
+  }
+
+  /// Ends a running reflow where it is (the next `applyFrames` sets the targets). Returns its spring state, so a new
+  /// reflow can carry its speed.
+  @discardableResult
+  private func endReflow() -> (value: Double, velocity: Double, distance: Double)? {
+    guard let running = reflow else { return nil }
+    reflow = nil
+    guard let state = reflowDriver.stop() else { return nil }
+    return (state.value, state.velocity, running.distance)
   }
 
   // MARK: Layout
@@ -125,9 +201,20 @@ public final class SplitContainerView: NSView {
 
   private var backingScale: CGFloat { window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2 }
 
+  private func targetFrames() -> SplitFrames {
+    SplitLayout.frames(in: bounds, axis: axis, factors: liveFactors, gap: gap, scale: backingScale)
+  }
+
+  /// The layout's frames, or while a reflow runs, each pane on its way there and the dividers in the gaps between.
   private func applyFrames() {
     guard paneCount > 0 else { return }
-    let frames = SplitLayout.frames(in: bounds, axis: axis, factors: liveFactors, gap: gap, scale: backingScale)
+    var frames = targetFrames()
+    if let reflow {
+      frames.panes = zip(frames.panes, reflow.from).map { target, from in
+        from.map { SplitReflow.frame(from: $0, to: target, progress: reflow.progress, scale: backingScale) } ?? target
+      }
+      frames.dividers = SplitReflow.dividers(between: frames.panes, axis: axis)
+    }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     for (card, frame) in zip(cards, frames.panes) where card.frame != frame { card.frame = frame }
@@ -136,7 +223,7 @@ public final class SplitContainerView: NSView {
   }
 
   private func layoutToast() {
-    guard let toastView else { return }
+    guard let toastView, !toastView.isHidden else { return }       // laid out again when it shows
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     toastView.frame = toastView.frame(centeredIn: bounds)
@@ -169,6 +256,7 @@ public final class SplitContainerView: NSView {
 
   func beginDividerDrag(_ index: Int) {
     guard draggingIndex == nil, dividers.indices.contains(index) else { return }
+    endReflow()
     draggingIndex = index
     factorsAtDragStart = liveFactors
     pacerSession = pacer.begin("split-divider", in: self)
@@ -195,6 +283,7 @@ public final class SplitContainerView: NSView {
     let equal = SplitLayout.equalShares(paneCount)
     // Already equal (every new split starts that way): no source write.
     guard liveFactors != equal else { return }
+    endReflow()
     liveFactors = equal
     applyFrames()
     onCommitFactors?(liveFactors)
@@ -206,6 +295,7 @@ public final class SplitContainerView: NSView {
     let factors = SplitLayout.factors(dragging: index, to: dividerPosition(index) + delta, in: bounds, axis: axis,
                                       factors: liveFactors, gap: gap, minimum: SplitLayout.minimumPaneLength)
     guard factors != liveFactors else { return false }
+    endReflow()
     liveFactors = factors
     applyFrames()
     onCommitFactors?(liveFactors)
@@ -222,15 +312,35 @@ public final class SplitContainerView: NSView {
   /// Leaving the window ends any drag (the pacer's display link would otherwise keep ticking).
   public override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
-    if window == nil { cancelDrag() }
+    if window == nil {
+      cancelDrag()
+      if endReflow() != nil { applyFrames() }
+    }
+  }
+
+  // MARK: Pointer
+
+  /// The pane a mouse-down at `point` (in this view) focuses: nil outside every pane and on a shown close button,
+  /// whose click closes its pane instead of focusing it first.
+  public func paneIndex(forMouseDownAt point: CGPoint) -> Int? {
+    guard let index = paneCards.firstIndex(where: { !$0.isHidden && $0.frame.contains(point) }) else { return nil }
+    if let button = paneCards[index].closeButton, button.isRevealed, !button.isHidden,
+       button.bounds.contains(button.convert(point, from: self)) {
+      return nil
+    }
+    return index
   }
 
   // MARK: Building blocks
 
   private func makeCard() -> ContentCardView {
     let card = ContentCardView(metrics: metrics)
+    let index = cards.count
     card.setAccessibilityIdentifier(AXID.Split.pane)
     card.autoresizingMask = []
+    card.installCloseButton()
+    card.closeButton?.reducesMotion = reduceMotion
+    card.onClose = { [weak self] in self?.onCloseRequest?(index) }
     addSubview(card, positioned: .below, relativeTo: dividerViews.first)
     return card
   }

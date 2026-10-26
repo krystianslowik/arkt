@@ -21,7 +21,10 @@ struct OnboardingRecordStoreTests {
 
     store.saveProgress(first)
     store.saveProgress(last)
-    let terminationFlush = Task { await store.flush(atMost: .seconds(1)) }
+    // The deadline only fires when the test resumes it: a saturated main actor (the whole suite runs in one process
+    // on CI) can take longer than the product's real second to run the write chain.
+    let deadline = ManualSleeper()
+    let terminationFlush = Task { await store.flush(atMost: .seconds(1), sleep: deadline.sleep) }
     _ = await writeStarts.next()
     #expect(store.needsFlush)
 
@@ -55,7 +58,7 @@ struct OnboardingRecordStoreTests {
     #expect(await storage.record == nil)
 
     await gate.open()
-    #expect(await store.flush(atMost: .seconds(1)))
+    #expect(await store.flush(atMost: .seconds(1), sleep: ManualSleeper().sleep))
     #expect(await storage.record?.isCompleted == true)
   }
 
@@ -72,7 +75,10 @@ struct OnboardingRecordStoreTests {
     var writeStarts = starts.makeAsyncIterator()
 
     store.markCompleted()
-    let terminationFlush = Task { await store.flush(atMost: .seconds(1)) }
+    // The deadline only fires when the test resumes it: a saturated main actor (the whole suite runs in one process
+    // on CI) can take longer than the product's real second to run the write chain.
+    let deadline = ManualSleeper()
+    let terminationFlush = Task { await store.flush(atMost: .seconds(1), sleep: deadline.sleep) }
     _ = await writeStarts.next()
     #expect(store.needsFlush)
 

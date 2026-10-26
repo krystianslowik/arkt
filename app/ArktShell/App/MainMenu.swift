@@ -61,7 +61,7 @@ enum MainMenu {
     main.addItem(submenu(title: "Edit", items: editItems(commands: commands)))
     main.addItem(submenu(title: "View", items: viewItems()))
     main.addItem(submenu(title: "History", items: historyItems()))
-    main.addItem(submenu(title: "Spaces", items: spaceItems()))
+    main.addItem(holder(for: spacesMenu()))                                            // #387, built in ShellUI
     main.addItem(submenu(title: TabsMenu.title, items: TabsMenu.items()))               // #103, built in ShellUI
     windowItems(commands: commands).forEach { windows.addItem($0) }
     // Onboarding spec, section 12: the first Help item, no shortcut.
@@ -80,7 +80,7 @@ enum MainMenu {
     return [
       item("About Arkt Shell", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),
       .separator(),
-      // KB-066. Disabled until Arkt has a Settings window; it keeps Cmd-, from Chromium's settings page.
+      // KB-066: Arkt's Settings window (#307); it keeps Cmd-, from Chromium's settings page (decision 9).
       item("Settings...", #selector(AppCommands.showSettings(_:)), ",", target: commands),
       .separator(),
       holder(for: services),
@@ -182,12 +182,13 @@ enum MainMenu {
     ]
   }
 
-  /// KB-033, KB-034 (Cmd-Opt-Right / Left) and KB-035, BH-041 (Ctrl-1 ... Ctrl-9).
-  private static func spaceItems() -> [NSMenuItem] {
+  /// KB-033, KB-034 (Cmd-Opt-Right / Left). The Spaces themselves, with KB-035, BH-041 (Ctrl-1 ... Ctrl-9), are
+  /// listed by `SpacesMenu` between these items (#387).
+  private static func spacesMenu() -> SpacesMenu {
     let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)
     let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
     // #106: New Space is unbound (KB-043); Rename and Move are [I], PARITY(NEEDS-RUNTIME-CHECK): Arc's titles and place.
-    var spaces: [NSMenuItem] = [
+    let leading: [NSMenuItem] = [
       item("New Space", #selector(ShellWindowController.newSpace(_:)), "", []),
       item("Rename Space", #selector(ShellWindowController.renameSpace(_:)), "", []),
       item("Move Space Left", #selector(ShellWindowController.moveSpaceLeft(_:)), "", []),
@@ -197,17 +198,10 @@ enum MainMenu {
       .separator(),
       item("Next Space", #selector(ShellWindowController.nextSpace(_:)), right, [.command, .option]),
       item("Previous Space", #selector(ShellWindowController.previousSpace(_:)), left, [.command, .option]),
-      .separator(),
     ]
-    // Submenu tags 0-8: not top level, and far below Chromium's `IDC_` values.
-    for n in 1...9 {
-      let space = item("Space \(n)", #selector(ShellWindowController.goToSpace(_:)), "\(n)", [.control])
-      space.tag = n - 1
-      spaces.append(space)
-    }
     // #206, decision on #86: asks, then archives the Space's items. PARITY(NEEDS-RUNTIME-CHECK): Arc's title and place.
-    spaces += [.separator(), item("Delete Space...", #selector(ShellWindowController.deleteSpace(_:)), "", [])]
-    return spaces
+    let trailing = [.separator(), item("Delete Space...", #selector(ShellWindowController.deleteSpace(_:)), "", [])]
+    return SpacesMenu(leading: leading, trailing: trailing)
   }
 
   /// AppKit lists the open windows (the Archive window among them) below these (`NSApp.windowsMenu`).

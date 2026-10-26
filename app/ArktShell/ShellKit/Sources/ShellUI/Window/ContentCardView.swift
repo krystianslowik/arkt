@@ -33,6 +33,26 @@ public final class ContentCardView: NSView {
   public var borderEmphasis: CGFloat = 1 {
     didSet { if borderEmphasis != oldValue { needsDisplay = true } }
   }
+  /// The pane close (X) of a split pane (#388), above the page at the top trailing corner; nil on the single card.
+  public private(set) var closeButton: SplitPaneCloseButton?
+  /// A click (or VoiceOver press) on `closeButton`.
+  var onClose: (@MainActor () -> Void)?
+  /// False while the pane shows no page (a closed pane's placeholder): the X is hidden, out of the key loop and the
+  /// accessibility tree.
+  var allowsClose = true {
+    didSet {
+      guard allowsClose != oldValue else { return }
+      if !allowsClose {
+        // A hidden card gets no exit event: a reused card must not come back with a stale hover or focus.
+        isHovered = false
+        closeHasFocus = false
+      }
+      closeButton?.isHidden = !allowsClose
+      refreshCloseReveal(animated: false)
+    }
+  }
+  private var isHovered = false
+  private var closeHasFocus = false
   private let metrics: ShellMetrics
 
   public init(metrics: ShellMetrics = .standard) {
@@ -112,6 +132,7 @@ public final class ContentCardView: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     clipView.frame = bounds
+    layoutCloseButton()
     let split = split
     toolbar.frame = split.toolbarFrame
     contentView?.frame = split.contentFrame
@@ -151,9 +172,58 @@ public final class ContentCardView: NSView {
     applyBorderWidth()
   }
 
+  // MARK: Pane close (#388)
+
+  /// Adds the pane close button and the hover that shows it. Split panes only; once per card.
+  func installCloseButton() {
+    guard closeButton == nil else { return }
+    let button = SplitPaneCloseButton(frame: .zero)
+    button.target = self
+    button.action = #selector(closeButtonPressed(_:))
+    button.isHidden = !allowsClose
+    button.onFocusChange = { [weak self] focused in
+      self?.closeHasFocus = focused
+      self?.refreshCloseReveal(animated: true)
+    }
+    addSubview(button, positioned: .above, relativeTo: clipView)          // above the page, below a toast
+    closeButton = button
+    // `.inVisibleRect` follows the card's frame, so a reflow moving the card every frame rebuilds nothing.
+    addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                   owner: self, userInfo: nil))
+    needsLayout = true
+  }
+
+  @objc private func closeButtonPressed(_ sender: Any?) { onClose?() }
+
+  public override func mouseEntered(with event: NSEvent) {
+    guard closeButton != nil else { return super.mouseEntered(with: event) }
+    isHovered = true
+    refreshCloseReveal(animated: true)
+  }
+
+  public override func mouseExited(with event: NSEvent) {
+    guard closeButton != nil else { return super.mouseExited(with: event) }
+    isHovered = false
+    refreshCloseReveal(animated: true)
+  }
+
+  private func refreshCloseReveal(animated: Bool) {
+    closeButton?.setRevealed(allowsClose && (isHovered || closeHasFocus), animated: animated)
+  }
+
+  /// Top trailing: centered in the Toolbar strip at the Toolbar's padding when it shows, else inset from the corner.
+  private func layoutCloseButton() {
+    guard let closeButton else { return }
+    let size = SplitPaneCloseButton.size
+    let top = showsToolbar ? ((ContentToolbarView.stripHeight - size) / 2).rounded() : SplitPaneCloseButton.inset
+    let trailing = showsToolbar ? ContentToolbarView.horizontalPadding : SplitPaneCloseButton.inset
+    let frame = CGRect(x: bounds.maxX - trailing - size, y: bounds.maxY - top - size, width: size, height: size)
+    if closeButton.frame != frame { closeButton.frame = frame }
+  }
+
   /// Centered, `ToastView.bottomInset` above the bottom edge, at most `ToastView.maxWidth` wide.
   private func layoutToast() {
-    guard let toastView else { return }
+    guard let toastView, !toastView.isHidden else { return }       // laid out again when it shows
     toastView.frame = toastView.frame(centeredIn: bounds)
   }
 

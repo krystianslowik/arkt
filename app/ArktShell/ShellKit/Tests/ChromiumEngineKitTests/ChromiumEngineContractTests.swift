@@ -27,6 +27,7 @@ struct ChromiumEngineContractTests {
     let harness = ScriptedHarness.make()
     #expect(harness.engineCreateTab != nil && harness.engineCloseTab != nil && harness.engineActivate != nil)
     #expect(harness.holdClose != nil && harness.answerDialog != nil)
+    #expect(harness.makeAudible != nil)
   }
 
   /// The list names every public check of `EngineContract` (read from its sources), so a new rule cannot be left out.
@@ -42,8 +43,8 @@ struct ChromiumEngineContractTests {
         names.insert(String(match.output.1))
       }
     }
-    #expect(names.count == 24)
+    #expect(names.count == 26)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
-    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...16))
+    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...17))
   }
 }

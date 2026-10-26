@@ -35,12 +35,24 @@ public enum AXID {
     public static let urlBar = "toolbar.urlBar"
   }
 
+  /// The shared dialog (`DialogSheetView`): Delete Space, Clear Archive, the launch alerts.
+  public enum Dialog {
+    /// Label: the title; help: the body.
+    public static let root = "dialog"
+    public static let primary = "dialog.primary"
+    public static let secondary = "dialog.secondary"
+    public static let cancel = "dialog.cancel"
+    public static let footerLink = "dialog.footerLink"
+  }
+
   /// The toast over the bottom of the content card (`ToastView`); absent while no toast shows.
   public enum Toast {
     /// Label: the toast text. Value: `persistent` or `timed`.
     public static let root = "toast"
     /// The action button; present only while the toast has an action.
     public static let action = "toast.action"
+    /// The dismiss button of a persistent toast.
+    public static let dismiss = "toast.dismiss"
     /// Value of `root` for a toast that stays until dismissed (recovery notices).
     public static let persistent = "persistent"
     /// Value of `root` for a toast that hides after its duration.
@@ -81,6 +93,8 @@ public enum AXID {
     public static let divider = "sidebar.divider"
     /// Present only while the row's close button is shown. Label: tooltip.
     public static let rowClose = "sidebar.row.close"
+    /// A row's audio button (#364): mutes or unmutes the page.
+    public static let rowAudio = "sidebar.row.audio"
   }
 
   /// Favorites grid and tiles at the top of the sidebar (group U4b).
@@ -140,6 +154,8 @@ public enum AXID {
     /// Value: pane share factor (`NSNumber`).
     public static let divider = "split.divider"
     public static let reopen = "split.reopen"
+    /// Label "Close Pane": the X at the top of a pane with a page (#388).
+    public static let close = "split.close"
   }
 
   /// The first run over the whole window (`OnboardingView`, onboarding spec sections 6 and 11); absent once it ends.
@@ -198,5 +214,18 @@ public enum AXID {
     public static let row = "tabSwitcher.row"
     /// "3 more above" / "2 more below" after a keyboard reveal; absent otherwise.
     public static let overflowPill = "sidebar.overflowPill"
+  }
+
+  /// The Settings window (#307, docs/design/settings.md, section 7).
+  public enum Settings {
+    public static let window = "settings.window"
+    /// A pane item: a radio button in the "Settings" tab group, labelled with the pane's short name.
+    public static func tab(_ pane: String) -> String { "settings.tab.\(pane)" }
+    /// A row's control: `settings.<pane>.<setting>`, labelled with the row's label, its caption as help.
+    public static func control(_ pane: String, _ setting: String) -> String { "settings.\(pane).\(setting)" }
+    /// Settings > Shortcuts: the search field.
+    public static let shortcutsSearch = "settings.shortcuts.search"
+    /// Settings > Spaces and Profiles: a Space's row, by the Space's id.
+    public static func spaceRow(_ id: String) -> String { "settings.spaces.space.\(id)" }
   }
 }

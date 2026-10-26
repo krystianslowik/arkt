@@ -86,9 +86,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var onTakeOverLiveTab: (@MainActor (NodeID) -> LiveTabHandoff)?
   /// The placeholder shown where a page moved to another window (#300); made on the first handoff.
   var handoffPlaceholder: HandoffPlaceholderView?
-  /// This window's last page moved to another window: the engine closes the emptied engine window, and this window
-  /// stays open without one (#300).
-  var handsOffEngineWindow = false
+  /// This window let go of its last page: it moved to another window (#300), or it closed (#386; Chromium closes a
+  /// `Browser` with its last tab). The engine may close the emptied engine window; this window then stays open
+  /// without one, and the next page it shows makes a new one.
+  var keepsWindowWithoutEngine = false
+  /// The current row whose page went with an engine window this window keeps going without (#386): a page opened in
+  /// the closing window, such as the sibling a Cmd-W makes current. It is shown again once that window has closed.
+  var nodeToReshow: NodeID?
   /// Engine tabs are created lazily, when a sidebar node is first shown (`openEngineTab(for:)`).
   var tabsByNode: [NodeID: TabID] = [:]
   var nodeByTab: [TabID: NodeID] = [:]
@@ -111,6 +115,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var reopenStack = ReopenStack()
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
+  /// The reopen batch the visible undo toast belongs to; nil without one.
+  var undoToastBatch: UUID?
+  /// The Delete Space sheet while it is up.
+  var spaceRemovalSheet: DialogSheet?
   /// Removes a Space (the app's ArchiveCoordinator: its pinned and Today items are archived, decision on #86); Delete
   /// Space calls it once `confirmSpaceRemoval` said yes. Nil: Delete Space is disabled.
   public var onRemoveSpace: (@MainActor (SpaceID) -> Void)?
@@ -169,7 +177,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     root.card.toastView = toastView
     toasts.view = toastView
     onError = { [weak self] mutation, error in
-      self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error)))
+      self?.toasts.show(Toast(text: Self.errorText(for: mutation, error: error), kind: .error))
     }
     onNewSpace = { [weak self] in self?.newSpace(nil) }
     wireSpaceEntryPoints()
@@ -220,6 +228,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onSpacesChanged = { [weak self] _ in
       self?.refreshThemes()
       self?.updateEmptyState()
+      NotificationCenter.default.post(name: SpacesMenu.listDidChangeNotification, object: self)   // #387
     }
     refreshThemes()
     updateEmptyState()
@@ -250,12 +259,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     refreshToastFlavor()
   }
 
-  /// Toasts follow the flavor of the Space the pager is nearest to.
+  /// Toasts follow the theme of the Space the pager is nearest to: its flavor and its first color stop (BH-190,
+  /// alerts design decision 2).
   private func refreshToastFlavor() {
     let themes = rootView.themeBackground.themes
     guard !themes.isEmpty else { return }
     let index = min(max(Int(pager.position.rounded()), 0), themes.count - 1)
-    toasts.view?.flavor = themes[index].flavor
+    toasts.view?.theme = themes[index]
   }
 
   /// The default error toast's text for a failed `mutation`. A full split says "Cannot Add New Pane" (BH-116).
@@ -441,12 +451,17 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Cmd-W (KB-008). A Today tab is archived (BH-071) and the nearest sibling below, else above, becomes current; with
   /// none left the card stays empty and the window open (BH-073). A pane archives alone and its split shrinks (user
   /// decision 4, PARITY(NEEDS-RUNTIME-CHECK BH-123)). A pinned tab or Favorite closes its page and keeps its row
-  /// (BH-067, BH-048 [I]). Without a current tab nothing happens (BH-069, a second Cmd-W unpinning, is
-  /// NEEDS-RUNTIME-CHECK and not implemented).
+  /// (BH-067, BH-048 [I]). Closing the window's last page keeps the window open on the empty card, also when the
+  /// engine closes its emptied engine window (#386). Without a current tab the window closes, as Close Window does
+  /// (CF-03, "Close current tab or window"; BH-069, a second Cmd-W unpinning, is NEEDS-RUNTIME-CHECK and not
+  /// implemented).
   @objc public func closeTab(_ sender: Any?) {
     if peek.isOpen { peek.close(.keyboard); return }                // KB-078: Cmd-W closes the Peek
     if closeSelection() { return }                                  // BH-072: a multi-selection closes at once
-    guard let node = currentNode else { return }
+    guard let node = currentNode else {
+      window?.performClose(sender)
+      return
+    }
     close(node: node)
   }
 
@@ -590,7 +605,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .notLive: break
     }
     let tab = engine.createTab(url: url, in: ensureEngineWindow())
-    handsOffEngineWindow = false
+    keepsWindowWithoutEngine = false
     tabsByNode[node] = tab
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)
@@ -620,6 +635,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     let newTitle = snapshot.title.isEmpty || snapshot.title == title ? nil : snapshot.title
     if newURL != nil || newTitle != nil { sidebar.updateTab(node, url: newURL, title: newTitle) }
     if let favicon = snapshot.faviconData { faviconChanged(favicon, for: node) }
+    showAudio(of: snapshot, in: node)                               // #364
   }
 
   private func faviconChanged(_ data: Data?, for node: NodeID) {
@@ -660,6 +676,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       engineDidActivate(tab, node: node)
     case .closeCancelled(let tab):
       closeWasCancelled(tab, node: node)
+    case .audibleChanged(let tab, _), .mutedChanged(let tab, _):
+      audioChanged(tab, node: node)                                 // #364
     case .tabCreated, .titleChanged, .loadingChanged:
       break
     }
@@ -686,11 +704,17 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       shownNodes.removeAll { $0 == node }
       sidebarController.visible.remove(node)
       if wasCurrent { currentTab = nil; rootView.card.setContent(nil) }
+      if wasCurrent, reason == .windowClosing, keepsWindowWithoutEngine, !isWindowCloseRequested {
+        nodeToReshow = node                                  // #386: its page went with the emptied window
+      }
       sidebarController.deactivate(node: node)
       return
     case .client, .page, .extension:
       break
     }
+    // The last page of this window closed (#386). Set once the close is handled, after a successor was opened.
+    let emptiedWindow = tabsByNode.isEmpty
+    defer { if emptiedWindow { keepsWindowWithoutEngine = true } }
     shownNodes.removeAll { $0 == node }                     // a closed page is not hidden, it is gone
     sidebarController.visible.remove(node)
     if wasCurrent { currentTab = nil }
