@@ -327,4 +327,8 @@ private actor DiscardingArchiveStore: ArchiveStoring {
   }
 
   func remove(_: [NodeID]) async throws {}
+
+  func count(matching _: ArchiveFilter) async throws -> Int { 0 }
+
+  func removeAll() async throws {}
 }

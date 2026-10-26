@@ -206,6 +206,7 @@ public actor FakeArchiveStore: ArchiveStoring {
 /// stored start (`setStarted`), else `now` (which is then stored, like `SettingsStore`).
 public actor FakeArchiveState: ArchiveStateStoring {
   public private(set) var resets: [Date] = []
+  public private(set) var educationBannerDismissed = false
   private var started: Date?
   private var settings = ArchiveSettings()
   private var failsResets = false
@@ -285,4 +286,10 @@ public final class FakeSidebarPersist {
     saved.append(sidebar)
     return succeeds
   }
+}
+
+/// BH-089: the education banner flag, in memory.
+extension FakeArchiveState: ArchiveBannerStoring {
+  public func isEducationBannerDismissed() async throws -> Bool { educationBannerDismissed }
+  public func dismissEducationBanner(at date: Date) async throws { educationBannerDismissed = true }
 }

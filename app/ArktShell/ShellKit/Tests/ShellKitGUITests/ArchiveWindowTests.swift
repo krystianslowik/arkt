@@ -435,6 +435,8 @@ private actor FixedArchiveStore: ArchiveStoring {
     ArchivePage(items: Array(stored.prefix(limit ?? stored.count)), unreadable: 0)
   }
   func remove(_ ids: [NodeID]) async throws {}
+  func count(matching filter: ArchiveFilter) async throws -> Int { stored.count }
+  func removeAll() async throws {}
 }
 
 /// Returns the queued pages in order (the last one repeats) and records every call.
