@@ -7,6 +7,11 @@ import Testing
 struct FavoritesUnloadPolicyTests {
   private func ids(_ count: Int) -> [NodeID] { (0..<count).map { _ in NodeID() } }
 
+  /// The maintainer's decision on #376: eight loaded Favorites, not the earlier guessed four.
+  @Test func theLimitIsTheDecidedEight() {
+    #expect(FavoritesUnloadPolicy.maximumLoadedFavorites == 8)
+  }
+
   @Test func atOrUnderTheLimitNothingUnloads() {
     let order = ids(FavoritesUnloadPolicy.maximumLoadedFavorites)
     #expect(FavoritesUnloadPolicy.evictions(loadedOrder: order, exempt: []) == [])
@@ -16,6 +21,14 @@ struct FavoritesUnloadPolicyTests {
   @Test func theLeastRecentlyUsedUnloadsFirst() {
     let order = ids(FavoritesUnloadPolicy.maximumLoadedFavorites + 2)
     #expect(FavoritesUnloadPolicy.evictions(loadedOrder: order, exempt: []) == Array(order.prefix(2)))
+  }
+
+  /// The ninth loaded Favorite unloads the least recently used one; a current or visible ninth stays (BH-049).
+  @Test func theNinthLoadedFavoriteUnloadsTheLeastRecentlyUsed() {
+    let order = ids(9)
+    #expect(FavoritesUnloadPolicy.evictions(loadedOrder: order, exempt: []) == [order[0]])
+    #expect(FavoritesUnloadPolicy.evictions(loadedOrder: order, exempt: [order[0]]) == [order[1]],
+            "a current or visible Favorite is exempt; the next least recently used unloads")
   }
 
   @Test func exemptNodesAreSkipped() {
