@@ -789,3 +789,58 @@ final class PeekWindowTests: XCTestCase {
     harness.controller.close()
   }
 }
+
+// MARK: - Sound of a hidden Peek (#364, #348)
+
+extension PeekWindowTests {
+  /// A hidden Peek keeps running its page, so it is muted while hidden; coming back unmutes it.
+  func testAHiddenPeekIsMutedAndItsRestoreUnmutesIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.engine.setAudible(session.tab, true)
+
+    harness.controller.activate(node: world.today[0])
+    XCTAssertEqual(harness.engine.snapshot(of: session.tab)?.isMuted, true, "a hidden Peek plays nothing")
+    XCTAssertEqual(harness.peek.hiddenPeeks[session.source]?.wasMuted, false)
+
+    harness.controller.activate(node: world.pinned)
+    XCTAssertEqual(harness.peek.session?.tab, session.tab)
+    XCTAssertEqual(harness.engine.snapshot(of: session.tab)?.isMuted, false, "the restored Peek plays again")
+    harness.controller.close()
+  }
+
+  /// A Peek the user had muted stays muted when it comes back.
+  func testAPeekMutedBeforeItWasHiddenStaysMutedOnRestore() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.engine.setMuted(session.tab, muted: true)
+
+    harness.controller.activate(node: world.today[0])
+    XCTAssertEqual(harness.peek.hiddenPeeks[session.source]?.wasMuted, true)
+    harness.controller.activate(node: world.pinned)
+
+    XCTAssertEqual(harness.peek.session?.tab, session.tab)
+    XCTAssertEqual(harness.engine.snapshot(of: session.tab)?.isMuted, true)
+    harness.controller.close()
+  }
+
+  /// A hidden Peek closed with its source (Tab Handoff) is parked as an unmuted copy, so a reopen plays.
+  func testAClosedHiddenPeekReopensUnmuted() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+    XCTAssertEqual(harness.controller.releaseLiveTab(of: world.pinned), .released(session.source))
+    guard case .peek(let closed)? = harness.controller.reopenStack.items.last,
+          let parked = closed.parked else {
+      return XCTFail("the Peek is on the reopen stack with a parked copy")
+    }
+    XCTAssertEqual(harness.engine.snapshot(of: parked)?.isMuted, false)
+    harness.controller.close()
+  }
+}

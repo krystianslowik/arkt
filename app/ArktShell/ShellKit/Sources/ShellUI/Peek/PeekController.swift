@@ -15,7 +15,7 @@ public struct PeekSession: Equatable, Sendable {
 
 /// A Peek kept, hidden, while its source tab is not shown (#348, docs/design/peek.md, Edge cases): its tab stays
 /// live with its page, scroll and state, and comes back when the source is shown again. It is not saved and never
-/// gets a row.
+/// gets a row. Its page is muted while hidden (#364).
 public struct HiddenPeek: Equatable, Sendable {
   public let tab: TabID
   public var url: URL
@@ -23,6 +23,8 @@ public struct HiddenPeek: Equatable, Sendable {
   /// The source's sidebar row, kept for the reopen stack: when the source closes, its row mapping is gone before the
   /// Peek hears of it.
   public var sourceNode: NodeID?
+  /// The page's mute before it was hidden: a restore or a close puts it back.
+  public var wasMuted: Bool
 }
 
 /// How a Peek is closed (BH-149): each keeps the source tab as it was.
@@ -456,13 +458,16 @@ public final class PeekController {
     restoreShownPeek()
   }
 
-  /// Keeps the open Peek, hidden: its tab stays live (page, scroll, history, state), nothing is parked or announced,
-  /// and the shown tab takes the engine's activation back.
+  /// Keeps the open Peek, hidden: its tab stays live (page, scroll, history, state) but muted, so a page that plays
+  /// is not heard from nowhere (#364); nothing is parked or announced, and the shown tab takes the engine's
+  /// activation back.
   private func hide() {
     guard let session else { return }
     Self.logger.notice("peek hidden")
+    let wasMuted = shell.engine.snapshot(of: session.tab)?.isMuted ?? false
     hiddenPeeks[session.source] = HiddenPeek(tab: session.tab, url: session.url, linkOffset: session.linkOffset,
-                                             sourceNode: sourceNode)
+                                             sourceNode: sourceNode, wasMuted: wasMuted)
+    if !wasMuted { shell.engine.setMuted(session.tab, muted: true) }
     self.session = nil
     sourceNode = nil
     removeOverlay()
@@ -479,6 +484,7 @@ public final class PeekController {
           let hidden = hiddenPeeks.removeValue(forKey: source) else { return }
     if shell.engine.snapshot(of: hidden.tab) != nil,
        present(hidden.tab, url: hidden.url, from: source, motion: .restore(linkOffset: hidden.linkOffset)) {
+      if !hidden.wasMuted { shell.engine.setMuted(hidden.tab, muted: false) }
       Self.logger.notice("peek restored")
       return
     }
