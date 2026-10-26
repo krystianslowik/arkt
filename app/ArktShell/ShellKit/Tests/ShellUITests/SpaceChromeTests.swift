@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 import Testing
 @testable import ShellUI
 
@@ -208,6 +209,29 @@ struct ThemeCrossfadeTests {
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.paper.baseColors.map(\.cgColor)))
     #expect(await settled(view, timeout: 5))
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.dusk.baseColors.map(\.cgColor)))
+  }
+
+  /// While the theme creator is open, a programmatic theme change (a preset, adding or removing a colour) animates
+  /// the gradient on `firm` (#410).
+  @Test func aCrossfadeSpringReplacesTheEase() throws {
+    let view = background()
+    view.crossfadeSpring = SpringPreset.firm.parameters
+    view.replaceThemes([SpaceThemeCatalog.dusk, SpaceThemeCatalog.paper], crossfade: true)
+    let animation = try #require(view.crossfadeAnimationForTesting as? CASpringAnimation)
+    #expect(animation.damping == CGFloat(SpringPreset.firm.parameters.damping))
+    #expect(animation.stiffness == CGFloat(SpringPreset.firm.parameters.stiffness))
+    #expect((animation.toValue as? NSNumber)?.floatValue == 1)
+  }
+
+  /// The creator's live re-tint: one Space's theme drawn at once, with no crossfade.
+  @Test func aPreviewDrawsAtOnce() {
+    let view = background()
+    view.previewTheme(SpaceThemeCatalog.dusk, at: 0)
+    #expect(view.crossfadeAnimationForTesting == nil)
+    #expect(view.themes == [SpaceThemeCatalog.dusk, SpaceThemeCatalog.paper])
+    #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.dusk.baseColors.map(\.cgColor)))
+    view.previewTheme(SpaceThemeCatalog.dusk, at: 5)
+    #expect(view.themes.count == 2)
   }
 
   @Test func reduceMotionAZeroDurationOrASwipeSnaps() {

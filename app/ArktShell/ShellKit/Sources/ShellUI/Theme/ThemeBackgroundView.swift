@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 /// Full-window Space theme behind the sidebar and the card: a diagonal gradient per Space plus a tiled texture
 /// (grain, sand, denim or tweed), crossfaded on the GPU as the pager moves (design section 2). Per frame
@@ -25,6 +26,9 @@ public final class ThemeBackgroundView: WindowDragView {
   public private(set) var position: CGFloat = 0
   /// TODO(measure): Arc's Space theme crossfade.
   public var crossfadeDuration: TimeInterval = 0.28
+  /// While set, a theme crossfade runs on this spring instead of the 0.28 s ease: the theme creator sets `firm` while
+  /// it is open, so adding a colour or picking a preset re-tints on the design's curve (#410).
+  public var crossfadeSpring: SpringParameters?
   /// Read when a theme is replaced. Tests replace it; Reduce Motion snaps.
   public var reducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   /// Whether the window can be seen (not occluded, not miniaturized); a texture draw waits until it can. Tests
@@ -169,6 +173,13 @@ public final class ThemeBackgroundView: WindowDragView {
     CATransaction.commit()
   }
 
+  /// Draws `theme` for the Space at `index` at once: no crossfade and no implicit animation. The theme creator's live
+  /// re-tint calls it on every drag event; Core Animation coalesces the changes to the display refresh.
+  public func previewTheme(_ theme: SpaceThemeInfo, at index: Int) {
+    guard themes.indices.contains(index), themes[index] != theme else { return }
+    themes[index] = theme
+  }
+
   /// position 1.25 = theme 1 blended 25% toward theme 2. An in-flight theme crossfade stops here.
   public func setPosition(_ newPosition: CGFloat) {
     mirror?.setPosition(newPosition)
@@ -214,11 +225,17 @@ public final class ThemeBackgroundView: WindowDragView {
   }
 
   private func fade(_ layer: CALayer, from: Float, to: Float, duration: TimeInterval) {
-    let animation = CABasicAnimation(keyPath: "opacity")
-    animation.fromValue = from
-    animation.toValue = to
-    animation.duration = duration
-    animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    let animation: CABasicAnimation
+    if let crossfadeSpring {
+      animation = SpringAnimationFactory.make(keyPath: "opacity", from: Double(from), to: Double(to),
+                                              parameters: crossfadeSpring)
+    } else {
+      animation = CABasicAnimation(keyPath: "opacity")
+      animation.fromValue = from
+      animation.toValue = to
+      animation.duration = duration
+      animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    }
     animation.fillMode = .forwards
     animation.isRemovedOnCompletion = false
     layer.add(animation, forKey: Self.crossfadeKey)
