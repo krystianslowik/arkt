@@ -30,8 +30,9 @@ public struct ReservedKeys: Sendable {
 
   public init(_ keys: [Key]) { self.keys = keys }
 
-  /// Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-D (KB-012, #108), Cmd-Opt-Right, Cmd-Opt-Left. Reopen
-  /// (Shift-Cmd-T), the tab switcher (Ctrl-Tab) and Incognito (Shift-Cmd-N) join when Arkt has them.
+  /// Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-D (KB-012, #108), Cmd-Opt-Right, Cmd-Opt-Left, and the tab
+  /// switcher's Ctrl-Tab and Ctrl-Shift-Tab (#103; `ShellWindow.sendEvent` already hands those to the switcher before
+  /// any view). Reopen (Shift-Cmd-T) and Incognito (Shift-Cmd-N) join when Arkt has them.
   public static let arkt = ReservedKeys([
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: .command),
     Key(keyCode: kVK_ANSI_L, character: "l", modifiers: .command),
@@ -42,6 +43,8 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_ANSI_D, character: "d", modifiers: .command),
     Key(keyCode: kVK_RightArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_LeftArrow, character: "", modifiers: [.command, .option]),
+    Key(keyCode: kVK_Tab, character: "", modifiers: .control),
+    Key(keyCode: kVK_Tab, character: "", modifiers: [.control, .shift]),
   ])
 
   /// The modifiers a key equivalent is compared on: Cmd, Shift, Option and Control. Arrow keys also carry

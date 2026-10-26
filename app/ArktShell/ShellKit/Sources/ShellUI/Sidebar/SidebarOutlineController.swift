@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 extension NSPasteboard.PasteboardType {
   /// A sidebar node dragged inside the app: the node's UUID string. Only tab rows write it (S7).
@@ -139,6 +140,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   }
 
   public override func mouseDown(with event: NSEvent) {
+    keyboardFocusRow = nil                       // the next pointer click removes the keyboard focus ring
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
     // A Ctrl-click is a secondary click: the row's context menu, as a right-click shows, never the click action.
     // Left to the table, it sends the row action with Control set, which activates the row (#277).
@@ -155,6 +157,75 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     rowView?.isPressed = true
     super.mouseDown(with: event)
     rowView?.isPressed = false
+  }
+
+  // MARK: Keyboard focus (BH-019, BH-020)
+
+  /// The row that holds keyboard focus after Ctrl-Space, drawn with the system focus ring (`focusRingMaskBounds`);
+  /// nil otherwise. Selection stays off (`shouldSelectItem`), so this is the outline's only keyboard cursor.
+  public internal(set) var keyboardFocusRow: Int? {
+    didSet {
+      guard keyboardFocusRow != oldValue else { return }
+      focusRingType = keyboardFocusRow == nil ? .none : .default
+      noteFocusRingMaskChanged()
+      if let keyboardFocusRow { scrollRowToVisible(keyboardFocusRow) }
+    }
+  }
+  /// Whether Up and Down may stop on a row (the divider may not).
+  var isKeyboardFocusable: @MainActor (Int) -> Bool = { _ in true }
+  /// Return on the focused row.
+  var onKeyboardReturn: (@MainActor (Int) -> Void)?
+  /// Esc: focus goes back to the page.
+  var onKeyboardEscape: (@MainActor () -> Void)?
+
+  /// The focused row's fill, where the ring is drawn.
+  func keyboardFocusRect(_ row: Int) -> NSRect {
+    rect(ofRow: row).insetBy(dx: 0, dy: SidebarMetrics.rowBackgroundInsetY)
+  }
+
+  public override var focusRingMaskBounds: NSRect {
+    guard let row = keyboardFocusRow, row < numberOfRows else { return .zero }
+    return keyboardFocusRect(row)
+  }
+
+  public override func drawFocusRingMask() {
+    guard let row = keyboardFocusRow, row < numberOfRows else { return }
+    let radius = SidebarMetrics.rowCornerRadius
+    NSBezierPath(roundedRect: keyboardFocusRect(row), xRadius: radius, yRadius: radius).fill()
+  }
+
+  /// Up / Down move the focus row, Return opens it, Esc gives focus back to the page. Without keyboard focus the
+  /// outline handles keys as before.
+  public override func keyDown(with event: NSEvent) {
+    guard let row = keyboardFocusRow else {
+      super.keyDown(with: event)
+      return
+    }
+    switch Int(event.keyCode) {
+    case kVK_DownArrow: moveKeyboardFocus(from: row, by: 1)
+    case kVK_UpArrow: moveKeyboardFocus(from: row, by: -1)
+    case kVK_Return, kVK_ANSI_KeypadEnter: onKeyboardReturn?(row)
+    case kVK_Escape: onKeyboardEscape?()
+    case kVK_LeftArrow, kVK_RightArrow: break                         // the Favorites grid's keys, not built yet
+    default: super.keyDown(with: event)
+    }
+  }
+
+  private func moveKeyboardFocus(from row: Int, by step: Int) {
+    var next = row + step
+    while next >= 0, next < numberOfRows, !isKeyboardFocusable(next) { next += step }
+    guard next >= 0, next < numberOfRows else { return }
+    keyboardFocusRow = next
+  }
+
+  /// Only Ctrl-Space makes the outline the key view (a click never did: selection is off), so it accepts first
+  /// responder only while it holds a keyboard focus row.
+  public override var acceptsFirstResponder: Bool { keyboardFocusRow != nil }
+
+  public override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRow = nil }
+    return resigned
   }
 
   /// Clicks activate rows; the window drags from empty sidebar space only.
@@ -283,6 +354,12 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.dataSource = self
     outlineView.delegate = self
     wireAccessibility()
+    outlineView.isKeyboardFocusable = { [weak self] row in self?.isKeyboardFocusable(row: row) ?? false }
+    outlineView.onKeyboardReturn = { [weak self] row in self?.keyboardReturn(on: row) }
+    outlineView.onKeyboardEscape = { [weak self] in
+      self?.outlineView.keyboardFocusRow = nil
+      self?.onKeyboardFocusExit?()
+    }
     scrollView.documentView = outlineView
     outlineView.reloadData()
     for id in pinnedIDs + todayIDs {
@@ -310,6 +387,54 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public func row(for id: NodeID) -> Int {
     guard let existing = items[id] else { return -1 }
     return outlineView.row(forItem: existing)
+  }
+
+  /// Folders the user collapsed in this outline; the keyboard skips their tabs (`SidebarTabOrder`).
+  public var collapsedFolderIDs: Set<NodeID> { collapsedFolders }
+
+  /// Opens every collapsed folder that holds `id` (BH-019) and returns its row, or nil when this outline does not
+  /// show it.
+  @discardableResult
+  public func expandAncestors(of id: NodeID) -> Int? {
+    var folders: [NodeID] = []
+    var location = source.parent(of: id)
+    for _ in 0..<64 {                                 // depth guard against a malformed source
+      guard let container = location?.containerNode else { break }
+      if case .folder? = source.node(container) { folders.append(container) }
+      location = source.parent(of: container)
+    }
+    for folder in folders.reversed() where collapsedFolders.contains(folder) {
+      collapsedFolders.remove(folder)
+      expandContainer(folder)
+      reload(node: folder)
+    }
+    let found = row(for: id)
+    return found >= 0 ? found : nil
+  }
+
+  /// Whether keyboard focus may sit on `row` (tabs, folders and splits; not the divider).
+  public func isKeyboardFocusable(row: Int) -> Bool { nodeID(atRow: row) != nil }
+
+  /// Keyboard focus left the outline through Return or Esc; the window gives focus back to the page.
+  public var onKeyboardFocusExit: (@MainActor () -> Void)?
+
+  /// Ctrl-Space: keyboard focus on `row` with the system focus ring (BH-019). The window makes the outline first
+  /// responder.
+  public func focusKeyboard(on row: Int) {
+    outlineView.keyboardFocusRow = row
+  }
+
+  /// Return on the focused row (RT-13 assumed): a folder opens or closes in place and keeps the focus; a tab or split
+  /// opens and focus goes back to the page.
+  private func keyboardReturn(on row: Int) {
+    guard let id = nodeID(atRow: row) else { return }
+    if case .folder? = source.node(id) {
+      handleClick(row: row, modifiers: [])
+      return
+    }
+    outlineView.keyboardFocusRow = nil
+    onActivate?(id)
+    onKeyboardFocusExit?()
   }
 
   private func children(of id: NodeID) -> [NodeID] {
