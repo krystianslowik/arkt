@@ -709,6 +709,7 @@ final class TabActionsTests: XCTestCase {
   func testClearUnselectedTodayTabsArchivesOnlyTheUnselectedRows() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
+    let before = harness.children(.today(world.work))
     harness.controller.activate(node: world.today[0])
     try harness.click(world.split, .command)                 // t0 and the split are selected
 
@@ -722,6 +723,47 @@ final class TabActionsTests: XCTestCase {
     XCTAssertEqual(try harness.outline().selectedNodes, [world.today[0], world.split],
                    "the rows that stayed keep their selection")
     XCTAssertEqual(harness.current, world.today[0], "the current tab stays too")
+
+    harness.controller.toasts.performActionForTesting()
+    XCTAssertEqual(harness.children(.today(world.work)), before, "one Undo brings every cleared row back, in order")
+    harness.controller.close()
+  }
+
+  /// BH-078: the current tab stays even when a Cmd-click took it out of the selection; its page is the shown one.
+  func testClearUnselectedNeverArchivesTheCurrentTab() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.today[2], .command)              // t0 (the seed) and t2 are selected
+    try harness.click(world.today[0], .command)              // t0 leaves the selection, still current
+    XCTAssertEqual(try harness.outline().selectedNodes, [world.today[2]])
+
+    let menu = try XCTUnwrap(harness.controller.sidebarController.view.archiveButton.menu)
+    menu.delegate?.menuNeedsUpdate?(menu)
+    menu.performActionForItem(at: 1)
+
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[0], world.today[2]])
+    XCTAssertEqual(harness.current, world.today[0])
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 4 tabs")
+    harness.controller.close()
+  }
+
+  /// BH-078 with a Split View current: a pane's split counts as selected, so it stays whole.
+  func testClearUnselectedKeepsTheCurrentSplitWhole() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.panes[1])
+    try harness.click(world.today[3], .command)              // the split (the seed) and t3 are selected
+    try harness.click(world.split, .command)                 // the split leaves the selection, its pane still current
+    XCTAssertEqual(try harness.outline().selectedNodes, [world.today[3]])
+
+    let menu = try XCTUnwrap(harness.controller.sidebarController.view.archiveButton.menu)
+    menu.delegate?.menuNeedsUpdate?(menu)
+    menu.performActionForItem(at: 1)
+
+    XCTAssertEqual(harness.children(.today(world.work)), [world.split, world.today[3]])
+    XCTAssertEqual(harness.children(.split(world.split)), world.panes)
+    XCTAssertEqual(harness.current, world.panes[1])
     harness.controller.close()
   }
 

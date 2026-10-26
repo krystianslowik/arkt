@@ -71,11 +71,17 @@ extension ShellWindowController {
 
   /// The rows a Clear takes, in Today order (BH-075, BH-076, BH-078). A row counts as selected when it or any tab
   /// inside it is (a selected tab in a folder keeps the folder), and as playing when any of its pages plays media.
+  /// The row holding the current tab always reads as selected (as `SidebarSelection` seeds it), so Clear unselected
+  /// never archives the shown page, nor tears its Split View apart, even after a Cmd-click deselected it.
   func todayRows(of space: SpaceID, scope: TodayClearPolicy.Scope) -> [NodeID] {
     let selected = Set(sidebarController.selectedNodes)
+    let current = currentNode
     return TodayClearPolicy.rows(
       sidebar.children(of: .today(space)), scope: scope,
-      isSelected: { row in Self.holdsSelection([row], selected, tabs: { self.tabs(in: $0) }) },
+      isSelected: { row in
+        Self.holdsSelection([row], selected, tabs: { self.tabs(in: $0) })
+          || current.map(self.tabs(in: row).contains) == true
+      },
       playsMedia: { row in self.tabs(in: row).contains { self.pagePlaysMedia($0) } })
   }
 
