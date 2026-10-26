@@ -84,6 +84,12 @@ public final class ContentCardView: NSView {
     clipView.addSubview(view, positioned: .below, relativeTo: nil)
   }
 
+  /// Forgets the content without removing it: another card mounts the same view next (Little Arkt's Open in moves
+  /// the page's view to the main window), and removing it here could take it out of that card.
+  public func releaseContent() {
+    contentView = nil
+  }
+
   /// Installs `view` above the page and the Toolbar, filling `clipView`, or removes the current one when nil.
   public func setEmptyState(_ view: NSView?) {
     if emptyStateView === view { return }
