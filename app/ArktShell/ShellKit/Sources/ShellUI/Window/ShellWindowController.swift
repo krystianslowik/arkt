@@ -252,12 +252,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     refreshToastFlavor()
   }
 
-  /// Toasts follow the flavor of the Space the pager is nearest to.
+  /// Toasts follow the theme of the Space the pager is nearest to: its flavor and its first color stop (BH-190,
+  /// alerts design decision 2).
   private func refreshToastFlavor() {
     let themes = rootView.themeBackground.themes
     guard !themes.isEmpty else { return }
     let index = min(max(Int(pager.position.rounded()), 0), themes.count - 1)
-    toasts.view?.flavor = themes[index].flavor
+    toasts.view?.theme = themes[index]
   }
 
   /// The default error toast's text for a failed `mutation`. A full split says "Cannot Add New Pane" (BH-116).
