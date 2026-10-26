@@ -3190,7 +3190,7 @@ column). One snapshot call serves both #370 and #352 (shape posted on #352).
 - Engine build (`ARKT_ENGINE_APP` set to `out/Spike/Chromium.app`, derived data outside the Chromium disk):
   `BUILD SUCCEEDED`; the binary defines `_OBJC_CLASS_$_ArktShellEmbedder` and lists it in its Objective-C class list
   (`otool -ov`), which is what `NSClassFromString` reads. The app was not launched.
-- ShellKit `swift test --skip ShellKitGUITests`, rebased on `5ebda1f`: 1283 passed; isolation suites 33 (28 + 5).
+- ShellKit `swift test --skip ShellKitGUITests`, rebased on `5ebda1f`: 1284 passed; isolation suites 34 (28 + 6).
   ArktCore `swift test`: 428 passed (428 + 0).
 
 ### Deviations
