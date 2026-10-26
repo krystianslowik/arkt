@@ -44,13 +44,14 @@ final class LittleArktAnimator {
   func run(_ targets: [LittleArktTarget], label: StaticString, in view: NSView,
            completion: ((Bool) -> Void)? = nil) {
     finish(completed: false)
-    springs.apply(targets, at: now())
+    let start = now()                                         // one read: the retarget and the first frame share it
+    springs.apply(targets, at: start)
     self.completion = completion ?? { _ in }
     generation += 1
     interval = ShellSignposts.signposter.beginInterval("LittleArkt", "\(label, privacy: .public)")
     guard drivesDisplayLink, view.window != nil else {
-      if !drivesDisplayLink { onFrame?(springs.scene(at: now())); return }
-      settleNow()
+      if !drivesDisplayLink { onFrame?(springs.scene(at: start)); return }
+      settle(at: start)
       return
     }
     let target = LittleArktLinkTarget { [weak self] link in self?.tick(link) }
@@ -58,12 +59,16 @@ final class LittleArktAnimator {
     link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
     link.add(to: .main, forMode: .common)
     self.link = link
-    onFrame?(springs.scene(at: now()))
+    onFrame?(springs.scene(at: start))
   }
 
   /// Jumps to the settled end of the current run and completes it (tests, and runs without a display).
   func settleNow() {
-    let end = springs.scene(at: now() + 30)
+    settle(at: now())
+  }
+
+  private func settle(at instant: CFTimeInterval) {
+    let end = springs.scene(at: instant + 30)
     springs.jump(to: end)
     onFrame?(end)
     finish(completed: true)

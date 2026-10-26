@@ -140,6 +140,17 @@ struct LittleArktFlightMotionTests {
     #expect(open.allSatisfy { $0 == .rest })
   }
 
+  /// Per frame the outline reads one row height, the arriving row's: the other rows' heights never matter.
+  @Test func onlyTheArrivingRowsHeightMakesRoom() {
+    var frame = Array(repeating: FolderMotionLayout.RowStyle.rest, count: 500)
+    SidebarArrivalLayout.apply(to: &frame, arrivalHeight: 34, arrivalRow: 1, room: 0.25, appear: 0.5)
+    let reference = SidebarArrivalLayout.styles(rowHeights: [28] + [CGFloat](repeating: 34, count: 499),
+                                                arrivalRow: 1, room: 0.25, appear: 0.5)
+    #expect(frame == reference)
+    #expect(frame[0] == .rest)
+    #expect(frame[499].offsetY == -25.5)
+  }
+
   // MARK: The snapshot image
 
   @Test func theSnapshotDecodesOffTheMainActorAtThePagesScale() async throws {

@@ -1223,11 +1223,14 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     var styles: [ObjectIdentifier: FolderMotionLayout.RowStyle] = [:]
     let arrivalRow = arrival.map { row(for: $0.node) } ?? -1
     if !transitions.isEmpty || arrivalRow >= 0 {
-      let heights = (0..<outlineView.numberOfRows).map { outlineView.rect(ofRow: $0).height }
-      var frame = FolderMotionLayout.styles(rowHeights: heights, transitions: transitions)
+      // Every row's height only when a folder is in motion; an arrival needs its own row's alone (#352).
+      var frame = transitions.isEmpty
+        ? Array(repeating: FolderMotionLayout.RowStyle.rest, count: outlineView.numberOfRows)
+        : FolderMotionLayout.styles(rowHeights: (0..<outlineView.numberOfRows).map { outlineView.rect(ofRow: $0).height },
+                                    transitions: transitions)
       if let arrival, arrivalRow >= 0 {
-        SidebarArrivalLayout.apply(to: &frame, rowHeights: heights, arrivalRow: arrivalRow, room: arrival.room,
-                                   appear: arrival.appear)
+        SidebarArrivalLayout.apply(to: &frame, arrivalHeight: outlineView.rect(ofRow: arrivalRow).height,
+                                   arrivalRow: arrivalRow, room: arrival.room, appear: arrival.appear)
       }
       for (row, style) in frame.enumerated() where style != .rest {
         if let key = styleKey(atRow: row) { styles[key] = style }

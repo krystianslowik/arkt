@@ -8,18 +8,20 @@ enum SidebarArrivalLayout {
   static func styles(rowHeights: [CGFloat], arrivalRow: Int, room: Double,
                      appear: Double) -> [FolderMotionLayout.RowStyle] {
     var styles = Array(repeating: FolderMotionLayout.RowStyle.rest, count: rowHeights.count)
-    apply(to: &styles, rowHeights: rowHeights, arrivalRow: arrivalRow, room: room, appear: appear)
+    guard rowHeights.indices.contains(arrivalRow) else { return styles }
+    apply(to: &styles, arrivalHeight: rowHeights[arrivalRow], arrivalRow: arrivalRow, room: room, appear: appear)
     return styles
   }
 
-  /// Adds the arrival to `styles` (a folder motion frame, or rest).
-  static func apply(to styles: inout [FolderMotionLayout.RowStyle], rowHeights: [CGFloat], arrivalRow: Int,
+  /// Adds the arrival to `styles` (a folder motion frame, or rest). Only the arriving row's own height matters: the
+  /// rows below it move by that, so the other rows' heights are never read.
+  static func apply(to styles: inout [FolderMotionLayout.RowStyle], arrivalHeight: CGFloat, arrivalRow: Int,
                     room: Double, appear: Double) {
-    guard styles.indices.contains(arrivalRow), rowHeights.indices.contains(arrivalRow) else { return }
+    guard styles.indices.contains(arrivalRow) else { return }
     let shown = CGFloat(min(max(appear, 0), 1))
     styles[arrivalRow].alpha *= shown
     styles[arrivalRow].scale *= 1 - CGFloat(1 - LittleArktFlightMotion.rowStartScale) * (1 - shown)
-    let missing = CGFloat(room - 1) * rowHeights[arrivalRow]
+    let missing = CGFloat(room - 1) * arrivalHeight
     for row in (arrivalRow + 1)..<styles.count {
       styles[row].offsetY += missing
     }

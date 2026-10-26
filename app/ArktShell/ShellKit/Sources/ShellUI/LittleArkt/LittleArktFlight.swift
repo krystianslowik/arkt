@@ -20,6 +20,9 @@ protocol LittleArktFlightDestination: AnyObject {
   func presentArrival(of node: NodeID, room: Double, appear: Double)
   /// The flight is at rest: the page moves into this window, mounted at its final size, selected and focused.
   func finishReceiving(_ tab: TabID, node: NodeID) -> Bool
+  /// The flight ended without the page coming here: the row's arrival stops and the row goes (the page was never
+  /// moved, so nothing here owns it).
+  func cancelReceiving(_ tab: TabID, node: NodeID)
 }
 
 // MARK: - Overlay
@@ -50,6 +53,28 @@ final class LittleArktFlightOverlay: NSWindow {
   override var canBecomeMain: Bool { false }
 }
 
+// MARK: - Abort
+
+/// Why a flight ended before it landed by itself.
+enum LittleArktFlightAbort: Equatable {
+  /// The main window closed: the page stays in the small window.
+  case mainWindowClosed
+  case mainWindowMiniaturized
+  /// The main window's display link stopped delivering frames (`LittleArktFlight.quietChecksToAbort` checks in a row).
+  case framesStopped
+  case appTerminating
+  /// The small window is closing: the page lands first.
+  case smallWindowClosing
+  /// Cmd-W or the close button: the page lands first, then the window closes.
+  case closeRequested
+  /// The page closed itself (`window.close()`): there is nothing to land.
+  case pageClosed
+}
+
+/// Schedules one watchdog check on a clock the caller injects, and returns what cancels it. The flight counts frames
+/// at every check, never seconds.
+typealias LittleArktFlightWatchdog = @MainActor (_ check: @escaping @MainActor () -> Void) -> @MainActor () -> Void
+
 // MARK: - Flight
 
 /// One Open in flight: the page's snapshot on its plate, as a layer on `overlay`, flies from the Little Arkt card to
@@ -59,6 +84,10 @@ final class LittleArktFlightOverlay: NSWindow {
 /// else as its plate, and the snapshot fades in on it when it arrives. The live page never moves mid-flight; at rest
 /// `onLand` moves it, and after the page's first frame in the main card (the next display frame) the card crossfades
 /// away (0.1 s) and the overlay is removed.
+///
+/// A flight that cannot land by itself (the main window closes or miniaturizes, its display link stops, the small
+/// window closes, the page closes, the app terminates) ends with `abort(_:)`: `onAbort` puts the page where the
+/// reason says (the landing without the flight, or staying put) and the overlay comes off at once.
 ///
 /// Every frame sets layer properties only: the card's position, mask bounds, scale and opacity, the snapshot's
 /// position and opacity, and the arriving row's style through `onRoom`. The image is decoded before it gets here.
@@ -89,6 +118,19 @@ final class LittleArktFlight {
   private var fadesSnapshotIn = false
   private var link: CADisplayLink?
   private var interval: OSSignpostIntervalState?
+  private var watcher: LittleArktFlightWatcher?
+  private var cancelWatchdog: (@MainActor () -> Void)?
+  private var frames = 0
+  private var framesAtLastCheck = 0
+  private var quietChecks = 0
+
+  /// Checks with no frame in between that end a flight (the first quiet one is a hitch).
+  static let quietChecksToAbort = 2
+  /// The production watchdog's interval, on the real clock; tests inject their own.
+  static let watchdogInterval: Duration = .milliseconds(250)
+
+  /// Schedules the watchdog's checks. Nil: the real clock when the flight drives a display link, none otherwise.
+  var watchdog: LittleArktFlightWatchdog?
 
   /// Tests turn this off and call `tick(at:)` with times of their own.
   var drivesDisplayLink = true
@@ -98,6 +140,8 @@ final class LittleArktFlight {
   var onRoom: (@MainActor (_ room: Double, _ row: Double) -> Void)?
   /// At rest: the page moves.
   var onLand: (@MainActor () -> Void)?
+  /// The flight cannot land by itself: the page goes where this says; the overlay comes off right after.
+  var onAbort: (@MainActor (LittleArktFlightAbort) -> Void)?
   /// The overlay is gone.
   var onFinish: (@MainActor () -> Void)?
 
@@ -121,6 +165,9 @@ final class LittleArktFlight {
 
   isolated deinit {
     link?.invalidate()
+    cancelWatchdog?()
+    watcher?.stop()
+    overlay.orderOut(nil)                                     // a flight nobody finished takes its overlay with it
   }
 
   private func buildLayers(flavor: ThemeFlavor) {
@@ -149,6 +196,8 @@ final class LittleArktFlight {
   /// (no window), the flight runs to its end at once.
   func start(on view: NSView?) {
     interval = ShellSignposts.signposter.beginInterval("LittleArkt", "flight")
+    watcher = LittleArktFlightWatcher(flight: self, mainWindow: view?.window)
+    armWatchdog()
     guard drivesDisplayLink else { return }
     guard let view, view.window != nil else {
       runToEnd()
@@ -187,6 +236,7 @@ final class LittleArktFlight {
 
   /// One display frame at `t` (the display link's target timestamp).
   func tick(at t: Double) {
+    frames += 1
     switch stage {
     case .waitingForFrame:
       begin(at: t)
@@ -242,12 +292,60 @@ final class LittleArktFlight {
     stage = .finished
     link?.invalidate()
     link = nil
+    cancelWatchdog?()
+    cancelWatchdog = nil
+    watcher?.stop()
+    watcher = nil
     overlay.orderOut(nil)
     snapshotLayer.contents = nil
     snapshot = nil
     if let interval { ShellSignposts.signposter.endInterval("LittleArkt", interval) }
     interval = nil
     onFinish?()
+  }
+
+  // MARK: Abort
+
+  /// Ends the flight early. Before it landed, `onAbort` puts the page where `reason` says; after it landed (the
+  /// page is in the main card already) only the overlay comes off.
+  func abort(_ reason: LittleArktFlightAbort) {
+    switch stage {
+    case .waitingForFrame, .flying:
+      onAbort?(reason)
+    case .landed, .crossfading, .finished:
+      break
+    }
+    finish()
+  }
+
+  private func armWatchdog() {
+    guard let schedule = watchdog ?? (drivesDisplayLink ? Self.realClockWatchdog : nil) else { return }
+    cancelWatchdog = schedule { [weak self] in self?.watchdogChecked() }
+  }
+
+  /// One interval passed: no frame since the last check twice in a row means the display link is not running.
+  private func watchdogChecked() {
+    guard stage != .finished else { return }
+    if frames == framesAtLastCheck {
+      quietChecks += 1
+      if quietChecks >= Self.quietChecksToAbort {
+        abort(.framesStopped)
+        return
+      }
+    } else {
+      quietChecks = 0
+    }
+    framesAtLastCheck = frames
+    armWatchdog()
+  }
+
+  private static let realClockWatchdog: LittleArktFlightWatchdog = { check in
+    let task = Task { @MainActor in
+      try? await Task.sleep(for: watchdogInterval)
+      guard !Task.isCancelled else { return }
+      check()
+    }
+    return { task.cancel() }
   }
 
   // MARK: Presenting
@@ -280,4 +378,34 @@ private final class LittleArktFlightLinkTarget: NSObject {
     guard let flight else { link.invalidate(); return }
     flight.tick(at: link.targetTimestamp)
   }
+}
+
+
+/// What ends a flight from outside: the main window closing or miniaturizing, and the app terminating. Selector
+/// based, so the flight hears them on the posting turn, before the window is gone.
+@MainActor
+private final class LittleArktFlightWatcher: NSObject {
+  private weak var flight: LittleArktFlight?
+
+  init(flight: LittleArktFlight, mainWindow: NSWindow?) {
+    self.flight = flight
+    super.init()
+    let center = NotificationCenter.default
+    if let mainWindow {
+      center.addObserver(self, selector: #selector(mainWindowClosed(_:)), name: NSWindow.willCloseNotification,
+                         object: mainWindow)
+      center.addObserver(self, selector: #selector(mainWindowMiniaturized(_:)),
+                         name: NSWindow.didMiniaturizeNotification, object: mainWindow)
+    }
+    center.addObserver(self, selector: #selector(appTerminating(_:)), name: NSApplication.willTerminateNotification,
+                       object: nil)
+  }
+
+  func stop() {
+    NotificationCenter.default.removeObserver(self)
+  }
+
+  @objc private func mainWindowClosed(_ note: Notification) { flight?.abort(.mainWindowClosed) }
+  @objc private func mainWindowMiniaturized(_ note: Notification) { flight?.abort(.mainWindowMiniaturized) }
+  @objc private func appTerminating(_ note: Notification) { flight?.abort(.appTerminating) }
 }

@@ -69,6 +69,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   var mainWindowConditions: @MainActor (NSWindow) -> LittleArktFlightConditions = {
     LittleArktFlightConditions(window: $0)
   }
+  /// Schedules the flight's watchdog checks (tests inject a clock of their own); nil: the real clock.
+  var flightWatchdog: LittleArktFlightWatchdog?
   /// The page's frame for the flight; nil asks the engine (`snapshot(of:)`).
   var snapshotSource: (@MainActor (TabID) async -> LittleArktSnapshot?)?
   /// Tests turn this off and step the motion and the flight by hand.
@@ -148,6 +150,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     case .tabClosed(let tab, _) where tab == shownTab:
       shownTab = nil
       if card.contentView?.isDescendant(of: rootView) == true { card.setContent(nil) }
+      flight?.abort(.pageClosed)                              // nothing left to land; the engine closes the window
     default:
       break
     }
@@ -208,6 +211,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   public func windowWillClose(_ notification: Notification) {
     rootView.removeToolTipsInSubtree()
+    flight?.abort(.smallWindowClosing)                        // the page lands in the main window first
     guard phase != .closed else { return }
     phase = .closed
     onClosed(self)
@@ -222,6 +226,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// Scale 0.97 and fade (`firmFast`), then the engine closes the window. A page that would ask before leaving
   /// (`beforeunload`) is asked at once, without the motion, so its prompt is never on an invisible window.
   func requestClose() {
+    if phase == .flying {
+      flight?.abort(.closeRequested)                          // the page lands now, never stranded in a hidden window
+      if phase == .handedOff { return }                       // the engine closes the emptied window
+    }
     guard phase == .open, engineWindow != nil else { return }
     if let shownTab, engine.snapshot(of: shownTab)?.wouldHoldClose == true {
       engineHost.onCloseRequested?()
@@ -311,7 +319,11 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     flight.onLand = { [weak self, weak destination] in
       self?.landFlight(tab, node: node, destination: destination, spaceName: spaceName)
     }
+    flight.onAbort = { [weak self, weak destination] reason in
+      self?.flightAborted(reason, tab, node: node, destination: destination, spaceName: spaceName)
+    }
     flight.onFinish = { [weak self] in self?.flightFinished() }
+    flight.watchdog = flightWatchdog
     self.flight = flight
     phase = .flying
     snapshotTask = Task { [weak self] in
@@ -347,6 +359,33 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       return
     }
     // The main window went away mid-flight: the page stays here (another window would add a second row for it).
+    keepPage(tab, node: node, destination: destination)
+  }
+
+  /// The flight ended early (`LittleArktFlight.abort`). The page lands in the main window without the flight, stays
+  /// here when that window is going away, or, when the page closed itself, there is nothing to land.
+  private func flightAborted(_ reason: LittleArktFlightAbort, _ tab: TabID, node: NodeID,
+                             destination: (any LittleArktFlightDestination)?, spaceName: String?) {
+    guard phase == .flying else { return }
+    switch reason {
+    case .mainWindowClosed:
+      snapshotTask?.cancel()
+      snapshotTask = nil
+      keepPage(tab, node: node, destination: destination)
+    case .pageClosed:
+      snapshotTask?.cancel()
+      snapshotTask = nil
+      destination?.cancelReceiving(tab, node: node)
+      phase = .handedOff                                      // the engine closes this window; no appear on it
+      if engineClosed || engineWindow == nil { finishClose() }
+    case .mainWindowMiniaturized, .framesStopped, .appTerminating, .smallWindowClosing, .closeRequested:
+      landFlight(tab, node: node, destination: destination, spaceName: spaceName)
+    }
+  }
+
+  /// The page stays in this window: the row made for it goes, and the window comes back.
+  private func keepPage(_ tab: TabID, node: NodeID, destination: (any LittleArktFlightDestination)?) {
+    destination?.cancelReceiving(tab, node: node)
     phase = .open
     window.ignoresMouseEvents = false
     if let view = engine.contentView(for: tab) { card.setContent(view) }

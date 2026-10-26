@@ -51,6 +51,16 @@ extension ShellWindowController: LittleArktFlightDestination {
     return true
   }
 
+  /// The flight ended and the page is not coming (the page closed itself, or this window is going away): the
+  /// arrival stops and the row made for the page goes. The page is still in the Little Arkt window, so the row lets
+  /// go of it first; a row the page's own close already archived is left alone.
+  func cancelReceiving(_ tab: TabID, node: NodeID) {
+    sidebarController.currentPage?.outlineController.endArrival()
+    guard tabsByNode[node] == tab else { return }
+    _ = releaseLiveTab(of: node)
+    archive(node, heldCurrent: false)
+  }
+
   func presentArrival(of node: NodeID, room: Double, appear: Double) {
     sidebarController.currentPage?.outlineController.presentArrival(of: node, room: room, appear: appear)
   }

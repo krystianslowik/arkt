@@ -30,7 +30,7 @@ final class LittleArktFlightTests: XCTestCase {
     for set in sets {
       for controller in set.controllers { controller.window?.orderOut(nil) }
       for little in set.littleArkts {
-        little.flight?.overlay.orderOut(nil)
+        little.flight?.abort(.closeRequested)
         little.window.orderOut(nil)
       }
     }
@@ -50,7 +50,8 @@ final class LittleArktFlightTests: XCTestCase {
   }
 
   /// A main window with `todayTabs` Today rows, and a Little Arkt popup whose motion and flight are stepped by hand.
-  private func makeScene(reduceMotion: Bool = false, todayTabs: Int = 0, clock: ManualClock? = nil) throws -> Scene {
+  private func makeScene(reduceMotion: Bool = false, todayTabs: Int = 0, clock: ManualClock? = nil,
+                         watchdog: ManualWatchdog? = nil) throws -> Scene {
     let engine = InMemoryEngine()
     let world = try EngineWorld.make()
     let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
@@ -60,7 +61,8 @@ final class LittleArktFlightTests: XCTestCase {
     gates.append(gate)
     set.littleArktConfigure = { little in
       little.drivesDisplayLink = false
-      if let clock { little.motionClock = { clock.now } }
+      if let clock { little.motionClock = { clock.read() } }
+      if let watchdog { little.flightWatchdog = { watchdog.schedule($0) } }
       little.snapshotSource = { [gate] tab in await gate.source(tab) }
     }
     engine.windowHostProvider = { [weak set] request in
@@ -321,6 +323,276 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertEqual(scene.main.currentTab, scene.tab)
   }
 
+  // MARK: Abort (a flight that cannot land by itself)
+
+  /// A flight in the air: opened, started, and a few frames in.
+  private func flyAFewFrames(_ scene: Scene) throws -> LittleArktFlight {
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.tick(at: 0)
+    flight.tick(at: 0.1)
+    XCTAssertEqual(flight.stage, .flying)
+    XCTAssertTrue(flight.overlay.isVisible)
+    return flight
+  }
+
+  /// The page landed in the main window with no flight, and nothing of the flight is left on screen.
+  private func assertLandedWithoutTheFlight(_ scene: Scene, _ flight: LittleArktFlight, _ page: NSView,
+                                            _ message: String, line: UInt = #line) {
+    XCTAssertEqual(flight.stage, .finished, message, line: line)
+    XCTAssertFalse(flight.overlay.isVisible, "the overlay is gone: \(message)", line: line)
+    XCTAssertNil(scene.little.flight, message, line: line)
+    XCTAssertEqual(scene.engine.snapshot(of: scene.tab)?.window, scene.main.engineWindow,
+                   "the page landed in the main window: \(message)", line: line)
+    XCTAssertTrue(page.isDescendant(of: scene.main.rootView.card), message, line: line)
+    XCTAssertEqual(scene.main.currentTab, scene.tab, message, line: line)
+    let outline = scene.main.sidebarController.currentPage?.outlineController
+    let arrived = scene.main.nodeByTab[scene.tab]
+    XCTAssertEqual(arrived.flatMap { outline?.rowStyle(for: $0) }, .rest, "the row draws at rest: \(message)",
+                   line: line)
+  }
+
+  func testTheMainWindowClosingMidFlightKeepsThePageInTheSmallWindow() throws {
+    let scene = try makeScene(todayTabs: 1)
+    let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let flight = try flyAFewFrames(scene)
+    let node = try XCTUnwrap(scene.main.nodeByTab[scene.tab])
+
+    scene.main.window?.close()
+
+    XCTAssertEqual(flight.stage, .finished)
+    XCTAssertFalse(flight.overlay.isVisible, "the overlay is gone")
+    XCTAssertNil(scene.little.flight)
+    XCTAssertEqual(scene.engine.snapshot(of: scene.tab)?.window, scene.littleWindow, "the page stayed")
+    XCTAssertTrue(page.isDescendant(of: scene.little.card))
+    XCTAssertFalse(scene.little.window.ignoresMouseEvents, "the small window takes clicks again")
+    XCTAssertEqual(scene.little.lastTransition, .appear, "and comes back")
+    XCTAssertFalse(scene.little.isClosed)
+    XCTAssertNil(scene.main.tabsByNode[node], "the main window let go of the page it never received")
+  }
+
+  func testTheMainWindowMiniaturizingMidFlightLandsThePageWithoutTheFlight() throws {
+    let scene = try makeScene(todayTabs: 1)
+    let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let flight = try flyAFewFrames(scene)
+
+    NotificationCenter.default.post(name: NSWindow.didMiniaturizeNotification, object: scene.main.window)
+
+    assertLandedWithoutTheFlight(scene, flight, page, "main window miniaturized")
+  }
+
+  func testTheSmallWindowClosingMidFlightLandsThePageWithoutTheFlight() throws {
+    let scene = try makeScene(todayTabs: 1)
+    let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let flight = try flyAFewFrames(scene)
+
+    scene.little.window.close()
+
+    assertLandedWithoutTheFlight(scene, flight, page, "small window closed")
+    XCTAssertTrue(scene.little.isClosed)
+  }
+
+  /// `window.close()` in the page: the page is gone, so the small window goes without replaying its appear, and the
+  /// row that was arriving for it is the main window's again.
+  func testThePageClosingItselfMidFlightClosesTheWindowWithoutReplayingTheAppear() throws {
+    let scene = try makeScene(todayTabs: 1)
+    let flight = try flyAFewFrames(scene)
+    let node = try XCTUnwrap(scene.main.nodeByTab[scene.tab])
+    XCTAssertEqual(scene.little.lastTransition, .fadeOut)
+
+    scene.engine.closeWindow(scene.littleWindow)
+
+    XCTAssertEqual(flight.stage, .finished)
+    XCTAssertFalse(flight.overlay.isVisible, "the overlay is gone")
+    XCTAssertNil(scene.little.flight)
+    XCTAssertEqual(scene.little.lastTransition, .fadeOut, "no appear on an emptied window")
+    XCTAssertTrue(scene.little.isClosed, "the window is closed")
+    let outline = try XCTUnwrap(scene.main.sidebarController.currentPage?.outlineController)
+    XCTAssertEqual(outline.rowStyle(for: node), .rest, "no row is left held back or faded")
+  }
+
+  func testTheAppTerminatingMidFlightLandsThePageWithoutTheFlight() throws {
+    let scene = try makeScene(todayTabs: 1)
+    let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let flight = try flyAFewFrames(scene)
+
+    NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: NSApp)
+
+    assertLandedWithoutTheFlight(scene, flight, page, "app terminating")
+  }
+
+  /// Cmd-W while the page is in the air: the flight lands at once, then the window closes, so the tab is never
+  /// stranded in an invisible window that ignores the keyboard.
+  func testCmdWMidFlightLandsThePageThenClosesTheWindow() throws {
+    let scene = try makeScene(todayTabs: 1)
+    let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let flight = try flyAFewFrames(scene)
+
+    scene.little.requestClose()
+
+    assertLandedWithoutTheFlight(scene, flight, page, "Cmd-W")
+  }
+
+  /// Cmd-W mid-flight with the main window gone: the page stays in the small window, which then closes as asked.
+  func testCmdWMidFlightWithTheMainWindowGoneStillClosesTheSmallWindow() throws {
+    let scene = try makeScene(todayTabs: 1)
+    let flight = try flyAFewFrames(scene)
+    scene.main.window?.close()
+    XCTAssertEqual(flight.stage, .finished)
+
+    scene.little.requestClose()
+    scene.little.finishMotion()
+
+    XCTAssertEqual(scene.little.lastTransition, .close, "the close the user asked for runs")
+  }
+
+  /// The display link stops delivering frames: counted in checks of the injected watchdog, not in seconds.
+  func testFramesStoppingMidFlightLandsThePageWithoutTheFlight() throws {
+    let watchdog = ManualWatchdog()
+    let scene = try makeScene(todayTabs: 1, watchdog: watchdog)
+    let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let flight = try flyAFewFrames(scene)
+
+    watchdog.fire()                                           // frames came in since the flight started
+    XCTAssertEqual(flight.stage, .flying)
+    flight.tick(at: 0.2)
+    watchdog.fire()                                           // and again: not stalled
+    XCTAssertEqual(flight.stage, .flying, "frames keep arriving, so the flight keeps going")
+
+    watchdog.fire()                                           // no frame since the last check
+    XCTAssertEqual(flight.stage, .flying, "one quiet interval is a hitch, not a stop")
+    watchdog.fire()                                           // none for a second interval
+    assertLandedWithoutTheFlight(scene, flight, page, "frames stopped")
+    XCTAssertEqual(watchdog.pending, 0, "the watchdog stops with the flight")
+  }
+
+  /// The main window never delivers its first frame (so the flight never starts).
+  func testNoFirstFrameLandsThePageWithoutTheFlight() throws {
+    let watchdog = ManualWatchdog()
+    let scene = try makeScene(todayTabs: 1, watchdog: watchdog)
+    let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    XCTAssertEqual(flight.stage, .waitingForFrame)
+
+    watchdog.fire()
+    watchdog.fire()
+
+    assertLandedWithoutTheFlight(scene, flight, page, "no first frame")
+  }
+
+  /// Frames stop after the page landed (the crossfade never ends): the overlay still comes off.
+  func testFramesStoppingDuringTheCrossfadeRemovesTheOverlay() throws {
+    let watchdog = ManualWatchdog()
+    let scene = try makeScene(todayTabs: 1, watchdog: watchdog)
+    let flight = try flyAFewFrames(scene)
+    XCTAssertNotNil(step(flight, from: 0.2) { flight.stage == .landed })
+    flight.tick(at: 5)
+    XCTAssertEqual(flight.stage, .crossfading)
+    watchdog.fire()                                           // frames arrived
+    watchdog.fire()
+    watchdog.fire()
+
+    XCTAssertEqual(flight.stage, .finished)
+    XCTAssertFalse(flight.overlay.isVisible)
+    XCTAssertEqual(scene.engine.snapshot(of: scene.tab)?.window, scene.main.engineWindow, "the page stays landed")
+  }
+
+  /// A flight that is released takes its overlay with it.
+  func testReleasingAFlightOrdersItsOverlayOut() throws {
+    var flight: LittleArktFlight? = LittleArktFlight(
+      source: CGRect(x: 100, y: 100, width: 400, height: 500), scale: 1, opacity: 1,
+      target: CGRect(x: 600, y: 100, width: 800, height: 600), span: CGRect(x: 100, y: 100, width: 1300, height: 600),
+      level: .floating, flavor: .light)
+    flight?.drivesDisplayLink = false
+    flight?.tick(at: 0)
+    let overlay = try XCTUnwrap(flight?.overlay)
+    XCTAssertTrue(overlay.isVisible)
+
+    flight = nil
+
+    XCTAssertFalse(overlay.isVisible)
+  }
+
+  // MARK: The clock
+
+  /// One read of the clock per run: the first frame is where the run starts, however long the machine takes between
+  /// two reads (#450). The clock here advances on every read.
+  func testARunReadsTheClockOnce() {
+    let clock = ManualClock(step: 0.05)
+    let animator = LittleArktAnimator(scene: .rest, now: { clock.read() })
+    animator.drivesDisplayLink = false
+    var frames: [LittleArktScene] = []
+    animator.onFrame = { frames.append($0) }
+
+    animator.run(LittleArktMotion.targets(for: .fadeOut, reduceMotion: false), label: "test", in: NSView())
+
+    XCTAssertEqual(clock.reads, 1)
+    XCTAssertEqual(frames.count, 1)
+    XCTAssertEqual(frames.first?[.opacity], 1, "the first frame is the start of the run, not 50 ms into it")
+  }
+
+  func testARunWithoutADisplayReadsTheClockOnceToo() {
+    let clock = ManualClock(step: 0.05)
+    let animator = LittleArktAnimator(scene: .rest, now: { clock.read() })
+    var completed: Bool?
+
+    animator.run(LittleArktMotion.targets(for: .fadeOut, reduceMotion: false), label: "test", in: NSView()) {
+      completed = $0
+    }
+
+    XCTAssertEqual(clock.reads, 1)
+    XCTAssertEqual(completed, true)
+  }
+
+  /// Open in reads the window's clock once to take the card's current scale and opacity, and each run it starts
+  /// (the small frame's fade at the first frame) once.
+  func testOpenInReadsTheWindowsClockOncePerRun() throws {
+    let clock = ManualClock(step: 0.01)
+    let scene = try makeScene(clock: clock)
+    clock.reads = 0
+
+    scene.little.openIn()
+    XCTAssertEqual(clock.reads, 1, "the card's current scene, read once")
+
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.tick(at: 0)
+    XCTAssertEqual(clock.reads, 2, "plus the fade's one read")
+  }
+
+  // MARK: The arrival's cost
+
+  /// For the pull request: the cost of one arrival frame with 500 Today rows. Skipped unless `ARKT_FLIGHT_MEASURE`
+  /// is set; prints the mean and worst of 600 frames in microseconds.
+  func testMeasureOneArrivalFrameWith500Rows() throws {
+    guard ProcessInfo.processInfo.environment["ARKT_FLIGHT_MEASURE"] != nil else {
+      throw XCTSkip("set ARKT_FLIGHT_MEASURE to measure an arrival frame")
+    }
+    let scene = try makeScene()
+    let space = try XCTUnwrap(scene.main.currentSpace)
+    for index in 0..<500 {
+      _ = try scene.main.sidebar.addTab(url: try XCTUnwrap(URL(string: "arkt-test://page/Row\(index)")),
+                                        title: "Row \(index)", in: .today(space), at: nil)
+    }
+    scene.main.window?.contentView?.layoutSubtreeIfNeeded()
+    scene.little.openIn()
+    let node = try XCTUnwrap(scene.main.nodeByTab[scene.tab])
+    let outline = try XCTUnwrap(scene.main.sidebarController.currentPage?.outlineController)
+    XCTAssertGreaterThan(outline.outlineView.numberOfRows, 400)
+    let clock = ContinuousClock()
+    var micros: [Double] = []
+    for frame in 0..<600 {
+      let room = Double(frame % 120) / 120
+      let start = clock.now
+      outline.presentArrival(of: node, room: room, appear: room)
+      let took = start.duration(to: clock.now)
+      micros.append(Double(took.components.attoseconds) / 1e12 + Double(took.components.seconds) * 1e6)
+    }
+    outline.endArrival()
+    let mean = micros.reduce(0, +) / Double(micros.count)
+    print("ARRIVAL FRAME, \(outline.outlineView.numberOfRows) rows: mean \(Int(mean)) us, worst \(Int(micros.max() ?? 0)) us")
+  }
+
   // MARK: Interrupt
 
   /// Open in during the appear (prototype: Play > Interrupt): the flight starts from the card's current scale and
@@ -352,6 +624,35 @@ final class LittleArktFlightTests: XCTestCase {
 @MainActor
 final class ManualClock {
   var now: CFTimeInterval = 0
+  /// How far `read()` moves the clock on from the value it returns: a clock that advances on every read.
+  let step: CFTimeInterval
+  var reads = 0
+
+  init(step: CFTimeInterval = 0) { self.step = step }
+
+  func read() -> CFTimeInterval {
+    reads += 1
+    defer { now += step }
+    return now
+  }
+}
+
+/// The flight's watchdog on a clock the test turns: `fire()` is one interval passing.
+@MainActor
+final class ManualWatchdog {
+  private var checks: [@MainActor () -> Void] = []
+  var pending: Int { checks.count }
+
+  func schedule(_ check: @escaping @MainActor () -> Void) -> @MainActor () -> Void {
+    checks.append(check)
+    return { [weak self] in self?.checks.removeAll() }
+  }
+
+  func fire() {
+    let due = checks
+    checks = []
+    for check in due { check() }
+  }
 }
 
 /// Holds the flight's snapshot until the test releases it.

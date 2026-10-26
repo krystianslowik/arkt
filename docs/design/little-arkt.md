@@ -274,7 +274,9 @@ as usual (Personal sample theme in light, Dev in dark).
   off the main actor. The engine reports no "first frame" for a page in its new window, so the snapshot's 0.1 s
   crossfade starts on the next display frame after the page is mounted in the main card. Open in with no main window
   open takes the no-flight path (the window it opens has no laid-out card to fly to). The Today row is in the sidebar
-  from the start of the flight and drawn by its clock; the selection moves to it when the page lands. The popup request
+  from the start of the flight and drawn by its clock; the selection moves to it when the page lands (the table's
+  selection fades are #455) and the flight carries no card shadow (#456; the layer shadow above is for the window's
+  own appear and close). The popup request
   does not carry the opener window yet.
 - Missing shell pieces: open-URL events and default-browser registration (#135); link routing (#113) for the
   destination; a global hotkey (`RegisterEventHotKey`, no Accessibility permission needed); the Archive's Little Arkt
