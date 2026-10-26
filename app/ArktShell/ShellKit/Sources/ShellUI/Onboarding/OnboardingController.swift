@@ -107,6 +107,23 @@ public final class OnboardingController {
     view.onKey = { [weak self] key in self?.handle(key) }
     view.onBack = { [weak self] in self?.back() }
     view.onSkipSetup = { [weak self] in self?.askSkipSetup() }
+    view.onAppearanceChange = { [weak self] in self?.systemAppearanceChanged() }
+    displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.systemAppearanceChanged() }
+    }
+  }
+
+  isolated deinit {
+    if let displayOptionsObserver { NSWorkspace.shared.notificationCenter.removeObserver(displayOptionsObserver) }
+  }
+
+  private var displayOptionsObserver: (any NSObjectProtocol)?
+
+  /// Light or dark, Reduce Motion, Reduce Transparency or Increase Contrast changed while the flow shows.
+  private func systemAppearanceChanged() {
+    appearanceChanged(OnboardingAppearance.current(for: view.effectiveAppearance))
   }
 
   // MARK: - Start

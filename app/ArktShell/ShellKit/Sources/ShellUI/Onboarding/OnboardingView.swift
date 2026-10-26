@@ -13,6 +13,8 @@ final class OnboardingView: NSView {
   var onKey: (@MainActor (Key) -> Void)?
   var onBack: (@MainActor () -> Void)?
   var onSkipSetup: (@MainActor () -> Void)?
+  /// The window's light or dark appearance changed.
+  var onAppearanceChange: (@MainActor () -> Void)?
 
   let surface = CALayer()
   let wash = CAGradientLayer()
@@ -92,8 +94,12 @@ final class OnboardingView: NSView {
   /// Footer pieces keep their place when hidden, so nothing shifts.
   func setFooter(showsBack: Bool, progress: String?, showsSkip: Bool, animated: Bool) {
     func show(_ view: NSView, _ shown: Bool) {
-      if let button = view as? PillButton { button.isEnabled = shown }
-      view.setAccessibilityElement(shown)
+      if let button = view as? PillButton {
+        button.isEnabled = shown
+        button.cell?.setAccessibilityElement(shown)     // a button reaches VoiceOver through its cell
+      } else {
+        view.setAccessibilityElement(shown)
+      }
       guard let layer = view.layer else { return }
       OnboardingMotion.animate(layer, "opacity", to: Float(shown ? 1 : 0), duration: animated ? 0.25 : 0)
       view.isHidden = false
@@ -118,6 +124,11 @@ final class OnboardingView: NSView {
     }
     OnboardingMotion.animate(wash, "opacity", to: theme == nil ? Float(0) : appearanceModel.washOpacity,
                              duration: animated ? 0.6 : 0, timing: CAMediaTimingFunction(name: .default))
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    onAppearanceChange?()
   }
 
   // MARK: Layout
@@ -173,9 +184,9 @@ final class OnboardingView: NSView {
 
   override func accessibilityChildren() -> [Any]? {
     var children: [Any] = stepView.map { [$0] } ?? []
-    for view in [backButton, progressLabel, skipButton] as [NSView] where view.isAccessibilityElement() {
-      children.append(view)
-    }
+    if backButton.cell?.isAccessibilityElement() == true { children.append(backButton) }
+    if progressLabel.isAccessibilityElement() { children.append(progressLabel) }
+    if skipButton.cell?.isAccessibilityElement() == true { children.append(skipButton) }
     return children
   }
 }
