@@ -30,11 +30,13 @@ public struct ReservedKeys: Sendable {
 
   public init(_ keys: [Key]) { self.keys = keys }
 
-  /// Cmd-T, Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-D (KB-012, #108), Cmd-Opt-Right, Cmd-Opt-Left, and the tab
-  /// switcher's Ctrl-Tab and Ctrl-Shift-Tab (#103; `ShellWindow.sendEvent` already hands those to the switcher before
-  /// any view). Reopen (Shift-Cmd-T) and Incognito (Shift-Cmd-N) join when Arkt has them.
+  /// Cmd-T, Shift-Cmd-T (Reopen Closed Tab, KB-010, #346), Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-D (KB-012,
+  /// #108), Cmd-Opt-Right, Cmd-Opt-Left, and the tab switcher's Ctrl-Tab and Ctrl-Shift-Tab (#103;
+  /// `ShellWindow.sendEvent` already hands those to the switcher before any view). Incognito (Shift-Cmd-N) joins when
+  /// Arkt has it. Cmd-Z stays the page's first (`ReopenUndoRouter`).
   public static let arkt = ReservedKeys([
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: .command),
+    Key(keyCode: kVK_ANSI_T, character: "t", modifiers: [.command, .shift]),
     Key(keyCode: kVK_ANSI_L, character: "l", modifiers: .command),
     Key(keyCode: kVK_ANSI_W, character: "w", modifiers: .command),
     Key(keyCode: kVK_ANSI_W, character: "w", modifiers: [.command, .shift]),

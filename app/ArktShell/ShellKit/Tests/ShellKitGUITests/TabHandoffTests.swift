@@ -197,7 +197,8 @@ final class TabHandoffTests: XCTestCase {
     first.closeTab(nil)                                 // Cmd-W archives T2; the split below is the successor
 
     XCTAssertNil(source.node(world.today[2]))
-    XCTAssertEqual(Set(engine.tabIDs), tabsBefore.subtracting([shown]), "the panes moved; nothing new loaded")
+    XCTAssertEqual(Set(engine.tabIDs).subtracting(first.reopenStack.parkedTabs), tabsBefore.subtracting([shown]),
+                   "the panes moved; nothing new loaded besides the closed page's parked copy (#346)")
     XCTAssertEqual(world.panes.map { first.engineTab(of: $0) }, paneTabs)
     for tab in paneTabs { XCTAssertEqual(engine.snapshot(of: tab)?.window, first.engineWindow) }
     XCTAssertEqual(first.visibleNodes, Set(world.panes))
