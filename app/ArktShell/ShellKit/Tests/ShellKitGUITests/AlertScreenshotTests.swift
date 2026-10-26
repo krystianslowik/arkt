@@ -91,4 +91,17 @@ final class AlertScreenshotTests: XCTestCase {
       controller.close()
     }
   }
+
+  func testLaunchAlertShots() throws {
+    for dark in [false, true] {
+      let alert = DialogAlert(content: .launchFailure(errorCode: "SQLiteError 11"))
+      alert.panel.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+      alert.panel.center()
+      alert.panel.orderFrontRegardless()
+      alert.enter()
+      settle()
+      try save(alert.panel, "launch-failure-\(dark ? "dark" : "light")")
+      alert.panel.orderOut(nil)
+    }
+  }
 }

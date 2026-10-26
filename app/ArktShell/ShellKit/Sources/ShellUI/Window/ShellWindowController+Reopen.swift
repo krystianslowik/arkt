@@ -145,17 +145,37 @@ extension ShellWindowController {
     case .node(let closed):
       return reopen(closed)
     case .batch(let batch):
-      // Newest close first, as single undos would run, so each row lands back at the index it left.
+      // Newest close first, as single undos would run, so each row lands back at the index it left. Nothing is
+      // activated on the way: only the row that held the current tab (closed last, so first back) is shown again, and
+      // only when its page was parked, so undoing an auto-archive pass loads no page.
       var reopened = false
-      for closed in batch.nodes.reversed() where reopen(closed) { reopened = true }
+      var shown: (node: NodeID, peek: ClosedPeek?)?
+      for closed in batch.nodes.reversed() {
+        guard let node = reopen(closed, activating: false) else { continue }
+        reopened = true
+        if shown == nil, closed.node == batch.nodes.last?.node, !closed.parked.isEmpty {
+          shown = (node, closed.peek)
+        } else if let parked = closed.peek?.parked {
+          closeParked([parked])                       // a Peek comes back only over the row that is shown
+        }
+      }
+      if let shown {
+        activate(node: shown.node)
+        if let peek = shown.peek { reopen(peek) }
+      }
       return reopened
     }
   }
 
   private func reopen(_ closed: ClosedNode) -> Bool {
+    reopen(closed, activating: true) != nil
+  }
+
+  /// Puts the row back and maps its parked pages to it; shows it when `activating`. The row, or nil when it is gone.
+  private func reopen(_ closed: ClosedNode, activating: Bool) -> NodeID? {
     guard let node = restoredNode(for: closed) else {
       closeParked(ClosedItem.node(closed).parkedTabs)
-      return false
+      return nil
     }
     for (page, copy) in closed.parked {
       parkedTabs.remove(copy)
@@ -166,9 +186,10 @@ extension ShellWindowController {
         engine.closeTab(copy, mode: .skipUnloadHandlers)
       }
     }
+    guard activating else { return node }
     activate(node: node)
     if let peekClosed = closed.peek { reopen(peekClosed) }
-    return true
+    return node
   }
 
   /// The row the close took: back from the Archive at its old place, or still in the sidebar (a pinned tab or a

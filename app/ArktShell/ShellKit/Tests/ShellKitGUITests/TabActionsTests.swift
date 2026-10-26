@@ -472,6 +472,8 @@ final class TabActionsTests: XCTestCase {
     harness.controller.activate(node: world.today[1])
     try harness.click(world.split, .shift)              // t1, t2, split
 
+    let rows = [world.today[1], world.today[2]] + world.panes          // the archived ones
+    let loadedBefore = Set(rows.filter { harness.tab($0) != nil })
     harness.controller.closeTab(nil)
     let toast = try XCTUnwrap(harness.controller.toasts.current)
     XCTAssertEqual(toast.kind, .undo)
@@ -483,6 +485,9 @@ final class TabActionsTests: XCTestCase {
     harness.controller.toasts.performActionForTesting()
 
     XCTAssertEqual(harness.children(.today(world.work)), before)
+    XCTAssertEqual(harness.current, world.today[1], "the tab that was current comes back current")
+    XCTAssertTrue(Set(rows.filter { harness.tab($0) != nil }).isSubset(of: loadedBefore),
+                  "no page loads for rows that were not loaded")
     XCTAssertNil(harness.controller.toasts.current)
     XCTAssertFalse(harness.controller.reopenClosed(), "the batch left the stack with the Undo")
     harness.controller.close()
@@ -506,7 +511,9 @@ final class TabActionsTests: XCTestCase {
 
   /// Clear Today Tabs comes back whole with one Undo, its rows in their order.
   func testUndoAfterClearTodayRestoresEveryRow() throws {
-    let world = try Self.makeWorld()
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "F", in: .today(world.work))
+    _ = try world.sidebar.addTab(url: Self.url("f"), title: "F0", in: .folder(folder))
     let harness = Harness(world.sidebar)
     let before = harness.children(.today(world.work))
     harness.controller.activate(node: world.today[0])

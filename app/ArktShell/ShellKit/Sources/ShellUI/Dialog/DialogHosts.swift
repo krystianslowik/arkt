@@ -129,8 +129,12 @@ public final class DialogAlert {
   }
 
   /// The entrance: scale 0.96 to 1 about the center on `firmFast`, opacity over 0.18 s (Reduce Motion: 0.15 s fade).
+  /// The window shadow is recomputed once the content is fully drawn.
   func enter() {
     guard let layer = container.layer else { return }
+    CATransaction.begin()
+    CATransaction.setCompletionBlock { [weak panel] in MainActor.assumeIsolated { panel?.invalidateShadow() } }
+    defer { CATransaction.commit() }
     let step = DialogMotion.alertIn(reduceMotion: reduceMotion())
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = 0
