@@ -3014,6 +3014,9 @@ the same screen; with the screen free every menu attempt worked.
 - Red first: the new tests failed to compile (`setMuted`, the event cases, `TabAudio`, `audioButton`,
   `HiddenPeek.wasMuted` missing), then passed.
 - ShellKit `swift test --skip ShellKitGUITests`: 1066 passed (1047 + 19).
+- ShellKit `swift test --filter ShellKitGUITests`: 899 run (886 + 13), 10 skipped (6 not applicable to FakeEngine,
+  rule 17's audible check among them; 4 frame-time gates NOT-MEASURABLE at load 16 to 23 on 10 cores), 0 failures
+  (897 in the full run plus FakeEngine's two rule-17 tests added after it, run on their own).
 
 ### Deviations
 
