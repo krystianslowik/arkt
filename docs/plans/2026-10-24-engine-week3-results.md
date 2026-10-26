@@ -3165,3 +3165,49 @@ column). One snapshot call serves both #370 and #352 (shape posted on #352).
   gives nil, and `PageThumbnails` falls back to the cache. Not checked on real Chromium: rule 18 covers shown tabs.
 - "History clearing" has no command yet; only Clear Archive empties the cache. The preview UI (#371, #372) is not part
   of this change.
+
+## #352: Little Arkt's Open in flight
+
+Branch `feat/352-little-arkt-flight`. Design: `docs/design/little-arkt.md`, Motion (`la-kf-promote-*`,
+`la-kf-interrupt-220ms`). Shell only: the snapshot is `EngineClient.pageImage(of:_:)` with `.fullFrame` (#370); no
+Chromium patch, no facade change.
+
+### What changed
+
+- `LittleArktFlight` draws the page's snapshot on its plate on `LittleArktFlightOverlay`, a transparent, click-through
+  borderless window spanning both windows, above both. Nothing changes until the first display frame; the card then
+  flies with its center, mask size and scale on `firmSlow` and its opacity back to 1, from wherever the appear has it.
+- The small frame fades at once (`fadeOut`, 0.12 s) and the main window comes forward. A snapshot that misses the first
+  frame fades in on the plate (critical 0.16 s).
+- The Today row is added at the start, drawn by the flight's clock: the rows below hold their place, make room after
+  200 ms and the row fades in from 0.96 at 290 ms (`springyFast`, `SidebarArrivalLayout` through the folder motion row
+  styles). At rest the page moves once (`moveTab`), is selected and mounted at its final size; the next display frame
+  starts the 0.1 s crossfade, and the overlay is removed.
+- No flight (today's fade-out path): Reduce Motion, no open main window, or one minimized, on another desktop, in full
+  screen or off every screen (`LittleArktFlightConditions`).
+
+### Verification
+
+- Red first: the motion and flight tests failed to compile (types missing), then passed. Break check: landing on the
+  first flying frame instead of at rest (`LittleArktFlight.tick`, the `isSettled` gate) turned three flight tests red;
+  restored.
+- ArktCore `swift test`: 428 passed (unchanged).
+- ShellKit `swift test --skip ShellKitGUITests`: 1298 passed (1287 + 11; the baseline is 1298 minus the 11 tests added,
+  not a run on `main`).
+- ShellKit `swift test --filter ShellKitGUITests`: 1103 run, 18 skipped, 0 failures (load average 22.6). An earlier run
+  before the merge of `main` had one failure, the `SpaceSwipeHitchTests` main-thread CPU gate at load average 44
+  (10.6 ms against 8.34 ms); it passed alone.
+- `swift test --filter "LittleArktFlight|LittleArktWindowTests"` 20 times in a row: 20 of 20 passed, 24 XCTest
+  (1 skipped, the screenshot test) and 11 Swift Testing each, load average 19.4 at the start and 27.9 at the end.
+
+### Deviations
+
+- The engine reports no first frame for a page in its new window; the crossfade starts on the next display frame after
+  the page is mounted.
+- Open in with no main window open takes the fade-out path (the window it opens has no laid-out card yet).
+- The selection moves to the new row when the page lands; the design's fade of the old selection and fade-in of the new
+  one is not drawn.
+- No card shadow during the flight (a shadow path per frame would be extra per-frame work).
+- The arriving row's styles recompute row heights each frame while it arrives, as the folder motion does. Not checked
+  with hundreds of Today rows.
+- If the main window goes away mid-flight, the page stays in the Little Arkt window.
