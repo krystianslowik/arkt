@@ -81,6 +81,8 @@ public enum AXID {
     public static let divider = "sidebar.divider"
     /// Present only while the row's close button is shown. Label: tooltip.
     public static let rowClose = "sidebar.row.close"
+    /// A row's audio button (#364): mutes or unmutes the page.
+    public static let rowAudio = "sidebar.row.audio"
   }
 
   /// Favorites grid and tiles at the top of the sidebar (group U4b).
@@ -140,6 +142,8 @@ public enum AXID {
     /// Value: pane share factor (`NSNumber`).
     public static let divider = "split.divider"
     public static let reopen = "split.reopen"
+    /// Label "Close Pane": the X at the top of a pane with a page (#388).
+    public static let close = "split.close"
   }
 
   /// The first run over the whole window (`OnboardingView`, onboarding spec sections 6 and 11); absent once it ends.

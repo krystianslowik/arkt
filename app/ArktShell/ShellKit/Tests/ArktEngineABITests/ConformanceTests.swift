@@ -88,6 +88,8 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var opener: (any ArktTabHandle)?
   var origin: ArktTabOrigin = .client
   var isActive = false
+  var isAudible = false
+  var isMuted = false
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -112,6 +114,8 @@ final class TestTab: NSObject, ArktTabHandle {
   var isActive: Bool { owner?.activeTab === self }
   var isClosing = false
   var wouldHoldClose = false
+  var isAudible = false
+  private(set) var isMuted = false
 
   init(sessionId: Int32, owner: TestBrowser, url: URL?, opener: (any ArktTabHandle)?, origin: ArktTabOrigin) {
     self.sessionId = sessionId; self.owner = owner; self.url = url; self.opener = opener; self.origin = origin
@@ -152,6 +156,13 @@ final class TestTab: NSObject, ArktTabHandle {
   func focus() {}
   private(set) var movedTo: [any ArktBrowserHandle] = []
   func move(to browser: any ArktBrowserHandle) { movedTo.append(browser) }
+  func setMuted(_ muted: Bool) {
+    guard isMuted != muted else { return }
+    isMuted = muted
+    let event = TestEvent(.mutedChanged, tab: self, browser: owner)
+    event.isMuted = muted
+    owner?.engine.record(event)
+  }
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }
     let copy = owner.insertTab(url: url, active: false, opener: self, origin: .client)
@@ -537,7 +548,8 @@ struct ConformanceTests {
     #expect([ArktTabOrigin.client, .engine].map(\.rawValue) == [0, 1])
     #expect([ArktEngineEventKind.tabCreated, .tabClosed, .activeTabChanged, .closeCancelled, .urlChanged,
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
-             .windowOpened, .windowClosed, .extensionActionsChanged].map(\.rawValue) == Array(0...13))
+             .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged].map(\.rawValue)
+      == Array(0...15))
     #expect([ArktWindowRequestKind.extension, .page, .reopen, .startupURL].map(\.rawValue) == Array(0...3))
     #expect([ArktLinkDecision.navigate, .cancel].map(\.rawValue) == [0, 1])
   }
@@ -556,5 +568,30 @@ struct LittleArktABITests {
     let tab = source.createTab(url: nil, active: true)
     tab.move(to: target)
     #expect((tab as? TestTab)?.movedTo.first === target)
+  }
+}
+
+/// Tab mute (#364): the handle's sound state and `setMuted(_:)` are part of the ABI, and a change arrives as a
+/// `MutedChanged` event with the plain value.
+@MainActor
+struct MuteABITests {
+  @Test func setMutedChangesTheHandleAndRecordsOneEvent() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+    engine.flush()
+    #expect(!tab.isMuted && !tab.isAudible)
+
+    tab.setMuted(true)
+    tab.setMuted(true)
+    engine.flush()
+
+    #expect(tab.isMuted)
+    let events = try #require(batches.last)
+    #expect(events.map(\.kind) == [.mutedChanged])
+    #expect(events.first?.isMuted == true && events.first?.tab === tab)
   }
 }

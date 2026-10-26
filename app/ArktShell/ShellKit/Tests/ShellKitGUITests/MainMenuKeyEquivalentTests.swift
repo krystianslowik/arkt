@@ -30,7 +30,14 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
         if let submenu = item.submenu { collect(submenu) }
       }
     }
-    collect(MainMenu.make(commands: AppCommands()).menu)
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    // Nine Spaces, so Ctrl-1 ... Ctrl-9 are in the menu (#387: it lists the main window's Spaces).
+    if let spaces = menu.items.first(where: { $0.title == SpacesMenu.menuTitle })?.submenu as? SpacesMenu {
+      let entries = (1...9).map { SpacesMenu.Entry(id: SpaceID(), title: "Space \($0)") }
+      spaces.entries = { entries }
+      spaces.refreshList()
+    }
+    collect(menu)
     return items
   }
 

@@ -41,6 +41,8 @@ public enum SidebarMenuAction: Hashable, Sendable {
   case newTab
   /// Clear Today Tabs (BH-075): every Today tab of the Space is archived.
   case clearToday(SpaceID)
+  /// Mute / Unmute (BH-126, #364): the tab's page is muted or unmuted.
+  case toggleMute(NodeID)
 }
 
 /// One context menu item, separator or submenu, as a value. `title` is "" for a separator.
@@ -70,25 +72,31 @@ public struct SidebarMenuEntry: Equatable, Sendable {
     self.submenu = submenu
   }
 
-  /// An item that is shown but not built yet (Share, Change Icon, Edit Pinned URL, Mute): disabled, as the
-  /// settings precedent shows unbuilt rows (design OQ6).
+  /// An item that is shown but not built yet (Share, Change Icon, Edit Pinned URL): disabled, as the settings
+  /// precedent shows unbuilt rows (design OQ6).
   static func unavailable(_ title: String) -> SidebarMenuEntry {
     SidebarMenuEntry(title: title, action: nil, isEnabled: false)
   }
 }
 
-/// What the menu needs besides the source: the Spaces for Move To, which pinned tabs left their pinned URL, and
-/// whether the clipboard holds a URL.
+/// What the menu needs besides the source: the Spaces for Move To, which pinned tabs left their pinned URL, whether
+/// the clipboard holds a URL, which tabs have a page open, and their sound (#364).
 public struct SidebarMenuContext: Sendable {
   public var spaces: [(id: SpaceID, title: String)]
   public var navigatedPins: Set<NodeID>
   public var clipboardHasURL: Bool
+  /// Tabs whose page is open in the engine: only those can be muted.
+  public var loadedTabs: Set<NodeID>
+  /// Sound of the tabs that play or are muted; a missing tab is silent.
+  public var audio: [NodeID: TabAudio]
 
   public init(spaces: [(id: SpaceID, title: String)] = [], navigatedPins: Set<NodeID> = [],
-              clipboardHasURL: Bool = false) {
+              clipboardHasURL: Bool = false, loadedTabs: Set<NodeID> = [], audio: [NodeID: TabAudio] = [:]) {
     self.spaces = spaces
     self.navigatedPins = navigatedPins
     self.clipboardHasURL = clipboardHasURL
+    self.loadedTabs = loadedTabs
+    self.audio = audio
   }
 }
 
@@ -153,7 +161,7 @@ public enum SidebarContextMenu {
                           _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
     switch (source.node(id), source.parent(of: id)) {
     case (.tab?, .split(let split)?):
-      return pane(id, split: split, source)
+      return pane(id, split: split, source, context)
     case (.tab?, _):
       if case .favorites? = source.section(containing: id) { return favorite(id, context) }
       if case .pinned? = source.section(containing: id) { return pinnedTab(id, source, context) }
@@ -176,7 +184,7 @@ public enum SidebarContextMenu {
                  SidebarMenuEntry(title: "Duplicate", action: .duplicate([id]))]
     if pinnable(id, source) { items.append(pinItem(pinned: false, [id])) }
     items.append(moveTo([id], source, context))
-    items += [.separator] + copyLink([id], plural: false) + [.separator]
+    items += [.separator] + soundGroup(id, context) + copyLink([id], plural: false) + [.separator]
     items.append(SidebarMenuEntry(title: "Archive Below", action: .archiveBelow(id),
                                   isEnabled: !todayNodesBelow(id, source).isEmpty))
     items.append(SidebarMenuEntry(title: "Archive", action: .archive([id]), key: "w"))
@@ -203,7 +211,7 @@ public enum SidebarContextMenu {
               .separator,
               moveTo([id], source, context),
               .separator]
-    items += copyLink([id], plural: false)
+    items += soundGroup(id, context) + copyLink([id], plural: false)
     items += [.separator, SidebarMenuEntry(title: "Close and Keep Pinned", action: .archive([id]), key: "w")]
     return items
   }
@@ -259,10 +267,11 @@ public enum SidebarContextMenu {
   }
 
   @MainActor
-  private static func pane(_ id: NodeID, split: NodeID, _ source: any SidebarSource) -> [SidebarMenuEntry] {
+  private static func pane(_ id: NodeID, split: NodeID, _ source: any SidebarSource,
+                           _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
     let panes = source.children(of: .split(split))
     let below = panes.firstIndex(of: id).map { panes.count - $0 - 1 } ?? 0
-    return [.unavailable("Mute"),             // the engine has no per-tab mute yet
+    return [muteItem(id, context),
             SidebarMenuEntry(title: "Duplicate Split View", action: .duplicateSplit(split)),
             SidebarMenuEntry(title: "Archive Below", action: .archiveBelow(id), isEnabled: below > 0),
             .unavailable("Share"),
@@ -309,6 +318,22 @@ public enum SidebarContextMenu {
   }
 
   // MARK: Shared items
+
+  /// Mute / Unmute (BH-126): enabled while the tab's page is open, "Unmute" while it is muted. A row that shows
+  /// sound has a page whatever the loaded set says, so its item is never disabled: a disabled item takes the click
+  /// and sends nothing.
+  private static func muteItem(_ id: NodeID, _ context: SidebarMenuContext) -> SidebarMenuEntry {
+    let audio = context.audio[id] ?? .silent
+    return SidebarMenuEntry(title: audio.toggleTitle, action: .toggleMute(id),
+                            isEnabled: audio != .silent || context.loadedTabs.contains(id))
+  }
+
+  /// A tab row's Mute group, only while its page plays or is muted: the design's tab menus have no Mute item
+  /// (BH-126 confirms it for panes only), so a silent tab keeps the designed menu (#364).
+  private static func soundGroup(_ id: NodeID, _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
+    guard let audio = context.audio[id], audio != .silent else { return [] }
+    return [muteItem(id, context), .separator]
+  }
 
   private static func pinItem(pinned: Bool, _ ids: [NodeID]) -> SidebarMenuEntry {
     SidebarMenuEntry(title: pinned ? "Unpin Tab" : "Pin Tab", action: .pinToggle(ids), key: "d")

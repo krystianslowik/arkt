@@ -224,6 +224,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onSpacesChanged = { [weak self] _ in
       self?.refreshThemes()
       self?.updateEmptyState()
+      NotificationCenter.default.post(name: SpacesMenu.listDidChangeNotification, object: self)   // #387
     }
     refreshThemes()
     updateEmptyState()
@@ -629,6 +630,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     let newTitle = snapshot.title.isEmpty || snapshot.title == title ? nil : snapshot.title
     if newURL != nil || newTitle != nil { sidebar.updateTab(node, url: newURL, title: newTitle) }
     if let favicon = snapshot.faviconData { faviconChanged(favicon, for: node) }
+    showAudio(of: snapshot, in: node)                               // #364
   }
 
   private func faviconChanged(_ data: Data?, for node: NodeID) {
@@ -669,6 +671,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       engineDidActivate(tab, node: node)
     case .closeCancelled(let tab):
       closeWasCancelled(tab, node: node)
+    case .audibleChanged(let tab, _), .mutedChanged(let tab, _):
+      audioChanged(tab, node: node)                                 // #364
     case .tabCreated, .titleChanged, .loadingChanged:
       break
     }
