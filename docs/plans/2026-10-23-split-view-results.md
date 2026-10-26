@@ -9,13 +9,13 @@ As recorded in PR #141 at `9bf54f2`: ArktCore 316 Swift Testing tests, ShellKit 
 ## S9: divider pacing (#59)
 
 - Initial red: `swift test -j 2 list` failed because the new pacing test could not access `FrameScript`, then the existing frame helpers were moved to `FrameTestSupport.swift` and the build succeeded.
-- `cd app/ArktCore && swift test -j 2`: 428 tests passed (S0 baseline 316; the difference includes intervening work).
-- `cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests`: 1,236 tests passed (S0 baseline 312; the difference includes intervening work).
-- `swift test --skip-build --filter SplitPacingTests`: 5 executed, 3 skipped, 0 failures. The deterministic commit check and FakeEngine informational run passed. The three gated InMemoryEngine scenarios were NOT-MEASURABLE: load 22.83 on 12 cores.
-- `swift test --skip-build --filter SpacePagerTests`: 22 executed, 1 skipped, 0 failures. The frame-pacing test was not measurable under load.
+- `cd app/ArktCore && swift test -j 2`: 428 tests passed after merging main (S0 baseline 316; the difference includes intervening work).
+- `cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests`: 1,237 tests passed after merging main (S0 baseline 312; the difference includes intervening work).
+- `swift test --skip-build --filter SplitPacingTests` (before merging main): 5 executed, 3 skipped, 0 failures. The deterministic commit check and FakeEngine informational run passed. The three gated InMemoryEngine scenarios were NOT-MEASURABLE: load 22.83 on 12 cores.
+- `swift test --skip-build --filter SpacePagerTests` (before merging main): 22 executed, 1 skipped, 0 failures. The frame-pacing test was not measurable under load.
 - `swift test --skip-build --filter SplitPacingTests.testDividerDragCommitsOnce`, 20 consecutive runs under load: 20 passed; load immediately after was 17.62 on 12 cores. Removing the `onCommitFactors` call in `SplitContainerView.endDividerDrag` made that test fail (observed 0 writes, expected 1); restoring it made the test pass.
 - FakeEngine informational (`split-divider-webkit`): screen maximum 240 Hz, 29 intervals, 0 over 8.6 ms, max and p99 8.33 ms, load 22.83 on 12 cores. This is not a gated timing result.
-- Full ShellKit GUI suite: not run. The three quiet-machine pacing measurements and the complete GUI suite remain required before the pull request is ready.
+- Full ShellKit GUI suite: not run. All GUI checks must be rerun on the merged tree; the three quiet-machine pacing measurements and the complete GUI suite remain required before the pull request is ready.
 
 ### Plan deviation
 
