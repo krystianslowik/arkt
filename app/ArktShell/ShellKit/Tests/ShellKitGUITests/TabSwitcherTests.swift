@@ -351,3 +351,18 @@ extension TabSwitcherTests {
     XCTAssertFalse(controller.tabSwitcher.isOpen)
   }
 }
+
+extension TabSwitcherTests {
+  /// While the first run covers the window, Ctrl-Tab opens nothing (its menu items are disabled the same way).
+  func testCtrlTabDoesNothingWhileTheFirstRunCoversTheWindow() throws {
+    view([tabs[0], tabs[1]])
+    _ = controller.presentOnboarding(services: FakeOnboardingServices(sidebar: source, arcFound: false),
+                                     options: .init(mode: .firstRun, includesExtensions: false, resume: nil))
+    let source = CGEventSource(stateID: .privateState)
+    let event = try XCTUnwrap(CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Tab), keyDown: true))
+    event.flags = .maskControl
+    controller.window?.sendEvent(try XCTUnwrap(NSEvent(cgEvent: event)))
+    XCTAssertFalse(controller.tabSwitcher.isOpen)
+    XCTAssertTrue(controller.tabSwitcher.view.isHidden)
+  }
+}

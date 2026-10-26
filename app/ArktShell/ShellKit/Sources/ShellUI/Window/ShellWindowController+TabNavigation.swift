@@ -16,7 +16,8 @@ extension ShellWindowController {
     switcher.onCommit = { [weak self] node in self?.activateByKeyboard(node) }
     switcher.onClose = { [weak self] node in self?.close(node: node) }
     (window as? ShellWindow)?.eventInterceptor = { [weak self] event in
-      self?.tabSwitcher.handle(event) ?? false
+      guard let self, !self.isShowingOnboarding else { return false }   // the first run covers the browser
+      return self.tabSwitcher.handle(event)
     }
     if let current = currentNode { switcher.noteViewed(current) }
   }
