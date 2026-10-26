@@ -670,18 +670,33 @@ public final class OnboardingController {
     view.stepView?.conceal(duration: 0.16)
     view.setFooter(showsBack: false, progress: nil, showsSkip: false, animated: true)
     let card = window.rootView.convert(window.rootView.card.frame, to: view)
-    view.stage.finish(onto: card, appearance: view.appearanceModel) {}
+    // The stage folds onto the card and fades on its own clock (P9); the overlay leaves once it is done and the
+    // command bar is up.
+    var stageDone = false, browserShown = false
+    let removeOverlay = { [weak self] in
+      guard let self, stageDone, browserShown else { return }
+      self.view.removeFromSuperview()
+    }
+    view.stage.finish(onto: card, appearance: view.appearanceModel) {
+      stageDone = true
+      removeOverlay()
+    }
     hideBrowser(false)
     if options.mode == .firstRun { land(on: landing, window: window) }
+    view.passesEventsThrough = true
     let reveal: CFTimeInterval = reduceMotion ? 0 : 0.65
     DispatchQueue.main.asyncAfter(deadline: .now() + reveal) { [weak self] in
-      guard let self, let layer = self.view.layer else { return }
-      OnboardingMotion.animate(layer, "opacity", to: Float(0), duration: reduceMotion ? 0 : 0.24)
+      // The browser shows through: the brand surface and the wash fade, the field stays for its fold.
+      guard let self else { return }
+      for layer in [self.view.surface, self.view.wash] as [CALayer] {
+        OnboardingMotion.animate(layer, "opacity", to: Float(0), duration: reduceMotion ? 0 : 0.24)
+      }
     }
     let commandBarDelay: CFTimeInterval = reduceMotion ? 0.05 : 0.9
     DispatchQueue.main.asyncAfter(deadline: .now() + commandBarDelay) { [weak self] in
       guard let self else { return }
-      self.view.removeFromSuperview()
+      browserShown = true
+      removeOverlay()
       if self.options.mode == .firstRun, !self.webStoreOn {
         window.window?.makeFirstResponder(nil)
         window.commandBar.toggle(.currentTab(nil))

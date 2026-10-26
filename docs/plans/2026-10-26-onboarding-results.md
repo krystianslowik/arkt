@@ -32,3 +32,26 @@ Split chosen: PR 1 is the whole flow with a no-particle stage behind the `Onboar
 | `brandTextSecondaryContrast` | 9.99:1 light, 12.58:1 dark (the spec lists 10.1 / 12.9; the hex values are kept) |
 | Blossom light end stop #F29BBB (sRGB) | `secondaryText` light 4.496:1 and `sidebarForeground` light 2.98:1 at 0.64 / 0.48; raised to 0.65 / 0.49 |
 | Mark samples at 140 px (alpha > 200, saturation > 70) | within 300 of the spec's 6,622 (`BrandMarkArtworkTests`) |
+
+## PR 2: the Metal particle field
+
+### What is built
+
+| Area | Where |
+|---|---|
+| Formations from the live layout (mark, fold, counts, theme, default, ext, tour 1 to 5, done, card, field), lanes of index mod 20, the website's spring model, re-tint at 900 pt/s, retarget without restart, the section 9 floors | `ShellUI/Onboarding/Particles/ParticleFormationBuilder.swift`, `ParticleSamplers.swift`, `ParticleFormationTests` |
+| Compute kernel and point-sprite draw, compiled at run time from source (no Metal build step in the package) | `ParticleShaders.swift`, `ParticleRenderer.swift` |
+| `MetalOnboardingStage`: `CAMetalLayer` view, display link at up to 120 Hz, tiers, pause, fold and release | `MetalOnboardingStage.swift`, `ParticleFieldTests` |
+| Default stage: Metal when it runs, else the Core Animation stage of PR 1 | `ShellWindowController+Onboarding.swift` |
+
+### Measurements
+
+Machine: Apple M2 Pro (10 cores), macOS 27.0, built-in display at 120 Hz. Not measured on an M1 (none available).
+
+| Check | Value |
+|---|---|
+| Full tier, 20,480 motes, Welcome formation, 2240 x 1440 drawable, 240 frames (`ParticleFieldTests.testFrameBudgetAt2x`, command buffer GPU timestamps) | GPU median 0.41 ms, p95 1.79 to 2.53 ms over two runs (first frames and other worktrees' load); CPU encode median 0.05 to 0.12 ms |
+| Budget (spec, M1) | GPU at most 1.0 ms, CPU at most 0.3 ms: met on this machine at the median |
+| Mark samples at 140 px | as PR 1 |
+
+Metal System Trace was not recorded; the GPU times above come from the command buffers' `gpuStartTime` / `gpuEndTime`, and each display-link callback is a `particles.frame` interval in `ShellSignposts` for Instruments.

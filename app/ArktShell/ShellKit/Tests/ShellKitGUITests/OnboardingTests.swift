@@ -202,7 +202,7 @@ final class OnboardingTests: XCTestCase {
     XCTAssertTrue(onboarding.view.skipButton.isEnabled == false, "Done shows an empty footer")
     onboarding.performPrimary()                                           // Start browsing
     XCTAssertTrue(spin(timeout: 3) { !window.isShowingOnboarding })
-    XCTAssertNil(onboarding.view.superview)
+    XCTAssertTrue(spin(timeout: 4) { onboarding.view.superview == nil }, "the overlay leaves once the field faded")
     XCTAssertEqual(services.completed, 1)
     XCTAssertEqual(stub.spaceOrder, [imported], "no Space is added after an import")
     XCTAssertEqual(window.currentSpace, imported)
