@@ -526,6 +526,32 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// An auto-archive pass is its own undo unit: its toast's Undo brings back exactly the rows the pass took, not an
+  /// earlier Cmd-W, which Cmd-Z then takes back on its own.
+  func testUndoAfterAutoArchiveRestoresExactlyThatPass() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[1])
+    harness.controller.closeTab(nil)                                   // a single Cmd-W first
+    harness.controller.activate(node: world.today[0])
+    let pass = [world.today[2], world.today[3]]
+    harness.controller.onArchive?(pass)                                // what the auto-archive coordinator does
+    harness.controller.rememberAutoArchived(pass, toast: ToastText.autoArchiveToast(count: pass.count))
+    XCTAssertTrue(Set(harness.children(.today(world.work))).isDisjoint(with: pass + [world.today[1]]))
+    XCTAssertEqual(harness.controller.toasts.current?.kind, .undo)
+
+    harness.controller.toasts.performActionForTesting()
+
+    let restored = Set(harness.children(.today(world.work)))
+    XCTAssertTrue(restored.isSuperset(of: pass), "the pass comes back")
+    XCTAssertFalse(restored.contains(world.today[1]), "the earlier Cmd-W stays undone")
+    XCTAssertEqual(harness.current, world.today[0], "undoing a pass changes no current tab")
+    XCTAssertTrue(harness.controller.reopenClosed())
+    XCTAssertTrue(Set(harness.children(.today(world.work))).contains(world.today[1]), "Cmd-Z takes the Cmd-W back")
+    XCTAssertFalse(harness.controller.reopenClosed(), "nothing is left to undo")
+    harness.controller.close()
+  }
+
   /// A single row's Cmd-W keeps its old behavior: no toast (alerts design, decision 3).
   func testSingleArchiveShowsNoToast() throws {
     let world = try Self.makeWorld()
