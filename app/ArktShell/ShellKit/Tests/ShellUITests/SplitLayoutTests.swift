@@ -144,4 +144,38 @@ struct SplitLayoutTests {
     #expect(f.panes == [CGRect(x: 0, y: 310, width: 800, height: 300), CGRect(x: 0, y: 0, width: 800, height: 300)])
     #expect(f.dividers == [CGRect(x: 0, y: 300, width: 800, height: 10)])
   }
+
+  // MARK: Reopen a closed pane (#403)
+
+  /// The reopened pane gets its old share back at its old index; the others keep their proportions in the rest.
+  @Test func insertingShareKeepsTheOtherProportions() {
+    let f = SplitLayout.inserting(share: 0.3, at: 1, into: [0.5 / 0.7, 0.2 / 0.7])
+    #expect(f.count == 3)
+    #expect(abs(f[0] - 0.5) < 1e-12)
+    #expect(abs(f[1] - 0.3) < 1e-12)
+    #expect(abs(f[2] - 0.2) < 1e-12)
+  }
+
+  @Test(arguments: [(0, [0.25, 0.375, 0.375]), (2, [0.375, 0.375, 0.25]), (7, [0.375, 0.375, 0.25]),
+                    (-3, [0.25, 0.375, 0.375])])
+  func insertingShareClampsTheIndex(index: Int, expected: [Double]) {
+    let f = SplitLayout.inserting(share: 0.25, at: index, into: [0.5, 0.5])
+    #expect(zip(f, expected).allSatisfy { abs($0 - $1) < 1e-12 })
+    #expect(f.count == expected.count)
+  }
+
+  /// No usable share (none recorded, not finite, or not strictly between 0 and 1): every pane gets an equal share,
+  /// as for any other pane added to a split (RT-35).
+  @Test(arguments: [nil, Double.nan, 0, 1, 1.5, -0.2])
+  func insertingWithoutAUsableShareGivesEqualShares(share: Double?) {
+    let third: Double = 1.0 / 3
+    #expect(SplitLayout.inserting(share: share, at: 1, into: [0.8, 0.2]) == [third, third, third])
+  }
+
+  /// The factors already there are normalized first, so the result always sums to 1.
+  @Test func insertingNormalizesTheFactorsAlreadyThere() {
+    let f = SplitLayout.inserting(share: 0.5, at: 0, into: [2, 6])
+    #expect(f == [0.5, 0.125, 0.375])
+    #expect(SplitLayout.inserting(share: 0.4, at: 0, into: []) == [1])
+  }
 }
