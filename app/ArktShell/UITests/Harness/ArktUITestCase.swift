@@ -173,7 +173,7 @@ class ArktUITestCase: XCTestCase {
     if app.state != .notRunning, window.exists {
       let shot = XCTAttachment(screenshot: window.screenshot())
       shot.name = "window"
-      shot.lifetime = .keepAlways
+      shot.lifetime = .deleteOnSuccess
       add(shot)
     }
     if app.state != .notRunning {
@@ -184,7 +184,7 @@ class ArktUITestCase: XCTestCase {
   private func attach(name: String, text: String) {
     let attachment = XCTAttachment(string: text)
     attachment.name = name
-    attachment.lifetime = .keepAlways
+    attachment.lifetime = .deleteOnSuccess
     add(attachment)
   }
 }

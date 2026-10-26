@@ -107,6 +107,7 @@ public final class SpacePagerView: NSView {
     // do not animate implicitly, so the implicit transaction commits these changes at the end of the pass.
     strip.frame = NSRect(x: offset, y: 0, width: CGFloat(pages.count) * width, height: bounds.height)
     strip.layer?.setAffineTransform(.identity)
+    unparkPages()
     for (i, page) in pages.enumerated() {
       let frame = NSRect(x: CGFloat(i) * width, y: 0, width: width, height: bounds.height)
       if page.frame != frame { page.frame = frame }
@@ -151,14 +152,49 @@ public final class SpacePagerView: NSView {
   /// testing, tracking areas and accessibility frames match what is on screen. A running settle or swipe carries on
   /// from the new frame: the next `apply` translates the layer relative to it.
   private func syncStripFrame() {
+    unparkPages()
     if strip.frame.origin.x != offset { strip.setFrameOrigin(NSPoint(x: offset, y: 0)) }
     if let layer = strip.layer, !layer.affineTransform().isIdentity { layer.setAffineTransform(.identity) }
   }
 
-  /// The strip shows somewhere other than where its view frame says (a layer translation is applied).
+  /// The strip, or a page parked in its visible slot, shows somewhere other than where its view frame says (a layer
+  /// translation is applied).
   private var stripGeometryIsStale: Bool {
     guard let layer = strip.layer else { return false }
-    return !layer.affineTransform().isIdentity
+    return !layer.affineTransform().isIdentity || !parkedPages.isEmpty
+  }
+
+  /// Pages shown mid-motion that sit in the strip's visible slot in AppKit's view geometry (#415), with a layer
+  /// translation that shows them at their own place in the strip.
+  private var parkedPages: [NSView] = []
+
+  /// Shows page `i` mid-motion where AppKit draws it (#415). The strip moves on its layer, so its view frame still
+  /// says where it last rested: a page that comes into view lies outside the pager in AppKit's geometry, its text
+  /// fields have an empty visible rect, and AppKit draws no text there (images, which are layer contents, still
+  /// show). So the page's view frame takes the slot the pager shows at rest (`-strip.frame.minX`, the slot of the
+  /// page the strip rests on) and a layer translation puts it back where it belongs in the strip. Nothing else moves:
+  /// the strip frame and the page the strip rests on keep their geometry, so their text stays drawn. One frame move
+  /// per page a motion shows (the shown range only grows); `syncStripFrame` puts the page back.
+  private func parkInVisibleSlot(_ page: NSView, at i: Int) {
+    guard let layer = page.layer else { return }
+    let slot = -strip.frame.origin.x
+    guard page.frame.origin.x != slot else { return }
+    page.setFrameOrigin(NSPoint(x: slot, y: page.frame.origin.y))
+    layer.setAffineTransform(CGAffineTransform(translationX: CGFloat(i) * pageWidth - slot, y: 0))
+    parkedPages.append(page)
+  }
+
+  /// Returns parked pages to their own slots and clears their translations; a page that left the strip only loses
+  /// its translation.
+  private func unparkPages() {
+    guard !parkedPages.isEmpty else { return }
+    for page in parkedPages {
+      if let i = pages.firstIndex(where: { $0 === page }) {
+        page.setFrameOrigin(NSPoint(x: CGFloat(i) * pageWidth, y: page.frame.origin.y))
+      }
+      page.layer?.setAffineTransform(.identity)
+    }
+    parkedPages.removeAll()
   }
 
   /// Pages whose visible rows were built already. Legitimately tiled rows survive being parked again; a page
@@ -266,6 +302,7 @@ public final class SpacePagerView: NSView {
     for (i, page) in pages.enumerated() {
       let hidden = !visible.contains(i)
       if page.isHidden != hidden {
+        if !hidden, isTracking || driver.isRunning { parkInVisibleSlot(page, at: i) }
         page.isHidden = hidden
         pageVisibilityChangesForTesting[i, default: 0] += 1
       }

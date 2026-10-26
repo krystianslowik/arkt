@@ -192,7 +192,9 @@ jobs:
           fi
           if grep -rnoE 'https?://[^[:space:]"'\''<>()\\`]*' . \
             | grep -vE '^[^:]+:[0-9]+:http://127\.0\.0\.1([:/]|$)' \
-            | grep -vE '^\./Harness/ArcFixture\.swift:[0-9]+:https://example\.com([:/]|$)'; then
+            | grep -vE '^\./Harness/ArcFixture\.swift:[0-9]+:https://example\.com([:/]|$)' \
+            | grep -vE '^\./Harness/FixtureServer\.swift:[0-9]+:http://localhost:$'; then
+            # FixtureServer's cross-site page links to `localhost` on its own port: loopback, another host (#348).
             print -r -- "URLs other than http://127.0.0.1 in UI tests above (the network is never touched)"
             failed=1
           fi

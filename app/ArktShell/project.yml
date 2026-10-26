@@ -161,6 +161,7 @@ targets:
     sources:
       - UITests
       - path: ShellKit/Sources/ShellUI/Accessibility/AXID.swift
+      - path: ShellKit/Sources/ShellUI/Accessibility/AXID+Peek.swift
       - path: ../ArktCore/Tests/ArcImportTests/Fixtures/StorableSidebar-synthetic.json
         buildPhase: resources
       - path: ../ArktCore/Tests/ArcImportTests/Fixtures/StorableArchiveItems-synthetic.json
@@ -195,5 +196,8 @@ schemes:
     test:
       # The ARKT_* overrides exist only in Debug (and Profile) builds.
       config: Debug
-      gatherCoverageData: false
-      targets: [ArktShellUITests]
+      # Attachments (the automatic screenshots and the tests' own) are kept only for failures: the
+      # plan sets both lifetimes to deleteOnSuccess (XcodeGen has no scheme key for them, issue #426).
+      testPlans:
+        - path: ArktShellUITests.xctestplan
+          defaultPlan: true

@@ -2195,6 +2195,93 @@ average near 30. Debug app build succeeds. XCUITest not run: no existing flow or
 and texture previews took about 250 ms and 530 ms to synthesize in Debug, so they are built off the main thread when
 the window opens (`ThemeCreatorImages`).
 
+## Space titles drawn while the strip moves (#415) (2026-10-26)
+
+Maintainer report: after swiping between Spaces, the target Space showed its favicons and folder glyphs but no row
+titles and no Space name.
+
+- **Root cause.** The strip moves on its layer during a swipe or a Space switch (#24); its view frame stays where it
+  last rested. A page the motion brings into view therefore lies outside the pager in AppKit's view geometry, so its
+  text fields have an empty visible rect. AppKit draws a `draw(_:)` view (every `NSTextField`) only inside its visible
+  rect, so the page came in with no text, while its favicons and glyphs (layer contents set directly) showed. The
+  text appeared only once the strip's frame caught up at rest, and not at all where nothing redrew it afterwards.
+  The page realization from #297 and #324 and the title cell sizing from #301 are not involved: the rows exist, are laid
+  out and have their titles; they are just never drawn.
+- **Fix.** `SpacePagerView` parks a page that a moving strip shows in the strip's visible slot: the page's view frame
+  takes the place of the page the strip rests on, so AppKit sees it inside the pager and draws its text, and a layer
+  translation on the page shows it at its own place in the strip. The strip frame and the resting page keep their
+  geometry, so the outgoing page keeps its text too. `syncStripFrame()` (rest, hit test, pointer move, touch-down,
+  backing change) and `layout()` put parked pages back. Cost: one page frame move per page a motion shows (the shown
+  range only grows), never per frame.
+- **Limit.** A geometry sync in the middle of a motion (a click, a pointer move over the strip, a finger touch-down)
+  puts the pages back where AppKit's geometry is current; a page the motion shows after that is parked again from
+  the new frame.
+- **Hover while parked.** A parked page shares AppKit's geometry with the outgoing page, so a hover resync under a
+  still pointer would light the incoming page's row there (and feed Folder Preview's hover). `SidebarRowView` reads a
+  row as not hovered while the strip or its page carries a layer translation; the sync at rest moves the tracking
+  areas and the resync then hovers the row under the pointer. Accessibility frames of a parked page are stale only
+  mid-motion, like the strip's own (#24).
+- **Rejected.** Moving the strip frame to the incoming page instead blanks the outgoing page the same way; drawing the
+  page while it is prepared does not survive the hide; `prepareContent(in:)` on the strip has no effect.
+- **Content card.** The empty content card in the report did not reproduce with the FakeEngine (the card shows the
+  page through every swipe and key switch); tracked separately.
+
+Tests (written first, failing before the change: the incoming page's header title and every row title had an empty
+visible rect on every frame of a key switch and from the first frame of a swipe): `SpaceSwitchTextTests` (GUI, 3) -
+a swipe to the next Space from its first frame, swipes back and forth (the reported case), and every presented frame
+of key switches 0 to 1, 1 to 2 and 2 to 0. ShellKit unit 1146 Swift Testing tests passed. ShellKitGUITests 1015 run,
+14 skipped, 0 failures. The #24 gates: `SpaceSwipeHitchTests` (10) pass, including the main-thread CPU gate
+(non-flavor legs max 3.14 ms per pass, swipe frame 0 median 2.26 ms against 0.63 ms before: the incoming page's
+text is now drawn on that frame); `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` skipped as
+NOT-MEASURABLE (load average 23 on 10 cores). The Debug app's scripted smoke (`-ArktSmoke YES -ArktSmokeRepeat 3`)
+passes functionally, and window captures through every swipe and key switch show the titles on both pages, where
+they were missing before. Debug app build succeeds.
+
+## Peek: Settings copy, the VoiceOver and Tab path, the XCUITest flows (#348, remaining rows) (2026-10-26)
+
+Audit before the work: the survival row shipped in #385 (a Peek is kept hidden across tab and Space switches and comes
+back with its source; #393 mutes its page while hidden), the Settings window in #390, and the two Peek switches with
+it (Settings > General > Links, already wired to `PeekLinkSettings`' `peekOpensCrossSiteLinks` and
+`peekOpensShiftClickedLinks`). What remained: the design's final copy, the source card hidden from VoiceOver, focus
+back on the source page, the Tab loop, the keyboard-only focus ring and the XCUITest flows.
+
+- **Settings copy.** `SettingsPanes+PeekLinks.swift` holds the two rows' final copy from docs/design/peek.md
+  ("Settings > Links, final copy"): "Open a Peek window when clicking on links to other sites" with "Only affects
+  Favorites and pinned tabs" as the note, and "Open a Peek window when clicking on links with Shift held". The rows
+  stay in General > Links (there is no separate Links pane; settings.md section 9 moves Air Traffic Control into
+  Spaces), and `docs/design/settings.md`'s row table now carries the same copy and marks both rows `exists` (#348).
+- **VoiceOver.** The source leaves the accessibility tree while the Peek is open: the content card, or only the source
+  pane of a split, or the whole split when the Peek covers the content area; the sidebar stays reachable. A live
+  `isAccessibilitySuppressed` flag on `ContentCardView` and `SplitContainerView` answers the accessibility overrides
+  (element, children, splitters, hidden): `setAccessibilityHidden` alone left the WebKit page in the tree (its remote
+  AX subtree ignores the flag) and an explicit `setAccessibilityChildren([])` could not be cleared again afterwards,
+  so neither was usable. Opening moves the VoiceOver focus to the Peek's page; closing moves it back and makes the
+  source card reachable again at the start of the close, so the focus and the hidden state never contradict. The dialog
+  group, its label, the controls' labels and help, the announcements and `AXCancel` were already held by #313.
+- **Keyboard.** Tab and Shift-Tab walk the page, Close, Open as Tab, Add to Split View and back to the page; the
+  window's own key loop is off for the duration and `recalculateKeyViewLoop()` runs on the close, so a relayout or the
+  sidebar cannot take the focus out of the Peek. The controls take keyboard focus and draw the system focus ring,
+  which AppKit draws only for keyboard focus; the ring follows the circle. Mustard stays a fill, never a stroke.
+- **Survival.** Verified held, not reimplemented: `PeekWindowTests` still covers hide on a tab and a Space switch,
+  restore with the open motion and the Reduce Motion fade, one hidden Peek per source, the source's close, Tab Handoff,
+  Delete Space and the window close.
+- **XCUITests.** `UITests/PeekTests.swift` (6) opens a Peek from a pinned tab's cross-site link and covers Cmd-W (with
+  the source card and its page back in the accessibility tree), the Close control with the toast's Reopen, a scrim
+  click, Esc, Open as Tab and Add to Split View. The fixture server's new `/x/<name>` page links to `localhost` on the
+  same port, so the click is a link to another site. `AXID.Peek` stays in `AXID+Peek.swift` because an open branch
+  holds `AXID.swift`; `project.yml` compiles that file into the UI test target instead of moving it.
+
+Tests (on the rebased tree, after #417): ShellKit unit 1172 passed (no unit tests added; the copy lives in the
+Settings window and the behavior in the window). ShellKitGUITests 1038 run, 14 skipped, 0 failures; the skipped ones
+are the frame-time gates, which skip themselves under load, and an earlier run with them measuring had the four
+frame-time classes fail under a load average of 7 to 17 and pass alone (54 tests, 0 failures): machine load, not this
+change. `PeekWindowTests` 49 (baseline 41 + 8: source card hidden from accessibility, a wide pane hidden alone, the
+whole split hidden under a narrow pane, focus to the Peek's page and back, focus back on a keyboard close, the Tab and
+Shift-Tab loop with the wrap both ways, the system focus ring on the circle, the VoiceOver focus on open and on close)
+and `SettingsWindowTests` 26 (the same switch test now asserts the final copy). ArktCore 423 passed. Debug app build and
+the UI test target's `build-for-testing` succeed. The XCUITests ran locally, 6 of 6 in about 2.5 minutes:
+`xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build -only-testing:ArktShellUITests/PeekTests test`.
+
 ## Favorites grid: adaptive columns (#337) (2026-10-26)
 
 Built to the maintainer decision on #337, which replaces the RT-15 runtime check for BH-050 (copied into the plan's

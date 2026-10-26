@@ -1,0 +1,26 @@
+{
+  "configurations" : [
+    {
+      "id" : "0A3C5E7B-6D2F-4B1A-9C84-5E1F2A7D9B30",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "systemAttachmentLifetime" : "deleteOnSuccess",
+    "userAttachmentLifetime" : "deleteOnSuccess"
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:ArktShell.xcodeproj",
+        "identifier" : "8D56DA3088CF91A715A8C3B2",
+        "name" : "ArktShellUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
