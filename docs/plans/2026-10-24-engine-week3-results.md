@@ -18,7 +18,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-8 | Main menu inventory and owner decision | DONE (steps 1-3; step 4 after W3-9) | Arkt owns the menu; conditions: a hidden `IDC_BOOKMARKS_MENU` placeholder (without it the first window crashes, measured), no `IDC_FILE_MENU` / `IDC_TAB_MENU` tags, Quit `IDC_EXIT` + `terminate:`; reserved keys in `ShellWindow`; no engine change; see "W3-8" below |
 | W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | DONE except logout (maintainer check); SIGTERM session end fixed by #298 | contract 16/16 in the app; smoke, startup and quit checks pass; 120 Hz gate holds (0 % over 8.6 ms); #9 holds; seven fixes, gaps #298-#301; see "W3-9" below |
 | W3-10 | Infobars, or a recorded gap | DONE | native rows on the tab container for every confirm infobar (every confirm type on Mac, triggered from `chrome://infobar-internals`), `--no-sandbox` acceptance passes; tab sharing and sign-in QR (own Views) recorded in #122; no patch; see "W3-10" below |
-| W3-11 | Self-contained bundle with the release framework | TODO | before the engine bundle ships, strip or gate the test-only code W3-9 links into the Engine app: `EngineAPITestSupport` (`InMemoryEngine`, `EngineContract`), the contract runner and its loopback server (`--arkt-engine-contract` skips the shell session for any launch that passes it), next to the `ARKT_*` overrides (W3-7 C and D) |
+| W3-11 | Self-contained bundle with the release framework | DONE except the real-keychain launch (maintainer check) | Engine app on `out/Arkt`'s framework, signed inside-out with one Apple Development identity and Chromium's options and entitlements, hardened runtime; `codesign --verify --deep --strict` valid; contract 16/16, smoke, #9 and quit pass from the internal disk; GPU hardware-accelerated, 0 seatbelt denials, no GPU or utility restarts in 2 min; 549 MB; the bundle still carries the test-only code W3-9 links (left open); see "W3-11" below |
 | W3-12 | Results, patch budget, issue updates, housekeeping | TODO | |
 
 ## Patch budget
@@ -36,6 +36,144 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-11: Self-contained bundle with the release framework
+
+Date 2026-10-26. Branch `engine/33-w3-11-signed-bundle` off `main` at `22a2b12`. No code change: `engine/README.md`
+(new section "Embedding in the app") and this file. `.patches` unchanged (7), `git -C $CR rev-list --count
+156.0.8078.48..arkt` 7. `$REL` = `$CR/out/Arkt`.
+
+### Build
+
+- **`out/Arkt`, incremental** (it had not been rebuilt since the overlay changes up to #326; `$CR/arkt` already
+  pointed at the engine worktree, `ln -sfn` as in "Link the overlay"): `autoninja -C out/Arkt -j 4 chrome` at normal
+  priority (`-j 4` because swap was already at 15.5 GB), **1 min 27 s**, `The build has finished successfully.`,
+  0 `FAILED:`; 22 `//arkt` objects recompiled and `Arkt Framework` relinked (448 MB); a second run had nothing to do;
+  `gn check out/Arkt '//arkt/*'`: `Header dependency check OK`. Internal disk 34 GiB free before, 30 GiB after the
+  task; swap 15.5 GB used before, 18.6 GB at the end (other agents' Swift builds ran at the same time).
+- **Engine configuration on the release framework:** `xcodebuild -scheme ArktShell -configuration Engine
+  ARKT_ENGINE_APP=$REL/Arkt.app CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-w3-11 -derivedDataPath
+  $CHROMIUM_ROOT/arkt-shell-dd/w3-11 build` (no change to `Local.xcconfig`, which keeps `out/Spike` for
+  development), 1 min 25 s, `BUILD SUCCEEDED`, `Engine framework copied: Arkt Framework.framework 156.0.8078.48`.
+  Info.plist: `ArktEngineFrameworkName = Arkt Framework`, `ArktEngineFrameworkVersion = 156.0.8078.48`,
+  `CrProductDirName = Arkt Dev Engine`, `NSPrincipalClass = BrowserCrApplication`. The app binary is arm64 only.
+  No dylib next to the bundle.
+- **Inventory before signing:** the only Mach-O files outside the framework are `Contents/MacOS/ArktShell`;
+  `otool -L` lists only `/System` and `/usr/lib`; `Resources/GRDB_GRDB.bundle` holds an Info.plist and
+  `PrivacyInfo.xcprivacy` (no code). The framework still had the linker's ad-hoc signature after the Xcode build
+  (`flags=0x20002(adhoc,linker-signed)`): Xcode did not re-sign it.
+
+### Signing
+
+A copy in `$CHROMIUM_ROOT/stage-w3-11`, signed inside-out with one Apple Development identity and
+`--timestamp=none`, options and entitlements from `chrome/installer/mac/signing/parts.py` and `chrome/app/*.plist`
+(the table and commands are in `engine/README.md`, "Embedding in the app"). 11 of 11 entries of `Helpers` covered.
+
+```
+$ codesign --verify --deep --strict --verbose=2 ArktShell.app
+--validated:.../ArktShell.app/Contents/Frameworks/Arkt Framework.framework/Versions/Current/.
+ArktShell.app: valid on disk
+ArktShell.app: satisfies its Designated Requirement
+```
+
+The same on the installed copy (`~/Applications/ArktTest/ArktShell.app`). `spctl --assess`: `rejected` (not
+notarized, #125), as expected.
+
+| Part | `codesign -dv` Identifier | CodeDirectory flags | Entitlements |
+|---|---|---|---|
+| `ArktShell.app` | `dev.arkt.ArktShell` | `0x12a00(kill,restrict,library-validation,runtime)` | `app-entitlements.plist` (7 device and personal-information keys) |
+| `Arkt Framework.framework` | `com.arkt.Arkt.framework` | `0x0(none)` | none |
+| `Libraries/*.dylib` (3) | `libaperitif`, `libvk_swiftshader`, `libvulkan` | `0x0(none)` | none |
+| `chrome_crashpad_handler`, `app_mode_loader`, `web_app_shortcut_copier` | own names | `0x12a00(kill,restrict,library-validation,runtime)` | none |
+| `Arkt Helper.app`, `(Aperitif)` | `com.arkt.Arkt.helper` | `0x12a00(kill,restrict,library-validation,runtime)` | none |
+| `(GPU)`, `(Aperitif GPU)` | `com.arkt.Arkt.helper` | `0x10a00(kill,restrict,runtime)` | `com.apple.security.cs.allow-jit` |
+| `(Renderer)`, `(Aperitif Renderer)` | `com.arkt.Arkt.helper.renderer` | `0x10a00(kill,restrict,runtime)` | `com.apple.security.cs.allow-jit` |
+| `(Alerts)`, `(Aperitif Alerts)` | `com.arkt.Arkt.framework.AlertNotificationService` | `0x12a00(kill,restrict,library-validation,runtime)` | none |
+
+**Bundle size:** 549 MB (`du -sh`), of which the framework 538 MB and `Contents/MacOS` 12 MB.
+
+**Ids (Risk 9):** app `dev.arkt.ArktShell`; framework `com.arkt.Arkt.framework`; helpers as in the table. The
+rendezvous service follows the outer app: `launchctl print gui/<uid>` listed
+`dev.arkt.ArktShell.MachPortRendezvousServer.<browser pid>` while the smoke run was up, and every helper ran from the
+bundle's own `Helpers` with no rendezvous error. Mixed ids (`dev.arkt.*` app, `com.arkt.*` framework and helpers)
+stay for #128.
+
+### Runs
+
+All from `~/Applications/ArktTest/ArktShell.app` (internal disk; launched by executable path, so no
+removable-volume prompt), each with its own profile under `~/Library/Application Support/ArktTest/w3-11/<run>`,
+scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and defaults suite, `--use-mock-keychain --no-first-run
+--no-default-browser-check --enable-logging=stderr`, pages from a loopback server on `127.0.0.1:8691`, stopped by
+PID or by the app's own Quit. No macOS permission or keychain prompt appeared in any run. Self-contained: in the
+smoke run no process of the app had a file open under `/Volumes`; the loaded images outside the system were the
+framework and its resources inside the bundle.
+
+**Contract** (`contract`, `--arkt-engine-contract --arkt-engine-test-api`, tabs probe): 24 checks PASS,
+`ARKT_CONTRACT result 16/16`, `ARKT_CONTRACT exit 0`, 9 s from launch; 0 `FATAL`/`Check failed`. The only
+`ERROR` lines are the `Message ... rejected by interface blink.mojom.Widget(Host)` pairs at window closes that the
+W3-9 contract runs on `out/Spike` also log.
+
+**Smoke** (`smoke`, CDP port of its own, tabs and action probes):
+
+| Check | Result | Evidence |
+|---|---|---|
+| Start, first window | PASS | `engineDidStart`, `main menu installed`, `session ready`, `embedderReady (0 queued request(s))`, `launch finished (0 window(s) from queued requests)` 3 s after launch |
+| New Tab (File menu), command bar, page loads | PASS | `Alpha visible` (CDP) |
+| Cmd-L navigates the current tab | PASS | `Gamma visible`, still one page target |
+| `chrome.tabs.create({active:false})` | PASS | Beta `hidden`, Gamma stays `visible` |
+| `chrome.tabs.update({active:true})` | PASS | Beta `visible`, Gamma `hidden` |
+| Cmd-W | PASS | `facade tab closed ... reason client`, Beta's target gone |
+| `chrome.windows.create` with bounds | PASS | `window request kind extension`, shell window at 400,150 900x650 |
+| Split View (View > Add Split View, URL typed into the new pane) | PASS | Delta and Epsilon both `visible` in one window |
+| Extension popup | PASS (programmatic) | `chrome.action.openPopup()` from the action probe: `TriggerPopup ... by_user=0`, `popup loaded ... popup.html`, `popup auto-resize 244x129`; the sidebar Extensions button was not clicked |
+| Held close | PASS | `beforeunload` set with a user gesture, Cmd-W: the row dims, "Leave site?" dialog (its own window, AX dialog Cancel / Leave); Cancel: `facade close cancelled`, batch `CloseCancelled`; Leave on a one-tab window: its tabs closed with `reason windowClosing` |
+| Quit (`quit`, no CDP port) | PASS | App menu Quit: `quit started`, `engineWillBeginTerminating`, `quit-start flush succeeded true`, `app terminating`, `engineWillTerminate`, `termination flush succeeded true`, `lifetime keep-alive released`, process exited in 2 s |
+| Web Store install, Services, Edit menu, Dock reopen, page commands | not run | covered in W3-9 on the same code; nothing in them depends on signing |
+
+**Web identity (#9)**, loopback page and echo page loaded twice: `navigator.userAgent` and `user-agent`
+`Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0
+Safari/537.36`; brands `Not:A-Brand 8, Chromium 156`; full version list `Not:A-Brand 8.0.0.0, Chromium
+156.0.8078.48`; `sec-ch-ua` `"Not:A-Brand";v="8", "Chromium";v="156"`; `sec-ch-ua-full-version-list`
+`"Not:A-Brand";v="8.0.0.0", "Chromium";v="156.0.8078.48"`; platform `macOS 27.0.0`, arch `arm`. No `Arkt`, no
+`--user-agent` in any process. PASS.
+
+### Hardened runtime (`hr`, `--enable-sandbox-logging`, startup URL, CDP port of its own)
+
+- **GPU:** `chrome://gpu` over CDP (`info-view` shadow root), in both the smoke and the hr run: Canvas, Compositing,
+  Rasterization, Video Decode, Video Encode, WebGL, WebGPU `Hardware accelerated`; OpenGL, Direct Rendering Display
+  Compositor, Skia Graphite `Enabled`; Skia backend `GraphiteDawnMetal`; `GL_RENDERER ANGLE (Apple, ANGLE Metal
+  Renderer: Apple M2 Pro ...)`. "Problems Detected" lists only Chromium's stock workarounds. In a page: WebGL2
+  `UNMASKED_RENDERER_WEBGL` is the ANGLE Metal renderer, `navigator.gpu.requestAdapter()` returns `apple metal-3`.
+  The GPU process runs in `Arkt Helper (Aperitif).app` (Chromium's choice on 156).
+- **Seatbelt:** Chromium's profiles do not log denials unless `--enable-sandbox-logging` (`common.sb`: `deny default
+  (with no-log)`); all 6 helpers got the switch. `/usr/bin/log show --start <launch> --predicate 'sender ==
+  "Sandbox"'` over the run: 6 lines, all from other processes, 0 from the app or its helpers.
+- **Restarts:** helpers at 15 s and at 2 min 27 s: the GPU process, the network service and the storage service kept
+  their PIDs; the three renderers that left were replaced on navigations (startup page, `chrome://gpu`, a new page),
+  with no `exited unexpectedly`, `crashed` or `was terminated` line. 0 `FATAL`/`Check failed`, 0 rendezvous errors;
+  the only `ERROR` lines (2) are `services/on_device_model/ml/gpu_blocklist.cc ... Unable to get gpu adapter`, which
+  the W3-9 smoke on `out/Spike` also logs. No new crash dump under `Arkt Dev Engine/Crashpad`, no new
+  `ArktShell`/`Arkt Helper` report in `~/Library/Logs/DiagnosticReports`.
+
+### Left open
+
+- **Test-only code in the bundle** (recorded with W3-9): the Engine configuration links `EngineAPITestSupport`, honours
+  `--arkt-engine-contract` and `--arkt-engine-test-api`, and reads the `ARKT_*` overrides (`ArktEnvironmentOverrides
+  = YES`). The bundle signed here is that configuration, so it is a test bundle, not a shippable one. A release
+  configuration without them (and with the product `CrProductDirName`) is still to do.
+- **Mixed bundle ids** (Risk 9): app `dev.arkt.ArktShell`, framework and helpers `com.arkt.Arkt.*`; #128.
+- The "Leave site?" dialog shows the generic app icon: the shell app has no icon yet.
+
+### Needs the maintainer
+
+Once: launch `~/Applications/ArktTest/ArktShell.app` without `--user-data-dir` and without `--use-mock-keychain`
+(the real default folder, `Arkt Dev Engine` for this configuration, and the "Arkt Safe Storage" keychain item), and
+report any keychain prompt.
+
+### Verification
+
+`codesign --verify --deep --strict --verbose=2` and `codesign -dv` output above; contract `16/16`; smoke, #9 and quit
+lines above; `chrome://gpu` feature status above. No Swift or engine source changed, so no `swift test` run.
 
 ## W3-9: ShellUI on ChromiumEngine, contract runner, smoke
 

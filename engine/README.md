@@ -223,3 +223,86 @@ Install (the internal disk holds swap; keep at least 4 GB free after the copy):
 
 To replace an older install, move it aside first (keep it for rollback until the new one passes the smoke), then
 `ditto` the new one in. Smoke from `/Applications` with a fresh profile and the launch flags above: plan W2 Step 3.
+
+## Embedding in the app (Engine configuration on out/Arkt)
+
+The shell app (`app/ArktShell`, configuration `Engine`) loads the engine framework from its own
+`Contents/Frameworks` and calls `ChromeMain` (week-3 plan, Decision 1). On `out/Arkt` the framework is
+self-contained: no component dylibs next to the bundle, so the app can be copied anywhere. Layout:
+
+    ArktShell.app/Contents/
+      MacOS/ArktShell                       Swift app (arm64); dlopens the framework, never links it
+      Frameworks/Arkt Framework.framework/  copied unchanged from $REL/Arkt.app by the Engine build phase
+        Versions/<version>/Libraries/       libaperitif, libvk_swiftshader, libvulkan (+ data files)
+        Versions/<version>/Helpers/         8 Arkt Helper*.app, chrome_crashpad_handler, app_mode_loader,
+                                            web_app_shortcut_copier (11 entries on 156)
+      Resources/GRDB_GRDB.bundle            resources only, no code
+      Info.plist                            ArktEngineFrameworkName, ArktEngineFrameworkVersion, CrProductDirName
+
+Build the app against the release framework without editing `Local.xcconfig` (it may point at `out/Spike` for
+development), into a folder on the Chromium disk:
+
+    cd $REPO/app/ArktShell && xcodebuild -scheme ArktShell -configuration Engine \
+      ARKT_ENGINE_APP=$REL/Arkt.app CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-rel \
+      -derivedDataPath $CHROMIUM_ROOT/arkt-shell-dd/embed-rel build
+
+Expect `Engine framework copied: Arkt Framework.framework <version>` in the log and `ArktEngineFrameworkName = Arkt
+Framework` in the app's Info.plist. Xcode signs only the app (ad hoc); the framework keeps the linker's signature
+until the steps below.
+
+**Sign** a copy, inside-out, with one identity, taking each part's options and entitlements from
+`chrome/installer/mac/signing/parts.py`. The helpers' sandbox profiles are not touched.
+
+| Part | `--options` | `--entitlements` (`$CR/chrome/app/`) |
+|---|---|---|
+| `Libraries/*.dylib` | none | none |
+| `chrome_crashpad_handler`, `app_mode_loader`, `web_app_shortcut_copier` | `restrict,library,kill,runtime` | none |
+| `Arkt Helper.app`, `(Alerts)`, `(Aperitif)`, `(Aperitif Alerts)` | `restrict,library,kill,runtime` | none |
+| `(Renderer)`, `(Aperitif Renderer)` | `restrict,kill,runtime` | `helper-renderer-entitlements.plist` (JIT) |
+| `(GPU)`, `(Aperitif GPU)` | `restrict,kill,runtime` | `helper-gpu-entitlements.plist` (JIT) |
+| `Arkt Framework.framework` | none | none |
+| `ArktShell.app` (last) | `restrict,library,kill,runtime` | `app-entitlements.plist` |
+
+    ID=<certificate hash>; ENT=$CR/chrome/app; STAGE=$CHROMIUM_ROOT/stage-embed
+    rm -rf $STAGE && mkdir -p $STAGE && ditto $CHROMIUM_ROOT/embed-rel/ArktShell.app $STAGE/ArktShell.app && cd $STAGE
+    S=(codesign --force --timestamp=none --sign $ID)
+    FULL=restrict,library,kill,runtime; JIT=restrict,kill,runtime
+    FW="ArktShell.app/Contents/Frameworks/Arkt Framework.framework"; F="$FW/Versions/Current"
+    for l in "$F"/Libraries/*.dylib; do $S "$l"; done
+    for t in chrome_crashpad_handler app_mode_loader web_app_shortcut_copier; do $S --options $FULL "$F/Helpers/$t"; done
+    for h in "$F"/Helpers/*.app; do case "$h" in
+      *Renderer*) $S --options $JIT --entitlements $ENT/helper-renderer-entitlements.plist "$h";;
+      *GPU*) $S --options $JIT --entitlements $ENT/helper-gpu-entitlements.plist "$h";;
+      *) $S --options $FULL "$h";; esac; done
+    $S "$FW"
+    $S --options $FULL --entitlements $ENT/app-entitlements.plist ArktShell.app
+    codesign --verify --deep --strict --verbose=2 ArktShell.app
+    codesign -dv ArktShell.app 2>&1 | grep -E '^(Identifier|CodeDirectory)'  # flags=0x12a00(kill,restrict,library-validation,runtime)
+
+Library validation on the app is why everything inside must carry the same team id: the app `dlopen`s the
+framework, and an ad-hoc or foreign-signed part fails to load. Signing the app drops Xcode's `get-task-allow`, so
+`sample` and debuggers no longer attach to the browser process.
+
+**Install for testing on the internal disk**, never into `/Applications` over a bundle someone else installed, and
+not on the Chromium disk (a launch from a removable volume shows the removable-volume prompt):
+
+    mkdir -p ~/Applications/ArktTest && ditto $STAGE/ArktShell.app ~/Applications/ArktTest/ArktShell.app
+    codesign --verify --deep --strict --verbose=2 ~/Applications/ArktTest/ArktShell.app
+
+**Launch** the executable directly, with the launch flags above, a profile under
+`~/Library/Application Support/ArktTest`, and the `ARKT_*` overrides so the shell's own data, Arc folder and
+defaults stay away from the real ones (the bundle id is the dev app's, `dev.arkt.ArktShell`):
+
+    T=~/Library/Application\ Support/ArktTest/<run>
+    ARKT_DATA_DIR=$T/shell ARKT_ARC_DIR=$T/arc ARKT_DEFAULTS_SUITE=arkt-test-<run> \
+      ~/Applications/ArktTest/ArktShell.app/Contents/MacOS/ArktShell --user-data-dir=$T/profile \
+      --use-mock-keychain --no-first-run --no-default-browser-check --enable-logging=stderr &
+
+Add `--enable-sandbox-logging` to see seatbelt denials in the unified log (Chromium's profiles do not log them
+otherwise), and use `/usr/bin/log`, not zsh's `log` builtin:
+`/usr/bin/log show --start '<launch time>' --style compact --predicate 'sender == "Sandbox"' | grep -i arkt`.
+
+Ids in this bundle (until #128 aligns them): app `dev.arkt.ArktShell`; framework `com.arkt.Arkt.framework`; helpers
+`com.arkt.Arkt.helper` (Helper, GPU, Aperitif, Aperitif GPU), `com.arkt.Arkt.helper.renderer` (Renderer, Aperitif
+Renderer), `com.arkt.Arkt.framework.AlertNotificationService` (Alerts, Aperitif Alerts). The Mach rendezvous service
+follows the outer app: `dev.arkt.ArktShell.MachPortRendezvousServer.<browser pid>`.
