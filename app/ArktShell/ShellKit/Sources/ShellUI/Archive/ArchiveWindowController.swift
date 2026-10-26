@@ -59,6 +59,9 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   private var matching: Int?
   private var unreadable = 0
   private var failed = false
+  /// Stored favicon bytes by id; an image is made the first time its row is shown (`favicon(_:)`), never for a
+  /// whole page at once.
+  private var faviconData: [UUID: Data] = [:]
   private var favicons: [UUID: NSImage] = [:]
   private var requestedFavicons: Set<UUID> = []
   private var searchTask: Task<Void, Never>?
@@ -459,7 +462,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
       guard let self else { return }
       let loaded = await self.dataSource.favicons(for: wanted)
       guard !loaded.isEmpty else { return }
-      for (id, data) in loaded { self.favicons[id] = NSImage(data: data) }
+      self.faviconData.merge(loaded) { _, new in new }
       let visible = self.tableView.rows(in: self.tableView.visibleRect)
       guard visible.length > 0 else { return }
       self.tableView.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<visible.location + visible.length),
@@ -524,6 +527,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   private func clearArchive() async {
     let cleared = await dataSource.clearArchive()
     favicons = [:]
+    faviconData = [:]
     requestedFavicons = []
     await reload()
     toasts.show(Toast(text: cleared ? "The Archive has been cleared." : "The Archive could not be cleared."))
@@ -586,16 +590,24 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     case .item(let index):
       let cell = rowCell(in: tableView)
       let item = rows[index]
-      cell.show(item, query: query.text, favicon: favicons[item.id], flavor: flavor, scale: scale)
+      cell.show(item, query: query.text, favicon: favicon(item.id), flavor: flavor, scale: scale)
       return cell
     case .child(let index, let child):
       let cell = rowCell(in: tableView)
       let parent = rows[index]
       let tab = parent.matchedChildren[child]
-      cell.showChild(tab, parentTitle: parent.title, query: query.text, favicon: favicons[tab.id], flavor: flavor,
+      cell.showChild(tab, parentTitle: parent.title, query: query.text, favicon: favicon(tab.id), flavor: flavor,
                      scale: scale)
       return cell
     }
+  }
+
+  /// The favicon image of `id`, made from its stored bytes on first use.
+  private func favicon(_ id: UUID) -> NSImage? {
+    if let image = favicons[id] { return image }
+    guard let data = faviconData.removeValue(forKey: id), let image = NSImage(data: data) else { return nil }
+    favicons[id] = image
+    return image
   }
 
   private func rowCell(in tableView: NSTableView) -> ArchiveRowCellView {
