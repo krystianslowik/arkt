@@ -41,6 +41,24 @@ struct EnvironmentOverrides {
 
   #if DEBUG
   static let uiTestKey = "ARKT_UITEST"
+  static let skipOnboardingKey = "ARKT_SKIP_ONBOARDING"
+  static let defaultBrowserKey = "ARKT_DEFAULT_BROWSER"
+
+  /// The first run is not shown (`ARKT_SKIP_ONBOARDING=1`): UI tests that start from the empty state.
+  var skipsOnboarding: Bool { environment[Self.skipOnboardingKey] == "1" }
+
+  /// What the default-browser check answers instead of asking macOS.
+  enum DefaultBrowser: Equatable { case isDefault, notDefault }
+
+  /// `ARKT_DEFAULT_BROWSER=default|notDefault`; in strict UI-test mode `notDefault` when unset, so a test run never
+  /// changes the real default browser. Nil: the real check and the real system prompt.
+  var defaultBrowser: DefaultBrowser? {
+    switch value(Self.defaultBrowserKey) {
+    case "default": .isDefault
+    case "notDefault": .notDefault
+    default: isUITest ? .notDefault : nil
+    }
+  }
 
   /// Strict UI-test mode (`ARKT_UITEST=1`): the app refuses to start unless every override is set.
   var isUITest: Bool { environment[Self.uiTestKey] == "1" }

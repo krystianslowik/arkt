@@ -79,6 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return .terminateLater
   }
 
+  /// A link or file another app opened with Arkt (it can be the default browser, onboarding section 6.4).
+  func application(_ application: NSApplication, open urls: [URL]) {
+    composition.session?.openFromOtherApp(urls)
+  }
+
   /// Closing the last window keeps the app running, as the engine build does (Chromium's keep-alive) and as macOS
   /// apps do (maintainer decision on #241); Quit is the way out.
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
