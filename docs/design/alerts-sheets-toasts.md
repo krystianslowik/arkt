@@ -116,6 +116,7 @@ The gain is the Space's own theme swatch and icon as the sheet's icon, so the us
 | Delete Space, untitled | Delete this Space? | as above | as above |
 | Launch failure | Arkt couldn't open its data | Nothing was changed. Try again, or show the data folder. / Error: <type> <code> (secondary) | Show Data Folder (text link, leading), Quit, **Try Again** (primary, Return) |
 | Newer schema | This data was saved by a newer version of Arkt | Update Arkt to open it. Nothing was changed. | **Quit** (primary, Return) |
+| Crash report (next launch after a crash, switch off, asked once) | Arkt quit unexpectedly. Send a report? | The report has no web addresses, page titles, file paths or names. Nothing is sent until you review it in your browser. / You can change this in Settings, under Privacy. (secondary) | Don't Send (Escape), Always Send, **Send** (primary, Return); a window sheet on the browser window (#129) |
 | Extension install | Add "<name>"? (Chromium string) | subtitle: rating and users; list "It can:" + permissions in a recessed field | Open in Web Store (text link), Cancel, **Add Extension** |
 | Extension uninstall | Remove "<name>"? (Chromium string) | checkbox Report abuse (Chromium string) | Cancel, **Remove** (destructive) |
 | Permission | <origin> wants to | glyph + permission ("Know your location") | Allow While Visiting the Site, Allow This Time, Never Allow (stacked, neutral: no nudge) |

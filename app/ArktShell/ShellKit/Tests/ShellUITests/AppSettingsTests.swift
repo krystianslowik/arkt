@@ -124,6 +124,29 @@ struct AppSettingsTests {
     #expect(!settings.tabNavigation.countsFavorites, "kept in memory")
     #expect(UserDefaults.standard.object(forKey: "settingsEphemeralProbe") == nil)
   }
+
+  // MARK: Crash reports (#129)
+
+  @Test func crashReportsAreOffAndUnansweredByDefault() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    #expect(!settings.sendsCrashReports)
+    #expect(!settings.crashReportAskAnswered)
+  }
+
+  @Test func crashReportValuesPersistUnderTheirKeysAndNotifyOnce() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    let recorder = Recorder()
+    settings.addObserver(recorder)
+    settings.sendsCrashReports = true
+    settings.sendsCrashReports = true                    // unchanged: no notification
+    settings.crashReportAskAnswered = true
+    #expect(recorder.count == 2)
+    #expect(suite.defaults.bool(forKey: AppSettings.Key.sendsCrashReports))
+    #expect(suite.defaults.bool(forKey: AppSettings.Key.crashReportAskAnswered))
+    #expect(AppSettings(defaults: suite.defaults).sendsCrashReports)
+  }
 }
 
 /// The seven panes, their order (Cmd-1 to Cmd-7), names and symbols (docs/design/settings.md, sections 3 and 4).

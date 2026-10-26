@@ -70,6 +70,8 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | Privacy | Site permissions (Location, Camera, Microphone, Notifications, Pop-ups and redirects) | popup Ask / Allow / Block, disclosure to the site list | Chromium content settings | Ask (Pop-ups: Block) | engine, planned | none (Chromium) |
 | Privacy | Let websites read your Space's theme colors | toggle | `themeToCSSSharingAllowed` | off | planned | section 4 |
 | Privacy | Clear browsing data | button "Clear..." (opens a sheet: time range + kinds) | Chromium browsing data remover | n/a | engine, planned | none |
+| Privacy | Send crash reports | toggle (Crash reports section) | `crashReportsEnabled` | off | built (#129); engine crashes follow in #447 | section 5 of the design plan |
+| Privacy | Send a crash report | pill "Send Crash Report", enabled while the switch is on and a report is kept; opens a prefilled GitHub issue in the browser | local reports in `<data folder>/CrashReports` | n/a | built (#129) | section 5 of the design plan |
 | Advanced | Save downloads to | popup with folder, Other... | `arc.folder` / Chromium `download.default_directory` | Downloads | engine, planned (#132) | BH-182 |
 | Advanced | Ask where to save each file | toggle | `arc.promptForDownload` / `download.prompt_for_download` | off | engine, planned (#132) | BH-182 |
 | Advanced | Open Picture in Picture when you leave a video tab | toggle | `autoPipGloballyDisabled` (inverted) | on | planned | BH-183, BH-185 |

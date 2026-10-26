@@ -114,6 +114,22 @@ extension DialogContent {
     defaultButton: .primary, escapeAnswersCancel: false)
 }
 
+// MARK: - Crash report ask (#129)
+
+extension DialogContent {
+  /// The one-time ask on the launch after a crash, with the switch off: Send (Return) opens the report as a GitHub
+  /// issue once, Always Send turns the switch on, Don't Send (Escape) deletes the report. Every answer ends the ask.
+  public static let crashReportAsk = DialogContent(
+    title: "Arkt quit unexpectedly. Send a report?", icon: .appIcon, iconPlacement: .stacked,
+    paragraphs: [
+      .init("The report has no web addresses, page titles, file paths or names. "
+        + "Nothing is sent until you review it in your browser."),
+      .init("You can change this in Settings, under Privacy.", secondary: true),
+    ],
+    primaryTitle: "Send", secondaryTitle: "Always Send", cancelTitle: "Don't Send",
+    defaultButton: .primary, escapeAnswersCancel: true)
+}
+
 // MARK: - Motion (section 7)
 
 /// Dialog motion as data. AppKit animates the window sheet; the app-modal alert grows from its center on `firmFast`,

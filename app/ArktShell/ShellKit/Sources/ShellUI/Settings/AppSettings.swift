@@ -16,6 +16,11 @@ public final class AppSettings {
     public static let switchToNinthSidebarItemEnabled = "switchToNinthSidebarItemEnabled"
     /// Arc's key for the system-wide Little Arkt hotkey (BH-131, KB-045).
     public static let globalLittleBrowserHotkeyEnabled = "globalLittleBrowserHotkeyEnabled"
+    /// Settings > Privacy > Send crash reports (#129). The app reads both crash keys straight from the defaults when a
+    /// crash is captured, so they are public.
+    public static let sendsCrashReports = "crashReportsEnabled"
+    /// The launch's one-time "Send a report?" was answered (Send, Don't Send or Always Send): never asked again.
+    public static let crashReportAskAnswered = "crashReportAskAnswered"
   }
 
   /// Show Toolbar and Show the full URL: the instance every window observes.
@@ -78,6 +83,27 @@ public final class AppSettings {
     set {
       guard newValue != opensLittleArktWithHotKey else { return }
       set(newValue, Key.globalLittleBrowserHotkeyEnabled)
+      notifyObservers()
+    }
+  }
+
+  /// Settings > Privacy > Send crash reports (#129): keep a stripped report of each crash on this Mac, so Send Crash
+  /// Report can open it as a GitHub issue. Off by default; one switch for the app and, later, the engine.
+  public var sendsCrashReports: Bool {
+    get { bool(Key.sendsCrashReports, default: false) }
+    set {
+      guard newValue != sendsCrashReports else { return }
+      set(newValue, Key.sendsCrashReports)
+      notifyObservers()
+    }
+  }
+
+  /// The one-time ask after the first crash was answered. Never reset by the app.
+  public var crashReportAskAnswered: Bool {
+    get { bool(Key.crashReportAskAnswered, default: false) }
+    set {
+      guard newValue != crashReportAskAnswered else { return }
+      set(newValue, Key.crashReportAskAnswered)
       notifyObservers()
     }
   }

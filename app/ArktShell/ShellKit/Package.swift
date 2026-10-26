@@ -10,6 +10,8 @@ let package = Package(
     .library(name: "Motion", targets: ["Motion"]),
     .library(name: "ShellUI", targets: ["ShellUI"]),
     .library(name: "CoreBridge", targets: ["CoreBridge"]),
+    // Local crash reports (#129): Foundation only; the app target links it, ShellUI never does.
+    .library(name: "CrashReporting", targets: ["CrashReporting"]),
     // The engine app's composition root only (ChromiumEngineKitIsolationTests).
     .library(name: "ChromiumEngineKit", targets: ["ChromiumEngineKit"]),
     // The shared engine contract; the app links it for the Engine configuration's contract runner (W3-9).
@@ -25,6 +27,8 @@ let package = Package(
     .target(name: "EngineAPITestSupport", dependencies: ["EngineAPI"]),
     .target(name: "FakeEngineKit", dependencies: ["EngineAPI"]),
     .target(name: "Motion"),
+    // The report model, stripping, local store, consent policy and the GitHub hand-off. No dependencies at all.
+    .target(name: "CrashReporting"),
     // The engine facade header (engine/arkt/api/arkt_engine.h, a byte-identical copy): protocols and enums only, no
     // code. Only ChromiumEngineKit and its tests may depend on it (EngineABIIsolationTests).
     .target(name: "ArktEngineABI"),
@@ -44,6 +48,7 @@ let package = Package(
     ),
     .testTarget(name: "EngineAPITests", dependencies: ["EngineAPI", "EngineAPITestSupport"]),
     .testTarget(name: "MotionTests", dependencies: ["Motion"]),
+    .testTarget(name: "CrashReportingTests", dependencies: ["CrashReporting"]),
     .testTarget(name: "ShellUITests", dependencies: ["ShellUI", "EngineAPITestSupport"]),
     .testTarget(name: "IsolationTests"),
     .testTarget(name: "ArktEngineABITests", dependencies: ["ArktEngineABI"]),

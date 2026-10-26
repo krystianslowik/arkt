@@ -52,6 +52,10 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var countFavoritesSwitch: SettingsSwitch?
   var ninthTabSwitch: SettingsSwitch?
   var importButton: ArchivePillButton?
+  /// Settings > Privacy > Crash reports (#129).
+  var crashReportsSwitch: SettingsSwitch?
+  var sendCrashReportButton: ArchivePillButton?
+  var sendCrashReportRow: SettingsRowView?
   let shortcutsSearch = ArchiveSearchField(frame: .zero)
   var shortcutSections: [ShortcutCatalog.Section] = []
   /// Closure targets of the pills (an action's target is weak).
@@ -392,6 +396,8 @@ extension SettingsWindowController: AppSettingsObserver {
     applyLittleArktHotKeyState()                    // #354
     countFavoritesSwitch?.setOn(settings.tabNavigation.countsFavorites, animated: true)
     ninthTabSwitch?.setOn(settings.tabNavigation.ninthOpensNinth, animated: true)
+    crashReportsSwitch?.setOn(settings.sendsCrashReports, animated: true)
+    applySendCrashReportState()                     // #129
   }
 }
 

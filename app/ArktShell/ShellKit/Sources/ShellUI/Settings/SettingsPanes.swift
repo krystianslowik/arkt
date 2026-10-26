@@ -398,6 +398,7 @@ extension SettingsWindowController {
             planned: true),
         row("Clear browsing data", "History, cookies and cached files, for a time range.", [clear], planned: true),
       ]),
+      crashReportsSection(),
     ]
   }
 
