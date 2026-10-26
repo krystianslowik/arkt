@@ -1,7 +1,7 @@
 import AppKit
 
 /// The target of the main menu's app-level items (week-3 results, W3-8 step 3): New Window, Settings, Import Browser
-/// Data, Show Archive and Welcome to Arkt. Explicit, so the items never reach the end of the responder chain, which in the Engine build is
+/// Data, Show Archive, Clear Archive and Welcome to Arkt. Explicit, so the items never reach the end of the responder chain, which in the Engine build is
 /// Chromium's `AppController`. Enabled from the session: nothing is enabled before the data folder loaded.
 @MainActor
 final class AppCommands: NSObject {
@@ -21,6 +21,9 @@ final class AppCommands: NSObject {
   /// Window > Show Archive (E5c, unbound by default, KB-043).
   @objc func showArchive(_ sender: Any?) { session?.showArchive() }
 
+  /// Window > Clear Archive... (BH-087, unbound, KB-043): fronts the Archive window and asks there.
+  @objc func clearArchive(_ sender: Any?) { session?.clearArchive() }
+
   /// Help > Welcome to Arkt (onboarding spec, section 12): the first run again over the frontmost window.
   @objc func showWelcome(_ sender: Any?) { session?.showWelcome() }
 }
@@ -36,6 +39,9 @@ extension AppCommands: NSMenuItemValidation {
       return false
     case #selector(showWelcome(_:)):
       return session.canShowWelcome
+    case #selector(clearArchive(_:)):
+      session.refreshArchiveHasItems()                 // off main; applies from the next validation
+      return session.archiveHasItems
     default:
       return true
     }

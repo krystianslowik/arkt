@@ -32,6 +32,12 @@ final class AppSession {
   let archive: ArchiveCoordinator
   /// The auto-archive pass every minute (E5d).
   let autoArchive: AutoArchiveTimer
+  /// Archived matches in every window's command bar (#111).
+  let archiveSearch: ArchiveCommandBarSearch
+  /// The archive held an item at the last check (Window > Clear Archive... is enabled then); refreshed off the main
+  /// actor each time the menu is validated, like `isArcImportAvailable`.
+  private(set) var archiveHasItems = false
+  private var archiveCountCheck: Task<Void, Never>?
   /// Arc's folder; read only when the user asks for an import.
   let arcFiles = ArcSourceFiles(directory: AppEnvironment.arcDirectory)
   /// Arc's sidebar file existed at the last check (existence only, off the main actor): at launch and again each
@@ -77,6 +83,7 @@ final class AppSession {
     self.archive = archive
     autosaver.beforeSave = { [weak archive] in await archive?.flushPendingAdds() ?? true }
     self.autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
+    self.archiveSearch = ArchiveCommandBarSearch(source: source, store: archiveStore, coordinator: archive)
     self.faviconStore = faviconStore
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
@@ -84,6 +91,9 @@ final class AppSession {
       changedSinceBackup = true
     }
     windows.configure = { [weak self] controller in self?.wire(controller) }
+    archiveSearch.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
+    archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
+    archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text)) }
   }
 
   /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine
@@ -97,6 +107,7 @@ final class AppSession {
     }
     if !defersWindows { finishLaunch(opensWindow: true) }
     refreshArcImportAvailability()
+    refreshArchiveHasItems()
     switch outcome {
     case .opened, .restoredFromBackup: backUp()
     case .created, .recreatedEmpty: break           // nothing to back up; never seed (decision 3)
@@ -139,6 +150,8 @@ final class AppSession {
     window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
     window.onFaviconChanged = { [weak self] id, data in self?.faviconWriter?.record(data, for: id) }
     window.isArcImportAvailable = isArcImportAvailable
+    window.commandBar.archivedProvider = { [weak self] query in await self?.archiveSearch.matches(for: query) ?? [] }
+    window.commandBar.onRestoreArchived = { [weak self] id in self?.archiveSearch.restore(id) }   // BH-104
     guard let writer = faviconWriter else { return }
     let load = writer.loadStored(Set(source.sidebar.nodes.keys))
     Task { [weak window] in
@@ -241,7 +254,10 @@ final class AppSession {
       archiveWindow.show()
       return
     }
-    let model = ArchiveListModel(source: source, store: archiveStore, coordinator: archive)
+    let model = ArchiveListModel(source: source, store: archiveStore, coordinator: archive, banner: settingsStore,
+                                 archiveState: settingsStore)
+    // Archived ids keep their stored favicons (`FaviconRetention`), so the rows show them.
+    model.faviconLoader = { [weak self] ids in await self?.faviconWriter?.loadStored(ids).value ?? [:] }
     // The source Space wins; when it is gone the item lands in the Space on screen (BH-157 routing comes later).
     model.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
@@ -249,6 +265,30 @@ final class AppSession {
     let controller = ArchiveWindowController(dataSource: model)
     archiveWindow = controller
     controller.show()
+  }
+
+  /// Window > Clear Archive... (BH-087): fronts the Archive window and asks there once its count is loaded, so the
+  /// question, the empty list and the cleared toast are seen in one place (design open question 3).
+  func clearArchive() {
+    showArchive()
+    guard let archiveWindow else { return }
+    Task { [weak archiveWindow] in
+      await archiveWindow?.pendingLoad?.value
+      archiveWindow?.confirmClearArchive()
+    }
+  }
+
+  /// Re-checks off the main actor whether the archive holds anything (stored or still in the outbox), unless a check
+  /// is already running. The menu validation that calls it returns the cached answer.
+  func refreshArchiveHasItems() {
+    guard archiveCountCheck == nil else { return }
+    let pending = !archive.pendingItems.isEmpty
+    archiveCountCheck = Task { [weak self, archiveStore] in
+      let stored = ((try? await archiveStore.count(matching: ArchiveFilter())) ?? 0) > 0
+      guard let self else { return }
+      self.archiveHasItems = pending || stored
+      self.archiveCountCheck = nil
+    }
   }
 
   /// BH-086: the restore toast in the browser window; "View" focuses the restored item. The item's favicons come
