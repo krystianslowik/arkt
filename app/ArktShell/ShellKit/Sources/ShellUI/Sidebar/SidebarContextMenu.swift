@@ -123,6 +123,31 @@ public enum SidebarContextMenu {
     }
   }
 
+  /// The native menu for `entries` (design 7): plain `NSMenuItem`s, no custom views and no attributed titles,
+  /// `autoenablesItems` off with the entries' enabled rules. Each item carries its `SidebarMenuAction` as its
+  /// `representedObject` and sends `action` to `target`.
+  @MainActor
+  public static func menu(_ entries: [SidebarMenuEntry], target: AnyObject, action: Selector) -> NSMenu {
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    for entry in entries {
+      if entry.isSeparator {
+        menu.addItem(.separator())
+        continue
+      }
+      let item = NSMenuItem(title: entry.title, action: entry.action == nil ? nil : action,
+                            keyEquivalent: entry.keyEquivalent)
+      item.keyEquivalentModifierMask = entry.modifiers
+      item.isAlternate = entry.isAlternate
+      item.isEnabled = entry.isEnabled
+      item.target = target
+      item.representedObject = entry.action
+      if let submenu = entry.submenu { item.submenu = self.menu(submenu, target: target, action: action) }
+      menu.addItem(item)
+    }
+    return menu
+  }
+
   @MainActor
   private static func row(_ id: NodeID, _ source: any SidebarSource,
                           _ context: SidebarMenuContext) -> [SidebarMenuEntry] {

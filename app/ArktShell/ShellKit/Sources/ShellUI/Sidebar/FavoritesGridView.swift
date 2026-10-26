@@ -166,6 +166,14 @@ final class FavoritesCollectionView: NSCollectionView {
   var onMouseDownBegan: (@MainActor () -> Void)?
   var onMouseDownEnded: (@MainActor (IndexPath?, NSPoint) -> Void)?
   var onMoveCommand: (@MainActor (_ deltaColumns: Int, _ deltaRows: Int) -> Void)?
+  /// The context menu of the tile at an index path (design 3.3); nil: none.
+  var menuProvider: (@MainActor (IndexPath) -> NSMenu?)?
+
+  /// A right-click or Ctrl-click on a tile opens that Favorite's menu; elsewhere in the grid there is none.
+  override func menu(for event: NSEvent) -> NSMenu? {
+    guard let indexPath = indexPathForItem(at: convert(event.locationInWindow, from: nil)) else { return nil }
+    return menuProvider?(indexPath)
+  }
 
   override var acceptsFirstResponder: Bool { true }
   override var mouseDownCanMoveWindow: Bool { false }
@@ -224,6 +232,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   public var onClose: (@MainActor (NodeID) -> Void)?
   /// Whether the Favorite's page is loaded in this window; only a loaded tile shows the X and the close action.
   public var pageLoadedProvider: (@MainActor (NodeID) -> Bool)?
+  /// A Favorite tile's context menu action (design 3.3); the window runs it.
+  public var onMenuAction: (@MainActor (SidebarMenuAction) -> Void)?
   /// A Favorite tab tile started or ended a drag (#214, S7); the window shows and hides its drop overlay.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   public var onNodeDragEnded: (@MainActor () -> Void)?
@@ -268,6 +278,10 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       }
       favoritesCollectionView.onMouseDownEnded = { [weak self] downIndexPath, point in
         self?.mouseDownEnded(downIndexPath: downIndexPath, at: point)
+      }
+      favoritesCollectionView.menuProvider = { [weak self] indexPath in
+        guard let self, let id = self.nodeID(at: indexPath) else { return nil }
+        return self.contextMenu(for: id)
       }
       favoritesCollectionView.onMoveCommand = { [weak self] deltaColumns, deltaRows in
         self?.moveKeyboardFocus(deltaColumns: deltaColumns, deltaRows: deltaRows)
@@ -463,6 +477,18 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   }
 
   /// Tile currently showing `id`, if realized.
+  /// The Favorite menu of `id` (design 3.3), nil for an unknown tile.
+  public func contextMenu(for id: NodeID) -> NSMenu? {
+    guard source.node(id) != nil else { return nil }
+    let entries = SidebarContextMenu.entries(for: .favorite(id), in: source, context: SidebarMenuContext())
+    return SidebarContextMenu.menu(entries, target: self, action: #selector(menuActionChosen(_:)))
+  }
+
+  @objc private func menuActionChosen(_ sender: NSMenuItem) {
+    guard let action = sender.representedObject as? SidebarMenuAction else { return }
+    onMenuAction?(action)
+  }
+
   public func tile(for id: NodeID) -> FavoriteTileView? {
     guard let index = nodeIDs.firstIndex(of: id) else { return nil }
     return (collectionView.item(at: IndexPath(item: index, section: 0)) as? FavoriteTileItem)?.tileView

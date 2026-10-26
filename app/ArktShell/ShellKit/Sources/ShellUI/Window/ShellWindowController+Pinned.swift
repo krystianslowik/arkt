@@ -73,6 +73,7 @@ extension ShellWindowController {
   /// Cmd-D (KB-012, File > Pin / Unpin Tab): pins the current Today tab or split, unpins a pinned one. The page
   /// never closes and the row never archives: the tab (or split) only changes sections.
   @objc public func pinTab(_ sender: Any?) {
+    if pinSelection() { return }                                    // a multi-selection pins at once (KB-012)
     guard let node = currentNode, let target = Self.pinnableNode(node, in: sidebar) else { return }
     togglePin(of: target)
   }
