@@ -18,15 +18,20 @@
   /* BrandTokens */
   --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
   --surface: #FAF9F5;                 /* surfaceBrand: sheets, panels, infobars */
-  --focus: #202321;                   /* focusRing */
+  /* System focus ring (NSColor.keyboardFocusIndicatorColor, Blue accent). Mustard is never a stroke. */
+  --focus: rgba(0,103,244,0.50);
   /* ShellTokens */
   --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
   --text-2: rgba(0,0,0,0.64);                                    /* secondaryText */
   --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
   --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
   --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --fg: rgba(0,0,0,0.48);                                        /* sidebarForeground (glyphs only) */
+  --list-field: color(display-p3 0.0549 0.0588 0.0627 / 0.035);  /* ArchiveTokens.listField */
   --card-border: rgba(0,0,0,0.10);                               /* cardBorder */
-  --toast: rgba(255,255,255,0.96);                               /* toastSurface (light flavor) */
+  /* The Space's theme (prototype: "Work", a blue theme). Toasts follow it: toastSurface tinted 10 % with the theme's first stop */
+  --theme-a: #DCE8F7; --theme-b: #BFD3EE;
+  --toast: color-mix(in srgb, var(--theme-a) 22%, rgba(255,255,255,0.96));   /* AlertTokens.toastSurface(theme), light flavor */
   --toast-text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);   /* toastText */
   --toast-text-2: rgba(0,0,0,0.64);
   --toast-divider: rgba(0,0,0,0.10);
@@ -35,7 +40,6 @@
   --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);  /* overlayShadow */
   --toast-shadow: 0 0 0 0.5px rgba(0,0,0,0.10), 0 8px 24px rgba(0,0,0,0.16), 0 1px 3px rgba(0,0,0,0.08);    /* toastShadow */
   /* Window context (prototype only: a Space theme and a page) */
-  --theme-a: #F2F0EE; --theme-b: #E4E1DD;
   --page: #FFFFFF; --page-ink: rgba(0,0,0,0.10); --page-ink-2: rgba(0,0,0,0.18);
   --desktop: #C9CDD2;
   --win-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
@@ -48,16 +52,17 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --surface: #202321; --focus: #E9B520;
+  --surface: #202321; --focus: rgba(26,145,255,0.55);
+  --fg: rgba(255,255,255,0.57); --list-field: color(display-p3 0 0 0 / 0.14);
   --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
   --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
   --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
-  --toast: color(display-p3 0.1098 0.1098 0.1255 / 0.96);
+  --toast: color-mix(in srgb, var(--theme-a) 30%, rgba(28,28,32,0.96));   /* AlertTokens.toastSurface(theme), dark flavor */
   --toast-text: rgba(255,255,255,0.85); --toast-text-2: rgba(255,255,255,0.72); --toast-divider: rgba(255,255,255,0.14);
   --destructive: #FFAAA2;
   --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
   --toast-shadow: 0 0 0 0.5px rgba(255,255,255,0.14), 0 8px 24px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.30);
-  --theme-a: #3A3B44; --theme-b: #24252B;
+  --theme-a: #2E3A4C; --theme-b: #1F2734;
   --page: #1E1F22; --page-ink: rgba(255,255,255,0.10); --page-ink-2: rgba(255,255,255,0.22);
   --desktop: #2C3036;
   --win-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
@@ -103,19 +108,22 @@ button { font: inherit; color: inherit; }
 .page i.img { height: 150px; border-radius: 10px; margin: 26px 0; }
 .dimmer { display: none; }
 
-/* ---------- Buttons (shared by every sheet and panel) ---------- */
-.btn { all: unset; box-sizing: border-box; height: 28px; min-width: 80px; padding: 0 14px; border-radius: 7px; text-align: center;
-  font-size: 13px; font-weight: 500; line-height: 28px; background: var(--fill); box-shadow: inset 0 0 0 0.5px var(--divider);
-  color: var(--text); white-space: nowrap; transition: transform 120ms var(--ease-out); cursor: default; }
-.btn.primary { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12); }
+/* ---------- Buttons: the brand's pills at chrome size (shared by every sheet, panel and infobar) ---------- */
+.btn { all: unset; box-sizing: border-box; height: 28px; min-width: 76px; padding: 0 16px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; background: var(--fill-hover); color: var(--text); white-space: nowrap;
+  transition: transform 160ms var(--ease-out), background-color 120ms ease; cursor: default; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
 .btn.destructive { color: var(--destructive); }
 .btn.full { display: block; width: 100%; }
+.btn.small { height: 24px; min-width: 0; padding: 0 12px; border-radius: 12px; font-size: 12px; line-height: 24px; }
 .btn:active { transform: scale(0.97); }
-@media (hover: hover) and (pointer: fine) { .btn:hover { background: var(--fill-hover); } .btn.primary:hover { background: var(--accent-highlight); } }
+@media (hover: hover) and (pointer: fine) { .btn:hover { background: var(--fill); } .btn.primary:hover { background: var(--accent-highlight); } }
 .btn.primary:active { background: var(--accent-pressed); }
-.btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.btn:focus-visible, .link:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--focus); }
 .btn .k { opacity: 0.55; font-weight: 400; margin-left: 6px; font-size: 12px; }
-.link { color: var(--text-2); text-decoration: underline; text-decoration-color: var(--divider); text-underline-offset: 3px; font-size: 13px; }
+/* Quiet actions: text links, never a bordered button */
+.link { all: unset; color: var(--text-2); font-size: 13px; cursor: default; border-radius: 4px; padding: 2px 4px; margin: 0 -4px; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) { .link:hover { color: var(--text); } }
 
 /* ---------- Dialog sheet: one content model, three hosts ---------- */
 .dlg { width: 420px; background: var(--surface); color: var(--text); padding: 20px; }
@@ -128,21 +136,23 @@ button { font: inherit; color: inherit; }
 .dlg .body { padding-left: 44px; }
 .dlg.noicon .body { padding-left: 0; }
 .dlg.noicon .ttl { padding-top: 0; }
-.dlg .list { margin-top: 12px; border-top: 1px solid var(--divider); padding-top: 10px; }
-.dlg .list h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
-.dlg .list li { font-size: 13px; line-height: 1.45; color: var(--text); margin: 0 0 4px; }
-.dlg .list ul { margin: 0; padding-left: 18px; }
+.dlg .list { margin-top: 14px; background: var(--list-field); border-radius: 10px; padding: 10px 12px; }
+.dlg .list h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.dlg .list li { font-size: 13px; line-height: 1.45; color: var(--text); margin: 0; display: flex; gap: 8px; align-items: center; }
+.dlg .list li::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--fg); flex: none; }
+.dlg .list ul { margin: 0; padding: 0; list-style: none; }
 .dlg .chk { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; }
-.dlg .chk i { width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--card-border); background: var(--page); }
+.dlg .chk i { width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--card-border); background: var(--fill); }
 .dlg .foot { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+.dlg .foot .link { margin-right: 8px; }
 .dlg .foot .sp { flex: 1; }
 .dlg .stack { display: grid; gap: 8px; margin-top: 16px; }
 
 /* Host 1: window sheet. AppKit owns the slide; the prototype imitates it. */
 .sheet-host { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: center; z-index: 5; pointer-events: none; }
-.sheet { pointer-events: auto; border-radius: 0 0 12px 12px; overflow: hidden; box-shadow: var(--overlay-shadow);
+.sheet { pointer-events: auto; border-radius: 0 0 14px 14px; overflow: hidden; box-shadow: var(--overlay-shadow);
   transform: translateY(0); }
-.sheet .dlg { border-radius: 0 0 12px 12px; }
+.sheet .dlg { border-radius: 0 0 14px 14px; }
 .anim .sheet { transition: transform 300ms var(--sheet-curve), opacity 300ms var(--sheet-curve); }
 .sheet.pre { transform: translateY(-102%); }
 :root[data-rm] .sheet.pre { transform: none; opacity: 0; }
@@ -158,8 +168,8 @@ button { font: inherit; color: inherit; }
 :root[data-rm] .anim .panel { transition: opacity 150ms ease; }
 
 /* Host 3: app-modal alert before any window exists (launch failure) */
-.alert { width: 420px; border-radius: 12px; overflow: hidden; box-shadow: var(--overlay-shadow); }
-.alert .dlg { border-radius: 12px; padding: 24px 20px 20px; }
+.alert { width: 420px; border-radius: 14px; overflow: hidden; box-shadow: var(--overlay-shadow); }
+.alert .dlg { border-radius: 14px; padding: 24px 20px 20px; }
 .alert .head { flex-direction: column; align-items: flex-start; gap: 14px; }
 .alert .body { padding-left: 0; }
 .alert .ttl { padding-top: 0; }
@@ -176,16 +186,16 @@ button { font: inherit; color: inherit; }
   font-size: 13px; font-weight: 500; }
 .toast .g { width: 16px; height: 16px; flex: none; color: var(--toast-text-2); display: grid; place-items: center; }
 .toast .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 6px; }
-.toast .sep { width: 1px; height: 16px; background: var(--toast-divider); flex: none; }
-.toast .act { all: unset; font-weight: 600; padding: 0 10px; height: 28px; line-height: 28px; border-radius: 14px; cursor: default; color: var(--toast-text); transition: transform 120ms var(--ease-out); }
+.toast .act { all: unset; font-size: 12px; font-weight: 600; padding: 0 12px; height: 24px; line-height: 24px; border-radius: 12px; cursor: default; color: var(--toast-text); background: var(--fill-hover); transition: transform 120ms var(--ease-out), background-color 120ms ease; white-space: nowrap; }
 .toast .act:active { transform: scale(0.96); }
 @media (hover: hover) and (pointer: fine) { .toast .act:hover { background: var(--fill); } }
+.toast .act:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--focus); }
 .toast .x { all: unset; width: 24px; height: 24px; border-radius: 12px; display: grid; place-items: center; color: var(--toast-text-2); flex: none; }
 .toast.only { padding-right: 14px; }
 .toast.multi { border-radius: 12px; align-items: flex-start; padding: 10px 8px 10px 12px; }
 .toast.multi .g { margin-top: 1px; }
 .toast.multi .t { white-space: normal; line-height: 1.38; padding-right: 4px; width: 300px; }
-.toast.multi .acts { display: flex; align-items: center; gap: 2px; margin-top: -4px; }
+.toast.multi .acts { display: flex; align-items: center; gap: 4px; margin-top: -2px; }
 .anim .toast { transition: transform 300ms var(--spring-springy-fast), opacity 160ms var(--ease-out); }
 .toast.pre { opacity: 0; transform: translateY(12px) scale(0.96); }
 .toast.out { opacity: 0; transform: translateY(6px) scale(0.98); transition: transform 150ms var(--ease-out), opacity 120ms var(--ease-out) !important; }
@@ -195,12 +205,10 @@ button { font: inherit; color: inherit; }
 /* ---------- Infobar ---------- */
 .infobars { position: absolute; left: 0; right: 0; top: 0; z-index: 3; }
 .infobar { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--surface); position: relative; }
-.infobar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--divider); }
 .infobar .ic { width: 20px; height: 20px; flex: none; display: grid; place-items: center; color: var(--text-2); }
 .infobar .m { flex: 1; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.infobar .m a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--divider); margin-left: 6px; }
-.infobar .btn { height: 24px; line-height: 24px; min-width: 0; padding: 0 10px; border-radius: 6px; }
-.infobar .close { all: unset; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--text-2); }
+.infobar .m a { color: var(--text-2); text-decoration: none; margin-left: 6px; }
+.infobar .close { all: unset; width: 22px; height: 22px; border-radius: 11px; display: grid; place-items: center; color: var(--text-2); }
 .anim .infobar { transition: opacity 140ms var(--ease-out); }
 .infobar.pre { opacity: 0; }
 .with-infobar .page { transform: translateY(40px); }
@@ -275,8 +283,8 @@ const appIcon = `<span class="appicon" role="img" aria-label="Arkt"><span class=
 function toast(kind) {
   const g = n => `<span class="g" aria-hidden="true">${G[n]}</span>`;
   switch (kind) {
-    case 'undo': return `<div class="toast pre" role="status">${g('archive')}<span class="t">Archived 3 tabs</span><span class="sep"></span><button class="act">Undo <span style="opacity:.5;font-weight:400">&#8984;Z</span></button></div>`;
-    case 'restored': return `<div class="toast pre" role="status">${g('restore')}<span class="t">Tab restored to Work</span><span class="sep"></span><button class="act">View</button></div>`;
+    case 'undo': return `<div class="toast pre" role="status">${g('archive')}<span class="t">Archived 3 tabs</span><button class="act">Undo</button></div>`;
+    case 'restored': return `<div class="toast pre" role="status">${g('restore')}<span class="t">Tab restored to Work</span><button class="act">View</button></div>`;
     case 'error': return `<div class="toast only pre" role="status">${g('error')}<span class="t">Couldn’t restore from the Archive.</span></div>`;
     case 'recovery': return `<div class="toast multi pre" role="status">${g('recovery')}<span class="t">Arkt couldn’t read its saved sidebar and restored it from a backup. Recent changes may be missing.</span><span class="acts"><button class="act">Show Files</button><button class="x" aria-label="Dismiss">${G.x}</button></span></div>`;
   }
@@ -293,7 +301,7 @@ const STATES = {
   'launch-failure': () => `<div class="alert pre">${dlg({
       icon: appIcon, title: 'Arkt couldn’t open its data',
       paras: [['Nothing was changed. Try again, or show the data folder.'], ['Error: SQLiteError 11', true]],
-      foot: `<button class="btn" style="min-width:0">Show Data Folder</button><span class="sp"></span><button class="btn">Quit</button><button class="btn primary">Try Again</button>` })}</div>`,
+      foot: `<button class="link">Show Data Folder</button><span class="sp"></span><button class="btn">Quit</button><button class="btn primary">Try Again</button>` })}</div>`,
   'launch-newer': () => `<div class="alert pre">${dlg({
       icon: appIcon, title: 'This data was saved by a newer version of Arkt',
       paras: [['Update Arkt to open it. Nothing was changed.']],
@@ -305,14 +313,14 @@ const STATES = {
   'ext-install': () => browser('', { sheet: `<div class="sheet pre">${dlg({
       icon: extTile, title: 'Add “JSON Formatter”?', sub: '4.6 stars, 1,000,000+ users',
       list: ['It can:', ['Read and change your data on all websites']],
-      foot: `<a class="link" href="#">Open in Web Store</a><span class="sp"></span><button class="btn">Cancel</button><button class="btn primary">Add Extension</button>` })}</div>` }),
+      foot: `<button class="link">Open in Web Store</button><span class="sp"></span><button class="btn">Cancel</button><button class="btn primary">Add Extension</button>` })}</div>` }),
   'ext-remove': () => browser('', { sheet: `<div class="sheet pre">${dlg({
       icon: extTile, title: 'Remove “JSON Formatter”?', check: 'Report abuse',
       foot: `<span class="sp"></span><button class="btn">Cancel</button><button class="btn destructive">Remove</button>` })}</div>` }),
   'permission': () => browser('', { panel: `<div class="panel pre" role="dialog" aria-labelledby="dlg-t">${dlg({
       title: 'fieldguide.example wants to', paras: [[`<span style="display:inline-flex;gap:8px;align-items:center">${G.location}Know your location</span>`]],
       stack: `<button class="btn full">Allow While Visiting the Site</button><button class="btn full">Allow This Time</button><button class="btn full">Never Allow</button>` })}</div>` }),
-  'infobar': () => browser('', { infobar: `<div class="infobars"><div class="infobar pre" role="alert"><span class="ic">${G.bug}</span><span class="m">“Page Inspector” started debugging this browser</span><button class="btn">Cancel</button></div></div>` }),
+  'infobar': () => browser('', { infobar: `<div class="infobars"><div class="infobar pre" role="alert"><span class="ic">${G.bug}</span><span class="m">“Page Inspector” started debugging this browser</span><button class="btn small">Cancel</button></div></div>` }),
 };
 
 const stage = document.getElementById('stage');
