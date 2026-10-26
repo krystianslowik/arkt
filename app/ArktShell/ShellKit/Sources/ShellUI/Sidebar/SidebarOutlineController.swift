@@ -141,6 +141,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 
   public override func mouseDown(with event: NSEvent) {
     keyboardFocusRow = nil                       // the next pointer click removes the keyboard focus ring
+    commitRenameInProgress()                     // any click, a Ctrl-click too, ends a rename first
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
     // A Ctrl-click is a secondary click: the row's context menu, as a right-click shows, never the click action.
     // Left to the table, it sends the row action with Control set, which activates the row (#277).
@@ -148,7 +149,6 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
       presentContextMenu(menu(for: event), event, self)
       return
     }
-    commitRenameInProgress()
     clickModifiers = modifiers
     defer { clickModifiers = [] }
     let point = convert(event.locationInWindow, from: nil)

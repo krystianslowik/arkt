@@ -196,6 +196,95 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
+  // MARK: Real mouse events through the table's own dispatch
+
+  /// Shows the window with `current` focused and lays it out, as before a real click (`SplitSidebarTests`).
+  private func shownOutline(_ harness: Harness, current: UUID) throws -> (NSWindow, SidebarOutlineView) {
+    harness.controller.showWindow(nil)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: current)
+    let view = try harness.outline().outlineView
+    window.contentView?.layoutSubtreeIfNeeded()
+    view.layoutSubtreeIfNeeded()
+    return (window, view)
+  }
+
+  private func point(of node: UUID, in harness: Harness, _ view: SidebarOutlineView) throws -> NSPoint {
+    let rect = view.rect(ofRow: try harness.row(node))
+    let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    XCTAssertEqual(view.row(at: view.convert(point, from: nil)), try harness.row(node))
+    return point
+  }
+
+  /// One click: the mouse-up is queued for the table's tracking loop, the mouse-down goes straight in.
+  private func click(at point: NSPoint, _ flags: NSEvent.ModifierFlags = [], count: Int = 1,
+                     in window: NSWindow, _ view: SidebarOutlineView) throws {
+    func event(_ type: NSEvent.EventType) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: point, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: count,
+        pressure: type == .leftMouseUp ? 0 : 1))
+    }
+    window.postEvent(try event(.leftMouseUp), atStart: true)
+    view.mouseDown(with: try event(.leftMouseDown))
+    window.discardEvents(matching: [.leftMouseUp], before: nil)
+  }
+
+  /// A real Cmd-click selects (the table sends its action with selection off) and does not activate.
+  func testARealCommandClickSelectsWithoutActivating() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let (window, view) = try shownOutline(harness, current: world.today[0])
+
+    try click(at: try point(of: world.today[2], in: harness, view), [.command], in: window, view)
+
+    XCTAssertEqual(try harness.outline().selectedNodes, [world.today[0], world.today[2]])
+    XCTAssertEqual(harness.current, world.today[0])
+  }
+
+  /// A real double-click on a tab row: the first click activates, the second opens the rename field. On a folder the
+  /// second click neither renames nor toggles the folder back.
+  func testARealDoubleClickRenamesATabAndTogglesAFolderOnce() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "F", in: .pinned(world.work))
+    try world.sidebar.addTab(url: Self.url("f"), title: "F0", in: .folder(folder))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let (window, view) = try shownOutline(harness, current: world.today[0])
+
+    let tabPoint = try point(of: world.today[2], in: harness, view)
+    try click(at: tabPoint, in: window, view)
+    try click(at: tabPoint, count: 2, in: window, view)
+    XCTAssertEqual(harness.current, world.today[2])
+    XCTAssertEqual(try harness.outline().renamingNode, world.today[2])
+    try harness.cell(world.today[2]).endRename(commit: false)
+
+    let folderPoint = try point(of: folder, in: harness, view)
+    let item = try XCTUnwrap(view.item(atRow: try harness.row(folder)))
+    try click(at: folderPoint, in: window, view)
+    try click(at: folderPoint, count: 2, in: window, view)
+    XCTAssertFalse(view.isItemExpanded(item), "the first click collapsed it and the second did not reopen it")
+    XCTAssertNil(try harness.outline().renamingNode)
+  }
+
+  /// A click on another row while the field is open keeps the typed name (design 4.1).
+  func testAClickElsewhereCommitsTheRename() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let (window, view) = try shownOutline(harness, current: world.today[0])
+    XCTAssertTrue(try harness.outline().beginRename(world.today[1]))
+    let editor = try XCTUnwrap(try harness.cell(world.today[1]).renameField?.currentEditor() as? NSTextView)
+    editor.insertText("Typed", replacementRange: editor.selectedRange())
+
+    try click(at: try point(of: world.today[3], in: harness, view), in: window, view)
+
+    XCTAssertNil(try harness.outline().renamingNode)
+    XCTAssertEqual(harness.title(world.today[1]), "Typed")
+    XCTAssertEqual(harness.current, world.today[3])
+  }
+
   // MARK: Duplicate (BH-027)
 
   func testDuplicateCopiesTheTabWithItsHistoryRightAfterIt() throws {
@@ -284,6 +373,27 @@ final class TabActionsTests: XCTestCase {
     XCTAssertNotNil(harness.current, "another tab becomes current")
     XCTAssertTrue([world.today[0], world.today[3]].contains(harness.current ?? UUID()))
     XCTAssertEqual(try harness.outline().selectedNodes, [], "the archived rows left the selection")
+    harness.controller.close()
+  }
+
+  /// A selected row whose close waits on a leave-site prompt is leaving too: the current row's successor skips it,
+  /// so the card never lands on a tab that is about to be archived.
+  func testABulkCloseSkipsARowHeldByALeaveSitePrompt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[2])
+    let held = try XCTUnwrap(harness.tab(world.today[2]))
+    harness.engine.holdClose(held)
+    harness.controller.activate(node: world.today[1])
+    try harness.click(world.today[2], .command)          // t1 (current) and t2 (held)
+
+    harness.controller.closeTab(nil)
+
+    XCTAssertEqual(harness.archived, [world.today[1]], "t2 waits on its prompt")
+    XCTAssertEqual(harness.current, world.panes[0], "the next row that stays: the split's first pane")
+    XCTAssertTrue(harness.engine.answerDialog(held, accept: true))
+    XCTAssertEqual(harness.archived, [world.today[1], world.today[2]])
+    XCTAssertEqual(harness.current, world.panes[0])
     harness.controller.close()
   }
 
@@ -514,7 +624,7 @@ final class TabActionsTests: XCTestCase {
     let sidebar = harness.controller.sidebarController.view
     XCTAssertFalse(sidebar.isDimmed)
     harness.controller.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification))
-    XCTAssertTrue(sidebar.isDimmed)
+    waitUntil("the sidebar to dim once no window of ours is key") { sidebar.isDimmed }
     XCTAssertEqual(sidebar.pager.alphaValue, SidebarContainerView.dimmedAlpha, accuracy: 0.001)
     XCTAssertEqual(harness.controller.rootView.card.alphaValue, 1, "the content card is untouched")
     harness.controller.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification))
