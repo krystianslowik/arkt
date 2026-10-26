@@ -15,6 +15,7 @@
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
+#include "arkt/browser/arkt_link_activation.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
 #include "base/command_line.h"
@@ -59,6 +60,7 @@
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/page_transition_types.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -314,6 +316,23 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize isActive = _isActive;
 @end
 
+// A link activation as plain values (#313).
+@interface ArktFacadeLinkActivation : NSObject <ArktLinkActivation>
+@property(nonatomic, copy) NSURL* url;
+@property(nonatomic) id<ArktTabHandle> tab;
+@property(nonatomic, nullable, copy) NSURL* sourceURL;
+@property(nonatomic) NSEventModifierFlags modifierFlags;
+@property(nonatomic) NSInteger disposition;
+@end
+
+@implementation ArktFacadeLinkActivation
+@synthesize url = _url;
+@synthesize tab = _tab;
+@synthesize sourceURL = _sourceURL;
+@synthesize modifierFlags = _modifierFlags;
+@synthesize disposition = _disposition;
+@end
+
 // One registered event sink.
 @interface ArktFacadeSink : NSObject
 @property(nonatomic, copy) void (^block)(NSArray<id<ArktEngineEvent>>*);
@@ -403,6 +422,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   }
 
   void Start() {
+    SetLinkActivationDecider(base::BindRepeating(
+        &Facade::DecideLinkActivation, base::Unretained(this)));
     observation_.Observe(GlobalBrowserCollection::GetInstance());
     GlobalBrowserCollection::GetInstance()->ForEach(
         [this](BrowserWindowInterface* browser) {
@@ -412,6 +433,39 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   }
 
   FacadeDelegate* delegate() { return delegate_; }
+
+  // The link activation throttle asks (#313), from inside the navigation
+  // start: the host answers as a Chromium notification would, so a facade
+  // call it makes CHECKs. A tab without a handle, or a host without the
+  // optional member, navigates. True cancels the navigation.
+  bool DecideLinkActivation(content::NavigationHandle& navigation) {
+    content::WebContents* contents = navigation.GetWebContents();
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil;
+    id<ArktWindowHost> host = handle.browser.host;
+    if (!host ||
+        ![host respondsToSelector:@selector(decideLinkActivation:)]) {
+      return false;
+    }
+    ArktFacadeLinkActivation* activation =
+        [[ArktFacadeLinkActivation alloc] init];
+    activation.url = ToNSURL(navigation.GetURL());
+    activation.tab = handle;
+    activation.sourceURL = ToNSURL(contents->GetLastCommittedURL());
+    // A same-tab link activation carries no modifier: Blink turns a modified
+    // click into another disposition, which does not reach this throttle.
+    activation.modifierFlags = 0;
+    activation.disposition =
+        static_cast<NSInteger>(WindowOpenDisposition::CURRENT_TAB);
+    ++in_notification_;
+    const ArktLinkDecision decision = [host decideLinkActivation:activation];
+    --in_notification_;
+    LOG(INFO) << "ARKT: link activation answered "
+              << (decision == ArktLinkDecisionCancel ? "cancel" : "navigate");
+    return decision == ArktLinkDecisionCancel;
+  }
   NSArray<ArktFacadeBrowser*>* browsers() { return [browsers_ copy]; }
 
   // Facade calls from the embedder must never arrive while the facade is

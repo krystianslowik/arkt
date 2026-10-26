@@ -253,6 +253,28 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   /// Test driver: the engine activates the tab (an extension's `chrome.tabs.update`).
   public func engineActivate(_ id: TabID) { setActive(id) }
 
+  /// Test driver: the user activates a link to `url` in the page of `tab` (#313). The tab's window host decides, as a
+  /// real engine asks before it navigates; `.navigate` navigates the tab (a `.currentTab` disposition only), `.cancel`
+  /// leaves it as it was. A tab without a window host navigates.
+  @discardableResult
+  public func simulateLinkActivation(in tab: TabID, url: URL, modifiers: EngineLinkModifiers = [],
+                                     disposition: EngineDisposition = .currentTab) -> EngineLinkDecision {
+    guard let snapshot = snapshots[tab] else { return .navigate }
+    let activation = EngineLinkActivation(url: url, sourceTab: tab, sourceURL: snapshot.url, modifiers: modifiers,
+                                          disposition: disposition)
+    let decision = snapshot.window.flatMap { hosts[$0] }?.decideLinkActivation(activation) ?? .navigate
+    if decision == .navigate, disposition == .currentTab { navigate(tab, to: url) }
+    return decision
+  }
+
+  /// Test driver: the page of `tab` did not handle the key down `event` (an Esc it does not use), which goes to the
+  /// tab's window host. True when the host took it.
+  @discardableResult
+  public func simulateUnhandledKeyDown(_ event: NSEvent, in tab: TabID) -> Bool {
+    guard let window = snapshots[tab]?.window, let host = hosts[window] else { return false }
+    return host.handleUnhandledKeyDown(event, in: tab)
+  }
+
   /// Test driver: the page registers a `beforeunload` handler with sticky user activation. `wouldHoldClose` stays
   /// true after a cancelled close, as the handler stays registered.
   public func holdClose(_ id: TabID) {

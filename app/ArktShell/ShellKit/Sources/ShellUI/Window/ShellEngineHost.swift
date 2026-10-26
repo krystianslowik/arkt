@@ -28,6 +28,17 @@ public final class ShellEngineHost: EngineWindowHosting {
     controller?.perform(command, disposition: disposition) ?? false
   }
 
+  /// Peek decides user link clicks (#313); it answers without calling the engine.
+  public func decideLinkActivation(_ activation: EngineLinkActivation) -> EngineLinkDecision {
+    controller?.peek.decide(activation) ?? .navigate
+  }
+
+  /// An Esc the page did not use closes an open Peek (Esc goes to the page first, decided 2026-10-25).
+  public func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool {
+    guard event.keyCode == 53, let controller else { return false }
+    return controller.peek.handleEscape(in: tab)
+  }
+
   /// A command from a menu item or key equivalent: the shell runs the commands it claims, the engine the rest.
   /// Nothing happens for an unclaimed command while no engine window exists yet.
   func dispatch(_ command: EngineCommand, disposition: EngineDisposition) {

@@ -31,6 +31,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
 @protocol ArktHistoryEntry;
+@protocol ArktLinkActivation;
 @protocol ArktTabHandle;
 @protocol ArktWindowHost;
 @protocol ArktWindowRequest;
@@ -124,6 +125,15 @@ typedef NS_ENUM(NSInteger, ArktWindowRequestKind) {
   ArktWindowRequestKindStartupURL = 3,
 };
 
+// A host's answer to a link activation (#313).
+typedef NS_ENUM(NSInteger, ArktLinkDecision) {
+  // The navigation goes on as Chromium would run it.
+  ArktLinkDecisionNavigate = 0,
+  // The navigation is dropped; the host opens the link itself (a Peek, a new
+  // tab) after the call returns.
+  ArktLinkDecisionCancel = 1,
+};
+
 // One recorded engine change, as plain values. Fields that do not apply to
 // the kind are nil, NO or ArktCloseReasonNone.
 NS_SWIFT_UI_ACTOR
@@ -175,6 +185,23 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, copy) NSString* title;
 @end
 
+// A user link activation in a tab's main frame (a click or key press on a
+// link, with a user gesture), before Chromium starts the navigation (#313).
+// Script navigations, forms, reloads and history moves are never reported.
+NS_SWIFT_UI_ACTOR
+@protocol ArktLinkActivation <NSObject>
+@property(nonatomic, readonly, copy) NSURL* url;
+// The tab the link is in.
+@property(nonatomic, readonly) id<ArktTabHandle> tab;
+// The tab's committed URL, so the host can decide without calling the
+// engine.
+@property(nonatomic, readonly, nullable, copy) NSURL* sourceURL;
+// Shift, Command, Option and Control as held for the activation.
+@property(nonatomic, readonly) NSEventModifierFlags modifierFlags;
+// A WindowOpenDisposition value (CURRENT_TAB for a plain click).
+@property(nonatomic, readonly) NSInteger disposition;
+@end
+
 // The embedder seam of an engine window (week 2's protocol, moved here).
 // The engine never creates or lays out the window: it asks its host for the
 // NSWindow and for the fallback view, and sets the blocks below.
@@ -198,6 +225,16 @@ NS_SWIFT_UI_ACTOR
     (NSInteger command, NSInteger disposition);
 
 @optional
+// A link activation in one of the window's tabs (#313), asked from inside
+// the navigation start: the host must not call the engine before it
+// returns. Not implemented: every link navigates.
+- (ArktLinkDecision)decideLinkActivation:(id<ArktLinkActivation>)activation
+    NS_SWIFT_NAME(decideLinkActivation(_:));
+// A key down that the page of `tab` did not handle (an Esc the page did not
+// use), from a task posted after the engine finished with the event.
+- (void)unhandledKeyDown:(NSEvent*)event
+                   inTab:(nullable id<ArktTabHandle>)tab
+    NS_SWIFT_NAME(unhandledKeyDown(_:in:));
 // Placeholder host only. Set by the engine; the host calls it when the user
 // picks a tab in its own tab list.
 @property(nonatomic, nullable, copy) void (^activateTab)(int32_t tabId);

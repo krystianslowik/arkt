@@ -30,7 +30,19 @@ public final class FakeEngine: EngineClient {
   /// WKWebView holds its navigation delegate weakly; the entry keeps this alive.
   private final class NavigationObserver: NSObject, WKNavigationDelegate {
     var onCommit: (@MainActor () -> Void)?
+    /// A user link activation in the main frame (#313): the link's URL and modifiers; true cancels it.
+    var onLinkActivation: (@MainActor (URL, NSEvent.ModifierFlags) -> Bool)?
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { onCommit?() }
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
+      guard action.navigationType == .linkActivated, action.targetFrame?.isMainFrame ?? true,
+            let url = action.request.url, let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+            let decide = onLinkActivation else {
+        decisionHandler(.allow)
+        return
+      }
+      decisionHandler(decide(url, action.modifierFlags) ? .cancel : .allow)
+    }
   }
 
   /// How long the end of a load waits for `document.title` before using what WebKit already knows.
@@ -71,6 +83,7 @@ public final class FakeEngine: EngineClient {
     webView.autoresizingMask = [.width, .height]
     let navigation = NavigationObserver()
     navigation.onCommit = { [weak self] in self?.didCommit(id) }
+    navigation.onLinkActivation = { [weak self] url, flags in self?.linkActivated(id, url: url, flags: flags) ?? false }
     webView.navigationDelegate = navigation
     let entry = Entry(webView: webView, navigation: navigation, snapshot: TabSnapshot(id: id, window: window))
     entries[id] = entry
@@ -258,6 +271,20 @@ public final class FakeEngine: EngineClient {
   }
 
   public func activateTab(_ id: TabID) { setActive(id) }
+
+  /// Asks the tab's window host about a link click (#313). WebKit runs a modified click in the same frame, so the
+  /// disposition is the one Chromium would give it: Shift a new window, Command a background tab.
+  private func linkActivated(_ id: TabID, url: URL, flags: NSEvent.ModifierFlags) -> Bool {
+    guard let snapshot = entries[id]?.snapshot, let window = snapshot.window, let host = hosts[window] else {
+      return false
+    }
+    let modifiers = EngineLinkModifiers(flags)
+    let disposition: EngineDisposition = modifiers.contains(.command) ? .newBackgroundTab
+      : modifiers.contains(.shift) ? .newWindow : .currentTab
+    let activation = EngineLinkActivation(url: url, sourceTab: id, sourceURL: snapshot.url, modifiers: modifiers,
+                                          disposition: disposition)
+    return host.decideLinkActivation(activation) == .cancel
+  }
 
   // MARK: - Page commands
 

@@ -37,6 +37,30 @@ final class WindowHostAdapter: NSObject, ArktWindowHost {
     didSet { updateForwarding() }
   }
 
+  /// Maps a facade tab handle to the engine's Swift id; set by `ChromiumEngine` when it makes the adapter. A handle it
+  /// does not list (another instance's tab) maps to nil.
+  var resolveTab: (@MainActor (any ArktTabHandle) -> TabID?)?
+
+  // MARK: Links and keys (#313)
+
+  /// The facade asks from inside the navigation start; the host answers without calling the engine. A tab this
+  /// instance does not list navigates without asking.
+  func decideLinkActivation(_ activation: any ArktLinkActivation) -> ArktLinkDecision {
+    guard let tab = resolveTab?(activation.tab) else { return .navigate }
+    let engineActivation = EngineLinkActivation(url: activation.url, sourceTab: tab, sourceURL: activation.sourceURL,
+                                                modifiers: EngineLinkModifiers(activation.modifierFlags),
+                                                disposition: EngineDisposition(rawValue: activation.disposition))
+    switch host.decideLinkActivation(engineActivation) {
+    case .navigate: return .navigate
+    case .cancel: return .cancel
+    }
+  }
+
+  /// Posted by the facade after the page passed on the key.
+  func unhandledKeyDown(_ event: NSEvent, in tab: (any ArktTabHandle)?) {
+    _ = host.handleUnhandledKeyDown(event, in: tab.flatMap { resolveTab?($0) })
+  }
+
   /// The window is gone: the host keeps no engine closures.
   func detach() {
     closeRequested = nil

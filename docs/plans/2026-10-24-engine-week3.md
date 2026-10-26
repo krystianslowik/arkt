@@ -382,6 +382,7 @@ request #238, so the new rules start at 11.
 |---|---|---|---|---|
 | 0001-0006 | week 2 (hook, draw, keychain, factory hook, tab features, dialogs) | exist | 13 | 0 |
 | 0007 | extension dialogs as native sheets (#244, pull request #252) | exists | 4 | 0 |
+| 0008 | link activation throttle for Peek (#313): one call in `chrome_content_browser_client_navigation_throttles.cc` | exists | 1 | 0 |
 | - | Handshake (Decision 1) | ObjC runtime lookup, no patch | 0 | 0 |
 | - | Framework name (Decision 7) | no patch unless decision 1 is reopened | 0 (1-2) | 0 |
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |

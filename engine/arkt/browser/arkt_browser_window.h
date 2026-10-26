@@ -174,6 +174,8 @@ class ArktBrowserWindow : public BrowserWindow,
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
       const input::NativeWebKeyboardEvent& event) override;
   bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) override;
+  // Hands a key down the page did not handle to the host (Esc, #313).
+  bool ForwardUnhandledKeyDown(NSEvent* event);
   std::unique_ptr<FindBar> CreateFindBar() override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
       override;
