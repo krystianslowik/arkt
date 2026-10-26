@@ -2028,3 +2028,40 @@ frame-time gates named under #388 (`SidebarHideTests.testRevealPacing`,
 `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) failed under a load average near 10 and pass when
 rerun alone. Debug app build
 succeeds. XCUITest not run: no UI flow covers split panes.
+
+## Copy URL actions (#118) (2026-10-26)
+
+Spec 2.16 (BH-190 to BH-193) and 1.2 (KB-013 to KB-016): Copy URL, Copy URL as Markdown, Copy URL as Quote and
+Paste URL as New Tab, each on Arc's key, with the tracker-stripped URL and the [S] toast strings.
+
+- **The clean-URL rules** are `TrackerStripping` (one place, documented there): the campaign prefix `utm_*` and a
+  named list (the ad click ids `fbclid`, `gclid`, `dclid`, `gbraid`, `wbraid`, `msclkid`, `ttclid`, `twclid`,
+  `yclid`; the mailing-list tags `mc_cid`, `mc_eid`, `mkt_tok`, `ml_subscriber`, `ml_subscriber_hash`, `_hsenc`,
+  `_hsmi`, `vero_id`; the social and referral tags `igshid`, `spm`, `ref_src`, `ref_url`, `s_cid`, `oly_anon_id`,
+  `oly_enc_id`, `rb_clickid`, `wickedid`; the analytics ids `_ga`, `_gl`, `__s`). Everything else - the path, the
+  other parameters, the fragment - is copied exactly; a copy that dropped nothing says "Copied Current URL" (BH-192's
+  [S] string; the plural "Copied Current URLs" is [I]), a stripped one "Copied a clean link without trackers" or the
+  plural "Copied clean links without trackers" (BH-191).
+- **Multi-selection (BH-191).** With rows selected, Copy URL copies one URL per line in display order; folder and
+  split rows are skipped (their panes are not rows).
+- **In a Peek (KB-013 "global, Peek").** With a Peek open, the copy takes the Peek's page, not the tab behind it.
+- **Markdown and Quote.** `[title](url)` (KB-014) and `> [title](url)` (KB-015); the toast wording is [I] - no [S]
+  string is documented - and the quote layout is [I] too (KB-015 gives the key only).
+- **Paste URL as New Tab (KB-016).** The clipboard's http(s) URL opens as a new tab and becomes current; anything
+  else (text, another scheme, an empty clipboard) does nothing, so Cmd-Opt-V never opens a page the user did not
+  copy. SINGLE-SOURCE in the spec.
+- **Reserved keys.** Cmd-Shift-C, Cmd-Shift-Opt-C, Ctrl-Shift-Cmd-C and Cmd-Opt-V join `ReservedKeys.arkt`: the
+  Chromium page takes key equivalents first and must not swallow them.
+- **BH-190.** Already held by the toast infrastructure (the view follows the Space theme, `showsSplit` moves it to
+  the pane); the copy toasts ride it.
+- **Deferred to #404, with reasons:** BH-193 (needs an engine selection API to build a `#:~:text=` link), BH-196
+  (the copy education toast, its own feature) and the RT-28 runtime check of the wording and duration.
+
+Tests: `TrackerStrippingTests` (ShellUITests) pins the rule list: no-tracker and no-query URLs unchanged, every
+`utm_*` and every listed name dropped, case-insensitive, lookalike names kept, a fully tracked query dropped, path
+and fragment kept, a valueless tracker dropped, kept parameters keep their percent-encoding byte for byte
+(`%2B` stays `%2B`), an encoded tracker name dropped. `LinkFormatTests` pins the Markdown escaping (brackets in the
+title, parentheses in the URL). `CopyLinkTests` (GUI, 8) drives the actions: the clean copy and its
+toast, the current-URL toast, the multi-selection copy, the Peek's page, Markdown, Quote, Paste URL as New Tab and
+the ignored non-URL clipboard. `ReservedKeysTests` covers the four keys; `MainMenuKeyEquivalentTests` the Edit menu
+items and keys.

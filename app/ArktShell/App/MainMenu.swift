@@ -137,6 +137,15 @@ enum MainMenu {
       item("Paste", #selector(NSText.paste(_:)), "v"),
       item("Select All", #selector(NSText.selectAll(_:)), "a"),
       .separator(),
+      // #118: the copy-link actions (KB-013 to KB-016). The keys are reserved (ReservedKeys) so a page cannot
+      // swallow them.
+      item("Copy URL", #selector(ShellWindowController.copyCurrentURL(_:)), "c", [.command, .shift]),
+      item("Copy URL as Markdown", #selector(ShellWindowController.copyCurrentURLAsMarkdown(_:)), "c",
+           [.command, .shift, .option]),
+      item("Copy URL as Quote", #selector(ShellWindowController.copyCurrentURLAsQuote(_:)), "c",
+           [.command, .shift, .control]),
+      item("Paste URL as New Tab", #selector(ShellWindowController.pasteURLAsNewTab(_:)), "v", [.command, .option]),
+      .separator(),
       find,
     ]
   }
