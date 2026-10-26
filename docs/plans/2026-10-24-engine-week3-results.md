@@ -2802,6 +2802,9 @@ menus, Opt-Cmd-click, UI tests).
 | Close button | PASS | real click (cliclick) on the red light; window and target gone |
 | Open as Tab (click) and Cmd-O | PASS | `facade moving session id ...`, then `TabMoved,ActiveTabChanged,...,WindowClosed`; same DevTools target, an in-page marker and typed text kept (no reload), `window.opener` kept; "Sign In Popup" first in Today, selected |
 | Space chooser | PASS after a fix | opens below the chevron with "Open in", the Space with Cmd-O, Copy Link |
+| Extension popup window (`action-probe` worker over CDP: `chrome.windows.create({type: "popup"})`) | PASS | `host asked kind=extension popup (app popup Browser ...) bounds 322,129 420x520`; a 432 x 566 Little Arkt window |
+| Extension normal window (`chrome.windows.create({url})`) | PASS | `kind=extension (show state or bounds given ...)`; a browser window, not Little Arkt |
+| Cmd-W and Cmd-Shift-W in a Little Arkt window (real keys through the main menu) | PASS | each closed the frontmost Little Arkt window and its target |
 
 Found by the check and fixed (tests first where testable): popups were Views windows (the factory filter), the chevron
 drew NSButton's default title, the lock showed for http, the chooser opened over the chevron (a flipped button). An
@@ -2818,8 +2821,9 @@ hand with a trackpad. Reduce Motion was not toggled on the shared machine; cover
   `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` failed in the full run beside two app builds and
   intermittently alone at load 6 on 10 cores (other agents' builds); both passed in a run alone. Neither touches
   Little Arkt. ArktCore is not touched.
-- Red first: every new test was run failing (compile errors for the new seams and models; the close race and the
-  chooser position as failing tests).
+- Red first: the engine seams, the pure models and the window tests were written first and run failing (compile
+  errors, then the close race and the test timing). The checks for the chevron title, the http lock and the chooser
+  anchor were added together with their fixes after the real-app check and did not run red.
 
 ### Deviations from the plan
 
