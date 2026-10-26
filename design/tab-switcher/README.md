@@ -90,6 +90,7 @@ an existing token.
 | Mid-cycle (Tab pressed once; second row highlighted) | `#s=mid` | `switcher-mid-cycle-{light,dark}.png` |
 | One row left after closing tabs with W | `#s=single` | `switcher-single-row-{light,dark}.png` |
 | Sidebar keyboard focus after Ctrl-Space, with the overflow pill | `#s=sidebar` | `sidebar-focus-{light,dark}.png` |
+| Favorites grid keyboard focus after Ctrl-Space | `#s=sidebar` | `favorites-focus-{light,dark}.png` |
 
 The list in the prototype is deliberately a multi-Space MRU: five synthetic tabs across the Work, Personal and Dev
 Spaces, one with a camera indicator, one inside a Split View (BH-011, BH-012).
@@ -303,4 +304,5 @@ maintainer — the prototype and the flows above assume the answer on the left, 
 All in `design/tab-switcher/screens/`, 2560 x 1600 (1280 x 800 pt at 2x), saved as full-color PNG (no palette
 quantization, so shadows stay smooth), each under 400 KB. Titles and URLs are synthetic.
 
-States, light and dark: `switcher-first-open`, `switcher-mid-cycle`, `switcher-single-row`, `sidebar-focus`.
+States, light and dark: `switcher-first-open`, `switcher-mid-cycle`, `switcher-single-row`, `sidebar-focus`,
+`favorites-focus`.
