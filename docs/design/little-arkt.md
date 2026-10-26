@@ -270,8 +270,12 @@ as usual (Personal sample theme in light, Dev in dark).
   (`TYPE_POPUP` as `.page`, `TYPE_APP_POPUP` as `.extension`, both `isPopup`) with the requested bounds, a size-only
   request centered over the last active window; `EngineClient.moveTab(_:to:)` moves a tab between engine windows
   without a reload (`ArktTabHandle.move(to:)`); a page's `window.close()` arrives as `.windowClosed`.
-- Missing engine piece: an image snapshot of a tab's current frame for the Open in flight (#352). The request does
-  not carry the opener window yet.
+- The Open in flight (#352) takes its snapshot with `EngineClient.pageImage(of:_:)` and `.fullFrame` (#440), decoded
+  off the main actor. The engine reports no "first frame" for a page in its new window, so the snapshot's 0.1 s
+  crossfade starts on the next display frame after the page is mounted in the main card. Open in with no main window
+  open takes the no-flight path (the window it opens has no laid-out card to fly to). The Today row is in the sidebar
+  from the start of the flight and drawn by its clock; the selection moves to it when the page lands. The popup request
+  does not carry the opener window yet.
 - Missing shell pieces: open-URL events and default-browser registration (#135); link routing (#113) for the
   destination; a global hotkey (`RegisterEventHotKey`, no Accessibility permission needed); the Archive's Little Arkt
   source and its threshold in auto-archive.

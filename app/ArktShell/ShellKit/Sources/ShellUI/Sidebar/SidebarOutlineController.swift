@@ -1190,6 +1190,25 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     syncAllFolders()
   }
 
+  // MARK: Arrival (#352)
+
+  /// A row arriving from Little Arkt's Open in flight: the rows below make room (`room`, 0 to 1) and the row fades
+  /// in (`appear`, 0 to 1), on the flight's clock. Nil when no row is arriving.
+  private var arrival: (node: NodeID, room: Double, appear: Double)?
+
+  /// One frame of `node`'s arrival at the top of Today, applied with the folder motion frame.
+  public func presentArrival(of node: NodeID, room: Double, appear: Double) {
+    arrival = (node, room, appear)
+    presentFolderMotion(folderMotion.progress())
+  }
+
+  /// The arrival ended: every row draws at rest (with any folder motion still running).
+  public func endArrival() {
+    guard arrival != nil else { return }
+    arrival = nil
+    presentFolderMotion(folderMotion.progress())
+  }
+
   /// One frame of the folder springs: each realized row gets its offset and opacity as layer properties (never a
   /// frame change, which would rebuild tracking areas and layout every frame).
   private func presentFolderMotion(_ progress: [NodeID: Double]) {
@@ -1202,10 +1221,15 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       raised.insert(folder)
     }
     var styles: [ObjectIdentifier: FolderMotionLayout.RowStyle] = [:]
-    if !transitions.isEmpty {
+    let arrivalRow = arrival.map { row(for: $0.node) } ?? -1
+    if !transitions.isEmpty || arrivalRow >= 0 {
       let heights = (0..<outlineView.numberOfRows).map { outlineView.rect(ofRow: $0).height }
-      for (row, style) in FolderMotionLayout.styles(rowHeights: heights, transitions: transitions).enumerated()
-      where style != .rest {
+      var frame = FolderMotionLayout.styles(rowHeights: heights, transitions: transitions)
+      if let arrival, arrivalRow >= 0 {
+        SidebarArrivalLayout.apply(to: &frame, rowHeights: heights, arrivalRow: arrivalRow, room: arrival.room,
+                                   appear: arrival.appear)
+      }
+      for (row, style) in frame.enumerated() where style != .rest {
         if let key = styleKey(atRow: row) { styles[key] = style }
       }
     }
@@ -1223,7 +1247,15 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     guard let layer = rowView.layer else { return }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    layer.transform = style.offsetY == 0 ? CATransform3DIdentity : CATransform3DMakeTranslation(0, style.offsetY, 0)
+    var transform = style.offsetY == 0 ? CATransform3DIdentity : CATransform3DMakeTranslation(0, style.offsetY, 0)
+    if style.scale != 1 {
+      // About the row's center; a row view's layer keeps its anchor at the origin.
+      let center = CGPoint(x: rowView.bounds.midX, y: rowView.bounds.midY)
+      transform = CATransform3DTranslate(transform, center.x, center.y, 0)
+      transform = CATransform3DScale(transform, style.scale, style.scale, 1)
+      transform = CATransform3DTranslate(transform, -center.x, -center.y, 0)
+    }
+    layer.transform = transform
     layer.opacity = Float(style.alpha)
     layer.zPosition = raised ? 1 : 0
     CATransaction.commit()

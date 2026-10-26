@@ -9,14 +9,19 @@ import QuartzCore
 @MainActor
 final class LittleArktAnimator {
   private(set) var springs: LittleArktSpringSet
-  private let now: @MainActor () -> CFTimeInterval
+  /// The clock runs start from and `currentScene` reads; a test sets it by hand.
+  var now: @MainActor () -> CFTimeInterval
   var onFrame: (@MainActor (LittleArktScene) -> Void)?
   private var link: CADisplayLink?
   private var completion: ((Bool) -> Void)?
   private var generation = 0
   private var interval: OSSignpostIntervalState?
 
-  var isRunning: Bool { link != nil }
+  /// Tests turn this off to step a run by hand: `run` then applies its first frame and waits for `settleNow`, with
+  /// no display link, so what a test reads does not depend on how long the machine took to get there.
+  var drivesDisplayLink = true
+
+  var isRunning: Bool { link != nil || (!drivesDisplayLink && completion != nil) }
 
   init(scene: LittleArktScene, now: @escaping @MainActor () -> CFTimeInterval = { CACurrentMediaTime() }) {
     springs = LittleArktSpringSet(scene: scene)
@@ -43,7 +48,8 @@ final class LittleArktAnimator {
     self.completion = completion ?? { _ in }
     generation += 1
     interval = ShellSignposts.signposter.beginInterval("LittleArkt", "\(label, privacy: .public)")
-    guard view.window != nil else {
+    guard drivesDisplayLink, view.window != nil else {
+      if !drivesDisplayLink { onFrame?(springs.scene(at: now())); return }
       settleNow()
       return
     }

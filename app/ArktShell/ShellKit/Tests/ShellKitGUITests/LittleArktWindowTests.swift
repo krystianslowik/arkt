@@ -139,6 +139,7 @@ final class LittleArktWindowTests: XCTestCase {
     let space = try XCTUnwrap(main.currentSpace)
 
     little.openIn()
+    little.flight?.runToEnd()                               // the flight's own steps: LittleArktFlightTests
     waitUntil("the page is in the main window") { main.currentTab == tab }
 
     XCTAssertEqual(engine.snapshot(of: tab)?.window, main.engineWindow)
@@ -229,7 +230,9 @@ final class LittleArktWindowTests: XCTestCase {
     let (little, _, tab) = try openPopup(engine, set)
     XCTAssertTrue(little.isAnimating)
     little.openIn()
-    XCTAssertEqual(little.lastTransition, .fadeOut)
+    let flight = try XCTUnwrap(little.flight, "the open main window takes the flight")
+    flight.runToEnd()
+    XCTAssertEqual(little.lastTransition, .fadeOut, "the small frame faded")
     waitUntil("the page is in the main window") { main.currentTab == tab }
   }
 }
