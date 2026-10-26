@@ -28,6 +28,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | 0001-0006 | week 2 (hook, draw, keychain, factory hook, tab features, dialogs) | exist | 13 | 0 |
 | 0007 | extension dialogs as native sheets (#244, pull request #252) | exists | 4 | 0 |
 | 0008 | link activation throttle for Peek (#313, pull request #349) | exists | 1 | 0 |
+| 0009 | modified link clicks asked in `OpenURLFromTab` (#345) | exists | 2 | 0 |
 | - | Handshake (Decision 1) | ObjC runtime lookup, no patch (W3-0: lookup works) | 0 | 0 |
 | - | Framework name (Decision 7) | no patch unless open decision 1 changes | 0 (1-2) | 0 |
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
@@ -38,6 +39,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
 After #313: 8 patch files, 18 upstream files, 0 hot-file hunks.
+After #345: 9 patch files, 20 upstream files, 0 hot-file hunks.
 
 ## W3-12: Results, patch budget, issue updates, housekeeping
 
@@ -2881,3 +2883,53 @@ prompt stays where it is and nothing loads.
   `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` at load 4 with other worktrees' work running; the
   pacing gate fails the same way on `main` without this change, and the Peek gate passed alone. ArktCore is not
   touched. Debug and Engine apps: `BUILD SUCCEEDED`.
+
+## #345: Peek for Shift-click and `target=_blank` links
+
+Date 2026-10-26. Branch `feat/345-peek-modifier-links` off `main` at `55fb137`. Design: `docs/design/peek.md`
+("When a Peek opens", "Popups").
+
+### What landed
+
+- **Patch 0009** (two upstream files, `chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc`
+  and its `BUILD.gn`; no hot file): `BrowserWebContentsDelegate::OpenURLFromTab` asks
+  `arkt::ShouldDropLinkOpenedFromTab` before it builds its `NavigateParams` and returns `nullptr` when Arkt takes the
+  link (the popup-blocked branch of the same function already returns `nullptr`). Justification: Blink turns a Shift-,
+  Command- or middle-click into a `NEW_WINDOW`, `NEW_FOREGROUND_TAB` or `NEW_BACKGROUND_TAB` OpenURL, which never
+  reaches the link activation throttle of patch 0008; for `NEW_WINDOW`, `chrome::Navigate` creates the window before
+  any navigation starts, so no throttle can stop it. `BrowserWebContentsDelegate` is created inside
+  `BrowserWindowFeatures` with no factory or override, so there is no seam without a patch.
+- **Overlay.** `//arkt/browser:link_activation`: the decider takes a plain `LinkActivation` (source contents, URL,
+  disposition) from both the throttle and the new check. The check asks only for a user-gesture, renderer-initiated
+  link transition to HTTP(S), not POST, not from the context menu, with one of the three dispositions above. The
+  facade reports the disposition and the modifiers Blink derived it from (`NEW_WINDOW` Shift, `NEW_BACKGROUND_TAB`
+  Command, `NEW_FOREGROUND_TAB` Command-Shift). NEEDS-RUNTIME-CHECK: a middle click reads as Command and Shift-Option
+  as Shift, because the browser only gets the disposition. No facade header change.
+- **`target=_blank` without a patch.** A `target=_blank` link (or `window.open` without window features) arrives as an
+  engine tab with an opener: `chrome::Navigate` sets the tab strip opener for a user gesture and the facade reports it.
+  The window decides one main-actor turn after `.tabCreated`, once the tab's URL and activation have arrived in the
+  same batch: `PeekRouting.routeOpenedTab` takes an active tab opened by a pinned tab or a Favorite to another site
+  into the Peek (the engine's tab itself, with its page, history and opener; no second load); every other engine tab
+  stays a Today row, selected when the engine made it active. A Command-Shift-click the window already answered with
+  navigate is remembered for 2 s, so its foreground tab is not taken for a `target=_blank` link.
+
+### Checks (Engine app, profile `$PROF/345-try`, scratch `ARKT_DATA_DIR` and defaults suite, loopback pages on `127.0.0.1` and `localhost`, input through CDP `Input.dispatchMouseEvent`)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `target=_blank` to the other host in a pinned tab opens a Peek | PASS | the engine's `b.html` tab shown in the Peek, no Today row, the source stays at `a.html`; window-only screenshot |
+| Shift-click inside the Peek opens a Today tab | PASS | `link activation (disposition 6) answered cancel`; the Peek closes, a selected Today row with the page |
+| Shift-click on a plain link in a pinned tab opens a Peek | PASS | `disposition 6` cancel; one window only, the Peek over the source |
+| Command-click opens a background Today tab | PASS | `disposition 4` answered navigate; a new unselected row, the source stays shown |
+| Command-Shift-click opens a foreground Today tab | PASS | `disposition 3` answered navigate; a new selected row, no Peek |
+| `target=_blank` to the same host opens a Today tab | PASS | a new selected row, no Peek |
+
+### Verification
+
+- `gn check out/Spike '//arkt/*'` and `gn check out/Spike '//chrome/browser/ui/browser_web_contents_delegate/*'`:
+  `Header dependency check OK`. `nice -n 10 autoninja -C out/Spike -j 4 chrome`: `The build has finished
+  successfully.` `git -C $CR rev-list --count 156.0.8078.48..arkt` 9 = `.patches` 9.
+- Debug and Engine apps: `BUILD SUCCEEDED`.
+- Red first: the new routing tests failed to compile (`routeOpenedTab` missing).
+- ShellKit `swift test --skip ShellKitGUITests`: 909 passed (902 + 7). GUI: see the pull request.
+
