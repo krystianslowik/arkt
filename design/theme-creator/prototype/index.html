@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt Space Theme</title>
+<!--
+  Space theme creator prototype (#382). Single file plus tex/, no network. 1 CSS px = 1 pt.
+  States by hash: #<state>[&dark][&haptics]
+    state:   two (default) | single | none
+    dark:    dark system appearance
+    haptics: show a small log of the haptic events the native popover would play (never shown to users)
+  Everything is live: drag the dots, double-click the pad to add a second colour, drag a dot off the pad or use the
+  header button to remove it, pick a texture, move the sliders. Contrast is handled as in README.md, "Automatic
+  contrast"; nothing about it is drawn.
+-->
+<style>
+:root {
+  --desktop: #C9CDD2;
+  --surface: #FAF9F5;
+  --panel: #FAF9F5;
+  --text: rgba(14,15,16,0.90);
+  --text-2: rgba(0,0,0,0.56);
+  --fill: rgba(14,15,16,0.05);
+  --fill-2: rgba(14,15,16,0.09);
+  --page: #FFFFFF;
+  --focus: #0A6CF0;
+  --focus-ring: rgba(0,103,244,0.50);
+  --shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
+  --pop-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.08);
+  --tex-blend: multiply;
+  --tex-max: 0.85;
+}
+:root[data-theme="dark"] {
+  --desktop: #2C3036;
+  --surface: #202321;
+  --panel: #262927;
+  --text: rgba(255,255,255,0.86);
+  --text-2: rgba(255,255,255,0.56);
+  --fill: rgba(250,251,255,0.07);
+  --fill-2: rgba(250,251,255,0.12);
+  --page: #1B1C1D;
+  --focus: #3B9BFF;
+  --focus-ring: rgba(26,145,255,0.55);
+  --shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
+  --pop-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3);
+  --tex-blend: overlay;
+  --tex-max: 1;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--desktop); min-width: 1440px; min-height: 900px; position: relative; overflow: hidden;
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; }
+
+/* ---------- Window: the live preview is the real window ---------- */
+.win { position: absolute; left: 48px; top: 44px; width: 1344px; height: 812px; border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); background: var(--surface); }
+.tint { position: absolute; inset: 0; }
+.grain { position: absolute; inset: 0; mix-blend-mode: var(--tex-blend); pointer-events: none; }
+.lights { position: absolute; left: 16px; top: 16px; display: flex; gap: 8px; z-index: 2; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.side { position: absolute; left: 0; top: 0; bottom: 0; width: 260px; z-index: 1; padding: 46px 10px 10px; color: var(--side-text); }
+.tools { position: absolute; right: 12px; top: 12px; display: flex; gap: 14px; color: var(--side-text-2); }
+.tools svg { width: 16px; height: 16px; display: block; }
+.url { height: 34px; border-radius: 9px; background: var(--side-fill); display: flex; align-items: center; padding: 0 11px; color: var(--side-text-2); margin-bottom: 12px; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.favs b { height: 46px; border-radius: 10px; background: var(--side-fill); display: grid; place-items: center; }
+.favs b i { width: 18px; height: 18px; border-radius: 5px; display: block; }
+.spname { font-size: 12px; font-weight: 600; color: var(--side-text-2); padding: 2px 10px 6px; display: inline-block; border-radius: 6px; }
+.spname.open { background: var(--side-fill); color: var(--side-text); }
+.row { height: 34px; border-radius: 8px; display: flex; align-items: center; gap: 9px; padding: 0 10px; color: var(--side-text); white-space: nowrap; }
+.row.cur { background: var(--side-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.10); }
+.row .fav { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; }
+.newtab { color: var(--side-text-2); }
+.page { position: absolute; top: 8px; right: 8px; bottom: 8px; left: 260px; border-radius: 9px; background: var(--page); z-index: 1; overflow: hidden;
+  box-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.08); }
+.article { padding: 64px 0 0 420px; width: 1000px; }
+.article .kick { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); }
+.article h1 { font-size: 34px; line-height: 1.08; letter-spacing: -0.02em; margin: 10px 0 16px; font-weight: 700; }
+.article p { font-size: 15px; line-height: 1.6; color: var(--text-2); margin: 0 0 14px; }
+.article .fig { height: 190px; border-radius: 8px; margin: 22px 0; background:
+  radial-gradient(60% 80% at 30% 40%, rgba(120,140,90,.55), transparent 70%), radial-gradient(50% 70% at 70% 60%, rgba(170,160,110,.5), transparent 70%), var(--fill-2); }
+
+/* ---------- Popover ---------- */
+.pop { position: absolute; z-index: 10; left: 320px; top: 166px; width: 300px; border-radius: 18px; padding: 14px; background: var(--panel); box-shadow: var(--pop-shadow);
+  transform-origin: 0 34px; animation: pop-in .32s cubic-bezier(.34,1.32,.64,1) both; }
+@keyframes pop-in { from { opacity: 0; transform: scale(.96); } }
+@media (prefers-reduced-motion: reduce) { .pop { animation: fade-in .12s linear both; } @keyframes fade-in { from { opacity: 0; } } }
+.pop::before { content: ""; position: absolute; left: -6px; top: 28px; width: 12px; height: 12px; background: var(--panel); transform: rotate(45deg); }
+.hd { display: flex; align-items: center; justify-content: space-between; height: 24px; padding: 0 2px 0 4px; margin-bottom: 10px; }
+.hd .tt { font-size: 13px; font-weight: 600; }
+.duo { all: unset; width: 30px; height: 22px; border-radius: 7px; background: var(--fill-2); position: relative; cursor: default; }
+.duo:focus-visible { box-shadow: 0 0 0 3px var(--focus-ring); }
+.duo i { position: absolute; top: 5px; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--panel); transition: left .2s cubic-bezier(.25,1,.5,1), opacity .2s; }
+.duo i.a { left: 6px; } .duo i.b { left: 12px; }
+.duo.one i.a { left: 5px; } .duo.one i.b { opacity: 0; }
+.duo .plus { position: absolute; right: 4px; top: 4px; font-size: 12px; line-height: 14px; font-weight: 600; color: var(--text-2); opacity: 0; transition: opacity .2s; }
+.duo.one .plus { opacity: 1; }
+
+.pad { position: relative; width: 272px; height: 212px; border-radius: 16px; touch-action: none; }
+.pad canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 16px; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16); }
+.pad .edge { position: absolute; inset: 0; border-radius: 16px; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16), inset 0 3px 14px rgba(0,0,0,.12); pointer-events: none; }
+.pad svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.dot { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; border: 3px solid #fff; outline: none; z-index: 2;
+  box-shadow: 0 2px 8px rgba(0,0,0,.35), 0 0 0 .5px rgba(0,0,0,.25);
+  transition: width .18s cubic-bezier(.34,1.32,.64,1), height .18s cubic-bezier(.34,1.32,.64,1), margin .18s cubic-bezier(.34,1.32,.64,1), opacity .18s; }
+.dot.drag { width: 34px; height: 34px; margin: -17px 0 0 -17px; box-shadow: 0 8px 22px rgba(0,0,0,.38), 0 0 0 .5px rgba(0,0,0,.25); }
+.dot:focus-visible { box-shadow: 0 2px 8px rgba(0,0,0,.35), 0 0 0 5px var(--focus-ring); }
+.dot.leaving { opacity: .35; }
+
+.ctl { margin-top: 16px; padding: 0 4px; }
+.ctl .lr { display: flex; align-items: center; justify-content: space-between; height: 18px; margin-bottom: 8px; }
+.ctl .lr > span:first-child { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.sl { position: relative; height: 24px; touch-action: none; outline: none; }
+.sl .tr { position: absolute; left: 0; right: 0; top: 7px; height: 10px; border-radius: 5px; overflow: hidden; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.14); }
+.sl .kn { position: absolute; top: 0; width: 24px; height: 24px; margin-left: -12px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 .5px rgba(0,0,0,.2), 0 2px 6px rgba(0,0,0,.25); }
+.sl:focus-visible .kn { box-shadow: 0 0 0 .5px rgba(0,0,0,.2), 0 2px 6px rgba(0,0,0,.25), 0 0 0 4px var(--focus-ring); }
+.sl.off { opacity: .4; pointer-events: none; }
+.sl.amount .tr { background: var(--fill-2); }
+.sl.amount .tr::after { content: ""; position: absolute; inset: 0; background: url(tex/sand.svg) 0 0/120px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000); mask-image: linear-gradient(90deg, transparent, #000); opacity: .9; }
+:root[data-theme="dark"] .sl.amount .tr::after { filter: invert(1); }
+.sl.opacity .tr { background: var(--opacity-track), repeating-conic-gradient(var(--fill-2) 0 25%, transparent 0 50%) 0 0/8px 8px; }
+.texs { display: flex; gap: 6px; }
+.texs button { all: unset; width: 18px; height: 18px; border-radius: 50%; position: relative; overflow: hidden; background: var(--fill-2); box-shadow: inset 0 0 0 .5px rgba(0,0,0,.18); }
+.texs button::after { content: ""; position: absolute; inset: 0; border-radius: 50%; }
+.texs [data-t="grain"]::after { background: url(tex/grain.svg) 0 0/60px; opacity: .8; mix-blend-mode: multiply; }
+.texs [data-t="sand"]::after { background: url(tex/sand.svg) 0 0/90px; }
+.texs [data-t="denim"]::after { background: url(tex/denim.svg) 0 0/8px; }
+.texs [data-t="tweed"]::after { background: url(tex/tweed.svg) 0 0/7px; }
+:root[data-theme="dark"] .texs button::after { filter: invert(1); mix-blend-mode: normal; }
+.texs button[aria-checked="true"] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--focus); overflow: visible; }
+.texs button:focus-visible { box-shadow: 0 0 0 3px var(--focus-ring); }
+
+/* prototype only: haptic event log (&haptics) */
+.hlog { position: absolute; right: 64px; bottom: 60px; width: 230px; z-index: 20; font: 500 11px/1.5 "SF Mono", ui-monospace, Menlo, monospace; color: var(--text-2); display: none; }
+:root[data-haptics] .hlog { display: block; }
+.hlog div { animation: fade-out 2.4s forwards; } @keyframes fade-out { 70% { opacity: 1; } to { opacity: 0; } }
+</style>
+</head>
+<body>
+<div class="win" id="win">
+  <div class="tint" id="tint"></div>
+  <div class="grain" id="grain"></div>
+  <div class="lights"><i></i><i></i><i></i></div>
+  <div class="side" id="side">
+    <div class="tools">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 3 5 5-5 5"/></svg>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5v3h-3"/></svg>
+    </div>
+    <div class="url">fieldguide.example/lichens</div>
+    <div class="favs"><b><i style="background:#E8553A"></i></b><b><i style="background:#3D7BE0"></i></b><b><i style="background:#1F1F1F"></i></b><b><i style="background:#F2A23A"></i></b></div>
+    <div><span class="spname open">Studio</span></div>
+    <div class="row cur"><span class="fav" style="background:#2F8F5B">F</span>Field guide to lichens</div>
+    <div class="row"><span class="fav" style="background:#5A6FA8">R</span>Research notes</div>
+    <div class="row"><span class="fav" style="background:#5B7FA6">E</span>Expense report template</div>
+    <div class="row"><span class="fav" style="background:#B4553A">M</span>Moodboard, winter issue</div>
+    <div class="row"><span class="fav" style="background:#2C6FB7">L</span>Flights to Lisbon</div>
+    <div class="row"><span class="fav" style="background:#7E6A3A">A</span>Miso aubergine</div>
+    <div class="row newtab"><span style="width:16px;text-align:center;font-size:16px">+</span>New Tab</div>
+  </div>
+  <div class="page">
+    <div class="article">
+      <div class="kick">Field notes</div>
+      <h1>A field guide to lichens</h1>
+      <p>Lichens grow slowly, a few millimetres a year, on bark, stone and old timber. Their colour shifts with the weather and the light.</p>
+      <div class="fig"></div>
+      <p>Crustose lichens sit flat against the surface. Foliose forms lift at the edges like paper left in the rain.</p>
+    </div>
+  </div>
+</div>
+
+<div class="pop" id="pop" role="dialog" aria-label="Space Theme">
+  <div class="hd"><span class="tt">Studio</span>
+    <button class="duo" id="duo" aria-label="Use one colour"><i class="a"></i><i class="b"></i><span class="plus">+</span></button></div>
+  <div class="pad" id="pad" role="group" aria-label="Colour">
+    <canvas id="padc" width="544" height="424"></canvas>
+    <div class="edge"></div>
+    <svg id="link"><line id="linkl" stroke="#fff" stroke-width="1.5" stroke-opacity=".85"/></svg>
+  </div>
+  <div class="ctl">
+    <div class="lr"><span>Texture</span>
+      <span class="texs" role="radiogroup" aria-label="Texture">
+        <button data-t="" role="radio" aria-label="None"></button><button data-t="grain" role="radio" aria-label="Grain"></button><button data-t="sand" role="radio" aria-label="Sand"></button><button data-t="denim" role="radio" aria-label="Denim"></button><button data-t="tweed" role="radio" aria-label="Tweed"></button>
+      </span></div>
+    <div class="sl amount" id="amount" role="slider" tabindex="0" aria-label="Texture amount"><div class="tr"></div><div class="kn"></div></div>
+  </div>
+  <div class="ctl" style="margin-bottom:4px">
+    <div class="lr"><span>Opacity</span></div>
+    <div class="sl opacity" id="opacity" role="slider" tabindex="0" aria-label="Opacity"><div class="tr"></div><div class="kn"></div></div>
+  </div>
+</div>
+<div class="hlog" id="hlog"></div>
+
+<script>
+const hash = location.hash.slice(1).split('&');
+const dark = hash.includes('dark');
+if (dark) document.documentElement.dataset.theme = 'dark';
+if (hash.includes('haptics')) document.documentElement.dataset.haptics = '';
+
+// ---------- colour model: pad x = hue, pad y = tone ----------
+// A hue at fixed saturation (HSL 60 %, 52 %) sits in the middle band; above it the colour blends toward porcelain,
+// below it toward near-black. This is the field the approved mock drew.
+const TOP = [250 / 255, 249 / 255, 245 / 255], BOTTOM = [18 / 255, 18 / 255, 20 / 255];
+const Y_MIN = 0.06, Y_MAX = 0.94;               // where a dot can go: the soft stop
+function hsl(h, s, l) {
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  return [0, 8, 4].map(n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)));
+}
+const lerp = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+function colour(y, h) {
+  const mid = hsl(h, 0.60, 0.52);
+  return y <= 0.5 ? lerp(TOP, mid, Math.max(0, y) / 0.5) : lerp(mid, BOTTOM, Math.min(1, (y - 0.5) / 0.5));
+}
+const css = c => `rgb(${c.map(v => Math.round(v * 255)).join(',')})`;
+const lum = c => { const f = v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+const mix = (a, b, t) => a.map((v, i) => v * t + b[i] * (1 - t));
+
+// ---------- state ----------
+const state = {
+  stops: [{ h: 216, y: 0.74 }, { h: 27, y: 0.34 }],
+  texture: 'sand', amount: 0.40, opacity: 0.80,
+};
+if (hash.includes('single')) state.stops.length = 1;
+if (hash.includes('none')) state.texture = '';
+
+// ---------- automatic contrast (README, "Automatic contrast") ----------
+const SURFACE = dark ? [32 / 255, 35 / 255, 33 / 255] : [250 / 255, 249 / 255, 245 / 255];
+const TEXT = { light: [[1, 1, 1], 0.84], dark: [[14 / 255, 15 / 255, 16 / 255], 0.90] };
+const MAX_MIX = 0.5, TARGET = 4.5;
+function drawn(stop, tone) {
+  // the colour the window draws for a stop: mixed toward near-black (light text) or porcelain (dark text) in 1 %
+  // steps until tab titles reach 4.5:1 over it, at most MAX_MIX
+  const [fg, fa] = TEXT[tone];
+  const toward = tone === 'light' ? BOTTOM : TOP, base = colour(stop.y, stop.h);
+  for (let k = 0; k <= MAX_MIX + 1e-9; k += 0.01) {
+    const c = lerp(base, toward, k), bg = mix(c, SURFACE, state.opacity);
+    if (ratio(mix(fg, bg, fa), bg) >= TARGET) return { c, k };
+  }
+  return null;
+}
+function resolve() {
+  // the appearance's own tone first; the other tone only if a stop would need more than MAX_MIX
+  const own = dark ? 'light' : 'dark', other = dark ? 'dark' : 'light';
+  for (const tone of [own, other]) {
+    const out = state.stops.map(s => drawn(s, tone));
+    if (out.every(Boolean)) return { tone, colours: out.map(o => o.c) };
+  }
+  return { tone: own, colours: state.stops.map(s => colour(s.y, s.h)) };
+}
+
+// ---------- haptics (logged only; the native popover plays them) ----------
+let lastTick = 0;
+function haptic(pattern, what) {
+  const now = performance.now();
+  if (now - lastTick < 50) return;            // global rate limit: one tick per 50 ms
+  lastTick = now;
+  const d = document.createElement('div'); d.textContent = `.${pattern}  ${what}`;
+  const log = document.getElementById('hlog'); log.prepend(d); while (log.children.length > 6) log.lastChild.remove();
+}
+// HSL hue of each family's second light stop (SpaceThemeCatalog.families)
+const PRESET_HUES = [['Paper', 37], ['Dune', 45], ['Sage', 107], ['Mist', 238], ['Indigo', 250], ['Blossom', 338]];
+
+// ---------- render ----------
+const win = document.getElementById('win'), tint = document.getElementById('tint'), grain = document.getElementById('grain');
+const pad = document.getElementById('pad'), W = 272, H = 212;
+function drawPad() {
+  const cv = document.getElementById('padc'), ctx = cv.getContext('2d'), img = ctx.createImageData(cv.width, cv.height);
+  for (let j = 0; j < cv.height; j++) for (let i = 0; i < cv.width; i++) {
+    const c = colour(j / (cv.height - 1), 360 * i / (cv.width - 1)), k = 4 * (j * cv.width + i);
+    img.data[k] = c[0] * 255; img.data[k + 1] = c[1] * 255; img.data[k + 2] = c[2] * 255; img.data[k + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+function render() {
+  const r = resolve();
+  const cs = r.colours.map(css);
+  tint.style.background = cs.length > 1 ? `linear-gradient(162deg, ${cs[0]} 8%, ${cs[1]} 82%)` : cs[0];
+  tint.style.opacity = state.opacity;
+  const light = r.tone === 'light';
+  const s = document.documentElement.style;
+  s.setProperty('--side-text', light ? 'rgba(255,255,255,0.84)' : 'rgba(14,15,16,0.90)');
+  s.setProperty('--side-text-2', light ? 'rgba(255,255,255,0.55)' : 'rgba(14,15,16,0.55)');
+  s.setProperty('--side-fill', light ? 'rgba(250,251,255,0.10)' : 'rgba(14,15,16,0.07)');
+  s.setProperty('--side-cur', light ? 'rgba(250,251,255,0.20)' : 'rgba(255,255,255,0.80)');
+  document.querySelector('.row.cur').style.color = light ? '' : 'rgba(14,15,16,0.9)';
+  grain.style.background = state.texture ? `url(tex/${state.texture}.svg) 0 0/${{ grain: 180, sand: 220, denim: 24, tweed: 16 }[state.texture]}px` : 'none';
+  grain.style.opacity = state.texture ? state.amount * getComputedStyle(document.documentElement).getPropertyValue('--tex-max') : 0;
+  const picked = state.stops.map(st => css(colour(st.y, st.h)));
+  s.setProperty('--opacity-track', `linear-gradient(90deg, transparent, ${picked.length > 1 ? picked[0] + ' 60%, ' + picked[1] : picked[0]})`);
+  // dots
+  pad.querySelectorAll('.dot').forEach((d, i) => { if (!state.stops[i]) d.remove(); });
+  state.stops.forEach((st, i) => {
+    let d = pad.querySelectorAll('.dot')[i];
+    if (!d) { d = document.createElement('div'); d.className = 'dot'; d.tabIndex = 0; d.setAttribute('role', 'slider'); pad.appendChild(d); bindDot(d, i); }
+    d.style.left = (st.h / 360 * W) + 'px'; d.style.top = (st.y * H) + 'px'; d.style.background = picked[i];
+    d.setAttribute('aria-label', `Colour ${i + 1}`);
+    d.setAttribute('aria-valuetext', `hue ${Math.round(st.h)} degrees, light ${Math.round((1 - st.y) * 100)} percent`);
+  });
+  const l = document.getElementById('linkl');
+  if (state.stops.length > 1) { l.setAttribute('x1', state.stops[0].h / 360 * W); l.setAttribute('y1', state.stops[0].y * H); l.setAttribute('x2', state.stops[1].h / 360 * W); l.setAttribute('y2', state.stops[1].y * H); l.style.display = ''; }
+  else l.style.display = 'none';
+  const duo = document.getElementById('duo');
+  duo.classList.toggle('one', state.stops.length === 1);
+  duo.setAttribute('aria-label', state.stops.length === 1 ? 'Add a second colour' : 'Use one colour');
+  duo.querySelector('.a').style.background = picked[0]; duo.querySelector('.b').style.background = picked[1] || picked[0];
+  document.querySelectorAll('.texs button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.t === state.texture)));
+  setSlider('amount', state.amount); setSlider('opacity', state.opacity);
+  document.getElementById('amount').classList.toggle('off', !state.texture);
+}
+function setSlider(id, v) { const el = document.getElementById(id); el.querySelector('.kn').style.left = (v * 100) + '%'; el.setAttribute('aria-valuenow', Math.round(v * 100)); el.setAttribute('aria-valuetext', Math.round(v * 100) + ' percent'); }
+
+// ---------- interaction ----------
+const yMin = Y_MIN, yMax = Y_MAX;
+function moveStop(i, h, y) {
+  const st = state.stops[i], prevH = st.h;
+  const cy = Math.min(Math.max(y, yMin), yMax);
+  if (cy !== y && (st.y !== cy)) haptic('levelChange', 'soft stop at the lightness limit');
+  st.h = (h + 360) % 360; st.y = cy;
+  for (const [name, ph] of PRESET_HUES) if ((prevH - ph) * (st.h - ph) < 0 && Math.abs(prevH - st.h) < 180) haptic('alignment', `passes ${name}`);
+  render();
+}
+function bindDot(d, i) {
+  d.addEventListener('pointerdown', e => {
+    e.preventDefault(); d.setPointerCapture(e.pointerId); d.classList.add('drag');
+    const r = pad.getBoundingClientRect();
+    const onMove = ev => {
+      const x = (ev.clientX - r.left) / W, y = (ev.clientY - r.top) / H;
+      const out = state.stops.length > 1 && (ev.clientX < r.left - 24 || ev.clientX > r.right + 24 || ev.clientY < r.top - 24 || ev.clientY > r.bottom + 24);
+      d.classList.toggle('leaving', out);
+      if (!out) moveStop(i, Math.min(Math.max(x, 0), 1) * 360, y);
+    };
+    const onUp = () => {
+      d.classList.remove('drag'); d.removeEventListener('pointermove', onMove); d.removeEventListener('pointerup', onUp);
+      if (d.classList.contains('leaving')) { d.remove(); state.stops.splice(i, 1); rebind(); render(); }
+    };
+    d.addEventListener('pointermove', onMove); d.addEventListener('pointerup', onUp);
+  });
+  d.addEventListener('keydown', e => {
+    const st = state.stops[i], k = e.shiftKey ? 5 : 1;
+    const moves = { ArrowLeft: [-2 * k, 0], ArrowRight: [2 * k, 0], ArrowUp: [0, -0.02 * k], ArrowDown: [0, 0.02 * k] };
+    if (moves[e.key]) { e.preventDefault(); moveStop(i, st.h + moves[e.key][0], st.y + moves[e.key][1]); }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && state.stops.length > 1) { state.stops.splice(i, 1); rebind(); render(); }
+  });
+}
+function rebind() { pad.querySelectorAll('.dot').forEach(d => d.remove()); }
+pad.addEventListener('dblclick', e => {
+  if (state.stops.length > 1 || e.target.classList.contains('dot')) return;
+  const r = pad.getBoundingClientRect();
+  state.stops.push({ h: (e.clientX - r.left) / W * 360, y: Math.min(Math.max((e.clientY - r.top) / H, yMin), yMax) }); render();
+});
+document.getElementById('duo').addEventListener('click', () => {
+  if (state.stops.length > 1) state.stops.length = 1;
+  else { const a = state.stops[0]; state.stops.push({ h: (a.h + 40) % 360, y: Math.min(Math.max(a.y + 0.25 * (a.y < 0.5 ? 1 : -1), yMin), yMax) }); }
+  rebind(); render();
+});
+document.querySelectorAll('.texs button').forEach(b => b.addEventListener('click', () => { if (state.texture !== b.dataset.t) haptic('alignment', 'texture step'); state.texture = b.dataset.t; render(); }));
+function bindSlider(id, key) {
+  const el = document.getElementById(id);
+  const set = v => {
+    const nv = Math.min(Math.max(v, 0), 1), ov = state[key];
+    for (const stop of [0, 0.5, 1]) if ((ov - stop) * (nv - stop) <= 0 && ov !== nv && ov !== stop) haptic('generic', `${id} ${stop * 100} %`);
+    state[key] = nv; render();
+  };
+  el.addEventListener('pointerdown', e => {
+    el.setPointerCapture(e.pointerId); const r = el.getBoundingClientRect();
+    const mv = ev => set((ev.clientX - r.left) / r.width); mv(e);
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', () => el.removeEventListener('pointermove', mv), { once: true });
+  });
+  el.addEventListener('keydown', e => { const d = { ArrowLeft: -0.05, ArrowRight: 0.05 }[e.key]; if (d) { e.preventDefault(); set(state[key] + d); } });
+}
+bindSlider('amount', 'amount'); bindSlider('opacity', 'opacity');
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('pop').style.display = 'none'; });
+
+drawPad(); render();
+</script>
+</body>
+</html>
