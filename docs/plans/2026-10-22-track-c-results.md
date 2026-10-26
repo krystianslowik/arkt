@@ -1692,7 +1692,7 @@ pixels and the contrast sampling. Follow-up: #381.
 Reduce Transparency and Increase Contrast: the spec says nothing about the theme texture, so no behavior was added.
 
 Tests (written first; the new ones failed to compile before the code existed), rebased on main with #374: ShellKit
-unit 1012 Swift Testing tests (998 + 14: `ThemeTextureTests`, parameterized over the four textures), all pass.
+unit 1013 Swift Testing tests (998 + 15: `ThemeTextureTests`, parameterized over the four textures), all pass.
 ShellKitGUITests 852 run (844 + 8: `ThemeGrainRendererTests`), 5 skipped, all new tests pass. In the full GUI run
 two frame-time gates fail at load1 5 to 7 on 10 cores: `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`
 (late frames 9 and 10 of the keyboard and flavor switches, about 21 ms) and
