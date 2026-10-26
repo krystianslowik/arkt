@@ -101,6 +101,18 @@ public final class ModelSidebarSource: SidebarSource {
     }
   }
 
+  /// BH-046 and BH-047 surface the refusal: `.favoritesFull` crosses as `SidebarMoveError.favoritesFull`; every
+  /// other model refusal is `.invalid`.
+  public func moveNode(_ id: UUID, to location: SidebarLocation, at index: Int) throws {
+    do {
+      try mutate { try $0.move(id, to: BridgeMapping.location(location), at: index) }
+    } catch SidebarError.favoritesFull {
+      throw SidebarMoveError.favoritesFull
+    } catch {
+      throw SidebarMoveError.invalid
+    }
+  }
+
   // MARK: - Split writes
 
   /// One mutation: a new tab is created next to the target (or next to the split, never inside it, so the pane cap

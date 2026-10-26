@@ -59,6 +59,20 @@ struct SidebarSourceContractTests {
   }
 
   @Test(arguments: SourceKind.allCases)
+  func moveNodeBetweenLocationsEmitsStructureForBoth(kind: SourceKind) throws {
+    let source = kind.make()
+    let space = try source.addSpace(title: "S")
+    let a = try source.addTab(url: Self.urlA, title: "A", in: .today(space))
+    var changes: [SidebarChange] = []
+    let observation = source.observe { changes.append($0) }
+    try source.moveNode(a, to: .favorites(profile: "default"), at: 0)
+    #expect(source.children(of: .favorites(profile: "default")) == [a])
+    #expect(source.children(of: .today(space)).isEmpty)
+    #expect(Set(changes) == [.structure(.today(space)), .structure(.favorites(profile: "default"))])
+    _ = observation
+  }
+
+  @Test(arguments: SourceKind.allCases)
   func updateTabEmitsNodeOnlyWhenDrawnFieldsChange(kind: SourceKind) throws {
     let source = kind.make()
     let space = try source.addSpace(title: "S")

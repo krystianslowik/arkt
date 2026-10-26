@@ -140,6 +140,14 @@ public enum SplitEditError: Error, Equatable, Sendable {
   case invalid
 }
 
+/// Why a `moveNode` was refused. The shell cannot see the model's `SidebarError`; sources map to this.
+public enum SidebarMoveError: Error, Equatable, Sendable {
+  /// The profile already holds its maximum number of Favorites (BH-046).
+  case favoritesFull
+  /// The move is not valid: an unknown node or destination, a cycle, or too deep.
+  case invalid
+}
+
 /// The tab that becomes a new pane in `SidebarSource.addToSplit`.
 public enum SplitPaneSource: Equatable, Sendable {
   /// A tab already in the sidebar; it leaves its place (a pane of another split shrinks that split).
@@ -178,6 +186,11 @@ public protocol SidebarSource: AnyObject {
   /// `.spaceChanged` when it changed; an unknown id or the same theme is ignored.
   func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo?)
   func updateTab(_ id: NodeID, url: URL?, title: String?)
+
+  /// Moves a node to `location` at `index` (measured before removal, clamped). Emits `.structure` for every
+  /// location whose child order changed. Throws `SidebarMoveError.favoritesFull` when the destination is a full
+  /// Favorites section (BH-046), `.invalid` for a move the model refuses otherwise. `StubSidebar` never throws.
+  func moveNode(_ id: NodeID, to location: SidebarLocation, at index: Int) throws
 
   // Split writes (BH-115, BH-116, BH-120). Each applies as one step: observers get its changes once, and a throw
   // leaves the source untouched. A full split throws `SplitEditError.splitFull`; ids that do not fit the edit throw `.invalid`.

@@ -133,6 +133,9 @@ private final class FailingSpaceSidebar: SidebarSource {
   func setIcon(_ id: SpaceID, to icon: SpaceIconInfo?) { base.setIcon(id, to: icon) }
   func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo?) { base.setTheme(id, to: theme) }
   func updateTab(_ id: NodeID, url: URL?, title: String?) { base.updateTab(id, url: url, title: title) }
+  func moveNode(_ id: NodeID, to location: SidebarLocation, at index: Int) throws {
+    base.moveNode(id, to: location, at: index)
+  }
   func addToSplit(_ pane: SplitPaneSource, target: NodeID, at index: Int, orientation: SplitOrientation) throws
     -> (split: NodeID, pane: NodeID)
   {
