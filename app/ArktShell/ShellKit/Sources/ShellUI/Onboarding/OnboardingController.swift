@@ -671,11 +671,12 @@ public final class OnboardingController {
     view.setFooter(showsBack: false, progress: nil, showsSkip: false, animated: true)
     let card = window.rootView.convert(window.rootView.card.frame, to: view)
     // The stage folds onto the card and fades on its own clock (P9); the overlay leaves once it is done and the
-    // command bar is up.
+    // command bar is up. The fold can outlast the controller (the window lets it go once the browser shows), so the
+    // overlay is captured, not the controller.
     var stageDone = false, browserShown = false
-    let removeOverlay = { [weak self] in
-      guard let self, stageDone, browserShown else { return }
-      self.view.removeFromSuperview()
+    let removeOverlay = { [view] in
+      guard stageDone, browserShown else { return }
+      view.removeFromSuperview()
     }
     view.stage.finish(onto: card, appearance: view.appearanceModel) {
       stageDone = true

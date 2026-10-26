@@ -57,6 +57,26 @@ final class FakeOnboardingServices: OnboardingServices {
   func markCompleted() { completed += 1 }
 }
 
+/// A stage whose fold ends when the test says so, like the particle field's, which outlasts the browser's reveal.
+@MainActor
+final class LateFoldStage: OnboardingStage {
+  let view = NSView()
+  var drawsCounts: Bool { false }
+  private var completion: (@MainActor () -> Void)?
+
+  func show(_ formation: OnboardingFormation, appearance: OnboardingAppearance, animated: Bool) {}
+  func finish(onto card: CGRect, appearance: OnboardingAppearance, completion: @escaping @MainActor () -> Void) {
+    self.completion = completion
+  }
+  func setVisible(_ visible: Bool) {}
+
+  func endFold() {
+    let completion = completion
+    self.completion = nil
+    completion?()
+  }
+}
+
 /// The first run over a real shell window (onboarding spec sections 2, 6, 10 to 13): both branches to the browser,
 /// Skip setup, the Name field's Escape, the arrow rules, resume, and no "Arc" in anything VoiceOver reads.
 @MainActor
@@ -482,6 +502,35 @@ final class OnboardingTests: XCTestCase {
     XCTAssertEqual(onboarding.view.accessibilityValue() as? String, "")
     onboarding.performPrimary()
     XCTAssertEqual(onboarding.view.accessibilityValue() as? String, "Step 1 of 4")
+    window.close()
+  }
+
+  // MARK: - Finish
+
+  /// The particle field folds for about 1.7 s, longer than the 0.9 s until the browser shows and the window lets the
+  /// controller go. The overlay still leaves when the fold ends, with nothing but the window holding the flow.
+  func testOverlayLeavesWhenTheFoldEndsAfterTheControllerIsReleased() throws {
+    let stub = StubSidebar()
+    let window = makeWindow(stub)
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: false)
+    let stage = LateFoldStage()
+    weak var released: OnboardingController?
+    let overlay: NSView
+    do {
+      let onboarding = window.presentOnboarding(
+        services: services, options: .init(mode: .firstRun, includesExtensions: false), stage: stage)
+      spin { onboarding.flow.conditions.arc != .checking }
+      onboarding.confirmSkip = { answer in answer(true) }
+      onboarding.view.onSkipSetup?()                                      // confirmed on Welcome
+      overlay = onboarding.view
+      released = onboarding
+    }
+    XCTAssertTrue(spin { !window.isShowingOnboarding }, "the browser shows")
+    XCTAssertTrue(spin { released == nil }, "the window let the controller go")
+    XCTAssertNotNil(overlay.superview, "the field is still folding")
+    stage.endFold()
+    XCTAssertNil(overlay.superview, "the overlay leaves once the fold ended")
+    window.commandBar.hide()
     window.close()
   }
 
