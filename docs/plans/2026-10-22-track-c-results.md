@@ -2105,3 +2105,42 @@ menu and enabled rules, unselected rows, a selected tab inside a folder, a playi
 menu bar item). ShellKit unit 1154 Swift Testing tests (baseline 1146 after #408 and #411 + 8), all passed.
 ShellKitGUITests 1019 run (baseline 1012 + 7), 14 skipped, 0 failures. Debug app build succeeds. ArktCore untouched. XCUITest not run: no
 UI flow covers these menus.
+
+## Space theme creator (#410) (2026-10-26)
+
+Built to `design/theme-creator/README.md` (#405). Space header > Theme > Edit Theme... (after a separator, below the
+#279 presets) opens a 300 pt popover beside the Space name, hosted in the window's root view: a colour pad with one or
+two dots, texture swatches with an amount slider, and an opacity slider. Every change applies live; closing keeps it
+and registers one undo step for the session.
+
+- **Model.** `SidebarModel.SpaceTheme` stores `noiseFactor` and `opacity`; the sidebar document is format version 3
+  (frozen `sidebar-v3.json`). Versions 1 and 2 decode themes through the older shape with the values they drew with
+  (0.5 with a texture, 0 without; opacity 1). `BridgeMapping` maps both fields; `SpaceThemeInfo` gains `opacity`.
+- **Automatic contrast** (`ThemeContrast`, pure). Applied when drawing to every Space theme through
+  `SidebarController.drawnSpace(_:)`: pages, sidebar chrome, the window background and toasts. The window's appearance
+  and Increase Contrast come from `ThemeContextObserver`. Stored colours never change.
+- **Live re-tint.** Drags preview through `ThemeBackgroundView.previewTheme(_:at:)` and the sidebar flavor with no
+  write and no animation, and store on release (no crossfade, the preview already matches). Discrete pointer changes
+  crossfade on `firm` while the creator is open; a tone flip from them cross-fades the sidebar 0.2 s.
+- **Haptics** (`ThemeHapticGate`, pure; `ThemeHaptics` with an injected performer): detents, preset hue crossings
+  (hues from `SpaceThemeCatalog.families`: 45, 238, 37, 107, 338, 250), the tone-limit soft stop and texture steps,
+  each with its re-arm rule, and one every 50 ms globally (dropped).
+
+Deviations: before the README's step 3, when either text tone already passes with no mix for every colour (the
+appearance's own tone first), that tone is used unmixed; the literal rule mixes every dark preset 35 to 49 % toward
+porcelain in light mode (noted in the design README). The popover is an overlay in the shell window, not a separate
+panel; it closes like a transient popover (a click outside it other than the Space's options button, Escape, or the
+window resigning key). A created theme's stored `isDark` follows its colours. Arc's `noiseFactor` is not imported yet (the synthetic
+fixture pairs 0.0 with an active overlay; needs a runtime check). No display link: AppKit coalesces drag events and
+Core Animation commits once per frame.
+
+Tests (written first): ArktCore 428 passed (baseline 423 + 5: v1 and v2 migrations, v3 golden, v3 without a new key
+fails, v2 ignores the v3 keys, defaults, round-trip). ShellKit unit 1196 passed (baseline 1146 + 50: `ThemeContrastTests`
+(every preset unchanged in both appearances, pale in dark, deep in light, the blue and copper example, Increase
+Contrast), `ThemePadTests`, `ThemeCreatorModelTests`, `ThemeHapticGateTests`, the popover surface pair in
+`ShellTokensContrastTests`, the spring crossfade and preview in `ThemeCrossfadeTests`, three bridge round-trips in
+`SpaceEditingContractTests`). ShellKitGUITests 1032 run (baseline 1013 + 19: `ThemeCreatorTests` 18 and the env-gated
+`ThemeCreatorScreenshotTests`), 15 skipped, 0 failures, with frame-time gates skipped as not measurable at a load
+average near 30. Debug app build succeeds. XCUITest not run: no existing flow or identifier changed. The pad field
+and texture previews took about 250 ms and 530 ms to synthesize in Debug, so they are built off the main thread when
+the window opens (`ThemeCreatorImages`).

@@ -100,6 +100,21 @@ public final class SidebarController {
   private var observation: SidebarObservation?
   private let buttonTarget = ButtonTarget()
 
+  /// The appearance and Increase Contrast setting the Space themes are drawn for (#410). The window keeps it current;
+  /// a change redraws every Space through `ThemeContrast`.
+  public var themeContext = ThemeContext(appearance: .light) {
+    didSet { if themeContext != oldValue { refreshSpaceDetails() } }
+  }
+  /// A theme drawn in place of a Space's stored one while the theme creator drags a control (#410). Not stored.
+  private(set) var themePreview: (space: SpaceID, theme: SpaceThemeInfo)?
+  /// The window draws a previewed theme at once, without a crossfade: the paged index and the drawn theme.
+  public var onThemePreview: (@MainActor (Int, SpaceThemeInfo) -> Void)?
+  /// The open theme creator, if any (#410).
+  var themeCreator: ThemeCreatorController?
+  /// The theme creator's haptics and Reduce Motion. Tests count haptics through an injected performer.
+  var makeThemeHaptics: @MainActor () -> ThemeHaptics = { ThemeHaptics() }
+  var themeCreatorReducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
   public init(source: any SidebarSource, profile: String = "default",
               topBarHeight: CGFloat = ShellMetrics.standard.sidebarTopBarHeight) {
     self.source = source
@@ -121,6 +136,64 @@ public final class SidebarController {
     observation = source.observe { [weak self] change in self?.apply(change) }
     if let first = spaces.first { showSpace(first) }
   }
+
+  /// `id`'s Space as the window draws it: the source's info with its theme (or the creator's preview) passed through
+  /// the automatic contrast rule (`ThemeContrast`). The source keeps the stored colors.
+  public func drawnSpace(_ id: SpaceID) -> SidebarSpaceInfo? {
+    guard var info = source.space(id) else { return nil }
+    let stored = themePreview?.space == id ? themePreview?.theme ?? info.theme : info.theme
+    info.theme = ThemeContrast.drawn(stored, in: themeContext)
+    return info
+  }
+
+  /// Shows `theme` for `space` without storing it (nil ends the preview): the window background, the page and the
+  /// sidebar chrome follow at once, with no animation. The creator stores the theme through the source when a drag
+  /// ends; the window then sees the same drawn theme and does not crossfade.
+  func previewTheme(_ theme: SpaceThemeInfo?, for space: SpaceID) {
+    themePreview = theme.map { (space, $0) }
+    guard theme != nil, let info = drawnSpace(space), let index = pagedSpaces.firstIndex(of: space) else { return }
+    pages[space]?.refresh(from: info)
+    if pagedFlavors.indices.contains(index) { pagedFlavors[index] = info.theme.flavor }
+    if space == currentSpace, view.flavor != info.theme.flavor { view.setFlavor(info.theme.flavor) }
+    onThemePreview?(index, info.theme)
+  }
+
+  /// The theme creator opened or closed (#410). The window switches its theme crossfade to `firm` while it is open.
+  public var onThemeCreatorChange: (@MainActor (Bool) -> Void)?
+
+  /// Theme > Edit Theme...: opens the theme creator for `id`, anchored to its Space name (#410). The Space becomes
+  /// current first. A creator open for another Space closes.
+  public func openThemeCreator(for id: SpaceID) {
+    if let open = themeCreator {
+      if open.spaceID == id { return }
+      closeThemeCreator(animated: false)
+    }
+    guard source.space(id)?.profile == profile, let host = view.window?.contentView else { return }
+    if id != currentSpace { showSpace(id) }
+    guard let page = pages[id] else { return }
+    host.layoutSubtreeIfNeeded()
+    let title = page.titleLabel
+    let anchor = title.convert(NSPoint(x: title.bounds.midX, y: title.bounds.midY), to: host)
+    let edge = view.convert(view.bounds, to: host).maxX
+    let creator = ThemeCreatorController(spaceID: id, sidebar: self, haptics: makeThemeHaptics(),
+                                         reducesMotion: themeCreatorReducesMotion)
+    creator.onClose = { [weak self, weak creator] in
+      guard let self, self.themeCreator === creator else { return }
+      self.themeCreator = nil
+      self.onThemeCreatorChange?(false)
+    }
+    creator.passThroughViews = [page.optionsButton]
+    themeCreator = creator
+    onThemeCreatorChange?(true)
+    creator.show(in: host, anchor: anchor, edge: edge)
+  }
+
+  /// Closes the theme creator, keeping its changes.
+  public func closeThemeCreator(animated: Bool = true) {
+    themeCreator?.close(animated: animated)
+  }
+
+  public var isThemeCreatorOpen: Bool { themeCreator != nil }
 
   /// Spaces of this window's profile, in sidebar order.
   public var spaces: [SpaceID] { source.spaceOrder.filter { source.space($0)?.profile == profile } }
@@ -175,6 +248,7 @@ public final class SidebarController {
   private func commit(space id: SpaceID, info: SidebarSpaceInfo, index: Int) {
     guard let page = pages[id] else { return }
     let changed = currentSpace != id
+    if changed, let creator = themeCreator, creator.spaceID != id { creator.close(animated: true) }   // #410
     if changed, let old = currentSpace { pages[old]?.outlineController.clearSelection() }   // design 6
     if changed { folderPreview.hide(animated: false) }                              // BH-093: the page left
     // The page leaving the screen ends its folder springs, so no closed folder's rows wait there for its return.
@@ -191,7 +265,7 @@ public final class SidebarController {
     // BH-065: a collapsed Pinned section bolds the Space title while one of its tabs is shown [I].
     page.setCurrentTabInPinned(current.flatMap { source.section(containing: $0) } == .pinned(page.spaceID))
     view.setCurrent(page: page)
-    view.setFlavor(info.theme.flavor)
+    view.setFlavor(drawnSpace(id)?.theme.flavor ?? info.theme.flavor)
     view.spaceDots.selectedIndex = index
   }
 
@@ -214,7 +288,7 @@ public final class SidebarController {
       if let tab = tabToRestore(in: id) { activate(node: tab) }
     } else {
       view.spaceDots.selectedIndex = index
-      view.setFlavor(info.theme.flavor)
+      view.setFlavor(drawnSpace(id)?.theme.flavor ?? info.theme.flavor)
     }
   }
 
@@ -235,13 +309,28 @@ public final class SidebarController {
   /// Re-reads every paged Space: live pages (title, flavor), dot titles, cached flavors and the current chrome,
   /// then tells the window once (themes) unless `notify` is false. Called after any Space list or Space field change.
   private func refreshSpaceDetails(notify: Bool = true) {
-    for id in pagedSpaces { pages[id]?.refresh(from: source.space(id)) }
-    pagedFlavors = pagedSpaces.map { source.space($0)?.theme.flavor ?? .light }
+    let drawn = pagedSpaces.map(drawnSpace)
+    for (id, info) in zip(pagedSpaces, drawn) { pages[id]?.refresh(from: info) }
+    pagedFlavors = drawn.map { $0?.theme.flavor ?? .light }
     view.spaceDots.titles = pagedSpaces.map { source.space($0)?.title ?? "" }
     view.spaceDots.icons = pagedSpaces.map { source.space($0)?.icon }
-    if let id = currentSpace, let info = source.space(id) { view.setFlavor(info.theme.flavor) }
+    if let id = currentSpace, let info = drawnSpace(id) { setChromeFlavor(info.theme.flavor) }
     noteCurrentTheme()
+    themeCreator?.sourceDidChange()
     if notify { onSpacesChanged?(pagedSpaces) }
+  }
+
+  /// The sidebar chrome's flavor. While the theme creator is open, a tone flip that is not a live drag (a preset,
+  /// adding or removing a colour) cross-fades the sidebar 0.2 s (#410); Reduce Motion flips at once.
+  private func setChromeFlavor(_ flavor: ThemeFlavor) {
+    if flavor != view.flavor, themeCreator != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+       let layer = view.layer {
+      let fade = CATransition()
+      fade.type = .fade
+      fade.duration = ThemeCreatorMotion.toneFlipDuration
+      layer.add(fade, forKey: kCATransition)
+    }
+    view.setFlavor(flavor)
   }
 
   /// Sets `themeCrossfadePending` only when the current Space's theme value changed, matched by id so a reorder
@@ -299,7 +388,9 @@ public final class SidebarController {
       self.folderPreview.folderHoverChanged(folder, hovered: hovered)
     }
     page.outlineController.onFoldersChanged = { [weak self] in self?.folderPreview.folderStatesChanged() }
+    page.onEditTheme = { [weak self] page in self?.openThemeCreator(for: page.spaceID) }
     page.outlineController.setRowStates(resolver)
+    if let info = drawnSpace(id) { page.refresh(from: info) }
     pages[id] = page
     return page
   }
@@ -361,7 +452,7 @@ public final class SidebarController {
   }
 
   private var currentFlavor: ThemeFlavor {
-    currentSpace.flatMap { source.space($0)?.theme.flavor } ?? .light
+    currentSpace.flatMap { drawnSpace($0)?.theme.flavor } ?? .light
   }
 
   // MARK: Activation

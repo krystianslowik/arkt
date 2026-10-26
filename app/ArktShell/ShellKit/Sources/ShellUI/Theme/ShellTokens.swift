@@ -90,6 +90,10 @@ public enum ShellTokens {
                                               contactRadius: 1.5, contactOffsetY: 1)
   /// The 0.5 pt edge of a toast-style pill.
   public static let toastEdge = TokenPair(light: .black(0.10), dark: .white(0.14))
+  /// The Space theme creator's popover (#410): porcelain (`BrandTokens.surfaceBrand`'s light) in light, a step above
+  /// graphite in dark, so it lifts off the window. Opaque; `primaryText` and `secondaryText` read on it
+  /// (`ShellTokensContrastTests`).
+  public static let themePopoverSurface = TokenPair(light: .srgb(hex: 0xFAF9F5), dark: .srgb(hex: 0x262927))
   // Space theme background (C6).
   /// Texture overlay alpha at noiseFactor 1: the texture multiplies the gradient by `mix(1, texel, alpha)` with alpha
   /// the noiseFactor itself (parity estimate, PARITY(NEEDS-RUNTIME-CHECK)); each texture's strength is in its texels

@@ -19,18 +19,35 @@ public struct RGBA: Hashable, Sendable, Codable {
   }
 }
 
+/// A Space's theme: its colors, texture and how strongly it covers the window.
+///
+/// Stored since format version 3 with `noiseFactor` and `opacity` (`SidebarStorageFormat`). Older documents decode
+/// with `defaultNoiseFactor(texture:)` and an opacity of 1, which is how they drew before the fields existed.
 public struct SpaceTheme: Hashable, Sendable, Codable {
   public var baseColors: [RGBA]
   public var overlayColors: [RGBA]
   public var texture: String?
+  /// Texture strength, 0...1 (Arc: `Modifiers.noiseFactor`). Kept while `texture` is nil, so choosing a texture
+  /// again restores it.
+  public var noiseFactor: Double
+  /// How strongly the theme covers the window surface, 0 (the plain surface) to 1 (the colors at full strength).
+  public var opacity: Double
   public var isDark: Bool
 
-  public init(baseColors: [RGBA], overlayColors: [RGBA] = [], texture: String? = nil, isDark: Bool = false) {
+  /// `noiseFactor` nil takes `defaultNoiseFactor(texture:)`.
+  public init(baseColors: [RGBA], overlayColors: [RGBA] = [], texture: String? = nil, noiseFactor: Double? = nil,
+              opacity: Double = 1, isDark: Bool = false) {
     self.baseColors = baseColors
     self.overlayColors = overlayColors
     self.texture = texture
+    self.noiseFactor = noiseFactor ?? Self.defaultNoiseFactor(texture: texture)
+    self.opacity = opacity
     self.isDark = isDark
   }
+
+  /// The strength a theme without a stored `noiseFactor` draws at: 0.5 with a texture, 0 without (the values the
+  /// shell used before the field was stored).
+  public static func defaultNoiseFactor(texture: String?) -> Double { texture == nil ? 0 : 0.5 }
 }
 
 /// A Space's icon (BH-034): an SF Symbol name such as "star", or one emoji (a single extended grapheme cluster; the

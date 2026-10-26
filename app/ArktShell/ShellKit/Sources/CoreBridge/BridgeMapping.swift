@@ -81,14 +81,14 @@ enum BridgeMapping {
     }
   }
 
-  /// Colors are stored as sRGB components (`modelColor`). `theme(_:)` reads them back as sRGB, and `noiseFactor` is
-  /// not stored: a theme with no texture and sRGB colors round-trips equal, which is what the header menu's checkmark
-  /// compares.
+  /// Colors are stored as sRGB components (`modelColor`), and `theme(_:)` reads them back as sRGB; `noiseFactor` and
+  /// `opacity` are stored as they are (#410). A theme with sRGB colors round-trips equal, which is what the header
+  /// menu's checkmark compares.
   static func modelTheme(_ theme: SpaceThemeInfo) -> SidebarModel.SpaceTheme {
     SidebarModel.SpaceTheme(
       baseColors: theme.baseColors.map { modelColor($0) },
       overlayColors: theme.overlayColors.map { modelColor($0) },
-      texture: theme.texture, isDark: theme.isDark)
+      texture: theme.texture, noiseFactor: theme.noiseFactor, opacity: theme.opacity, isDark: theme.isDark)
   }
 
   private static let logger = Logger(subsystem: "dev.arkt.shell", category: "bridge")
@@ -127,8 +127,7 @@ enum BridgeMapping {
     guard let theme, !theme.baseColors.isEmpty else { return .bridgeDefault }
     return SpaceThemeInfo(
       baseColors: theme.baseColors.map(rgba), overlayColors: theme.overlayColors.map(rgba), texture: theme.texture,
-      // Arc's noiseFactor is not in the core model yet; a mid value until it is.
-      noiseFactor: theme.texture == nil ? 0 : 0.5, isDark: theme.isDark)
+      noiseFactor: theme.noiseFactor, opacity: theme.opacity, isDark: theme.isDark)
   }
 
   /// Arc stores `extendedSRGB` components; values outside 0...1 are kept.
