@@ -1,6 +1,5 @@
 import Metal
 import QuartzCore
-import Synchronization
 import simd
 
 /// The particle field's GPU side (section 7.4): one compute pass per frame springs every mote toward its target,
@@ -17,28 +16,11 @@ final class ParticleRenderer {
     var preferredFrameRate: Float { self == .full ? 120 : 60 }
   }
 
-  /// GPU milliseconds of the frames completed so far, written from Metal's completion queue.
-  final class GPUTimes: Sendable {
-    private let state = Mutex<(last: Double, overBudget: Int, samples: [Double])>((0, 0, []))
-
-    func record(_ milliseconds: Double) {
-      state.withLock {
-        $0.last = milliseconds
-        $0.overBudget = milliseconds > 2 ? $0.overBudget + 1 : 0
-        if $0.samples.count < 4_096 { $0.samples.append(milliseconds) }
-      }
-    }
-
-    /// Consecutive frames over 2 ms of GPU time.
-    var consecutiveOverBudget: Int { state.withLock { $0.overBudget } }
-    var samples: [Double] { state.withLock { $0.samples } }
-    func reset() { state.withLock { $0 = (0, 0, []) } }
-  }
-
   let device: any MTLDevice
   let tier: Tier
   let count: Int
-  let gpuTimes = GPUTimes()
+  /// GPU milliseconds per frame; 2 ms is the budget the fallback tier watches.
+  let gpuTimes = GPUFrameTimes(budgetMilliseconds: 2)
   private let queue: any MTLCommandQueue
   private let stepPipeline: any MTLComputePipelineState
   private let alphaPipeline: any MTLRenderPipelineState

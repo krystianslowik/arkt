@@ -1602,6 +1602,106 @@ open; a drop keeps open the folders it lands in. A navigated pin dropped in anot
 store its live URL. Follow-up: move `DropGapSprings` into `Motion` and give `SpringField` (#109) its envelope
 settling, so one spring type serves both.
 
+## Space theme textures: grain, sand, denim, tweed (#120) (2026-10-26)
+
+C6 review M6. `ThemeBackgroundView` keeps its API (`themes`, `setPosition`, `replaceThemes`, `mirror`) and now draws
+all four textures instead of drawing every texture as grain.
+
+### Compositing and intensity
+
+- The tiled texture multiplies the gradient: `gradient * mix(1, texel, alpha)`, with `alpha` the overlay alpha and
+  each texture's own strength in its texels. The shell does this with Core Animation: one layer per texture in use, `multiplyBlendMode`, layer
+  opacity = overlay alpha. A theme change between two textures fades one layer out and the other in.
+- `alpha = noiseFactor` (`ShellTokens.themeTextureMaxOpacity` is now 1; the `TODO(parity)` is gone). This mapping is
+  a parity estimate, PARITY(NEEDS-RUNTIME-CHECK). It matches the one Arc measurement
+  there is (about +-3 per channel per pixel over `#7A7A7A`, `2026-10-23-arc-measurements.md`), which grain gives at
+  alpha 0.4 to 0.5, a mid knob. A Space with a known `noiseFactor` measured in Arc would pin it.
+- Sand alone is softened: its overlay alpha is noiseFactor x 0.72 (`ThemeTexture.alphaScale`), after the maintainer's
+  visual review found it slightly too strong at full scale. Grain, denim and tweed are unscaled.
+- The old renderer (soft light at 0.16 x noiseFactor) was mean-preserving and almost invisible on light themes. The
+  multiply darkens by `alpha * (1 - mean texel)` and is visible on light themes, as in Arc.
+
+### Textures
+
+Generated in code at launch (no bitmap asset), deterministic (SplitMix64 seeds), seamless (wraparound filters): each
+texture matches parity-estimate statistics at 2x, as multiply factors.
+
+| Texture | Mean factor | Spread (sd) | Neighbour correlation x / y | Structure |
+|---|---|---|---|---|
+| grain | 0.931 | 0.055 | 0.38 / 0.39 | fine noise, flat at 1 on the light end |
+| sand | 0.656 | 0.207 | 0.55 / 0.54 | coarse noise, wide spread |
+| denim | 0.841 | 0.049 | 0.24 / 0.25 | diagonal twill, period about 4.4 px |
+| tweed | 0.706 | 0.046 | 0.42 / 0.50 | flecks stretched vertically |
+
+Tiles are 100 pt (200 px masters; 1x is the master box-downsampled), anchored at the top left of the window.
+
+### Renderer
+
+- Metal tier: `ThemeGrainRenderer` (shader compiled at run time from source, like the particle field) draws one
+  100 pt tile per texture into a `CAMetalLayer`, once per texture and backing scale; two nested `CAReplicatorLayer`s
+  repeat it across the view. The pager, crossfades and resizes change only opacities and replica counts: no display
+  link, no draw per frame or per resize, no draw while the window is occluded or miniaturized or the view is hidden
+  (deferred to the next occlusion change, unhide or layout). Tiles are synthesized in a `@concurrent` task, never
+  on the main thread; the first draw lands when the upload is done.
+- Fallback tier (no Metal): a Core Animation pattern of the same synthesized tile.
+- `GPUFrameTimes` (ShellUI/Metal) is the particle renderer's GPU time recorder, extracted so both renderers share it.
+
+Numbers (`ThemeGrainRendererTests`, 2x, M2 Pro, load 6 to 20 on 10 cores):
+
+| Measure | Value |
+|---|---|
+| Tile draws per texture | 1 per backing scale |
+| Draws during 240 pager positions / a 120-frame live resize | 0 / 0 |
+| Main thread per resize layout, 2 textures in use | p50 0.04 ms, p95 0.07 ms, max 0.08 ms |
+| GPU per tile draw | at most 0.02 ms |
+| Footprint of two textures in use | +2.0 MB |
+| Space swipe pacing (#24 gate), run alone, load1 5.6 to 6.3, 4 runs | swipe, key and flavor swipe: 0 frames over 8.6 ms, max 8.33 ms, asserted=yes |
+
+A first version drew a window-sized drawable per texture; it cost 18 MB per drawable and a redraw per resize step
+(6.6 ms main thread for two textures), which is why the tiles are replicated instead.
+
+### Window captures (sidebar patch, sRGB 8-bit, noiseFactor 0.5, detrended noise sd per channel R / G / B)
+
+| Theme | Before mean, sd | After mean, sd |
+|---|---|---|
+| light, grain | 250.8 / 195.4 / 209.1, 0.8 / 1.5 / 1.3 | 242.1 / 188.7 / 201.9, 7.0 / 5.5 / 5.8 |
+| light, sand | same as grain | 219.6 / 171.0 / 183.2, 17.8 / 14.0 / 14.9 |
+| light, denim | same as grain | 230.7 / 179.7 / 192.4, 6.1 / 4.9 / 5.1 |
+| light, tweed | same as grain | 213.8 / 166.4 / 178.3, 5.7 / 4.5 / 4.7 |
+| dark, grain | 29.5 / 43.9 / 80.0, 1.2 / 1.1 / 1.8 | 28.5 / 42.5 / 77.1, 1.2 / 1.5 / 2.5 |
+| dark, sand | same as grain | 25.8 / 38.3 / 69.8, 2.2 / 3.3 / 5.7 |
+| dark, denim | same as grain | 27.0 / 40.4 / 73.2, 1.1 / 1.5 / 2.2 |
+| dark, tweed | same as grain | 25.2 / 37.2 / 67.9, 1.0 / 1.2 / 1.8 |
+
+No texture: unchanged (light 250.8 / 195.5 / 209.1, dark 29.5 / 44.0 / 80.0).
+
+### Contrast
+
+The multiply darkens, so `ShellContrastProbe` now also measures every sample multiplied by the theme's mean texture
+factor. `secondaryText` light fell to 4.49:1 (hovered URL bar over the Personal sample's pink stop with grain at
+0.5) and goes from 0.65 to 0.66, the #72 / #310 rule (smallest passing level at 0.01):
+
+| Token | Mode | Before | After | Worst surface |
+|---|---|---|---|---|
+| `secondaryText` | light | 0.65: 4.49:1 | 0.66: 4.60:1 | hovered URL bar over `#F29BBB` darkened by grain at 0.5 |
+
+### Deferred
+
+`overlayColors` (the second gradient layer) and OKLab gradient interpolation stay out: both change every theme's
+pixels and the contrast sampling. Follow-up: #381.
+Reduce Transparency and Increase Contrast: the spec says nothing about the theme texture, so no behavior was added.
+
+Tests (written first; the new ones failed to compile before the code existed), rebased on main with #374: ShellKit
+unit 1013 Swift Testing tests (998 + 15: `ThemeTextureTests`, parameterized over the four textures), all pass.
+ShellKitGUITests 852 run (844 + 8: `ThemeGrainRendererTests`), 5 skipped, all new tests pass. In the full GUI run
+two frame-time gates fail at load1 5 to 7 on 10 cores: `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`
+(late frames 9 and 10 of the keyboard and flavor switches, about 21 ms) and
+`PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`. main (ccc4d43) fails the same two gates the same
+way in a full run at load1 5.8 (844 run, frames 9 and 10 at 20.8 and 21.7 ms), so it is not this change; both pass
+alone on this branch (4 of 4 for the pager gate). ArktCore untouched: 405, all pass. Debug app build succeeds.
+The GUI test windows were covered by other windows on the test desktop, so their tiles were deferred (occluded);
+the pager and resizes do not draw either way.
+
 ## Reopen closed tabs and Peeks, the Peek closed toast (#346, reopen part of #110) (2026-10-26)
 
 One reopen stack per window for closed tabs and closed Peeks (BH-074, BH-150, KB-010, KB-011, KB-079). Cmd-Shift-T
