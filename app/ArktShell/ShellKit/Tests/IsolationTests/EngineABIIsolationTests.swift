@@ -94,7 +94,21 @@ struct EngineABIIsolationTests {
     let products = manifest.matches(of: #/\.library\([^)]*\)/#).map { String($0.output) }
     #expect(!products.isEmpty, "no products found in Package.swift")
     #expect(products.allSatisfy { !$0.contains(Self.module) }, "\(products)")
-    #expect(!(try String(contentsOf: WebKitIsolationTests.projectSpec, encoding: .utf8)).contains(Self.module))
+  }
+
+  /// The app target never depends on the module. Since #268 the Engine configuration names its module map, the one
+  /// a linked ChromiumEngineKit product used to pass, so the kit's swiftmodule loads there; that one flag is the only
+  /// place project.yml may mention the module.
+  @Test func projectSpecNamesTheModuleOnlyInTheEngineModuleMapFlag() throws {
+    let spec = try String(contentsOf: WebKitIsolationTests.projectSpec, encoding: .utf8)
+    let mentions = spec.split(separator: "\n").filter { $0.contains(Self.module) }
+    let allowed = ChromiumEngineKitIsolationTests.settingLines("OTHER_SWIFT_FLAGS", in: spec).filter {
+      $0.configuration == "Engine" && $0.value.contains("-fmodule-map-file=") && $0.value.contains(Self.module)
+    }
+    #expect(mentions.count == allowed.count, "project.yml mentions \(Self.module) outside the Engine module map flag")
+    #expect(allowed.count <= 1)
+    let products = ChromiumEngineKitIsolationTests.packageDependencies(in: spec).map(\.product)
+    #expect(!products.contains(Self.module), "project.yml depends on \(Self.module)")
   }
 
   @Test func targetNamesAreReadFromBothKinds() {
