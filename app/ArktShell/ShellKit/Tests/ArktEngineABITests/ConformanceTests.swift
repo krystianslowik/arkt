@@ -32,6 +32,33 @@ final class TestWindowHost: NSObject, ArktWindowHost {
   var executeCommand: ((Int, Int) -> Void)?
 }
 
+/// A link activation as the facade reports it (#313).
+final class TestLinkActivation: NSObject, ArktLinkActivation {
+  let url: URL
+  let tab: any ArktTabHandle
+  let sourceURL: URL?
+  let modifierFlags: NSEvent.ModifierFlags = .shift
+  let disposition = 1
+  init(url: URL, tab: any ArktTabHandle, sourceURL: URL?) { self.url = url; self.tab = tab; self.sourceURL = sourceURL }
+}
+
+/// A host that takes the optional link and key seams (#313).
+final class TestLinkHost: NSObject, ArktWindowHost {
+  let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+                        backing: .buffered, defer: true)
+  let cardView = NSView()
+  var closeRequested: (() -> Void)?
+  var validateCommand: ((Int) -> Bool)?
+  var executeCommand: ((Int, Int) -> Void)?
+  var asked: [URL] = []
+  var keys: [UInt16] = []
+  func decideLinkActivation(_ activation: any ArktLinkActivation) -> ArktLinkDecision {
+    asked.append(activation.url)
+    return .cancel
+  }
+  func unhandledKeyDown(_ event: NSEvent, in tab: (any ArktTabHandle)?) { keys.append(event.keyCode) }
+}
+
 final class TestWindowRequest: NSObject, ArktWindowRequest {
   let kind: ArktWindowRequestKind
   let opener: (any ArktBrowserHandle)?
@@ -437,6 +464,25 @@ struct ConformanceTests {
     #expect(!host.responds(to: #selector(ArktWindowHost.tabListChanged(_:))))
     #expect(!host.responds(to: #selector(setter: ArktWindowHost.activateTab)))
     #expect(host.responds(to: #selector(setter: ArktWindowHost.closeRequested)))
+    #expect(!host.responds(to: #selector(ArktWindowHost.decideLinkActivation(_:))))
+  }
+
+  @Test func linkAndKeySeamsAreOptionalHostMembers() throws {
+    let host = TestLinkHost()
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: host)
+    let tab = browser.createTab(url: URL(string: "https://mail.test/")!, active: true)
+    let seam: any ArktWindowHost = host
+    let answer = seam.decideLinkActivation?(TestLinkActivation(url: URL(string: "https://atlas.test/")!, tab: tab,
+                                                               sourceURL: tab.url))
+    #expect(answer == .cancel)
+    let escape = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                               windowNumber: 0, context: nil, characters: "\u{1b}",
+                                               charactersIgnoringModifiers: "\u{1b}", isARepeat: false,
+                                               keyCode: 53))
+    seam.unhandledKeyDown?(escape, in: tab)
+    #expect(host.asked == [URL(string: "https://atlas.test/")!] && host.keys == [53])
+    withExtendedLifetime(engine) {}
   }
 
   @Test func extensionActionsAndTestAPIGoThroughTheFacade() {
@@ -489,5 +535,6 @@ struct ConformanceTests {
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
              .windowOpened, .windowClosed, .extensionActionsChanged].map(\.rawValue) == Array(0...13))
     #expect([ArktWindowRequestKind.extension, .page, .reopen, .startupURL].map(\.rawValue) == Array(0...3))
+    #expect([ArktLinkDecision.navigate, .cancel].map(\.rawValue) == [0, 1])
   }
 }

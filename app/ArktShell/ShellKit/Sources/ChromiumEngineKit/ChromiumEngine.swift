@@ -190,7 +190,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
 
   @discardableResult
   public func createWindow(host: any EngineWindowHosting) -> EngineWindowID {
-    let adapter = WindowHostAdapter(host: host)
+    let adapter = makeAdapter(host: host)
     let browser = facade.createBrowser(host: adapter)
     let id = EngineWindowID()
     register(browser, adapter: adapter, as: id)
@@ -247,9 +247,16 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
       preconditionFailure("ChromiumEngine has no windowHostProvider for an engine window request")
     }
     let engineRequest = engineRequest(from: request)
-    let adapter = WindowHostAdapter(host: provider(engineRequest))
+    let adapter = makeAdapter(host: provider(engineRequest))
     pendingHosts[ObjectIdentifier(adapter)] = PendingHost(id: EngineWindowID(), adapter: adapter,
                                                           kind: engineRequest.kind)
+    return adapter
+  }
+
+  /// An adapter that maps the facade's tab handles to this instance's ids (#313).
+  private func makeAdapter(host: any EngineWindowHosting) -> WindowHostAdapter {
+    let adapter = WindowHostAdapter(host: host)
+    adapter.resolveTab = { [weak self] handle in self?.tabByHandle[ObjectIdentifier(handle)] }
     return adapter
   }
 

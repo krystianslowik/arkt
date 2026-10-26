@@ -75,6 +75,14 @@ public protocol EngineWindowHosting: AnyObject {
   /// Set by the engine. The host calls it when the user asks to close the window (close button, Close Window) and
   /// never closes the window itself: the engine closes its tabs and then reports `.windowClosed`.
   var onCloseRequested: (@MainActor () -> Void)? { get set }
+  /// A user link activation in one of this window's tabs, before the engine navigates (#313). Called from inside the
+  /// engine's navigation start: it must not call the engine. To open the link elsewhere, answer `.cancel` and act
+  /// after the call returns. Default (`EngineLinks.swift`): `.navigate`.
+  func decideLinkActivation(_ activation: EngineLinkActivation) -> EngineLinkDecision
+  /// A key down that a page of this window did not handle (Esc the page did not use), with the tab it was sent to.
+  /// True when the host took it. Called after the engine finished with the event, never from inside the page's own
+  /// handling. Default: false.
+  func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool
 }
 
 /// Why the engine asks for a window of its own (Decision 2).
