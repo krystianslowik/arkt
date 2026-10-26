@@ -108,6 +108,7 @@ public final class OnboardingController {
     view.onBack = { [weak self] in self?.back() }
     view.onSkipSetup = { [weak self] in self?.askSkipSetup() }
     view.onAppearanceChange = { [weak self] in self?.systemAppearanceChanged() }
+    view.onResize = { [weak self] in self?.relayout() }
     displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
     ) { [weak self] _ in
@@ -134,6 +135,7 @@ public final class OnboardingController {
     view.frame = root.bounds
     view.autoresizingMask = [.width, .height]
     root.addSubview(view)
+    view.layoutSubtreeIfNeeded()                      // the stage builds its first shape from the laid-out views
     hideBrowser(true)
     if case .imported = flow.importPhase { importedSpaces = Array(window.sidebar.spaceOrder.prefix(1)) }
     showStep(animated: false, firstReveal: options.resume == nil)
@@ -747,6 +749,13 @@ public final class OnboardingController {
     view.stage.show(view.stepView.map(formation(for:)) ?? .none, appearance: appearance, animated: false)
     view.setWash(flow.step == .theme ? theme?.resolvedTheme : nil, animated: false)
     refreshFooter(animated: false)
+  }
+
+  /// A resize moves the step's views: the stage's shape follows them.
+  private func relayout() {
+    guard !isFinished, let stepView = view.stepView else { return }
+    stepView.layoutSubtreeIfNeeded()
+    view.stage.show(formation(for: stepView), appearance: view.appearanceModel, animated: false)
   }
 
   /// Occluded, miniaturized or hidden: the stage draws no frames.

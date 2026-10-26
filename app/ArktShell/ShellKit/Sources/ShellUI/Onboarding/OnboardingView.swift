@@ -15,6 +15,9 @@ final class OnboardingView: NSView {
   var onSkipSetup: (@MainActor () -> Void)?
   /// The window's light or dark appearance changed.
   var onAppearanceChange: (@MainActor () -> Void)?
+  /// The window was resized: shapes are built again from the new layout.
+  var onResize: (@MainActor () -> Void)?
+  private var laidOutSize = NSSize.zero
 
   let surface = CALayer()
   let wash = CAGradientLayer()
@@ -141,6 +144,11 @@ final class OnboardingView: NSView {
     }
     stage.view.frame = bounds
     stepView?.frame = bounds
+    if laidOutSize != bounds.size {
+      let first = laidOutSize == .zero
+      laidOutSize = bounds.size
+      if !first { onResize?() }
+    }
     let y = bounds.height - 16 - PillButton.quietHeight
     let back = backButton.intrinsicContentSize, skip = skipButton.intrinsicContentSize
     backButton.frame = NSRect(x: 26 - 14, y: y, width: back.width, height: back.height)
