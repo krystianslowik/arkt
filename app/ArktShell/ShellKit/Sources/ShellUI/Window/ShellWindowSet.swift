@@ -180,6 +180,16 @@ public final class ShellWindowSet {
     return little
   }
 
+  // MARK: Tab Handoff (#300, BH-066)
+
+  /// The other window that has `node`'s page lets go of it for `taker`. Little Arkt windows have no rows.
+  private func releaseLiveTab(of node: NodeID, for taker: ShellWindowController?) -> LiveTabHandoff {
+    guard let holder = controllers.first(where: { $0 !== taker && $0.engineTab(of: node) != nil }) else {
+      return .notLive
+    }
+    return holder.releaseLiveTab(of: node)
+  }
+
   // MARK: Unions over the open windows
 
   /// The tabs any window shows (quit stamps them, decision 10).
@@ -206,6 +216,9 @@ public final class ShellWindowSet {
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
                                            opensFirstTab: opensFirstTab)
     controller.onNewWindow = { [weak self] in self?.openWindow(opensFirstTab: false) }
+    controller.onTakeOverLiveTab = { [weak self, weak controller] node in
+      self?.releaseLiveTab(of: node, for: controller) ?? .notLive
+    }
     windows.append(controller)
     trackMain(controller)
     configure?(controller)

@@ -16,7 +16,12 @@ final class WindowHostAdapter: NSObject, ArktWindowHost {
     self.host = host
   }
 
-  var window: NSWindow { host.window }
+  /// The host's window until the engine window closes, then `detachedWindow`.
+  var window: NSWindow { detachedWindow ?? host.window }
+  /// A window never shown, the facade's window after `detach()`. Chromium orders its host window out when it tears a
+  /// closed window down (`ArktBrowserWindow::UnbindHost`), after `.windowClosed`; by then the shell has decided about
+  /// its own window: it closes it, or keeps it open when its last page moved to another window (#300).
+  private var detachedWindow: NSWindow?
   var cardView: NSView { host.cardView }
 
   var closeRequested: (() -> Void)? {
@@ -61,8 +66,13 @@ final class WindowHostAdapter: NSObject, ArktWindowHost {
     _ = host.handleUnhandledKeyDown(event, in: tab.flatMap { resolveTab?($0) })
   }
 
-  /// The window is gone: the host keeps no engine closures.
+  /// The window is gone: the host keeps no engine closures, and its window is no longer the facade's.
   func detach() {
+    if detachedWindow == nil {
+      let stand = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: true)
+      stand.isReleasedWhenClosed = false
+      detachedWindow = stand
+    }
     closeRequested = nil
     validateCommand = nil
     executeCommand = nil

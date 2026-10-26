@@ -1383,7 +1383,7 @@ Spec section 2.4 (BH-055 to BH-066).
   opening the rename field (BH-038; TB24's title-toggle variant is not taken).
 - **BH-066.** Two windows already show the same Space's pinned and Today tabs (one source). The one-loaded-copy
   handoff is deferred to #300 (the known bug: selecting a row that is live in another window loads the page a
-  second time).
+  second time). Done in #300: the page moves to the selecting window (engine week-3 results, "#300").
 
 Tests (after rebasing on main with #349): ArktCore 387 (not touched). ShellKit non-GUI 798 passed (791 + 7 new:
 `PinnedTabLogicTests`; `ReservedKeysTests` moves Cmd-D into the reserved set); ShellKitGUITests 636 executed, 9

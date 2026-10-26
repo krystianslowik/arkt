@@ -56,7 +56,10 @@ extension ShellWindowController {
     case .extensionActionsChanged:
       refreshExtensions()
     case .windowClosed:
-      // Its tabs reported `.tabClosed(reason: .windowClosing)` already (contract rule 11).
+      // Its tabs reported `.tabClosed(reason: .windowClosing)` already (contract rule 11). A window whose last page
+      // moved to another window (#300) stays open without an engine window; the next page it shows makes a new one.
+      let keepsWindow = handsOffEngineWindow && !isWindowCloseRequested
+      handsOffEngineWindow = false
       engineWindow = nil
       engineActiveTab = nil
       isWindowCloseRequested = false
@@ -66,7 +69,7 @@ extension ShellWindowController {
       pendingArchives = [:]
       expectsEngineReactivation = false
       refreshExtensions()
-      window?.close()
+      if !keepsWindow { window?.close() }
     }
   }
 

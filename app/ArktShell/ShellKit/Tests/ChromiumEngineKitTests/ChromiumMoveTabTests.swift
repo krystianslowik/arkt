@@ -45,6 +45,28 @@ struct ChromiumMoveTabTests {
     #expect(!recorder.events.contains { if case .tabClosed = $0 { true } else { false } })
   }
 
+  /// Chromium orders its host window out when it tears down a closed window (`ArktBrowserWindow::UnbindHost`), after
+  /// `.windowClosed`. A main window whose last page moved to another window stays open (#300), so once the window is
+  /// reported closed the host's window is no longer the one the facade sees.
+  @Test func aClosedWindowsTeardownCannotHideTheHostWindow() throws {
+    facade.holdsBatches = true
+    let engine = ChromiumEngine(facade: facade)
+    let host = StubWindowHost()
+    let left = engine.createWindow(host: host)
+    let other = engine.createWindow(host: StubWindowHost())
+    let tab = engine.createTab(url: URL(string: "arkt-test://page/Moved"), in: left)
+    facade.flush()
+    let browser = try #require(facade.browsers.first as? ScriptedBrowser)
+    #expect(browser.host.window === host.window)
+
+    engine.moveTab(tab, to: other)
+    facade.flush()
+
+    #expect(!engine.windowIDs.contains(left))
+    #expect(browser.host.window !== host.window)
+    #expect(!browser.host.window.isVisible)
+  }
+
   @Test func ownWindowAndUnknownWindowAreNoOps() {
     facade.holdsBatches = true
     let engine = ChromiumEngine(facade: facade)

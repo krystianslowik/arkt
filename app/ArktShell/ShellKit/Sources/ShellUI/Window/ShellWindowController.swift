@@ -81,6 +81,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A sidebar mutation failed (for example `addTab` into a location the model refuses). Default: a toast whose
   /// text names the failed mutation (`errorText(for:error:)`).
   public var onError: (@MainActor (SidebarMutation, any Error) -> Void)?
+  /// Asks the other windows of the set for a row's live page (Tab Handoff, #300); set by `ShellWindowSet`. Nil: a
+  /// window on its own, which always loads the page.
+  var onTakeOverLiveTab: (@MainActor (NodeID) -> LiveTabHandoff)?
+  /// The placeholder shown where a page moved to another window (#300); made on the first handoff.
+  var handoffPlaceholder: HandoffPlaceholderView?
+  /// This window's last page moved to another window: the engine closes the emptied engine window, and this window
+  /// stays open without one (#300).
+  var handsOffEngineWindow = false
   /// Engine tabs are created lazily, when a sidebar node is first shown (`openEngineTab(for:)`).
   var tabsByNode: [NodeID: TabID] = [:]
   var nodeByTab: [TabID: NodeID] = [:]
@@ -102,7 +110,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The tabs this window shows: the current one, every pane with a page of a shown split, or none.
   public var visibleNodes: Set<NodeID> { Set(shownNodes) }
   /// `visibleNodes` in pane order; changed only through `setShown(_:)` and `.tabClosed`.
-  private var shownNodes: [NodeID] = []
+  private(set) var shownNodes: [NodeID] = []
   var currentNode: NodeID? { currentTab.flatMap { nodeByTab[$0] } }
   /// Split View window state (S4): the shown split, last focused and closed panes. Window lifetime, not persisted.
   var splitState = SplitWindowState()
@@ -552,11 +560,18 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// `deactivate(node:)` (#156 review).
   ///
   /// The first one creates this window's engine window (week-3 decision 4), and every tab lands in that window
-  /// (the `in:` form of `createTab`), so with two windows a tab never opens in the other one.
+  /// (the `in:` form of `createTab`), so with two windows a tab never opens in the other one. A row whose page is live
+  /// in another window gets that page moved here instead (Tab Handoff, #300).
   func openEngineTab(for node: NodeID) -> TabID? {
     if let existing = tabsByNode[node] { return existing }
     guard case .tab(_, let url, _)? = sidebar.node(node) else { return nil }
+    switch onTakeOverLiveTab?(node) ?? .notLive {                  // one loaded copy (BH-066)
+    case .released(let tab): return adoptHandedOffTab(tab, for: node)
+    case .held: return nil
+    case .notLive: break
+    }
     let tab = engine.createTab(url: url, in: ensureEngineWindow())
+    handsOffEngineWindow = false
     tabsByNode[node] = tab
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)

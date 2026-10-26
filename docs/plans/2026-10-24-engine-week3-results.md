@@ -400,7 +400,7 @@ ARKT_CONTRACT exit 0
 | Services submenu under Arkt's App menu | PASS | 23 items with text selected in the page |
 | Edit menu with page focus | PASS | Select All selects the page field's text; Cut, Copy, Paste enabled |
 | Dock reopen with no window | PASS (gap #299) | both windows closed (`browsers normal=0`), `open -a` on the running app: `window request kind reopen`, an adopted shell window on Space 1; Chromium's `chrome://newtab/` became a Today row (#299) |
-| Two windows on one Space | gap #300 | selecting a row live in the other window loads it again |
+| Two windows on one Space | gap #300 | selecting a row live in the other window loads it again (fixed: the #300 section below) |
 | Empty Space, Space title, stale tooltip | gap #301 | |
 
 **Page commands (W3-8 step 4)**, AX menu clicks, window frontmost, page focused:
@@ -2834,3 +2834,50 @@ hand with a trackpad. Reduce Motion was not toggled on the shared machine; cover
 - A popup without a position is centered over the last active window by the engine, not over its opener window: the
   request does not carry the opener.
 - The remembered size lasts for the session (#353 persists it).
+
+## #300: one loaded copy (Tab Handoff, BH-066)
+
+Date 2026-10-26. Branch `fix/300-one-loaded-copy` off `main` at `751efac`. Swift only: no patch, no overlay change,
+`.patches` unchanged (7), no Chromium rebuild.
+
+### Behaviour
+
+BH-066 (CONFIRMED): two windows show the same Space, and a tab's web content is loaded in only one window at a time
+(Tab Handoff). Selecting a row whose page is live in another window now moves that page into the selecting window
+with #314's no-reload move (`EngineClient.moveTab`), with its history and state; nothing loads again. The window the
+page left keeps the row (no longer selected there) and, where it showed the page, shows a placeholder ("This tab is
+open in another window." and Move Here [I]); selecting the row there, or Move Here, moves the page back. The engine's
+own pick of a next active tab in that window is not followed. A window whose last page moved out stays open without
+an engine window, as after New Window; its next page makes a new one. A page whose close is held behind a leave-site
+prompt stays where it is and nothing loads.
+
+### What landed
+
+- `ShellWindowController.openEngineTab(for:)`, the one place every window creates engine tabs (click, keyboard, the
+  archive successor, split panes), asks the window set first (`onTakeOverLiveTab`, wired by `ShellWindowSet`). The
+  holding window lets go (`releaseLiveTab(of:)`: mappings, row state, shown nodes, a shown pane closes as when its
+  page closed), then the taker maps the tab and calls `moveTab` (`adoptHandedOffTab`).
+- `.windowClosed` after a handoff of the last page keeps the shell window (`handsOffEngineWindow`).
+- `WindowHostAdapter.detach()` gives the facade a never-shown stand-in window: Chromium orders its host window out in
+  `ArktBrowserWindow::UnbindHost` when it destroys a closed window, after `.windowClosed`, which hid the shell window
+  whose last page moved out. The shell already closes its own windows on `.windowClosed` (main and Little Arkt).
+- `HandoffPlaceholderView` (`AXID.Handoff`).
+
+### Checks (Engine app on `out/Spike`, `$CHROMIUM_ROOT/embed-300`, profile `$PROF/300-try`, scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and defaults suite, loopback pages on `127.0.0.1`, keys through System Events into the app's frontmost window)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Select in window B the row shown in window A | PASS | CDP page targets before and after the same 3 ids; `facade moving session id ... to window ...`, `TabMoved`, no `client tab inserted`; the page's marker, typed field text and `performance.timeOrigin` unchanged (no reload); window A shows the placeholder (window-only screenshots) |
+| Move every page of A into B | PASS after a fix | before the adapter fix window A left the screen (`native window destroyed` ordered the host out); after it, A stays on screen with the placeholder, `browsers normal=1` |
+| Select the row again in A | PASS | `facade createBrowser(host:)` for A's new engine window, `facade moving session id ...`; same target id, marker and `timeOrigin`; 3 page targets |
+
+### Verification
+
+- Red first: `TabHandoffTests` (8 GUI tests) failed to compile before the seam existed; a ninth, added with the
+  real-app check (every page moved out one by one), passed at once on `InMemoryEngine`;
+  `ChromiumMoveTabTests.aClosedWindowsTeardownCannotHideTheHostWindow` failed (the facade still saw the host's window).
+- ShellKit `swift test --skip ShellKitGUITests`: 863 passed (862 + 1). `swift test --filter ShellKitGUITests`: 711 run
+  (702 + 9), 5 skipped, 0 failures apart from the frame-time gates `PeekMotionOnScreenTests` and
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` at load 4 with other worktrees' work running; the
+  pacing gate fails the same way on `main` without this change, and the Peek gate passed alone. ArktCore is not
+  touched. Debug and Engine apps: `BUILD SUCCEEDED`.
