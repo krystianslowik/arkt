@@ -1,5 +1,5 @@
 import AppKit
-import CoreBridge
+@testable import CoreBridge
 import EngineAPI
 import EngineAPITestSupport
 import SidebarModel
@@ -273,13 +273,226 @@ final class PeekWindowTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// Switching to another tab removes the Peek (it is not kept for a return yet).
-  func testShowingAnotherTabRemovesThePeek() throws {
+  // MARK: Across tab and Space switches (#348)
+
+  /// Switching to another tab hides the Peek with its live page: no overlay, no recede, no row, nothing on the
+  /// reopen stack, and the URL bar shows the new tab.
+  func testShowingAnotherTabHidesThePeekAndKeepsItsPage() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let rows = harness.source.children(of: .today(world.space))
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+
+    XCTAssertNil(harness.peek.session)
+    XCTAssertNil(harness.peek.overlay)
+    XCTAssertNotNil(harness.engine.snapshot(of: session.tab), "the Peek's page stays live")
+    XCTAssertEqual(harness.peek.hiddenPeeks[session.source]?.tab, session.tab)
+    XCTAssertNil(harness.controller.nodeByTab[session.tab], "still no row")
+    XCTAssertEqual(harness.source.children(of: .today(world.space)), rows)
+    XCTAssertTrue(harness.controller.reopenStack.isEmpty, "a hidden Peek is not a closed one")
+    XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(harness.controller.rootView.card.layer?.transform)))
+    XCTAssertEqual(harness.controller.currentTab, harness.tab(world.today[0]))
+    XCTAssertNotEqual(harness.controller.urlBar.url, Self.atlas)
+    harness.controller.close()
+  }
+
+  /// Coming back to the source brings the same Peek back, its page untouched, with the open motion.
+  func testReturningToTheSourceRestoresTheSamePeekWithTheOpenMotion() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     let session = try openPeek(harness, world)
+    harness.settle()
     harness.controller.activate(node: world.today[0])
+    harness.controller.activate(node: world.pinned)
+
+    let restored = try XCTUnwrap(harness.peek.session)
+    XCTAssertEqual(restored.tab, session.tab, "the same tab, never closed or reloaded")
+    XCTAssertEqual(restored.source, session.source)
+    XCTAssertEqual(restored.phase, .opening)
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    let overlay = try XCTUnwrap(harness.peek.overlay)
+    XCTAssertTrue(overlay.card.page === harness.engine.contentView(for: session.tab))
+    XCTAssertEqual(overlay.scene[.cardScale], 0.90, accuracy: 0.01, "the open starts small")
+    XCTAssertLessThan(overlay.scene[.cardOpacity], 0.1)
+    XCTAssertEqual(harness.controller.urlBar.url, Self.atlas)
+    harness.settle()
+    XCTAssertEqual(harness.peek.session?.phase, .open)
+    let transform = try XCTUnwrap(harness.controller.rootView.card.layer?.transform)
+    XCTAssertEqual(transform.m11, 0.985, accuracy: 1e-6, "the source recedes again")
+
+    harness.peek.close(.control)                       // a close by the user still goes on the stack (#346)
+    harness.settle()
     XCTAssertNil(harness.peek.session)
+    XCTAssertEqual(harness.controller.reopenStack.items.count, 1)
+    harness.controller.close()
+  }
+
+  /// Reduce Motion: the restored Peek fades in at its frame.
+  func testReduceMotionRestoresThePeekWithAFade() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar, reduceMotion: true)
+    _ = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+    harness.controller.activate(node: world.pinned)
+
+    let overlay = try XCTUnwrap(harness.peek.overlay)
+    XCTAssertEqual(overlay.scene[.cardScale], 1)
+    XCTAssertEqual(overlay.scene[.cardX], 0)
+    XCTAssertEqual(overlay.scene[.cardY], 0)
+    XCTAssertLessThan(overlay.scene[.cardOpacity], 0.1, "the restore starts transparent")
+    harness.settle()
+    XCTAssertEqual(overlay.scene[.cardOpacity], 1)
+    XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(harness.controller.rootView.card.layer?.transform)))
+    harness.controller.close()
+  }
+
+  /// A Space switch hides the Peek as a tab switch does; coming back to the Space shows its source and the Peek.
+  func testSwitchingSpaceHidesThePeekAndComingBackRestoresIt() throws {
+    var world = try Self.makeWorld()
+    let home = world.sidebar.addSpace(title: "Home")
+    let other = try world.sidebar.addTab(url: URL(string: "https://notes.example/home")!, title: "Home",
+                                         in: .today(home))
+    let empty = world.sidebar.addSpace(title: "Empty")
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+
+    harness.controller.activate(node: other)                   // a tab of another Space
+    XCTAssertEqual(harness.controller.currentSpace, home)
+    XCTAssertNil(harness.peek.session)
+    XCTAssertNotNil(harness.engine.snapshot(of: session.tab))
+    harness.controller.activate(node: world.pinned)
+    XCTAssertEqual(harness.peek.session?.tab, session.tab)
+    harness.settle()
+
+    harness.controller.sidebarController.showSpace(empty)      // a Space with no tab to show
+    XCTAssertNil(harness.controller.currentTab)
+    XCTAssertNil(harness.peek.session)
+    XCTAssertNotNil(harness.peek.hiddenPeeks[session.source])
+    harness.controller.activate(node: world.pinned)
+    XCTAssertEqual(harness.peek.session?.tab, session.tab)
+    harness.controller.close()
+  }
+
+  /// One hidden Peek per source tab; each comes back over its own source only.
+  func testEachSourceKeepsItsOwnHiddenPeek() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let first = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+    XCTAssertEqual(try harness.click(Self.atlas, in: world.today[0], modifiers: .shift, disposition: .newWindow),
+                   .cancel)
+    let second = try XCTUnwrap(harness.peek.session)
+    XCTAssertNotEqual(second.tab, first.tab)
+    harness.settle()
+
+    harness.controller.activate(node: world.today[1])
+    XCTAssertEqual(Set(harness.peek.hiddenPeeks.keys), [first.source, second.source])
+    harness.controller.activate(node: world.pinned)
+    XCTAssertEqual(harness.peek.session?.tab, first.tab)
+    XCTAssertEqual(Array(harness.peek.hiddenPeeks.keys), [second.source])
+    harness.controller.activate(node: world.today[0])
+    XCTAssertEqual(harness.peek.session?.tab, second.tab)
+    XCTAssertEqual(Array(harness.peek.hiddenPeeks.keys), [first.source])
+    harness.controller.close()
+  }
+
+  /// The source closing while its Peek is hidden closes the Peek too.
+  func testClosingTheSourceOfAHiddenPeekClosesThePeek() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+    harness.engine.engineCloseTab(session.source, reason: .page)
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    XCTAssertNil(harness.engine.snapshot(of: session.tab))
+    XCTAssertNil(harness.peek.session)
+    harness.controller.close()
+  }
+
+  /// A hidden Peek whose page closes itself is gone, with nothing to bring back.
+  func testAHiddenPeekWhosePageClosesItselfIsDropped() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+    harness.engine.engineCloseTab(session.tab, reason: .page)
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    harness.controller.activate(node: world.pinned)
+    XCTAssertNil(harness.peek.session)
+    XCTAssertTrue(harness.controller.reopenStack.isEmpty)
+    harness.controller.close()
+  }
+
+  /// Tab Handoff (#300): the source's page moving to another window closes its hidden Peek, parked on this window's
+  /// reopen stack.
+  func testHandingOffTheSourceClosesItsHiddenPeek() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+    XCTAssertEqual(harness.controller.releaseLiveTab(of: world.pinned), .released(session.source))
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    XCTAssertNil(harness.engine.snapshot(of: session.tab))
+    guard case .peek(let closed)? = harness.controller.reopenStack.items.last else {
+      return XCTFail("the Peek is on the reopen stack")
+    }
+    XCTAssertEqual(closed.sourceNode, world.pinned)
+    XCTAssertEqual(closed.url, Self.atlas)
+    harness.controller.close()
+  }
+
+  /// Tab Handoff of the source while its Peek is shown closes the Peek the same way.
+  func testHandingOffTheSourceOfAShownPeekClosesIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    XCTAssertEqual(harness.controller.releaseLiveTab(of: world.pinned), .released(session.source))
+    XCTAssertNil(harness.peek.session)
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    XCTAssertNil(harness.engine.snapshot(of: session.tab))
+    XCTAssertEqual(harness.controller.reopenStack.items.count, 1)
+    harness.controller.close()
+  }
+
+  /// Deleting the Space that holds a hidden Peek's source closes the Peek's tab with it: nothing is left hidden.
+  func testDeletingTheSpaceOfAHiddenPeeksSourceClosesThePeek() throws {
+    var world = try Self.makeWorld()
+    let home = world.sidebar.addSpace(title: "Home")
+    let other = try world.sidebar.addTab(url: URL(string: "https://notes.example/home")!, title: "Home",
+                                         in: .today(home))
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: other)
+    XCTAssertNotNil(harness.peek.hiddenPeeks[session.source])
+
+    _ = harness.source.removeSpace(world.space, at: Self.now)
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    XCTAssertNil(harness.engine.snapshot(of: session.tab), "no live page outlives its source")
+    XCTAssertNil(harness.peek.session)
+    harness.controller.close()
+  }
+
+  /// The engine window closing (the window's close, or quit) takes a hidden Peek's tab with it.
+  func testClosingTheWindowClosesAHiddenPeeksTab() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+    XCTAssertNotNil(harness.peek.hiddenPeeks[session.source])
+
+    harness.engine.closeWindow(try XCTUnwrap(harness.controller.engineWindow))
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
     XCTAssertNil(harness.engine.snapshot(of: session.tab))
     harness.controller.close()
   }

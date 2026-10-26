@@ -284,19 +284,39 @@ final class ReopenClosedTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// #349: switching tab closes the Peek; Cmd-Shift-T brings back its source and the Peek over it.
-  func testAPeekClosedByATabSwitchComesBackOverItsSource() throws {
+  /// #348: a tab switch hides the Peek instead of closing it, so there is nothing to reopen; going back shows it.
+  func testATabSwitchKeepsThePeekOffTheStackAndTheReturnBringsItBack() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     let session = try harness.openPeek(over: world.pinned)
     harness.controller.activate(node: world.today[0])
     XCTAssertNil(harness.peek.session)
+    XCTAssertFalse(harness.controller.canReopenClosed)
+
+    harness.controller.activate(node: world.pinned)
+    XCTAssertEqual(harness.peek.session?.tab, session.tab)
+    harness.controller.close()
+  }
+
+  /// Archiving the source while its Peek is hidden closes both; Cmd-Shift-T brings both back together.
+  func testArchivingTheSourceOfAHiddenPeekReopensBothTogether() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try harness.openPeek(over: world.today[2], shift: true)
+    harness.controller.activate(node: world.today[0])
+    XCTAssertNil(harness.peek.session)
+    harness.controller.close(node: world.today[2])            // the row's X, with the Peek hidden
+    XCTAssertNil(harness.source.node(world.today[2]))
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    XCTAssertNil(harness.engine.snapshot(of: session.tab))
+    XCTAssertEqual(harness.controller.reopenStack.items.count, 1, "one item for both")
 
     harness.controller.reopenClosedTab(nil)
-    XCTAssertEqual(harness.controller.currentNode, world.pinned)
+    XCTAssertEqual(harness.controller.currentNode, world.today[2])
     let reopened = try XCTUnwrap(harness.peek.session)
-    XCTAssertEqual(reopened.source, session.source)
+    XCTAssertEqual(reopened.source, harness.tab(world.today[2]))
     XCTAssertEqual(harness.engine.snapshot(of: reopened.tab)?.url, Self.atlas)
+    XCTAssertFalse(harness.controller.canReopenClosed)
     harness.controller.close()
   }
 
