@@ -30,6 +30,7 @@ final class ThemeCreatorController {
   private var leavingDot: Int?
   private var outsideClickMonitor: Any?
   private var imagesObserver: (any NSObjectProtocol)?
+  private var resignKeyObserver: (any NSObjectProtocol)?
   private(set) var isClosed = false
   /// Runs once the popover has closed.
   var onClose: (() -> Void)?
@@ -77,6 +78,8 @@ final class ThemeCreatorController {
     var y = host.isFlipped ? anchor.y - arrow : anchor.y + arrow - size.height
     y = min(max(y, 8), max(host.bounds.height - size.height - 8, 8))
     view.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
+    // Stays level with the Space name when the window resizes: the margin below the popover is the flexible one.
+    view.autoresizingMask = host.isFlipped ? [.maxYMargin] : [.minYMargin]
     apply(animated: false)
     host.addSubview(view, positioned: .above, relativeTo: nil)
     view.layoutSubtreeIfNeeded()
@@ -87,6 +90,12 @@ final class ThemeCreatorController {
       [weak self] event in
       MainActor.assumeIsolated { self?.handleOutsideClick(event) }
       return event
+    }
+    // Like a transient popover, it closes when the window stops being key (another app or window took the focus).
+    resignKeyObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.didResignKeyNotification, object: host.window, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.close(animated: true) }
     }
   }
 
@@ -105,6 +114,8 @@ final class ThemeCreatorController {
     outsideClickMonitor = nil
     if let imagesObserver { NotificationCenter.default.removeObserver(imagesObserver) }
     imagesObserver = nil
+    if let resignKeyObserver { NotificationCenter.default.removeObserver(resignKeyObserver) }
+    resignKeyObserver = nil
     sidebar?.previewTheme(nil, for: spaceID)
     registerUndo()
     let window = view.window

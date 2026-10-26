@@ -387,6 +387,40 @@ final class ThemeCreatorTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// It behaves like a transient popover: a click inside keeps it, a click outside it closes it, and so does the
+  /// window resigning key. It stays level with the Space name when the window resizes.
+  func testOutsideClickAndResignKeyCloseAndResizeKeepsItAnchored() throws {
+    let harness = Harness()
+    let window = try XCTUnwrap(harness.controller.window)
+    let root = harness.controller.rootView
+    var popover = try harness.open()
+    let title = try XCTUnwrap(harness.page(harness.ids[0])?.titleLabel)
+    func arrowOffset() -> CGFloat {
+      let titleMid = title.convert(NSPoint(x: title.bounds.midX, y: title.bounds.midY), to: root)
+      let arrowY = root.isFlipped ? popover.frame.minY + ThemeCreatorMetrics.arrowCenterY
+        : popover.frame.maxY - ThemeCreatorMetrics.arrowCenterY
+      return arrowY - titleMid.y
+    }
+    window.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 700), display: false)
+    root.layoutSubtreeIfNeeded()
+    XCTAssertEqual(arrowOffset(), 0, accuracy: 0.5)
+
+    // Local monitors see events only through NSApp.sendEvent.
+    let inside = NSPoint(x: popover.bounds.midX, y: popover.bounds.maxY - 12)
+    NSApp.sendEvent(try harness.event(.leftMouseDown, at: inside, in: popover))
+    NSApp.sendEvent(try harness.event(.leftMouseUp, at: inside, in: popover))
+    XCTAssertNotNil(harness.creator)
+    let outside = NSPoint(x: root.bounds.maxX - 40, y: root.bounds.midY)
+    NSApp.sendEvent(try harness.event(.leftMouseDown, at: outside, in: root))
+    NSApp.sendEvent(try harness.event(.leftMouseUp, at: outside, in: root))
+    XCTAssertNil(harness.creator)
+
+    popover = try harness.open()
+    NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+    XCTAssertNil(harness.creator)
+    harness.controller.close()
+  }
+
   /// The pad field and texture previews are built off the main thread; the popover shows them once they are ready.
   func testThePadFieldAndPreviewsArriveFromTheBackground() async throws {
     let harness = Harness()
