@@ -89,8 +89,9 @@ typealias LittleArktFlightWatchdog = @MainActor (_ check: @escaping @MainActor (
 /// window closes, the page closes, the app terminates) ends with `abort(_:)`: `onAbort` puts the page where the
 /// reason says (the landing without the flight, or staying put) and the overlay comes off at once.
 ///
-/// Every frame sets layer properties only: the card's position, mask bounds, scale and opacity, the snapshot's
-/// position and opacity, and the arriving row's style through `onRoom`. The image is decoded before it gets here.
+/// Every frame sets layer properties only: the card's position, mask bounds, scale and opacity, the shadow layer's
+/// to match (its path rebuilt only when the size changed), the snapshot's position and opacity, and the arriving
+/// row's style through `onRoom`. The image is decoded before it gets here.
 @MainActor
 final class LittleArktFlight {
   enum Stage: Equatable {
@@ -106,6 +107,9 @@ final class LittleArktFlight {
   let overlay: LittleArktFlightOverlay
   /// The plate (the page's stand-in background), clipped to the card's corners: the mask that grows.
   let cardLayer = CALayer()
+  /// The card's shadow (#456): a layer of its own under the card, since the card's mask would clip it. It has the
+  /// card's position, size, scale and opacity, and an explicit `shadowPath`, so drawing it needs no offscreen pass.
+  let shadowLayer = CALayer()
   /// The page's frame at its own size, centered at the top of the card.
   let snapshotLayer = CALayer()
   private(set) var stage = Stage.waitingForFrame
@@ -123,6 +127,16 @@ final class LittleArktFlight {
   private var frames = 0
   private var framesAtLastCheck = 0
   private var quietChecks = 0
+  private let cornerRadius = ShellMetrics.standard.cardCornerRadius
+  private var shadowPathSize: CGSize?
+  /// How many times the shadow's path was rebuilt: only when the card's size changed since the last frame.
+  private(set) var shadowPathUpdates = 0
+
+  /// Whether the card carries its shadow. On in light and off in dark (the token is clear there, so no shadow pass
+  /// at all); tests and the frame-cost measurement switch it.
+  var carriesShadow: Bool {
+    didSet { if carriesShadow != oldValue { applyShadowState() } }
+  }
 
   /// Checks with no frame in between that end a flight (the first quiet one is a hitch).
   static let quietChecksToAbort = 2
@@ -151,6 +165,7 @@ final class LittleArktFlight {
   /// card. All three rectangles are in screen coordinates; the overlay spans `span`.
   init(source: CGRect, scale: Double, opacity: Double, target: CGRect, span: CGRect, level: NSWindow.Level,
        flavor: ThemeFlavor) {
+    carriesShadow = flavor != .dark
     let frame = span.union(source).union(target).integral
     overlay = LittleArktFlightOverlay(frame: frame, level: level)
     let origin = frame.origin
@@ -182,7 +197,47 @@ final class LittleArktFlight {
     snapshotLayer.contentsGravity = .resize
     snapshotLayer.opacity = 0
     cardLayer.addSublayer(snapshotLayer)
+    // The same values as the main window's card (`ContentCardView.updateLayer`), which the flight lands on.
+    shadowLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+    shadowLayer.shadowColor = ShellTokens.cardShadow.resolve(flavor).cgColor
+    shadowLayer.shadowRadius = 3
+    shadowLayer.shadowOffset = CGSize(width: 0, height: -1)
+    applyShadowState()
+    overlay.contentView?.layer?.addSublayer(shadowLayer)
     overlay.contentView?.layer?.addSublayer(cardLayer)
+  }
+
+  /// On: the shadow shows (its path follows at the next frame). Off: no shadow and no path, so no pass for it.
+  private func applyShadowState() {
+    shadowLayer.shadowOpacity = carriesShadow ? 1 : 0
+    if !carriesShadow {
+      shadowLayer.shadowPath = nil
+      shadowPathSize = nil
+    }
+  }
+
+  /// The shadow follows the card in the same tick. The path is rebuilt only when the size changed: while the mask
+  /// grows it follows every frame, at rest and while it fades it stays.
+  private func presentShadow(size: CGSize) {
+    guard carriesShadow else { return }
+    shadowLayer.bounds = CGRect(origin: .zero, size: size)
+    shadowLayer.position = cardLayer.position
+    shadowLayer.transform = cardLayer.transform
+    shadowLayer.opacity = cardLayer.opacity
+    if shadowPathSize != size {
+      shadowPathSize = size
+      shadowPathUpdates += 1
+      shadowLayer.shadowPath = CGPath(roundedRect: shadowLayer.bounds, cornerWidth: cornerRadius,
+                                      cornerHeight: cornerRadius, transform: nil)
+    }
+  }
+
+  /// The overlay is going: nothing of the shadow stays behind.
+  private func clearShadow() {
+    shadowLayer.removeFromSuperlayer()
+    shadowLayer.shadowOpacity = 0
+    shadowLayer.shadowPath = nil
+    shadowPathSize = nil
   }
 
   /// The card as drawn now, in screen coordinates.
@@ -297,6 +352,7 @@ final class LittleArktFlight {
     watcher?.stop()
     watcher = nil
     overlay.orderOut(nil)
+    clearShadow()
     snapshotLayer.contents = nil
     snapshot = nil
     if let interval { ShellSignposts.signposter.endInterval("LittleArkt", interval) }
@@ -360,6 +416,7 @@ final class LittleArktFlight {
     cardLayer.position = CGPoint(x: next[.centerX], y: next[.centerY])
     cardLayer.transform = CATransform3DMakeScale(next[.scale], next[.scale], 1)
     cardLayer.opacity = Float(min(max(next[.opacity], 0), 1))
+    presentShadow(size: CGSize(width: width, height: height))
     // Top-anchored and centered (y up): the page keeps its size while the mask grows around it.
     let size = snapshotLayer.bounds.size
     snapshotLayer.position = CGPoint(x: width / 2, y: height - size.height / 2)

@@ -560,6 +560,201 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertEqual(clock.reads, 2, "plus the fade's one read")
   }
 
+  // MARK: The card's shadow (#456)
+
+  /// A flight over a main window in `appearance`, stepped to its first frame.
+  private func flightInAir(_ scene: Scene, appearance: NSAppearance.Name) throws -> LittleArktFlight {
+    scene.main.window?.appearance = NSAppearance(named: appearance)
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.tick(at: 0)
+    return flight
+  }
+
+  /// The shadow layer's geometry is the card's, and its path is the card's rounded rectangle at the size it has now.
+  private func assertShadowFollowsTheCard(_ flight: LittleArktFlight, _ message: String, line: UInt = #line) {
+    let card = flight.cardLayer
+    let shadow = flight.shadowLayer
+    XCTAssertEqual(shadow.bounds, card.bounds, "bounds: \(message)", line: line)
+    XCTAssertEqual(shadow.position, card.position, "position: \(message)", line: line)
+    XCTAssertTrue(CATransform3DEqualToTransform(shadow.transform, card.transform), "scale: \(message)", line: line)
+    XCTAssertEqual(shadow.opacity, card.opacity, "opacity: \(message)", line: line)
+    XCTAssertEqual(shadow.shadowPath?.boundingBoxOfPath, CGRect(origin: .zero, size: card.bounds.size),
+                   "the path is the card's size in the same tick: \(message)", line: line)
+  }
+
+  /// The design's card shadow (the prototype's lifted plate carries `--card-shadow`; light only), the same values the
+  /// main window's card lands with, through the whole flight.
+  func testTheCardCarriesTheDesignsShadowThroughTheFlight() throws {
+    let scene = try makeScene()
+    let flight = try flightInAir(scene, appearance: .aqua)
+    let landing = try XCTUnwrap(scene.main.rootView.card.layer)
+    scene.main.rootView.card.appearance = NSAppearance(named: .aqua)
+    scene.main.rootView.card.needsDisplay = true
+    scene.main.rootView.card.displayIfNeeded()
+
+    var t = 0.0
+    var ticks = 0
+    while flight.stage == .flying, t < 5 {
+      let shadow = flight.shadowLayer
+      XCTAssertEqual(shadow.shadowOpacity, 1, "at \(t)")
+      XCTAssertEqual(shadow.shadowRadius, landing.shadowRadius, "the main card's blur at \(t)")
+      XCTAssertEqual(shadow.shadowOffset, landing.shadowOffset, "and offset at \(t)")
+      XCTAssertEqual(shadow.shadowColor, ShellTokens.cardShadow.resolve(.light).cgColor, "the token's color at \(t)")
+      XCTAssertEqual(shadow.shadowColor, landing.shadowColor, "the same color the main card lands with at \(t)")
+      XCTAssertNotNil(shadow.shadowPath, "an explicit path, so no offscreen pass, at \(t)")
+      assertShadowFollowsTheCard(flight, "flying at \(t)")
+      t += Self.frame
+      flight.tick(at: t)
+      ticks += 1
+    }
+    XCTAssertGreaterThan(ticks, 30)
+    XCTAssertTrue(flight.shadowLayer.superlayer === flight.overlay.contentView?.layer, "on the overlay")
+    XCTAssertTrue(flight.cardLayer.superlayer === flight.overlay.contentView?.layer)
+    let layers = try XCTUnwrap(flight.overlay.contentView?.layer?.sublayers)
+    XCTAssertEqual(layers.firstIndex { $0 === flight.shadowLayer }, 0, "under the card")
+    XCTAssertTrue(flight.cardLayer.masksToBounds, "the mask clips the card, so the shadow is a layer of its own")
+    XCTAssertFalse(flight.shadowLayer.masksToBounds)
+  }
+
+  /// The path is rebuilt only when the card's size changed since the last frame, in the same tick: it follows the
+  /// growing mask, then stays while the card is at rest and fades.
+  func testTheShadowPathChangesOnlyWithTheSize() throws {
+    let scene = try makeScene()
+    let flight = try flightInAir(scene, appearance: .aqua)
+    var t = 0.0
+    var sizes: [CGSize] = [flight.cardLayer.bounds.size]
+    while flight.stage == .flying, t < 5 {
+      let before = flight.shadowPathUpdates
+      t += Self.frame
+      flight.tick(at: t)
+      let size = flight.cardLayer.bounds.size
+      let changed = size != sizes.last
+      XCTAssertEqual(flight.shadowPathUpdates - before, changed ? 1 : 0, "one rebuild per size change at \(t)")
+      sizes.append(size)
+    }
+    XCTAssertEqual(flight.stage, .landed)
+    XCTAssertGreaterThan(Set(sizes.map { "\($0.width)x\($0.height)" }).count, 10, "the size animates, so the path follows")
+    let atRest = flight.shadowPathUpdates
+    for _ in 0..<20 {
+      t += Self.frame
+      flight.tick(at: t)
+      assertShadowFollowsTheCard(flight, "at rest and fading at \(t)")
+    }
+    XCTAssertEqual(flight.shadowPathUpdates, atRest, "no rebuild while the size is still")
+  }
+
+  /// The shadow fades with the card: the landing's crossfade carries it out, and the finished flight has none left.
+  func testTheShadowFadesWithTheLanding() throws {
+    let scene = try makeScene()
+    let flight = try flightInAir(scene, appearance: .aqua)
+    var t = try XCTUnwrap(step(flight, from: Self.frame) { flight.stage == .landed })
+    t += Self.frame
+    flight.tick(at: t)
+    XCTAssertEqual(flight.stage, .crossfading)
+    XCTAssertEqual(flight.shadowLayer.opacity, 1, "full at the start of the crossfade")
+    t += 0.05
+    flight.tick(at: t)
+    XCTAssertLessThan(flight.shadowLayer.opacity, 1)
+    XCTAssertGreaterThan(flight.shadowLayer.opacity, 0)
+    assertShadowFollowsTheCard(flight, "fading")
+    XCTAssertNotNil(step(flight, from: t + Self.frame) { flight.stage == .finished })
+    XCTAssertNil(flight.shadowLayer.superlayer, "gone with the overlay")
+    XCTAssertNil(flight.shadowLayer.shadowPath)
+    XCTAssertEqual(flight.shadowLayer.shadowOpacity, 0)
+  }
+
+  /// The card has no shadow in dark (the token is clear), and then no shadow pass or path work at all.
+  func testNoShadowInDark() throws {
+    let scene = try makeScene()
+    let flight = try flightInAir(scene, appearance: .darkAqua)
+    var t = 0.0
+    while flight.stage == .flying, t < 5 {
+      XCTAssertEqual(flight.shadowLayer.shadowOpacity, 0, "at \(t)")
+      XCTAssertNil(flight.shadowLayer.shadowPath, "at \(t)")
+      t += Self.frame
+      flight.tick(at: t)
+    }
+    XCTAssertEqual(flight.shadowPathUpdates, 0)
+  }
+
+  /// Reduce Motion takes no flight, so there is no card to carry a shadow: the card fades in the small window.
+  func testReduceMotionHasNoFlightAndSoNoShadow() throws {
+    let scene = try makeScene(reduceMotion: true)
+    scene.main.window?.appearance = NSAppearance(named: .aqua)
+    scene.little.openIn()
+    XCTAssertNil(scene.little.flight, "no flight, so no overlay and no shadow layer")
+    XCTAssertEqual(scene.little.lastTransition, .fadeOut, "the card fades in place (0.12 s)")
+    XCTAssertFalse(LittleArktFlightConditions(reduceMotion: true).allowsFlight)
+  }
+
+  /// An aborted flight clears the shadow with the overlay, at every stage it can end in the air.
+  func testAnAbortedFlightClearsItsShadow() throws {
+    for reason in [LittleArktFlightAbort.mainWindowClosed, .mainWindowMiniaturized, .framesStopped, .appTerminating,
+                   .smallWindowClosing, .closeRequested, .pageClosed] {
+      let scene = try makeScene(todayTabs: 1)
+      let flight = try flightInAir(scene, appearance: .aqua)
+      flight.tick(at: 0.1)
+      XCTAssertEqual(flight.shadowLayer.shadowOpacity, 1, "in the air before \(reason)")
+      XCTAssertNotNil(flight.shadowLayer.superlayer)
+
+      flight.abort(reason)
+
+      XCTAssertEqual(flight.stage, .finished, "\(reason)")
+      XCTAssertNil(flight.shadowLayer.superlayer, "\(reason)")
+      XCTAssertNil(flight.shadowLayer.shadowPath, "\(reason)")
+      XCTAssertEqual(flight.shadowLayer.shadowOpacity, 0, "\(reason)")
+      XCTAssertFalse(flight.overlay.isVisible, "\(reason)")
+    }
+  }
+
+  /// A flight stepped to the end with no display clears its shadow too.
+  func testARunToTheEndLeavesNoShadow() throws {
+    let scene = try makeScene()
+    scene.main.window?.appearance = NSAppearance(named: .aqua)
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.runToEnd()
+    XCTAssertEqual(flight.stage, .finished)
+    XCTAssertNil(flight.shadowLayer.superlayer)
+    XCTAssertNil(flight.shadowLayer.shadowPath)
+  }
+
+  /// For the pull request: the main-thread cost of one flying frame, with the shadow and without it, over 10 flights
+  /// each (interleaved), in microseconds. A frame is the tick plus the transaction commit that encodes the layer
+  /// tree. Skipped unless `ARKT_FLIGHT_MEASURE` is set.
+  func testMeasureAFlyingFrameWithAndWithoutTheShadow() throws {
+    guard ProcessInfo.processInfo.environment["ARKT_FLIGHT_MEASURE"] != nil else {
+      throw XCTSkip("set ARKT_FLIGHT_MEASURE to measure a flying frame")
+    }
+    let clock = ContinuousClock()
+    var costs: [Bool: [Double]] = [true: [], false: []]
+    for run in 0..<20 {
+      let withShadow = run % 2 == 0
+      let scene = try makeScene()
+      let flight = try flightInAir(scene, appearance: .aqua)
+      flight.carriesShadow = withShadow
+      var t = 0.0
+      while flight.stage == .flying, t < 5 {
+        t += Self.frame
+        let start = clock.now
+        flight.tick(at: t)
+        CATransaction.flush()
+        let took = start.duration(to: clock.now)
+        costs[withShadow, default: []].append(Double(took.components.attoseconds) / 1e12
+                                              + Double(took.components.seconds) * 1e6)
+      }
+      flight.abort(.closeRequested)
+    }
+    for (label, key) in [("with shadow", true), ("without", false)] {
+      let values = (costs[key] ?? []).sorted()
+      let mean = values.reduce(0, +) / Double(max(values.count, 1))
+      let p95 = values.isEmpty ? 0 : values[Int(Double(values.count - 1) * 0.95)]
+      print("FLYING FRAME \(label): \(values.count) frames, mean \(Int(mean)) us, p95 \(Int(p95)) us, "
+            + "worst \(Int(values.last ?? 0)) us")
+    }
+  }
+
   // MARK: The arrival's cost
 
   /// For the pull request: the cost of one arrival frame with 500 Today rows. Skipped unless `ARKT_FLIGHT_MEASURE`
