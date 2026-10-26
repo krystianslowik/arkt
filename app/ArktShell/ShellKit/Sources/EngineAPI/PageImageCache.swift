@@ -13,6 +13,8 @@ public actor PageImageCache {
   private struct Entry {
     var bytes: Int
     var stored: Date
+    /// Store order, so eviction does not depend on a clock that can step backwards (#442).
+    var sequence: UInt64
   }
 
   private let directory: URL
@@ -22,6 +24,8 @@ public actor PageImageCache {
   private let log = Logger(subsystem: "dev.arkt.shell", category: "PageImageCache")
   /// Loaded from the folder on first use.
   private var entries: [String: Entry]?
+  /// The sequence number the next store receives; entries loaded from disk are numbered from their dates.
+  private var nextSequence: UInt64 = 0
 
   /// `now` dates each store; tests pass a clock whose order does not depend on the file system's time resolution.
   public init(directory: URL, maxEntries: Int = defaultMaxEntries, maxBytes: Int = defaultMaxBytes,
@@ -72,7 +76,8 @@ public actor PageImageCache {
     }
     let stored = now()
     try? FileManager.default.setAttributes([.modificationDate: stored], ofItemAtPath: fileURL(key).path)
-    entries[key] = Entry(bytes: file.count, stored: stored)
+    entries[key] = Entry(bytes: file.count, stored: stored, sequence: nextSequence)
+    nextSequence += 1
     self.entries = entries
     evict()
   }
@@ -82,6 +87,7 @@ public actor PageImageCache {
     let removed = loaded().count
     try? FileManager.default.removeItem(at: directory)
     entries = [:]
+    nextSequence = 0
     log.notice("cleared \(removed) page image(s)")
   }
 
@@ -101,8 +107,18 @@ public actor PageImageCache {
     for file in files where file.pathExtension == "pageimage" {
       guard let values = try? file.resourceValues(forKeys: Set(keys)) else { continue }
       found[file.deletingPathExtension().lastPathComponent] =
-        Entry(bytes: values.fileSize ?? 0, stored: values.contentModificationDate ?? .distantPast)
+        Entry(bytes: values.fileSize ?? 0, stored: values.contentModificationDate ?? .distantPast, sequence: 0)
     }
+    // Number the entries oldest first from their file dates, with the key as a stable tie-break. The sequence is
+    // monotonic within a run and for the next store after a reload; load order still comes from the file dates,
+    // and persisting the sequence is out of scope.
+    let ordered = found.sorted {
+      ($0.value.stored, $0.key) < ($1.value.stored, $1.key)
+    }
+    for (sequence, entry) in ordered.enumerated() {
+      found[entry.key]?.sequence = UInt64(sequence)
+    }
+    nextSequence = UInt64(ordered.count)
     entries = found
     return found
   }
@@ -116,7 +132,9 @@ public actor PageImageCache {
   private func evict() {
     var entries = loaded()
     var bytes = entries.values.reduce(0) { $0 + $1.bytes }
-    let oldestFirst = entries.sorted { $0.value.stored < $1.value.stored }.map(\.key)
+    let oldestFirst = entries.sorted {
+      ($0.value.sequence, $0.key) < ($1.value.sequence, $1.key)
+    }.map(\.key)
     var evicted = 0
     for key in oldestFirst where entries.count > maxEntries || bytes > maxBytes {
       bytes -= entries[key]?.bytes ?? 0

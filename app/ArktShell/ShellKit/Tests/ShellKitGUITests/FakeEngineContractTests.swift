@@ -120,7 +120,7 @@ final class FakeEngineContractTests: XCTestCase {
     let recorder = EventRecorder(engine)
     let id = engine.createTab(url: URL(string: "http://127.0.0.1:\(server.port)/bad-icon.html")!)
     try await harness.settle(engine, id)
-    try await Task.sleep(for: .milliseconds(500))
+    await engine.waitForFaviconFetch(id)
     XCTAssertNil(engine.snapshot(of: id)?.faviconData)
     XCTAssertFalse(recorder.events(for: id).contains { if case .faviconChanged(_, .some) = $0 { return true }; return false })
   }
@@ -184,9 +184,14 @@ extension EngineHarness {
         view.frame = window.contentLayoutRect
         window.contentView?.addSubview(view)
         window.orderFrontRegardless()
-        // One turn for WebKit to lay out and draw at the new size.
-        try await Task.sleep(for: .milliseconds(300))
         FakeEngineContractTests.shownWindows.append(window)
+        // The fixed 300 ms turn was a guess. This waits only for the state the snapshot call needs: the page
+        // loaded and the view mounted in its window. takeSnapshot renders on demand; this is not a paint guarantee.
+        try await EngineContract.waitUntil(timeout: .seconds(10)) {
+          guard let snapshot = engine.snapshot(of: id) else { return false }
+          return !snapshot.isLoading && snapshot.url != nil && view.window === window
+            && view.bounds.width > 0 && view.bounds.height > 0
+        }
       }
     )
   }

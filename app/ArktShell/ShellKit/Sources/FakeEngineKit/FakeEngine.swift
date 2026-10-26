@@ -56,6 +56,9 @@ public final class FakeEngine: EngineClient {
   private var lastActiveWindow: EngineWindowID?
   private let configuration: WKWebViewConfiguration
   private let faviconSession = URLSession(configuration: .ephemeral)
+  /// Favicon fetches in flight per tab, and the test waits for the last one to finish (#442).
+  private var faviconFetches: [TabID: Int] = [:]
+  private var faviconFetchWaiters: [TabID: [FaviconFetchWaiter]] = [:]
   public private(set) var tabIDs: [TabID] = []
 
   public init() {
@@ -139,6 +142,8 @@ public final class FakeEngine: EngineClient {
       }
     }
     entries[id] = nil
+    faviconFetches[id] = nil
+    for waiter in faviconFetchWaiters.removeValue(forKey: id) ?? [] { waiter.resume() }
     entry.observations.forEach { $0.invalidate() }
     entry.navigation.onCommit = nil
     entry.webView.navigationDelegate = nil
@@ -490,22 +495,76 @@ public final class FakeEngine: EngineClient {
 
   // MARK: - Favicon
 
+  /// One test waiter. Whichever of the fetch finishing or the deadline arrives first resumes it, and the
+  /// continuation is dropped so the other path cannot resume it again.
+  @MainActor
+  private final class FaviconFetchWaiter {
+    private var continuation: CheckedContinuation<Void, Never>?
+    init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+    func resume() {
+      continuation?.resume()
+      continuation = nil
+    }
+  }
+
+  /// Test hook (reachable through `@testable import`): waits for the favicon fetch in flight for `id`, if any,
+  /// but no longer than 10 s. The deadline only bounds a test; a fetch that finishes resumes at once.
+  func waitForFaviconFetch(_ id: TabID) async {
+    guard faviconFetches[id, default: 0] > 0 else { return }
+    await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+      let waiter = FaviconFetchWaiter(done)
+      faviconFetchWaiters[id, default: []].append(waiter)
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(10))
+        self?.expireFaviconFetchWaiter(waiter, for: id)
+      }
+    }
+  }
+
+  private func expireFaviconFetchWaiter(_ waiter: FaviconFetchWaiter, for id: TabID) {
+    faviconFetchWaiters[id]?.removeAll { $0 === waiter }
+    if faviconFetchWaiters[id]?.isEmpty == true { faviconFetchWaiters[id] = nil }
+    waiter.resume()
+  }
+
+  private func beginFaviconFetch(_ id: TabID) {
+    faviconFetches[id, default: 0] += 1
+  }
+
+  private func finishFaviconFetch(_ id: TabID) {
+    guard let count = faviconFetches[id] else { return }
+    guard count > 1 else {
+      faviconFetches[id] = nil
+      for waiter in faviconFetchWaiters.removeValue(forKey: id) ?? [] { waiter.resume() }
+      return
+    }
+    faviconFetches[id] = count - 1
+  }
+
   /// Prototype favicon: <link rel=icon> or /favicon.ico, fetched with an ephemeral URLSession and
   /// accepted only as an HTTP 200 image/* response. Real engines push it.
   private func fetchFavicon(_ id: TabID) {
     guard let web = entries[id]?.webView, let pageURL = web.url, !pageURL.isFileURL else { return }
+    beginFaviconFetch(id)
     let script = "(document.querySelector('link[rel~=\"icon\"]') || {}).href || ''"
     let session = faviconSession
     web.evaluateJavaScript(script) { [weak self] result, _ in
       MainActor.assumeIsolated {
         let href = (result as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
-        guard let iconURL = href ?? URL(string: "/favicon.ico", relativeTo: pageURL)?.absoluteURL else { return }
+        guard let iconURL = href ?? URL(string: "/favicon.ico", relativeTo: pageURL)?.absoluteURL else {
+          self?.finishFaviconFetch(id)
+          return
+        }
         Task { @MainActor [weak self] in
           guard let (data, response) = try? await session.data(from: iconURL),
                 let http = response as? HTTPURLResponse, http.statusCode == 200,
                 http.mimeType?.lowercased().hasPrefix("image/") == true,
-                self?.entries[id]?.snapshot.url == pageURL else { return }
+                self?.entries[id]?.snapshot.url == pageURL else {
+            self?.finishFaviconFetch(id)
+            return
+          }
           self?.update(id) { $0.faviconData = data } event: { .faviconChanged(id, data) }
+          self?.finishFaviconFetch(id)
         }
       }
     }
