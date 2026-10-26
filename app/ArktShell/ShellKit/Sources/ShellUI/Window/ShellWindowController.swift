@@ -488,7 +488,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       guard let location = sidebar.parent(of: current) else { return nil }
       let siblings = sidebar.children(of: location)
       if let index = siblings.firstIndex(of: current) {
-        let candidates = siblings[(index + 1)...] + siblings[..<index].reversed()
+        // A sibling whose own archive waits on its pages (a bulk close, BH-072) is leaving too.
+        let candidates = (siblings[(index + 1)...] + siblings[..<index].reversed())
+          .filter { pendingArchives[$0] == nil }
         if let tab = candidates.lazy.compactMap({ self.sidebar.firstTab(at: $0) }).first { return tab }
       }
       guard let container = location.containerNode else { return nil }
@@ -695,12 +697,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public func windowDidExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidBecomeKey(_ notification: Notification) {
     reapplyTrafficLights()
-    updateSidebarDimming(isKey: true)                // BH-025
+    windowKeyStateChanged(isKey: true)               // BH-025
     if !commandBarPrewarmed { commandBarPrewarmed = true; commandBar.prewarm() }
   }
   public func windowDidResignKey(_ notification: Notification) {
     reapplyTrafficLights()
-    updateSidebarDimming(isKey: false)               // BH-025
+    windowKeyStateChanged(isKey: false)              // BH-025
     tabSwitcher.windowDidResignKey()
   }
   public func windowDidChangeBackingProperties(_ notification: Notification) {
