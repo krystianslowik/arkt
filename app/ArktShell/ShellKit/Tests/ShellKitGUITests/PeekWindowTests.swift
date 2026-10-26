@@ -1,5 +1,5 @@
 import AppKit
-import CoreBridge
+@testable import CoreBridge
 import EngineAPI
 import EngineAPITestSupport
 import SidebarModel
@@ -460,6 +460,40 @@ final class PeekWindowTests: XCTestCase {
     XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
     XCTAssertNil(harness.engine.snapshot(of: session.tab))
     XCTAssertEqual(harness.controller.reopenStack.items.count, 1)
+    harness.controller.close()
+  }
+
+  /// Deleting the Space that holds a hidden Peek's source closes the Peek's tab with it: nothing is left hidden.
+  func testDeletingTheSpaceOfAHiddenPeeksSourceClosesThePeek() throws {
+    var world = try Self.makeWorld()
+    let home = world.sidebar.addSpace(title: "Home")
+    let other = try world.sidebar.addTab(url: URL(string: "https://notes.example/home")!, title: "Home",
+                                         in: .today(home))
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: other)
+    XCTAssertNotNil(harness.peek.hiddenPeeks[session.source])
+
+    _ = harness.source.removeSpace(world.space, at: Self.now)
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    XCTAssertNil(harness.engine.snapshot(of: session.tab), "no live page outlives its source")
+    XCTAssertNil(harness.peek.session)
+    harness.controller.close()
+  }
+
+  /// The engine window closing (the window's close, or quit) takes a hidden Peek's tab with it.
+  func testClosingTheWindowClosesAHiddenPeeksTab() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.controller.activate(node: world.today[0])
+    XCTAssertNotNil(harness.peek.hiddenPeeks[session.source])
+
+    harness.engine.closeWindow(try XCTUnwrap(harness.controller.engineWindow))
+    XCTAssertTrue(harness.peek.hiddenPeeks.isEmpty)
+    XCTAssertNil(harness.engine.snapshot(of: session.tab))
     harness.controller.close()
   }
 
