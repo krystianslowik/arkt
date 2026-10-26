@@ -16,26 +16,28 @@
 <style>
 :root {
   /* BrandTokens */
-  --accent: #E9B520;            /* accent, fill only */
+  --accent: #E9B520;            /* accent: the one primary pill per pane, a fill only */
   --accent-highlight: #F3CA3D;  /* accentHighlight */
   --accent-pressed: #DCA319;    /* accentPressed */
   --on-accent: #202321;         /* onAccent */
   --surface: #FAF9F5;           /* surfaceBrand */
-  --accent-text: #8A5A0E;       /* accentText */
-  --focus: #202321;             /* focusRing */
+  /* System focus ring (NSColor.keyboardFocusIndicatorColor, Blue accent). Mustard is never a stroke. */
+  --focus: rgba(0,103,244,0.50);
   /* ShellTokens */
-  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);   /* primaryText */
-  --text-2: rgba(0,0,0,0.64);                              /* secondaryText */
-  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);   /* sidebarItemBackground */
-  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10); /* sidebarItemHovered */
-  --fill-pressed: color(display-p3 0.0549 0.0588 0.0627 / 0.15);
-  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10); /* sidebarDivider */
-  --card-border: rgba(0,0,0,0.10);                           /* cardBorder */
-  /* New in this design (SettingsTokens, see the doc) */
-  --group-fill: rgba(255,255,255,0.85);       /* groupFill (tabCurrent level) */
-  --chrome-material: rgba(250,249,245,0.82);  /* toolbarMaterial: surfaceBrand at 82 % over blur */
-  --tab-idle: color(display-p3 0.0549 0.0588 0.0627 / 0.06); /* tabTileIdle */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
+  --text-2: rgba(0,0,0,0.64);                                    /* secondaryText */
+  --fg: rgba(0,0,0,0.48);                                        /* sidebarForeground (glyphs only) */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --row-cur: rgba(255,255,255,0.85);                             /* tabCurrent */
+  --row-cur-shadow: 0 1px 2px rgba(0,0,0,0.10), 0 0 0 0.5px rgba(0,0,0,0.06);  /* tabCurrentShadow */
+  --list-field: color(display-p3 0.0549 0.0588 0.0627 / 0.035);  /* ArchiveTokens.listField, reused as SettingsTokens.groupField */
+  /* Switch: on is a graphite fill (primaryText), never mustard; the knob is porcelain */
+  --switch-on: #202321;         /* SettingsTokens.switchOn */
   --knob: #FFFFFF;
+  --chrome-material: rgba(250,249,245,0.82);  /* toolbarMaterial: surfaceBrand at 82 % over blur */
+  /* AlertTokens */
   --destructive: #B3261E;       /* destructiveText */
   --desktop: #C9CDD2;           /* prototype only: the desktop behind the window */
   --shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
@@ -48,19 +50,19 @@
 }
 :root[data-theme="dark"] {
   --surface: #202321;
-  --accent-text: #E9B520;
-  --focus: #E9B520;
+  --focus: rgba(26,145,255,0.55);
   --text: rgba(255,255,255,0.84);
   --text-2: rgba(255,255,255,0.76);
+  --fg: rgba(255,255,255,0.57);
   --fill: color(display-p3 0.98 0.984 1 / 0.10);
   --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
-  --fill-pressed: color(display-p3 0.98 0.984 1 / 0.20);
   --divider: rgba(255,255,255,0.075);
-  --card-border: rgba(255,255,255,0.20);
-  --group-fill: color(display-p3 0.98 0.984 1 / 0.06);
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20);
+  --row-cur-shadow: none;
+  --list-field: color(display-p3 0 0 0 / 0.14);
+  --switch-on: #F4F3EF;
+  --knob: #202321;
   --chrome-material: rgba(32,35,33,0.80);
-  --tab-idle: color(display-p3 0.98 0.984 1 / 0.08);
-  --knob: #F4F3EF;
   --destructive: #FFAAA2;
   --desktop: #2C3036;
   --shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
@@ -98,157 +100,169 @@ button { font: inherit; color: inherit; }
 .anim .win { transition: height 250ms var(--ease-out); }   /* stands in for NSWindow setFrame(animate:) */
 :root[data-rm] .anim .win { transition: none; }
 
+/* Unified chrome: title and pane bar on the window surface, no strip, no hairline */
 .chrome {
   position: absolute; inset: 0 0 auto 0; z-index: 2;
-  height: 86px;
+  height: 84px;
   background: var(--chrome-material);
   -webkit-backdrop-filter: saturate(1.6) blur(24px); backdrop-filter: saturate(1.6) blur(24px);
-  border-bottom: 1px solid var(--divider);
 }
 :root[data-rt] .chrome { -webkit-backdrop-filter: none; backdrop-filter: none; }
-.lights { position: absolute; left: 12px; top: 10px; display: flex; gap: 8px; }  /* 12 pt diameter, 20 pt pitch */
+.lights { position: absolute; left: 20px; top: 14px; display: flex; gap: 8px; }  /* 12 pt diameter, 20 pt pitch */
 .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
 .lights i:nth-child(1) { background: #FF5F57; }
 .lights i:nth-child(2) { background: #FEBC2E; }
 .lights i:nth-child(3) { background: var(--tl-zoom); }
-.wtitle { position: absolute; top: 7px; left: 0; right: 0; text-align: center; font-weight: 600; font-size: 13px; color: var(--text); }
+.wtitle { position: absolute; top: 12px; left: 0; right: 0; text-align: center; font-weight: 600; font-size: 13px; color: var(--text); }
 
-.tabs { position: absolute; left: 0; right: 0; top: 30px; display: flex; justify-content: center; gap: 2px; }
+/* Pane bar: sidebar items laid out in a row. The selected pane lifts in tabCurrent, like the current tab. */
+.tabs { position: absolute; left: 0; right: 0; top: 36px; display: flex; justify-content: center; gap: 2px; }
 .tab {
   all: unset; box-sizing: border-box; cursor: default;
-  width: 82px; height: 50px; border-radius: 8px;
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; padding-top: 2px;
+  width: 84px; height: 44px; border-radius: 9px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   color: var(--text-2); font-size: 11px; font-weight: 500;
   transition: transform 160ms var(--ease-out);
 }
 .tab:active { transform: scale(0.96); }
-.tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.tile { width: 28px; height: 28px; border-radius: 8px; position: relative; display: grid; place-items: center; }
-.tile::before, .tile::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
-.tile::before { background: var(--tab-idle); }
-.tile::after { background: var(--accent); opacity: 0; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12); }
-.anim .tile::after { transition: opacity 120ms var(--ease-out); }
-.tile svg, .tile b { position: relative; z-index: 1; }
-.tab[aria-selected="true"] { color: var(--text); }
-.tab[aria-selected="true"] .tile::after { opacity: 1; }
-.tab[aria-selected="true"] .tile { color: var(--on-accent); }
-.tile svg { width: 16px; height: 16px; display: block; }
-.tile b { font: 600 15px/1 -apple-system, BlinkMacSystemFont, sans-serif; }
+.tab:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--focus); }
+@media (hover: hover) and (pointer: fine) { .tab:hover { background: var(--fill); } }
+.tab .tile { width: 18px; height: 18px; display: grid; place-items: center; color: var(--fg); }
+.tab .tile svg { width: 16px; height: 16px; display: block; }
+.tab .tile b { font: 600 15px/1 -apple-system, BlinkMacSystemFont, sans-serif; }
+.tab[aria-selected="true"] { color: var(--text); background: var(--row-cur); box-shadow: var(--row-cur-shadow); }
+.tab[aria-selected="true"] .tile { color: var(--text); }
+.anim .tab { transition: transform 160ms var(--ease-out), background-color 120ms var(--ease-out); }
 
 /* ---------- Content ---------- */
 .content {
   position: absolute; inset: 0; overflow: hidden auto;
-  padding: 86px 0 0;
+  padding: 84px 0 0;
 }
-.pane { padding: 20px 24px 24px; }
-.anim .pane.enter { animation: none; }
+.pane { padding: 8px 16px 20px; }
 .pane.in { opacity: 1; transform: none; }
 .anim .pane { transition: opacity 220ms var(--ease-out), transform 320ms var(--spring-firm); }
 .pane.pre { opacity: 0; transform: translateY(4px); transition: none !important; }
 :root[data-rm] .pane.pre { transform: none; }
 :root[data-rm] .anim .pane { transition: opacity 150ms ease; }
 
-h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px 2px; color: var(--text); }
-.section + .section { margin-top: 20px; }
-.note { font-size: 11px; color: var(--text-2); margin: 6px 2px 0; line-height: 1.4; max-width: 560px; }
-.group {
-  background: var(--group-fill);
-  border-radius: 10px;
-  box-shadow: inset 0 0 0 1px var(--divider);
-}
+/* Section titles are the sidebar's section titles ("Work", "Today") */
+h2 { font-size: 12px; font-weight: 600; margin: 0 0 6px; padding: 0 10px; color: var(--text-2); }
+.section + .section { margin-top: 18px; }
+.note { font-size: 12px; color: var(--text-2); margin: 8px 10px 0; line-height: 1.4; max-width: 560px; }
+/* A group is the Archive's recessed field; its rows are sidebar rows */
+.group { background: var(--list-field); border-radius: 10px; padding: 4px; display: grid; gap: 2px; }
 .row {
-  min-height: 44px; padding: 8px 14px;
+  min-height: 36px; padding: 6px 8px 6px 10px; border-radius: 9px;
   display: flex; align-items: center; gap: 12px; position: relative;
 }
-.row + .row::before { content: ""; position: absolute; top: 0; left: 14px; right: 0; height: 1px; background: var(--divider); }
-.row.indent + .row::before, .row + .row.indent::before { left: 50px; }
+.row.cap2 { min-height: 48px; }
+@media (hover: hover) and (pointer: fine) { .row:not(.planned):not(.static):hover { background: var(--fill); } }
 .row .lbl { flex: 1; min-width: 0; }
-.row .lbl > div:first-child { color: var(--text); }
-.row .cap { font-size: 11px; color: var(--text-2); margin-top: 2px; line-height: 1.35; }
+.row .lbl > div:first-child { color: var(--text); font-weight: 500; }
+.row .cap { font-size: 12px; color: var(--text-2); margin-top: 1px; line-height: 1.35; }
 .row.dim .lbl > div:first-child { color: var(--text-2); }
+.row.add { min-height: 34px; gap: 8px; color: var(--fg); padding-left: 14px; }
+.row.add svg { flex: none; }
+@media (hover: hover) and (pointer: fine) { .row.add:hover { color: var(--text); } }
 
 /* Controls */
-.tg { all: unset; position: relative; width: 38px; height: 22px; border-radius: 11px; flex: none; cursor: default; }
+.tg { all: unset; position: relative; width: 32px; height: 20px; border-radius: 10px; flex: none; cursor: default; }
 .tg::before, .tg::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
 .tg::before { background: var(--fill-hover); }
-.tg::after { background: var(--accent); opacity: 0; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.10); }
-.tg i { position: absolute; z-index: 1; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--knob);
+.tg::after { background: var(--switch-on); opacity: 0; }
+.tg i { position: absolute; z-index: 1; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF;
   box-shadow: 0 1px 2px rgba(0,0,0,0.22), 0 0 0 0.5px rgba(0,0,0,0.06); }
 .tg[aria-checked="true"]::after { opacity: 1; }
-.tg[aria-checked="true"] i { transform: translateX(16px); }
+.tg[aria-checked="true"] i { transform: translateX(12px); background: var(--knob); }
+:root[data-theme="dark"] .tg i { background: rgba(255,255,255,0.84); box-shadow: 0 1px 2px rgba(0,0,0,0.40); }
+:root[data-theme="dark"] .tg[aria-checked="true"] i { background: var(--knob); box-shadow: none; }
 .anim .tg::after { transition: opacity 150ms ease; }
-.anim .tg i { transition: transform 260ms var(--spring-springy-fast); }
+.anim .tg i { transition: transform 260ms var(--spring-springy-fast), background-color 150ms ease; }
 :root[data-rm] .anim .tg i { transition: transform 1ms; }
 .tg:active i { transform: scaleX(1.12); transform-origin: left center; }
-.tg[aria-checked="true"]:active i { transform: translateX(14px) scaleX(1.12); }
+.tg[aria-checked="true"]:active i { transform: translateX(10px) scaleX(1.12); }
 .tg[aria-disabled="true"] { opacity: 0.42; }
-.tg:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tg:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--focus); }
 
+/* Pop-up: the sidebar's URL-pill shape, no edge */
 .pop {
-  all: unset; box-sizing: border-box; height: 24px; padding: 0 6px 0 10px; border-radius: 6px;
-  background: var(--fill); box-shadow: inset 0 0 0 0.5px var(--divider);
+  all: unset; box-sizing: border-box; height: 26px; padding: 0 8px 0 10px; border-radius: 8px;
+  background: var(--fill-hover);
   display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); white-space: nowrap; flex: none;
 }
-.pop::after { content: ""; width: 10px; height: 14px; flex: none;
-  background: currentColor; opacity: 0.55;
+.pop::after { content: ""; width: 9px; height: 13px; flex: none;
+  background: var(--fg);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M2 5.2 5 2.2l3 3M2 8.8l3 3 3-3' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat;
 }
-.btn {
-  all: unset; box-sizing: border-box; height: 28px; padding: 0 14px; min-width: 80px; border-radius: 7px; text-align: center;
-  font-size: 13px; font-weight: 500; line-height: 28px; background: var(--fill); box-shadow: inset 0 0 0 0.5px var(--divider);
-  color: var(--text); flex: none; transition: transform 120ms var(--ease-out); white-space: nowrap;
-}
-.btn.small { height: 24px; line-height: 24px; min-width: 0; padding: 0 10px; border-radius: 6px; }
-.btn.primary { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12); }
-.btn.destructive { color: var(--destructive); }
-.btn:active { transform: scale(0.97); }
+.pop:focus-visible { box-shadow: 0 0 0 3.5px var(--focus); }
+
+/* Buttons: the brand's pills at chrome size (same values as the Archive window) */
+.pill { all: unset; box-sizing: border-box; height: 28px; min-width: 76px; padding: 0 16px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; white-space: nowrap; cursor: default; flex: none;
+  background: var(--fill-hover); color: var(--text); transition: transform 160ms var(--ease-out), background-color 120ms ease; }
+.pill.small { height: 24px; min-width: 0; padding: 0 12px; border-radius: 12px; font-size: 12px; line-height: 24px; }
+.pill.primary { background: var(--accent); color: var(--on-accent); }
+.pill.icon { width: 24px; padding: 0; display: inline-grid; place-items: center; background: none; color: var(--fg); }
+.pill.icon[aria-pressed="true"] { color: var(--text); }
+.pill:not([disabled]):active { transform: scale(0.97); }
+.pill.primary:not([disabled]):active { background: var(--accent-pressed); }
 @media (hover: hover) and (pointer: fine) {
-  .btn:hover { background: var(--fill-hover); }
-  .btn.primary:hover { background: var(--accent-highlight); }
+  .pill:not([disabled]):hover { background: var(--fill); }
+  .pill.icon:not([disabled]):hover { background: var(--fill-hover); }
+  .pill.primary:not([disabled]):hover { background: var(--accent-highlight); }
 }
-.btn.primary:active { background: var(--accent-pressed); }
-.seg { display: inline-flex; padding: 2px; border-radius: 7px; background: var(--fill); box-shadow: inset 0 0 0 0.5px var(--divider); flex: none; position: relative; }
-.seg span { width: 84px; height: 22px; line-height: 22px; text-align: center; font-size: 12px; position: relative; z-index: 1; color: var(--text-2); }
-.seg span.on { color: var(--text); font-weight: 500; }
-.seg .plate { position: absolute; z-index: 0; top: 2px; left: 2px; width: 84px; height: 22px; border-radius: 5px; background: var(--knob);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.14), 0 0 0 0.5px rgba(0,0,0,0.06); }
+.pill:focus-visible, .quiet:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--focus); }
+/* Quiet actions: text links. Destructive ones are red, never a bordered button. */
+.quiet { all: unset; font-size: 13px; color: var(--text-2); cursor: default; border-radius: 4px; padding: 2px 4px; margin: 0 -4px; white-space: nowrap; flex: none; }
+.quiet.destructive { color: var(--destructive); }
+@media (hover: hover) and (pointer: fine) { .quiet:hover { color: var(--text); } .quiet.destructive:hover { color: var(--destructive); text-decoration: underline; text-underline-offset: 2px; } }
+
+/* Segmented: a recessed track whose selected segment lifts in tabCurrent */
+.seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--fill-hover); flex: none; position: relative; }
+.seg span { width: 80px; height: 24px; line-height: 24px; text-align: center; font-size: 12px; position: relative; z-index: 1; color: var(--text-2); }
+.seg span.on { color: var(--text); font-weight: 600; }
+.seg .plate { position: absolute; z-index: 0; top: 2px; left: 2px; width: 80px; height: 24px; border-radius: 7px; background: var(--row-cur); box-shadow: var(--row-cur-shadow); }
 :root[data-theme="dark"] .seg .plate { background: rgba(255,255,255,0.18); }
 .anim .seg .plate { transition: transform 280ms var(--spring-firm); }
 :root[data-rm] .anim .seg .plate { transition: none; }
 
 .keys { display: inline-flex; gap: 3px; flex: none; }
-.key { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 5px; display: inline-grid; place-items: center;
-  font-size: 12px; font-weight: 500; color: var(--text); background: var(--fill); box-shadow: inset 0 0 0 0.5px var(--divider), inset 0 -1px 0 var(--divider); }
-.chev { width: 7px; height: 12px; flex: none; opacity: 0.45; }
-.gl { width: 28px; height: 28px; border-radius: 7px; flex: none; display: grid; place-items: center; font-weight: 600; font-size: 13px; color: #fff; }
-.swatch { width: 28px; height: 28px; border-radius: 8px; flex: none; position: relative; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12); display: grid; place-items: center; font-size: 13px; }
-.badge { font-size: 11px; color: var(--text-2); padding: 1px 7px; border-radius: 9px; background: var(--fill); }
-.search { height: 28px; border-radius: 7px; background: var(--fill); box-shadow: inset 0 0 0 0.5px var(--divider); display: flex; align-items: center; gap: 6px; padding: 0 9px; color: var(--text-2); margin-bottom: 16px; }
-.rec { height: 24px; min-width: 150px; border-radius: 6px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; flex: none;
-  background: var(--surface); outline: 2px solid var(--focus); outline-offset: 0; color: var(--text-2); font-size: 12px; }
+.key { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 6px; display: inline-grid; place-items: center;
+  font-size: 12px; font-weight: 500; color: var(--text); background: var(--fill-hover); }
+.chev { width: 7px; height: 12px; flex: none; color: var(--fg); }
+.gl { width: 20px; height: 20px; border-radius: 5px; flex: none; display: grid; place-items: center; font-weight: 700; font-size: 11px; color: #fff; }
+/* A Space's own theme: the swatch is its gradient, the dot its first stop */
+.swatch { width: 20px; height: 20px; border-radius: 6px; flex: none; position: relative; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12); display: grid; place-items: center; font-size: 10px; }
+.row.indent { padding-left: 8px; }
+.search { height: 32px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; gap: 7px; padding: 0 10px; color: var(--fg); margin: 0 0 14px; font-size: 13px; }
+.search .ph { color: var(--text-2); }
+.rec { height: 26px; min-width: 150px; border-radius: 8px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; flex: none;
+  background: var(--row-cur); box-shadow: 0 0 0 3.5px var(--focus); color: var(--text-2); font-size: 12px; }
 .rec .caret { width: 1px; height: 14px; background: var(--text); }
-.warn { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px 12px 14px; position: relative; }
-.warn::before { content: ""; position: absolute; top: 0; left: 14px; right: 0; height: 1px; background: var(--divider); }
-.warn + .row::before { content: ""; position: absolute; top: 0; left: 14px; right: 0; height: 1px; background: var(--divider); }
-.warn .msg { flex: 1; font-size: 12px; color: var(--text); line-height: 1.4; }
-.warn .msg .cap { font-size: 11px; color: var(--text-2); margin-top: 2px; }
-.warn .acts { display: flex; gap: 8px; margin-top: 8px; }
-.ok { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; flex: none; }
-.empty { padding: 28px 24px 26px; text-align: center; }
-.empty .t { font-weight: 600; font-size: 13px; margin-top: 10px; }
-.empty .c { font-size: 12px; color: var(--text-2); margin: 4px auto 14px; max-width: 320px; line-height: 1.45; }
+.warn { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px 10px; border-radius: 9px; background: var(--fill); }
+.warn .wg { width: 16px; height: 16px; flex: none; color: var(--text); margin-top: 1px; }
+.warn .msg { flex: 1; font-size: 13px; color: var(--text); line-height: 1.4; }
+.warn .msg .cap { font-size: 12px; color: var(--text-2); margin-top: 1px; }
+.warn .acts { display: flex; gap: 14px; align-items: center; margin-top: 10px; }
+.ok { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 7px; border-radius: 12px; background: var(--fill-hover); color: var(--text); font-size: 12px; font-weight: 600; flex: none; }
+.ok svg { color: var(--text); }
+.empty { padding: 30px 24px 26px; text-align: center; display: grid; justify-items: center; }
+.empty .eico { width: 44px; height: 44px; border-radius: 12px; background: var(--fill); display: grid; place-items: center; color: var(--fg); }
+.empty .t { font-weight: 600; font-size: 15px; margin-top: 10px; }
+.empty .c { font-size: 12px; color: var(--text-2); margin: 4px auto 16px; max-width: 320px; line-height: 1.45; }
 
-/* Appearance live preview */
-.preview { display: flex; gap: 16px; align-items: center; padding: 16px; }
+/* Appearance live preview: a small Arkt window in the Work Space's theme */
+.preview { display: flex; gap: 16px; align-items: center; padding: 12px; }
 .mini {
   width: 236px; height: 140px; border-radius: 8px; flex: none; position: relative; overflow: hidden;
-  background: linear-gradient(160deg, #F2F0EE, #E4E1DD);
+  background: linear-gradient(160deg, #DCE8F7, #BFD3EE);
   box-shadow: 0 0 0 0.5px rgba(0,0,0,0.14), 0 6px 18px rgba(0,0,0,0.10);
 }
-:root[data-theme="dark"] .mini { background: linear-gradient(160deg, #3A3B44, #24252B); box-shadow: 0 0 0 0.5px rgba(255,255,255,0.16), 0 6px 18px rgba(0,0,0,0.4); }
+:root[data-theme="dark"] .mini { background: linear-gradient(160deg, #2E3A4C, #1F2734); box-shadow: 0 0 0 0.5px rgba(255,255,255,0.16), 0 6px 18px rgba(0,0,0,0.4); }
 .mini .sb { position: absolute; left: 0; top: 0; bottom: 0; width: 56px; padding: 18px 6px 6px; }
-.mini .sb i { display: block; height: 7px; border-radius: 3px; margin-bottom: 4px; background: rgba(255,255,255,0.55); }
-:root[data-theme="dark"] .mini .sb i { background: rgba(255,255,255,0.12); }
+.mini .sb i { display: block; height: 7px; border-radius: 3px; margin-bottom: 4px; background: rgba(255,255,255,0.45); }
+:root[data-theme="dark"] .mini .sb i { background: rgba(255,255,255,0.10); }
 .mini .sb i.cur { background: rgba(255,255,255,0.9); }
 :root[data-theme="dark"] .mini .sb i.cur { background: rgba(255,255,255,0.22); }
 .mini .sb .url { height: 10px; border-radius: 4px; background: rgba(0,0,0,0.06); margin-bottom: 8px; }
@@ -320,18 +334,20 @@ const TITLES = { spaces: 'Spaces and Profiles', privacy: 'Privacy and Security' 
 
 const tg = (on, dis) => `<button class="tg" role="switch" aria-checked="${!!on}"${dis ? ' aria-disabled="true"' : ''}><i></i></button>`;
 const pop = t => `<button class="pop" aria-haspopup="menu">${t}</button>`;
-const btn = (t, k = '') => `<button class="btn ${k}">${t}</button>`;
+const btn = (t, k = '') => `<button class="pill ${k}">${t}</button>`;
+const link = (t, k = '') => `<button class="quiet ${k}">${t}</button>`;   /* quiet action; destructive ones are red */
+const add = t => `<div class="row add"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>${t}</div>`;   /* the sidebar's New Tab row */
 const keys = ks => `<span class="keys" aria-label="${ks.join(' ')}">${ks.map(k => `<span class="key">${k}</span>`).join('')}</span>`;
 const chev = '<svg class="chev" viewBox="0 0 7 12" aria-hidden="true"><path d="M1.5 1.5 5.5 6l-4 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 /* What issue #307 builds first; with &today every other row is disabled. */
-const BUILT = new Set(['Show Toolbar', 'Show the full URL', 'Import from Arc', 'Arkt\u2019s data folder', 'Arkt is not your default browser', 'Arkt is your default browser']);
+const BUILT = new Set(['Show Toolbar', 'Show the full URL', 'Import browser data', 'Arkt\u2019s data folder', 'Arkt is not your default browser', 'Arkt is your default browser']);
 let TODAY = false;
 const later = (label, cap, extra) => /planned/.test(extra) || (TODAY && label && !BUILT.has(label) && !/^<span class="keys"/.test(label) && !/^(New Tab|Open Command Bar|Archive Tab|Show or Hide|Next Space|Previous Space|Copy URL)/.test(label));
 const capOf = (cap, off) => off ? `${cap ? cap + ' ' : ''}<span class="later">Not available yet.</span>` : cap;
 const row = (label, cap, ctl, extra = '') => { const off = later(label, cap, extra); cap = capOf(cap, off); if (off) { extra += ' planned'; ctl = (ctl || '').replace(/<button /g, '<button disabled aria-disabled="true" '); } return `<div class="row ${extra}"><div class="lbl"><div>${label}</div>${cap ? `<div class="cap">${cap}</div>` : ''}</div>${ctl || ''}</div>`; };
 const lead = (glyph, label, cap, ctl, extra = '') => { const off = later(label, cap, extra); cap = capOf(cap, off); if (off) { extra += ' planned'; ctl = (ctl || '').replace(/<button /g, '<button disabled aria-disabled="true" '); } return `<div class="row indent ${extra}">${glyph}<div class="lbl"><div>${label}</div>${cap ? `<div class="cap">${cap}</div>` : ''}</div>${ctl || ''}</div>`; };
 const sec = (h, rows, note) => `<div class="section">${h ? `<h2>${h}</h2>` : ''}<div class="group">${rows.join('')}</div>${note ? `<p class="note">${note}</p>` : ''}</div>`;
-const check = '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6.5" fill="var(--accent)"/><path d="M4 7.2 6 9.1l4-4.3" fill="none" stroke="#202321" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const check = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.3 5 8.6l4.5-5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const markTile = '<span class="appicon" role="img" aria-label="Arkt"></span>';
 const sw = (a, b, ch) => `<span class="swatch" style="background:linear-gradient(150deg,${a},${b})">${ch}</span>`;
 const gl = (ch, c) => `<span class="gl" style="background:${c}">${ch}</span>`;
@@ -370,12 +386,12 @@ function spaces() {
     sec('Profiles', [
       lead(gl('D', '#7C8A6E'), 'Default', 'Used by Personal and Reading', chev),
       lead(gl('W', '#5B7AA6'), 'Work', 'Used by Work', chev),
-      row('', '', btn('New Profile…', 'small')),
+      add('New Profile…'),
     ], 'Each profile keeps its own Favorites, history, cookies, passwords and extensions.'),
     sec('Link routing', [
       row('Links from other apps open in', '', pop('Little Arkt')),
-      row('<span class="keys"><span class="key" style="font-weight:400">contains</span></span>&nbsp; figma.com &nbsp;<span style="color:var(--text-2)">opens in</span>&nbsp; Work', '', btn('Edit', 'small')),
-      row('', '', btn('Add Route…', 'small')),
+      row('<span class="keys"><span class="key" style="font-weight:400">contains</span></span>&nbsp; figma.com &nbsp;<span style="color:var(--text-2)">opens in</span>&nbsp; Work', '', link('Edit')),
+      add('Add Route…'),
     ]),
   ].join('');
 }
@@ -408,12 +424,12 @@ function shortcuts(mode) {
   const r = (label, ks, extra = '') => row(label, '', keys(ks), extra);
   const recRow = row('Show or Hide Sidebar', '', `<span class="rec" role="textbox" aria-label="Type a new shortcut for Show or Hide Sidebar"><span class="caret"></span>Type a shortcut</span>`);
   const conflictRow = row('Show or Hide Sidebar', '', `<span class="rec" style="color:var(--text)">${keys(['⌘', 'E'])}</span>`) +
-    `<div class="warn" role="alert"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="flex:none;margin-top:1px"><path d="M8 1.8 15 14H1z" fill="var(--accent)" stroke="var(--accent)" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v3.6" stroke="#202321" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.95" fill="#202321"/></svg>
+    `<div class="warn" role="alert"><svg class="wg" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.1" r="0.9" fill="currentColor"/></svg>
       <div class="msg">Command-E is already used by <b>Cycle Pinned Extensions</b>.<div class="cap">Use it here and remove it there, or keep the old shortcut.</div>
-      <div class="acts">${btn('Use Command-E', 'small primary')}${btn('Keep Command-S', 'small')}</div></div></div>`;
+      <div class="acts">${btn('Use Command-E', 'small primary')}${link('Keep Command-S')}</div></div></div>`;
   const sidebar = mode === 'recording' ? recRow : mode === 'conflict' ? conflictRow : r('Show or Hide Sidebar', ['⌘', 'S']);
   return [
-    `<div class="search" role="search"><svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true"><circle cx="5.5" cy="5.5" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m8.7 8.7 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Search actions or type a shortcut, like Command-E</div>`,
+    `<div class="search" role="search"><svg width="14" height="14" viewBox="0 0 13 13" aria-hidden="true"><circle cx="5.5" cy="5.5" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m8.7 8.7 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span class="ph">Search actions or type a shortcut, like Command-E</span></div>`,
     sec('Customized', [
       row('Copy URL', `<span>Changed from ${'⇧⌘C'}</span>`, keys(['⌥', '⌘', 'C']) + pop('Arkt first')),
     ]),
@@ -426,22 +442,22 @@ function shortcuts(mode) {
       r('Next Space', ['⌥', '⌘', '→']),
       r('Previous Space', ['⌥', '⌘', '←']),
     ]),
-    `<div class="section" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><p class="note" style="margin:0">Right-click a shortcut to reset it, or to choose whether Arkt or the website gets it first.</p>${btn('Reset All Shortcuts', 'small destructive')}</div>`,
+    `<div class="section" style="display:flex;justify-content:space-between;align-items:center;gap:16px;padding:0 10px"><p class="note" style="margin:0">Right-click a shortcut to reset it, or to choose whether Arkt or the website gets it first.</p>${link('Reset All Shortcuts…', 'destructive')}</div>`,
   ].join('');
 }
 function extensions(empty) {
   if (empty) return [
-    `<div class="section"><div class="group"><div class="empty">${ICON.extensions.replace('<svg', '<svg width="28" height="28" style="color:var(--text-2)"')}
-      <div class="t">No extensions yet</div><div class="c">Arkt runs extensions from the Chrome Web Store. The ones you add show up here and in the sidebar’s extensions menu.</div>
+    `<div class="section"><div class="group"><div class="empty"><span class="eico">${ICON.extensions.replace('<svg', '<svg width="22" height="22"')}</span>
+      <div class="t">No Extensions Yet</div><div class="c">Arkt runs extensions from the Chrome Web Store. The ones you add show up here and in the sidebar’s extensions menu.</div>
       ${btn('Open Chrome Web Store', 'primary')}</div></div></div>`,
     sec('', [row('Developer mode', 'Load unpacked extensions from a folder.', tg(false))]),
   ].join('');
-  const pin = on => `<button class="btn small" aria-pressed="${on}" aria-label="${on ? 'Unpin from' : 'Pin to'} sidebar" style="min-width:0;padding:0 8px"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 1.5h4l-.6 3.2L9.5 7h-7l2.1-2.3zM6 7v3.6" fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>`;
+  const pin = on => `<button class="pill small icon" aria-pressed="${on}" aria-label="${on ? 'Unpin from' : 'Pin to'} sidebar"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 1.5h4l-.6 3.2L9.5 7h-7l2.1-2.3zM6 7v3.6" fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>`;
   return [
     sec('Installed', [
-      lead(gl('1', '#2E5FD8'), '1Password', 'Version 8.11 · Can read and change data on all sites', pin(true) + tg(true)),
-      lead(gl('u', '#8B1E1E'), 'uBlock Origin Lite', 'Version 2025.1 · Can block content on all sites', pin(false) + tg(true)),
-      lead(gl('{}', '#4A5A4E'), 'JSON Formatter', 'Version 0.9 · Turned off', pin(false) + tg(false), 'dim'),
+      lead(gl('1', '#2E5FD8'), '1Password', 'Version 8.11. Can read and change data on all sites.', pin(true) + tg(true)),
+      lead(gl('u', '#8B1E1E'), 'uBlock Origin Lite', 'Version 2025.1. Can block content on all sites.', pin(false) + tg(true)),
+      lead(gl('{}', '#4A5A4E'), 'JSON Formatter', 'Version 0.9. Turned off.', pin(false) + tg(false), 'dim'),
     ], 'Click an extension for its details, options and keyboard shortcuts. Remove it from its details.'),
     sec('', [
       row('Get more extensions', '', btn('Open Chrome Web Store', 'small')),
@@ -465,7 +481,7 @@ function privacy() {
     ], 'The arrow lists the sites you allowed or blocked. Change one site from the page with the site controls in the URL bar.'),
     sec('Data', [
       row('Let websites read your Space’s theme colors', '', tg(false)),
-      row('Clear browsing data', 'History, cookies and cached files, for a time range.', btn('Clear…', 'small')),
+      row('Clear browsing data', 'History, cookies and cached files, for a time range.', link('Clear…', 'destructive')),
     ]),
   ].join('');
 }
@@ -480,11 +496,11 @@ function advanced() {
       row('Drag the window from the top of web pages', 'Hold Command to select text there instead.', tg(true)),
     ]),
     sec('Data', [
-      row('Import from Arc', 'Spaces, pinned tabs, folders and Favorites.', btn('Import…', 'small')),
+      row('Import browser data', 'Spaces, pinned tabs, folders and Favorites from another browser.', btn('Import…', 'small')),
       row('Arkt’s data folder', 'The sidebar, the Archive and their backups.', btn('Show in Finder', 'small')),
     ]),
     sec('Reset', [
-      row('Reset all settings', 'Your Spaces, tabs and the Archive stay as they are.', btn('Reset…', 'small destructive')),
+      row('Reset all settings', 'Your Spaces, tabs and the Archive stay as they are.', link('Reset…', 'destructive')),
     ]),
   ].join('');
 }
@@ -502,7 +518,7 @@ const STATES = {
   'privacy': () => ['privacy', privacy()],
   'advanced': () => ['advanced', advanced()],
 };
-const MAXH = 860, CHROME = 86;   /* the window caps at the screen's visible height minus 120 pt; the prototype uses 860 */
+const MAXH = 860, CHROME = 84;   /* the window caps at the screen's visible height minus 120 pt; the prototype uses 860 */
 const tabs = document.getElementById('tabs'), content = document.getElementById('content'), win = document.getElementById('win');
 tabs.innerHTML = PANES.map(([id, label], i) =>
   `<button class="tab" role="tab" id="tab-${id}" data-pane="${id}" aria-selected="false" aria-controls="pane" title="${label} (⌘${i + 1})"><span class="tile" aria-hidden="true">${ICON[id]}</span><span>${label}</span></button>`).join('');
@@ -541,7 +557,7 @@ function wire(pane) {
   }));
   pane.querySelectorAll('[data-seg]').forEach(seg => {
     const items = [...seg.querySelectorAll('span:not(.plate)')], plate = seg.querySelector('.plate');
-    const place = i => { items.forEach((s, j) => s.classList.toggle('on', i === j)); plate.style.transform = `translateX(${i * 84}px)`;
+    const place = i => { items.forEach((s, j) => s.classList.toggle('on', i === j)); plate.style.transform = `translateX(${i * 80}px)`;
       const mini = document.getElementById('mini'); if (mini) mini.classList.toggle('webdark', i === 1 || (i === 2 && document.documentElement.dataset.theme === 'dark')); };
     place(items.findIndex(s => s.classList.contains('on')));
     items.forEach((s, i) => s.addEventListener('click', () => place(i)));
