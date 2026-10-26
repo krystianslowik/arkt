@@ -50,8 +50,12 @@ final class SpaceSwitchTextTests: XCTestCase {
       for row in rows.lowerBound..<rows.upperBound {
         guard let cell = outline.rowView(atRow: row, makeIfNecessary: false)?.view(atColumn: 0)
           as? SidebarTabCellView else { continue }
-        titled += 1
         let field = cell.titleField
+        // A row cut by the clip edge (a short window on a small screen) can show none of its title; only titles the
+        // scroll view shows at all are checked.
+        let clip = page.scrollView.contentView
+        guard clip.bounds.intersects(field.convert(field.bounds, to: clip)) else { continue }
+        titled += 1
         XCTAssertFalse(field.stringValue.isEmpty, "\(moment): \(space) row \(row) has a title", file: file, line: line)
         XCTAssertGreaterThan(field.frame.width, 0, "\(moment): \(space) row \(row) title laid out",
                              file: file, line: line)
