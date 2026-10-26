@@ -215,6 +215,8 @@ enum MainMenu {
       page("Downloads", .downloads, "j", [.command, .shift]),                              // KB-065
       // KB-043: Show Archive is unbound by default; Cmd-Shift-L stays reserved for the Library (KB-065).
       item("Show Archive", #selector(AppCommands.showArchive(_:)), "", [], target: commands),
+      // BH-087, KB-043: unbound; opens the Archive window and asks there (#111).
+      item("Clear Archive...", #selector(AppCommands.clearArchive(_:)), "", [], target: commands),
       .separator(),
       item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:)), "", [], target: NSApp),
     ]
