@@ -433,11 +433,12 @@ public enum EngineContract {
   // MARK: Rule 17 (#364)
 
   /// A page that plays a tone through Web Audio, for the `makeAudible` driver of a real engine. It needs a user
-  /// gesture (the autoplay policy), so run it as one.
+  /// gesture (the autoplay policy), so run it as one. It answers the context's state at once (`running` with the
+  /// gesture); the test API does not wait for promises.
   public static let toneScript = """
     (() => { const c = new AudioContext(); const o = c.createOscillator(); const g = c.createGain(); \
-    g.gain.value = 0.05; o.connect(g).connect(c.destination); o.start(); window.arktTone = c; \
-    return c.resume().then(() => c.state); })()
+    g.gain.value = 0.05; o.connect(g).connect(c.destination); o.start(); c.resume(); window.arktTone = c; \
+    return c.state; })()
     """
 
   public static func muteIsReportedOnce(_ h: EngineHarness) async throws {
