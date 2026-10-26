@@ -95,6 +95,13 @@ final class PeekMotionOnScreenTests: XCTestCase {
     XCTAssertEqual(controller.rootView.card.frame, frames.2)
   }
 
+  private func details() -> String {
+    controller.peek.animator.pacer.hitchDetails.map { d in
+      String(format: "frame %d %.1f ms late %.1f busy %.1f ms cpu %.1f", d.frame, d.interval * 1000, d.late * 1000,
+             (d.longest?.wall ?? 0) * 1000, d.cpu * 1000)
+    }.joined(separator: "; ")
+  }
+
   /// The repo's frame-time gate (8.6 ms per interval at 120 Hz) for the open and the close, on a machine that can
   /// measure it.
   func testOpenAndCloseStayInsideTheFrameTimeGate() throws {
@@ -103,10 +110,10 @@ final class PeekMotionOnScreenTests: XCTestCase {
     waitUntil("the open settles", timeout: 5) { self.controller.peek.session?.phase == .open }
     let open = try XCTUnwrap(controller.peek.animator.lastPacing)
     XCTAssertGreaterThan(open.frameCount, 20, "the open ran on the display")
-    XCTAssertEqual(open.hitchCount, 0, "open: max \(open.maxInterval * 1000) ms")
+    XCTAssertEqual(open.hitchCount, 0, "open: max \(open.maxInterval * 1000) ms, \(details())")
     controller.peek.close(.control)
     waitUntil("the close finishes", timeout: 5) { self.controller.peek.session == nil }
     let close = try XCTUnwrap(controller.peek.animator.lastPacing)
-    XCTAssertEqual(close.hitchCount, 0, "close: max \(close.maxInterval * 1000) ms")
+    XCTAssertEqual(close.hitchCount, 0, "close: max \(close.maxInterval * 1000) ms, \(details())")
   }
 }

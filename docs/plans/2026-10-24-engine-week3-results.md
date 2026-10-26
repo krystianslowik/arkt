@@ -2679,3 +2679,85 @@ check, as for #299).
   `testClosingTheWindowRemovesEveryToolTipOfItsViews` failed (10 tool tips left after the close).
 - ShellKit `swift test --skip ShellKitGUITests`: 608 passed. `swift test --filter ShellKitGUITests`: 517 run (515 + 2
   new), 5 skipped, 0 failures. ArktCore `swift test`: 378 passed.
+
+## #313: Peek
+
+Date 2026-10-26. Branch `feat/313-peek`, rebased on `main` at `dbbef68`. Design: `docs/design/peek.md`, `design/peek/`.
+
+### What landed
+
+- **Engine seam.** `EngineWindowHosting` gains `decideLinkActivation(_:)` (a user link activation before the engine
+  navigates; the host answers navigate or cancel without calling the engine) and `handleUnhandledKeyDown(_:in:)` (a
+  key the page did not use), both with defaults. `EngineClient.focusPage(of:)` focuses a tab's page (the Chromium
+  container is not the page). The facade header gains `ArktLinkActivation`, `ArktLinkDecision` and two optional
+  `ArktWindowHost` members (both copies). InMemoryEngine has test drivers for both; FakeEngine asks the host from
+  `decidePolicyFor` (WKWebView runs a Shift-click in the same frame, so FakeEngine reports Shift-clicks too).
+- **Overlay.** `//arkt/browser:link_activation`: a navigation throttle that asks the facade about renderer-initiated
+  primary main-frame navigations with a user gesture and a link transition (HTTP(S), not POST, not history);
+  `CANCEL_AND_IGNORE` on a cancel. `ArktBrowserWindow::HandleKeyboardEvent` hands an Esc the page did not handle to
+  the host from a posted task.
+- **Patch 0008** (one upstream file, two hunks, no hot file): the throttle is added at the end of
+  `CreateAndAddChromeThrottlesForNavigation`. Justification: a renderer-initiated same-tab link navigation can only be
+  stopped before its request starts by a throttle, and `NavigationHandle::RegisterThrottleForTesting` needs content's
+  internal throttle registry.
+- **Shell.** `ShellUI/Peek`: `PeekLayout` (insets 56 / 34 / 26, controls outside in the right gutter, the small-window
+  fallback below 600 pt, the split-pane layout 24 / 34 / 26 / 52 for a pane of 600 pt or more), `PeekRouting`
+  (BH-144, BH-145, BH-146, BH-056; same-site by registrable domain), `PeekMotion` (the design's spring table with the
+  Reduce Motion variants, drag thresholds 120 pt / 800 pt/s, rubber band offset^0.7) over `PeekSpringSet` (every
+  channel retargets from its current value and velocity), `PeekAnimator` (display link, one `FramePacer` session and
+  one Points of Interest interval per transition), `PeekOverlayView`, `PeekController`. Tokens `peekScrim`,
+  `peekShadow`, `peekGrabber` in `ShellTokens+Peek.swift`.
+
+### Checks (Engine app, profile `$PROF/313-try`, scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` with a synthetic Arc sidebar on loopback URLs, defaults suite, loopback pages on `127.0.0.1` and `localhost`)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Cross-site link in a Favorite opens a Peek; the source does not navigate | PASS | `link activation answered cancel`; CDP lists the source at its URL and the Peek page; window-only screenshots mid-open and at rest |
+| Esc goes to the page first | PASS | page `keydown` with `preventDefault`: `usedEsc=1`, the Peek stays; the next Esc logs `peek unhandled Esc` and `peek close keyboard` |
+| Close by control, scrim, Cmd-W | PASS | `peek close control`, `peek close scrim`, Cmd-W closes the Peek and the source tab stays |
+| Cmd-O opens as a Today tab | PASS | "Peek Page" row at the top of Today, selected; the same page shown in the content card; mid-expand screenshot shows the mask growing around the page held in place |
+| Add to Split View | PASS | sidebar split row "Source Page \| Peek Page", the Peek's page in the right pane |
+| Peek inside a split, pane under 600 pt | PASS | Peek over the whole content area, scrim and recede on both panes |
+| Peek inside a split, pane of 600 pt or more | PASS | Peek over the source pane only, controls in the 52 pt gutter; a click on the other pane logs `peek close scrim` |
+| Drag down to dismiss | PASS | card follows the pointer, scales, scrim fades, controls gone; release past 120 pt logs `peek close fling` |
+
+Found by the check and fixed with a failing test first: the controls were in reverse order (an unflipped container),
+and the Peek's page never got the keyboard (`document.hasFocus()` false), so an Esc the page used still closed the
+Peek through the responder chain; the Peek now focuses its page with `focusPage(of:)`. Reduce Motion was not toggled
+on the shared machine; its variants are covered by the unit and GUI tests.
+
+### Verification
+
+- `gn check out/Spike '//arkt/*'` and `gn check out/Spike '//chrome/browser:core'`: `Header dependency check OK`.
+  `nice -n 10 autoninja -C out/Spike -j 4 chrome`: `The build has finished successfully.` (one fix for explicit
+  property synthesis first).
+- Debug and Engine apps: `BUILD SUCCEEDED`.
+- Frame-time gate: `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate` measured on this machine
+  (120 Hz, load below the core count): 0 hitches over 8.6 ms for the open and the close in every run alone (9 runs)
+  and with the other Peek GUI tests (3 runs). It failed twice at load 6 to 8 (another agent's builds): once with the
+  other Peek GUI tests (2 intervals over 8.6 ms, max 20.8 ms) and once in a full-suite run, where the existing
+  `SpacePagerTests` pacing gate failed too, with main-thread passes of 9 to 14 ms. The last full run passed, with the
+  timing gates skipped as NOT-MEASURABLE once the load passed the core count. A run on a quiet machine is still due.
+- Red first: every new test was run failing (a compile error for the new seams and models, the control order and the
+  page focus found by the real-app check).
+- After the rebase on `dbbef68`: ShellKit `swift test --skip ShellKitGUITests`: 791 passed (736 + 55).
+  `swift test --filter ShellKitGUITests`: 610 run (580 + 30), 9 skipped (5 not applicable to FakeEngine, 4 timing
+  gates NOT-MEASURABLE under load), 0 failures. Debug and Engine apps: `BUILD SUCCEEDED`. ArktCore is not touched.
+
+### Deviations from the plan
+
+- Add to Split View commits the split at rest: the Peek's mask grows into the new right pane and the source card is
+  re-laid out when the split appears, instead of both cards sliding together.
+- Reduce Motion's Open as Tab and Add to Split View fade the Peek out, then fade the content in (opacity animation on
+  the card), as the design's table says.
+- A Peek closes when its source leaves the content area (a tab or Space switch) instead of staying hidden (#348).
+- Keyboard closes keep the design's `firmFast` in-place close (0.15 s) rather than no animation.
+
+### Deferred (follow-up issues)
+
+- #345: Shift-click and `target=_blank` links in the Chromium engine (they go through `Browser::OpenURLFromTab`).
+- #346: the "Peek closed" toast, Cmd-Z and Cmd-Shift-T reopen with history (BH-150, KB-079).
+- #347: the Toolbar inside the Peek (BH-151), Copy URL on the Peek (KB-013, KB-014), Cmd-L.
+- #348: Settings > Links UI, the full VoiceOver and keyboard path, XCUITest flows, Peek across tab and Space
+  switches, an Instruments trace.
+- BH-147 waits on #113; BH-153 and OS-03 stay out of scope.

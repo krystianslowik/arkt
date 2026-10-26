@@ -63,7 +63,9 @@ public final class PeekController {
     }
   }
 
+  /// The window closed: no monitor, no observation, and no display link left running.
   func invalidate() {
+    if animator.isRunning { animator.jump(to: animator.currentScene) }
     if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
     mouseMonitor = nil
     observation = nil

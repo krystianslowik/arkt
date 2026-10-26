@@ -50,8 +50,11 @@ final class PeekWindowTests: XCTestCase {
     func click(_ url: URL, in node: UUID, modifiers: EngineLinkModifiers = [],
                disposition: EngineDisposition = .currentTab) throws -> EngineLinkDecision {
       let tab = try XCTUnwrap(self.tab(node))
+      let before = peek.session?.tab
       let decision = engine.simulateLinkActivation(in: tab, url: url, modifiers: modifiers, disposition: disposition)
-      RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+      if decision == .cancel {                  // the Peek or the new tab opens after the call returns
+        waitUntil("the window acts on the link") { peek.session?.tab != before || peek.session == nil && before != nil }
+      }
       return decision
     }
 
