@@ -1433,8 +1433,8 @@ Spec sections 1.1 and 2.1 (BH-007 to BH-020, KB-020 to KB-030, KB-036), built ag
   nothing to skip until the Pinned section collapses (#108). The Favorites grid has no keyboard focus yet (Left /
   Right).
 
-Tests (after rebasing on main with #336, #341 and #342): ShellKit unit 775 (736 + 39), ShellKitGUITests 621 run, 8
-skipped (580 + 41; the skips are pacing gates NOT-MEASURABLE at load1 about 15), ArktCore 387 (not touched). Before
-the rebase, one full GUI run at load1 about 5.5 failed the Space pager pacing gate by 1 to 2 frames; alternating single
-runs at the same load passed 3 of 3 on this branch and 2 of 3 on `main`. The switcher stays closed while the first run
-covers the window.
+Tests (after rebasing on main with #336, #341, #342 and #349): ShellKit unit 830 (791 + 39), ShellKitGUITests 651 run,
+8 skipped (610 + 41), ArktCore 387 (not touched). The Space pager pacing gate failed by 1 to 2 frames at load1 7 to 9;
+alternating single runs at load1 about 5.5 passed 3 of 3 on this branch and 2 of 3 on `main`. UI tests: 34 run, 33
+passed, 1 skipped, outside `OnboardingTests`, whose 4 tests fail identically on `main`. The switcher stays closed while
+the first run covers the window.
