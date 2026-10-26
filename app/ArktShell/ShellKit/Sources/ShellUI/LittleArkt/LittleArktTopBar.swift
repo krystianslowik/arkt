@@ -41,6 +41,7 @@ final class LittleArktTopBar: WindowDragView {
     chooserButton.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
       .withSymbolConfiguration(.init(pointSize: 9, weight: .bold))
     chooserButton.imagePosition = .imageOnly
+    chooserButton.title = ""                         // NSButton's default title would draw over the chevron
     chooserButton.setAccessibilityLabel(LittleArktCopy.chooseSpace)
     chooserButton.setAccessibilityHelp("Command-Option-O")
     chooserButton.toolTip = LittleArktCopy.chooseSpace
@@ -61,11 +62,12 @@ final class LittleArktTopBar: WindowDragView {
   override var wantsUpdateLayer: Bool { true }
 
   /// The host, its full URL as help and tooltip, and the primary action's label and swatch.
-  func configure(host: String, fullURL: String, openLabel: String, openHelp: String, accent: Bool,
+  func configure(host: String, fullURL: String, secure: Bool, openLabel: String, openHelp: String, accent: Bool,
                  swatch: [RGBA]) {
     hostLabel.stringValue = host
     hostLabel.toolTip = fullURL
-    hostLabel.setAccessibilityLabel(host.isEmpty ? "" : "\(host), secure")
+    lockView.isHidden = !secure
+    hostLabel.setAccessibilityLabel(host.isEmpty || !secure ? host : "\(host), secure")
     hostLabel.setAccessibilityHelp(fullURL)
     openButton.title = openLabel
     openButton.setAccessibilityHelp(openHelp)
@@ -95,7 +97,7 @@ final class LittleArktTopBar: WindowDragView {
     copyButton.frame = CGRect(x: splitX - Self.gap - Self.controlHeight, y: y, width: Self.controlHeight,
                               height: Self.controlHeight)
     lockView.frame = CGRect(x: Self.hostX, y: ((height - 12) / 2).rounded(), width: 12, height: 12)
-    let labelX = lockView.frame.maxX + 7
+    let labelX = lockView.isHidden ? Self.hostX : lockView.frame.maxX + 7
     let labelHeight = ceil(hostLabel.intrinsicContentSize.height)
     hostLabel.frame = CGRect(x: labelX, y: ((height - labelHeight) / 2).rounded(),
                              width: max(0, copyButton.frame.minX - 8 - labelX), height: labelHeight)
@@ -170,6 +172,8 @@ final class LittleArktSegmentButton: NSButton {
 
   override var title: String { didSet { applyTitleColor() } }
   override var mouseDownCanMoveWindow: Bool { false }
+  /// The window's one action works on the first click, also while another window is key.
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
   private func applyTitleColor() {
     guard !title.isEmpty else { return }
@@ -248,6 +252,7 @@ final class LittleArktIconButton: NSButton {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var mouseDownCanMoveWindow: Bool { false }
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
   override func updateTrackingAreas() {
     super.updateTrackingAreas()

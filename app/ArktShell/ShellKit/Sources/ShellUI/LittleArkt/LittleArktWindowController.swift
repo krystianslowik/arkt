@@ -163,6 +163,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   private func finishClose() {
     guard phase != .closed else { return }
     phase = .closed
+    rootView.removeToolTipsInSubtree()                      // a tool tip shown at the close goes with it (#301)
     window.orderOut(nil)
     window.close()
     onClosed(self)
@@ -177,6 +178,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   }
 
   public func windowWillClose(_ notification: Notification) {
+    rootView.removeToolTipsInSubtree()
     guard phase != .closed else { return }
     phase = .closed
     onClosed(self)
@@ -262,7 +264,12 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     copy.target = self
     menu.addItem(copy)
     let anchor = topBar.chooserButton
-    menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.minY - 4), in: anchor)
+    menu.popUp(positioning: nil, at: Self.menuOrigin(below: anchor), in: anchor)
+  }
+
+  /// 4 pt below `view`'s bottom edge, in its own coordinates (a button is flipped).
+  static func menuOrigin(below view: NSView) -> NSPoint {
+    NSPoint(x: view.bounds.minX, y: view.isFlipped ? view.bounds.maxY + 4 : view.bounds.minY - 4)
   }
 
   @objc private func chooseSpace(_ sender: NSMenuItem) {
@@ -297,6 +304,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     let url = shownTab.flatMap { engine.snapshot(of: $0)?.url }
     let target = targetSpace()
     topBar.configure(host: LittleArktCopy.host(of: url), fullURL: url?.absoluteString ?? "",
+                     secure: url?.scheme == "https",
                      openLabel: LittleArktCopy.openLabel(isPopup: isPopup, spaceName: target?.title),
                      openHelp: LittleArktCopy.openHelp(isPopup: isPopup, spaceName: target?.title),
                      accent: !isPopup, swatch: target?.theme.baseColors ?? [])

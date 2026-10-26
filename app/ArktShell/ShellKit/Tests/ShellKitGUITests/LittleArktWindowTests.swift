@@ -71,6 +71,8 @@ final class LittleArktWindowTests: XCTestCase {
     XCTAssertEqual(little.topBar.hostLabel.stringValue, "page")
     XCTAssertEqual(little.topBar.openButton.title, "Open as Tab", "a popup's action is the quiet Open as Tab")
     XCTAssertFalse(little.topBar.usesAccent)
+    XCTAssertEqual(little.topBar.chooserButton.title, "", "the chevron segment draws no title")
+    XCTAssertTrue(little.topBar.lockView.isHidden, "no lock for a page that is not https")
   }
 
   func testANormalExtensionWindowStaysABrowserWindow() throws {
@@ -100,6 +102,18 @@ final class LittleArktWindowTests: XCTestCase {
     let page = CGRect(x: visible.midX - 250, y: visible.midY - 200, width: 500, height: 400).integral
     let (little, _, _) = try openPopup(engine, set, bounds: page)
     XCTAssertEqual(little.window.frame, LittleArktLayout.frame(forRequestedPage: page, in: visible))
+  }
+
+  func testTheChooserOpensBelowTheChevron() throws {
+    let (set, engine, _) = try makeSet()
+    _ = set.openWindow()
+    let (little, _, _) = try openPopup(engine, set)
+    little.window.contentView?.layoutSubtreeIfNeeded()
+    let chevron = little.topBar.chooserButton
+    let origin = LittleArktWindowController.menuOrigin(below: chevron)
+    let inWindow = chevron.convert(origin, to: nil)
+    let chevronInWindow = chevron.convert(chevron.bounds, to: nil)
+    XCTAssertEqual(inWindow.y, chevronInWindow.minY - 4, accuracy: 0.5, "the menu starts below the chevron")
   }
 
   // MARK: Cascade
