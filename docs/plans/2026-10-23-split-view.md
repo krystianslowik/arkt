@@ -129,8 +129,8 @@ user decision 4.
 | Design section 5 (2) | Divider resize: no frame over 8.6 ms at 120 Hz | S3, S9 |
 
 **Deferred.** Each item below is cited so nobody adds it by accident, and gets its own issue:
-- GS-010 and BH-118: drop a tab onto another sidebar tab (left or right half). This needs sidebar drop-target
-  infrastructure (reordering, drop indicators), which does not exist.
+- GS-010 and BH-118: drop a tab onto another sidebar tab (left or right half). Built in #104 on the sidebar
+  drop-target infrastructure (reordering, drop indicators) it adds.
 - BH-126: Mute per pane needs engine audio state; Share has no share support; Archive Below is out of scope as in
   Track E. "Duplicate split" is in S6.
 - BH-127: Opt-click on the close button unsplits. It is behind the flag

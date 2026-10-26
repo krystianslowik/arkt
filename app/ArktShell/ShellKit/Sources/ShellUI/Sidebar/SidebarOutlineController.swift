@@ -32,6 +32,8 @@ public final class OutlineItem: NSObject {
 @MainActor
 public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   let axProxyRows: AXProxyRows
+  /// Takes this outline's drags and drops (#104); the controller's `drop`.
+  weak var dropHandler: SidebarOutlineDrop?
 
   public override init(frame frameRect: NSRect) {
     axProxyRows = AXProxyRows(role: .outline, identifier: AXID.Sidebar.outline)
@@ -357,7 +359,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       URLInputParser.url(from: $0.trimmingCharacters(in: .whitespacesAndNewlines))
     }
   }
-  /// A tab row started a drag (S7, GS-011); the window shows its drop overlay above the page.
+  /// This outline as a drag source and drop target (#104).
+  public private(set) lazy var drop = SidebarOutlineDrop(controller: self)
+  /// A row started a drag (S7, GS-011); the window shows its drop overlays.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   /// The drag that `onNodeDragBegan` reported ended, dropped or not.
   public var onNodeDragEnded: (@MainActor () -> Void)?
@@ -432,8 +436,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.action = #selector(rowClicked(_:))
     outlineView.doubleAction = #selector(rowDoubleClicked(_:))
     outlineView.onEmptyAreaClick = { [weak self] in self?.clearSelection() }   // a plain click ends it (design 6)
-    outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
-    outlineView.setDraggingSourceOperationMask([], forLocal: false)   // tabs stay inside the app
+    outlineView.setDraggingSourceOperationMask([.move, .copy], forLocal: true)   // Option copies (GS-014)
+    outlineView.setDraggingSourceOperationMask([], forLocal: false)   // rows stay inside the app
     let menu = NSMenu()
     menu.autoenablesItems = false
     menu.delegate = self
@@ -451,6 +455,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       self?.onKeyboardFocusExit?()
     }
     scrollView.documentView = outlineView
+    outlineView.dropHandler = drop
     outlineView.reloadData()
     syncAllFolders()
     folderMotion.onFrame = { [weak self] progress in self?.presentFolderMotion(progress) }
@@ -569,36 +574,47 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     return source.node(id)?.childLocation != nil
   }
 
-  // MARK: Drag source (S7)
+  // MARK: Drag source (S7, #104)
 
-  /// Tab rows (plain tabs, tabs in folders, panes) write their node id under the private `.sidebarNode` type; folders,
-  /// splits and the divider are not dragged.
+  /// Every node row is dragged (#104; the divider is not). It writes its id under `.sidebarNode`, which the page and
+  /// Favorites overlays read, and the whole drag under `.sidebarNodes`: the multi-selection when the row is part of
+  /// one (#105), else the row alone.
   public func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any)
     -> (any NSPasteboardWriting)? {
-    guard let id = (item as? OutlineItem)?.nodeID, isTab(id) else { return nil }
+    guard let id = (item as? OutlineItem)?.nodeID, source.node(id) != nil else { return nil }
     let pasteboardItem = NSPasteboardItem()
     pasteboardItem.setString(id.uuidString, forType: .sidebarNode)
+    pasteboardItem.setString(dragPayload(startingAt: id).pasteboardString, forType: .sidebarNodes)
     return pasteboardItem
   }
 
   public func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
                           willBeginAt screenPoint: NSPoint, forItems draggedItems: [Any]) {
-    draggingSessionWillBegin(items: draggedItems)
+    draggingSessionWillBegin(items: draggedItems, session: session)
   }
 
   public func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession,
                           endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+    drop.sourceEnded(at: screenPoint, operation: operation)
     draggingSessionEnded()
   }
 
-  /// Rows cannot be selected, so a drag carries one row: the first tab among `items`.
-  func draggingSessionWillBegin(items: [Any]) {
+  /// Rows cannot be selected in the table's sense, so a drag starts on one row: the first node among `items`. It
+  /// carries the multi-selection when that row is part of it.
+  func draggingSessionWillBegin(items: [Any], session: NSDraggingSession? = nil) {
     let ids = items.compactMap { ($0 as? OutlineItem)?.nodeID }
-    guard let id = ids.first(where: isTab) else { return }
+    guard let id = ids.first(where: { source.node($0) != nil }) else { return }
+    drop.sourceBegan(dragPayload(startingAt: id), session: session)
     onNodeDragBegan?(id)
   }
 
   func draggingSessionEnded() { onNodeDragEnded?() }
+
+  /// The selection in display order when `id` is one of two or more selected rows, else `id`.
+  private func dragPayload(startingAt id: NodeID) -> SidebarDragPayload {
+    let nodes = selection.count >= 2 && selection.contains(id) ? selectedNodes : [id]
+    return SidebarDragPayload(nodes: nodes, isSingleTab: nodes.count == 1 && isTab(nodes[0]))
+  }
 
   // MARK: Delegate
 

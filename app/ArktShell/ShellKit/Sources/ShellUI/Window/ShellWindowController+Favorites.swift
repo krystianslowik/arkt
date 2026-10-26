@@ -10,8 +10,11 @@ extension ShellWindowController {
       guard let self else { return }
       self.move(node, to: .favorites(profile: self.sidebarController.profile))
     }
-    sidebarController.onSidebarDrop = { [weak self] node, location in
-      self?.move(node, to: location) ?? false
+    sidebarController.onSidebarDrop = { [weak self] node, location in   // the band: the whole dragged set (#105)
+      guard let self else { return false }
+      let dragged = self.sidebarController.dragNodes
+      let nodes = dragged.contains(node) ? Self.moveTargets(dragged, in: self.sidebar) : [node]
+      return self.move(nodes, to: location, at: self.sidebar.children(of: location).count)
     }
     sidebarController.onFavoriteUnload = { [weak self] node in self?.close(node: node) }
   }
@@ -29,6 +32,21 @@ extension ShellWindowController {
       return false
     }
     if enteringToday { didEnterToday(node) }
+    return true
+  }
+
+  /// Moves a dragged set (#104) as one source write: `nodes` land together at `index` (measured before removal).
+  /// Every node arriving in Today from another section goes through `didEnterToday(_:)`, as one moved alone does.
+  @discardableResult
+  func move(_ nodes: [NodeID], to location: SidebarLocation, at index: Int) -> Bool {
+    let entering = Self.isToday(location) ? nodes.filter { !Self.isToday(sidebar.section(containing: $0)) } : []
+    do {
+      try sidebar.moveNodes(nodes, to: location, at: index)
+    } catch {
+      onError?(.moveNode, error)
+      return false
+    }
+    for node in entering { didEnterToday(node) }
     return true
   }
 

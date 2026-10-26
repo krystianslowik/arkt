@@ -123,20 +123,20 @@ final class SplitDragTests: XCTestCase {
 
   // MARK: Drag source
 
-  /// Only tab rows (plain tabs, tabs in folders, panes) and tab Favorites tiles write the private node type, with the
-  /// node's id.
-  func testPasteboardWriterOnlyForTabs() throws {
+  /// Every node row writes the private node type with its id (#104: folders and split rows are dragged too, so they
+  /// can be reordered, pinned and moved), plus the drag's node list; the page overlay still takes tabs only. Tab
+  /// Favorites tiles write the node type alone.
+  func testPasteboardWriterForNodeRowsAndTabTiles() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     let outline = try harness.outline()
 
-    for node in [world.today[0], world.folderTab, world.panes[1]] {
-      let item = try XCTUnwrap(try harness.writer(node) as? NSPasteboardItem, "a tab row is a drag source")
-      XCTAssertEqual(item.types, [.sidebarNode])
+    for node in [world.today[0], world.folderTab, world.panes[1], world.split, world.folder] {
+      let item = try XCTUnwrap(try harness.writer(node) as? NSPasteboardItem, "a node row is a drag source")
+      XCTAssertEqual(item.types, [.sidebarNode, .sidebarNodes])
       XCTAssertEqual(item.string(forType: .sidebarNode), node.uuidString)
+      XCTAssertEqual(item.string(forType: .sidebarNodes), node.uuidString)
     }
-    XCTAssertNil(try harness.writer(world.split), "a split row is not a drag source")
-    XCTAssertNil(try harness.writer(world.folder), "a folder row is not a drag source")
     let divider = try XCTUnwrap(outline.outlineView.item(atRow: outline.dividerRow))
     XCTAssertNil(outline.outlineView(outline.outlineView, pasteboardWriterForItem: divider),
                  "the divider is not a drag source")
