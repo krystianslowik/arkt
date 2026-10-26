@@ -44,7 +44,9 @@ enum ScriptedHarness {
           scripted(chromium).engineCreateTab(in: browser, url: URL(string: "arkt-test://page.test/Created"),
                                              opener: openerTab, active: active)
         }
-        try await EngineContract.waitUntil(timeout: .seconds(5)) { Set(chromium.tabIDs).subtracting(before).count == 1 }
+        try await ScriptedWait.until("the engine-created tab to be listed") {
+          Set(chromium.tabIDs).subtracting(before).count == 1
+        }
         guard let created = Set(chromium.tabIDs).subtracting(before).first else { throw HarnessError("no new tab") }
         return created
       },
@@ -114,6 +116,6 @@ enum ScriptedHarness {
   /// Waits until the facade has delivered everything it recorded (its batches arrive one main-actor turn later).
   static func delivered(_ engine: ChromiumEngine) async throws {
     let facade = scripted(engine)
-    try await EngineContract.waitUntil(timeout: .seconds(5)) { facade.isIdle }
+    try await ScriptedWait.until("the facade to deliver its batch") { facade.isIdle }
   }
 }
