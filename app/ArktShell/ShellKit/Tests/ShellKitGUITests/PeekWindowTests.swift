@@ -29,7 +29,8 @@ final class PeekWindowTests: XCTestCase {
     let controller: ShellWindowController
     var announcements: [String] = []
 
-    init(_ sidebar: SidebarModel.Sidebar, width: CGFloat = 1200, reduceMotion: Bool = false) {
+    init(_ sidebar: SidebarModel.Sidebar, width: CGFloat = 1200, reduceMotion: Bool = false,
+         steppedMotion: Bool = false) {
       let source = ModelSidebarSource(sidebar: sidebar, now: { PeekWindowTests.now })
       self.source = source
       controller = ShellWindowController(engine: engine, sidebar: source)
@@ -37,6 +38,7 @@ final class PeekWindowTests: XCTestCase {
       layout()
       controller.onArchive = { ids in _ = source.archive(ids, reason: .manual, at: PeekWindowTests.now) }
       controller.peek.reduceMotion = { reduceMotion }
+      controller.peek.animator.drivesDisplayLink = !steppedMotion   // true: the test steps motion with settle()
       controller.peek.linkSettings = { PeekLinkSettings() }
       controller.peek.announce = { [unowned self] text, _ in announcements.append(text) }
     }
@@ -301,7 +303,7 @@ final class PeekWindowTests: XCTestCase {
   /// Coming back to the source brings the same Peek back, its page untouched, with the open motion.
   func testReturningToTheSourceRestoresTheSamePeekWithTheOpenMotion() throws {
     let world = try Self.makeWorld()
-    let harness = Harness(world.sidebar)
+    let harness = Harness(world.sidebar, steppedMotion: true)
     let session = try openPeek(harness, world)
     harness.settle()
     harness.controller.activate(node: world.today[0])
@@ -332,7 +334,7 @@ final class PeekWindowTests: XCTestCase {
   /// Reduce Motion: the restored Peek fades in at its frame.
   func testReduceMotionRestoresThePeekWithAFade() throws {
     let world = try Self.makeWorld()
-    let harness = Harness(world.sidebar, reduceMotion: true)
+    let harness = Harness(world.sidebar, reduceMotion: true, steppedMotion: true)
     _ = try openPeek(harness, world)
     harness.settle()
     harness.controller.activate(node: world.today[0])
@@ -662,7 +664,7 @@ final class PeekWindowTests: XCTestCase {
 
   func testReduceMotionFadesWithoutTravelScaleOrRecede() throws {
     let world = try Self.makeWorld()
-    let harness = Harness(world.sidebar, reduceMotion: true)
+    let harness = Harness(world.sidebar, reduceMotion: true, steppedMotion: true)
     _ = try openPeek(harness, world)
     let overlay = try XCTUnwrap(harness.peek.overlay)
     XCTAssertEqual(overlay.scene[.cardScale], 1)

@@ -1869,7 +1869,7 @@ load average near the core count and pass when rerun. The reflow tests freeze th
 `PacingEnvironment.requireCaught`, so they do not depend on the machine's speed. Debug app build succeeds. XCUITest not run: no UI flow covers split panes.
 
 Cmd-Shift-T brings a closed pane back as a Today tab (the archive restore), as for Cmd-W; whether it should go back
-into its split is left to the maintainer (#388).
+into its split is left to the maintainer (#388). Decided on #403: back into its split (next section).
 
 ## Spaces menu lists the real Spaces (#387) (2026-10-26)
 
@@ -1970,6 +1970,42 @@ here: other Debug builds of the app were running on the machine and the harness 
 Not done here: the sidebar width and hidden state (#331) have no designed row and are per-window state; the Favorites
 unload limit (#376) has no designed row; "Websites use" waits for an engine appearance bridge; the shortcut recorder,
 conflicts and priority modes are #119.
+
+## Reopen a closed Split View pane back into its split (#403) (2026-10-26)
+
+Maintainer decision on #403: a pane closed with its X (#388) or Cmd-W and reopened with Cmd-Shift-T or Cmd-Z (#378)
+goes back into the same split at its old place, if that split still exists.
+
+- **Close.** `ClosedNode` keeps the pane's normalized share of its split (`splitShare`) next to the split and index it
+  already kept.
+- **Reopen.** The archive restore puts the pane on top of Today as before; when its split still exists and has room,
+  the pane then joins it at its old index (clamped to the split as it is now) and the split's factors become
+  `SplitLayout.inserting(share:at:into:)`: the old share at that index, the other panes scaled into the rest so they
+  keep their proportions. A split that ended (a two-pane split ends with the close), or one that is full (four panes),
+  leaves the pane a Today tab, as before; nothing is shown for that. A Pinned or Favorite pane never left its split
+  and reopens its page in place, as before.
+- **Motion.** When the split is the one on screen, the panes shown reflow on the #388 spring (`SpringPreset.firm`,
+  interruptible, position and speed carried) and the reopened page takes its frame at once. The re-show the source
+  change queues one main-queue turn later carries the running spring on instead of ending it at the layout. Reduce
+  Motion: the frames change at once under the 0.15 s crossfade. Reopened from another tab, the split comes on screen
+  as it is, without a reflow or a fade.
+
+Deviations: the reopen is a keyboard action and animates, by the maintainer's acceptance criteria on #403 (keyboard
+closes stay instant). Putting the pane back is two source writes (`addToSplit`, then `setSplitWidthFactors`), not one:
+`SidebarSource` has no single write for an insert with a given share, and both run before anything is shown.
+
+
+Tests (written first, failing before the change): `SplitLayoutTests` + 4 (the share insert: proportions kept, index
+clamped, no usable share gives equal shares, factors normalized first); `SplitPaneReopenTests` (8, GUI): X close and
+Cmd-W close reopen at the old index and share, the index clamped to the split as it is now, an ended split and a
+full split leave a Today tab, the spring caught with a frozen clock and carried through the re-show (it snaps without
+the fix), Reduce Motion crossfades, no reflow or fade when reopened from another tab. ShellKit unit 1133 Swift Testing
+tests passed (baseline 1129 + 4). ShellKitGUITests 997 run (baseline 989 + 8), 11 skipped; in the full run two of the
+frame-time gates named under #388 (`SidebarHideTests.testRevealPacing`,
+`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) failed under a load average near 10 and pass when
+rerun alone. Debug app build
+succeeds. XCUITest not run: no UI flow covers split panes.
+
 ## Copy URL actions (#118) (2026-10-26)
 
 Spec 2.16 (BH-190 to BH-193) and 1.2 (KB-013 to KB-016): Copy URL, Copy URL as Markdown, Copy URL as Quote and
@@ -2000,7 +2036,9 @@ Paste URL as New Tab, each on Arc's key, with the tracker-stripped URL and the [
 
 Tests: `TrackerStrippingTests` (ShellUITests) pins the rule list: no-tracker and no-query URLs unchanged, every
 `utm_*` and every listed name dropped, case-insensitive, lookalike names kept, a fully tracked query dropped, path
-and fragment kept, a valueless tracker dropped. `CopyLinkTests` (GUI, 8) drives the actions: the clean copy and its
+and fragment kept, a valueless tracker dropped, kept parameters keep their percent-encoding byte for byte
+(`%2B` stays `%2B`), an encoded tracker name dropped. `LinkFormatTests` pins the Markdown escaping (brackets in the
+title, parentheses in the URL). `CopyLinkTests` (GUI, 8) drives the actions: the clean copy and its
 toast, the current-URL toast, the multi-selection copy, the Peek's page, Markdown, Quote, Paste URL as New Tab and
 the ignored non-URL clipboard. `ReservedKeysTests` covers the four keys; `MainMenuKeyEquivalentTests` the Edit menu
 items and keys.
