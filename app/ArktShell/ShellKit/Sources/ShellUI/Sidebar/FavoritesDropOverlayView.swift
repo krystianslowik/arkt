@@ -1,9 +1,9 @@
 import AppKit
 
-/// The drop target for sidebar drags inside the sidebar (BH-047): a tab dropped on the Favorites band above the
-/// Space title becomes a Favorite; a Favorite dropped on the Space page below is pinned there. Like the split
-/// overlay, it exists only while a sidebar drag runs, accepts only the private `.sidebarNode` type, and its
-/// `hitTest` returns nil so clicks always pass through.
+/// The drop target for sidebar drags on the Favorites band (BH-047): a tab dropped above the Space title becomes a
+/// Favorite. It covers the band only; the Space page below is its outline's drop target (#104), which also takes a
+/// Favorite dragged down onto it. Like the split overlay, it exists only while a sidebar drag runs, accepts only the
+/// private `.sidebarNode` type, and its `hitTest` returns nil so clicks always pass through.
 ///
 /// While a favorite-able tab hovers the band, one translucent highlight covers it. The zone math is
 /// `FavoritesDrop`'s; the closures answer the target and perform the drop, so tests drive `preview(at:)` and
@@ -102,7 +102,9 @@ public final class FavoritesDropOverlayView: NSView {
   }
 
   public override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-    preview(at: convert(sender.draggingLocation, from: nil)) == nil ? [] : .move
+    // An Opt-drag (copy, GS-014) duplicates on the page's rows only; the band moves.
+    guard sender.draggingSourceOperationMask.contains(.move) else { return [] }
+    return preview(at: convert(sender.draggingLocation, from: nil)) == nil ? [] : .move
   }
 
   public override func draggingExited(_ sender: (any NSDraggingInfo)?) {

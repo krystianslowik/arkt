@@ -20,6 +20,8 @@ public final class SidebarDropPreview {
   /// The line's current y in outline coordinates (the middle of the opened gap, or the row boundary).
   public private(set) var indicatorY: CGFloat = 0
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// The motion clock; the display link samples it too, so tests that set it see no frame from another clock.
+  var now: @MainActor () -> Double = { CACurrentMediaTime() }
 
   private weak var outline: SidebarOutlineView?
   private let canvas = SidebarDropCanvas(frame: .zero)
@@ -28,8 +30,6 @@ public final class SidebarDropPreview {
   private var target: SidebarDropTarget?
   private var lineShown = false
   private var link: CADisplayLink?
-  /// Rows that carry a shift, so a reset touches exactly those.
-  private var shifted: Set<Int> = []
 
   init(outline: SidebarOutlineView) {
     self.outline = outline
@@ -44,7 +44,10 @@ public final class SidebarDropPreview {
   func show(_ target: SidebarDropTarget?, at t: Double) {
     guard let outline else { return }
     attachCanvas(to: outline)
-    guard target != self.target else { return }
+    guard target != self.target else {
+      tick(at: t)                                     // rows scrolled into view under a steady gap get their shift
+      return
+    }
     self.target = target
     let reduce = reduceMotion()
     let gap = Double(SidebarMetrics.rowPitch)
@@ -120,15 +123,13 @@ public final class SidebarDropPreview {
     guard let outline else { return }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    var next: Set<Int> = []
     outline.enumerateAvailableRowViews { rowView, row in
+      guard let layer = rowView.layer else { return }
       let offset = self.rows.offset(of: row, at: t)
-      guard offset != 0 || self.shifted.contains(row), let layer = rowView.layer else { return }
       let down = CGFloat(offset) * (layer.isFlippedInWindow ? 1 : -1)
-      layer.sublayerTransform = offset == 0 ? CATransform3DIdentity : CATransform3DMakeTranslation(0, down, 0)
-      if offset != 0 { next.insert(row) }
+      let transform = offset == 0 ? CATransform3DIdentity : CATransform3DMakeTranslation(0, down, 0)
+      if !CATransform3DEqualToTransform(layer.sublayerTransform, transform) { layer.sublayerTransform = transform }
     }
-    shifted = next
     if lineShown {
       indicatorY = CGFloat(line.offset(of: 0, at: t))
       canvas.placeLine(atY: indicatorY)
@@ -179,8 +180,9 @@ public final class SidebarDropPreview {
 
   fileprivate func linkFired(_ link: CADisplayLink) {
     guard link === self.link else { return link.invalidate() }
-    tick(at: link.targetTimestamp)
-    if isSettled(at: link.targetTimestamp) { stopLink() }
+    let t = now()
+    tick(at: t)
+    if isSettled(at: t) { stopLink() }
   }
 }
 

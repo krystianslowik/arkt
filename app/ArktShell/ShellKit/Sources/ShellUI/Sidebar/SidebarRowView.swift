@@ -137,6 +137,7 @@ public final class SidebarRowView: NSTableRowView {
 
   public override func prepareForReuse() {
     super.prepareForReuse()
+    layer?.sublayerTransform = CATransform3DIdentity   // a drop preview's shift never travels to another row (#104)
     isHovered = false
     isPressed = false
     state = .normal

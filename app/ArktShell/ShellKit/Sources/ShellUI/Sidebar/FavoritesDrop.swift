@@ -1,7 +1,8 @@
 import CoreGraphics
 
-/// BH-047 drop zones inside the sidebar: a tab dropped above the Space title becomes a Favorite; a Favorite
-/// dropped below it (on the Space page) is pinned in the current Space.
+/// BH-047 drop zones inside the sidebar: a tab dropped above the Space title becomes a Favorite. The overlay covers
+/// only the band since #104; the page rule below (a Favorite pinned in the current Space) is kept for callers that
+/// pass a point under the band, and the page outline places a Favorite dropped there where its indicator stands.
 public enum FavoritesDrop {
   /// The band above the Space title that takes drops: the Favorites grid's frame, expanded to one tile row when
   /// the grid is empty (zero Favorites must still offer the target, BH-046).

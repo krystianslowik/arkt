@@ -36,8 +36,11 @@ public final class SidebarOutlineDrop {
     get { preview.reduceMotion }
     set { preview.reduceMotion = newValue }
   }
-  /// The motion and dwell clock (`CACurrentMediaTime`'s domain, which display-link timestamps share).
-  var now: @MainActor () -> Double = { CACurrentMediaTime() }
+  /// The motion and dwell clock, shared with the preview's display link.
+  var now: @MainActor () -> Double {
+    get { preview.now }
+    set { preview.now = newValue }
+  }
   /// BH-024: a light tick when the drop point moves to a new place.
   var haptic: @MainActor () -> Void = {
     NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
@@ -95,6 +98,7 @@ public final class SidebarOutlineDrop {
   @discardableResult
   public func perform(payload: SidebarDragPayload, at point: NSPoint, duplicate: Bool, fromOtherWindow: Bool)
     -> Bool {
+    rows = nil                                        // read fresh: the source may have changed during the drag
     let target = resolve(at: point, payload: payload)
     endHover(dropped: true)
     guard let target else { return false }
@@ -105,6 +109,7 @@ public final class SidebarOutlineDrop {
   /// Drops `text` (a link or anything to search for) at `point` as a new tab (GS-015).
   @discardableResult
   public func performText(_ text: String, at point: NSPoint) -> Bool {
+    rows = nil
     let target = resolve(at: point, payload: SidebarDragPayload(nodes: [], isSingleTab: false))
     endHover(dropped: true)
     guard let url = SidebarTextDrop.url(for: text) else { return false }

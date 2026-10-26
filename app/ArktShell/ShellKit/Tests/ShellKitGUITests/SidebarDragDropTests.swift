@@ -447,6 +447,46 @@ final class SidebarDragDropTests: XCTestCase {
     }
   }
 
+  /// The shift moves a row's content down on screen, measured in the window's root layer.
+  func testRowsMakeRoomDownwardOnScreen() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    let gapRow = try harness.row(world.today[1])
+    let outline = try harness.outline().outlineView
+    let rowView = try XCTUnwrap(outline.rowView(atRow: gapRow, makeIfNecessary: false))
+    let cellView = try XCTUnwrap(outline.view(atColumn: 0, row: gapRow, makeIfNecessary: false))
+    cellView.wantsLayer = true
+    let cell = try XCTUnwrap(cellView.layer)
+    var root = cell
+    while let parent = root.superlayer { root = parent }                // the window's root layer
+    let before = cell.convert(cell.bounds, to: root)
+    drop.update(at: try harness.point(world.today[1], y: 0.1), payload: harness.payload([world.today[0]]))
+    drop.preview.tick(at: harness.motionTime + 2)
+    let after = cell.convert(cell.bounds, to: root)
+    let down = root.isGeometryFlipped ? after.minY - before.minY : before.minY - after.minY
+    XCTAssertEqual(down, SidebarMetrics.rowPitch, accuracy: 0.5)
+
+    rowView.prepareForReuse()
+    XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(rowView.layer).sublayerTransform),
+                  "a reused row starts without a shift")
+  }
+
+  /// Rows realized under a steady gap (scrolled into view) get their shift on the next update.
+  func testAnUnchangedTargetStillPresentsTheCurrentFrame() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    let gapRow = try harness.row(world.today[1])
+    let point = try harness.point(world.today[1], y: 0.1)
+    drop.update(at: point, payload: harness.payload([world.today[0]]))
+    let rowView = try XCTUnwrap(harness.outline().outlineView.rowView(atRow: gapRow, makeIfNecessary: false))
+    rowView.layer?.sublayerTransform = CATransform3DIdentity        // as a freshly realized row
+    harness.motionTime += 2
+    drop.update(at: point, payload: harness.payload([world.today[0]]))
+    XCTAssertEqual(abs(try XCTUnwrap(rowView.layer).sublayerTransform.m42), SidebarMetrics.rowPitch, accuracy: 0.01)
+  }
+
   func testReduceMotionShowsTheIndicatorWithoutMovingRows() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar, reduceMotion: true)

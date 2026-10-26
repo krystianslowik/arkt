@@ -120,7 +120,9 @@ public final class SplitDropOverlayView: NSView {
   }
 
   public override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-    preview(at: convert(sender.draggingLocation, from: nil)) == .none ? [] : .move
+    // An Opt-drag (copy, GS-014) duplicates on the sidebar rows only; the page moves the tab.
+    guard sender.draggingSourceOperationMask.contains(.move) else { return [] }
+    return preview(at: convert(sender.draggingLocation, from: nil)) == .none ? [] : .move
   }
 
   public override func draggingExited(_ sender: (any NSDraggingInfo)?) {
