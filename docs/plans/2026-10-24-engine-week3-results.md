@@ -80,7 +80,7 @@ native window default), #261 (tab-modal attachment, #207).
 | #268 | `ChromiumEngineKit` is linked in every configuration; it should link only in the Engine configuration | open, no labels |
 | #265 | Permission prompt follow-ups, leave-site sheet, pinned hint and tab events | open, `status:ready` |
 | #313, #314 | Peek and Little Arkt: out of scope for week 3 | open, `status:ready` |
-| #128 | Product bundle id (`dev.arkt.Arkt`), data folder, engine user-data-dir, branding; bundle ids are mixed today (app `dev.arkt.ArktShell`, framework and helpers `com.arkt.Arkt.*`) | open, `status:ready` |
+| #128 | Product bundle id (`dev.arkt.Arkt`), data folder, engine user-data-dir, branding (see "#128" below) | in review |
 | #300 | Selecting a row that is live in another window loads the page a second time | open, `status:ready` |
 | #121, #122 | Extension context menus, pinning, keyboard commands, install sheet (#121); native replacements for the remaining Views surfaces, including the page context menu, tab sharing and sign-in QR (#122) | open, `status:blocked` |
 
@@ -3165,3 +3165,70 @@ column). One snapshot call serves both #370 and #352 (shape posted on #352).
   gives nil, and `PageThumbnails` falls back to the cache. Not checked on real Chromium: rule 18 covers shown tabs.
 - "History clearing" has no command yet; only Clear Archive empties the cache. The preview UI (#371, #372) is not part
   of this change.
+
+## #128: product bundle id, data folder, engine user-data-dir and branding
+
+Date 2026-10-26. Branch `engine/128-product-bundle-id` off `main` at `7940026`. Decision: #73 (`dev.arkt.*`).
+
+### What landed
+
+- **Bundle id.** `engine/arkt/branding/BRANDING` `MAC_BUNDLE_ID` `com.arkt.Arkt` -> `dev.arkt.Arkt`; the app's
+  `PRODUCT_BUNDLE_IDENTIFIER` `dev.arkt.ArktShell` -> `dev.arkt.Arkt`. The framework and helpers derive from the
+  branding file, so no `com.arkt.*` id remains. `ProductIdentityTests` pins both ids to each other.
+- **Branding strings.** `CFBundleName` and `CFBundleDisplayName` `Arkt Shell` -> `Arkt` (the keychain prompt text, W3-11).
+  The executable and bundle file name stay `ArktShell`.
+- **Data folder.** Unchanged: `~/Library/Application Support/Arkt` (`DatabaseLocation.productFolderName`, now a named
+  constant with a test). The engine's default user-data-dir lives inside it, as `Arkt/Engine`.
+- **`CrProductDirName`.** The Engine build phase writes it from the build setting `ARKT_PRODUCT_DIR_NAME`
+  (`Engine.xcconfig`, default `Arkt Dev Engine`, so the development path is unchanged). A product build passes
+  `ARKT_PRODUCT_DIR_NAME=Arkt/Engine`; the release configuration (#334) sets it in its own xcconfig. The build phase fails
+  on an empty value. Chromium reads the key from the outer bundle (`chrome_paths_mac.mm`), so it is a seam: **no
+  Chromium patch**, `.patches` 9 = `rev-list --count 156.0.8078.48..arkt` 9.
+- **Keychain.** Untouched. Patch 0003 keeps the product item "Arkt Safe Storage"; the maintainer keeps the existing
+  "Chromium Safe Storage" item (#20). `grep -a -c` on `Arkt Framework`: `Arkt Safe Storage` 1, `Chromium Safe Storage` 0.
+  Nothing read or wrote the keychain (`--use-mock-keychain`).
+- **Facade header:** not changed; both copies byte-identical (`cmp`).
+
+### Checks
+
+Engine app on the rebuilt `out/Arkt` framework, bundle id `dev.arkt.ArktShell.try128` (own id, never installed),
+`ARKT_PRODUCT_DIR_NAME=Arkt/Engine`, copy on the internal disk, `CFFIXED_USER_HOME` pointing at an empty throwaway home
+so the defaults resolve there and not in the real `~/Library/Application Support`, `--use-mock-keychain`, no
+`--user-data-dir` and no `ARKT_DATA_DIR`.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Ids in the rebuilt `out/Arkt` | PASS | app `dev.arkt.Arkt`; framework `dev.arkt.Arkt.framework`; helpers `dev.arkt.Arkt.helper` (Helper, GPU, Aperitif, Aperitif GPU), `dev.arkt.Arkt.helper.renderer` (Renderer, Aperitif Renderer), `dev.arkt.Arkt.framework.AlertNotificationService` (Alerts, Aperitif Alerts); no `com.arkt` string in the framework binary |
+| App Info.plist | PASS | `CFBundleIdentifier=dev.arkt.ArktShell.try128`, `CFBundleName=Arkt`, `CFBundleDisplayName=Arkt`, `CrProductDirName=Arkt/Engine`, `ArktEngineFrameworkName=Arkt Framework` |
+| Development path | PASS | the Engine build on `out/Spike` gives `CrProductDirName=Arkt Dev Engine` |
+| Shell data folder | PASS | `<home>/Library/Application Support/Arkt/Arkt.sqlite` |
+| Engine user-data-dir | PASS | `<home>/Library/Application Support/Arkt/Engine` holding `Default`, `Local State`, `Crashpad`; cache `<home>/Library/Caches/Arkt/Engine` |
+| Mach rendezvous | PASS | `launchctl print gui/<uid>`: `dev.arkt.ArktShell.try128.MachPortRendezvousServer.<browser pid>` (follows the outer app); 7 helpers ran from the bundle with no rendezvous error |
+| Real folders | PASS | `~/Library/Application Support/Arkt/Engine` still absent after the run; the real `Arkt` and `Arkt Dev Engine` folders untouched |
+| Quit | PASS | `kill <browser pid>`; the browser and all 7 helper pids gone after 6 s |
+
+One `ERROR:net/disk_cache/disk_cache.cc: Unable to create cache` line appeared in the throwaway-home run (the cache
+folder sits under the long scratch path); not investigated further, no effect on the checks.
+
+### Verification
+
+- Red first: `ProductIdentityTests` failed on the old ids and `DatabaseLocationTests` did not compile
+  (`productFolderName` missing), then both passed.
+- ShellKit `swift test --skip ShellKitGUITests`: 1292 passed (baseline 1287 + the 5 `ProductIdentityTests`). ArktCore `swift test`: 429 passed (428 + `DatabaseLocationTests`).
+- `nice -n 15 autoninja -C out/Spike chrome`: `The build has finished successfully.` (nothing to rebuild; the overlay
+  is unchanged). `nice -n 15 autoninja -C out/Arkt chrome -j 4`: `The build has finished successfully.` (branding
+  change).
+- Engine app: `xcodebuild -scheme ArktShell -configuration Engine`: `BUILD SUCCEEDED` on `out/Spike` (development
+  value) and on `out/Arkt` (product value, own bundle id).
+
+### Cleanup
+
+Test copy, throwaway home, embed folders and probe removed. The test bundle was registered with LaunchServices by the
+launch itself; `lsregister -u` was run, but one record for the deleted path (`dev.arkt.ArktShell.try128`, unique id) is
+still listed and will be dropped by LaunchServices' own cleanup. It cannot take over any real app's links.
+
+### Left open
+
+- The release configuration (no test-only code, product `ARKT_PRODUCT_DIR_NAME`) is #334; signing is #125.
+- Existing installs of the placeholder id: none ship; the maintainer's `~/Applications/ArktTest` bundle keeps its old id
+  until it is rebuilt.
