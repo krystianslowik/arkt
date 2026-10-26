@@ -41,6 +41,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     didSet {
       guard let tab = currentTab, tab != oldValue else { return }
       activateEngineTab(tab)
+      if let node = nodeByTab[tab] { tabSwitcher.noteViewed(node) }      // the recent-tab list (#103)
     }
   }
   /// What the engine sees of this window: the window, the card, the command and close seams.
@@ -111,6 +112,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public internal(set) var onboarding: OnboardingController?
   /// Peek (#313): link activations, the Peek over the source tab and its closes, Open as Tab and Add to Split View.
   public private(set) lazy var peek = PeekController(shell: self)
+  /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
+  public let tabSwitcher = TabSwitcherController()
+  /// Scrolls the sidebar to a row a keyboard command landed on, with the overflow pill (BH-018).
+  public let sidebarReveal = SidebarRevealer()
+  /// How Cmd-1 ... Cmd-9 count (BH-014, BH-015). Defaults until the Settings window exists.
+  public var tabNavigationSettings = TabNavigationSettings()
 
   /// `toolbarSetting` defaults to an in-memory setting so windows built without one (tests, the smoke) never
   /// write user defaults. `opensFirstTab` shows the first tab of the first Space at once, which creates the engine
@@ -172,10 +179,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     wireAddressBars()
     wireSplit()
     wireExtensions()                        // tab and window events start with the engine window (attach)
+    wireTabNavigation()
     // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
       switch change {
-      case .structure, .spaceRemoved: self?.closeEngineTabsOfRemovedNodes()
+      case .structure, .spaceRemoved:
+        self?.closeEngineTabsOfRemovedNodes()
+        self?.tabSwitcher.sourceDidChange()
       case .node, .spaceAdded, .spaceMoved, .spaceChanged: break
       }
       self?.splitSourceDidChange(change)
@@ -683,7 +693,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     reapplyTrafficLights()
     if !commandBarPrewarmed { commandBarPrewarmed = true; commandBar.prewarm() }
   }
-  public func windowDidResignKey(_ notification: Notification) { reapplyTrafficLights() }
+  public func windowDidResignKey(_ notification: Notification) {
+    reapplyTrafficLights()
+    tabSwitcher.windowDidResignKey()
+  }
   public func windowDidChangeBackingProperties(_ notification: Notification) {
     reapplyTrafficLights()
     if let scale = window?.backingScaleFactor { SymbolImageCache.shared.prewarm(scale: scale) }   // cache hits if warm
