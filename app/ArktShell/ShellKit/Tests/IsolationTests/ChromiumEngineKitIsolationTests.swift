@@ -107,19 +107,47 @@ struct ChromiumEngineKitIsolationTests {
     return value.trimmingCharacters(in: .whitespaces)
   }
 
-  /// Each `setting:` line of project.yml with the configuration key (`Engine:` and the like) it sits under.
+  /// Configuration keys, by their lowercased spelling: XcodeGen matches `configs:` keys ignoring case.
+  static let configurationKeys = ["debug": "Debug", "release": "Release", "profile": "Profile", "engine": "Engine",
+                                  "base": "base"]
+
+  /// Each `setting:` line of project.yml with the configuration key (`Engine:` and the like) it sits under, spelled
+  /// canonically. A line indented no deeper than the key ends that key's block.
   static func settingLines(_ setting: String, in spec: String) -> [(configuration: String?, value: String)] {
-    var configuration: String?
+    var current: (name: String, indent: Int)?
     var found: [(String?, String)] = []
     for raw in spec.split(separator: "\n") {
       let line = raw.trimmingCharacters(in: .whitespaces)
-      if let match = line.wholeMatch(of: #/(Debug|Release|Profile|Engine|base):/#) {
-        configuration = String(match.output.1)
+      guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+      let indent = raw.prefix { $0 == " " }.count
+      if let block = current, indent <= block.indent { current = nil }
+      if let match = line.wholeMatch(of: #/(\w+):/#),
+         let name = Self.configurationKeys[String(match.output.1).lowercased()] {
+        current = (name, indent)
       } else if let value = Self.value(of: setting, in: line) {
-        found.append((configuration, value))
+        found.append((current?.name, value))
       }
     }
     return found
+  }
+
+  @Test func settingLinesFollowConfigurationBlocks() {
+    let sample = """
+      settings:
+        configs:
+          Engine:
+            OTHER_LDFLAGS: engine
+          debug:
+            OTHER_LDFLAGS: lowercase
+          RELEASE:
+            # a comment
+            OTHER_LDFLAGS: uppercase
+        OTHER_LDFLAGS: dedented
+      OTHER_LDFLAGS: top
+      """
+    let lines = Self.settingLines("OTHER_LDFLAGS", in: sample)
+    #expect(lines.map(\.value) == ["engine", "lowercase", "uppercase", "dedented", "top"])
+    #expect(lines.map(\.configuration) == ["Engine", "Debug", "Release", nil, nil])
   }
 
   @Test func packageDependenciesAreReadWithTheirLinkFlag() {
