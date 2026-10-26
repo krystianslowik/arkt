@@ -68,4 +68,28 @@ struct ArchiveCommandBarSearchTests {
     bar.restore(match.id)
     #expect(toasts.count == 1, "restored once")
   }
+
+  @Test func aCancelledOlderReplyKeepsTheNewerMatchesRestorable() async throws {
+    let (bar, source, work, store) = try Self.make([])
+    await store.seed([
+      Self.tab("Expense report", url: "https://sheets.example", ago: 60, source: .space(work)),
+      Self.tab("Exponent notes", url: "https://notes.example", ago: 30, source: .space(work)),
+    ])
+    await store.holdReads()
+    let older = Task { await bar.matches(for: "expo") }
+    while await store.heldReadCount < 1 { await Task.yield() }
+    let newer = Task { await bar.matches(for: "expense") }
+    while await store.heldReadCount < 2 { await Task.yield() }
+
+    await store.releaseLastRead()
+    let shown = await newer.value
+    older.cancel()                                  // the bar drops the older query's task
+    await store.releaseReads()
+    #expect(await older.value.isEmpty)
+
+    let match = try #require(shown.first)
+    #expect(match.title == "Expense report")
+    bar.restore(match.id)
+    #expect(source.sidebar.children(of: .today(work)).count == 1, "the shown match still restores")
+  }
 }

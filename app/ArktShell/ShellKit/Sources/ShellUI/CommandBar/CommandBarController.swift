@@ -367,9 +367,6 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
                              contentHeight: CommandBarGeometry.contentHeight(rowCount: results.count))
   }
 
-  /// Reloads the table only when the results (or the backing scale of the icon bitmaps) changed. A warm show usually repeats the previous results, and
-  /// NSTableView drops its reuse queue between shows, so a reload rebuilt every cell (about 8 ms of main-thread
-  /// layout and text drawing in the show's commit, which made every other show land a frame late; C7 phase 3).
   /// Asks for the archived matches of the field's text; a reply for an older text is dropped.
   private func searchArchive() {
     archivedSearch?.cancel()
@@ -389,6 +386,9 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     }
   }
 
+  /// Reloads the table only when the results (or the backing scale of the icon bitmaps) changed. A warm show usually repeats the previous results, and
+  /// NSTableView drops its reuse queue between shows, so a reload rebuilt every cell (about 8 ms of main-thread
+  /// layout and text drawing in the show's commit, which made every other show land a frame late; C7 phase 3).
   private func reloadResults() {
     let text = barView.field.stringValue
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

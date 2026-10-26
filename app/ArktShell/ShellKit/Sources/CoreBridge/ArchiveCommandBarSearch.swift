@@ -40,7 +40,7 @@ public final class ArchiveCommandBarSearch {
   }
 
   /// The archived items matching `query`, newest first, at most `CommandBarResults.maxArchivedResults`; entries
-  /// still in the outbox count too. Empty for a blank query or an unreadable store.
+  /// still in the outbox count too. Empty for a blank query, an unreadable store, or a cancelled caller.
   public func matches(for query: String) async -> [CommandBarResults.ArchivedMatch] {
     guard ArchiveSearch.query(query) != nil else { return [] }
     let filter = ArchiveFilter(text: query)
@@ -52,6 +52,8 @@ public final class ArchiveCommandBarSearch {
       .sorted { $0.archivedAt > $1.archivedAt }
       .filter { seen.insert($0.id).inserted && !coordinator.isRestored($0.id) }
       .prefix(limit)
+    // A reply the bar dropped for a newer query (its task was cancelled) must not replace the items Enter restores.
+    guard !Task.isCancelled else { return [] }
     listed = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     return items.map { item in
       CommandBarResults.ArchivedMatch(id: item.id, title: item.title, subtitle: subtitle(for: item))
