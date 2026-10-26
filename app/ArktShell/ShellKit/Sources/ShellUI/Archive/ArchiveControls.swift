@@ -290,11 +290,14 @@ final class ArchiveLinkButton: NSButton {
   enum Style { case secondary, destructive }
 
   let style: Style
+  /// 12 pt in the Archive window, 13 pt as a dialog's footer link.
+  let fontSize: CGFloat
   private var hovering = false
   private var tracking: NSTrackingArea?
 
-  init(style: Style, title: String) {
+  init(style: Style, title: String, fontSize: CGFloat = 12) {
     self.style = style
+    self.fontSize = fontSize
     super.init(frame: .zero)
     self.title = title
     isBordered = false
@@ -321,7 +324,7 @@ final class ArchiveLinkButton: NSButton {
 
   private func restyle() {
     var attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 12), .foregroundColor: displayedColor.nsColor(),
+      .font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: displayedColor.nsColor(),
     ]
     if style == .destructive, hovering, isEnabled { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
     attributedTitle = NSAttributedString(string: title, attributes: attributes)

@@ -28,6 +28,7 @@ final class AlertScreenshotTests: XCTestCase {
   private func makeWindow(dark: Bool) -> ShellWindowController {
     let stub = StubSidebar()
     let space = stub.addSpace(title: "Work", theme: Self.workTheme(dark: dark))
+    stub.setIcon(space, to: .symbol("diamond.fill"))
     for title in ["Field guide to lichens", "Release checklist", "Weekend recipes"] {
       _ = stub.addTab(url: URL(string: "https://example.com/\(title.count)")!, title: title, in: .today(space),
                       at: nil)
