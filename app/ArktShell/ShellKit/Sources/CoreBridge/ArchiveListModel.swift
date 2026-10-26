@@ -32,6 +32,9 @@ public final class ArchiveListModel: ArchiveListDataSource {
   public var onRestoreFailed: (@MainActor (String) -> Void)?
   /// Stored favicons of archived node ids (the app reads its favicon folder); none when unset.
   public var faviconLoader: (@MainActor (Set<UUID>) async -> [UUID: Data])?
+  /// After a successful Clear Archive, before it reports success: clears what the app kept about the cleared pages
+  /// (the command bar's page thumbnails, #370).
+  public var onCleared: (@MainActor () async -> Void)?
 
   /// The rows loaded so far, newest first.
   public private(set) var rows: [ArchiveRow] = []
@@ -159,6 +162,7 @@ public final class ArchiveListModel: ArchiveListDataSource {
     mayHaveMore = false
     total = 0
     matching = 0
+    await onCleared?()
     return true
   }
 
