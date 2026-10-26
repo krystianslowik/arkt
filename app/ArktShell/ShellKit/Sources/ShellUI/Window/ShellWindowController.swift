@@ -109,6 +109,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public let toolbarSetting: ToolbarSetting
   /// The first run (or Help > Welcome to Arkt) while it covers this window (`presentOnboarding`).
   public internal(set) var onboarding: OnboardingController?
+  /// Peek (#313): link activations, the Peek over the source tab and its closes, Open as Tab and Add to Split View.
+  public private(set) lazy var peek = PeekController(shell: self)
 
   /// `toolbarSetting` defaults to an in-memory setting so windows built without one (tests, the smoke) never
   /// write user defaults. `opensFirstTab` shows the first tab of the first Space at once, which creates the engine
@@ -195,6 +197,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       sidebarController.activate(node: first)
     }
     reapplyTrafficLights()
+    _ = peek                                          // its click monitor records where links are clicked
   }
 
   public func activate(node: NodeID) { sidebarController.activate(node: node) }
@@ -382,7 +385,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Both URL bars show the current tab's URL from the engine snapshot (nil: no tab shown). In a split that is the
   /// focused pane; each pane card's own Toolbar is refreshed by `configurePaneToolbars()`.
   func refreshAddress() {
-    let url = currentTab.flatMap { engine.snapshot(of: $0)?.url }
+    let url = peek.addressOverride ?? currentTab.flatMap { engine.snapshot(of: $0)?.url }
     urlBar.url = url
     rootView.card.toolbar.urlBar.url = url
     refreshToolbarHistory()
@@ -408,6 +411,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// (BH-067, BH-048 [I]). Without a current tab nothing happens (BH-069, a second Cmd-W unpinning, is
   /// NEEDS-RUNTIME-CHECK and not implemented).
   @objc public func closeTab(_ sender: Any?) {
+    if peek.isOpen { peek.close(.keyboard); return }                // KB-078: Cmd-W closes the Peek
     guard let node = currentNode else { return }
     close(node: node)
   }
@@ -560,6 +564,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     shownNodes = nodes
     sidebarController.visible = Set(nodes)
     for node in hidden { onTabHidden?(node) }
+    peek.shownTabsDidChange()
   }
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -698,6 +703,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     isClosed = true
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
+    peek.invalidate()
     commandBar.invalidate()
     rootView.sidebarOverlay.invalidate()
     pager.stopInteraction()        // a closed window's views keep their display links
