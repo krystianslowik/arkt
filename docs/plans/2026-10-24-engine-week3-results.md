@@ -19,7 +19,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | W3-9 | Integration: ShellUI on ChromiumEngine, contract runner, smoke | DONE except logout (maintainer check); SIGTERM session end fixed by #298 | contract 16/16 in the app; smoke, startup and quit checks pass; 120 Hz gate holds (0 % over 8.6 ms); #9 holds; seven fixes, gaps #298-#301; see "W3-9" below |
 | W3-10 | Infobars, or a recorded gap | DONE | native rows on the tab container for every confirm infobar (every confirm type on Mac, triggered from `chrome://infobar-internals`), `--no-sandbox` acceptance passes; tab sharing and sign-in QR (own Views) recorded in #122; no patch; see "W3-10" below |
 | W3-11 | Self-contained bundle with the release framework | DONE except the real-keychain launch (maintainer check) | Engine app on `out/Arkt`'s framework, signed inside-out with one Apple Development identity and Chromium's options and entitlements, hardened runtime; `codesign --verify --deep --strict` valid; contract 16/16, smoke, #9 and quit pass from the internal disk; GPU hardware-accelerated, 0 seatbelt denials, no GPU or utility restarts in 2 min; 549 MB; the bundle still carries the test-only code W3-9 links (left open); see "W3-11" below |
-| W3-12 | Results, patch budget, issue updates, housekeeping | TODO | |
+| W3-12 | Results, patch budget, issue updates, housekeeping | DONE | all tasks PASS (two maintainer checks open); patch budget 7 = 7; no process of this track left; see "W3-12" below |
 
 ## Patch budget
 
@@ -36,6 +36,107 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 
 Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection after week 3: the same, or 8 patch files
 if the framework is renamed by patch.
+
+## W3-12: Results, patch budget, issue updates, housekeeping
+
+Recorded on 2026-10-26 at `origin/main` d797225.
+
+### PASS / FAIL per task
+
+PASS means the task's acceptance criteria hold; a maintainer-only check or a recorded gap that the plan allows is
+listed in the last column and does not turn a PASS into a FAIL. No task is FAIL.
+
+| Task | Verdict | Pull requests | Open on this task |
+|---|---|---|---|
+| W3-0a | PASS | #229 | none |
+| W3-0 | PASS | #253 | none |
+| W3-1 | PASS | #264 | none |
+| W3-2 | PASS | #246, #319 (six page command constants, refs #272) | none |
+| W3-3 (gate) | PASS | #254 | recorded deviations (readiness queue, quit-start seam, CDP keep-alive) |
+| W3-4 | PASS | #255 | none |
+| W3-5 | PASS | #256, #257, #262 (review follow-ups, #258) | page context menu needs context menus on Arkt windows (#122); permission prompts, leave-site sheet, pinned hint, tab events (#265) |
+| W3-6 | PASS | #267 | `ChromiumEngineKit` is linked in every configuration (#268) |
+| W3-7 | PASS | #274 (A, B), #294 (C, D) | none |
+| W3-8 | PASS | #271 | none |
+| W3-9 | PASS | #302; fixes #320 (SIGTERM flush, #298), #323 (#301), #326 (#299) | logout is a maintainer check; #300 (row live in another window loads twice); #328 (reopen kind for a URL from another app); #331 (sidebar width and hidden state per window) |
+| W3-10 | PASS | #281 | tab sharing and sign-in QR (own Views) stay in #122 |
+| W3-11 | PASS | #333; fix #332 (first-run startup URL, #327) | real-keychain launch (maintainer check); the bundle is the test configuration, release configuration is #334; mixed bundle ids (#128) |
+| W3-12 | PASS | this pull request | none |
+
+Plan and decision pull requests: #220 (plan), #263 (decisions), #44 (window seam inventory). Related: #247 (#21,
+native window default), #261 (tab-modal attachment, #207).
+
+### Known gaps
+
+| Issue | Gap | Status |
+|---|---|---|
+| #328 | A URL from another app while Arkt runs with no window reports `kind=reopen`; telling it apart needs `creation_source` in `OpenStartupTabsInBrowserWithProfile` (a patch) or another signal | open, no status label |
+| #334 | Release configuration without `EngineAPITestSupport`, `--arkt-engine-contract`, `--arkt-engine-test-api` and the `ARKT_*` overrides | open, `status:ready` |
+| #331 | Sidebar width and hidden state are not persisted per window | open, `status:ready` |
+| #268 | `ChromiumEngineKit` is linked in every configuration; it should link only in the Engine configuration | open, no labels |
+| #265 | Permission prompt follow-ups, leave-site sheet, pinned hint and tab events | open, `status:ready` |
+| #313, #314 | Peek and Little Arkt: out of scope for week 3 | open, `status:ready` |
+| #128 | Product bundle id (`dev.arkt.Arkt`), data folder, engine user-data-dir, branding; bundle ids are mixed today (app `dev.arkt.ArktShell`, framework and helpers `com.arkt.Arkt.*`) | open, `status:ready` |
+| #300 | Selecting a row that is live in another window loads the page a second time | open, `status:ready` |
+| #121, #122 | Extension context menus, pinning, keyboard commands, install sheet (#121); native replacements for the remaining Views surfaces, including the page context menu, tab sharing and sign-in QR (#122) | open, `status:blocked` |
+
+Open items on #33 (its acceptance boxes are still unticked; the maintainer closes them on review):
+
+- Maintainer check: launch `~/Applications/ArktTest/ArktShell.app` once without `--user-data-dir` and without
+  `--use-mock-keychain` and report any keychain prompt (W3-11).
+- Maintainer check: logout (W3-9).
+- Release configuration without test-only code (#334) and product bundle id (#128).
+- Follow-ups #265, #268, #300, #328, #331.
+
+### Patch budget
+
+Week-2 commands:
+
+```zsh
+wc -l < $REPO/engine/patches/chromium/.patches
+git -C /Volumes/SSD_2/arkt-chromium/chromium/src rev-list --count 156.0.8078.48..arkt
+```
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 7 |
+| `arkt` commits above `156.0.8078.48` | 7 |
+
+Equal. Seven patch files (0001-0007), 17 upstream files, 0 hunks in hot files, as in the W3-0 baseline: week 3 added
+no patch beyond 0007 (#244). The read-only `rev-list` was the only command run on `SSD_2`.
+
+### Process check
+
+`ps -axo pid,command | grep -E "out/Spike|embed-week3|/Applications/Arkt" | grep -v grep` prints only the
+maintainer's `/Applications/Arkt.app` (main process 42259 with its crashpad handlers, GPU, network and storage
+helpers, and renderers 10296, 10297, 10415, 10502). Those are not this track's processes and were left running. The
+check cannot print nothing while that app is open.
+
+No process from `out/Spike`, `embed-week3`, `$PROF` or `~/Library/Application Support/ArktTest` was running, so
+nothing was killed. Two processes of other lanes were left alone: `xctest` 69621 (ShellKit GUI tests) and
+`ArktShell` 69874 (from the `310-onboarding` worktree). Test profiles under `$PROF` and `ArktTest` stay in place.
+
+### `--arkt-native-window`
+
+#21 is closed (pull request #247: native window is the default, the switch is a no-op). The Engine configuration
+already passes no `--arkt-native-window` (W3-3, W3-0 step 4), and no source file outside the plans and patch 0004's
+description mentions it, so no configuration change was needed.
+
+### Issue comments
+
+Posted on #33, #9, #21, #121, #122, #128 and #207 with the outcome for each.
+
+### Worktrees
+
+| Worktree | Branch | State | Action |
+|---|---|---|---|
+| `arkt-wt/103-tab-switcher` | `feat/103-tab-switcher` | merged into `main`; clean when checked, then modified files appeared (in use) | kept |
+| `arkt-wt/engine` | detached, now `engine/33-w3-12-results` | clean | kept (shared engine worktree) |
+| `arkt-wt/website` | website branch | merged into `main`, 3 uncommitted files | kept |
+| `arkt-wt/107-favorites` | `feat/107-favorites` | 2 commits ahead, 6 uncommitted files | kept |
+| `arkt-wt/112-command-bar` | `feat/112-command-bar` | pull request #322 open, 8 commits ahead | kept |
+| `arkt-wt/310-onboarding` | `feat/310-onboarding` | 5 commits ahead, 17 uncommitted files | kept |
+| `arkt-wt/readme-brand` | `readme` | pull request #284 merged, 1 commit ahead (not in `main`), 1 uncommitted file | kept |
 
 ## W3-11: Self-contained bundle with the release framework
 
