@@ -472,6 +472,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   /// Removes the tab and reports it. A window's active tab is replaced by its right neighbour, else its left one,
   /// unless the whole window is closing.
   private func removeTab(_ id: TabID, reason: CloseReason, reactivate: Bool = true) {
+    framesUnavailable.remove(id)
     guard let removed = snapshots[id] else { return }
     var successor: TabID?
     if let window = removed.window, activeTabs[window] == id {

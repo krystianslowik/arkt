@@ -9,19 +9,18 @@ import os
 public final class PageThumbnails {
   private let engine: any EngineClient
   private let cache: PageImageCache?
-  private let request: PageImageRequest
   private let log = Logger(subsystem: "dev.arkt.shell", category: "PageThumbnails")
 
-  public init(engine: any EngineClient, cache: PageImageCache?, request: PageImageRequest = .thumbnail) {
+  /// Always `.thumbnail`: the cache is sized for thumbnails, never full frames.
+  public init(engine: any EngineClient, cache: PageImageCache?) {
     self.engine = engine
     self.cache = cache
-    self.request = request
   }
 
   /// The tab's thumbnail: its live frame, else the image last cached for its URL; nil for an unknown or closed tab.
   public func thumbnail(of id: TabID) async -> PageImage? {
     guard let url = engine.snapshot(of: id)?.url else { return nil }
-    if let live = await engine.pageImage(of: id, request) {
+    if let live = await engine.pageImage(of: id, .thumbnail) {
       // The tab may have navigated while its frame was copied: file the image only under the URL it still shows.
       if let cache, engine.snapshot(of: id)?.url == url { await cache.store(live, for: url) }
       log.debug("live thumbnail \(live.pixelWidth)x\(live.pixelHeight) px, \(live.data.count) bytes")

@@ -3152,7 +3152,8 @@ column). One snapshot call serves both #370 and #352 (shape posted on #352).
 - Red first: the new tests failed to compile (`PageImage`, `PageImageRequest`, `pageImage(of:_:)`,
   `copyFrame(maxPixelSize:completion:)` missing), then passed. The two `onCleared` tests were written with the hook and
   not run red.
-- ShellKit `swift test --skip ShellKitGUITests`: 1277 passed (1236 + 41).
+- ShellKit `swift test --skip ShellKitGUITests`: 1277 passed (1236 + 41; the baseline is 1277 minus the 41 tests
+  added, not a run on `main`). ArktCore `swift test`: 428 passed (unchanged).
 - ShellKit `swift test --filter ShellKitGUITests.FakeEngineContractTests`: 34 run (31 + 3), 7 skipped (not applicable
   to FakeEngine), 0 failures. The rest of the GUI suite was not run: no shell UI changed.
 
