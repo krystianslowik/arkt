@@ -91,6 +91,28 @@ public final class ContentCardView: NSView {
   public override var wantsUpdateLayer: Bool { true }
   public override var mouseDownCanMoveWindow: Bool { false }
 
+  /// A Peek covers this card (#348): it leaves the accessibility tree with its page and chrome, and comes back with
+  /// the same flag. A live flag read by the overrides, unlike `setAccessibilityHidden`/`setAccessibilityChildren`:
+  /// WebKit's remote tree ignores the hidden flag, and a set children array cannot be cleared again.
+  var isAccessibilitySuppressed = false {
+    didSet {
+      guard isAccessibilitySuppressed != oldValue else { return }
+      NSAccessibility.post(element: self, notification: .layoutChanged)
+    }
+  }
+
+  public override func isAccessibilityElement() -> Bool {
+    isAccessibilitySuppressed ? false : super.isAccessibilityElement()
+  }
+
+  public override func accessibilityChildren() -> [Any]? {
+    isAccessibilitySuppressed ? [] : super.accessibilityChildren()
+  }
+
+  public override func isAccessibilityHidden() -> Bool {
+    isAccessibilitySuppressed || super.isAccessibilityHidden()
+  }
+
   /// Removes the previous content and installs `view` below the Toolbar, filling the rest of `clipView`
   /// (autoresizing, no constraints).
   public func setContent(_ view: NSView?) {

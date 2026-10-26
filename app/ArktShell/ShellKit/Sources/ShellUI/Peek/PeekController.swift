@@ -60,6 +60,11 @@ public final class PeekController {
     NSAccessibility.post(element: element, notification: .announcementRequested,
                          userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
   }
+  /// Moves the VoiceOver focus (tests record it): to the Peek's page when it opens, back to the source page when it
+  /// closes (docs/design/peek.md, VoiceOver).
+  var moveAccessibilityFocus: @MainActor (NSView) -> Void = { element in
+    NSAccessibility.post(element: element, notification: .focusedUIElementChanged)
+  }
   private var observation: EngineObservation?
   private var observedWindow: EngineWindowID?
   private var mouseMonitor: Any?
@@ -67,6 +72,9 @@ public final class PeekController {
   private var lastMouseDown: (point: CGPoint, time: TimeInterval)?
   /// The views that recede under the Peek (the source card, a pane card, or the whole split).
   private var receded: [NSView] = []
+  /// The views suppressed from accessibility while the Peek is open (the receding ones, so the sidebar stays
+  /// reachable).
+  private var accessibilitySuppressedSource: [NSView] = []
   private var dragOrigin = 0.0
   /// Source tabs whose last link the engine opens in a new tab itself, with the time it was answered (#345).
   private var engineOpens: [TabID: TimeInterval] = [:]
@@ -102,6 +110,8 @@ public final class PeekController {
     mouseMonitor = nil
     observation = nil
     observedWindow = nil
+    overlay?.restoreKeyLoop()
+    showSourceInAccessibility()
     hiddenPeeks.removeAll()                                     // their tabs close with the window
   }
 
@@ -229,6 +239,7 @@ public final class PeekController {
     session = PeekSession(tab: tab, source: source, url: url, linkOffset: offset, phase: .opening)
     sourceNode = shell.nodeByTab[source]
     closeGeneration += 1
+    hideSourceFromAccessibility()
     refreshSplitControl()
     observe()
     let reduce = reduceMotion()
@@ -248,6 +259,8 @@ public final class PeekController {
     }
     shell.activateEngineTab(tab)
     shell.engine.focusPage(of: tab)
+    overlay.installKeyLoop(page: page)
+    moveAccessibilityFocus(page)
     refreshAccessibility()
     shell.refreshAddress()
     let title = shell.engine.snapshot(of: tab)?.title ?? ""
@@ -308,6 +321,25 @@ public final class PeekController {
     return [root.split]
   }
 
+  /// The source leaves the accessibility tree while the Peek is open (docs/design/peek.md, VoiceOver); the sidebar
+  /// stays reachable, and a split keeps its other panes. Read after the session is set, so a wide pane is the pane.
+  private func hideSourceFromAccessibility() {
+    guard accessibilitySuppressedSource.isEmpty else { return }
+    accessibilitySuppressedSource = recedingViews()
+    for view in accessibilitySuppressedSource { suppressAccessibility(of: view, true) }
+  }
+
+  private func showSourceInAccessibility() {
+    for view in accessibilitySuppressedSource { suppressAccessibility(of: view, false) }
+    accessibilitySuppressedSource = []
+  }
+
+  /// A card, or the split, leaves the accessibility tree while the Peek covers it.
+  private func suppressAccessibility(of view: NSView, _ suppressed: Bool) {
+    (view as? ContentCardView)?.isAccessibilitySuppressed = suppressed
+    (view as? SplitContainerView)?.isAccessibilitySuppressed = suppressed
+  }
+
   // MARK: - Frames
 
   private func present(_ scene: PeekScene) {
@@ -352,6 +384,7 @@ public final class PeekController {
     case .fling(let velocity): .fling(velocity: velocity)
     }
     restoreSourceFocus()
+    showSourceInAccessibility()
     animator.run(PeekMotion.targets(for: transition, reduceMotion: reduceMotion()), label: "close", in: overlay) {
       [weak self] done in
       guard done else { return }
@@ -385,6 +418,8 @@ public final class PeekController {
     }
     shell.activateEngineTab(session.tab)
     shell.engine.focusPage(of: session.tab)
+    if let page = shell.engine.contentView(for: session.tab) { moveAccessibilityFocus(page) }
+    hideSourceFromAccessibility()
     shell.refreshAddress()
     return true
   }
@@ -407,6 +442,7 @@ public final class PeekController {
   private func restoreSourceFocus() {
     guard let session else { return }
     shell.engine.focusPage(of: session.source)
+    if let page = shell.engine.contentView(for: session.source) { moveAccessibilityFocus(page) }
   }
 
   /// Removes the Peek now: the overlay goes, the source stands back up, and the Peek's tab closes unless it moved
@@ -434,6 +470,8 @@ public final class PeekController {
     animator.jump(to: .rest)
     for view in receded { setScale(view, 1) }
     receded = []
+    showSourceInAccessibility()
+    overlay?.restoreKeyLoop()
     overlay?.card.unmount()
     overlay?.removeFromSuperview()
     overlay = nil

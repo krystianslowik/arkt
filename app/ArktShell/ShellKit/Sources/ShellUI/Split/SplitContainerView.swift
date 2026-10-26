@@ -80,10 +80,30 @@ public final class SplitContainerView: NSView {
 
   public override var mouseDownCanMoveWindow: Bool { false }
 
-  public override func accessibilitySplitters() -> [Any]? { dividers }
+  /// A Peek covers the whole content area (#348): the split leaves the accessibility tree with every pane. A live
+  /// flag read by the overrides (see `ContentCardView.isAccessibilitySuppressed`).
+  var isAccessibilitySuppressed = false {
+    didSet {
+      guard isAccessibilitySuppressed != oldValue else { return }
+      NSAccessibility.post(element: self, notification: .layoutChanged)
+    }
+  }
+
+  public override func isAccessibilityElement() -> Bool {
+    isAccessibilitySuppressed ? false : super.isAccessibilityElement()
+  }
+
+  public override func accessibilitySplitters() -> [Any]? {
+    isAccessibilitySuppressed ? [] : dividers
+  }
 
   public override func accessibilityChildren() -> [Any]? {
-    NSAccessibility.unignoredChildren(from: paneCards + dividers + (toastView.map { [$0] } ?? []))
+    isAccessibilitySuppressed ? [] : NSAccessibility.unignoredChildren(from: paneCards + dividers
+                                                                      + (toastView.map { [$0] } ?? []))
+  }
+
+  public override func isAccessibilityHidden() -> Bool {
+    isAccessibilitySuppressed || super.isAccessibilityHidden()
   }
 
   // MARK: Showing panes
