@@ -93,6 +93,23 @@ final class ParticleFieldTests: XCTestCase {
     window.close()
   }
 
+  func testAStepBuildStillInFlightNeverReplacesTheCard() throws {
+    guard let stage = MetalOnboardingStage.make() else { throw XCTSkip("no Metal device") }
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 720), styleMask: [.titled],
+                          backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView?.addSubview(stage.view)
+    stage.view.frame = window.contentView?.bounds ?? .zero
+    window.orderFront(nil)
+    stage.show(.done(mark: CGRect(x: 476, y: 220, width: 168, height: 168)), appearance: .init(flavor: .light),
+               animated: true)                          // its build runs off the main thread
+    stage.finish(onto: CGRect(x: 200, y: 10, width: 910, height: 700), appearance: .init(flavor: .light)) {}
+    let card = stage.renderer.lastTargets.map(\.target)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    XCTAssertTrue(stage.renderer.lastTargets.map(\.target) == card, "the fold keeps the card's targets")
+    window.close()
+  }
+
   /// Section 7.4 budget: GPU at most 1.0 ms and CPU at most 0.3 ms per frame at 2x and 120 Hz (M1). Measured here on
   /// this machine's GPU with the full tier over 240 frames into a window-sized layer.
   func testFrameBudgetAt2x() throws {

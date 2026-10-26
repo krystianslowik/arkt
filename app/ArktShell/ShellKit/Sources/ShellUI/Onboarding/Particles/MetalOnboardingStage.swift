@@ -80,6 +80,7 @@ public final class MetalOnboardingStage: NSObject, OnboardingStage {
       completion()
       return
     }
+    buildGeneration += 1                               // a step's build still in flight must not replace the card
     let input = builderInput(reduceMotion: appearance.reduceMotion)
     renderer.upload(ParticleFormationBuilder(input: input).buildCard(card))
     fadeStart = time + 0.9
@@ -197,7 +198,10 @@ public final class MetalOnboardingStage: NSObject, OnboardingStage {
       config: SIMD4(Float(renderer.count), 3.4, 3.2, 0))
     let additive = appearance.flavor == .dark && !appearance.reduceTransparency
     renderer.frame(into: drawable, uniforms: uniforms, additive: additive)
-    if renderer.tier == .full, renderer.gpuTimes.consecutiveOverBudget >= 30 { dropToFallbackTier() }
+    // Not during the fold: a new renderer would rebuild the last step's shape instead of the card.
+    if renderer.tier == .full, finishCompletion == nil, renderer.gpuTimes.consecutiveOverBudget >= 30 {
+      dropToFallbackTier()
+    }
   }
 
   /// After 30 consecutive frames over 2 ms of GPU time: 8,192 motes at 60 Hz from here on.
