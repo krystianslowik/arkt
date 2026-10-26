@@ -2169,10 +2169,11 @@ appended at the end rather than inside the #24 section because the file is share
   rest the exact offset is kept.
 - **Parked pages after a mid-motion sync.** On the branch rebased onto #415, `syncStripFrame()` unparks the pages
   #415 parks in the strip's visible slot. A page stays visible after the sync, so it is not parked again when the
-  motion goes on, and its text stops drawing for the rest of the motion. `unparkPages()` now remembers the pages it
-  unpacked during a motion and the next `apply` parks them again; the sync itself stays exact, so the hit test or
-  hover that asked for it still sees the geometry on screen. This is a stacking interaction, not one of the four
-  #282 notes.
+  motion goes on, and its text stops drawing for the rest of the motion. `unparkPages(rememberForRepark:)` now
+  remembers the pages a sync unpacked during a motion and the next `apply` parks them again; the sync itself stays
+  exact, so the hit test or hover that asked for it still sees the geometry on screen. A layout's unpark is the
+  sidebar-resize path, which sets every page frame to the new width after it, so it does not remember. This is a
+  stacking interaction, not one of the four #282 notes.
 - **Probe deinit.** `MainThreadBusyProbe` has an `isolated deinit` that stops a still-running probe, so its run loop
   observer is invalidated when the probe is freed while running.
 - **CPU gate through `PacingEnvironment`.** `PacingEnvironment.skipIfScreenBelow120Hz(fps:)` is the screen-only gate
@@ -2197,21 +2198,27 @@ the first red. With the implementation in place they pass:
   and the helper has no load term.
 - `SpaceSwitchTextTests.testAPointerSyncMidMotionKeepsTheShownPagesTextDrawn` (GUI, on the #415 branch): the first
   frame of a settle draws the incoming page, one `mouseMoved` syncs, and the next frame still draws the header and
-  every row title. It fails on #415's head (`Work header title is drawn`) and passes with the re-park.
+  every row title. It fails on #415's head (`Work header title is drawn`) and passes with the re-park. The existing
+  `SpacePagerTests.testPageWidthFollowsASidebarResizeDuringASwipe` caught the first version, which also re-parked
+  after a layout's unpark and left the page at the old slot; remembering only a sync's unpark fixes it.
 - `testAHitTestMidSettleFindsTheViewShownUnderThePoint` and `testAPointerMoveMidSettleSyncsTheStripFrame` now assert
   a frame within a backing pixel (and pixel alignment) instead of exact equality with the fractional offset.
 
 ### Verification
 
-- `cd app/ArktShell/ShellKit && nice -n 10 swift test --filter ShellKitGUITests` on the branch rebased onto #415:
-  1028 tests executed, 14 skipped, 0 failures (184 s). Skips: 4 NOT-MEASURABLE (`ParticleFieldTests.testFrameBudgetAt2x`,
-  `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`, `SidebarHideTests.testRevealPacing`,
-  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`; load 36-48 on 12 cores in the passing run), 7
-  `FakeEngineContractTests` cases the harness has no driver for, and 3 `AlertScreenshotTests` that need
-  `ARKT_ALERT_SHOTS_DIR`. The CPU gate did not skip: it passed in the final full run at load 25.07 and in three
-  focused reruns at load 96-120 (worst gated pass 2.9 ms; the two light/dark flavor legs are reported, not gated,
-  #275). One earlier full run at load 154 failed the gate once (a key-previous pass at 12.85 ms of thread CPU); it
-  did not reproduce in the three focused runs or the next full run. The failure is recorded rather than hidden.
+- `cd app/ArktShell/ShellKit && swift test --filter ShellKitGUITests` on the branch rebased onto #415 and then
+  fixed: 1029 tests executed, 14 skipped, 0 failures (179 s). Skips: 4 NOT-MEASURABLE
+  (`ParticleFieldTests.testFrameBudgetAt2x`, `PeekMotionOnScreenTests.testOpenAndCloseStayInsideTheFrameTimeGate`,
+  `SidebarHideTests.testRevealPacing`, `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`; load
+  17.08-18.96 on 12 cores in the passing run), 7 `FakeEngineContractTests` cases the harness has no driver for, and
+  3 `AlertScreenshotTests` that need `ARKT_ALERT_SHOTS_DIR`. The CPU gate did not skip: the final full run passed at
+  load 17.94 with worst gated pass 2.83 ms (the two light/dark flavor legs, 24.92 and 27.96 ms, are reported, not
+  gated, #275), and a focused `SpaceSwipeHitchTests` run at load 23.17 passed with worst gated pass 3.66 ms. A full
+  run on the first rebased tree failed twice: the existing `testPageWidthFollowsASidebarResizeDuringASwipe` caught
+  the first `rememberForRepark` version re-parking after a layout's unpark (remember only a sync's unpark now), and
+  a key-previous pass took 10.34 ms of thread CPU at load 41.5. The fixed full run passed. An earlier pre-rebase run
+  at load 154 failed the same key-previous gate at 12.85 ms; it did not reproduce in focused runs. Both failures are
+  recorded rather than hidden.
 - `cd app/ArktShell/ShellKit && nice -n 10 swift test --skip ShellKitGUITests`: Swift Testing 1165 tests, 0 failures
   (main 1164 + the new probe test); XCTest 0.
 - `cd app/ArktCore && nice -n 10 swift test`: 423 tests, 0 failures.
@@ -2248,6 +2255,15 @@ the first red. With the implementation in place they pass:
 - The trace predates the rebase onto #415, which draws the incoming pages' text during the motion on the main
   thread. #295's changes only remove work from the pointer-move path, so the WindowServer-side result still applies
   to them, but a trace of the final merged tree is a separate maintainer step.
+- A second trace on the final tree: `/tmp/295-final-c1c.trace`, recorded at 16:13 with the same
+  `xctrace record --template 'Animation Hitches' --all-processes --time-limit 14s --window 12s --no-prompt`
+  command against the signed Profile copy of the final build, while `-ArktSmoke YES -ArktSmokeRepeat 6` ran
+  (ArktShell pid 82231; the smoke reported `functional = PASS`). Load was 43.36 at trace start and 21.43 when the
+  file was saved. The same export xpath on all six hitch tables (`hitches`, `-frame-lifetimes`, `-renders`,
+  `-framewait`, `-gpu`, `-updates`) gives 0 rows. The app pacer in that run saw 3 late display-link intervals in 24
+  interactions: swipe-next frame 4 at 13.19 ms, swipe-next frame 65 at 16.66 ms, key-next frame 48 at 16.66 ms; the
+  other 21 interactions had none. Its verdict is still `NOT-MEASURABLE (load 43.36 on 12 cores)`, so this is a
+  final-tree trace but not a quiet-machine one either.
 
 ### Acceptance: idle smoke (#24 criterion 4)
 

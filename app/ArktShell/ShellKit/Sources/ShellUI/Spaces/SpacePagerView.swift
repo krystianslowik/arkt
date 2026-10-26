@@ -166,7 +166,7 @@ public final class SpacePagerView: NSView {
   /// rounded to whole backing pixels, so the translations that follow stay pixel-aligned for the rest of the motion
   /// (#295); at rest the exact offset is kept.
   private func syncStripFrame() {
-    unparkPages()
+    unparkPages(rememberForRepark: true)
     stripFrameSyncsForTesting += 1
     var x = offset
     if isTracking || driver.isRunning {
@@ -209,10 +209,12 @@ public final class SpacePagerView: NSView {
   }
 
   /// Returns parked pages to their own slots and clears their translations; a page that left the strip only loses
-  /// its translation.
-  private func unparkPages() {
+  /// its translation. `rememberForRepark` is for a sync that has to hand the exact geometry to a hit test or a hover:
+  /// the motion goes on from the new frame, and its next pass parks these pages again so their text keeps drawing
+  /// (#415, #295). A layout's unpark is the resize path, which sets every page frame to the new width itself.
+  private func unparkPages(rememberForRepark: Bool = false) {
     guard !parkedPages.isEmpty else {
-      if !(isTracking || driver.isRunning) { pagesToRepark.removeAll() }
+      if !rememberForRepark || !(isTracking || driver.isRunning) { pagesToRepark.removeAll() }
       return
     }
     for page in parkedPages {
@@ -221,9 +223,7 @@ public final class SpacePagerView: NSView {
       }
       page.layer?.setAffineTransform(.identity)
     }
-    // The sync that asked for this is exact for its hit test or hover. A motion goes on from the new frame, and its
-    // next pass parks these pages again so their text keeps drawing (#415, #295).
-    if isTracking || driver.isRunning {
+    if rememberForRepark, isTracking || driver.isRunning {
       pagesToRepark = Set(parkedPages.compactMap { page in
         pages.firstIndex(where: { $0 === page })
       })
