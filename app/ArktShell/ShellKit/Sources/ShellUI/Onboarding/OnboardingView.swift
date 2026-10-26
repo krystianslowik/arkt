@@ -59,7 +59,13 @@ final class OnboardingView: NSView {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var isFlipped: Bool { true }
-  override var acceptsFirstResponder: Bool { true }
+  override var acceptsFirstResponder: Bool { !passesEventsThrough }
+  /// Set for the finish (M8): the browser underneath takes the pointer while the field fades.
+  var passesEventsThrough = false
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    passesEventsThrough ? nil : super.hitTest(point)
+  }
   override var mouseDownCanMoveWindow: Bool { false }
 
   /// Windows shorter than 700 pt use the compact values of section 4.

@@ -12,9 +12,11 @@ extension ShellWindowController {
   /// Covers the window with the flow and starts it. Only one window runs it; a second call returns the running one.
   @discardableResult
   public func presentOnboarding(services: any OnboardingServices, options: OnboardingController.Options,
-                                stage: any OnboardingStage = CoreAnimationOnboardingStage()) -> OnboardingController {
+                                stage: (any OnboardingStage)? = nil) -> OnboardingController {
     if let onboarding { return onboarding }
     if options.mode == .firstRun { fitWindowForOnboarding() }
+    // The particle field when Metal runs it; the no-particle stage of section 7.4 otherwise.
+    let stage = stage ?? MetalOnboardingStage.make() ?? CoreAnimationOnboardingStage()
     let controller = OnboardingController(window: self, services: services, options: options, stage: stage)
     onboarding = controller
     commandBar.hide()
