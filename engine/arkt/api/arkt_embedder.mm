@@ -34,6 +34,7 @@
 // target cannot depend on it; the symbol is in the same framework.
 #include "chrome/browser/ui/browser_tabstrip.h"  // nogncheck
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/browser_window/public/create_browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths_internal.h"
@@ -457,6 +458,7 @@ class Embedder : public FacadeDelegate {
         fields.kind = ArktWindowRequestKindPage;
         fields.popup = true;
         fields.source = "popup Browser (window.open with window features)";
+        CenterUnplacedPopup(params, fields.bounds);
         return fields;
       case BrowserWindowInterface::TYPE_APP_POPUP:
         fields.kind = ArktWindowRequestKindExtension;
@@ -476,6 +478,28 @@ class Embedder : public FacadeDelegate {
       fields.default_params = true;
     }
     return fields;
+  }
+
+  // A page that asked for a popup size but no position (no left and top
+  // features) gets it centered over the last active window, the opener's
+  // window in practice (docs/design/little-arkt.md, Popups). Without a
+  // window the origin stays and the shell keeps the frame on screen.
+  static void CenterUnplacedPopup(const BrowserWindowCreateParams& params,
+                                  gfx::Rect& bounds) {
+    if (bounds.IsEmpty() ||
+        params.initial_origin_specified ==
+            BrowserWindowCreateParams::ValueSpecified::kSpecified) {
+      return;
+    }
+    BrowserWindowInterface* last =
+        GetLastActiveBrowserWindowInterfaceWithAnyProfile();
+    ui::BaseWindow* window = last ? last->GetWindow() : nullptr;
+    if (!window) {
+      return;
+    }
+    gfx::Rect opener = window->GetBounds();
+    bounds.set_origin(gfx::Point(opener.CenterPoint().x() - bounds.width() / 2,
+                                 opener.CenterPoint().y() - bounds.height() / 2));
   }
 
   void Replay() {
