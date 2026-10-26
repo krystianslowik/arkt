@@ -73,37 +73,25 @@ public enum ShellTokens {
   /// The sidebar hairline between pinned and Today. Dark: Arc 1.168, about white 7.5 % over the sidebar, measured in a
   /// non-key dark 2x window. Light: not measured, the hovered item level as before. Decorative, no contrast minimum.
   public static let sidebarDivider = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.10), dark: .white(0.075))
-  /// Floating overlays (the tab switcher; the alerts design's `overlayShadow`): a 0.5 pt edge and two drops.
-  public static let overlayShadow = ShadowToken(
-    edge: TokenPair(light: .black(0.12), dark: .white(0.20)),
-    drops: [
-      ShadowToken.Drop(color: TokenPair(light: .black(0.22), dark: .black(0.55)), offsetY: 18, blur: 48),
-      ShadowToken.Drop(color: TokenPair(light: .black(0.10), dark: .black(0.30)), offsetY: 3, blur: 10),
-    ])
-  /// Small floating pills (the sidebar overflow pill; the alerts design's `toastShadow`).
-  public static let toastShadow = ShadowToken(
-    edge: TokenPair(light: .black(0.10), dark: .white(0.14)),
-    drops: [
-      ShadowToken.Drop(color: TokenPair(light: .black(0.16), dark: .black(0.45)), offsetY: 8, blur: 24),
-      ShadowToken.Drop(color: TokenPair(light: .black(0.08), dark: .black(0.30)), offsetY: 1, blur: 3),
-    ])
+  /// Floating overlays (the tab switcher; the alerts design's `overlayShadow`): 18 / 48 and 3 / 10 drops (CSS blur,
+  /// so radius 24 and 5), plus `overlayEdge`.
+  public static let overlayShadow = ShadowToken(color: TokenPair(light: .black(0.22), dark: .black(0.55)), radius: 24,
+                                                offsetY: 18,
+                                                contactColor: TokenPair(light: .black(0.10), dark: .black(0.30)),
+                                                contactRadius: 5, contactOffsetY: 3)
+  /// The 0.5 pt edge of a floating overlay.
+  public static let overlayEdge = TokenPair(light: .black(0.12), dark: .white(0.20))
+  /// Small floating pills (the sidebar overflow pill; the alerts design's `toastShadow`): 8 / 24 and 1 / 3 drops,
+  /// plus `toastEdge`.
+  public static let toastShadow = ShadowToken(color: TokenPair(light: .black(0.16), dark: .black(0.45)), radius: 12,
+                                              offsetY: 8,
+                                              contactColor: TokenPair(light: .black(0.08), dark: .black(0.30)),
+                                              contactRadius: 1.5, contactOffsetY: 1)
+  /// The 0.5 pt edge of a toast-style pill.
+  public static let toastEdge = TokenPair(light: .black(0.10), dark: .white(0.14))
   // Space theme background (C6).
   /// Texture layer opacity at noiseFactor 1. TODO(parity): match Arc's grain intensity.
   public static let themeTextureMaxOpacity = 0.16
   /// Grain tile edge in points (Arc's `grain` texture is 155 pt).
   public static let themeGrainTile: CGFloat = 155
-}
-
-/// A layered shadow as the design docs write it in CSS: a hairline edge and drop shadows (offset and blur in points).
-public struct ShadowToken: Sendable, Equatable {
-  public struct Drop: Sendable, Equatable {
-    public let color: TokenPair
-    public let offsetY: CGFloat
-    /// The CSS blur; Core Animation's `shadowRadius` is half of it.
-    public let blur: CGFloat
-    public var shadowRadius: CGFloat { blur / 2 }
-  }
-
-  public let edge: TokenPair
-  public let drops: [Drop]
 }

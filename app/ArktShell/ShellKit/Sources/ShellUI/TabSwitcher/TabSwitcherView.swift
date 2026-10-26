@@ -71,7 +71,7 @@ public final class TabSwitcherView: NSView {
     wantsLayer = true
     isHidden = true
     layer?.masksToBounds = false
-    for _ in ShellTokens.overlayShadow.drops {
+    for _ in 0..<2 {
       let drop = CALayer()
       drop.masksToBounds = false
       dropLayers.append(drop)
@@ -319,14 +319,12 @@ public final class TabSwitcherView: NSView {
   private func applyColors() {
     let surfaceColor = reduceTransparency() ? ShellTokens.toolbarSurface : ShellTokens.toastSurface
     surface.backgroundColor = surfaceColor.resolve(flavor).cgColor
-    surface.borderColor = ShellTokens.overlayShadow.edge.resolve(flavor).cgColor
-    for (drop, token) in zip(dropLayers, ShellTokens.overlayShadow.drops) {
-      let color = token.color.resolve(flavor)
-      drop.shadowColor = RGBA(red: color.red, green: color.green, blue: color.blue, alpha: 1, space: color.space)
-        .cgColor
-      drop.shadowOpacity = Float(color.alpha)
-      drop.shadowRadius = token.shadowRadius
-      drop.shadowOffset = CGSize(width: 0, height: token.offsetY)       // the panel's layer is flipped: y points down
+    surface.borderColor = ShellTokens.overlayEdge.resolve(flavor).cgColor
+    for (drop, shadow) in zip(dropLayers, ShellTokens.overlayShadow.drops(flavor)) {
+      drop.shadowColor = shadow.color
+      drop.shadowOpacity = shadow.opacity
+      drop.shadowRadius = shadow.radius
+      drop.shadowOffset = CGSize(width: 0, height: shadow.offsetY)        // the layer is flipped: y points down
     }
     highlightLayer.backgroundColor = ShellTokens.sidebarItemHovered.resolve(flavor).cgColor
     highlightLayer.borderColor = ShellTokens.sidebarDivider.resolve(flavor).cgColor
@@ -459,4 +457,16 @@ public final class TabSwitcherRowView: NSView {
 @MainActor
 private final class FlippedClipView: NSView {
   override var isFlipped: Bool { true }
+}
+
+extension ShadowToken {
+  /// The two drops, outer first, as Core Animation shadow settings for `flavor`: an opaque color, the opacity, the
+  /// radius and the downward offset.
+  func drops(_ flavor: ThemeFlavor) -> [(color: CGColor, opacity: Float, radius: CGFloat, offsetY: CGFloat)] {
+    [(color, radius, offsetY), (contactColor, contactRadius, contactOffsetY)].map { pair, radius, offsetY in
+      let value = pair.resolve(flavor)
+      let opaque = RGBA(red: value.red, green: value.green, blue: value.blue, alpha: 1, space: value.space)
+      return (opaque.cgColor, Float(value.alpha), radius, offsetY)
+    }
+  }
 }

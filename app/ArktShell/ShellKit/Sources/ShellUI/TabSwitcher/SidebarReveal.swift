@@ -135,7 +135,7 @@ public final class SidebarOverflowPill: NSView {
     super.init(frame: frameRect)
     wantsLayer = true
     isHidden = true
-    for _ in ShellTokens.toastShadow.drops {
+    for _ in 0..<2 {
       let drop = CALayer()
       drops.append(drop)
       layer?.addSublayer(drop)
@@ -173,14 +173,12 @@ public final class SidebarOverflowPill: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     surface.backgroundColor = ShellTokens.toastSurface.resolve(flavor).cgColor
-    surface.borderColor = ShellTokens.toastShadow.edge.resolve(flavor).cgColor
-    for (drop, token) in zip(drops, ShellTokens.toastShadow.drops) {
-      let color = token.color.resolve(flavor)
-      drop.shadowColor = RGBA(red: color.red, green: color.green, blue: color.blue, alpha: 1, space: color.space)
-        .cgColor
-      drop.shadowOpacity = Float(color.alpha)
-      drop.shadowRadius = token.shadowRadius
-      drop.shadowOffset = CGSize(width: 0, height: token.offsetY)      // flipped: y points down
+    surface.borderColor = ShellTokens.toastEdge.resolve(flavor).cgColor
+    for (drop, shadow) in zip(drops, ShellTokens.toastShadow.drops(flavor)) {
+      drop.shadowColor = shadow.color
+      drop.shadowOpacity = shadow.opacity
+      drop.shadowRadius = shadow.radius
+      drop.shadowOffset = CGSize(width: 0, height: shadow.offsetY)        // the layer is flipped: y points down
     }
     CATransaction.commit()
     needsLayout = true
