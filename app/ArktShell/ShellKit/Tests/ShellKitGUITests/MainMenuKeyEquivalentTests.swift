@@ -233,8 +233,8 @@ final class MainMenuInventoryTests: XCTestCase {
 
   func testAppLevelItemsHaveExplicitTargets() throws {
     let toApp: [(String, Selector)] = [
-      ("About Arkt Shell", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
-      ("Hide Arkt Shell", #selector(NSApplication.hide(_:))),
+      ("About Arkt", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+      ("Hide Arkt", #selector(NSApplication.hide(_:))),
       ("Hide Others", #selector(NSApplication.hideOtherApplications(_:))),
       ("Show All", #selector(NSApplication.unhideAllApplications(_:))),
       ("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))),
@@ -338,6 +338,7 @@ final class MainMenuInventoryTests: XCTestCase {
       ("Zoom", #selector(NSWindow.performZoom(_:)), "", []),
       ("Jump to Selection", #selector(NSResponder.centerSelectionInVisibleArea(_:)), "j", .command),
       ("Settings...", #selector(AppCommands.showSettings(_:)), ",", .command),
+      ("Show Archive", #selector(AppCommands.showArchive(_:)), "", []),
     ]
     for (title, action, key, modifiers) in expected {
       let item = try item(title)
@@ -356,7 +357,7 @@ final class MainMenuInventoryTests: XCTestCase {
       (kVK_ANSI_W, .maskCommand, "Archive Tab"),
       (kVK_ANSI_W, [.maskCommand, .maskShift], "Close Window"),
       (kVK_ANSI_N, .maskCommand, "New Window"),
-      (kVK_ANSI_Q, .maskCommand, "Quit Arkt Shell"),
+      (kVK_ANSI_Q, .maskCommand, "Quit Arkt"),
       (kVK_RightArrow, [.maskCommand, .maskAlternate], "Next Space"),
       (kVK_LeftArrow, [.maskCommand, .maskAlternate], "Previous Space"),
       (kVK_ANSI_D, .maskCommand, "Pin Tab"),                                    // KB-012 (#108)

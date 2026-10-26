@@ -33,7 +33,7 @@ public struct CardToolbarLayout: Equatable, Sendable {
 
 /// Whether the content card shows the Toolbar (Toggle Toolbar, Cmd-Shift-D; KB-018, BH-032).
 ///
-/// Persistence: an app-level setting, stored in the app's standard user defaults (domain `dev.arkt.ArktShell`)
+/// Persistence: an app-level setting, stored in the app's standard user defaults (domain `dev.arkt.Arkt`)
 /// under Arc's key name `topBarURLEnabled`, so every window shares it and it survives relaunch. It is not part
 /// of the sidebar database. `ephemeral()` keeps the value in memory only (tests, the scripted smoke).
 ///

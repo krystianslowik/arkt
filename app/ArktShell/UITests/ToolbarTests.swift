@@ -72,7 +72,7 @@ final class ToolbarTests: ArktUITestCase {
 
   /// The relaunch reuses the sandbox, so the Toolbar being on afterwards comes from the sandbox's defaults suite. That
   /// the first launch of a sandbox has the Toolbar off (the other tests assert it) shows the real
-  /// `dev.arkt.ArktShell` domain is not read.
+  /// `dev.arkt.Arkt` domain is not read.
   func test_BH032_toolbarSettingSurvivesRelaunchInSameSuite() throws {
     let sandbox = try Sandbox()
     let app = try launch(sandbox)

@@ -56,7 +56,7 @@ enum MainMenu {
     let services = NSMenu(title: "Services")
     let windows = NSMenu(title: "Window")
     let help = NSMenu(title: "Help")
-    main.addItem(submenu(title: "Arkt Shell", items: appItems(commands: commands, services: services)))
+    main.addItem(submenu(title: "Arkt", items: appItems(commands: commands, services: services)))
     main.addItem(submenu(title: "File", items: fileItems(commands: commands)))
     main.addItem(submenu(title: "Edit", items: editItems(commands: commands)))
     main.addItem(submenu(title: "View", items: viewItems()))
@@ -75,17 +75,17 @@ enum MainMenu {
   // MARK: - Menus
 
   private static func appItems(commands: AppCommands, services: NSMenu) -> [NSMenuItem] {
-    let quit = item("Quit Arkt Shell", #selector(NSApplication.terminate(_:)), "q", target: NSApp)   // KB-069
+    let quit = item("Quit Arkt", #selector(NSApplication.terminate(_:)), "q", target: NSApp)   // KB-069
     quit.tag = Tag.exit
     return [
-      item("About Arkt Shell", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),
+      item("About Arkt", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),
       .separator(),
       // KB-066: Arkt's Settings window (#307); it keeps Cmd-, from Chromium's settings page (decision 9).
       item("Settings...", #selector(AppCommands.showSettings(_:)), ",", target: commands),
       .separator(),
       holder(for: services),
       .separator(),
-      item("Hide Arkt Shell", #selector(NSApplication.hide(_:)), "h", target: NSApp),                // KB-069
+      item("Hide Arkt", #selector(NSApplication.hide(_:)), "h", target: NSApp),                // KB-069
       item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option],
            target: NSApp),
       item("Show All", #selector(NSApplication.unhideAllApplications(_:)), "", [], target: NSApp),

@@ -80,7 +80,7 @@ native window default), #261 (tab-modal attachment, #207).
 | #268 | `ChromiumEngineKit` is linked in every configuration; it should link only in the Engine configuration | open, no labels |
 | #265 | Permission prompt follow-ups, leave-site sheet, pinned hint and tab events | open, `status:ready` |
 | #313, #314 | Peek and Little Arkt: out of scope for week 3 | open, `status:ready` |
-| #128 | Product bundle id (`dev.arkt.Arkt`), data folder, engine user-data-dir, branding; bundle ids are mixed today (app `dev.arkt.ArktShell`, framework and helpers `com.arkt.Arkt.*`) | open, `status:ready` |
+| #128 | Product bundle id (`dev.arkt.Arkt`), data folder, engine user-data-dir, branding (see "#128" below) | in review |
 | #300 | Selecting a row that is live in another window loads the page a second time | open, `status:ready` |
 | #121, #122 | Extension context menus, pinning, keyboard commands, install sheet (#121); native replacements for the remaining Views surfaces, including the page context menu, tab sharing and sign-in QR (#122) | open, `status:blocked` |
 
@@ -3165,3 +3165,161 @@ column). One snapshot call serves both #370 and #352 (shape posted on #352).
   gives nil, and `PageThumbnails` falls back to the cache. Not checked on real Chromium: rule 18 covers shown tabs.
 - "History clearing" has no command yet; only Clear Archive empties the cache. The preview UI (#371, #372) is not part
   of this change.
+
+## #268: ChromiumEngineKit linked only in the Engine configuration
+
+### What landed
+
+- `project.yml`: the `ChromiumEngineKit` and `EngineAPITestSupport` package dependencies say `link: false`. Xcode
+  still builds both products in every configuration (the Engine compile needs their modules), but only the Engine
+  configuration links them, through `OTHER_LDFLAGS` naming `$(BUILT_PRODUCTS_DIR)/<product>.o`.
+- The Engine configuration also passes the facade header's module map (`OTHER_SWIFT_FLAGS`, `-fmodule-map-file`). A
+  linked product used to pass it; without it the explicit module scan of `App/Engine` failed ("Unable to resolve module
+  dependency"), because the kit's swiftmodule loads the facade module for its `internal import`.
+- Isolation tests: the two products are the only ones with `link: false`, their objects appear in exactly one
+  `OTHER_LDFLAGS`, under `Engine`, and only `App/Engine` imports them. The facade module check on `project.yml` is
+  narrowed from "never named" to "named only in the Engine module map flag, and never a dependency".
+
+### Verification
+
+- `xcodegen generate` (2.46.0): the two products are target dependencies and absent from the Frameworks phase.
+- Debug, Release and Profile builds: `BUILD SUCCEEDED`. `nm` on the Debug stub, `ArktShell.debug.dylib`, the Release
+  and the Profile binary: 0 `ArktShellEmbedder` or `ChromiumEngineKit` symbols, 0 `EngineAPITestSupport` symbols,
+  `strings` finds no `ArktShellEmbedder`; `otool -L` lists no engine framework. Before the change, a Debug
+  `ArktShell.debug.dylib` built from `main` defined `_OBJC_CLASS_$_ArktShellEmbedder`.
+- Engine build (`ARKT_ENGINE_APP` set to `out/Spike/Chromium.app`, derived data outside the Chromium disk):
+  `BUILD SUCCEEDED`; the binary defines `_OBJC_CLASS_$_ArktShellEmbedder` and lists it in its Objective-C class list
+  (`otool -ov`), which is what `NSClassFromString` reads. The app was not launched.
+- ShellKit `swift test --skip ShellKitGUITests`, rebased on `5ebda1f`: 1284 passed; isolation suites 34 (28 + 6).
+  ArktCore `swift test`: 428 passed (428 + 0).
+
+### Deviations
+
+- The facade module map flag in `project.yml` (above), and the narrowed isolation check that allows it.
+
+## #128: product bundle id, data folder, engine user-data-dir and branding
+
+Date 2026-10-26. Branch `engine/128-product-bundle-id` off `main` at `7940026`. Decision: #73 (`dev.arkt.*`).
+
+### What landed
+
+- **Bundle id.** `engine/arkt/branding/BRANDING` `MAC_BUNDLE_ID` `com.arkt.Arkt` -> `dev.arkt.Arkt`; the app's
+  `PRODUCT_BUNDLE_IDENTIFIER` `dev.arkt.ArktShell` -> `dev.arkt.Arkt`. The framework and helpers derive from the
+  branding file, so no `com.arkt.*` id remains. `ProductIdentityTests` pins both ids to each other.
+- **Branding strings.** `CFBundleName` and `CFBundleDisplayName` `Arkt Shell` -> `Arkt` (the keychain prompt text, W3-11).
+  The executable and bundle file name stay `ArktShell`.
+- **Data folder.** Unchanged: `~/Library/Application Support/Arkt` (`DatabaseLocation.productFolderName`, now a named
+  constant with a test). The engine's default user-data-dir lives inside it, as `Arkt/Engine`.
+- **`CrProductDirName`.** The Engine build phase writes it from the build setting `ARKT_PRODUCT_DIR_NAME`
+  (`Engine.xcconfig`, default `Arkt Dev Engine`, so the development path is unchanged). A product build passes
+  `ARKT_PRODUCT_DIR_NAME=Arkt/Engine`; the release configuration (#334) sets it in its own xcconfig. The build phase fails
+  on an empty value. Chromium reads the key from the outer bundle (`chrome_paths_mac.mm`), so it is a seam: **no
+  Chromium patch**, `.patches` 9 = `rev-list --count 156.0.8078.48..arkt` 9.
+- **Keychain.** Untouched. Patch 0003 keeps the product item "Arkt Safe Storage"; the maintainer keeps the existing
+  "Chromium Safe Storage" item (#20). `grep -a -c` on `Arkt Framework`: `Arkt Safe Storage` 1, `Chromium Safe Storage` 0.
+  Nothing read or wrote the keychain (`--use-mock-keychain`).
+- **Facade header:** not changed; both copies byte-identical (`cmp`).
+
+### Checks
+
+Engine app on the rebuilt `out/Arkt` framework, bundle id `dev.arkt.ArktShell.try128` (own id, never installed),
+`ARKT_PRODUCT_DIR_NAME=Arkt/Engine`, copy on the internal disk, `CFFIXED_USER_HOME` pointing at an empty throwaway home
+so the defaults resolve there and not in the real `~/Library/Application Support`, `--use-mock-keychain`, no
+`--user-data-dir` and no `ARKT_DATA_DIR`.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Ids in the rebuilt `out/Arkt` | PASS | app `dev.arkt.Arkt`; framework `dev.arkt.Arkt.framework`; helpers `dev.arkt.Arkt.helper` (Helper, GPU, Aperitif, Aperitif GPU), `dev.arkt.Arkt.helper.renderer` (Renderer, Aperitif Renderer), `dev.arkt.Arkt.framework.AlertNotificationService` (Alerts, Aperitif Alerts); no `com.arkt` string in the framework binary |
+| App Info.plist | PASS | `CFBundleIdentifier=dev.arkt.ArktShell.try128`, `CFBundleName=Arkt`, `CFBundleDisplayName=Arkt`, `CrProductDirName=Arkt/Engine`, `ArktEngineFrameworkName=Arkt Framework` |
+| Development path | PASS | the Engine build on `out/Spike` gives `CrProductDirName=Arkt Dev Engine` |
+| Shell data folder | PASS | `<home>/Library/Application Support/Arkt/Arkt.sqlite` |
+| Engine user-data-dir | PASS | `<home>/Library/Application Support/Arkt/Engine` holding `Default`, `Local State`, `Crashpad`; cache `<home>/Library/Caches/Arkt/Engine` |
+| Mach rendezvous | PASS | `launchctl print gui/<uid>`: `dev.arkt.ArktShell.try128.MachPortRendezvousServer.<browser pid>` (follows the outer app); 7 helpers ran from the bundle with no rendezvous error |
+| Real folders | PASS | `~/Library/Application Support/Arkt/Engine` still absent after the run; the real `Arkt` and `Arkt Dev Engine` folders untouched |
+| Quit | PASS | `kill <browser pid>`; the browser and all 7 helper pids gone after 6 s |
+
+One `ERROR:net/disk_cache/disk_cache.cc: Unable to create cache` line appeared in the throwaway-home run (the cache
+folder sits under the long scratch path); not investigated further, no effect on the checks.
+
+### Verification
+
+- Red first: `ProductIdentityTests` failed on the old ids and `DatabaseLocationTests` did not compile
+  (`productFolderName` missing), then both passed.
+- ShellKit `swift test --skip ShellKitGUITests`: 1292 passed (baseline 1287 + the 5 `ProductIdentityTests`). ArktCore `swift test`: 429 passed (428 + `DatabaseLocationTests`).
+- `nice -n 15 autoninja -C out/Spike chrome`: `The build has finished successfully.` (nothing to rebuild; the overlay
+  is unchanged). `nice -n 15 autoninja -C out/Arkt chrome -j 4`: `The build has finished successfully.` (branding
+  change).
+- Engine app: `xcodebuild -scheme ArktShell -configuration Engine`: `BUILD SUCCEEDED` on `out/Spike` (development
+  value) and on `out/Arkt` (product value, own bundle id).
+
+### Cleanup
+
+Test copy, throwaway home, embed folders and probe removed. The test bundle was registered with LaunchServices by the
+launch itself; `lsregister -u` was run, but one record for the deleted path (`dev.arkt.ArktShell.try128`, unique id) is
+still listed and will be dropped by LaunchServices' own cleanup. It cannot take over any real app's links.
+
+### Left open
+
+- The release configuration (no test-only code, product `ARKT_PRODUCT_DIR_NAME`) is #334; signing is #125.
+- Existing installs of the placeholder id: none ship; the maintainer's `~/Applications/ArktTest` bundle keeps its old id
+  until it is rebuilt.
+
+## #352: Little Arkt's Open in flight
+
+Branch `feat/352-little-arkt-flight`. Design: `docs/design/little-arkt.md`, Motion (`la-kf-promote-*`,
+`la-kf-interrupt-220ms`). Shell only: the snapshot is `EngineClient.pageImage(of:_:)` with `.fullFrame` (#370); no
+Chromium patch, no facade change.
+
+### What changed
+
+- `LittleArktFlight` draws the page's snapshot on its plate on `LittleArktFlightOverlay`, a transparent, click-through
+  borderless window spanning both windows, above both. Nothing changes until the first display frame; the card then
+  flies with its center, mask size and scale on `firmSlow` and its opacity back to 1, from wherever the appear has it.
+- The small frame fades at once (`fadeOut`, 0.12 s) and the main window comes forward. A snapshot that misses the first
+  frame fades in on the plate (critical 0.16 s).
+- The Today row is added at the start, drawn by the flight's clock: the rows below hold their place, make room after
+  200 ms and the row fades in from 0.96 at 290 ms (`springyFast`, `SidebarArrivalLayout` through the folder motion row
+  styles). At rest the page moves once (`moveTab`), is selected and mounted at its final size; the next display frame
+  starts the 0.1 s crossfade, and the overlay is removed.
+- No flight (today's fade-out path): Reduce Motion, no open main window, or one minimized, on another desktop, in full
+  screen or off every screen (`LittleArktFlightConditions`).
+- A flight that cannot land by itself ends with `LittleArktFlight.abort(_:)`, which orders the overlay out and tells
+  the window controller what to do with the page: the main window miniaturizing, the main window's display link
+  stopping (two quiet checks of a watchdog on an injected clock, counted in frames, never seconds), the app
+  terminating, the small window closing, and Cmd-W or the close button land the page in the main window at once,
+  without the flight; the main window closing keeps the page in the small window and drops the row made for it; the
+  page closing itself (`window.close()`) drops the row and lets the engine close the window, with no appear on it.
+  Cmd-W mid-flight lands first and then closes (it is never ignored). A released flight orders its overlay out.
+- `LittleArktAnimator.run` reads its clock once per run (#450); `beginFlight` reads the window's clock once.
+- An arrival frame reads one row height (the arriving row's) instead of all of them.
+
+### Verification
+
+- Red first: the motion and flight tests failed to compile (types missing), then passed. Break check: landing on the
+  first flying frame instead of at rest (`LittleArktFlight.tick`, the `isSettled` gate) turned three flight tests red;
+  restored.
+- ArktCore `swift test`: 428 passed (unchanged).
+- ShellKit `swift test --skip ShellKitGUITests`: 1299 passed (1298 before the abort fixes + 1; the earlier baseline
+  is 1298 minus the 11 tests added, not a run on `main`).
+- ShellKit `swift test --filter ShellKitGUITests` before the abort fixes (not re-run after them; the Little Arkt
+  suites above were): 1103 run, 18 skipped, 0 failures (load average 22.6). An earlier run
+  before the merge of `main` had one failure, the `SpaceSwipeHitchTests` main-thread CPU gate at load average 44
+  (10.6 ms against 8.34 ms); it passed alone.
+- `swift test --filter "LittleArktFlight|LittleArktWindowTests"` 20 times in a row: 20 of 20 passed, 39 XCTest
+  (2 skipped: the screenshot and measurement tests) and 12 Swift Testing each, load average 22.6 at the start and
+  18.8 at the end.
+- Abort break check: removing the `abort` calls in `LittleArktWindowController` (`windowWillClose`, `requestClose`,
+  the `.tabClosed` case) turned the Cmd-W and page-closed tests red (flight still `flying`, overlay still up, page
+  not landed, row held back). The old animator (two clock reads) fails the three clock tests. Restored.
+- One arrival frame with 509 rows (Debug, load average about 23, `ARKT_FLIGHT_MEASURE=1`, 600 frames): mean 460 us
+  before (458 to 474 over 4 runs), 296 us after (293 to 299 over 4 runs).
+
+### Deviations
+
+- Open in with no main window open takes the fade-out path (the window it opens has no laid-out card yet).
+- The engine reports no first frame for a page in its new window; the crossfade starts on the next display frame after
+  the page is mounted. A check with real Chromium is #454.
+- The selection moves to the new row when the page lands; the design's fade of the old selection and fade-in of the new
+  one is not drawn (#455).
+- No card shadow during the flight (a shadow path per frame would be extra per-frame work; #456).
+- If the main window goes away mid-flight, the page stays in the Little Arkt window.

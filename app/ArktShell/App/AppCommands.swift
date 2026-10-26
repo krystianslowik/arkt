@@ -20,7 +20,7 @@ final class AppCommands: NSObject {
   /// Arkt window. The same bar as the system-wide hotkey (KB-045).
   @objc func newLittleArktWindow(_ sender: Any?) { session?.showLittleArktLookup() }
 
-  /// Arkt Shell > Settings... (Cmd-, KB-066): opens the Settings window, or brings it forward (#307).
+  /// Arkt > Settings... (Cmd-, KB-066): opens the Settings window, or brings it forward (#307).
   @objc func showSettings(_ sender: Any?) { session?.showSettings() }
 
   /// File > Import from Arc... (E4c).
