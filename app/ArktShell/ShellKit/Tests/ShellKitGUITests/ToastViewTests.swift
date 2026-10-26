@@ -212,6 +212,7 @@ final class ToastLayoutTests: XCTestCase {
   func testTheSurfaceFollowsTheSpaceTheme() throws {
     let blue = SpaceThemeInfo(baseColors: [.srgb(hex: 0x3B82F6)], isDark: false)
     let controller = makeController(theme: blue)
+    controller.toasts.view?.reduceTransparency = { false }         // the runner's own setting must not decide
     let view = try shown(controller, Toast(text: "Pinned to Work"))
     XCTAssertEqual(view.theme, blue)
     XCTAssertEqual(view.layer?.backgroundColor, AlertTokens.toastSurface(theme: blue).cgColor)

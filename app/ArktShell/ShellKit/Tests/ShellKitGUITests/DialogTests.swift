@@ -111,7 +111,9 @@ final class DialogTests: XCTestCase {
                                 primaryTitle: "Allow", cancelTitle: "Never Allow", defaultButton: .none, width: 320)
     let panel = DialogPanel(content: content)
     panel.reduceMotion = { false }
-    let anchor = NSRect(x: 300, y: 120, width: 600, height: 600)
+    // Inside the screen: a CI runner's small screen would otherwise move the panel down (constrained frame).
+    let screen = try XCTUnwrap(NSScreen.main?.visibleFrame)
+    let anchor = NSRect(x: screen.minX + 40, y: screen.minY + 20, width: 600, height: min(600, screen.height - 40))
     panel.show(over: parent, anchoredTo: anchor)
     XCTAssertEqual(panel.panel.frame.minX, anchor.minX + 12)
     XCTAssertEqual(panel.panel.frame.maxY, anchor.maxY - 12)

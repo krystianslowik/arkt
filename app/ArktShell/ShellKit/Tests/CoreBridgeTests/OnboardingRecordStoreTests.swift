@@ -21,7 +21,8 @@ struct OnboardingRecordStoreTests {
 
     store.saveProgress(first)
     store.saveProgress(last)
-    let terminationFlush = Task { await store.flush(atMost: .seconds(1)) }
+    let sleeper = ManualSleeper()      // the deadline never fires: only the write ends the flush
+    let terminationFlush = Task { await store.flush(atMost: .seconds(1), sleep: sleeper.sleep) }
     _ = await writeStarts.next()
     #expect(store.needsFlush)
 
@@ -55,7 +56,7 @@ struct OnboardingRecordStoreTests {
     #expect(await storage.record == nil)
 
     await gate.open()
-    #expect(await store.flush(atMost: .seconds(1)))
+    #expect(await store.flush(atMost: .seconds(1), sleep: ManualSleeper().sleep))
     #expect(await storage.record?.isCompleted == true)
   }
 
@@ -72,7 +73,8 @@ struct OnboardingRecordStoreTests {
     var writeStarts = starts.makeAsyncIterator()
 
     store.markCompleted()
-    let terminationFlush = Task { await store.flush(atMost: .seconds(1)) }
+    let sleeper = ManualSleeper()      // the deadline never fires: only the write ends the flush
+    let terminationFlush = Task { await store.flush(atMost: .seconds(1), sleep: sleeper.sleep) }
     _ = await writeStarts.next()
     #expect(store.needsFlush)
 
