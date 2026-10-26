@@ -45,6 +45,8 @@ public struct EngineHarness {
   /// Makes the page register a `beforeunload` handler with sticky user activation, so an honouring close holds.
   public let holdClose: EngineTabAction?
   public let answerDialog: AnswerDialog?
+  /// Makes the page of `id` play sound (rule 17), for example `EngineContract.toneScript` run with a user gesture.
+  public let makeAudible: EngineTabAction?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -56,11 +58,13 @@ public struct EngineHarness {
               engineCloseTab: EngineTabAction? = nil,
               engineActivate: EngineTabAction? = nil,
               holdClose: EngineTabAction? = nil,
-              answerDialog: AnswerDialog? = nil) {
+              answerDialog: AnswerDialog? = nil,
+              makeAudible: EngineTabAction? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
     self.engineActivate = engineActivate; self.holdClose = holdClose; self.answerDialog = answerDialog
+    self.makeAudible = makeAudible
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -87,7 +91,8 @@ public struct EngineHarness {
         guard try inMemory(engine).answerDialog(id, accept: accept) else {
           throw ContractViolation(description: "no pending dialog in \(id)")
         }
-      }
+      },
+      makeAudible: { engine, id in try inMemory(engine).setAudible(id, true) }
     )
   }
 
@@ -136,6 +141,9 @@ public struct EngineHarness {
 ///     reports `.closeCancelled` and leaves the tab open with no `.tabClosed`; `.skipUnloadHandlers` never holds on a
 ///     `beforeunload` page. A window close with a held tab that is cancelled keeps the window and its tabs open (no
 ///     `.windowClosed`). Needs `holdClose` and `answerDialog`.
+/// 17. `setMuted(_:muted:)` sets `isMuted` in the snapshot and reports each change with one `.mutedChanged`; setting
+///     the state the tab already has reports nothing (#364). A page that plays sound reports `.audibleChanged(true)`
+///     and `isAudible` (needs `makeAudible`).
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
@@ -419,6 +427,49 @@ public enum EngineContract {
     engine.goBack(copy)
     try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: copy)?.url == first }
     try require(engine.snapshot(of: id)?.url == second, "original tab must stay on second")
+  }
+
+  // MARK: Rule 17 (#364)
+
+  /// A page that plays a tone through Web Audio, for the `makeAudible` driver of a real engine. It needs a user
+  /// gesture (the autoplay policy), so run it as one. It answers the context's state at once (`running` with the
+  /// gesture); the test API does not wait for promises.
+  public static let toneScript = """
+    (() => { const c = new AudioContext(); const o = c.createOscillator(); const g = c.createGain(); \
+    g.gain.value = 0.05; o.connect(g).connect(c.destination); o.start(); c.resume(); window.arktTone = c; \
+    return c.state; })()
+    """
+
+  public static func muteIsReportedOnce(_ h: EngineHarness) async throws {
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Muted"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try require(engine.snapshot(of: id)?.isMuted == false, "a new tab must not be muted")
+    engine.setMuted(id, muted: true)
+    try await waitUntil(timeout: .seconds(5)) { engine.snapshot(of: id)?.isMuted == true }
+    engine.setMuted(id, muted: true)
+    engine.setMuted(id, muted: false)
+    try await waitUntil(timeout: .seconds(5)) { engine.snapshot(of: id)?.isMuted == false }
+    // A redundant call that an engine reported anyway would arrive by now (one batch after the calls).
+    try await Task.sleep(for: .milliseconds(100))
+    let mutes = recorder.events(for: id).filter { if case .mutedChanged = $0 { true } else { false } }
+    try require(mutes == [.mutedChanged(id, isMuted: true), .mutedChanged(id, isMuted: false)],
+                "each mute change must be reported once: \(mutes)")
+  }
+
+  public static func audibleStateIsReported(_ h: EngineHarness) async throws {
+    let makeAudible = try driver(h.makeAudible, "makeAudible")
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Tone"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try require(engine.snapshot(of: id)?.isAudible == false, "a silent page must not be audible")
+    try await makeAudible(engine, id)
+    try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.isAudible == true }
+    try require(recorder.events(for: id).contains(.audibleChanged(id, isAudible: true)),
+                "the audible start must be reported: \(recorder.events(for: id))")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
   }
 
   /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.

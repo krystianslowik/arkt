@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-16), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-17), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -13,8 +13,10 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case activationIsOneTabPerWindow, engineCreatedTabIsAnnounced, engineCloseIsTerminal
   case windowlessCreateTabLandsInMostRecentlyActiveWindow, heldCloseKeepsTheTabUntilAnswered
   case skipUnloadHandlersNeverHolds, cancelledWindowCloseKeepsTheWindow
+  // Rule 17
+  case muteIsReportedOnce, audibleStateIsReported
 
-  /// The contract rule (1-16) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The contract rule (1-17) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -34,6 +36,7 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .engineCloseIsTerminal: 14
     case .windowlessCreateTabLandsInMostRecentlyActiveWindow: 15
     case .heldCloseKeepsTheTabUntilAnswered, .skipUnloadHandlersNeverHolds, .cancelledWindowCloseKeepsTheWindow: 16
+    case .muteIsReportedOnce, .audibleStateIsReported: 17
     }
   }
 
@@ -66,6 +69,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .heldCloseKeepsTheTabUntilAnswered: try await EngineContract.heldCloseKeepsTheTabUntilAnswered(h)
     case .skipUnloadHandlersNeverHolds: try await EngineContract.skipUnloadHandlersNeverHolds(h)
     case .cancelledWindowCloseKeepsTheWindow: try await EngineContract.cancelledWindowCloseKeepsTheWindow(h)
+    case .muteIsReportedOnce: try await EngineContract.muteIsReportedOnce(h)
+    case .audibleStateIsReported: try await EngineContract.audibleStateIsReported(h)
     }
   }
 }

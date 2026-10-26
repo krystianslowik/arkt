@@ -8,7 +8,7 @@ import EngineAPITestSupport
 /// `--arkt-engine-contract` and `--arkt-engine-test-api` (plus the tabs probe extension loaded with
 /// `--load-extension`); the shell's session is not started. Every check gets a fresh `ChromiumEngine` from
 /// `ChromiumEmbedding.makeEngine()`, its own windows, and pages from a loopback server. Prints one
-/// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when all 16 rules pass, 1 when any check fails or
+/// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when all 17 rules pass, 1 when any check fails or
 /// reports not applicable, 2 when the runner cannot start.
 ///
 /// The switch is a Chromium-style switch, not `-ArktEngineContract YES` as the plan wrote it: Chromium reads every
@@ -198,6 +198,13 @@ final class EngineContractRunner {
         try await EngineContract.waitUntil(timeout: .seconds(5)) {
           answered = chromium.answerDialog(in: id, accept: accept)
           return answered
+        }
+      },
+      makeAudible: { [unowned self] engine, id in
+        // A Web Audio tone; the user gesture lets it start under the autoplay policy (rule 17, #364).
+        let state = try await chromium(engine).evaluateScript(EngineContract.toneScript, in: id, userGesture: true)
+        guard state == .string("running") else {
+          throw RunnerError("the tone did not start: \(String(describing: state))")
         }
       }
     )

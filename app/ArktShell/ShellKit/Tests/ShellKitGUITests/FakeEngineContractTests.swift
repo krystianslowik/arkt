@@ -62,6 +62,11 @@ final class FakeEngineContractTests: XCTestCase {
   func testCancelledWindowCloseKeepsTheWindow() async throws {
     try await notApplicable { try await EngineContract.cancelledWindowCloseKeepsTheWindow(harness) }
   }
+  // Rule 17 (#364): mute is engine state; WKWebView has no public audible signal.
+  func testMuteIsReportedOnce() async throws { try await EngineContract.muteIsReportedOnce(harness) }
+  func testAudibleStateIsReported() async throws {
+    try await notApplicable { try await EngineContract.audibleStateIsReported(harness) }
+  }
 
   /// Reports a rule without its driver as skipped (not applicable), never as passed.
   private func notApplicable(_ rule: () async throws -> Void) async throws {

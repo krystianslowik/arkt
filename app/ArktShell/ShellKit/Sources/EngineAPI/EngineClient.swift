@@ -63,15 +63,21 @@ public struct TabSnapshot: Equatable, Sendable {
   /// A close with `.honourUnloadHandlers` would be held now (the page has a `beforeunload` handler). Auto-archive
   /// skips such a tab (Decision 11).
   public var wouldHoldClose: Bool
+  /// The page is playing sound now (contract rule 17). Chromium keeps it true for a muted page that plays, so a
+  /// muted tab can be audible; the shell shows the muted state first.
+  public var isAudible: Bool
+  /// The tab's sound is muted (`setMuted(_:muted:)`, contract rule 17).
+  public var isMuted: Bool
 
   public init(id: TabID, url: URL? = nil, title: String = "", faviconData: Data? = nil, isLoading: Bool = false,
               canGoBack: Bool = false, canGoForward: Bool = false, window: EngineWindowID? = nil,
               opener: TabID? = nil, origin: TabOrigin = .client, isActive: Bool = false, isClosing: Bool = false,
-              wouldHoldClose: Bool = false) {
+              wouldHoldClose: Bool = false, isAudible: Bool = false, isMuted: Bool = false) {
     self.id = id; self.url = url; self.title = title; self.faviconData = faviconData; self.isLoading = isLoading
     self.canGoBack = canGoBack; self.canGoForward = canGoForward
     self.window = window; self.opener = opener; self.origin = origin; self.isActive = isActive
     self.isClosing = isClosing; self.wouldHoldClose = wouldHoldClose
+    self.isAudible = isAudible; self.isMuted = isMuted
   }
 }
 
@@ -112,12 +118,16 @@ public enum EngineEvent: Equatable, Sendable {
   case activeTabChanged(TabID)
   /// A held close was cancelled (the user stayed on the page); the tab stays open (contract rule 16).
   case closeCancelled(TabID)
+  /// The page started or stopped playing sound (contract rule 17).
+  case audibleChanged(TabID, isAudible: Bool)
+  /// The tab was muted or unmuted (contract rule 17).
+  case mutedChanged(TabID, isMuted: Bool)
 
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id, _), .urlChanged(let id, _), .titleChanged(let id, _),
          .faviconChanged(let id, _), .loadingChanged(let id, _), .historyChanged(let id, _, _),
-         .activeTabChanged(let id), .closeCancelled(let id):
+         .activeTabChanged(let id), .closeCancelled(let id), .audibleChanged(let id, _), .mutedChanged(let id, _):
       return id
     }
   }
@@ -183,6 +193,10 @@ public protocol EngineClient: AnyObject {
   /// (`.windowClosed`, no `.tabClosed`). A no-op for an unknown or closing tab, an unknown window, or the tab's own
   /// window. Default: a no-op, for an engine that cannot move tabs.
   func moveTab(_ id: TabID, to window: EngineWindowID)
+  /// Mutes or unmutes the tab's sound (#364, BH-126, contract rule 17): `isMuted` in the snapshot and one
+  /// `.mutedChanged` per change; setting the state the tab already has reports nothing. The page keeps playing and
+  /// keeps its `isAudible`. A no-op for an unknown or closed tab.
+  func setMuted(_ id: TabID, muted: Bool)
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it
   /// arrives after the call that caused it returns. During queued delivery `snapshot(of:)`
