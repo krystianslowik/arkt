@@ -31,6 +31,12 @@ public final class ShellWindowSet {
   private var mainOrder: [ObjectIdentifier] = []
   private var mainObservers: [ObjectIdentifier: any NSObjectProtocol] = [:]
   private var windowObservation: EngineObservation?
+  /// Little Arkt windows (#314), the frontmost last.
+  private var littleArktWindows: [LittleArktWindowController] = []
+  /// The size new Little Arkt windows get: the last one the user set (BH-142), for this session.
+  private var littleArktSize = LittleArktLayout.defaultSize
+  /// Reduce Motion for Little Arkt windows (tests set it).
+  public var littleArktReduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
   /// `hostLookup` is needed only for an engine that asks for windows of its own (a host provider); FakeEngine never
   /// does.
@@ -98,6 +104,7 @@ public final class ShellWindowSet {
   /// window yet (no tab was shown, so the engine counts no window); every other request gets a new window in the
   /// opener's Space, else the primary window's, with the requested frame.
   public func host(for request: EngineWindowRequest) -> any EngineWindowHosting {
+    if LittleArktRouting.opensInLittleArkt(request) { return makeLittleArkt(for: request).engineHost }
     if request.kind == .reopen, let reusable = controllers.first(where: { candidate in
       candidate.engineWindow == nil && !awaitingAdoption.contains { $0 === candidate }
     }) {
@@ -127,11 +134,50 @@ public final class ShellWindowSet {
 
   private func windowOpened(_ id: EngineWindowID) {
     awaitingAdoption.removeAll { $0.isClosed }
+    if let host = hostLookup?(id), let little = littleArktWindows.first(where: { $0.engineHost === host }) {
+      little.adopt(engineWindow: id)
+      return
+    }
     guard let host = hostLookup?(id),
           let index = awaitingAdoption.firstIndex(where: { $0.engineHost === host }) else { return }
     let controller = awaitingAdoption.remove(at: index)
     controller.adopt(engineWindow: id)
     controller.showWindow(nil)
+  }
+
+  // MARK: Little Arkt (#314)
+
+  /// The open Little Arkt windows, the frontmost last.
+  public var littleArkts: [LittleArktWindowController] {
+    littleArktWindows.removeAll { $0.isClosed }
+    return littleArktWindows
+  }
+
+  /// Built inside the engine's window construction: placed, wired and kept until its window is announced. A popup
+  /// gets the frame its page asked for; otherwise the remembered size at the top-right, cascaded from the frontmost
+  /// Little Arkt window.
+  private func makeLittleArkt(for request: EngineWindowRequest) -> LittleArktWindowController {
+    let screen = NSScreen.main ?? NSScreen.screens.first
+    let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: LittleArktLayout.defaultSize)
+    let frame = request.bounds.map { LittleArktLayout.frame(forRequestedPage: $0, in: visible) }
+      ?? LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
+    let little = LittleArktWindowController(engine: engine, isPopup: request.isPopup || request.kind == .page,
+                                            frame: frame)
+    little.reduceMotion = { [weak self] in self?.littleArktReduceMotion() ?? false }
+    little.targetSpace = { [weak self] in self?.primary?.littleArktTargetSpace }
+    little.spaces = { [weak self] in
+      guard let self else { return [] }
+      return self.sidebar.spaceOrder.compactMap { self.sidebar.space($0) }
+    }
+    little.onOpenIn = { [weak self] tab, space in
+      guard let self else { return false }
+      let target = self.primary ?? self.openWindow(opensFirstTab: false)
+      return target.receiveMovedTab(tab, in: space)
+    }
+    little.onResize = { [weak self] size in self?.littleArktSize = size }
+    little.onClosed = { [weak self] closed in self?.littleArktWindows.removeAll { $0 === closed } }
+    littleArktWindows.append(little)
+    return little
   }
 
   // MARK: Unions over the open windows
