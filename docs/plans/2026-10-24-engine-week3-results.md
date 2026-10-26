@@ -3101,3 +3101,66 @@ and the next launches did not repeat it.
 - FakeEngine has no extensions: `extensionWindowCloseReportsExtension` is not applicable there.
 - An extension call from an extension page that holds no keepalive (a popup, an options page) is still told apart
   only as `user` (week-3 Decision 12's limit, `arkt_extension_calls.h`).
+
+## #370: page thumbnails for the command bar preview (shared with #352)
+
+Date 2026-10-26. Branch `feat/370-page-thumbnails` off `main` at `c68bf21`. Design: `design/command-bar/` (Preview
+column). One snapshot call serves both #370 and #352 (shape posted on #352).
+
+### What landed
+
+- **Facade header (both copies, additive).** `-[ArktTabHandle copyFrameWithMaxPixelSize:completion:]`: the tab's
+  current frame as PNG with its pixel size and its pixels per point; `NSZeroSize` copies the full frame at the backing
+  scale. Existing members are unchanged.
+- **Facade.** `RenderWidgetHostView::CopyFromSurface` with the output size computed from the view bounds and the device
+  scale, so viz scales on the GPU; 2 s copy timeout; the answer is posted back to the UI thread, the PNG is encoded on
+  the thread pool (`PNGCodec::FastEncodeBGRASkBitmap`), and the completion runs on the UI thread, never inside the call.
+  A discarded tab, a pending or closed handle, or a view whose surface is not available for copy answers nil; the tab
+  is never shown, woken or reloaded. `//components/viz/common` added to the overlay's deps. **No Chromium patch**;
+  `.patches` 9 = `rev-list --count` 9; `gn check out/Spike '//arkt/api:*'` OK.
+- **Engine API.** `EngineClient.pageImage(of:_:) async -> PageImage?` with `PageImageRequest.thumbnail` (600 x 360 px,
+  80 KB) and `.fullFrame` (no caps, PNG, for #352). `PageImage` is `Data` (PNG or JPEG) plus pixel size and scale, so it
+  stays `Sendable`. `PageImageEncoder` (`@concurrent`) applies the caps: never upscales, keeps the aspect, steps the JPEG
+  quality down (0.8 to 0.2) and then halves the size until the byte cap holds, else nil; a facade PNG that already fits
+  passes through.
+- **History cache.** `PageImageCache` (actor): the last thumbnail per page, keyed by SHA-256 of the URL (no URL part in
+  a file name), at most 200 entries and 20 MB, oldest stored evicted first, kept across launches. `PageThumbnails`
+  combines engine and cache: a live tab's image is stored under the URL it still shows after the copy; a tab without a
+  frame gives its cached image or nil; a history item gives its cached image or nil, never a fetch.
+- **Engines.** ChromiumEngine through the facade (logs size and time, never the URL). FakeEngine through WKWebView
+  `takeSnapshot` at the width that fits the cap (nil for a tab not in a window). InMemoryEngine draws a deterministic
+  image per URL (`setFrameAvailable` driver for the no-frame case), for command bar tests with no engine.
+- **App.** The session owns `pageThumbnails` (for #372) over `<Caches>/<bundle id>/PageImages`, or
+  `<ARKT_DATA_DIR>/Caches/PageImages` in development and test runs; Clear Archive empties it
+  (`ArchiveListModel.onCleared`). Contract rule 18 (`pageImageFitsTheCaps`, `pageImageOfAClosedTabIsNil`, driver
+  `showPage`); the in-app runner prints the thumbnail's size and time.
+
+### Checks (Engine app on `out/Spike`, `$CHROMIUM_ROOT/embed-370`, bundle id `dev.arkt.ArktShell.try370`, profile `$PROF/370-try` with `--use-mock-keychain`, scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and defaults suite, tabs probe loaded, loopback pages)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Contract on real Chromium, all rules | PASS | `--arkt-engine-contract --arkt-engine-test-api`: `ARKT_CONTRACT result 18/18` |
+| Live thumbnail of a loaded, shown page | PASS | `ARKT_CONTRACT page image png 498x360 px @0.69, 5640 bytes in 12 ms` (a 720 x 520 pt runner window at 2x: 1440 x 1040 px scaled to fit 600 x 360); decodes to the size it reports |
+| Full frame of the same page | PASS | at least as large as the thumbnail (rule 18) |
+| Closed and unknown tab | PASS | nil (`pageImageOfAClosedTabIsNil`, 69 ms) |
+
+### Verification
+
+- `nice -n 10 autoninja -C out/Spike -j 4 chrome`: `The build has finished successfully.` (facade object and
+  `libchrome_dll.dylib` rebuilt).
+- Debug and Engine apps: `BUILD SUCCEEDED`.
+- Red first: the new tests failed to compile (`PageImage`, `PageImageRequest`, `pageImage(of:_:)`,
+  `copyFrame(maxPixelSize:completion:)` missing), then passed. The two `onCleared` tests were written with the hook and
+  not run red.
+- ShellKit `swift test --skip ShellKitGUITests`: 1277 passed (1236 + 41).
+- ShellKit `swift test --filter ShellKitGUITests.FakeEngineContractTests`: 34 run (31 + 3), 7 skipped (not applicable
+  to FakeEngine), 0 failures. The rest of the GUI suite was not run: no shell UI changed.
+
+### Deviations
+
+- The issue asks FakeEngine for deterministic synthetic images; FakeEngine is the WKWebView stand-in and returns real
+  snapshots, and InMemoryEngine (what the command bar tests use) returns the deterministic ones.
+- A hidden tab whose surface Chromium still holds gives that last frame (no wake-up); one whose surface was evicted
+  gives nil, and `PageThumbnails` falls back to the cache. Not checked on real Chromium: rule 18 covers shown tabs.
+- "History clearing" has no command yet; only Clear Archive empties the cache. The preview UI (#371, #372) is not part
+  of this change.
