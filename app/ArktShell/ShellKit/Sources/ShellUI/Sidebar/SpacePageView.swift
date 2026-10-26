@@ -579,9 +579,11 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   }
 
   /// The caret shows only while the Space holds pinned tabs (an unpinned Space's header has nothing to collapse);
-  /// the title shifts right for it. Called on every change of the Space's pinned child list.
+  /// the title shifts right for it. Called on every change of the Space's pinned child list. The collapse ends
+  /// with the last pin, so the next pin never lands in a hidden section.
   func refreshCollapseAffordance() {
     let shown = !source.children(of: .pinned(spaceID)).isEmpty
+    if !shown && isPinnedCollapsed { setPinnedCollapsed(false) }
     guard shown != !collapsePinnedButton.isHidden else { return }
     collapsePinnedButton.isHidden = !shown
     needsLayout = true

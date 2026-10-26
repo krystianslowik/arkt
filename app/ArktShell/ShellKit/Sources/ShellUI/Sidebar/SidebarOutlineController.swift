@@ -678,8 +678,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// duplicates it into a split (GS-032). Arc gates both behind `newSplitSeparationMechanismsEnabled` and
   /// `dragToCombineTabsIntoSplitEnabled` [S]; here they are always on [I]. An Opt-click on any other tab, or on a
   /// pane, activates it like a plain click [I]. A click on a pinned tab's favicon goes to the window's reset path
-  /// (GS-005, BH-057, BH-058); anywhere else on the row activates it.
+  /// (GS-005, BH-057, BH-058); anywhere else on the row activates it. The recorded click point serves this click
+  /// only, so an activation without a mouse-down (an AX press) is never hit-tested against a stale point.
   func handleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
+    defer { outlineView.lastClickPoint = nil }
     guard row >= 0, let item = outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }
     let option = modifiers.intersection([.command, .option, .control, .shift]) == .option
     switch source.node(id) {

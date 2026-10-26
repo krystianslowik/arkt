@@ -459,6 +459,26 @@ final class PinnedTabTests: XCTestCase {
   }
 
   /// GS-005: a favicon click on a navigated pinned tab resets it; on an untouched one it activates it.
+  /// A click's recorded point lasts for that click only: a later activation with no mouse-down (an AX press) is
+  /// never hit-tested against an old favicon point, so it activates the navigated pin instead of resetting it.
+  func testAClickWithoutAMouseDownIgnoresTheLastClickPoint() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    try harness.navigate(world.p0, to: "p0/other", title: "Other")
+    let tab = try XCTUnwrap(harness.controller.tabsByNode[world.p0])
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.p0, at: harness.faviconPoint(world.p0))
+    XCTAssertEqual(harness.engine.snapshot(of: tab)?.url, Self.url("p0"), "the favicon click resets")
+    try harness.navigate(world.p0, to: "p0/again", title: "Again")
+    harness.controller.activate(node: world.today[0])
+
+    try harness.outline().handleClick(row: try harness.row(world.p0), modifiers: [])
+
+    XCTAssertEqual(harness.engine.snapshot(of: tab)?.url, Self.url("p0/again"))
+    XCTAssertEqual(harness.controller.currentNode, world.p0)
+    harness.controller.close()
+  }
+
   func testAFaviconClickResetsANavigatedPinnedTab() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
@@ -652,6 +672,25 @@ final class PinnedTabTests: XCTestCase {
     XCTAssertFalse(page.collapsePinnedButton.isHidden)
     harness.source.mutate { $0.remove(pinned) }
     XCTAssertTrue(page.collapsePinnedButton.isHidden)
+    harness.controller.close()
+  }
+
+  /// The collapse ends with the last pin: the next pin lands in a visible section, with its caret.
+  func testLosingTheLastPinExpandsTheSection() throws {
+    var sidebar = SidebarModel.Sidebar()
+    sidebar.addSpace(title: "Bare")
+    let harness = Harness(sidebar)
+    let space = harness.source.spaceOrder[0]
+    let page = try XCTUnwrap(harness.sidebarController.currentPage)
+    let pinned = try harness.source.addTab(url: Self.url("p"), title: "P", in: .pinned(space))
+    page.setPinnedCollapsed(true)
+
+    harness.source.mutate { $0.remove(pinned) }
+
+    XCTAssertFalse(page.isPinnedCollapsed)
+    let next = try harness.source.addTab(url: Self.url("q"), title: "Q", in: .pinned(space))
+    XCTAssertFalse(page.collapsePinnedButton.isHidden)
+    XCTAssertGreaterThanOrEqual(try harness.row(next), 0, "the new pin shows")
     harness.controller.close()
   }
 
