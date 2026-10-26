@@ -8,6 +8,7 @@ import XCTest
 @MainActor
 final class AppCommands: NSObject {
   @objc func newWindow(_ sender: Any?) {}
+  @objc func newLittleArktWindow(_ sender: Any?) {}
   @objc func showSettings(_ sender: Any?) {}
   @objc func importFromArc(_ sender: Any?) {}
   @objc func showArchive(_ sender: Any?) {}
