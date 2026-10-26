@@ -66,15 +66,18 @@ final class ArchivePillButton: NSButton {
 
   let style: Style
   private let pillHeight: CGFloat
+  /// The title's font; nil: 13 pt, semibold for the primary and medium otherwise (the Archive's pills).
+  private let fontOverride: NSFont?
   private let body = CALayer()
   private let label = CATextLayer()
   private var hovering = false
   private(set) var pressing = false
   private var tracking: NSTrackingArea?
 
-  init(style: Style, title: String, height: CGFloat = ArchiveMetrics.pillHeight) {
+  init(style: Style, title: String, height: CGFloat = ArchiveMetrics.pillHeight, font: NSFont? = nil) {
     self.style = style
     pillHeight = height
+    fontOverride = font
     super.init(frame: .zero)
     let cell = ArchivePillCell()
     cell.owner = self
@@ -98,13 +101,15 @@ final class ArchivePillButton: NSButton {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var title: String { didSet { restyle(); invalidateIntrinsicContentSize() } }
+  /// The opacity while disabled; Settings dims the whole row control itself and sets 1.
+  var disabledOpacity: Float = 0.4 { didSet { restyle() } }
   override var isEnabled: Bool { didSet { restyle() } }
   override var mouseDownCanMoveWindow: Bool { false }
   override var wantsUpdateLayer: Bool { true }
   override func updateLayer() { restyle() }
 
   private var titleFont: NSFont {
-    .systemFont(ofSize: 13, weight: style == .primary ? .semibold : .medium)
+    fontOverride ?? .systemFont(ofSize: 13, weight: style == .primary ? .semibold : .medium)
   }
 
   override var intrinsicContentSize: NSSize {
@@ -145,7 +150,7 @@ final class ArchivePillButton: NSButton {
         .font: titleFont, .foregroundColor: displayedTitleColor.nsColor(),
       ])
       label.contentsScale = scale
-      layer?.opacity = isEnabled ? 1 : 0.4
+      layer?.opacity = isEnabled ? 1 : disabledOpacity
     }
     needsLayout = true
   }
@@ -241,11 +246,13 @@ final class ArchiveLinkButton: NSButton {
   enum Style { case secondary, destructive }
 
   let style: Style
+  private let fontSize: CGFloat
   private var hovering = false
   private var tracking: NSTrackingArea?
 
-  init(style: Style, title: String) {
+  init(style: Style, title: String, fontSize: CGFloat = 12) {
     self.style = style
+    self.fontSize = fontSize
     super.init(frame: .zero)
     self.title = title
     isBordered = false
@@ -261,6 +268,8 @@ final class ArchiveLinkButton: NSButton {
   override var title: String { didSet { restyle() } }
   override var isEnabled: Bool { didSet { restyle() } }
   override var mouseDownCanMoveWindow: Bool { false }
+  /// The opacity while disabled; Settings dims the whole row control itself and sets 1.
+  var disabledOpacity: Float = 0.4 { didSet { restyle() } }
 
   var displayedColor: RGBA {
     let flavor = archiveFlavor
@@ -272,11 +281,11 @@ final class ArchiveLinkButton: NSButton {
 
   private func restyle() {
     var attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 12), .foregroundColor: displayedColor.nsColor(),
+      .font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: displayedColor.nsColor(),
     ]
     if style == .destructive, hovering, isEnabled { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
     attributedTitle = NSAttributedString(string: title, attributes: attributes)
-    alphaValue = isEnabled ? 1 : 0.4
+    alphaValue = isEnabled ? 1 : CGFloat(disabledOpacity)
     setArchiveAccessibilityLabel(title.replacingOccurrences(of: "...", with: ""))
   }
 
@@ -394,6 +403,9 @@ final class ArchiveFilterButton: NSButton {
 /// focus ring around the pill.
 @MainActor
 final class ArchiveSearchField: NSSearchField {
+  /// The placeholder text.
+  var placeholder = "Search Archive" { didSet { restyle() } }
+
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     let cell = ArchiveSearchFieldCell(textCell: "")
@@ -421,7 +433,7 @@ final class ArchiveSearchField: NSSearchField {
     let flavor = archiveFlavor
     let scale = window?.backingScaleFactor ?? 2
     textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
-    placeholderAttributedString = NSAttributedString(string: "Search Archive", attributes: [
+    placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
       .font: NSFont.systemFont(ofSize: 13), .foregroundColor: ShellTokens.secondaryText.resolve(flavor).nsColor(),
     ])
     guard let cell = cell as? ArchiveSearchFieldCell else { return }
