@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Mon, 26 Oct 2026 06:30:42 +0100
+Subject: [PATCH] Arkt: ask Arkt about modified link clicks in OpenURLFromTab
+
+BrowserWebContentsDelegate::OpenURLFromTab asks arkt::ShouldDropLinkOpenedFromTab (//arkt/browser:link_activation) before it navigates, so Arkt can open a Shift-, Command- or middle-clicked link itself (a Peek, a new tab). Blink sends these as NEW_WINDOW, NEW_FOREGROUND_TAB or NEW_BACKGROUND_TAB OpenURLs, which never reach the link activation throttle, and NEW_WINDOW creates its window before any navigation starts.
+---
+ .../ui/browser_web_contents_delegate/BUILD.gn        |  3 +++
+ .../browser_web_contents_delegate.cc                 | 12 ++++++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/BUILD.gn b/chrome/browser/ui/browser_web_contents_delegate/BUILD.gn
+index d4dacf5897..f36f082f34 100644
+--- a/chrome/browser/ui/browser_web_contents_delegate/BUILD.gn
++++ b/chrome/browser/ui/browser_web_contents_delegate/BUILD.gn
+@@ -52,5 +52,8 @@ if (!is_android) {
+     if (is_chromeos) {
+       deps += [ "//chrome/browser/ui:settings_window_manager_chromeos" ]
+     }
++    if (is_mac) {
++      deps += [ "//arkt/browser:link_activation" ]
++    }
+   }
+ }
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+index 3bc40bcc91..01efc14715 100644
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+@@ -113,6 +113,10 @@
+ #include "chrome/browser/ui/overscroll_pref_manager.h"
+ #endif  // defined(USE_AURA)
+ 
++#if BUILDFLAG(IS_MAC)
++#include "arkt/browser/arkt_link_activation.h"
++#endif  // BUILDFLAG(IS_MAC)
++
+ #if BUILDFLAG(IS_CHROMEOS)
+ #include "chrome/browser/ui/settings_window_manager_chromeos.h"
+ #endif
+@@ -568,6 +572,14 @@ content::WebContents* BrowserWebContentsDelegate::OpenURLFromTab(
+     }
+   }
+ 
++#if BUILDFLAG(IS_MAC)
++  // Arkt opens a modified link click itself (a Peek, a new tab) when it takes
++  // it, before a tab or a window exists.
++  if (arkt::ShouldDropLinkOpenedFromTab(source, params)) {
++    return nullptr;
++  }
++#endif  // BUILDFLAG(IS_MAC)
++
+   NavigateParams nav_params(&*browser_, params.url, params.transition);
+   nav_params.FillNavigateParamsFromOpenURLParams(params);
+   nav_params.source_contents = source;

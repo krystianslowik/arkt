@@ -436,11 +436,12 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   FacadeDelegate* delegate() { return delegate_; }
 
   // The link activation throttle asks (#313), from inside the navigation
-  // start: the host answers as a Chromium notification would, so a facade
-  // call it makes CHECKs. A tab without a handle, or a host without the
-  // optional member, navigates. True cancels the navigation.
-  bool DecideLinkActivation(content::NavigationHandle& navigation) {
-    content::WebContents* contents = navigation.GetWebContents();
+  // start, and OpenURLFromTab for a modified click (#345), before it opens a
+  // tab or a window: the host answers as a Chromium notification would, so a
+  // facade call it makes CHECKs. A tab without a handle, or a host without the
+  // optional member, navigates. True drops the link.
+  bool DecideLinkActivation(const LinkActivation& link) {
+    content::WebContents* contents = link.source.get();
     tabs::TabInterface* tab =
         contents ? tabs::TabInterface::MaybeGetFromContents(contents)
                  : nullptr;
@@ -452,20 +453,36 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     }
     ArktFacadeLinkActivation* activation =
         [[ArktFacadeLinkActivation alloc] init];
-    activation.url = ToNSURL(navigation.GetURL());
+    activation.url = ToNSURL(link.url);
     activation.tab = handle;
     activation.sourceURL = ToNSURL(contents->GetLastCommittedURL());
-    // A same-tab link activation carries no modifier: Blink turns a modified
-    // click into another disposition, which does not reach this throttle.
-    activation.modifierFlags = 0;
-    activation.disposition =
-        static_cast<NSInteger>(WindowOpenDisposition::CURRENT_TAB);
+    activation.modifierFlags = ModifierFlagsForDisposition(link.disposition);
+    activation.disposition = static_cast<NSInteger>(link.disposition);
     ++in_notification_;
     const ArktLinkDecision decision = [host decideLinkActivation:activation];
     --in_notification_;
-    LOG(INFO) << "ARKT: link activation answered "
+    LOG(INFO) << "ARKT: link activation (disposition "
+              << static_cast<int>(link.disposition) << ") answered "
               << (decision == ArktLinkDecisionCancel ? "cancel" : "navigate");
     return decision == ArktLinkDecisionCancel;
+  }
+
+  // The modifiers Blink derived a link's disposition from
+  // (NavigationPolicyFromEventModifiers, Mac): the browser gets the
+  // disposition only. NEEDS-RUNTIME-CHECK: a middle click reads as Command,
+  // and Shift-Option reads as Shift (Blink ignores Option with Shift).
+  static NSEventModifierFlags ModifierFlagsForDisposition(
+      WindowOpenDisposition disposition) {
+    switch (disposition) {
+      case WindowOpenDisposition::NEW_WINDOW:
+        return NSEventModifierFlagShift;
+      case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+        return NSEventModifierFlagCommand;
+      case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+        return NSEventModifierFlagCommand | NSEventModifierFlagShift;
+      default:
+        return 0;
+    }
   }
   NSArray<ArktFacadeBrowser*>* browsers() { return [browsers_ copy]; }
 

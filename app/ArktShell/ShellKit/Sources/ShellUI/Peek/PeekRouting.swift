@@ -69,6 +69,22 @@ public enum PeekRouting {
     return .peek
   }
 
+  /// A tab the engine opened on its own from another tab (#345): a `target=_blank` link, or `window.open` without
+  /// window features, which "follow the normal tab rules, and therefore the Peek rules when the opener is a pinned tab
+  /// or a Favorite" (docs/design/peek.md, Popups). `.peek` takes the engine's tab into a Peek; every other answer
+  /// leaves it the engine's tab, a Today row. A background tab (a Command-click) and a tab without a web URL yet stay
+  /// the engine's.
+  public static func routeOpenedTab(url: URL?, openerURL: URL?, section: PeekSourceSection, isActive: Bool,
+                                    settings: PeekLinkSettings = PeekLinkSettings()) -> LinkRoute {
+    guard isActive, let url, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+      return .navigate
+    }
+    // The rules read the URLs and the section only; the source tab's id plays no part.
+    let link = EngineLinkActivation(url: url, sourceTab: TabID(), sourceURL: openerURL,
+                                    disposition: .newForegroundTab)
+    return route(link, section: section, settings: settings) == .peek ? .peek : .navigate
+  }
+
   /// Meet, Zoom and Teams meeting links (BH-146).
   public static func isMeetingLink(_ url: URL) -> Bool {
     guard let host = url.host()?.lowercased() else { return false }

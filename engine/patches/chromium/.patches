@@ -6,3 +6,4 @@
 0006-Arkt-tolerate-a-non-BrowserView-window-in-dialogs.patch
 0007-Arkt-let-Arkt-show-extension-dialogs-as-native-sheet.patch
 0008-Arkt-add-the-link-activation-throttle.patch
+0009-Arkt-ask-Arkt-about-modified-link-clicks-in-OpenURLF.patch

@@ -83,4 +83,42 @@ struct PeekRoutingTests {
   @Test func aSourceWithoutAURLCountsAsCrossSite() {
     #expect(PeekRouting.route(Self.link(Self.atlas, from: nil), section: .pinned) == .peek)
   }
+
+  // MARK: Tabs the engine opened (#345: target=_blank, window.open without features)
+
+  @Test(arguments: [PeekSourceSection.pinned, .favorites])
+  func aForegroundTabToAnotherSiteOpenedByAPinnedTabOrFavoriteBecomesAPeek(section: PeekSourceSection) {
+    #expect(PeekRouting.routeOpenedTab(url: Self.atlas, openerURL: Self.mail, section: section, isActive: true)
+      == .peek)
+  }
+
+  @Test(arguments: [PeekSourceSection.today, .peek, .other])
+  func aTabOpenedByAnyOtherTabStaysTheEnginesTab(section: PeekSourceSection) {
+    #expect(PeekRouting.routeOpenedTab(url: Self.atlas, openerURL: Self.mail, section: section, isActive: true)
+      == .navigate)
+  }
+
+  @Test func aSameSiteTabABackgroundTabAndAMeetingLinkStayTheEnginesTab() throws {
+    #expect(PeekRouting.routeOpenedTab(url: Self.mailOther, openerURL: Self.mail, section: .pinned, isActive: true)
+      == .navigate)
+    #expect(PeekRouting.routeOpenedTab(url: Self.atlas, openerURL: Self.mail, section: .pinned, isActive: false)
+      == .navigate, "a Command-click opens in the background (BH-144: the engine's)")
+    let meeting = try #require(URL(string: "https://meet.google.com/abc-defg-hij"))
+    #expect(PeekRouting.routeOpenedTab(url: meeting, openerURL: Self.mail, section: .pinned, isActive: true)
+      == .navigate, "a meeting link is a Today tab (BH-146), which the engine's tab already is")
+  }
+
+  @Test func aTabWithoutAWebURLYetStaysTheEnginesTab() throws {
+    #expect(PeekRouting.routeOpenedTab(url: nil, openerURL: Self.mail, section: .pinned, isActive: true)
+      == .navigate)
+    let blank = try #require(URL(string: "about:blank"))
+    #expect(PeekRouting.routeOpenedTab(url: blank, openerURL: Self.mail, section: .pinned, isActive: true)
+      == .navigate)
+  }
+
+  @Test func theCrossSiteSettingOffLeavesOpenedTabsToTheEngine() {
+    let settings = PeekLinkSettings(opensCrossSiteLinks: false, opensShiftClickedLinks: true)
+    #expect(PeekRouting.routeOpenedTab(url: Self.atlas, openerURL: Self.mail, section: .pinned, isActive: true,
+                                       settings: settings) == .navigate)
+  }
 }

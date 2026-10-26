@@ -51,6 +51,8 @@ public final class PeekController {
   /// The views that recede under the Peek (the source card, a pane card, or the whole split).
   private var receded: [NSView] = []
   private var dragOrigin = 0.0
+  /// Source tabs whose last link the engine opens in a new tab itself, with the time it was answered (#345).
+  private var engineOpens: [TabID: TimeInterval] = [:]
 
   public var isOpen: Bool { session != nil }
 
@@ -81,6 +83,9 @@ public final class PeekController {
     let point = linkPoint()
     switch PeekRouting.route(activation, section: section(of: source), settings: linkSettings()) {
     case .navigate:
+      // A modified click the engine opens itself (Command-Shift: a foreground tab) must not be taken for a
+      // `target=_blank` tab of the same source when that tab arrives (#345).
+      if activation.disposition != .currentTab { engineOpens[source] = ProcessInfo.processInfo.systemUptime }
       return .navigate
     case .peek:
       DispatchQueue.main.async { [weak self] in self?.open(activation.url, from: source, at: point) }
@@ -139,10 +144,35 @@ public final class PeekController {
       teardown(closingTab: true)
     }
     let tab = shell.engine.createTab(url: url, in: shell.ensureEngineWindow())
-    guard let page = shell.engine.contentView(for: tab) else {
-      shell.engine.closeTab(tab, mode: .skipUnloadHandlers)
-      return
+    if !present(tab, url: url, from: source, at: point) { shell.engine.closeTab(tab, mode: .skipUnloadHandlers) }
+  }
+
+  /// A tab the engine opened on its own from `snapshot.opener` (#345: a `target=_blank` link, `window.open` without
+  /// window features) becomes the Peek when the link rules say so: the engine's tab itself, with its page, history and
+  /// opener, never a second load. True when it did; the window then adds no row for it.
+  func adoptOpenedTab(_ snapshot: TabSnapshot) -> Bool {
+    guard shell.window != nil, let source = snapshot.opener, shownTabs.contains(source), source != session?.tab else {
+      return false
     }
+    if let answered = engineOpens.removeValue(forKey: source),
+       ProcessInfo.processInfo.systemUptime - answered < Self.engineOpenWindow { return false }
+    let route = PeekRouting.routeOpenedTab(url: snapshot.url, openerURL: shell.engine.snapshot(of: source)?.url,
+                                           section: section(of: source), isActive: snapshot.isActive,
+                                           settings: linkSettings())
+    guard route == .peek, let url = snapshot.url else { return false }
+    let point = linkPoint()
+    if session != nil { teardown(closingTab: true) }
+    guard present(snapshot.id, url: url, from: source, at: point) else { return false }
+    Self.logger.notice("peek adopted an engine tab")
+    return true
+  }
+
+  /// How long a link the engine opens itself is remembered for its source. [I]
+  static let engineOpenWindow: TimeInterval = 2
+
+  /// Shows `tab` in a new Peek over `source`. False when the tab has no page to show.
+  private func present(_ tab: TabID, url: URL, from source: TabID, at point: CGPoint?) -> Bool {
+    guard let page = shell.engine.contentView(for: tab) else { return false }
     let overlay = makeOverlay()
     overlay.card.mount(page)
     let geometry = overlay.geometry ?? PeekLayout.compute(content: shell.rootView.card.frame)
@@ -162,6 +192,7 @@ public final class PeekController {
     shell.refreshAddress()
     let title = shell.engine.snapshot(of: tab)?.title ?? ""
     announce(title.isEmpty ? "Peek opened" : "Peek opened, \(title)", overlay.card)
+    return true
   }
 
   private func makeOverlay() -> PeekOverlayView {
