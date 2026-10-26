@@ -292,7 +292,10 @@ public final class TabSwitcherView: NSView {
       drop.shadowPath = shape
     }
     rowsClip.frame = bounds.insetBy(dx: Self.padding, dy: Self.padding)
-    highlightLayer.frame = rowFrame(0)
+    // Bounds and position, not `frame`: setting the frame of a transformed layer would cancel its translation.
+    let first = rowFrame(0)
+    highlightLayer.bounds = CGRect(origin: .zero, size: first.size)
+    highlightLayer.position = CGPoint(x: first.midX, y: first.midY)
   }
 
   public override func layout() {
@@ -428,8 +431,9 @@ public final class TabSwitcherRowView: NSView {
     faviconView.frame = NSRect(x: Self.faviconLeading, y: midY - 8, width: 16, height: 16)
     var trailing = bounds.width - Self.trailingInset
     if !spaceField.isHidden {
-      let width = min(ceil(spaceField.intrinsicContentSize.width), Self.spaceMaxWidth)
-      let height = ceil(spaceField.intrinsicContentSize.height)
+      let size = spaceField.cell?.cellSize ?? spaceField.intrinsicContentSize
+      let width = min(ceil(size.width), Self.spaceMaxWidth)
+      let height = ceil(size.height)
       spaceField.frame = NSRect(x: trailing - width, y: midY - height / 2, width: width, height: height)
       trailing -= width + Self.dotGap
       CATransaction.begin()

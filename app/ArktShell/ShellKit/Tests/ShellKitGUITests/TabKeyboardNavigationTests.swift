@@ -192,8 +192,13 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(row, 0, "the folder opened")
     XCTAssertTrue(controller.window?.firstResponder === outline)
     XCTAssertEqual(outline.keyboardFocusRow, row)
-    XCTAssertEqual(outline.focusRingType, .default)
-    XCTAssertEqual(outline.focusRingMaskBounds, outline.keyboardFocusRect(row))
+    let ring = outline.keyboardFocusRing
+    XCTAssertFalse(ring.isHidden)
+    XCTAssertTrue(ring.superview === outline)
+    XCTAssertEqual(ring.frame, outline.keyboardFocusRect(row))
+    ring.updateLayer()
+    XCTAssertEqual(ring.ring.strokeColor, ring.strokeColor, "the system focus ring color")
+    XCTAssertEqual(ring.ring.lineWidth, KeyboardFocusRingView.lineWidth)
   }
 
   func testArrowsMoveTheFocusPastTheDividerAndReturnOpensTheRow() throws {
@@ -212,7 +217,7 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertEqual(current, today[0])
     XCTAssertFalse(controller.window?.firstResponder === outline, "focus went back to the page")
     XCTAssertNil(outline.keyboardFocusRow)
-    XCTAssertEqual(outline.focusRingMaskBounds, .zero)
+    XCTAssertTrue(outline.keyboardFocusRing.isHidden)
   }
 
   func testEscapeGivesFocusBackWithoutOpeningAnything() throws {

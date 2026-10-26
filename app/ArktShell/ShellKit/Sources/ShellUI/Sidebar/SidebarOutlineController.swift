@@ -161,15 +161,18 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 
   // MARK: Keyboard focus (BH-019, BH-020)
 
-  /// The row that holds keyboard focus after Ctrl-Space, drawn with the system focus ring (`focusRingMaskBounds`);
-  /// nil otherwise. Selection stays off (`shouldSelectItem`), so this is the outline's only keyboard cursor.
+  /// The row that holds keyboard focus after Ctrl-Space, drawn with the focus ring; nil otherwise. Selection stays off
+  /// (`shouldSelectItem`), so this is the outline's only keyboard cursor.
   public internal(set) var keyboardFocusRow: Int? {
     didSet {
       guard keyboardFocusRow != oldValue else { return }
-      focusRingType = keyboardFocusRow == nil ? .none : .default
-      noteFocusRingMaskChanged()
+      updateKeyboardFocusRing()
     }
   }
+  /// The ring on the focused row: the system focus ring's color (`NSColor.keyboardFocusIndicatorColor`, which follows
+  /// the user's accent color) and width, never mustard. Drawn here because a table view ignores a row-sized focus
+  /// ring mask (it rings the whole table or nothing). Inset into the row fill so the clip view never cuts it.
+  let keyboardFocusRing = KeyboardFocusRingView(frame: .zero)
   /// Whether Up and Down may stop on a row (the divider may not).
   var isKeyboardFocusable: @MainActor (Int) -> Bool = { _ in true }
   /// Return on the focused row.
@@ -184,15 +187,21 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     rect(ofRow: row).insetBy(dx: 0, dy: SidebarMetrics.rowBackgroundInsetY)
   }
 
-  public override var focusRingMaskBounds: NSRect {
-    guard let row = keyboardFocusRow, row < numberOfRows else { return .zero }
-    return keyboardFocusRect(row)
+  /// Places the ring on the focused row (or hides it), above the rows.
+  func updateKeyboardFocusRing() {
+    guard let row = keyboardFocusRow, row < numberOfRows else {
+      keyboardFocusRing.isHidden = true
+      return
+    }
+    if keyboardFocusRing.superview !== self { addSubview(keyboardFocusRing, positioned: .above, relativeTo: nil) }
+    keyboardFocusRing.frame = keyboardFocusRect(row)
+    keyboardFocusRing.isHidden = false
+    keyboardFocusRing.needsDisplay = true
   }
 
-  public override func drawFocusRingMask() {
-    guard let row = keyboardFocusRow, row < numberOfRows else { return }
-    let radius = SidebarMetrics.rowCornerRadius
-    NSBezierPath(roundedRect: keyboardFocusRect(row), xRadius: radius, yRadius: radius).fill()
+  public override func layout() {
+    super.layout()
+    if keyboardFocusRow != nil { updateKeyboardFocusRing() }
   }
 
   /// Up / Down move the focus row, Return opens it, Esc gives focus back to the page. Without keyboard focus the
@@ -988,5 +997,55 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       handler(self)?(id)
       return true
     }
+  }
+}
+
+/// The keyboard focus ring on a sidebar row (BH-019): a 3 pt stroke in the system focus ring color, following the
+/// row fill's rounded shape. Not hit-testable and not an accessibility element.
+@MainActor
+final class KeyboardFocusRingView: NSView {
+  static let lineWidth: CGFloat = 3
+  let ring = CAShapeLayer()
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    isHidden = true
+    ring.fillColor = nil
+    ring.lineWidth = Self.lineWidth
+    layer?.addSublayer(ring)
+    setAccessibilityElement(false)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override var wantsUpdateLayer: Bool { true }
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  /// Resolved here so it follows the accent color and the appearance.
+  var strokeColor: CGColor {
+    var color = NSColor.keyboardFocusIndicatorColor.cgColor
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      color = NSColor.keyboardFocusIndicatorColor.withAlphaComponent(1).cgColor
+    }
+    return color
+  }
+
+  override func updateLayer() {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    let inset = Self.lineWidth / 2
+    let rect = bounds.insetBy(dx: inset, dy: inset)
+    let radius = max(SidebarMetrics.rowCornerRadius - inset, 0)
+    ring.frame = bounds
+    ring.path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    ring.strokeColor = strokeColor
+    CATransaction.commit()
+  }
+
+  override func layout() {
+    super.layout()
+    needsDisplay = true
   }
 }

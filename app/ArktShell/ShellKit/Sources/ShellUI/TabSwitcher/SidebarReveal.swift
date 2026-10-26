@@ -64,7 +64,6 @@ public final class SidebarRevealer {
       let clip = page.scrollView.contentView
       clip.scroll(to: NSPoint(x: clip.bounds.minX, y: CGFloat(value)))
       page.scrollView.reflectScrolledClipView(clip)
-      page.outlineView.noteFocusRingMaskChanged()
     }
     let running = scrollDriver.stop()
     scrollDriver.animate(in: page, from: running?.value ?? Double(clip.bounds.minY), to: Double(y),

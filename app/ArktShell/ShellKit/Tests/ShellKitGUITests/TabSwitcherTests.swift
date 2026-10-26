@@ -254,6 +254,9 @@ final class TabSwitcherTests: XCTestCase {
     let row = panel.rowViews[0]
     XCTAssertEqual(row.titleField.stringValue, "Pane")
     XCTAssertEqual(row.spaceField.stringValue, "Work")
+    row.layoutSubtreeIfNeeded()
+    XCTAssertGreaterThanOrEqual(row.spaceField.frame.width, ceil(row.spaceField.cell?.cellSize.width ?? 0),
+                                "the Space name is not truncated")
     XCTAssertFalse(row.splitView.isHidden)
     XCTAssertEqual(row.accessibilityLabel(), "Pane, Work, 1 of 1, split")
   }
@@ -281,6 +284,9 @@ final class TabSwitcherTests: XCTestCase {
     send(try key(kVK_Tab, .maskControl))
     XCTAssertFalse(panel.isHighlightMoving)
     XCTAssertEqual(panel.highlightOffset, TabSwitcherView.rowHeight)
+    panel.layout()                                       // a layout pass must not undo the translation
+    XCTAssertEqual(panel.highlightLayer.frame.minY, TabSwitcherView.rowHeight, accuracy: 0.01,
+                   "the fill sits under the second row")
   }
 
   /// With motion, the highlight springs and a second Tab mid-flight retargets the same run.
