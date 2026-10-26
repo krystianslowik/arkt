@@ -2,21 +2,35 @@
 
 Design issue: #305 (part of #304). Implementation issue: #307.
 Prototype: [`design/settings/prototype.html`](../../design/settings/prototype.html). Screenshots:
-[`design/settings/screens/`](../../design/settings/screens/).
+[`design/settings/screens/`](../../design/settings/screens/). Restyled to the brand direction (#304); the before and
+after list is in [`design/settings/README.md`](../../design/settings/README.md).
 
 ## 1. The look in one paragraph
 
-A native macOS Settings window that looks like part of the system, then has one Arkt moment. Seven toolbar tabs sit
-under the window title. Each tab is an SF Symbol on a 28 pt rounded tile. The selected tile fills with mustard and its
-glyph turns graphite. That is the only mustard in the chrome, so the brand color tells you where you are. Content is
-grouped System Settings style: porcelain (graphite in dark) behind groups of rows with hairline separators, one
-control per row on the trailing edge, a short caption under the label where the label alone is not enough. Toggles
-fill with mustard when on, primary buttons are mustard with graphite text, and nothing else is colored. The
-Appearance pane has a small live preview of an Arkt window at the top, so toolbar and website appearance changes are
-visible before you close Settings.
+Settings is everyday chrome, so it follows the Archive window (`design/archive-search/archive-search.md`, section 2)
+instead of System Settings: the system font at Arc's sidebar density, the porcelain (graphite in dark) surface, and
+rows that are sidebar rows. What lifts it above a stock preferences sheet:
 
-Type is SF Pro (the system font), on purpose: this is system UI and should read like it. Sizes: window title 13
-semibold, tab labels 11 medium, section headings 13 semibold, row labels 13 regular, captions 11 regular.
+- **One bar on top.** The title and the seven pane items sit on the window surface (unified, 84 pt), with no toolbar
+  strip and no hairline under it. A pane item is an SF Symbol over its short name; the selected one lifts in
+  `tabCurrent` with `tabCurrentShadow`, exactly as the current tab does in the sidebar. No tiles, no mustard.
+- **Groups are recessed fields, rows are sidebar rows.** Each group is the Archive's recessed list field (radius 10,
+  4 pt padding); its rows are radius 9, 2 pt apart, hover `sidebarItemBackground`, with no hairlines between them.
+  Section titles are the sidebar's section titles (12 semibold `secondaryText`). Add actions ("New Profile...",
+  "Add Route...") are the sidebar's New Tab row: a plus glyph and the label in `sidebarForeground`.
+- **One primary per pane.** The only mustard on a pane is its one primary action, a mustard pill with graphite text
+  (Make Default; Open Chrome Web Store when no extension is installed; Use Command-E in a shortcut conflict). Panes
+  without a primary have no mustard at all. Secondary actions are neutral pills (`sidebarItemHovered`, no edge) or
+  quiet text links. Destructive actions (Reset..., Clear..., Reset All Shortcuts...) are quiet red text links.
+- **Switches are graphite, not mustard.** On is a graphite fill with a white knob (a porcelain fill with a graphite
+  knob in dark), so twenty switches never compete with the one primary.
+- **Space color carries meaning.** A Space row leads with its theme swatch (the theme's own gradient); the Appearance
+  preview is drawn in the Work Space's theme.
+- **Focus is the system's.** Every focus ring, the shortcut recorder included, is the system focus ring
+  (`NSColor.keyboardFocusIndicatorColor`). Mustard is a fill only: never text, never a stroke.
+
+Type is SF Pro (the system font), on purpose. Sizes: window title 13 semibold, pane labels 11 medium, section titles
+12 semibold, row labels 13 medium, captions and notes 12 regular, buttons 13 semibold (12 small).
 
 ## 2. Setting inventory
 
@@ -60,9 +74,9 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | Advanced | Ask where to save each file | toggle | `arc.promptForDownload` / `download.prompt_for_download` | off | engine, planned (#132) | BH-182 |
 | Advanced | Open Picture in Picture when you leave a video tab | toggle | `autoPipGloballyDisabled` (inverted) | on | planned | BH-183, BH-185 |
 | Advanced | Drag the window from the top of web pages | toggle | `contentWindowDraggingEnabled` | on | planned | BH-168 |
-| Advanced | Import from Arc | button "Import..." (same action as File > Import from Arc...) | none | n/a | **exists** (E4c) | import |
+| Advanced | Import browser data | neutral pill "Import..." (same action as File > Import Browser Data...) | none | n/a | **exists** (E4c) | import |
 | Advanced | Arkt's data folder | button "Show in Finder" (same action as the recovery toast's Show Files) | none | n/a | **exists** (action) | decision 4 |
-| Advanced | Reset all settings | button "Reset...", destructive, confirmation sheet | all keys above | n/a | planned | none |
+| Advanced | Reset all settings | red text link "Reset...", confirmation sheet | all keys above | n/a | planned | none |
 
 Not shown as settings (state, not preference, as section 4 of the spec says): `hasHiddenSidebarWithGesture`, upsell
 counters, `LastPiPPosition`, window sizes, collapsed sections, per-host Developer Mode (Ctrl-D, BH-208), per-host PiP
@@ -94,8 +108,8 @@ States designed (each is a prototype hash and a screenshot pair):
 
 | State | What it shows |
 |---|---|
-| `general` | Arkt is not the default browser; "Make Default" is the one primary button |
-| `general-default` | Arkt is the default browser: a mustard check seal and "Default" instead of the button |
+| `general` | Arkt is not the default browser; "Make Default" is the pane's one primary (mustard pill) |
+| `general-default` | Arkt is the default browser: a neutral "Default" capsule with a check instead of the button; the pane has no mustard |
 | `spaces` | three Spaces with their theme swatch and icon, a profile popup each; archive, profiles, link routing |
 | `appearance` | live preview with the Toolbar on; websites segmented control; Toolbar and sidebar toggles |
 | `shortcuts` | search, the Customized section, the Tabs and Spaces section, Reset All Shortcuts |
@@ -104,7 +118,7 @@ States designed (each is a prototype hash and a screenshot pair):
 | `extensions` | three installed extensions: icon, version and access summary, pin, toggle; Web Store, Developer mode |
 | `extensions-empty` | no extensions: an invitation to the Chrome Web Store |
 | `privacy` | tracking, site permissions with disclosures, data |
-| `advanced` | downloads, pages, data (Import from Arc, data folder), reset |
+| `advanced` | downloads, pages, data (Import browser data, data folder), reset as a red link |
 | `general-today`, `appearance-today` | the first build: rows whose feature is not built yet are shown disabled with "Not available yet." (decision 4) |
 
 Default browser: "Make Default" calls `NSWorkspace.setDefaultApplication(at:toOpenURLsWithScheme:)` for `http`; macOS
@@ -118,60 +132,61 @@ in `docs/design/alerts-sheets-toasts.md` (destructive button: "Clear Data" / "Re
 
 | Element | Value | Token / source |
 |---|---|---|
-| Window width | 680, fixed | new; PARITY(NEEDS-RUNTIME-CHECK) Arc's width unmeasured |
+| Window width | 680, fixed | decision 5 |
 | Window height | chrome + pane content, at most the screen's visible height minus 120; the content scrolls past that | |
 | Window corner radius | system (titled window) | |
-| Title row | 28 high, title 13 semibold centered, `primaryText` | ShellTokens.primaryText |
-| Toolbar row | 58 high (tabs 50 + 8 bottom); chrome total 86 incl. 1 pt hairline | |
-| Toolbar material | `.titlebar` vibrancy behind `toolbarMaterial`; Reduce Transparency: opaque `surfaceBrand` | new SettingsTokens.toolbarMaterial |
-| Chrome hairline | 1, `sidebarDivider` | ShellTokens.sidebarDivider |
-| Tab item | 82 x 50, radius 8, tile 28 x 28 radius 8, gap 4, label 11 medium | |
-| Tab tile, idle | fill `tabTileIdle`, glyph `secondaryText` 16 pt SF Symbol (regular) | new SettingsTokens.tabTileIdle |
-| Tab tile, selected | fill `accent`, glyph `onAccent`, label `primaryText` | BrandTokens.accent, onAccent |
-| Tab SF Symbols | gearshape, square.on.square, circle.lefthalf.filled, command, puzzlepiece.extension, hand.raised (or checkmark.shield), slider.horizontal.3 | |
+| Chrome | unified, 84 high (`titlebarAppearsTransparent`, `.fullSizeContentView`): traffic lights at their standard inset, title 13 semibold centered `primaryText`, pane bar 36 from the top; no hairline below | the Archive window's title bar |
+| Chrome material | `.titlebar` vibrancy behind `toolbarMaterial`, only visible while content scrolls under it; Reduce Transparency: opaque `surfaceBrand` | SettingsTokens.toolbarMaterial |
+| Pane item | 84 x 44, radius 9, 2 apart, centered; SF Symbol 16 pt `sidebarForeground`, 3 above the label, label 11 medium `secondaryText`; hover `sidebarItemBackground` | SidebarMetrics.rowCornerRadius |
+| Pane item, selected | `tabCurrent` fill + `tabCurrentShadow`; glyph and label `primaryText` | ShellTokens, the current tab |
+| Pane SF Symbols | gearshape, square.on.square, circle.lefthalf.filled, command, puzzlepiece.extension, checkmark.shield, slider.horizontal.3 | |
 | Content background | `surfaceBrand` | BrandTokens.surfaceBrand |
-| Content inset | 20 top, 24 sides, 24 bottom | brand spacing scale 8/16/24 |
-| Section heading | 13 semibold `primaryText`, 8 below, 2 leading nudge | |
-| Section gap | 20 | |
-| Group | radius 10, fill `groupFill`, 1 pt inner border `sidebarDivider` | new SettingsTokens.groupFill |
-| Row | min height 44, padding 8 x 14, gap 12; label 13 `primaryText`; caption 11 `secondaryText`, 2 below | |
-| Row separator | 1 pt `sidebarDivider`, inset 14 leading (50 when the row has a 28 pt leading glyph) | |
-| Note under a group | 11 `secondaryText`, 6 below, max 560 wide | |
-| Toggle | 38 x 22, knob 18 white with 0.5 pt edge and 1 pt shadow; off fill `sidebarItemHovered`, on fill `accent` | BrandTokens.accent |
-| Popup button | 24 high, radius 6, fill `sidebarItemBackground`, 0.5 pt `sidebarDivider` edge, chevron.up.chevron.down 10 pt at 55 % | |
-| Push button | 28 high (24 small), radius 7 (6 small), min width 80, padding 14 (10 small), 13 medium | engine sheet values (kButtonHeight 28, kButtonRadius 7) |
-| Primary button | `accent` fill, `onAccent` text; hover `accentHighlight`; pressed `accentPressed` | BrandTokens |
-| Destructive button | neutral fill, `destructiveText` | new AlertTokens.destructiveText |
-| Segmented control | 2 pt inset track, segments 84 x 22, plate radius 5 (white in light, white 18 % in dark) | |
-| Keycaps | 22 high, min 22 wide, radius 5, 12 medium, fill `sidebarItemBackground` | |
-| Shortcut recorder | 24 high, min 150 wide, radius 6, `surfaceBrand` fill, 2 pt `focusRing` | BrandTokens.focusRing |
-| Search field | 28 high, radius 7, `sidebarItemBackground`, 16 below | |
-| Focus ring | 2 pt `focusRing` (graphite light, mustard dark), outset 2 | BrandTokens.focusRing |
+| Content inset | 8 top, 16 sides, 20 bottom | |
+| Section title | 12 semibold `secondaryText`, 10 leading, 6 below | the sidebar's section title |
+| Section gap | 18 | |
+| Group | recessed field: radius 10, padding 4, `SettingsTokens.groupField`, no edge | ArchiveTokens.listField |
+| Row | min height 36, radius 9, padding 6 / 8 / 6 / 10, 2 between rows, gap 12; label 13 medium `primaryText`; caption 12 `secondaryText`, 1 below; hover `sidebarItemBackground`; no separators | SidebarMetrics, adapted |
+| Leading glyph | 20 x 20: Space theme swatch (radius 6, the theme's gradient), profile monogram (radius 5), extension icon; the app icon 32 on the default-browser row; 12 to the label | |
+| Add row | 34 high, 14 leading, plus glyph 12 pt and label 13 in `sidebarForeground`, hover `primaryText` | the sidebar's New Tab row |
+| Note under a group | 12 `secondaryText`, 8 below, 10 leading, max 560 wide | |
+| Switch | 32 x 20, knob 16; off: fill `sidebarItemHovered`, white knob; on: fill `SettingsTokens.switchOn`, white knob (dark: porcelain fill, graphite knob) | new SettingsTokens.switchOn |
+| Pop-up button | 26 high, radius 8, fill `sidebarItemHovered`, no edge, chevron.up.chevron.down 9 pt `sidebarForeground` | the sidebar URL pill's shape |
+| Pill (neutral) | 28 high, radius 14, padding 16, min width 76, 13 semibold `primaryText`, fill `sidebarItemHovered`, hover `sidebarItemBackground`, no edge | the Archive window's pills |
+| Pill, small | 24 high, radius 12, padding 12, 12 semibold | |
+| Primary pill | one per pane: `accent` fill, `onAccent` text; hover `accentHighlight`; pressed `accentPressed` | BrandTokens |
+| Text link | 13 regular `secondaryText`, hover `primaryText`; destructive: `destructiveText`, underlined on hover | AlertTokens.destructiveText |
+| Segmented control | track radius 9, 2 inset, fill `sidebarItemHovered`; segments 80 x 24; plate radius 7 in `tabCurrent` + `tabCurrentShadow` (dark: white 18 %) | |
+| Keycaps | 22 high, min 22 wide, radius 6, 12 medium, fill `sidebarItemHovered`, no edge | |
+| Shortcut recorder | 26 high, min 150 wide, radius 8, `tabCurrent` fill, the system focus ring | |
+| Conflict notice | a row-shaped block inside the group: radius 9, `sidebarItemBackground`, 16 pt exclamationmark.circle in `primaryText`, message 13, caption 12, actions 10 below (primary pill, then the text link 14 after it) | |
+| Search field | 32 high, radius 9, `sidebarItemBackground`, magnifier 14 pt `sidebarForeground`, 14 below | the Archive search field |
+| Default capsule | 24 high, radius 12, `sidebarItemHovered`, check 12 pt and "Default" 12 semibold `primaryText` | |
+| Empty state | 44 pt tile radius 12 `sidebarItemBackground` with a 22 pt glyph, title 15 semibold, detail 12 `secondaryText` max 320 wide, primary pill 16 below | the Archive's empty states |
+| Focus ring | the system focus ring (`focusRingType = .default`, `NSColor.keyboardFocusIndicatorColor`); never mustard, never graphite | AppKit |
 
 New tokens (to add to `ShellUI/Theme`, with contrast tests next to `BrandTokensTests`):
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `SettingsTokens.groupFill` | white 0.85 (the `tabCurrent` level) | p3 #FAFBFF 0.06 | row groups |
-| `SettingsTokens.tabTileIdle` | p3 #0E0F10 0.06 | p3 #FAFBFF 0.08 | unselected tab tiles |
+| `SettingsTokens.groupField` | `ArchiveTokens.listField` (p3 #0E0F10 0.035) | black 0.14 | recessed row groups |
+| `SettingsTokens.switchOn` | sRGB #202321 (graphite) | sRGB #F4F3EF (porcelain) | switch on fill; the knob is the opposite |
 | `SettingsTokens.toolbarMaterial` | `surfaceBrand` 0.82 over the vibrancy view | `surfaceBrand` 0.80 | chrome over scrolled content |
-| `AlertTokens.destructiveText` | sRGB #B3261E (6.20:1 on porcelain) | sRGB #FFAAA2 (8.71:1 on graphite) | destructive button titles |
-| `SettingsTokens.separatorIncreasedContrast` | black 0.20 | white 0.20 | group edges and separators with Increase Contrast |
+| `AlertTokens.destructiveText` | sRGB #B3261E (6.20:1 on porcelain) | sRGB #FFAAA2 (8.71:1 on graphite) | destructive links and titles |
+| `SettingsTokens.separatorIncreasedContrast` | black 0.20 | white 0.20 | group edges with Increase Contrast |
 
-Contrast checked: graphite on mustard 8.4:1; `secondaryText` captions on `groupFill` over porcelain stay above 4.5:1
-(black 0.64 over near-white); destructive text is at least 4.5:1 in every placement, idle and hovered (table below).
+`SettingsTokens.groupFill` and `SettingsTokens.tabTileIdle` from the first pass are dropped. `BrandTokens.focusRing`
+is not used by Settings.
 
-Destructive text, measured (WCAG 2.x, fills composited over the surface; neutral pressed fill is never used under
-destructive text, pressed keeps the hover fill and scales to 0.97):
+Contrast (WCAG 2.x, fills composited over the surface):
 
-| Placement | Light #B3261E | Dark #FFAAA2 |
+| Placement | Light | Dark |
 |---|---|---|
-| on the surface (porcelain / graphite) | 6.20:1 | 8.71:1 |
-| neutral button fill | 5.59:1 | 6.44:1 |
-| neutral button fill, hovered | 5.02:1 | 5.45:1 |
-| neutral button fill inside a Settings group | 5.85:1 | 5.38:1 |
-| same, hovered | 5.25:1 | 4.58:1 |
-
+| destructive link on the surface | 6.20:1 | 8.71:1 |
+| destructive link on the group field | 5.77:1 | 9.20:1 |
+| same, row hovered | 5.21:1 | 6.87:1 |
+| `secondaryText` caption on the group field | 6.42:1 | 10.12:1 |
+| switch on fill against the group field (non-text, 3:1 needed) | 14.01:1 | 15.11:1 |
+| graphite on mustard (primary pill) | 8.4:1 | 8.4:1 |
 
 ## 5. Motion spec
 
@@ -182,13 +197,13 @@ Gate first (how often is it seen, and why does it move):
 | Window opens / closes | occasional | system | AppKit's own window animation; nothing custom |
 | Pane switch by click | occasional | spatial continuity | window frame resizes to the new pane, `NSAnimationContext` 0.25 s, timing (0.23, 1, 0.32, 1); old pane fades out over 0.08 s; new pane opacity 0 to 1 and translateY 4 to 0 on `SpringPreset.firm` (0.90 / 0.25 s) |
 | Pane switch by keyboard (Cmd-1 to Cmd-7) | frequent for keyboard users | none | instant: new pane and new frame in one step |
-| Tab tile selection | with the pane switch | state | by click: mustard layer opacity 0 to 1 over 0.12 s; by keyboard (Cmd-1 to Cmd-7): instant; no sliding highlight (toolbar items are separate views) |
-| Tab press | occasional | feedback | tile scale 0.96 on mouse down, `springyExtraFast` back |
-| Toggle | occasional | state | knob translateX on `springyFast` (0.80 / 0.18 s, a slight overshoot); the on-fill layer cross-fades 0.15 s |
-| Toggle press | occasional | feedback | knob stretches to scaleX 1.12 from its leading edge while the mouse is down |
+| Pane item selection | with the pane switch | state | by click: the `tabCurrent` plate fades in over 0.12 s; by keyboard (Cmd-1 to Cmd-7): instant; no sliding highlight (toolbar items are separate views) |
+| Pane item press | occasional | feedback | item scale 0.96 on mouse down, `springyExtraFast` back |
+| Switch | occasional | state | knob translateX on `springyFast` (0.80 / 0.18 s, a slight overshoot); the graphite on-fill layer cross-fades 0.15 s |
+| Switch press | occasional | feedback | knob stretches to scaleX 1.12 from its leading edge while the mouse is down |
 | Segmented control | occasional | state | plate translateX on `firm` |
 | Appearance preview | occasional | explanation | toolbar strip translateY -100 % to 0 and page translateY by the strip height, both on `firm`; the sidebar URL pill fades 0.15 s |
-| Push button press | occasional | feedback | scale 0.97, 0.12 s ease-out |
+| Pill press | occasional | feedback | scale 0.97, 160 ms ease-out; the primary also shows `accentPressed` |
 | Shortcut recorder, conflict warning | keyboard-driven | none | instant, no animation |
 
 Rules: transform and opacity only. The one exception is the window frame on a pane switch: that is the NSWindow
@@ -202,14 +217,17 @@ Reduce Transparency: the toolbar material becomes opaque `surfaceBrand`; groups 
 
 ## 6. Light and dark
 
-Every color above is a `TokenPair`; the prototype's `#<state>&dark` screenshots show the dark side. In dark the
-content is graphite, groups lift by 6 % white, the focus ring and accent text switch to mustard, the selected tile
-stays mustard with a graphite glyph. Increase Contrast: group borders and separators use `SettingsTokens.separatorIncreasedContrast`
-instead of `sidebarDivider` (light black 0.10 to 0.20, dark white 0.075 to 0.20); popup and button edges follow.
+Every color above is a `TokenPair`; the prototype's `#<state>&dark` screenshots show the dark side. The window follows
+the system appearance (it belongs to no Space, like the Archive). In dark the surface is graphite, groups recess into
+black 14 %, the selected pane item lifts in white 20 % (`tabCurrent` dark), switches turn porcelain with a graphite
+knob, and the focus ring stays the system's. Mustard appears only as the pane's one primary pill, in both
+appearances. Increase Contrast: groups, pop-ups and the search field gain a 1 pt
+`SettingsTokens.separatorIncreasedContrast` edge (light black 0.20, dark white 0.20), and the selected pane item's
+shadow becomes that edge in dark.
 
 ## 7. Keyboard and VoiceOver
 
-- Tab bar: an `NSToolbar` with `selectedItemIdentifier`; each item is a toolbar item with a custom view (the tile and
+- Tab bar: an `NSToolbar` with `selectedItemIdentifier`; each item is a toolbar item with a custom view (the glyph and
   label). Cmd-1 to Cmd-7 select panes. With Full Keyboard Access, Tab reaches the toolbar items, Space selects.
 - Panes: the key view loop runs top to bottom, leading to trailing; every toggle, popup and button is reachable; row
   captions are not focusable.
@@ -237,7 +255,7 @@ instead of `sidebarDivider` (light black 0.10 to 0.20, dark white 0.075 to 0.20)
 - Planned rows are shown disabled until their feature works (decision 4): label in `secondaryText`, control at 42 %
   opacity with `isEnabled = false`, caption ending "Not available yet.", VoiceOver reads the control as dimmed. The
   first build enables General (default browser, startup if
-  window restoration exists), Appearance (Toolbar, full URL), Shortcuts (read-only list) and Advanced (Import from Arc,
+  window restoration exists), Appearance (Toolbar, full URL), Shortcuts (read-only list) and Advanced (Import browser data,
   data folder) rows; the rest are disabled. Each later feature enables its row and adds its UI test.
 
 ## 9. Parity notes
@@ -272,6 +290,6 @@ instead of `sidebarDivider` (light black 0.10 to 0.20, dark white 0.075 to 0.20)
 ## 11. Screenshots
 
 Rendered at 2x with the project's Chromium in headless mode from the prototype (`--window-size=760,<window height +
-80>`, `--force-device-scale-factor=2`, hash `#<state>[&dark]&shot`), into `design/settings/screens/<state>-<light|dark>.png`:
+80>`, the height read from the prototype's `data-h`, `--force-device-scale-factor=2`, hash `#<state>[&dark]&shot`), into `design/settings/screens/<state>-<light|dark>.png`:
 general, general-default, spaces, appearance, shortcuts, shortcuts-recording, shortcuts-conflict, extensions,
 extensions-empty, privacy, advanced, plus general-today and appearance-today (disabled rows, hash `&today`) (26 files).

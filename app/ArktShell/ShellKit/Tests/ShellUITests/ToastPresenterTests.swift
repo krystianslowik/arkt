@@ -84,6 +84,29 @@ struct ToastPresenterTests {
     #expect(calls == 1)
   }
 
+  /// The Peek's toast (#346): "Peek closed" with "Reopen" and its key, announced politely with the key spelled out.
+  @Test func aToastCarriesItsShortcutAndAnnouncement() {
+    let toast = Toast(text: "Peek closed", actionTitle: "Reopen", shortcut: "\u{2318}Z",
+                      announcement: "Peek closed. Press Command-Z to reopen.", isPolite: true)
+    #expect(toast.shortcut == "\u{2318}Z")
+    #expect(toast.spokenText == "Peek closed. Press Command-Z to reopen.")
+    #expect(toast.isPolite)
+    let plain = Toast(text: "Archived 3 tabs")
+    #expect(plain.shortcut == nil && plain.spokenText == "Archived 3 tabs" && !plain.isPolite)
+  }
+
+  /// A reopen by key takes the reopen toast down, and only that one.
+  @Test func dismissingASpecificToastLeavesAnyOtherUp() {
+    let presenter = ToastPresenter(sleep: Self.forever)
+    let closed = Toast(text: "Peek closed", actionTitle: "Reopen")
+    presenter.show(closed)
+    presenter.dismiss(closed)
+    #expect(presenter.current == nil)
+    presenter.show(Toast(text: "Other"))
+    presenter.dismiss(closed)
+    #expect(presenter.current?.text == "Other")
+  }
+
   @Test func actionMayShowANewToast() {
     let presenter = ToastPresenter(sleep: Self.forever)
     presenter.show(Toast(text: "One", actionTitle: "Next")) { [unowned presenter] in

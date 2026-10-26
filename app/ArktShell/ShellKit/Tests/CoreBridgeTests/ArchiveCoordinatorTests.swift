@@ -371,6 +371,42 @@ struct ArchiveCoordinatorTests {
     #expect(await harness.store.stored[item.id] == nil)
   }
 
+  /// Reopen Closed Tab (#110, BH-074): a row archived a moment ago comes back by its id, without a store read, and
+  /// only once.
+  @Test func aRecentArchiveIsRestoredByIDOnce() async throws {
+    let harness = try Harness(todayTabs: 2)
+    harness.coordinator.archive([harness.today[1]], reason: .manual)
+    let restored = try #require(try harness.coordinator.restoreRecent(harness.today[1], fallbackSpace: nil))
+    #expect(restored.nodeID == harness.today[1])
+    #expect(harness.source.children(of: .today(harness.space)) == [harness.today[1], harness.today[0]])
+    #expect(try harness.coordinator.restoreRecent(harness.today[1], fallbackSpace: nil) == nil)
+    #expect(try harness.coordinator.restoreRecent(UUID(), fallbackSpace: nil) == nil)
+    await harness.drain()
+  }
+
+  /// An item restored from the Archive window, or one the user cleared, is not brought back by a reopen.
+  @Test func aRecentArchiveIsForgottenWhenRestoredElsewhereOrCleared() async throws {
+    let harness = try Harness(todayTabs: 2)
+    let items = harness.coordinator.archive(harness.today, reason: .manual)
+    _ = try harness.coordinator.restore(items[0], fallbackSpace: nil)
+    harness.coordinator.archive([harness.today[0]], reason: .manual)
+    harness.coordinator.forgetRecentlyArchived()
+    #expect(try harness.coordinator.restoreRecent(harness.today[0], fallbackSpace: nil) == nil)
+    #expect(try harness.coordinator.restoreRecent(harness.today[1], fallbackSpace: nil) == nil)
+    await harness.drain()
+  }
+
+  @Test func onlyTheLatestArchivesAreKeptForReopen() async throws {
+    let harness = try Harness(todayTabs: 1)
+    harness.coordinator.archive([harness.today[0]], reason: .manual)
+    for index in 0..<ArchiveCoordinator.recentLimit {
+      let id = try harness.source.addTab(url: Self.url, title: "N\(index)", in: .today(harness.space))
+      harness.coordinator.archive([id], reason: .manual)
+    }
+    #expect(try harness.coordinator.restoreRecent(harness.today[0], fallbackSpace: nil) == nil)
+    await harness.drain()
+  }
+
   @Test func restoreWithoutASectionPutsAFolderAtTheEndOfPinned() async throws {  // BH-090
     let harness = try Harness()
     var other = SidebarModel.Sidebar()

@@ -53,8 +53,21 @@ public final class PeekController {
   private var dragOrigin = 0.0
   /// Source tabs whose last link the engine opens in a new tab itself, with the time it was answered (#345).
   private var engineOpens: [TabID: TimeInterval] = [:]
+  /// The sidebar row of the open Peek's source, kept for the reopen stack: when the source closes, its row mapping is
+  /// gone before the Peek hears of it.
+  private var sourceNode: NodeID?
+  /// How long after a close starts the "Peek closed" toast comes in (the motion table: after 140 ms). Tests set 0.
+  var closedToastDelay: TimeInterval = 0.14
+  /// Bumped by every close and reopen; a toast scheduled by a close shows only if nothing happened since.
+  private var closeGeneration = 0
+
+  /// "Peek closed" with "Reopen" and its key, a polite live region (docs/design/peek.md, Close, VoiceOver and Copy).
+  public static let closedToast = Toast(text: "Peek closed", actionTitle: "Reopen", shortcut: "\u{2318}Z",
+                                        announcement: "Peek closed. Press Command-Z to reopen.", isPolite: true)
 
   public var isOpen: Bool { session != nil }
+  /// A close is running: Reopen turns it around (`reverseClose()`).
+  public var isClosing: Bool { session?.phase == .closing }
 
   init(shell: ShellWindowController) {
     self.shell = shell
@@ -141,7 +154,7 @@ public final class PeekController {
         self.session?.url = url
         return
       }
-      teardown(closingTab: true)
+      teardown(closingTab: true, remember: true)
     }
     let tab = shell.engine.createTab(url: url, in: shell.ensureEngineWindow())
     if !present(tab, url: url, from: source, at: point) { shell.engine.closeTab(tab, mode: .skipUnloadHandlers) }
@@ -161,7 +174,7 @@ public final class PeekController {
                                            settings: linkSettings())
     guard route == .peek, let url = snapshot.url else { return false }
     let point = linkPoint()
-    if session != nil { teardown(closingTab: true) }
+    if session != nil { teardown(closingTab: true, remember: true) }
     guard present(snapshot.id, url: url, from: source, at: point) else { return false }
     Self.logger.notice("peek adopted an engine tab")
     return true
@@ -170,19 +183,27 @@ public final class PeekController {
   /// How long a link the engine opens itself is remembered for its source. [I]
   static let engineOpenWindow: TimeInterval = 2
 
-  /// Shows `tab` in a new Peek over `source`. False when the tab has no page to show.
-  private func present(_ tab: TabID, url: URL, from source: TabID, at point: CGPoint?) -> Bool {
+  /// Shows `tab` in a new Peek over `source`. False when the tab has no page to show. A reopen (`reopenOffset` set)
+  /// comes in at its frame, without the travel from the link, and keeps the old link for a later close.
+  private func present(_ tab: TabID, url: URL, from source: TabID, at point: CGPoint?,
+                       reopenOffset: CGVector? = nil) -> Bool {
     guard let page = shell.engine.contentView(for: tab) else { return false }
     let overlay = makeOverlay()
     overlay.card.mount(page)
     let geometry = overlay.geometry ?? PeekLayout.compute(content: shell.rootView.card.frame)
-    let offset = point.map { CGVector(dx: $0.x - geometry.card.midX, dy: $0.y - geometry.card.midY) } ?? .zero
+    let offset = reopenOffset
+      ?? point.map { CGVector(dx: $0.x - geometry.card.midX, dy: $0.y - geometry.card.midY) } ?? .zero
     session = PeekSession(tab: tab, source: source, url: url, linkOffset: offset, phase: .opening)
+    sourceNode = shell.nodeByTab[source]
+    closeGeneration += 1
     refreshSplitControl()
     observe()
     let reduce = reduceMotion()
-    animator.jump(to: PeekMotion.openStart(linkOffset: offset, reduceMotion: reduce))
-    animator.run(PeekMotion.targets(for: .open, reduceMotion: reduce), label: "open", in: overlay) { [weak self] done in
+    let transition: PeekTransition = reopenOffset == nil ? .open : .reopen
+    animator.jump(to: reopenOffset == nil ? PeekMotion.openStart(linkOffset: offset, reduceMotion: reduce)
+                    : PeekMotion.reopenStart(reduceMotion: reduce))
+    animator.run(PeekMotion.targets(for: transition, reduceMotion: reduce), label: "open", in: overlay) {
+      [weak self] done in
       guard done, self?.session?.phase == .opening else { return }
       self?.session?.phase = .open
     }
@@ -295,14 +316,53 @@ public final class PeekController {
     animator.run(PeekMotion.targets(for: transition, reduceMotion: reduceMotion()), label: "close", in: overlay) {
       [weak self] done in
       guard done else { return }
-      self?.teardown(closingTab: true)
-      self?.announceClosed()
+      self?.teardown(closingTab: true, remember: true)
+    }
+    showClosedToast()
+  }
+
+  /// "Peek closed" with Reopen, 140 ms into the close (BH-150). It also says, politely, how to reopen.
+  private func showClosedToast() {
+    closeGeneration += 1
+    let generation = closeGeneration
+    DispatchQueue.main.asyncAfter(deadline: .now() + closedToastDelay) { [weak self] in
+      guard let self, self.closeGeneration == generation, self.session == nil || self.isClosing else { return }
+      self.shell.toasts.show(Self.closedToast) { [weak self] in self?.shell.reopenClosed() }
     }
   }
 
-  private func announceClosed() {
-    guard let root = shell.window?.contentView else { return }
-    announce("Peek closed.", root)
+  /// Reopen while the close still runs: the card turns around from where it is, and the tab never closed. True when
+  /// a close was running.
+  func reverseClose() -> Bool {
+    guard var session, session.phase == .closing, let overlay else { return false }
+    closeGeneration += 1
+    session.phase = .opening
+    self.session = session
+    let reduce = reduceMotion()
+    animator.run(PeekMotion.targets(for: .open, reduceMotion: reduce), label: "open", in: overlay) {
+      [weak self] done in
+      guard done, self?.session?.phase == .opening else { return }
+      self?.session?.phase = .open
+    }
+    shell.activateEngineTab(session.tab)
+    shell.engine.focusPage(of: session.tab)
+    shell.refreshAddress()
+    return true
+  }
+
+  /// Puts a closed Peek back over `source`: its parked copy, history and all, or a new load of its URL without one.
+  /// An open Peek closes first (it goes on the stack).
+  func reopen(_ closed: ClosedPeek, over source: TabID) {
+    if session != nil { teardown(closingTab: true, remember: true) }
+    if let copy = closed.parked, shell.engine.snapshot(of: copy) != nil,
+       present(copy, url: closed.url, from: source, at: nil, reopenOffset: closed.linkOffset) {
+      return
+    }
+    if let copy = closed.parked { shell.engine.closeTab(copy, mode: .skipUnloadHandlers) }
+    let tab = shell.engine.createTab(url: closed.url, in: shell.ensureEngineWindow())
+    if !present(tab, url: closed.url, from: source, at: nil, reopenOffset: closed.linkOffset) {
+      shell.engine.closeTab(tab, mode: .skipUnloadHandlers)
+    }
   }
 
   private func restoreSourceFocus() {
@@ -311,10 +371,18 @@ public final class PeekController {
   }
 
   /// Removes the Peek now: the overlay goes, the source stands back up, and the Peek's tab closes unless it moved
-  /// into the sidebar.
-  func teardown(closingTab: Bool) {
+  /// into the sidebar. `remember`: the close goes on the window's reopen stack (#346) with a parked copy of the page;
+  /// `withSource`: the source's close closed it, and both reopen together.
+  func teardown(closingTab: Bool, remember: Bool = false, withSource: Bool = false) {
     guard let session else { return }
+    if closingTab, remember {
+      let url = shell.engine.snapshot(of: session.tab)?.url ?? session.url
+      let closed = ClosedPeek(parked: shell.park(session.tab), sourceNode: sourceNode, url: url,
+                              linkOffset: session.linkOffset)
+      shell.rememberClosedPeek(closed, withSource: withSource)
+    }
     self.session = nil
+    sourceNode = nil
     observation = nil
     animator.jump(to: .rest)
     for view in receded { setScale(view, 1) }
@@ -328,10 +396,12 @@ public final class PeekController {
   }
 
   /// The content area no longer shows the source tab (another tab, Space or an empty Space): the Peek goes with it.
-  /// It is not kept for a later return (deviation from the design's edge case, follow-up issue).
+  /// It is not kept for a later return (deviation from the design's edge case, follow-up issue); Cmd-Shift-T brings it
+  /// back over its source (#346).
   func shownTabsDidChange() {
     guard let session, session.phase != .expanding, !shownTabs.contains(session.source) else { return }
-    teardown(closingTab: true)
+    // The source's own close shows its successor before the Peek hears of the close: then both reopen together.
+    teardown(closingTab: true, remember: true, withSource: shell.nodeByTab[session.source] == nil)
   }
 
   // MARK: - Keys
@@ -536,9 +606,12 @@ public final class PeekController {
   private func handle(_ event: EngineEvent) {
     guard let session else { return }
     switch event {
-    case .tabClosed(let tab, _) where tab == session.tab || tab == session.source:
-      // The page closed itself, or the source went: the Peek goes at once.
-      teardown(closingTab: tab != session.tab)
+    case .tabClosed(let tab, _) where tab == session.tab:
+      // The page closed itself: the Peek goes at once, with nothing to reopen.
+      teardown(closingTab: false)
+    case .tabClosed(let tab, _) where tab == session.source:
+      // The source went: the Peek goes with it, and both reopen together (#346).
+      teardown(closingTab: true, remember: true, withSource: true)
     case .urlChanged(let tab, let url) where tab == session.tab:
       if let url { self.session?.url = url }
       shell.refreshAddress()

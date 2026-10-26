@@ -199,6 +199,7 @@ struct ArchiveListModelSearchTests {
 
     #expect(await harness.model.loadPage().rows.isEmpty)
     #expect(harness.coordinator.pendingItems.isEmpty)
+    #expect(try harness.coordinator.restoreRecent(tab, fallbackSpace: nil) == nil, "no reopen of a cleared tab")
   }
 
   @Test func clearArchiveReportsAStoreFailure() async throws {

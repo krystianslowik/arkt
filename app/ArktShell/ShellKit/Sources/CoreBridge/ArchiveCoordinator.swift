@@ -81,6 +81,11 @@ public final class ArchiveCoordinator {
   private var outbox: [Operation] = []
   /// Ids restored and not archived again since; restoring one of them again is a no-op.
   private var restoredIDs: Set<NodeID> = []
+  /// The latest archived entries, oldest first, for Reopen Closed Tab (#110, BH-074): a reopen puts a row back from
+  /// here without reading the store.
+  private var recent: [ArchivedItem] = []
+  /// How many archived entries `restoreRecent` can bring back. [I]
+  nonisolated public static let recentLimit = 50
   /// Ids this coordinator may have left in the store: sent in an add, or named by a remove that failed. A
   /// successful remove takes them out. Restoring a pending entry whose id is not here needs no store remove.
   private var mayBeStored: Set<NodeID> = []
@@ -122,6 +127,9 @@ public final class ArchiveCoordinator {
   private func enqueue(_ items: [ArchivedItem]) {
     guard !items.isEmpty else { return }
     restoredIDs.subtract(items.map(\.id))
+    recent.removeAll { item in items.contains { $0.id == item.id } }
+    recent.append(contentsOf: items)
+    if recent.count > Self.recentLimit { recent.removeFirst(recent.count - Self.recentLimit) }
     outbox.append(.add(items))
     startWriter(delayFirst: false)
     onPendingItemsChange?()
@@ -166,6 +174,7 @@ public final class ArchiveCoordinator {
     guard let fallback else { throw RestoreError.noSpaceForRestore }
     let restored = try source.restore(item, fallbackSpace: fallback)
     restoredIDs.insert(item.id)
+    recent.removeAll { $0.id == item.id }
     let wasPending = dropUnsentAdds(of: item.id)
     // Queued whenever a store call may have written the entry: a failed add may still have landed, and an extra
     // remove is harmless.
@@ -176,6 +185,17 @@ public final class ArchiveCoordinator {
     if wasPending { onPendingItemsChange?() }
     return restored
   }
+
+  /// Reopen Closed Tab (#110, BH-074): restores the entry archived as `id` a moment ago, as `restore` does. Nil when it
+  /// is not among the latest `recentLimit` archives, or was restored or forgotten since.
+  @discardableResult
+  public func restoreRecent(_ id: NodeID, fallbackSpace: UUID?) throws -> RestoredItem? {
+    guard let item = recent.last(where: { $0.id == id }) else { return nil }
+    return try restore(item, fallbackSpace: fallbackSpace)
+  }
+
+  /// The archive was cleared: nothing archived before comes back through a reopen.
+  public func forgetRecentlyArchived() { recent.removeAll() }
 
   // MARK: - Flush
 

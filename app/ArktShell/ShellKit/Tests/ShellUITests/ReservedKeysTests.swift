@@ -15,6 +15,7 @@ struct ReservedKeysTests {
     (kVK_ANSI_N, "n", NSEvent.ModifierFlags.command.rawValue),
     (kVK_ANSI_Q, "q", NSEvent.ModifierFlags.command.rawValue),
     (kVK_ANSI_D, "d", NSEvent.ModifierFlags.command.rawValue),    // KB-012 (#108)
+    (kVK_ANSI_T, "t", NSEvent.ModifierFlags([.command, .shift]).rawValue),   // KB-010 (#346): reopen
   ])
   func `every reserved letter key matches`(keyCode: Int, character: String, modifiers: UInt) {
     #expect(keys.matches(keyCode: UInt16(keyCode), character: character,
@@ -64,7 +65,7 @@ struct ReservedKeysTests {
   }
 
   @Test func `extra or missing modifiers do not match`() {
-    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_T), character: "t", modifiers: [.command, .shift]))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_T), character: "t", modifiers: [.command, .option]))
     #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_W), character: "w", modifiers: [.command, .option]))
     #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_W), character: "w", modifiers: [.command, .control]))
     #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_Q), character: "q", modifiers: []))
