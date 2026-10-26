@@ -956,6 +956,81 @@ Promotion still waits on 10 green `UI tests (informative)` runs on `main`, one l
 - Test names citing a row id outside the spec count as malformed input and exit 1 after the report is printed.
 - GS-001 and BH-040 are in the deferred file before U12 merges; U12's probe failed as the plan describes.
 
+### Parity rows and a local run on current main (2026-10-26)
+
+Base: `origin/main` at `98a8445`, branch `chore/181-parity-report`. The counts above were taken when the suite had 18
+tests and #54 to #58 and #111 were open. It now has 45 tests, those issues are closed, and U16's deferred rows were
+checked one by one against `main`.
+
+Deferred rows: 25, none added and none dropped. Each of the 25 ids still has no naming test in
+`app/ArktShell/UITests` (`grep -rn "func test_"`), so every line still records a real gap.
+
+| Rows | Was | Now | Why |
+|---|---|---|---|
+| KB-031, KB-032 | #119, "not bound" | #119, reason corrected | `MainMenu.historyItems` now binds Cmd-[ and Cmd-] (#294); Cmd-Left / Cmd-Right stay out of the menu on purpose (the comment there), and no UI test names either row |
+| 19 split rows: KB-070 to KB-075, BH-115 to BH-117, BH-120 to BH-123, BH-125, BH-128, GS-010, GS-011, GS-032, GS-033 | #54 to #58 (closed) | #180 | S4 to S8 shipped, but `UITests/` has no `SplitViewTests.swift`; #180 (U15) is the open task that owns those tests |
+| BH-087 (search) | #111 (closed), "not implemented" | #174 | Archive search shipped in #111; the U9 archive UI tests (#174) are not written |
+| BH-069, GS-001, BH-040 | #85, #26 | unchanged | Issues open, gap unchanged |
+
+Skip reasons: Xcode 27.1 (local) reports `XCTSkip` as a `Skip Message` node, Xcode 26.6 (CI) as a `Failure Message`
+node. The script read only `Failure Message`, so a local run printed the "names no #issue" note for
+`test_GS001_twoFingerSwipeMovesSpace()` even though its reason ends in `#26`. `reasons_in` now reads `Skip Message`
+for a skipped test as well (expected failures stay `Failure Message`), and the fixture's `GS-002` uses a `Skip
+Message` node so `parity-report-test.sh` fails without the fix.
+
+### Local run
+
+Apple M2 Pro, macOS 27.0 (26A428), Xcode 27.1, built-in 3024 x 1964 display. `xcodegen generate`, then:
+
+```zsh
+TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE=3 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests \
+  -derivedDataPath build -resultBundlePath build/ui-1793028533.xcresult \
+  -parallel-testing-enabled NO -collect-test-diagnostics never test
+```
+
+`** TEST SUCCEEDED **`, 45 tests, 1 skipped (`test_GS001_twoFingerSwipeMovesSpace`, #26), 0 failures:
+`Executed 45 tests, with 1 test skipped and 0 failures (0 unexpected) in 960.918 (960.964) seconds`; xcodebuild
+reports 962.287 s of testing and 16 min 42 s wall time including the build.
+
+`scripts/ui-tests/parity-report.sh` on that bundle exited 0, with the refreshed deferred file:
+
+| Status | Rows |
+|---|---:|
+| Passing | 27 |
+| Failing | 0 |
+| Deferred | 24 |
+| Not covered | 295 |
+| Total | 346 |
+
+One row has a deferred part (BH-087, search). Passing [I]: KB-084 and KB-085, all three of KB-085's tests. No unknown
+row ids, and no "names no #issue" note after the `Skip Message` fix.
+
+Slowest five:
+
+```
+`test_KB085_optEnterOpensURLInNewTab()` 1m 14s (74.15589594841003s)
+`test_KB085_cmdEnterOpensURLInNewTab()` 1m 11s (71.94246995449066s)
+`test_onboarding_arcBranchImportsAndLandsInTheBrowser()` 1m (60.7766010761261s)
+`test_BH104_BH110_switchToTabRow()` 55s (55.702857971191406s)
+`test_E_issue301_newEmptySpaceClearsContentAndRestoresLiveTab()` 51s (51.48850703239441s)
+```
+
+### CI run and promotion status
+
+Run 40329967087 at `main` (`Persist the sidebar width and hidden state per window`), `macos-26` runner, Xcode 26.6:
+`** TEST SUCCEEDED **`, 45 tests, 1 skipped, 0 failures, `Executed 45 tests ... in 999.241 (999.291) seconds`. The
+`xcodebuild test` step took 18 min 38 s (14:10:32 to 14:29:10 UTC) and the job 19 min 11 s, inside the 40 min job
+timeout and the plan's 20 min suite budget. Its report has the same counts as the local run (27 / 0 / 24 / 295 / 346)
+and the same passing [I] rows; the slowest five there were `test_KB085_cmdEnterOpensURLInNewTab` 84.1 s,
+`test_KB085_optEnterOpensURLInNewTab` 82.9 s, `test_BH104_BH110_switchToTabRow` 66.7 s, `test_KB085_downWrapsFromLastToFirst` 57.2 s
+and `test_onboarding_arcBranchImportsAndLandsInTheBrowser` 57.1 s.
+
+Promotion, as of this run: the `UI tests (informative)` job has been green on 26 consecutive completed runs on
+`main`, from 40280792149 (06:36 UTC) to 40334727687 (13:54 UTC). It is not green by construction: 40277908550 at
+06:06 UTC reported a failed job, so `continue-on-error` does not hide a failed suite. The local 20-iteration run
+(`-test-iterations 20 -run-tests-until-failure`) and the maintainer decision in #161 remain; this change does not
+remove `continue-on-error`, does not add `ui-tests` to the gate and does not edit `CONTRIBUTING.md`.
+
 ## U13: Import from Arc (#178)
 
 Base: `origin/main` at `46f3729`, branch `chore/178-arc-import-ui`. Lands after #289: it merges
