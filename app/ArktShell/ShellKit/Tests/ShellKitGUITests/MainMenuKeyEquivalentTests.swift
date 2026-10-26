@@ -416,7 +416,16 @@ final class MainMenuInventoryTests: XCTestCase {
     let pinAction = try XCTUnwrap(pin.action)
     XCTAssertFalse(NSWindow.instancesRespond(to: pinAction),
                    "NSWindow implements \(pinAction); Pin Tab would reach the window, not the controller")
-    XCTAssertFalse(NSWindow.instancesRespond(to: #selector(ShellWindowController.toggleSidebarVisibility(_:))))
+    // Every nil-target item meant for the controller: none may be claimed by the window first.
+    let controllerItems = allItems().filter {
+      $0.target == nil && $0.action.map { ShellWindowController.instancesRespond(to: $0) } == true
+    }
+    XCTAssertFalse(controllerItems.isEmpty)
+    for item in controllerItems {
+      let action = try XCTUnwrap(item.action)
+      XCTAssertFalse(NSWindow.instancesRespond(to: action),
+                     "\(item.title): NSWindow implements \(action), so the controller never receives it")
+    }
   }
 
   /// Decision 9: no menu item names Arc.
