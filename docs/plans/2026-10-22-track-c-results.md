@@ -1654,3 +1654,39 @@ request; Cmd-Shift-T put the row back with the page on B, `history.length` 2, an
 navigated from one page to a second closed with Esc and showed "Peek closed / Reopen ⌘Z"; Cmd-Z brought it back on
 the second page with `history.length` 2. A Peek closed with its Close control came back with Cmd-Shift-T; its page
 was requested only when it was shown again. UI tests (XCUITest) not run here.
+
+## Peek kept across tab and Space switches (#348, switch part) (2026-10-26)
+
+Maintainer decision on #348: a Peek is kept hidden, not closed, when its source tab or Space is switched away, and
+comes back when the source is shown again; memory cost accepted.
+
+- **Hide.** When the content area stops showing the source tab (another tab, another Space, an empty Space), the
+  Peek's overlay goes and the source stands back up, but its engine tab stays live: page, scroll, history and state.
+  Nothing is parked, no toast, nothing goes on the reopen stack. `PeekController.hiddenPeeks` keeps one entry per
+  source tab, so a source has at most one hidden Peek. The tab has no row, so it is not in the sidebar, the tab
+  switcher, the Archive or the saved session, and it does not survive quit.
+- **Restore.** Showing the source again (a row click, a Space switch back, the tab switcher) mounts the same page in a
+  new overlay with the Open motion from the original link (`firmSlow`, opacity critically damped); Reduce Motion fades
+  it in at its frame (0.20 s). If several shown panes have hidden Peeks, the current tab's comes back first.
+- **Closes.** A Peek the user closes still goes on the reopen stack (#378). A close in progress when the switch
+  happens finishes at once. The source closing or archived while its Peek is hidden closes the Peek, parked, on the
+  source's stack item, so Cmd-Shift-T brings both back together. A hidden Peek whose page closes itself is dropped.
+- **Tab Handoff (#300).** Picked: the Peek closes cleanly, it does not move with the page. Shown or hidden, it closes
+  in the window the page leaves, parked on that window's reopen stack (a reopen there selects the source row, which
+  hands the page back, and puts the Peek over it). Moving a row-less tab between two windows' Peek controllers was
+  not worth the extra state.
+- No Chromium change: no new patch, `.patches` unchanged.
+
+Tests: ShellKit unit 1022, all passed (no unit tests added; the behavior lives in a window). ShellKitGUITests 867
+run, 9 skipped, 0 failures: `PeekWindowTests` replaces the old switch-closes test with 9 (hide, restore with the
+open motion, Reduce Motion fade, Space and empty-Space switch, one Peek per source, source closed while hidden, page
+closing itself, handoff while hidden and while shown), and `ReopenClosedTests` rewrites the switch test and adds
+archive-while-hidden (net +9). Debug and Engine app builds succeed. Real-app check on the Engine build (out/Spike,
+throwaway profile and data folder, synthetic pages on a local server, real clicks): a Shift-click in a Today tab
+opened a Peek on a long page, scrolled to 2400; a click on another row hid it (`document.visibilityState` hidden);
+a click back on the source row brought it back with the open motion (caught mid-open at 80 ms), with the same
+`performance.timeOrigin`, `scrollY` 2400, a JavaScript marker still set, and one request for the page in the server
+log. Esc then closed it with the "Peek closed" toast.
+
+Still open on #348: Settings > Links toggles, the source card hidden from VoiceOver and the Tab loop, XCUITest flows,
+and the Instruments trace at 120 Hz.
