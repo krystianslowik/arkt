@@ -328,7 +328,7 @@ extension SettingsWindowController {
   }
 
   func applyShortcutSearch() {
-    guard let pane = paneViewIfBuilt(.shortcuts), let search = pane.blocks.first, let footer = pane.blocks.last else {
+    guard let pane = shortcutsPaneIfBuilt, let search = pane.blocks.first, let footer = pane.blocks.last else {
       return
     }
     let found = ShortcutCatalog.filter(shortcutSections, query: shortcutsSearch.stringValue)
@@ -342,9 +342,8 @@ extension SettingsWindowController {
     ShortcutCatalog.filter(shortcutSections, query: shortcutsSearch.stringValue).flatMap(\.entries).map(\.title)
   }
 
-  private func paneViewIfBuilt(_ pane: SettingsPane) -> SettingsPaneView? {
-    shortcutsSearch.enclosingPane
-  }
+  /// The Shortcuts pane, once built (the search field sits in it).
+  private var shortcutsPaneIfBuilt: SettingsPaneView? { shortcutsSearch.enclosingPane }
 
   // MARK: Extensions
 
@@ -408,11 +407,11 @@ extension SettingsWindowController {
     let importButton = pill(.advanced, "importBrowserData", "Import...", small: true) {
       services.importBrowserData()
     }
-    importButton.isEnabled = services.canImportBrowserData()
     self.importButton = importButton
     let reveal = pill(.advanced, "showDataFolder", "Show in Finder", small: true) { services.showDataFolder?() }
     let importRow = row("Import browser data", "Spaces, pinned tabs, folders and Favorites from another browser.",
                         [importButton])
+    // After the row: a row enables the controls it holds.
     importButton.isEnabled = services.canImportBrowserData()
     let folderRow = row("Arkt\u{2019}s data folder", "The sidebar, the Archive and their backups.", [reveal])
     reveal.isEnabled = services.showDataFolder != nil
