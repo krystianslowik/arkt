@@ -6,47 +6,42 @@ description: Use before launching, testing or driving a local Arkt build (app co
 # Arkt local app safety
 
 Local runs share the machine with the user's real browser and apps. Keep test builds isolated and leave nothing
-behind.
+behind. These rules hold for every launch, test run and build.
 
-## Bundle ids and LaunchServices
+## 0. Gate: write it down before launching
 
-- Launch app copies under their own bundle id, distinct from any installed release build.
-- Never register a build under the real app's bundle id with LaunchServices (`lsregister`, or copying a test bundle
-  into `/Applications`). The test build then takes over the user's link opens and default-browser handling.
-- Launch a test build by its path inside the build output, not by bundle id.
+1. What you will launch, from which path, under which bundle id.
+2. The throwaway data folder or profile it will use.
+3. How you will record its PID and stop it.
+4. Free disk now (`df -h .`).
 
-## Processes
+**STOP** if the bundle id equals an installed release build's, or the data folder is a real profile.
 
-- Record the PID of everything you start (`$!` after a background launch) and stop it by that exact PID:
-  `kill <PID>`.
-- Never `pkill`, `killall` or kill by name or pattern (`CONTRIBUTING.md`, section 7, "Processes"). Never stop a
-  process you did not start.
+## 1. Checklist
 
-## Input
+1. **Own bundle id.** Launch app copies under their own bundle id, distinct from any installed release build.
+2. **No LaunchServices registration** under the real app's bundle id (`lsregister`, or copying a test bundle into
+   `/Applications`). A test build registered that way takes over the user's link opens.
+3. **Launch by path** inside the build output, not by bundle id.
+4. **Exact PID only.** Record the PID of everything you start (`$!`) and stop it with `kill <PID>`. Never `pkill`,
+   `killall`, or a name or pattern. Never stop a process you did not start (`CONTRIBUTING.md`, section 7).
+5. **Input only into your own window.** Before each synthetic click or key, check the frontmost app is your test
+   build. **STOP** if it is not.
+6. **No real browser data.** Never open, copy, read or grep the user's browser data or profiles. Tests use synthetic
+   fixtures and the throwaway folders the harness creates. Engine launches use a throwaway `--user-data-dir` and
+   `--use-mock-keychain` (`engine/README.md`, "Launch flags").
+7. **Never bypass** a blocked permission prompt, a hook or a sandbox. If one blocks you, stop and report it.
+8. **Disk.** Check free space before any build. **STOP** if it is short; never delete files you did not create.
 
-- Send synthetic input (clicks, keys, scrolls) only into a window your run owns, and only while it is frontmost.
-  Check the frontmost app before every input step; stop if it is not yours.
-- Keep hands off the keyboard and mouse while UI tests run (section 7).
+## 2. Cleanup, verify before you claim
 
-## Browser data
+1. Stop every process you started; confirm with `ps -p <PID>` (prints no process).
+2. Remove the throwaway profiles and data folders your run created.
+3. UI-test attachments land outside the repo; where they are and how to clear them is in `CONTRIBUTING.md`,
+   section 7, "Attachments". Keep the `deleteOnSuccess` lifetime on any attachment you add.
+4. Report what you stopped and removed, and anything you kept and why.
 
-- Never open, copy, read or grep the user's browser data or profiles. Tests use the synthetic fixtures and throwaway
-  data folders the harness creates.
-- Engine launches use a throwaway `--user-data-dir` and `--use-mock-keychain` (`engine/README.md`, "Launch flags").
+## Common mistakes we made
 
-## Cleanup
-
-- UI-test attachments land outside the repo, in testmanagerd's container. Where they are and how to clear them is in
-  `CONTRIBUTING.md`, section 7, "Attachments". Keep the `deleteOnSuccess` lifetime on any attachment you add.
-- Remove throwaway profiles and data folders your run created.
-
-## Disk
-
-Check free disk before any build and stop if it is short:
-
-```zsh
-df -h .
-```
-
-Chromium builds need the space listed in `engine/README.md`. A build stopped for space is recorded in the results
-file, never fixed by deleting files you did not create.
+- UI tests keeping screenshots for passing runs until the disk filled (#426, fixed in #427).
+- A test build registered under the real bundle id, which took over the user's link opens.
