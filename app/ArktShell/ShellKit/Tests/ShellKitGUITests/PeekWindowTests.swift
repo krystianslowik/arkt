@@ -800,13 +800,20 @@ final class PeekWindowTests: XCTestCase {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     var focused: [NSView] = []
-    harness.peek.moveAccessibilityFocus = { focused.append($0) }
+    var cardHiddenAtFocus: [Bool] = []
+    let card = harness.controller.rootView.card
+    harness.peek.moveAccessibilityFocus = { view in
+      focused.append(view)
+      cardHiddenAtFocus.append(card.isAccessibilityHidden())
+    }
     let session = try openPeek(harness, world)
     harness.settle()
     XCTAssertTrue(focused.last === harness.engine.contentView(for: session.tab), "the Peek's page")
     harness.peek.close(.control)
     harness.settle()
     XCTAssertTrue(focused.last === harness.engine.contentView(for: session.source), "the source page")
+    XCTAssertEqual(cardHiddenAtFocus.last, false,
+                   "the source card is back in the accessibility tree when VoiceOver focus moves to its page")
     harness.controller.close()
   }
 

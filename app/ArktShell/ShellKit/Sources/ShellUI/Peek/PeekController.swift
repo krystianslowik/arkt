@@ -383,8 +383,9 @@ public final class PeekController {
     case .keyboard: .closeInPlace
     case .fling(let velocity): .fling(velocity: velocity)
     }
-    restoreSourceFocus()
+    // The source is back in the accessibility tree before VoiceOver focus moves to its page.
     showSourceInAccessibility()
+    restoreSourceFocus()
     animator.run(PeekMotion.targets(for: transition, reduceMotion: reduceMotion()), label: "close", in: overlay) {
       [weak self] done in
       guard done else { return }
