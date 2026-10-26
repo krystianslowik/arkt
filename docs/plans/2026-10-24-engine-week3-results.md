@@ -3166,6 +3166,37 @@ column). One snapshot call serves both #370 and #352 (shape posted on #352).
 - "History clearing" has no command yet; only Clear Archive empties the cache. The preview UI (#371, #372) is not part
   of this change.
 
+## #268: ChromiumEngineKit linked only in the Engine configuration
+
+### What landed
+
+- `project.yml`: the `ChromiumEngineKit` and `EngineAPITestSupport` package dependencies say `link: false`. Xcode
+  still builds both products in every configuration (the Engine compile needs their modules), but only the Engine
+  configuration links them, through `OTHER_LDFLAGS` naming `$(BUILT_PRODUCTS_DIR)/<product>.o`.
+- The Engine configuration also passes the facade header's module map (`OTHER_SWIFT_FLAGS`, `-fmodule-map-file`). A
+  linked product used to pass it; without it the explicit module scan of `App/Engine` failed ("Unable to resolve module
+  dependency"), because the kit's swiftmodule loads the facade module for its `internal import`.
+- Isolation tests: the two products are the only ones with `link: false`, their objects appear in exactly one
+  `OTHER_LDFLAGS`, under `Engine`, and only `App/Engine` imports them. The facade module check on `project.yml` is
+  narrowed from "never named" to "named only in the Engine module map flag, and never a dependency".
+
+### Verification
+
+- `xcodegen generate` (2.46.0): the two products are target dependencies and absent from the Frameworks phase.
+- Debug, Release and Profile builds: `BUILD SUCCEEDED`. `nm` on the Debug stub, `ArktShell.debug.dylib`, the Release
+  and the Profile binary: 0 `ArktShellEmbedder` or `ChromiumEngineKit` symbols, 0 `EngineAPITestSupport` symbols,
+  `strings` finds no `ArktShellEmbedder`; `otool -L` lists no engine framework. Before the change, a Debug
+  `ArktShell.debug.dylib` built from `main` defined `_OBJC_CLASS_$_ArktShellEmbedder`.
+- Engine build (`ARKT_ENGINE_APP` set to `out/Spike/Chromium.app`, derived data outside the Chromium disk):
+  `BUILD SUCCEEDED`; the binary defines `_OBJC_CLASS_$_ArktShellEmbedder` and lists it in its Objective-C class list
+  (`otool -ov`), which is what `NSClassFromString` reads. The app was not launched.
+- ShellKit `swift test --skip ShellKitGUITests`, rebased on `5ebda1f`: 1284 passed; isolation suites 34 (28 + 6).
+  ArktCore `swift test`: 428 passed (428 + 0).
+
+### Deviations
+
+- The facade module map flag in `project.yml` (above), and the narrowed isolation check that allows it.
+
 ## #352: Little Arkt's Open in flight
 
 Branch `feat/352-little-arkt-flight`. Design: `docs/design/little-arkt.md`, Motion (`la-kf-promote-*`,
