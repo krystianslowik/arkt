@@ -38,7 +38,8 @@ final class SpacesMenuTests: XCTestCase {
   private func spacesMenu() throws -> SpacesMenu {
     let main = MainMenu.make(commands: AppCommands()).menu
     let menu = try XCTUnwrap(main.items.first { $0.title == "Spaces" }?.submenu as? SpacesMenu)
-    menu.entries = { [unowned self] in self.controller.spaceMenuEntries }
+    // Optional: a menu still alive after tearDown (a window becoming main) must not read the released controller.
+    menu.entries = { [weak self] in self?.controller?.spaceMenuEntries ?? [] }
     return menu
   }
 
