@@ -10,6 +10,8 @@ enum FolderMotionLayout {
     /// Points along the outline's flipped y axis: negative moves the row up.
     var offsetY: CGFloat
     var alpha: CGFloat
+    /// About the row's center: a row arriving from Little Arkt's Open in grows from 0.96 (#352).
+    var scale: CGFloat = 1
 
     static let rest = RowStyle(offsetY: 0, alpha: 1)
   }

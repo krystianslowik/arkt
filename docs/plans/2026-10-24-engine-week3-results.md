@@ -3263,3 +3263,63 @@ still listed and will be dropped by LaunchServices' own cleanup. It cannot take 
 - The release configuration (no test-only code, product `ARKT_PRODUCT_DIR_NAME`) is #334; signing is #125.
 - Existing installs of the placeholder id: none ship; the maintainer's `~/Applications/ArktTest` bundle keeps its old id
   until it is rebuilt.
+
+## #352: Little Arkt's Open in flight
+
+Branch `feat/352-little-arkt-flight`. Design: `docs/design/little-arkt.md`, Motion (`la-kf-promote-*`,
+`la-kf-interrupt-220ms`). Shell only: the snapshot is `EngineClient.pageImage(of:_:)` with `.fullFrame` (#370); no
+Chromium patch, no facade change.
+
+### What changed
+
+- `LittleArktFlight` draws the page's snapshot on its plate on `LittleArktFlightOverlay`, a transparent, click-through
+  borderless window spanning both windows, above both. Nothing changes until the first display frame; the card then
+  flies with its center, mask size and scale on `firmSlow` and its opacity back to 1, from wherever the appear has it.
+- The small frame fades at once (`fadeOut`, 0.12 s) and the main window comes forward. A snapshot that misses the first
+  frame fades in on the plate (critical 0.16 s).
+- The Today row is added at the start, drawn by the flight's clock: the rows below hold their place, make room after
+  200 ms and the row fades in from 0.96 at 290 ms (`springyFast`, `SidebarArrivalLayout` through the folder motion row
+  styles). At rest the page moves once (`moveTab`), is selected and mounted at its final size; the next display frame
+  starts the 0.1 s crossfade, and the overlay is removed.
+- No flight (today's fade-out path): Reduce Motion, no open main window, or one minimized, on another desktop, in full
+  screen or off every screen (`LittleArktFlightConditions`).
+- A flight that cannot land by itself ends with `LittleArktFlight.abort(_:)`, which orders the overlay out and tells
+  the window controller what to do with the page: the main window miniaturizing, the main window's display link
+  stopping (two quiet checks of a watchdog on an injected clock, counted in frames, never seconds), the app
+  terminating, the small window closing, and Cmd-W or the close button land the page in the main window at once,
+  without the flight; the main window closing keeps the page in the small window and drops the row made for it; the
+  page closing itself (`window.close()`) drops the row and lets the engine close the window, with no appear on it.
+  Cmd-W mid-flight lands first and then closes (it is never ignored). A released flight orders its overlay out.
+- `LittleArktAnimator.run` reads its clock once per run (#450); `beginFlight` reads the window's clock once.
+- An arrival frame reads one row height (the arriving row's) instead of all of them.
+
+### Verification
+
+- Red first: the motion and flight tests failed to compile (types missing), then passed. Break check: landing on the
+  first flying frame instead of at rest (`LittleArktFlight.tick`, the `isSettled` gate) turned three flight tests red;
+  restored.
+- ArktCore `swift test`: 428 passed (unchanged).
+- ShellKit `swift test --skip ShellKitGUITests`: 1299 passed (1298 before the abort fixes + 1; the earlier baseline
+  is 1298 minus the 11 tests added, not a run on `main`).
+- ShellKit `swift test --filter ShellKitGUITests` before the abort fixes (not re-run after them; the Little Arkt
+  suites above were): 1103 run, 18 skipped, 0 failures (load average 22.6). An earlier run
+  before the merge of `main` had one failure, the `SpaceSwipeHitchTests` main-thread CPU gate at load average 44
+  (10.6 ms against 8.34 ms); it passed alone.
+- `swift test --filter "LittleArktFlight|LittleArktWindowTests"` 20 times in a row: 20 of 20 passed, 39 XCTest
+  (2 skipped: the screenshot and measurement tests) and 12 Swift Testing each, load average 22.6 at the start and
+  18.8 at the end.
+- Abort break check: removing the `abort` calls in `LittleArktWindowController` (`windowWillClose`, `requestClose`,
+  the `.tabClosed` case) turned the Cmd-W and page-closed tests red (flight still `flying`, overlay still up, page
+  not landed, row held back). The old animator (two clock reads) fails the three clock tests. Restored.
+- One arrival frame with 509 rows (Debug, load average about 23, `ARKT_FLIGHT_MEASURE=1`, 600 frames): mean 460 us
+  before (458 to 474 over 4 runs), 296 us after (293 to 299 over 4 runs).
+
+### Deviations
+
+- Open in with no main window open takes the fade-out path (the window it opens has no laid-out card yet).
+- The engine reports no first frame for a page in its new window; the crossfade starts on the next display frame after
+  the page is mounted. A check with real Chromium is #454.
+- The selection moves to the new row when the page lands; the design's fade of the old selection and fade-in of the new
+  one is not drawn (#455).
+- No card shadow during the flight (a shadow path per frame would be extra per-frame work; #456).
+- If the main window goes away mid-flight, the page stays in the Little Arkt window.

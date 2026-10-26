@@ -42,6 +42,8 @@ public final class ShellWindowSet {
   private var littleArktSize = LittleArktLayout.defaultSize
   /// Reduce Motion for Little Arkt windows (tests set it).
   public var littleArktReduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// Runs on each new Little Arkt window before it appears (tests step its motion by hand).
+  var littleArktConfigure: (@MainActor (LittleArktWindowController) -> Void)?
 
   /// `hostLookup` is needed only for an engine that asks for windows of its own (a host provider); FakeEngine never
   /// does.
@@ -210,9 +212,11 @@ public final class ShellWindowSet {
       let target = self.primary ?? self.openWindow(opensFirstTab: false)
       return target.receiveMovedTab(tab, in: space)
     }
+    little.flightDestination = { [weak self] in self?.primary }        // #352: an open main window only
     little.onResize = { [weak self] size in self?.littleArktSize = size }
     little.onClosed = { [weak self] closed in self?.littleArktWindows.removeAll { $0 === closed } }
     littleArktWindows.append(little)
+    littleArktConfigure?(little)
     return little
   }
 
