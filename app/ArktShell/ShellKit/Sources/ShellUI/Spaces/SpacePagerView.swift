@@ -59,6 +59,16 @@ public final class SpacePagerView: NSView {
   private var tracker = VelocityTracker()
   private var lock = ScrollAxisLock<NSEvent>()
   private var laidOutWidth: CGFloat = 0
+  /// How many presented frames of a motion a pointer move waits between two strip syncs (#295): at 120 Hz this is
+  /// about 25 ms. The first move of a settle still syncs, and a hit test never waits (a click must land on what is
+  /// drawn under the pointer).
+  static let pointerSyncFrameInterval = 3
+  /// Presented frames of the current (or last) motion: the clock for `pointerSyncFrameInterval`.
+  private var motionFrames = 0
+  /// `motionFrames` at the last pointer-move sync.
+  private var lastPointerSyncFrame = -SpacePagerView.pointerSyncFrameInterval
+  /// Tests: how many times the strip view geometry was synced (clicks, pointer moves, rest, backing changes).
+  private(set) var stripFrameSyncsForTesting = 0
 
   public override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -138,6 +148,7 @@ public final class SpacePagerView: NSView {
     if strip.layer == nil || !(isTracking || driver.isRunning) {
       syncStripFrame()
     } else {
+      motionFrames += 1
       // Pixel-aligned, so text and glyphs stay sharp mid-swipe; the final offset is page-aligned anyway.
       let scale = shellBackingScale
       let shift = ((newOffset - strip.frame.origin.x) * scale).rounded() / scale
@@ -150,10 +161,18 @@ public final class SpacePagerView: NSView {
   /// Moves the strip view to `offset` and clears the layer translation (one implicit transaction, so the two never
   /// show apart). Called whenever the strip comes to rest and when input needs the geometry mid-motion, so hit
   /// testing, tracking areas and accessibility frames match what is on screen. A running settle or swipe carries on
-  /// from the new frame: the next `apply` translates the layer relative to it.
+  /// from the new frame: the next `apply` translates the layer relative to it. While the strip moves the origin is
+  /// rounded to whole backing pixels, so the translations that follow stay pixel-aligned for the rest of the motion
+  /// (#295); at rest the exact offset is kept.
   private func syncStripFrame() {
     unparkPages()
-    if strip.frame.origin.x != offset { strip.setFrameOrigin(NSPoint(x: offset, y: 0)) }
+    stripFrameSyncsForTesting += 1
+    var x = offset
+    if isTracking || driver.isRunning {
+      let scale = shellBackingScale
+      x = (x * scale).rounded() / scale
+    }
+    if strip.frame.origin.x != x { strip.setFrameOrigin(NSPoint(x: x, y: 0)) }
     if let layer = strip.layer, !layer.affineTransform().isIdentity { layer.setAffineTransform(.identity) }
   }
 
@@ -251,10 +270,17 @@ public final class SpacePagerView: NSView {
   }
 
   /// A pointer moving over the strip mid-motion would otherwise enter and leave rows by their stale tracking areas
-  /// (hover on a row the pointer is not over): the sync rebuilds them where the rows show and resyncs hover. Nothing
-  /// happens at rest. The event is not passed up the responder chain; it was generated for this view's own area.
+  /// (hover on a row the pointer is not over): the sync rebuilds them where the rows show and resyncs hover. During a
+  /// motion a moving pointer can arrive on every displayed frame, and each sync is a frame move, a tracking-area
+  /// rebuild and a window-server pointer query, so after the first move of the motion at most one move per
+  /// `pointerSyncFrameInterval` presented frames syncs (#295). Nothing happens at rest, where the settle already
+  /// synced the exact frame. The event is not passed up the responder chain; it was generated for this view's own
+  /// area.
   public override func mouseMoved(with event: NSEvent) {
-    if stripGeometryIsStale { syncStripFrame() }
+    guard stripGeometryIsStale else { return }
+    guard motionFrames - lastPointerSyncFrame >= Self.pointerSyncFrameInterval else { return }
+    lastPointerSyncFrame = motionFrames
+    syncStripFrame()
   }
 
   /// A backing change (the window moved to a display with another scale or color space) makes AppKit update the
@@ -370,6 +396,8 @@ public final class SpacePagerView: NSView {
 
   private func settle(to target: Int, velocity: CGFloat) {
     let velocity = velocity.isFinite ? velocity : 0
+    motionFrames = 0
+    lastPointerSyncFrame = -Self.pointerSyncFrameInterval
     targetIndex = target
     let session = pacerSession
     driver.animate(in: self, from: Double(offset), to: Double(-CGFloat(target) * pageWidth),
@@ -400,6 +428,8 @@ public final class SpacePagerView: NSView {
     frozenTarget = nil
     let base = min(max(Int(position.rounded()), 0), pages.count - 1)
     dragBase = base
+    motionFrames = 0
+    lastPointerSyncFrame = -Self.pointerSyncFrameInterval
     translation = PagingMath.initialTranslation(offset: offset, index: base, pageWidth: pageWidth, count: pages.count)
     tracker.reset()
     isTracking = true

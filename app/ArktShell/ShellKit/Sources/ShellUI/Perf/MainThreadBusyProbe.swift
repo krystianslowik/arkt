@@ -46,7 +46,14 @@ final class MainThreadBusyProbe {
 
   init(capacity: Int = 32) { self.capacity = capacity }
 
+  /// Invalidate the run loop observer if the probe is freed while it is still running, so no observer stays
+  /// installed with a weak capture of a gone probe (#295).
+  isolated deinit { stop() }
+
   var isRunning: Bool { observer != nil }
+
+  /// Tests: the installed observer (nil when stopped), to check that a freed probe removed it.
+  var observerForTesting: CFRunLoopObserver? { observer }
 
   func start() {
     guard observer == nil else { return }

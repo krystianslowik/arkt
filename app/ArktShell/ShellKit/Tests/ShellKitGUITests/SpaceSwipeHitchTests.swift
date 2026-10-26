@@ -176,7 +176,9 @@ final class SpaceSwipeHitchTests: XCTestCase {
     let hit = try XCTUnwrap(window.contentView?.hitTest(point))
     XCTAssertTrue(hit === pager.pages[1] || hit.isDescendant(of: pager.pages[1]), "hit \(hit) is not on page 1")
     XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
-    XCTAssertEqual(pager.strip.frame.minX, pager.offset, accuracy: 0.01)
+    XCTAssertEqual(pager.strip.frame.minX, pager.offset, accuracy: 0.5, "the synced frame is within a backing pixel")
+    let framePixels = pager.strip.frame.minX * pager.shellBackingScale
+    XCTAssertEqual(framePixels, framePixels.rounded(), accuracy: 0.000001)
     XCTAssertEqual(pager.pages[1].convert(point, from: nil).x, local.x - (pager.offset + width), accuracy: 0.5,
                    "page 1 converts the click with the frame it shows at")
     XCTAssertTrue(pager.isSettling, "the click does not stop the settle")
@@ -221,8 +223,76 @@ final class SpaceSwipeHitchTests: XCTestCase {
                                                 context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
     pager.mouseMoved(with: move)
     XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
-    XCTAssertEqual(pager.strip.frame.minX, pager.offset, accuracy: 0.01)
+    XCTAssertEqual(pager.strip.frame.minX, pager.offset, accuracy: 0.5)
     XCTAssertTrue(pager.isSettling)
+    pager.stopInteraction()
+  }
+
+  /// A pointer moving on every frame of a settle must not put the per-frame geometry sync back (#295): at most one
+  /// sync per `pointerSyncFrameInterval` presented frames, while the first move still syncs and hover stays right at
+  /// rest.
+  func testAPointerMovingEveryFrameMidSettleSyncsAtMostOncePerFewFrames() throws {
+    let pager = controller.pager
+    let window = try XCTUnwrap(pager.window)
+    var time = try midSettle(pager)
+    let move = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved,
+                                                location: pager.convert(NSPoint(x: 10, y: 10), to: nil),
+                                                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                                context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+    // The first move of the settle syncs: the frame catches up to the screen and hover is right from there.
+    pager.mouseMoved(with: move)
+    let synced = pager.stripFrameSyncsForTesting
+    XCTAssertGreaterThanOrEqual(synced, 1)
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
+    // Each following frame moves the strip again. A pointer move on each of them, inside the interval, must leave
+    // the geometry alone; it is the per-frame path #24 removed.
+    for _ in 1..<SpacePagerView.pointerSyncFrameInterval {
+      time += 1.0 / 120
+      pager.driver.tick(at: time)
+      pager.mouseMoved(with: move)
+      XCTAssertEqual(pager.stripFrameSyncsForTesting, synced, "a pointer move synced again inside the rate limit")
+      XCTAssertNotEqual(pager.stripLayerShiftForTesting, 0, "the strip still translates on its layer")
+    }
+    // The next presented frame is past the interval: a move syncs again.
+    time += 1.0 / 120
+    pager.driver.tick(at: time)
+    pager.mouseMoved(with: move)
+    XCTAssertEqual(pager.stripFrameSyncsForTesting, synced + 1)
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
+    // At rest, hover does not need another sync: the settle leaves the frame on the page boundary.
+    pager.stopInteraction()
+    let atRest = pager.stripFrameSyncsForTesting
+    pager.mouseMoved(with: move)
+    XCTAssertEqual(pager.stripFrameSyncsForTesting, atRest)
+    XCTAssertEqual(pager.strip.frame.minX, pager.offset, accuracy: 0.001)
+  }
+
+  /// A sync mid-motion rounds the strip frame to whole backing pixels, so the layer translations that follow start
+  /// from a pixel-aligned origin instead of keeping the fractional offset of the frame that happened to be current.
+  func testASyncMidMotionRoundsTheStripFrameToBackingPixels() throws {
+    let pager = controller.pager
+    let window = try XCTUnwrap(pager.window)
+    let scale = pager.shellBackingScale
+    XCTAssertGreaterThan(scale, 0)
+    pager.beginTracking()
+    pager.track(delta: -100.3, at: 0.01)
+    let fractionalPixels = pager.offset * scale
+    XCTAssertNotEqual(fractionalPixels.rounded(), fractionalPixels, accuracy: 0.0001,
+                      "the tracked offset is between backing pixels")
+    let move = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved,
+                                                location: pager.convert(NSPoint(x: 10, y: 10), to: nil),
+                                                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                                context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+    pager.mouseMoved(with: move)
+    XCTAssertTrue(pager.isTracking)
+    let framePixels = pager.strip.frame.minX * scale
+    XCTAssertEqual(framePixels, framePixels.rounded(), accuracy: 0.000001,
+                   "the synced frame origin is a whole number of backing pixels")
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0)
+    // The next translation is measured from the aligned frame, so the strip stays on whole pixels mid-motion.
+    pager.track(delta: -1.3, at: 0.02)
+    let shownPixels = (pager.strip.frame.minX + pager.stripLayerShiftForTesting) * scale
+    XCTAssertEqual(shownPixels, shownPixels.rounded(), accuracy: 0.000001)
     pager.stopInteraction()
   }
 
@@ -273,6 +343,17 @@ final class SpaceSwipeHitchTests: XCTestCase {
   private static let labels = ["swipe-next", "key-flavor-next", "swipe-flavor-back", "swipe-back", "key-next",
                                "key-previous"]
 
+  /// The screen-only pacing gate looks at the display, not at load: a test that measures thread CPU time is
+  /// measurable on a loaded machine, unlike the wall-clock pacing tests.
+  func testScreenOnlyPacingGateIgnoresLoad() throws {
+    XCTAssertNil(PacingEnvironment.screenNotMeasurableReason(fps: 120))
+    XCTAssertEqual(PacingEnvironment.screenNotMeasurableReason(fps: 60), "screen 60 Hz")
+    XCTAssertThrowsError(try PacingEnvironment.skipIfScreenBelow120Hz(fps: 60)) { error in
+      XCTAssertTrue(error is XCTSkip)
+    }
+    XCTAssertNoThrow(try PacingEnvironment.skipIfScreenBelow120Hz(fps: 120))
+  }
+
   /// #24: main-thread CPU of every run loop pass during scripted swipes and keyboard switches both ways stays under
   /// one 120 Hz refresh. Thread CPU time does not include time the thread was preempted, so this holds on a loaded machine where the
   /// wall-clock pacing test reports NOT-MEASURABLE. Before the fix (strip moved with `setFrameOrigin`) single passes
@@ -280,9 +361,9 @@ final class SpaceSwipeHitchTests: XCTestCase {
   /// under 5 ms.
   func testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU() async throws {
     // CPU time does not depend on load, but it does on the hardware: a virtualized runner below 120 Hz (CI) is not
-    // the machine this budget is for, and its display link ticks too rarely to drive the scripted frames.
-    let fps = controller.window?.screen?.maximumFramesPerSecond ?? 0
-    if fps < 120 { throw XCTSkip("NOT-MEASURABLE (screen \(fps) Hz)") }
+    // the machine this budget is for, and its display link ticks too rarely to drive the scripted frames. The
+    // screen-only gate is deliberate: thread CPU time is the load-independent number of #24.
+    try PacingEnvironment.skipIfScreenBelow120Hz(fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
     let rounds = Int(ProcessInfo.processInfo.environment["ARKT_SWIPE_ROUNDS"] ?? "") ?? 6
     var hitches: [HitchDetail] = []
     var all: [String: [Pass]] = [:]
