@@ -50,7 +50,7 @@ struct ThemeTextureSynthesisTests {
     #expect(tile == texture.masterTile())
   }
 
-  /// The measured 2x statistics of each texture: mean factor, spread and neighbour correlation.
+  /// The target 2x statistics of each texture: mean factor, spread and neighbour correlation.
   @Test(arguments: ThemeTexture.allCases)
   func theMasterTileMatchesTheMeasuredStatistics(texture: ThemeTexture) {
     let stats = TileStats(texture.masterTile(), pixels: ThemeTexture.masterPixels)
@@ -74,7 +74,7 @@ struct ThemeTextureSynthesisTests {
     #expect(stats.correlation(4, 0) > 0.4)
   }
 
-  /// Texels darken or leave the gradient alone; grain's light end is flat at 1, like the shipped texture.
+  /// Texels darken or leave the gradient alone; grain's light end is flat at 1.
   @Test func grainNeverBrightensAndReachesOne() {
     let tile = ThemeTexture.grain.masterTile()
     #expect(tile.max() == 255)
@@ -114,7 +114,7 @@ struct ThemeTextureSynthesisTests {
 // MARK: - Intensity
 
 struct ThemeTextureIntensityTests {
-  /// Arc's overlay alpha is the theme's noiseFactor: `gradient * mix(1, texel, noiseFactor)`.
+  /// The overlay alpha is the theme's noiseFactor: `gradient * mix(1, texel, noiseFactor)`.
   @Test func overlayAlphaIsTheNoiseFactor() {
     #expect(ShellTokens.themeTextureMaxOpacity == 1)
     let theme = SpaceThemeInfo(baseColors: [.white(1)], texture: "sand", noiseFactor: 0.35, isDark: false)

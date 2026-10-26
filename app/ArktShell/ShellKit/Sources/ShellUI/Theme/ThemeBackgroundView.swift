@@ -4,8 +4,8 @@ import AppKit
 /// (grain, sand, denim or tweed), crossfaded on the GPU as the pager moves (design section 2). Per frame
 /// `setPosition` changes only layer opacities; gradient colors change only when the pair of neighbouring Spaces does.
 ///
-/// Textures (#120): one layer per texture in use, composited as a multiply at the theme's overlay alpha, which is
-/// Arc's overlay math (`gradient * mix(1, texel, alpha)`). With Metal, `ThemeGrainRenderer` draws one 100 pt tile per
+/// Textures (#120): one layer per texture in use, composited as a multiply at the theme's overlay alpha
+/// (`gradient * mix(1, texel, alpha)`). With Metal, `ThemeGrainRenderer` draws one 100 pt tile per
 /// texture into a `CAMetalLayer` once per backing scale (deferred while the view cannot be seen) and replicator
 /// layers repeat it; without Metal, a Core Animation pattern of the same synthesized tile. Neither draws per frame
 /// or per resize. Empty areas drag the window.

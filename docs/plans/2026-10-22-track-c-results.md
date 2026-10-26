@@ -1609,12 +1609,11 @@ all four textures instead of drawing every texture as grain.
 
 ### Compositing and intensity
 
-- Arc's theme shader composites the tiled overlay as a multiply: `gradient * mix(1, texel, alpha)`, with `alpha` the
-  overlay alpha and each texture's own strength in its texels (grain is mostly transparent, the other three are
-  opaque gray). The shell does the same with Core Animation: one layer per texture in use, `multiplyBlendMode`, layer
+- The tiled texture multiplies the gradient: `gradient * mix(1, texel, alpha)`, with `alpha` the overlay alpha and
+  each texture's own strength in its texels. The shell does this with Core Animation: one layer per texture in use, `multiplyBlendMode`, layer
   opacity = overlay alpha. A theme change between two textures fades one layer out and the other in.
 - `alpha = noiseFactor` (`ShellTokens.themeTextureMaxOpacity` is now 1; the `TODO(parity)` is gone). This mapping is
-  an inference: the knob-to-alpha step is in the app binary, not in the shader. It matches the one Arc measurement
+  a parity estimate, PARITY(NEEDS-RUNTIME-CHECK). It matches the one Arc measurement
   there is (about +-3 per channel per pixel over `#7A7A7A`, `2026-10-23-arc-measurements.md`), which grain gives at
   alpha 0.4 to 0.5, a mid knob. A Space with a known `noiseFactor` measured in Arc would pin it.
 - The old renderer (soft light at 0.16 x noiseFactor) was mean-preserving and almost invisible on light themes. The
@@ -1622,8 +1621,8 @@ all four textures instead of drawing every texture as grain.
 
 ### Textures
 
-Synthesized at launch, deterministic (SplitMix64 seeds), seamless (wraparound filters), no bitmap copied: each
-texture matches the measured statistics of the shipped 2x tile, as multiply factors.
+Generated in code at launch (no bitmap asset), deterministic (SplitMix64 seeds), seamless (wraparound filters): each
+texture matches parity-estimate statistics at 2x, as multiply factors.
 
 | Texture | Mean factor | Spread (sd) | Neighbour correlation x / y | Structure |
 |---|---|---|---|---|
@@ -1686,8 +1685,8 @@ factor. `secondaryText` light fell to 4.49:1 (hovered URL bar over the Personal 
 
 ### Deferred
 
-`overlayColors` (Arc's second gradient layer, strength very likely `intensityFactor`) and Arc's OKLab gradient
-interpolation stay out: both change every theme's pixels and the contrast sampling, so they get their own issue.
+`overlayColors` (the second gradient layer) and OKLab gradient interpolation stay out: both change every theme's
+pixels and the contrast sampling. Follow-up: overlayColors and OKLab gradient (to be filed).
 Reduce Transparency and Increase Contrast: the spec says nothing about the theme texture, so no behavior was added.
 
 Tests (written first; the new ones failed to compile before the code existed), rebased on main with #374: ShellKit

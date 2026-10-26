@@ -91,7 +91,8 @@ public enum ShellTokens {
   /// The 0.5 pt edge of a toast-style pill.
   public static let toastEdge = TokenPair(light: .black(0.10), dark: .white(0.14))
   // Space theme background (C6).
-  /// Texture overlay alpha at noiseFactor 1. Arc multiplies the gradient by `mix(1, texel, alpha)` with alpha the
-  /// noiseFactor itself; each texture's strength is in its texels (`ThemeTexture`), not in this scale (#120).
+  /// Texture overlay alpha at noiseFactor 1: the texture multiplies the gradient by `mix(1, texel, alpha)` with alpha
+  /// the noiseFactor itself (parity estimate, PARITY(NEEDS-RUNTIME-CHECK)); each texture's strength is in its texels
+  /// (`ThemeTexture`), not in this scale (#120).
   public static let themeTextureMaxOpacity = 1.0
 }

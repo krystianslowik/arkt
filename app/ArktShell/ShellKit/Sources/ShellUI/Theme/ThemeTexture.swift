@@ -1,13 +1,12 @@
 import Foundation
 
-/// The four tiled Space theme textures (Arc: `Modifiers.overlay`), synthesized procedurally.
+/// The four tiled Space theme textures, generated in code (no bitmap asset).
 ///
-/// Arc composites its overlay as a multiply: `gradient * mix(1, texel, alpha)`, with `alpha` the overlay alpha the
-/// theme's `noiseFactor` sets. A texel here is that multiply factor (1 leaves the gradient alone, lower darkens), so
-/// a texture's look is its statistics: the mean factor (how much it darkens), the spread (how loud it is) and the
-/// correlation between neighbouring pixels (grain size and weave). The targets below were measured from the shipped
-/// textures at 2x; no bitmap is copied. Each tile is seamless and deterministic: the same seed always yields the
-/// same bytes.
+/// The texture multiplies the gradient by `mix(1, texel, alpha)`, with `alpha` the theme's `noiseFactor` (parity
+/// estimate, PARITY(NEEDS-RUNTIME-CHECK)). A texel here is that multiply factor (1 leaves the gradient alone, lower
+/// darkens), so a texture's look is its statistics: the mean factor (how much it darkens), the spread (how loud it
+/// is) and the correlation between neighbouring pixels (grain size and weave). The targets below are parity
+/// estimates at 2x. Each tile is seamless and deterministic: the same seed always yields the same bytes.
 public enum ThemeTexture: String, CaseIterable, Sendable {
   case grain, sand, denim, tweed
 
@@ -22,7 +21,7 @@ public enum ThemeTexture: String, CaseIterable, Sendable {
   /// Edge of the synthesized master tile, in pixels: one tile at 2x.
   public static let masterPixels = 200
 
-  /// Measured statistics of the multiply factor at 2x.
+  /// Target statistics of the multiply factor at 2x (parity estimates).
   struct Target: Sendable {
     var mean: Double
     var deviation: Double

@@ -4,8 +4,8 @@ import QuartzCore
 
 /// Draws the Space theme textures (#120) into `CAMetalLayer` tiles, once per texture and backing scale; replicator
 /// layers repeat the tile across the view. The pager, theme crossfades and resizes never draw: they change alphas
-/// and replica counts, which the render server composites as a multiply (`gradient * mix(1, texel, alpha)`, Arc's
-/// overlay math). So there is no display link and no frame while idle, and a view that cannot be seen defers its
+/// and replica counts, which the render server composites as a multiply (`gradient * mix(1, texel,
+/// alpha)`). So there is no display link and no frame while idle, and a view that cannot be seen defers its
 /// draw.
 ///
 /// The shader is compiled at run time from source, like the particle field's (`ParticleShaders`), so the package
