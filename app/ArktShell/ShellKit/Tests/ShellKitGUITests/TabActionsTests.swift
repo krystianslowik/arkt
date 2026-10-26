@@ -31,6 +31,7 @@ final class TabActionsTests: XCTestCase {
     let controller: ShellWindowController
     let pasteboard = NSPasteboard(name: NSPasteboard.Name("dev.arkt.tests.\(UUID().uuidString)"))
     var archived: [UUID] = []
+    var archivedItems: [ArchivedItem] = []
 
     init(_ sidebar: SidebarModel.Sidebar) {
       let source = ModelSidebarSource(sidebar: sidebar, now: { TabActionsTests.now })
@@ -41,7 +42,16 @@ final class TabActionsTests: XCTestCase {
       controller.window?.contentView?.layoutSubtreeIfNeeded()
       controller.onArchive = { [unowned self] ids in
         archived += ids
-        _ = source.archive(ids, reason: .manual, at: TabActionsTests.now)
+        archivedItems += source.archive(ids, reason: .manual, at: TabActionsTests.now)
+      }
+      // Reopen and Undo bring a row back from what this harness archived, as the app's coordinator does.
+      controller.onReopenArchived = { [unowned self] id in
+        guard let index = archivedItems.lastIndex(where: { $0.id == id }),
+              let space = source.spaceOrder.first,
+              let restored = try? source.restore(archivedItems.remove(at: index), fallbackSpace: space) else {
+          return nil
+        }
+        return restored.nodeID
       }
       try? outline().clipboardURL = { [pasteboard] in
         pasteboard.string(forType: .string).flatMap { URL(string: $0) }
@@ -450,6 +460,62 @@ final class TabActionsTests: XCTestCase {
     XCTAssertTrue(harness.engine.answerDialog(held, accept: true))
     XCTAssertEqual(harness.archived, [world.today[1], world.today[2]])
     XCTAssertEqual(harness.current, world.panes[0])
+    harness.controller.close()
+  }
+
+  /// Decision 3: a bulk archive shows "Archived N tabs" with Undo (no key hint, 6 s); Undo brings every row back at
+  /// its place, as one unit, and takes the toast down.
+  func testUndoOnTheToastRestoresTheWholeSelection() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let before = harness.children(.today(world.work))
+    harness.controller.activate(node: world.today[1])
+    try harness.click(world.split, .shift)              // t1, t2, split
+
+    harness.controller.closeTab(nil)
+    let toast = try XCTUnwrap(harness.controller.toasts.current)
+    XCTAssertEqual(toast.kind, .undo)
+    XCTAssertEqual(toast.actionTitle, "Undo")
+    XCTAssertNil(toast.shortcut)
+    XCTAssertEqual(toast.glyph, "archivebox")
+    XCTAssertEqual(toast.duration, .seconds(6))
+
+    harness.controller.toasts.performActionForTesting()
+
+    XCTAssertEqual(harness.children(.today(world.work)), before)
+    XCTAssertNil(harness.controller.toasts.current)
+    XCTAssertFalse(harness.controller.reopenClosed(), "the batch left the stack with the Undo")
+    harness.controller.close()
+  }
+
+  /// Cmd-Z after a bulk archive restores the same rows the Undo would, in one step, and dismisses the undo toast.
+  func testCommandZRestoresTheSameRowsAsUndo() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let before = harness.children(.today(world.work))
+    harness.controller.activate(node: world.today[1])
+    try harness.click(world.split, .shift)
+
+    harness.controller.closeTab(nil)
+    XCTAssertTrue(harness.controller.reopenClosed())
+
+    XCTAssertEqual(harness.children(.today(world.work)), before)
+    XCTAssertNil(harness.controller.toasts.current, "the undo toast goes with its batch")
+    harness.controller.close()
+  }
+
+  /// Clear Today Tabs comes back whole with one Undo, its rows in their order.
+  func testUndoAfterClearTodayRestoresEveryRow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let before = harness.children(.today(world.work))
+    harness.controller.activate(node: world.today[0])
+    try harness.choose("Clear Today Tabs", on: nil)
+    XCTAssertEqual(harness.children(.today(world.work)), [])
+
+    harness.controller.toasts.performActionForTesting()
+
+    XCTAssertEqual(harness.children(.today(world.work)), before)
     harness.controller.close()
   }
 

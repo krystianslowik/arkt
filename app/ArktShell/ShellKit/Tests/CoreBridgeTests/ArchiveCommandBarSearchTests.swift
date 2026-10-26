@@ -48,7 +48,7 @@ struct ArchiveCommandBarSearchTests {
     #expect(matches[0].subtitle == "b.example, Work, archived 2h ago")
     #expect(matches[1].subtitle == "sheets.example, Work, archived Jun 22")
     #expect(matches[2].subtitle == "a.example, Little Arkt, archived Jun 19")
-    #expect(await bar.matches(for: "   ").isEmpty)
+    #expect(await bar.matches(for: "  ").isEmpty)
     #expect(await store.limits.last == 3, "the store returns three at most")
   }
 
@@ -63,7 +63,7 @@ struct ArchiveCommandBarSearchTests {
 
     bar.restore(match.id)
 
-    #expect(toasts == ["Tab restored to Work. Click to view."])
+    #expect(toasts == ["Tab restored to Work"])
     #expect(source.sidebar.children(of: .today(work)).count == 1)
     bar.restore(match.id)
     #expect(toasts.count == 1, "restored once")

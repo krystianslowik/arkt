@@ -46,14 +46,19 @@ extension ShellWindowController {
 
   // MARK: Archive (BH-072, BH-075, BH-077)
 
-  /// Closes `ids` the way Cmd-W closes one node. One node: exactly `close(node:)` (a pane archives alone, BH-123).
-  /// Two or more: whole tabs and splits only, the node holding the current tab last, so the tab that becomes current
-  /// afterwards is one that stays; then "Archived N tabs" when two or more Today tabs went (alerts design, decision 3).
+  /// Closes `ids` the way Cmd-W closes one node. One node: exactly `close(node:)` (a pane archives alone, BH-123),
+  /// no toast. Two or more: whole tabs and splits only, the node holding the current tab last, so the tab that becomes
+  /// current afterwards is one that stays; they come back as one unit (`archiveAsOneUndo`).
   func closeAll(_ ids: [NodeID]) {
     guard ids.count > 1 else {
       if let id = ids.first { close(node: id) }
       return
     }
+    archiveAsOneUndo { closeEach(ids) }
+  }
+
+  /// Closes each bulk target and returns how many Today tabs went to the Archive.
+  private func closeEach(_ ids: [NodeID]) -> Int {
     let targets = SidebarSelection.bulkTargets(ids, in: sidebar)
     let holdsCurrent = { (node: NodeID) in self.currentNode.map(self.tabs(in: node).contains) ?? false }
     let ordered = targets.filter { !holdsCurrent($0) } + targets.filter(holdsCurrent)
@@ -61,7 +66,21 @@ extension ShellWindowController {
       if case .today? = sidebar.section(containing: node) { count + tabs(in: node).count } else { count }
     }
     for node in ordered { close(node: node) }
-    if archivedTabs >= 2 { toasts.show(Toast(text: Self.archivedToastText(count: archivedTabs))) }
+    return archivedTabs
+  }
+
+  /// Runs `body`, which archives rows and returns how many tabs went, and makes its closes one reopen batch: Undo on
+  /// the toast and Cmd-Z bring them all back together. "Archived N tabs" with Undo shows only when two or more tabs
+  /// went (alerts design, decision 3).
+  func archiveAsOneUndo(_ body: () -> Int) {
+    let mark = reopenStack.beginBatch()
+    let archivedTabs = body()
+    let id = UUID()
+    let batched = reopenStack.collapse(since: mark, into: id)
+    closeParked(reopenStack.endBatch())
+    guard archivedTabs >= 2, batched else { return }
+    showUndoToast(Toast(text: Self.archivedToastText(count: archivedTabs), kind: .undo, actionTitle: "Undo"),
+                  batch: id)
   }
 
   /// The several-tabs archive toast (alerts design 4.3).
@@ -73,18 +92,39 @@ extension ShellWindowController {
     if case .split(let split)? = sidebar.parent(of: id) {
       let panes = sidebar.children(of: .split(split))
       guard let index = panes.firstIndex(of: id) else { return }
-      for pane in panes[(index + 1)...].reversed() { close(node: pane) }
+      let below = panes[(index + 1)...]
+      guard below.count > 1 else {
+        below.forEach { close(node: $0) }
+        return
+      }
+      archiveAsOneUndo {
+        let archived = sidebar.section(containing: id).map { if case .today = $0 { below.count } else { 0 } } ?? 0
+        for pane in below.reversed() { close(node: pane) }
+        return archived
+      }
       return
     }
     closeAll(SidebarContextMenu.todayNodesBelow(id, sidebar))
   }
 
-  /// Clear Today Tabs (BH-075): every Today row of the Space; a Today folder goes to the Archive whole.
+  /// Clear Today Tabs (BH-075): every Today row of the Space; a Today folder goes to the Archive whole. The folders
+  /// and rows come back together, by Undo or Cmd-Z.
   func clearToday(_ space: SpaceID) {
     let rows = sidebar.children(of: .today(space))
     let folders = rows.filter { if case .folder? = sidebar.node($0) { true } else { false } }
-    if !folders.isEmpty { onArchive?(folders) }
-    closeAll(rows.filter { !folders.contains($0) })
+    let others = rows.filter { !folders.contains($0) }
+    archiveAsOneUndo {
+      var archived = folders.reduce(0) { $0 + tabs(in: $1).count }
+      for folder in folders { rememberClose(of: folder, pages: [], archived: true) }
+      if !folders.isEmpty { onArchive?(folders) }
+      if others.count == 1, let only = others.first {
+        if case .today? = sidebar.section(containing: only) { archived += tabs(in: only).count }
+        close(node: only)
+      } else if !others.isEmpty {
+        archived += closeEach(others)
+      }
+      return archived
+    }
   }
 
   /// Cmd-W with two or more selected rows (BH-072); nil otherwise, so Cmd-W closes the current tab as before.

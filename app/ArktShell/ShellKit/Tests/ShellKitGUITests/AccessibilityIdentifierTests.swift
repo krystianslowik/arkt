@@ -162,7 +162,7 @@ final class AccessibilityIdentifierTests: XCTestCase {
 
   func testPersistentToastWithActionHasActionButton() throws {
     let controller = makeController()
-    controller.toasts.show(Toast(text: "Could not save", actionTitle: "Retry", isPersistent: true))
+    controller.toasts.show(Toast(text: "Could not save", kind: .persistent, actionTitle: "Retry"))
     controller.rootView.layoutSubtreeIfNeeded()
     let toast = try element(AXID.Toast.root, in: controller)
     XCTAssertEqual(toast.accessibilityLabel(), "Could not save")

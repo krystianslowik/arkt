@@ -530,7 +530,8 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     faviconData = [:]
     requestedFavicons = []
     await reload()
-    toasts.show(Toast(text: cleared ? "The Archive has been cleared." : "The Archive could not be cleared."))
+    toasts.show(cleared ? Toast(text: "The Archive has been cleared.")
+                         : Toast(text: "The Archive could not be cleared.", kind: .error))
   }
 
   // MARK: Banner

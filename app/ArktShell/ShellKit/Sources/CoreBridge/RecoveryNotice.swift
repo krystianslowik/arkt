@@ -12,7 +12,7 @@ public enum RecoveryNotice: Hashable, Sendable {
 
   /// A persistent toast with a "Show Files" action that reveals Arkt's data folder.
   public var toast: Toast {
-    Toast(text: text, actionTitle: Self.showFilesTitle, isPersistent: true)
+    Toast(text: text, kind: .persistent, actionTitle: Self.showFilesTitle)
   }
 
   private var text: String {

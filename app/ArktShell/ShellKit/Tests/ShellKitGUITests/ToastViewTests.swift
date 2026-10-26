@@ -52,7 +52,7 @@ final class ToastViewTests: XCTestCase {
   func testDismissHidesTheViewAfterTheFade() throws {
     let controller = makeController()
     let view = try toastView(controller)
-    controller.toasts.show(Toast(text: "Saved", isPersistent: true))
+    controller.toasts.show(Toast(text: "Saved", kind: .persistent))
     controller.toasts.dismiss()
     XCTAssertNil(controller.toasts.current)
     let hidden = expectation(description: "hidden after fade")
@@ -68,7 +68,7 @@ final class ToastViewTests: XCTestCase {
     let controller = makeController()
     let view = try toastView(controller)
     var calls = 0
-    controller.toasts.show(Toast(text: "Restored", actionTitle: "Show Files", isPersistent: true)) { calls += 1 }
+    controller.toasts.show(Toast(text: "Restored", kind: .persistent, actionTitle: "Show Files")) { calls += 1 }
     XCTAssertFalse(view.actionButton.isHidden)
     XCTAssertEqual(view.actionButton.title, "Show Files")
     XCTAssertTrue(view.isAccessibilityElement())
