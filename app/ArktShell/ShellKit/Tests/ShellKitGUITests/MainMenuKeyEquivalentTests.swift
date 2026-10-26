@@ -338,6 +338,7 @@ final class MainMenuInventoryTests: XCTestCase {
       ("Zoom", #selector(NSWindow.performZoom(_:)), "", []),
       ("Jump to Selection", #selector(NSResponder.centerSelectionInVisibleArea(_:)), "j", .command),
       ("Settings...", #selector(AppCommands.showSettings(_:)), ",", .command),
+      ("Show Archive", #selector(AppCommands.showArchive(_:)), "", []),
     ]
     for (title, action, key, modifiers) in expected {
       let item = try item(title)
