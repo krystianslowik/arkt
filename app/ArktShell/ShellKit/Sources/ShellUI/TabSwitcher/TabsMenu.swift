@@ -38,6 +38,13 @@ public enum TabsMenu {
                     [.command])                                                                  // KB-021
     last.tag = 9
     items.append(last)
+    // #109: KB-040 stays unbound until RT-04 (CF-02: Cmd-Shift-N is New Incognito Window); BH-097 has no default key.
+    items += [
+      .separator(),
+      item("New Folder", #selector(ShellWindowController.newFolder(_:)), "", []),
+      item("Collapse All Folders", #selector(ShellWindowController.collapseAllFolders(_:)), "", []),
+      item("Expand All Folders", #selector(ShellWindowController.expandAllFolders(_:)), "", []),
+    ]
     return items
   }
 

@@ -289,6 +289,19 @@ public final class SidebarController {
     currentPage?.outlineController.beginRename(node) ?? false
   }
 
+  // MARK: Folders (#109)
+
+  /// Collapse All Folders / Expand All Folders (BH-097): every folder of every Space page in this window (each window
+  /// keeps its own, BH-098). Only the page on screen moves; the others change at once.
+  public func setAllFolders(open: Bool) {
+    for page in pages.values {
+      page.outlineController.setAllFolders(open: open, animated: page === currentPage)
+    }
+  }
+
+  /// Whether the current Space has a folder (the Collapse / Expand All items' enabled state).
+  public var currentSpaceHasFolders: Bool { currentPage?.outlineController.hasFolders ?? false }
+
   // MARK: Activation
 
   /// Makes `node` current. A split activates its `preferredPane`, else its first pane; folders and unknown nodes

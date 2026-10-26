@@ -224,20 +224,29 @@ extension ShellWindowController {
   /// The title a new folder gets before the user names it [I].
   static let newFolderTitle = "New Folder"
 
-  /// New Folder on a selection: a new folder in Pinned (at the first selected pinned row's place, else at the end)
-  /// takes the selected rows in order, then opens for naming [I].
+  /// New Folder on a selection: a new folder takes the selected rows in order, then opens for naming [I]. Rows that
+  /// all sit in one folder form a folder nested there, at the first one's place (BH-094); any other selection gets a
+  /// new folder in Pinned (at the first selected pinned row's place, else at the end).
   func newFolder(holding ids: [NodeID]) {
     let nodes = Self.moveTargets(ids, in: sidebar)
     guard let space = nodes.lazy.compactMap({ self.sidebar.spaceID(containing: $0) }).first else { return }
-    let pinned = sidebar.children(of: .pinned(space))
-    let index = nodes.lazy.compactMap { pinned.firstIndex(of: $0) }.first
+    let location = Self.newFolderLocation(for: nodes, in: sidebar) ?? .pinned(space)
+    let siblings = sidebar.children(of: location)
+    let index = nodes.lazy.compactMap { siblings.firstIndex(of: $0) }.min()
     let folder: NodeID
-    do { folder = try sidebar.addFolder(title: Self.newFolderTitle, in: .pinned(space), at: index) } catch {
+    do { folder = try sidebar.addFolder(title: Self.newFolderTitle, in: location, at: index) } catch {
       onError?(.moveNode, error)
       return
     }
     for node in nodes { move(node, to: .folder(folder)) }
     sidebarController.beginRename(node: folder)
+  }
+
+  /// The folder holding every node, when they share one (BH-094's nested folder); nil otherwise.
+  static func newFolderLocation(for nodes: [NodeID], in sidebar: any SidebarSource) -> SidebarLocation? {
+    let parents = Set(nodes.compactMap { sidebar.parent(of: $0) })
+    guard parents.count == 1, let parent = parents.first, case .folder = parent else { return nil }
+    return parent
   }
 
   /// New Folder on the empty area: an empty folder at the end of the Space's Pinned, open for naming [I].
