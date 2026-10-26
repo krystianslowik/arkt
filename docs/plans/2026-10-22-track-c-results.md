@@ -2160,9 +2160,9 @@ appended at the end rather than inside the #24 section because the file is share
   pointer move after every presented frame of a settle: a `setFrameOrigin`, a tracking-area rebuild and the
   window-server pointer query behind the hover resync, the per-frame path #24 removed. The first move of a settle or
   swipe still syncs; after that at most one move per `pointerSyncFrameInterval` (3) presented motion frames syncs,
-  about 25 ms at 120 Hz. A hit test never waits (a click or gesture start must find the view drawn under the point),
-  and a backing change and the settle-at-rest sync are unchanged. At rest the settle's sync already put the exact
-  frame in place, so a pointer move there does no work.
+  about 25 ms at 120 Hz. A hit test is never rate-limited (a click or gesture start must find the view drawn under
+  the point), and a backing change and the settle-at-rest sync are unchanged. At rest the settle's sync already put
+  the exact frame in place, so a pointer move there does no work.
 - **Pixel alignment after a mid-motion sync.** `syncStripFrame()` rounds the strip frame origin to whole backing
   pixels while tracking or settling. Before, a sync mid-motion left a fractional origin and every later translation
   was rounded relative to it, so the strip stayed off the pixel grid for the rest of the motion (#282 review). At
@@ -2222,10 +2222,10 @@ the first red. With the implementation in place they pass:
 - `cd app/ArktShell/ShellKit && nice -n 10 swift test --skip ShellKitGUITests`: Swift Testing 1165 tests, 0 failures
   (main 1164 + the new probe test); XCTest 0.
 - `cd app/ArktCore && nice -n 10 swift test`: 423 tests, 0 failures.
-- `cd app/ArktShell && xcodegen generate && nice -n 10 xcodebuild -project ArktShell.xcodeproj -scheme ArktShell
-  -configuration Debug -derivedDataPath build build`: the build compiles and links, then fails in `CodeSign` with
-  `resource fork, Finder information, or similar detritus not allowed`. The same command with
-  `CODE_SIGNING_ALLOWED=NO` prints `** BUILD SUCCEEDED **`, and a manual
+- `cd app/ArktShell && xcodebuild -project ArktShell.xcodeproj -scheme ArktShell -configuration Debug
+  -derivedDataPath build -jobs 6 CODE_SIGNING_ALLOWED=NO build`: `** BUILD SUCCEEDED **`. Without
+  `CODE_SIGNING_ALLOWED=NO` the build compiles and links, then fails in `CodeSign` with
+  `resource fork, Finder information, or similar detritus not allowed`. A manual
   `codesign --force --sign - --entitlements ... --generate-entitlement-der` of the product succeeds. The worktree is
   on an iCloud-synced Desktop and FileProvider re-adds `com.apple.FinderInfo` while codesign walks the bundle; no
   source or project change was needed.
@@ -2281,7 +2281,7 @@ NOT-MEASURABLE and a functional-FAIL attempt were not retried; it is recorded an
 | --- | --- | --- | --- | --- | --- |
 | 1 | 1 | 11.11 | PASS | FAIL | 6 (swipe-back 62 at 17.65 ms; swipe-next 4 at 13.77, 5 at 11.22; three more interactions at frame 9, 16.66 ms each) |
 | 1 | 2 | 14.34 | PASS | NOT-MEASURABLE | 6 |
-| 1 | 3 | 10.77 | FAIL (KB-003) | FAIL | 0 |
+| 1 | 3 | 10.77 | FAIL (KB-003) | FAIL | 0 late; the command bar's warm p95 was 31.05 ms against a 12.33 ms bound |
 | 2 | 1 | 6.35 | PASS | FAIL | 37 (key-previous 1-20; swipe-next 39-45 up to 59.11 ms; swipe-back 42-55) |
 | 2 | 2 | 4.86 | PASS | FAIL | 1 (key-next 59 at 16.66 ms) |
 | 2 | 3 | 6.29 | PASS | FAIL | 28 (one 16.66 ms interval at frame 9 of almost every swipe, plus swipe-back 7 at 12.50 and 62 at 16.91) |
