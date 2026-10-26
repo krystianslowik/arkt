@@ -99,6 +99,7 @@ final class ParticleFieldTests: XCTestCase {
     guard let device = MTLCreateSystemDefaultDevice(), device.supportsFamily(.apple7) else {
       throw XCTSkip("the full tier runs on Apple silicon")
     }
+    try PacingEnvironment.skipIfNotMeasurable()
     let field = try renderer(tier: .full)
     let input = ParticleFormationBuilder.Input(size: SIMD2(1120, 720), count: field.count, now: 0, epoch: 1,
                                                dark: false, mark: MetalOnboardingStage.markSamples)
