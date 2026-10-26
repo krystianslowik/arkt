@@ -72,7 +72,11 @@ extension ShellWindowController {
 
   /// Cmd-D (KB-012, File > Pin / Unpin Tab): pins the current Today tab or split, unpins a pinned one. The page
   /// never closes and the row never archives: the tab (or split) only changes sections.
-  @objc public func pinTab(_ sender: Any?) {
+  ///
+  /// Not named `pinTab(_:)`: `NSWindow` implements that selector (a private window-tabbing command) and comes before
+  /// its controller in the responder chain, so a nil-target menu item would reach the window and do nothing (the
+  /// reason `toggleSidebarVisibility(_:)` is named the way it is, #102).
+  @objc public func pinCurrentTab(_ sender: Any?) {
     if pinSelection() { return }                                    // a multi-selection pins at once (KB-012)
     guard let node = currentNode, let target = Self.pinnableNode(node, in: sidebar) else { return }
     togglePin(of: target)
@@ -206,7 +210,7 @@ extension ShellWindowController {
   /// in the current Space.
   func validatePinnedMenuItem(_ item: NSMenuItem) -> Bool? {
     switch item.action {
-    case #selector(pinTab(_:)):
+    case #selector(pinCurrentTab(_:)):
       guard let node = currentNode, let target = Self.pinnableNode(node, in: sidebar) else { return false }
       item.title = Self.pinMenuTitle(isPinned: sidebar.parent(of: target).map {
         if case .pinned = $0 { true } else { false }
