@@ -1,4 +1,5 @@
 import AppKit
+import ShellUI
 
 /// The target of the main menu's app-level items (week-3 results, W3-8 step 3): New Window, Settings, Import Browser
 /// Data, Show Archive, Clear Archive and Welcome to Arkt. Explicit, so the items never reach the end of the responder chain, which in the Engine build is
@@ -6,6 +7,9 @@ import AppKit
 @MainActor
 final class AppCommands: NSObject {
   weak var composition: AppComposition?
+  /// Edit > Undo's target (menu targets are weak): Cmd-Z reopens a closed tab or Peek unless text is being edited
+  /// (#346, KB-011).
+  let undoRouter = ReopenUndoRouter()
 
   private var session: AppSession? { composition?.session }
 
