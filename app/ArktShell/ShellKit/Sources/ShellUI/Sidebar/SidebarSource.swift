@@ -40,9 +40,10 @@ public struct SpaceThemeInfo: Equatable, Sendable {
   }
 
   /// The texture's overlay alpha for this theme (0 without a texture): the gradient is multiplied by
-  /// `mix(1, texel, textureOpacity)`.
+  /// `mix(1, texel, textureOpacity)`. The noiseFactor scaled by the texture's own `alphaScale`.
   public var textureOpacity: Double {
-    texture == nil ? 0 : min(max(noiseFactor, 0), 1) * ShellTokens.themeTextureMaxOpacity
+    guard let textureKind else { return 0 }
+    return min(max(noiseFactor, 0), 1) * ShellTokens.themeTextureMaxOpacity * textureKind.alphaScale
   }
 
   /// The texture this theme draws, nil for none.

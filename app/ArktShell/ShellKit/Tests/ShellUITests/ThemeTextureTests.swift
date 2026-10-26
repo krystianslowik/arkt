@@ -115,12 +115,24 @@ struct ThemeTextureSynthesisTests {
 
 struct ThemeTextureIntensityTests {
   /// The overlay alpha is the theme's noiseFactor: `gradient * mix(1, texel, noiseFactor)`.
-  @Test func overlayAlphaIsTheNoiseFactor() {
+  @Test(arguments: [ThemeTexture.grain, .denim, .tweed])
+  func overlayAlphaIsTheNoiseFactor(texture: ThemeTexture) {
     #expect(ShellTokens.themeTextureMaxOpacity == 1)
-    let theme = SpaceThemeInfo(baseColors: [.white(1)], texture: "sand", noiseFactor: 0.35, isDark: false)
+    #expect(texture.alphaScale == 1)
+    let theme = SpaceThemeInfo(baseColors: [.white(1)], texture: texture.rawValue, noiseFactor: 0.35, isDark: false)
     #expect(abs(theme.textureOpacity - 0.35) < 1e-12)
-    #expect(theme.textureKind == .sand)
+    #expect(theme.textureKind == texture)
     #expect(SpaceThemeInfo(baseColors: [.white(1)], noiseFactor: 0.35, isDark: false).textureKind == nil)
+  }
+
+  /// Sand alone is softened to 70 to 75 percent of the noiseFactor (maintainer review on #379).
+  @Test func sandIsSoftenedByItsOwnScale() {
+    #expect(ThemeTexture.sand.alphaScale >= 0.70 && ThemeTexture.sand.alphaScale <= 0.75)
+    let sand = SpaceThemeInfo(baseColors: [.white(1)], texture: "sand", noiseFactor: 0.5, isDark: false)
+    #expect(abs(sand.textureOpacity - 0.5 * ThemeTexture.sand.alphaScale) < 1e-12)
+    #expect(abs(sand.meanTextureFactor - (1 - sand.textureOpacity * (1 - ThemeTexture.sand.meanFactor))) < 1e-12)
+    let loud = SpaceThemeInfo(baseColors: [.white(1)], texture: "sand", noiseFactor: 4, isDark: false)
+    #expect(abs(loud.textureOpacity - ThemeTexture.sand.alphaScale) < 1e-12)
   }
 
   /// The mean darkening a texture applies at a given alpha, which the contrast probe composites.
@@ -161,16 +173,17 @@ struct ThemeGrainLayerTests {
 
   /// Between two Spaces each texture's alpha follows its own Space's weight; a texture at 0 is hidden.
   @Test func alphasFollowThePagerPerTexture() throws {
+    let sandScale = Float(ThemeTexture.sand.alphaScale)
     let view = view([theme("grain", 0.5), theme("sand", 1), theme(nil, 0)])
     #expect(abs(view.grainOpacityForTesting(.grain) - 0.5) < 1e-6)
     #expect(view.grainOpacityForTesting(.sand) == 0)
     #expect(try #require(view.grainLayerForTesting(.sand)).isHidden)
     view.setPosition(0.25)
     #expect(abs(view.grainOpacityForTesting(.grain) - 0.375) < 1e-6)
-    #expect(abs(view.grainOpacityForTesting(.sand) - 0.25) < 1e-6)
+    #expect(abs(view.grainOpacityForTesting(.sand) - 0.25 * sandScale) < 1e-6)
     #expect(try #require(view.grainLayerForTesting(.sand)).isHidden == false)
     view.setPosition(1.5)
-    #expect(abs(view.grainOpacityForTesting(.sand) - 0.5) < 1e-6)
+    #expect(abs(view.grainOpacityForTesting(.sand) - 0.5 * sandScale) < 1e-6)
     #expect(view.grainOpacityForTesting(.grain) == 0)
     #expect(try #require(view.grainLayerForTesting(.grain)).isHidden)
   }

@@ -3259,7 +3259,7 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
 - M6: grain renderer: the four textures (grain, sand, denim, tweed), their intensity, Metal renderer with
   `overlayColors` (data-model doc 1.6). Textures and intensity done in #379: the four textures, generated in code to
   parity-estimate statistics and multiplied at alpha = noiseFactor (parity estimate, PARITY(NEEDS-RUNTIME-CHECK)),
-  drawn by a Metal tile renderer. Follow-up: overlayColors and OKLab gradient (to be filed).
+  drawn by a Metal tile renderer. Follow-up: #381.
 - M9: the flavor flip (sidebar appearance aqua / darkAqua) at the halfway point is a known hitch risk; precompute
   both flavors on the row layers if C7 pacing shows it.
 - M10: space-level change events in `SidebarSource` (add / remove / reorder / retheme a Space) so the pager and the

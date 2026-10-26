@@ -1616,6 +1616,8 @@ all four textures instead of drawing every texture as grain.
   a parity estimate, PARITY(NEEDS-RUNTIME-CHECK). It matches the one Arc measurement
   there is (about +-3 per channel per pixel over `#7A7A7A`, `2026-10-23-arc-measurements.md`), which grain gives at
   alpha 0.4 to 0.5, a mid knob. A Space with a known `noiseFactor` measured in Arc would pin it.
+- Sand alone is softened: its overlay alpha is noiseFactor x 0.72 (`ThemeTexture.alphaScale`), after the maintainer's
+  visual review found it slightly too strong at full scale. Grain, denim and tweed are unscaled.
 - The old renderer (soft light at 0.16 x noiseFactor) was mean-preserving and almost invisible on light themes. The
   multiply darkens by `alpha * (1 - mean texel)` and is visible on light themes, as in Arc.
 
@@ -1663,11 +1665,11 @@ A first version drew a window-sized drawable per texture; it cost 18 MB per draw
 | Theme | Before mean, sd | After mean, sd |
 |---|---|---|
 | light, grain | 250.8 / 195.4 / 209.1, 0.8 / 1.5 / 1.3 | 242.1 / 188.7 / 201.9, 7.0 / 5.5 / 5.8 |
-| light, sand | same as grain | 207.4 / 161.5 / 173.0, 24.8 / 19.4 / 20.7 |
+| light, sand | same as grain | 219.6 / 171.0 / 183.2, 17.8 / 14.0 / 14.9 |
 | light, denim | same as grain | 230.7 / 179.7 / 192.4, 6.1 / 4.9 / 5.1 |
 | light, tweed | same as grain | 213.8 / 166.4 / 178.3, 5.7 / 4.5 / 4.7 |
 | dark, grain | 29.5 / 43.9 / 80.0, 1.2 / 1.1 / 1.8 | 28.5 / 42.5 / 77.1, 1.2 / 1.5 / 2.5 |
-| dark, sand | same as grain | 24.4 / 36.2 / 66.0, 3.0 / 4.5 / 7.8 |
+| dark, sand | same as grain | 25.8 / 38.3 / 69.8, 2.2 / 3.3 / 5.7 |
 | dark, denim | same as grain | 27.0 / 40.4 / 73.2, 1.1 / 1.5 / 2.2 |
 | dark, tweed | same as grain | 25.2 / 37.2 / 67.9, 1.0 / 1.2 / 1.8 |
 
@@ -1686,7 +1688,7 @@ factor. `secondaryText` light fell to 4.49:1 (hovered URL bar over the Personal 
 ### Deferred
 
 `overlayColors` (the second gradient layer) and OKLab gradient interpolation stay out: both change every theme's
-pixels and the contrast sampling. Follow-up: overlayColors and OKLab gradient (to be filed).
+pixels and the contrast sampling. Follow-up: #381.
 Reduce Transparency and Increase Contrast: the spec says nothing about the theme texture, so no behavior was added.
 
 Tests (written first; the new ones failed to compile before the code existed), rebased on main with #374: ShellKit

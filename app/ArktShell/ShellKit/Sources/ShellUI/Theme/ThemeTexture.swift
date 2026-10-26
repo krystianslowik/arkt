@@ -41,6 +41,16 @@ public enum ThemeTexture: String, CaseIterable, Sendable {
   /// Mean multiply factor of the tile: how much the texture darkens at full alpha.
   public var meanFactor: Double { target.mean }
 
+  /// Scale on this texture's overlay alpha, applied on top of the theme's noiseFactor. Sand is the loudest texture
+  /// and reads slightly too strong at full scale, so it is held at 0.72 (maintainer review on #379); the others are
+  /// unscaled.
+  public var alphaScale: Double {
+    switch self {
+    case .sand: 0.72
+    case .grain, .denim, .tweed: 1
+    }
+  }
+
   // MARK: - Synthesis
 
   /// The 2x master tile, row-major, `masterPixels` squared bytes of the multiply factor (0...255 for 0...1).
