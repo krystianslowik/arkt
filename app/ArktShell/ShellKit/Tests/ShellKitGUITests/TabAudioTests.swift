@@ -226,3 +226,33 @@ final class TabAudioTests: XCTestCase {
     harness.controller.close()
   }
 }
+
+extension TabAudioTests {
+  /// A row whose cell is reloaded (a new title) keeps its audio button at rest: no fade on a reconfigured cell.
+  func testAReloadedPlayingRowKeepsItsButtonWithoutAFade() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    let tab = try harness.tab(world.today[0])
+    harness.engine.setAudible(tab, true)
+    harness.engine.setDocumentTitle(tab, "Retitled")
+
+    let cell = try harness.cell(world.today[0])
+    XCTAssertEqual(cell.titleField.stringValue, "Retitled")
+    XCTAssertEqual(cell.audio, .playing)
+    XCTAssertFalse(cell.audioButton.isHidden)
+    XCTAssertEqual(cell.audioButton.alphaValue, 1)
+    XCTAssertNil(cell.audioButton.layer?.animation(forKey: "opacity"), "a reconfigured cell does not fade")
+    harness.controller.close()
+  }
+
+  /// A recycled cell starts silent: reuse clears the previous row's sound.
+  func testReuseClearsTheSound() throws {
+    let cell = SidebarTabCellView(frame: NSRect(x: 0, y: 0, width: 240, height: 41))
+    cell.setAudio(.playing, animated: false)
+    XCTAssertFalse(cell.audioButton.isHidden)
+    cell.prepareForReuse()
+    XCTAssertEqual(cell.audio, .silent)
+    XCTAssertTrue(cell.audioButton.isHidden)
+  }
+}

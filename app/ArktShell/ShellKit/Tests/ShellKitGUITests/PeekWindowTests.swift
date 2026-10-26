@@ -828,6 +828,21 @@ extension PeekWindowTests {
     harness.controller.close()
   }
 
+  /// Open as Tab keeps the Peek's sound on its new row (the engine tab is adopted, not replayed).
+  func testAMutedPeekOpenedAsATabShowsItsMuteOnTheRow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    harness.engine.setMuted(session.tab, muted: true)
+    harness.peek.openAsTab()
+    harness.settle()
+    waitUntil("the Peek becomes a row") { harness.controller.nodeByTab[session.tab] != nil }
+    let node = try XCTUnwrap(harness.controller.nodeByTab[session.tab])
+    XCTAssertEqual(harness.controller.sidebarController.audio[node], .muted)
+    harness.controller.close()
+  }
+
   /// A hidden Peek closed with its source (Tab Handoff) is parked as an unmuted copy, so a reopen plays.
   func testAClosedHiddenPeekReopensUnmuted() throws {
     let world = try Self.makeWorld()

@@ -415,11 +415,11 @@ public final class SidebarController {
   /// The sound of tabs whose page plays or is muted (#364); a silent tab has no entry.
   public private(set) var audio: [NodeID: TabAudio] = [:]
 
-  /// Shows a row's sound (#364). Only that row is reconfigured, and only when the state changed.
+  /// Shows a row's sound (#364): only that row's audio button changes, in place, and only when the state changed.
   public func setAudio(_ state: TabAudio, for node: NodeID) {
     guard (audio[node] ?? .silent) != state else { return }
     audio[node] = state == .silent ? nil : state
-    for page in pages.values { page.outlineController.reload(node: node) }
+    for page in pages.values { page.outlineController.audioChanged(node: node) }
   }
 
   /// Forgets a node that no longer has a tab (engine tab closed): its loaded state, any current/previous role, its

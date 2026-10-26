@@ -637,6 +637,7 @@ public final class PeekController {
     shell.tabsByNode[node] = tab
     shell.nodeByTab[tab] = node
     shell.sidebarController.markLoaded(node: node)
+    if let snapshot = shell.engine.snapshot(of: tab) { shell.showAudio(of: snapshot, in: node) }   // #364
   }
 
   private func pageInfo(_ session: PeekSession) -> (URL, String) {

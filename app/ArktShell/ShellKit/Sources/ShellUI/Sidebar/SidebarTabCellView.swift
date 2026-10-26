@@ -73,7 +73,7 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
       self.flavor = flavor
       closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale)
     }
-    setAudio(audio, restyled: restyled)
+    applyAudio(audio, restyled: restyled, animated: false)
     self.closeAction = closeAction
     closeButton.toolTip = closeAction?.tooltip
     closeButton.setAccessibilityLabel(closeAction?.tooltip)
@@ -91,11 +91,16 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
     closeButton.setShown(shown, animated: animated)
   }
 
-  /// Shows the audio button for a page that plays or is muted, fading in or out when the sound starts or stops (it
-  /// changes a few times an hour, not on every hover); the glyph swaps at once on a click, which is the feedback.
-  private func setAudio(_ audio: TabAudio, restyled: Bool) {
+  /// A live change of the page's sound (#364): the button fades in or out when the sound starts or stops (a few
+  /// times an hour, not on every hover); the glyph swaps at once on a click, which is the feedback. `configure` and
+  /// reuse set the state without a fade, so a recycled or reloaded cell never animates another row's state.
+  public func setAudio(_ audio: TabAudio, animated: Bool) {
+    applyAudio(audio, restyled: false, animated: animated)
+  }
+
+  private func applyAudio(_ audio: TabAudio, restyled: Bool, animated: Bool) {
     let changed = audio != self.audio
-    guard changed || restyled else { return }
+    guard changed || restyled || !animated else { return }
     let wasShown = self.audio != .silent
     self.audio = audio
     if let symbol = audio.symbolName {
@@ -104,8 +109,8 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
     audioButton.toolTip = audio.tooltip
     audioButton.setAccessibilityLabel(audio.toggleTitle)
     let shown = audio != .silent
-    if shown != wasShown || restyled {
-      audioButton.setShown(shown, animated: changed && window != nil)
+    if shown != wasShown || restyled || !animated {         // unanimated calls always settle the state
+      audioButton.setShown(shown, animated: animated && changed && window != nil)
       layoutTitle()
     }
   }
@@ -113,6 +118,7 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
   public override func prepareForReuse() {
     super.prepareForReuse()
     setCloseButtonShown(false, animated: false)
+    applyAudio(.silent, restyled: false, animated: false)
     if isRenaming { endRename(commit: true) }
   }
 

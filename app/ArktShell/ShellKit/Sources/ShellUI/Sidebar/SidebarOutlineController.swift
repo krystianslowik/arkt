@@ -846,6 +846,16 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
   }
 
+  /// A live change of a row's sound (#364): a realized cell fades its audio button in place, without a reload; a row
+  /// not on screen picks the state up from `audioProvider` when its cell is made.
+  public func audioChanged(node id: NodeID) {
+    guard let item = items[id] else { return }
+    let row = outlineView.row(forItem: item)
+    guard row >= 0, let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+            as? SidebarTabCellView else { return }
+    cell.setAudio(audio(of: id), animated: true)
+  }
+
   /// Refreshes one row's cell (title or favicon) without touching any other row.
   public func reload(node id: NodeID) {
     if id == renamingNode {

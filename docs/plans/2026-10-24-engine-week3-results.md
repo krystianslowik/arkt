@@ -2987,7 +2987,10 @@ Date 2026-10-26. Branch `feat/364-tab-mute` off `main` at `6fd5738`, rebased on 
   menu's Mute is enabled for a loaded pane and reads Unmute while muted. Today and pinned tab menus show Mute / Unmute
   only while the tab plays or is muted (see Deviations). Mute toggles are logged (`dev.arkt.shell`, category `audio`).
 - **Peek (#348).** Hiding a Peek records its mute and mutes it; restoring puts the recorded mute back, so a Peek the
-  user muted stays muted. A parked copy (`WebContents::Clone`) starts unmuted.
+  user muted stays muted. A parked copy (`WebContents::Clone`) starts unmuted. Open as Tab and Add to Split View show
+  the Peek's sound on the new row.
+- **Cells.** A live sound change updates a realized cell's button in place (the only animated path); `configure` and
+  reuse set it without a fade, so a reloaded or recycled cell never fades another row's state.
 
 ### Checks (Engine app on `out/Spike`, `$CHROMIUM_ROOT/embed-364`, profile `$PROF/364-try`, scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and defaults suite, tabs probe loaded, loopback pages on `127.0.0.1` and `localhost`, tone started through CDP with a user gesture, state read with `chrome.tabs.query` in the probe's worker)
 
@@ -3003,8 +3006,11 @@ Date 2026-10-26. Branch `feat/364-tab-mute` off `main` at `6fd5738`, rebased on 
 | A Peek muted before it was hidden stays muted | PASS | muted by `chrome.tabs.update`; hidden and restored: `muted: true` |
 | Contract on real Chromium | PASS | `--arkt-engine-contract --arkt-engine-test-api` with the tabs probe: `ARKT_CONTRACT result 17/17` |
 
-The first menu attempts in the session did not reach the shell while another worktree's UI test run had windows on
-the same screen; with the screen free every menu attempt worked.
+Before a relaunch, menu clicks on Mute / Unmute did not reach the shell in four attempts (one of them with the click
+point confirmed as this app's by `AXUIElementCopyElementAtPosition` and no other GUI run on screen), while Copy Link
+through the same clicks worked; part of that time another worktree's UI test run had windows on the same screen.
+The cause was not found. After a relaunch with the `dev.arkt.shell:audio` log, all three menu attempts reached
+`toggleMute` and the engine. To recheck by hand (Manual checks).
 
 ### Verification
 
@@ -3014,9 +3020,12 @@ the same screen; with the screen free every menu attempt worked.
 - Red first: the new tests failed to compile (`setMuted`, the event cases, `TabAudio`, `audioButton`,
   `HiddenPeek.wasMuted` missing), then passed.
 - ShellKit `swift test --skip ShellKitGUITests`: 1066 passed (1047 + 19).
-- ShellKit `swift test --filter ShellKitGUITests`: 899 run (886 + 13), 10 skipped (6 not applicable to FakeEngine,
+- ShellKit `swift test --filter ShellKitGUITests`: 902 run (886 + 16), 10 skipped (6 not applicable to FakeEngine,
   rule 17's audible check among them; 4 frame-time gates NOT-MEASURABLE at load 16 to 23 on 10 cores), 0 failures
-  (897 in the full run plus FakeEngine's two rule-17 tests added after it, run on their own).
+  (897 in the full run; the 5 tests added after it, run with their suites: FakeEngine's two rule-17 tests, the
+  reload and reuse tests of the audio button, and the Open as Tab one).
+- Not run red first: FakeEngine's rule-17 tests and the audio button's reload and reuse tests (added with their fix
+  after a review of the cell's reuse path). The Open as Tab test ran red (the adopted row showed no sound).
 
 ### Deviations
 
