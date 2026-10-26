@@ -72,8 +72,24 @@ struct StrippingTests {
     raw.exceptionType = "Not allowed: \(CrashFixtures.title)\nline two"
     raw.osVersion = String(repeating: "9", count: 200)
     let report = CrashFixtures.stripper.report(from: raw, id: "x")
-    #expect(report.exceptionType == "unknown")
+    #expect(report.exceptionType == "CustomException")
     #expect(report.osVersion == "unknown")
+  }
+
+  @Test(arguments: [
+    ("NSRangeException", "NSRangeException"),
+    ("com.example.Bad_Thing2", "com.example.Bad_Thing2"),
+    ("EXC_BAD_ACCESS (SIGSEGV)", "EXC_BAD_ACCESS (SIGSEGV)"),
+    ("Quarterly Taxes Spreadsheet", "CustomException"),
+    ("Failed: taxes-2025", "CustomException"),
+    ("", "CustomException"),
+    (String(repeating: "A", count: 64), String(repeating: "A", count: 64)),
+    (String(repeating: "A", count: 65), "CustomException"),
+  ])
+  func anExceptionNameIsKeptOnlyAsAnIdentifier(name: String, expected: String) {
+    var raw = CrashFixtures.raw()
+    raw.exceptionType = name
+    #expect(CrashFixtures.stripper.report(from: raw, id: "x").exceptionType == expected)
   }
 
   @Test func longStacksAndSymbolsAreBounded() {

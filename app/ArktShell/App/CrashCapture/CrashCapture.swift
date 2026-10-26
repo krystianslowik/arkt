@@ -1,6 +1,7 @@
 import AppKit
 import CrashReporting
 import ShellUI
+import SidebarModel
 import os
 
 /// Crash reporting for the app (#129): captures crashes behind the Settings > Privacy switch, keeps stripped reports
@@ -15,6 +16,7 @@ final class CrashCapture {
 
   private let store: CrashReportStore
   private let recorder: CrashReportRecorder
+  private let redactions = CrashRedactions()
   private let environment = CrashEnvironment.current()
   private let settings: AppSettings
   private var metricKit: MetricKitCrashSource?
@@ -31,14 +33,20 @@ final class CrashCapture {
     self.settings = settings
     lastEnabled = settings.sendsCrashReports
     store = CrashReportStore(directory: directory.appending(path: "CrashReports", directoryHint: .isDirectory))
-    recorder = CrashReportRecorder(
-      store: store,
-      stripper: CrashReportStripper(homeDirectory: NSHomeDirectory(), userName: NSUserName()),
+    recorder = CrashReportRecorder.production(
+      store: store, homeDirectory: NSHomeDirectory(), userName: NSUserName(), redactions: redactions,
       consent: {
         let defaults = AppEnvironment.userDefaults
         return (enabled: defaults.bool(forKey: AppSettings.Key.sendsCrashReports),
          asked: defaults.bool(forKey: AppSettings.Key.crashReportAskAnswered))
-      })
+      },
+      markAsked: { AppEnvironment.userDefaults.set(true, forKey: AppSettings.Key.crashReportAskAnswered) })
+  }
+
+  /// The current profile and Space names, scrubbed from every report. Called with the sidebar at launch and after each
+  /// change. "default" is the unnamed profile, not a user's text, and would shred ordinary symbols.
+  func updateRedactions(from sidebar: SidebarModel.Sidebar) {
+    redactions.update(sidebar.spaces.values.flatMap { [$0.title, $0.profile] }.filter { $0 != "default" })
   }
 
   /// Installs both capture sources and counts the reports already kept.

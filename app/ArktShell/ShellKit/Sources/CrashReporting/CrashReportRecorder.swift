@@ -9,11 +9,14 @@ public struct CrashReportRecorder: Sendable {
   private let stripper: CrashReportStripper
   private let newID: @Sendable () -> String
   private let consent: Consent
+  private let markAsked: @Sendable () -> Void
 
-  /// `consent` is read at each call, so the switch applies at once.
+  /// `consent` is read at each call, so the switch applies at once. `markAsked` records that the one-time ask is
+  /// settled; it runs when the user turns the switch off, which is an answer.
   public init(store: CrashReportStore, stripper: CrashReportStripper,
               newID: @escaping @Sendable () -> String = { UUID().uuidString.lowercased() },
-              consent: @escaping Consent) {
+              consent: @escaping Consent, markAsked: @escaping @Sendable () -> Void = {}) {
+    self.markAsked = markAsked
     self.store = store
     self.stripper = stripper
     self.newID = newID
@@ -43,11 +46,11 @@ public struct CrashReportRecorder: Sendable {
     return newest
   }
 
-  /// The switch or the answer changed: with the switch off, only the report the ask still needs stays.
+  /// The switch changed. Off is the user's answer: every stored report goes, and the ask never comes back.
   public func consentChanged() {
-    let state = consent()
-    guard !state.enabled else { return }
-    if state.asked { store.removeAll() } else { store.keepNewest(1) }
+    guard !consent().enabled else { return }
+    store.removeAll()
+    markAsked()
   }
 
   /// One uncaught exception ends in one abort: the first stored exception report not yet matched takes it.

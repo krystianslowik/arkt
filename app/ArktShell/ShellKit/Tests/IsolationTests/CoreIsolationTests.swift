@@ -101,11 +101,11 @@ struct CoreIsolationTests {
 
   // MARK: Crash reporting (#129)
 
-  /// The crash report target is pure Foundation: no ArktCore module, no GRDB, no UI, no engine.
-  @Test func crashReportingImportsOnlyFoundation() throws {
+  /// The crash report target is Foundation and the standard library's Synchronization: no ArktCore module, no GRDB, no UI, no engine.
+  @Test func crashReportingImportsOnlyFoundationAndSynchronization() throws {
     let modules = try Self.imports(under: "Sources/CrashReporting")
     #expect(!modules.isEmpty, "the scanner sees the target")
-    let offenders = modules.filter { !["Foundation"].contains($0.module) }
+    let offenders = modules.filter { !["Foundation", "Synchronization"].contains($0.module) }
     #expect(offenders.isEmpty, "\(offenders)")
   }
 

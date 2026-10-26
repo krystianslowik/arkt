@@ -24,9 +24,38 @@ public struct CrashReportStore: Sendable {
   /// Writes `report`, then applies the retention limits.
   public func save(_ report: CrashReport) throws {
     guard Self.isSafe(report.id) else { throw StoreError.unsafeID }
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    try Self.encoder.encode(report).write(to: file(for: report.id), options: .atomic)
+    try FileManager.default.createDirectory(
+      at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: Self.folderMode])
+    try write(Self.encoder.encode(report), to: file(for: report.id))
     _ = try reports()
+  }
+
+  /// The folder's mode: the owner only.
+  static let folderMode = 0o700
+  /// A report file's mode: the owner only.
+  static let fileMode: mode_t = 0o600
+
+  /// Writes `data` to a temporary file created with `fileMode` (never wider, not even for a moment), then renames it
+  /// over `url`, so a reader sees the old file or the whole new one.
+  private func write(_ data: Data, to url: URL) throws {
+    let temporary = directory.appendingPathComponent(".\(UUID().uuidString).tmp")
+    let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL, Self.fileMode)
+    guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+    do {
+      defer { close(descriptor) }
+      try data.withUnsafeBytes { buffer in
+        var offset = 0
+        while offset < buffer.count {
+          let written = Foundation.write(descriptor, buffer.baseAddress! + offset, buffer.count - offset)
+          guard written > 0 else { throw CocoaError(.fileWriteUnknown) }
+          offset += written
+        }
+      }
+      guard rename(temporary.path, url.path) == 0 else { throw CocoaError(.fileWriteUnknown) }
+    } catch {
+      unlink(temporary.path)
+      throw error
+    }
   }
 
   /// Every kept report, newest first, after retention removed the expired and the surplus. A file that does not read

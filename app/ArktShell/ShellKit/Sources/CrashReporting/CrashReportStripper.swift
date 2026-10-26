@@ -15,13 +15,18 @@ public struct CrashReportStripper: Sendable {
 
   private let homeDirectory: String
   private let userName: String
-  private let redacting: [String]
+  private let redacting: @Sendable () -> [String]
 
   /// - Parameters:
   ///   - homeDirectory: the user's home folder path.
   ///   - userName: the account's short name.
   ///   - redacting: further names to remove wherever they appear (profile and Space names, titles).
   public init(homeDirectory: String, userName: String, redacting: [String] = []) {
+    self.init(homeDirectory: homeDirectory, userName: userName, redacting: { redacting })
+  }
+
+  /// `redacting` is read at each scrub, so names that change while the app runs (a renamed Space) apply at once.
+  public init(homeDirectory: String, userName: String, redacting: @escaping @Sendable () -> [String]) {
     self.homeDirectory = homeDirectory
     self.userName = userName
     self.redacting = redacting
@@ -36,14 +41,14 @@ public struct CrashReportStripper: Sendable {
       appVersion: allowed(raw.appVersion, pattern: Self.versionPattern),
       appBuild: allowed(raw.appBuild, pattern: Self.versionPattern),
       engineVersion: allowed(raw.engineVersion, pattern: Self.versionPattern),
-      exceptionType: allowed(raw.exceptionType, pattern: Self.exceptionTypePattern),
+      exceptionType: exceptionType(raw.exceptionType),
       frames: raw.frames.prefix(Self.maximumFrames).map(frame(from:)))
   }
 
   /// `text` with every forbidden thing removed. Exposed for the stripping tests.
   public func scrub(_ text: String) -> String {
     var result = text
-    for name in redacting where name.count >= Self.minimumRedactedLength {
+    for name in redacting() where name.count >= Self.minimumRedactedLength {
       result = Self.replacing(name, in: result, with: "<redacted>", wholeWord: false)
     }
     if !homeDirectory.isEmpty { result = Self.replacingTail(from: homeDirectory, in: result, with: "~") }
@@ -68,6 +73,13 @@ public struct CrashReportStripper: Sendable {
     return .init(image: image.isEmpty ? "unknown" : image, offset: raw.offset, symbol: symbol, uuid: uuid)
   }
 
+  /// The exception name when it is an identifier (`NSRangeException`, `EXC_BAD_ACCESS`), else "CustomException". A
+  /// MetricKit type such as "EXC_BAD_ACCESS (SIGSEGV)" is built by the mapping from identifiers, joined with a space.
+  private func exceptionType(_ value: String) -> String {
+    guard value.wholeMatch(of: Self.exceptionTypePattern) != nil else { return "CustomException" }
+    return scrub(value)
+  }
+
   /// `value` when it is short and made of plain characters, else "unknown". The allow-list is the point: a string that
   /// is not what the field should hold is not kept, whatever it holds.
   private func allowed(_ value: String, pattern: Regex<Substring>) -> String {
@@ -76,7 +88,9 @@ public struct CrashReportStripper: Sendable {
   }
 
   private static var versionPattern: Regex<Substring> { #/[A-Za-z0-9._() +\-]{1,64}/# }
-  private static var exceptionTypePattern: Regex<Substring> { #/[A-Za-z0-9._() +\-]{1,64}/# }
+  /// An identifier (letters, digits, dots, underscores), at most 64 characters, optionally followed by the signal the
+  /// MetricKit mapping appends, `(SIGSEGV)`. No other spaces, so a custom exception name cannot carry text.
+  private static var exceptionTypePattern: Regex<Substring> { #/[A-Za-z0-9._]{1,64}(?: \(SIG[A-Z0-9_]{1,16}\))?/# }
 
   // MARK: Replacing
 

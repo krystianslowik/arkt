@@ -108,6 +108,7 @@ final class AppSession {
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
       autosaver.scheduleSave(sidebar)                 // every model change
+      crashCapture.updateRedactions(from: sidebar)    // #129: the names reports must not carry
       changedSinceBackup = true
     }
     windows.configure = { [weak self] controller in self?.wire(controller) }
@@ -120,6 +121,7 @@ final class AppSession {
   /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine
   /// calls it after `embedderReady`, when the windows it queued exist).
   func start(outcome: OpenOutcome, defersWindows: Bool = false) {
+    crashCapture.updateRedactions(from: source.sidebar)
     crashCapture.start()                              // #129: before anything else can crash
     startFavicons(prune: outcome == .opened)          // before a window can create engine tabs
     launchNotice = Self.notice(for: outcome)

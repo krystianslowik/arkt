@@ -114,14 +114,23 @@ struct ConsentGateTests {
     #expect(try store.reports().isEmpty)
   }
 
-  @Test func theSwitchOffBeforeTheAskKeepsTheHeldReport() throws {
+  @Test func turningTheSwitchOffBeforeAnyAnswerDeletesEverythingAndEndsTheAsk() throws {
     let store = makeStore()
     defer { try? FileManager.default.removeItem(at: store.directory) }
     let consent = Consent(enabled: false, asked: false)
-    let recorder = makeRecorder(consent, store: store)
-    _ = recorder.record(CrashFixtures.raw())
+    let recorder = CrashReportRecorder(
+      store: store, stripper: CrashFixtures.stripper, newID: { UUID().uuidString.lowercased() },
+      consent: { consent.value }, markAsked: { consent.set(asked: true) })
+    _ = recorder.record(CrashFixtures.raw())                       // held for the ask
+    consent.set(enabled: true)
     recorder.consentChanged()
-    #expect(try store.reports().count == 1, "the ask still has its report")
+    #expect(try store.reports().count == 1, "turning it on keeps the report")
+    consent.set(enabled: false)                                    // on, then off, before any answer
+    recorder.consentChanged()
+    #expect(try store.reports().isEmpty, "off deletes every stored report")
+    #expect(consent.value.asked, "off settles the ask")
+    #expect(recorder.reportToAskAbout() == nil)
+    #expect(recorder.record(CrashFixtures.raw()) == nil, "and nothing more is kept")
   }
 
   @Test func aMetricKitAbortAfterAnExceptionReportIsTheSameCrash() throws {
