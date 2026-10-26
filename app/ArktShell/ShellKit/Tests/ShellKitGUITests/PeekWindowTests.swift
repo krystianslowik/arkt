@@ -183,7 +183,8 @@ final class PeekWindowTests: XCTestCase {
     XCTAssertEqual(harness.engine.snapshot(of: session.source)?.url, Self.mail)
     XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(harness.controller.rootView.card.layer?.transform)))
     XCTAssertEqual(harness.controller.urlBar.url, Self.mail)
-    XCTAssertTrue(harness.announcements.contains("Peek closed."))
+    waitUntil("the Peek closed toast") { harness.controller.toasts.current != nil }
+    XCTAssertEqual(harness.controller.toasts.current?.spokenText, "Peek closed. Press Command-Z to reopen.")
     harness.controller.close()
   }
 
