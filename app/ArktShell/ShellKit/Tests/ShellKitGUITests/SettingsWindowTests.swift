@@ -301,8 +301,11 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertFalse(settings.peekLinks.opensCrossSiteLinks)
     shift.performClick(nil)
     XCTAssertFalse(settings.peekLinks.opensShiftClickedLinks)
-    XCTAssertEqual(crossSite.accessibilityLabel(), "Open a Peek for links to other sites")
-    XCTAssertEqual(crossSite.accessibilityHelp(), "From Favorites and pinned tabs only.")
+    XCTAssertEqual(crossSite.accessibilityLabel(), "Open a Peek window when clicking on links to other sites")
+    XCTAssertEqual(crossSite.accessibilityHelp(), "Only affects Favorites and pinned tabs")
+    XCTAssertEqual(shift.accessibilityLabel(), "Open a Peek window when clicking on links with Shift held")
+    XCTAssertTrue(controller.visibleTexts().contains("Only affects Favorites and pinned tabs"),
+                  "the note under the row is the design copy")
   }
 
   /// Decision 4: an unbuilt row is shown, disabled: secondary label, control at 42 % and not enabled, caption ending

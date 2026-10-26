@@ -660,6 +660,172 @@ final class PeekWindowTests: XCTestCase {
     harness.controller.close()
   }
 
+  // MARK: VoiceOver and the keyboard path (#348)
+
+  /// The source card leaves the accessibility tree while the Peek is open and comes back with it; the sidebar stays
+  /// reachable (docs/design/peek.md, VoiceOver).
+  func testTheSourceCardIsHiddenFromAccessibilityWhileThePeekIsOpen() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let card = harness.controller.rootView.card
+    let sidebar = harness.controller.rootView.sidebarContainer
+    XCTAssertFalse(card.isAccessibilityHidden())
+
+    _ = try openPeek(harness, world)
+    harness.settle()
+    XCTAssertTrue(card.isAccessibilityHidden(), "the source card is hidden from VoiceOver")
+    XCTAssertFalse(sidebar.isAccessibilityHidden(), "the sidebar stays reachable")
+
+    try XCTUnwrap(harness.peek.overlay).closeButton.performClick(nil)
+    harness.settle()
+    XCTAssertFalse(card.isAccessibilityHidden(), "the source card is back after the close")
+    harness.controller.close()
+  }
+
+  /// A Peek over a wide pane hides that pane only; the other panes of the split stay live (decided 2026-10-25).
+  func testAPeekOverAWidePaneHidesThatPaneFromAccessibilityOnly() throws {
+    let (world, panes) = try splitWorld()
+    let harness = Harness(world.sidebar, width: 1720)
+    harness.controller.activate(node: panes[0])
+    harness.layout()
+    try harness.click(Self.atlas, in: panes[0], modifiers: .shift, disposition: .newWindow)
+    harness.settle()
+    let root = harness.controller.rootView
+    XCTAssertEqual(try XCTUnwrap(harness.peek.overlay).scrim.frame,
+                   root.convert(root.split.paneCards[0].frame, from: root.split), "over the source pane only")
+    XCTAssertTrue(root.split.paneCards[0].isAccessibilityHidden())
+    XCTAssertFalse(root.split.paneCards[1].isAccessibilityHidden(), "the other pane stays reachable")
+    harness.controller.close()
+  }
+
+  /// A Peek over the whole content area (a pane under 600 pt) hides the split; the sidebar stays reachable.
+  func testAPeekOverTheWholeContentAreaHidesTheSplitFromAccessibility() throws {
+    let (world, panes) = try splitWorld()
+    let harness = Harness(world.sidebar, width: 1280)
+    harness.controller.activate(node: panes[0])
+    harness.layout()
+    try harness.click(Self.atlas, in: panes[0], modifiers: .shift, disposition: .newWindow)
+    harness.settle()
+    let root = harness.controller.rootView
+    XCTAssertTrue(root.split.isAccessibilityHidden())
+    XCTAssertFalse(root.sidebarContainer.isAccessibilityHidden())
+    harness.controller.close()
+  }
+
+  /// Opening puts the keyboard focus on the Peek's page and closing puts it back on the source page at once.
+  func testFocusGoesToThePeekPageAndBackToTheSourcePageOnClose() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    let window = try XCTUnwrap(harness.controller.window)
+    XCTAssertTrue(window.firstResponder === harness.engine.contentView(for: session.tab), "the Peek's page")
+
+    try XCTUnwrap(harness.peek.overlay).closeButton.performClick(nil)
+    XCTAssertTrue(window.firstResponder === harness.engine.contentView(for: session.source),
+                  "the source page gets the focus back at once")
+    harness.settle()
+    harness.controller.close()
+  }
+
+  /// Esc and Cmd-W give the source page its focus back the same way.
+  func testAKeyboardCloseReturnsFocusToTheSourcePage() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    harness.settle()
+    let window = try XCTUnwrap(harness.controller.window)
+    XCTAssertTrue(harness.peek.handleEscape(in: session.tab))
+    XCTAssertTrue(window.firstResponder === harness.engine.contentView(for: session.source))
+    harness.settle()
+    harness.controller.close()
+  }
+
+  /// Tab and Shift-Tab move through the page, the three controls and back; the window's own loop is off while the
+  /// Peek is open, so focus never leaves it (docs/design/peek.md, Keyboard).
+  func testTabAndShiftTabKeepTheFocusInsideThePeek() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    let loopWasAutomatic = window.autorecalculatesKeyViewLoop
+    let session = try openPeek(harness, world)
+    harness.settle()
+    let overlay = try XCTUnwrap(harness.peek.overlay)
+    let page = try XCTUnwrap(harness.engine.contentView(for: session.tab))
+    XCTAssertFalse(window.autorecalculatesKeyViewLoop, "the Peek owns the loop while it is open")
+    XCTAssertTrue(page.nextKeyView === overlay.closeButton)
+    XCTAssertTrue(overlay.closeButton.nextKeyView === overlay.expandButton)
+    XCTAssertTrue(overlay.expandButton.nextKeyView === overlay.splitButton)
+    XCTAssertTrue(overlay.splitButton.nextKeyView === page, "back to the page, never out of the Peek")
+
+    XCTAssertTrue(window.makeFirstResponder(page))
+    if NSApp.isFullKeyboardAccessEnabled {
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === overlay.closeButton, "Tab reaches the controls")
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === overlay.expandButton)
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === overlay.splitButton)
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === page, "Tab wraps from the last control to the page")
+      window.selectPreviousKeyView(nil)
+      XCTAssertTrue(window.firstResponder === overlay.splitButton, "Shift-Tab wraps back the same way")
+    } else {
+      // Without Full Keyboard Access (the CI runners) buttons refuse key view, as everywhere in macOS: Tab and
+      // Shift-Tab skip the controls and the focus stays on the Peek's page instead of leaving the Peek.
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === page, "Tab stays inside the Peek")
+      window.selectPreviousKeyView(nil)
+      XCTAssertTrue(window.firstResponder === page, "Shift-Tab stays inside the Peek")
+    }
+
+    overlay.closeButton.performClick(nil)
+    harness.settle()
+    XCTAssertEqual(window.autorecalculatesKeyViewLoop, loopWasAutomatic,
+                   "the window's own loop is back after the close")
+    harness.controller.close()
+  }
+
+  /// The controls take keyboard focus and draw AppKit's focus ring, which only a keyboard focus shows; the ring
+  /// follows the circle (the system ring, never a mustard stroke).
+  func testThePeekControlsUseTheSystemFocusRingOnlyForKeyboardFocus() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    _ = try openPeek(harness, world)
+    harness.settle()
+    let overlay = try XCTUnwrap(harness.peek.overlay)
+    let window = try XCTUnwrap(harness.controller.window)
+    for control in overlay.controls {
+      XCTAssertEqual(control.focusRingType, .default, "the system focus ring")
+      XCTAssertEqual(control.focusRingMaskBounds, control.bounds, "the ring follows the circle")
+      XCTAssertTrue(control.acceptsFirstResponder)
+    }
+    XCTAssertTrue(window.makeFirstResponder(overlay.closeButton), "Tab reaches Close")
+    XCTAssertTrue(window.firstResponder === overlay.closeButton)
+    harness.controller.close()
+  }
+
+  /// Opening moves the VoiceOver focus to the Peek's page, closing moves it back to the source page.
+  func testTheAccessibilityFocusFollowsTheOpenAndTheClose() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    var focused: [NSView] = []
+    var cardHiddenAtFocus: [Bool] = []
+    let card = harness.controller.rootView.card
+    harness.peek.moveAccessibilityFocus = { view in
+      focused.append(view)
+      cardHiddenAtFocus.append(card.isAccessibilityHidden())
+    }
+    let session = try openPeek(harness, world)
+    harness.settle()
+    XCTAssertTrue(focused.last === harness.engine.contentView(for: session.tab), "the Peek's page")
+    harness.peek.close(.control)
+    harness.settle()
+    XCTAssertTrue(focused.last === harness.engine.contentView(for: session.source), "the source page")
+    XCTAssertEqual(cardHiddenAtFocus.last, false,
+                   "the source card is back in the accessibility tree when VoiceOver focus moves to its page")
+    harness.controller.close()
+  }
+
   // MARK: Reduce Motion
 
   func testReduceMotionFadesWithoutTravelScaleOrRecede() throws {
