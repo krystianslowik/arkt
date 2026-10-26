@@ -43,7 +43,7 @@ final class SettingsRowView: SettingsBlockView {
   private let leading: NSView?
   private let leadingSize: NSSize
   private let label: NSTextField
-  private let caption: NSTextField?
+  private var caption: NSTextField?
   /// Inline keycaps after the caption text ("Also with" Shift Command D).
   private let captionAccessory: NSView?
   private(set) var trailing: [NSView]
@@ -97,6 +97,29 @@ final class SettingsRowView: SettingsBlockView {
     views.forEach(addSubview)
     describeControls()
     applyDimming()
+    needsLayout = true
+  }
+
+  /// Replaces the caption (the Little Arkt hotkey row's conflict line, #354); the pane's height follows the next
+  /// layout. Nil removes the line.
+  func setCaption(_ text: String?) {
+    guard text != (caption?.stringValue) else { return }
+    guard let text else {
+      caption?.removeFromSuperview()
+      caption = nil
+      describeControls()
+      needsLayout = true
+      return
+    }
+    if let caption {
+      caption.stringValue = text
+    } else {
+      let field = settingsLabel(text, size: 12)
+      addSubview(field)
+      caption = field
+      restyle()
+    }
+    describeControls()
     needsLayout = true
   }
 

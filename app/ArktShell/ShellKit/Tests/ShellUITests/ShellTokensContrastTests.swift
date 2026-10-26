@@ -238,6 +238,27 @@ struct ShellTokensContrastTests {
     #expect(onToolbar >= Contrast.minimumText, "secondaryText \(flavor) over toolbar: \(onToolbar)")
   }
 
+  /// The Space theme creator's popover (#410): porcelain in light, #262927 in dark, with the Space name in
+  /// `primaryText`, the section labels in `secondaryText`, and the colour-count button's `sidebarItemHovered` fill.
+  @Test(arguments: flavors)
+  func themePopoverTextReadsOnItsSurface(flavor: ThemeFlavor) {
+    let surface = ShellTokens.themePopoverSurface.resolve(flavor)
+    #expect(surface.alpha == 1)
+    let primary = ShellContrastProbe.ratio(ShellTokens.primaryText.resolve(flavor), onOpaque: surface)
+    let secondary = ShellContrastProbe.ratio(ShellTokens.secondaryText.resolve(flavor), onOpaque: surface)
+    let onButton = ShellContrastProbe.ratio(ShellTokens.secondaryText.resolve(flavor),
+                                            onOpaque: ShellContrastProbe.over(ShellTokens.sidebarItemHovered
+                                              .resolve(flavor), surface))
+    #expect(primary >= Contrast.minimumText, "primaryText \(flavor) on the theme popover: \(primary)")
+    #expect(secondary >= Contrast.minimumText, "secondaryText \(flavor) on the theme popover: \(secondary)")
+    #expect(onButton >= Contrast.minimumText, "secondaryText \(flavor) on the colour-count button: \(onButton)")
+  }
+
+  @Test func themePopoverSurfaceIsTheDesignedPair() {
+    #expect(ShellTokens.themePopoverSurface.light == .srgb(hex: 0xFAF9F5))
+    #expect(ShellTokens.themePopoverSurface.dark == .srgb(hex: 0x262927))
+  }
+
   /// Why `toolbarSurface` is not Arc's measured strip (#186): Arc 1.168 draws the Toolbar on the card's own surface,
   /// sRGB #878787 in the dark theme measured, where `secondaryText` would fall below 4.5:1. If this ever passes, the
   /// measured surface can be reconsidered.

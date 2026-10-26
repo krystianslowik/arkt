@@ -46,6 +46,9 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var preview: SettingsAppearancePreview?
   var peekCrossSiteSwitch: SettingsSwitch?
   var peekShiftSwitch: SettingsSwitch?
+  /// The lookup hotkey's switch and row (#354); the row's caption carries the registration answer.
+  var littleArktHotKeySwitch: SettingsSwitch?
+  var littleArktHotKeyRow: SettingsRowView?
   var countFavoritesSwitch: SettingsSwitch?
   var ninthTabSwitch: SettingsSwitch?
   var importButton: ArchivePillButton?
@@ -386,6 +389,7 @@ extension SettingsWindowController: AppSettingsObserver {
   public func appSettingsDidChange(_ settings: AppSettings) {
     peekCrossSiteSwitch?.setOn(settings.peekLinks.opensCrossSiteLinks, animated: true)
     peekShiftSwitch?.setOn(settings.peekLinks.opensShiftClickedLinks, animated: true)
+    applyLittleArktHotKeyState()                    // #354
     countFavoritesSwitch?.setOn(settings.tabNavigation.countsFavorites, animated: true)
     ninthTabSwitch?.setOn(settings.tabNavigation.ninthOpensNinth, animated: true)
   }

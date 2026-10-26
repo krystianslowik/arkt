@@ -283,7 +283,8 @@ final class SpaceEditingTests: XCTestCase {
     let profile = try XCTUnwrap(menu.item(withTitle: "Profile"))
     XCTAssertFalse(profile.isEnabled)
     XCTAssertNil(profile.action)
-    XCTAssertEqual(menu.item(withTitle: "Theme")?.submenu?.items.map(\.title), ["Default", "Paper", "Dusk"])
+    XCTAssertEqual(menu.item(withTitle: "Theme")?.submenu?.items.map(\.title),
+                   ["Default", "Paper", "Dusk", "", "Edit Theme\u{2026}"])
 
     let dusk = try XCTUnwrap(menu.item(withTitle: "Theme")?.submenu?.item(withTitle: "Dusk"))
     page.pickTheme(dusk)

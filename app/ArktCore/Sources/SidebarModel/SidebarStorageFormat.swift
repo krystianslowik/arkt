@@ -17,6 +17,11 @@ import Foundation
 /// decoding it leaves every icon nil and is the whole migration. Nothing else is rewritten. An `icon` key inside a
 /// version 1 document is not part of version 1 and is ignored, never read as a version 2 icon.
 ///
+/// Version 3 adds `SpaceTheme.noiseFactor` and `SpaceTheme.opacity`, both always written. Versions 1 and 2 decode
+/// their themes through the older shape (`SpaceThemeV2`): `noiseFactor` takes `SpaceTheme.defaultNoiseFactor` (0.5
+/// with a texture, 0 without) and `opacity` 1, so every stored theme draws as it did. Those keys inside an older
+/// document are ignored.
+///
 /// Equality: two stored documents hold the same sidebar when their decoded values are equal. Byte equality is only a
 /// fast path (the encoding is deterministic for a given build), never the definition.
 ///
@@ -24,12 +29,12 @@ import Foundation
 /// `Sidebar.maximumNestingDepth`, enforced by `insert`, bounds how deep the decoded tree may be, and is reported as
 /// `.invalidTree(.nestingTooDeep(id))`.
 public enum SidebarStorageFormat {
-  public static let currentVersion = 2
+  public static let currentVersion = 3
 
-  /// Documents this build reads. Version 1 migrates by leaving `Space.icon` nil (the field did not exist).
-  /// `SidebarStorageFormat` versions only the sidebar document; archived `NodeSnapshot`s carry no Space data and are
-  /// versioned on their own (`ArchiveStore.snapshotFormatVersion`).
-  public static let readableVersions: Set<Int> = [1, 2]
+  /// Documents this build reads. Version 1 migrates by leaving `Space.icon` nil (the field did not exist); versions
+  /// 1 and 2 give themes the version 3 defaults. `SidebarStorageFormat` versions only the sidebar document; archived
+  /// `NodeSnapshot`s carry no Space data and are versioned on their own (`ArchiveStore.snapshotFormatVersion`).
+  public static let readableVersions: Set<Int> = [1, 2, 3]
 
   /// Same value as `Sidebar.maximumNestingDepth`, the model invariant that decoding enforces through `insert`.
   public static let maximumNestingDepth = Sidebar.maximumNestingDepth
@@ -67,13 +72,26 @@ private struct SpaceEntry: Codable {
   var today: [NodeSnapshot]
 }
 
+/// A Space theme as versions 1 and 2 store it: no `noiseFactor`, no `opacity`. Read only.
+private struct SpaceThemeV2: Decodable {
+  var baseColors: [RGBA]
+  var overlayColors: [RGBA]
+  var texture: String?
+  var isDark: Bool
+
+  /// The migration: the defaults the theme drew with before the fields were stored.
+  var theme: SpaceTheme {
+    SpaceTheme(baseColors: baseColors, overlayColors: overlayColors, texture: texture, isDark: isDark)
+  }
+}
+
 /// A version 1 Space entry. Read only; this build writes `currentVersion`.
 private struct SpaceEntryV1: Decodable {
   struct SpaceV1: Decodable {
     var id: SpaceID
     var title: String
     var profile: String
-    var theme: SpaceTheme?
+    var theme: SpaceThemeV2?
   }
 
   var space: SpaceV1
@@ -82,7 +100,29 @@ private struct SpaceEntryV1: Decodable {
 
   var entry: SpaceEntry {
     SpaceEntry(
-      space: Space(id: space.id, title: space.title, profile: space.profile, theme: space.theme, icon: nil),
+      space: Space(id: space.id, title: space.title, profile: space.profile, theme: space.theme?.theme, icon: nil),
+      pinned: pinned, today: today)
+  }
+}
+
+/// A version 2 Space entry: the icon, and the older theme shape. Read only.
+private struct SpaceEntryV2: Decodable {
+  struct SpaceV2: Decodable {
+    var id: SpaceID
+    var title: String
+    var profile: String
+    var theme: SpaceThemeV2?
+    var icon: SpaceIcon?
+  }
+
+  var space: SpaceV2
+  var pinned: [NodeSnapshot]
+  var today: [NodeSnapshot]
+
+  var entry: SpaceEntry {
+    SpaceEntry(
+      space: Space(id: space.id, title: space.title, profile: space.profile, theme: space.theme?.theme,
+                   icon: space.icon),
       pinned: pinned, today: today)
   }
 }
@@ -101,12 +141,12 @@ extension Sidebar: Codable {
     guard SidebarStorageFormat.readableVersions.contains(version) else {
       throw SidebarDocumentError.unsupportedVersion(version)
     }
-    // Version 1 Spaces decode through their own shape, which has no icon: an `icon` key in a version 1 document is
-    // never read, whatever it holds.
-    let spaces: [SpaceEntry] = if version == 1 {
-      try container.decode([SpaceEntryV1].self, forKey: .spaces).map(\.entry)
-    } else {
-      try container.decode([SpaceEntry].self, forKey: .spaces)
+    // Older Spaces decode through their own shapes: an `icon` key in a version 1 document, or a theme's
+    // `noiseFactor` or `opacity` in a version 1 or 2 document, is never read, whatever it holds.
+    let spaces: [SpaceEntry] = switch version {
+    case 1: try container.decode([SpaceEntryV1].self, forKey: .spaces).map(\.entry)
+    case 2: try container.decode([SpaceEntryV2].self, forKey: .spaces).map(\.entry)
+    default: try container.decode([SpaceEntry].self, forKey: .spaces)
     }
     let favorites = try container.decode([FavoritesEntry].self, forKey: .favorites)
     var sidebar = Sidebar()

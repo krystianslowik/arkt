@@ -28,15 +28,19 @@ public struct SpaceThemeInfo: Equatable, Sendable {
   public var overlayColors: [RGBA]
   /// Tiled overlay texture: "grain", "sand", "denim" or "tweed" (Track B: `SpaceTheme.texture`); see `ThemeTexture`.
   public var texture: String?
-  /// Texture strength 0...1 (Arc: `Modifiers.noiseFactor`).
+  /// Texture strength 0...1 (Arc: `Modifiers.noiseFactor`). Kept while `texture` is nil.
   public var noiseFactor: Double
+  /// How strongly the colors cover the window surface, 0...1 (#410). `ThemeContrast.drawn(_:in:)` composites the
+  /// colors over the surface at this opacity; what the window draws is always opaque.
+  public var opacity: Double
+  /// The stored text tone. The drawn tone comes from `ThemeContrast`, which starts from the appearance.
   public var isDark: Bool
   public var flavor: ThemeFlavor { isDark ? .dark : .light }
 
   public init(baseColors: [RGBA], overlayColors: [RGBA] = [], texture: String? = nil, noiseFactor: Double = 0,
-              isDark: Bool) {
+              opacity: Double = 1, isDark: Bool) {
     self.baseColors = baseColors; self.overlayColors = overlayColors
-    self.texture = texture; self.noiseFactor = noiseFactor; self.isDark = isDark
+    self.texture = texture; self.noiseFactor = noiseFactor; self.opacity = opacity; self.isDark = isDark
   }
 
   /// The texture's overlay alpha for this theme (0 without a texture): the gradient is multiplied by
