@@ -18,7 +18,7 @@ struct ChromiumEngineScriptTests {
   }
 
   func delivered() async throws {
-    try await EngineContract.waitUntil(timeout: .seconds(5)) { facade.isIdle }
+    try await ScriptedWait.until("the facade to deliver its batch") { facade.isIdle }
   }
 
   func scriptedTab(_ engine: ChromiumEngine, _ id: TabID) throws -> ScriptedTab {

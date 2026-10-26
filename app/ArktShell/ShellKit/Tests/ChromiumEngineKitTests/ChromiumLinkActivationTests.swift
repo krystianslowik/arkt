@@ -132,7 +132,7 @@ struct ChromiumLinkActivationTests {
     let opener = try #require(engine.handle(of: tab))
     let opened = browser.insertTab(opener: opener, origin: .engine, active: true)
     opened.startLoad(Self.target, title: nil)
-    try await EngineContract.waitUntil(timeout: .seconds(5)) { facade.isIdle }
+    try await ScriptedWait.until("the facade to deliver its batch") { facade.isIdle }
     let id = try #require(engine.tabIDs.first { $0 != tab })
     let snapshot = try #require(engine.snapshot(of: id))
     #expect(snapshot.opener == tab)
