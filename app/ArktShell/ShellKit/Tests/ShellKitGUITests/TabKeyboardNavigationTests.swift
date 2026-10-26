@@ -327,6 +327,28 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertNil(outline.keyboardFocusRow)
   }
 
+  /// #337: in a wide sidebar, Ctrl-Space arrows follow the adaptive grid (5 Favorites: 3 + 2).
+  func testCtrlSpaceArrowsFollowTheAdaptiveColumns() throws {
+    favorites += (2..<5).map {
+      source.addTab(url: Self.url("f\($0)"), title: "F\($0)", in: .favorites(profile: "default"))
+    }
+    controller.rootView.sidebarWidth = 400
+    controller.window?.layoutIfNeeded()
+    controller.activate(node: favorites[2])
+    controller.revealCurrentTab(nil)
+    let grid = controller.sidebarController.view.favorites
+    XCTAssertEqual(grid.columns, 3)
+    XCTAssertEqual(grid.keyboardFocusID, favorites[2])
+
+    grid.collectionView.keyDown(with: try key(kVK_DownArrow))
+    XCTAssertEqual(grid.keyboardFocusID, favorites[4], "Down over the short row's gap takes its last tile")
+    grid.collectionView.keyDown(with: try key(kVK_LeftArrow))
+    XCTAssertEqual(grid.keyboardFocusID, favorites[3])
+    grid.collectionView.keyDown(with: try key(kVK_UpArrow))
+    XCTAssertEqual(grid.keyboardFocusID, favorites[0], "Up moves one row of 3")
+    XCTAssertEqual(current, favorites[2], "moving focus does not activate the destination")
+  }
+
   /// #343: with no Favorites, Up at the first outline row keeps the outline cursor and its ring.
   func testUpAtTheFirstOutlineRowWithoutFavoritesKeepsOutlineFocus() throws {
     for favorite in favorites { source.removeNode(favorite) }

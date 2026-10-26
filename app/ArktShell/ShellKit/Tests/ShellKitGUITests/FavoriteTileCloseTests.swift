@@ -257,7 +257,9 @@ final class FavoriteTileCloseTests: XCTestCase {
     let last = try harness.tile(world.favorites[2])
     let middle = try harness.tile(world.favorites[1])
     let pointer = HoverPointerStub(window: try XCTUnwrap(last.window))
-    pointer.move(toCenterOf: middle)
+    // Near the middle tile's trailing edge: with two Favorites left the grid takes two wider columns (#337), and
+    // this point falls on the second one.
+    pointer.pointInWindow = middle.convert(NSPoint(x: middle.bounds.maxX - 6, y: middle.bounds.midY), to: nil)
     harness.grid.hoverPointerLookup = pointer.lookup
     harness.grid.resyncHoverWithPointer()
     XCTAssertTrue(middle.isHovered)
