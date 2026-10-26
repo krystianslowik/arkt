@@ -94,6 +94,36 @@ public final class ModelSidebarSource: SidebarSource {
     _ = try? mutate { try $0.updateTab(id, url: url, title: title) }
   }
 
+  /// Rename (BH-026): the model's `rename`. Splits and unknown ids are ignored, like `StubSidebar`.
+  public func renameNode(_ id: UUID, to title: String?) {
+    _ = try? mutate { try $0.rename(id, to: title) }
+  }
+
+  /// Duplicate (BH-027, BH-095): the subtree with fresh ids right after the original. The copy is new, so it and
+  /// its tabs are stamped now (as `duplicateSplit` does) and auto-archive does not take it for an old node.
+  @discardableResult
+  public func duplicateNode(_ id: UUID) throws -> UUID {
+    let stamp = now()
+    return try mutate { sidebar in
+      guard let node = sidebar.nodes[id], let snapshot = sidebar.snapshot(of: id) else {
+        throw SidebarError.unknownNode(id)
+      }
+      let copy = Self.restamped(snapshot.withFreshIDs(), at: stamp)
+      let position = sidebar.children(of: node.parent).firstIndex(of: id) ?? 0
+      try sidebar.insert(copy, in: node.parent, at: position + 1)
+      return copy.id
+    }
+  }
+
+  /// New Folder (KB-040, BH-094), created now.
+  @discardableResult
+  public func addFolder(title: String, in location: SidebarLocation, at index: Int?) throws -> UUID {
+    let createdAt = now()
+    return try mutate {
+      try $0.addFolder(title: title, in: BridgeMapping.location(location), at: index, createdAt: createdAt)
+    }
+  }
+
   /// D4b contract: stamps tabs that stopped being visible. Non-tabs and unknown ids are skipped.
   public func markInactive(_ ids: some Sequence<UUID>, at date: Date) {
     mutate { sidebar in

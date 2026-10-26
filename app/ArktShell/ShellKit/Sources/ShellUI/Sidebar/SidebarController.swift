@@ -48,6 +48,10 @@ public final class SidebarController {
   public var pinnedNavigatedProvider: (@MainActor (NodeID) -> Bool)?
   /// A loaded Favorite past the recency limit should unload (BH-049); the window closes its page like the X does.
   public var onFavoriteUnload: (@MainActor (NodeID) -> Void)?
+  /// A context menu action of any Space page that has no callback of its own (#105); the window runs it.
+  public var onMenuAction: (@MainActor (SidebarMenuAction) -> Void)?
+  /// A double-click on empty sidebar space of any Space page (BH-021).
+  public var onEmptyAreaDoubleClick: (@MainActor () -> Void)?
   /// The "+" button in the bottom bar.
   public var onNewTab: (@MainActor () -> Void)?
   /// The pane to focus when a split row is activated (decision 7: the split's last focused pane). Nil, or a node
@@ -95,6 +99,7 @@ public final class SidebarController {
     view.favorites.onActivate = { [weak self] id in self?.activate(node: id) }
     view.favorites.faviconProvider = { [weak self] id in self?.favicons[id] }
     view.favorites.onClose = { [weak self] id in self?.onClose?(id) }
+    view.favorites.onMenuAction = { [weak self] action in self?.onMenuAction?(action) }
     view.favorites.pageLoadedProvider = { [weak self] id in self?.loadedNodes.contains(id) ?? false }
     view.favorites.onNodeDragBegan = { [weak self] id in self?.nodeDragBegan(id) }
     view.favorites.onNodeDragEnded = { [weak self] in self?.nodeDragEnded() }
@@ -161,6 +166,7 @@ public final class SidebarController {
   private func commit(space id: SpaceID, info: SidebarSpaceInfo, index: Int) {
     guard let page = pages[id] else { return }
     let changed = currentSpace != id
+    if changed, let old = currentSpace { pages[old]?.outlineController.clearSelection() }   // design 6
     currentSpace = id
     if changed, tabToRestore(in: id) == nil {
       previous = current
@@ -261,6 +267,8 @@ public final class SidebarController {
     page.outlineController.pinnedNavigatedProvider = { [weak self] node in
       self?.pinnedNavigatedProvider?(node) ?? false
     }
+    page.outlineController.onMenuAction = { [weak self] action in self?.onMenuAction?(action) }
+    page.outlineController.onEmptyAreaDoubleClick = { [weak self] in self?.onEmptyAreaDoubleClick?() }
     page.outlineController.onNodeDragBegan = { [weak self] node in self?.nodeDragBegan(node) }
     page.outlineController.onNodeDragEnded = { [weak self] in self?.nodeDragEnded() }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
@@ -268,6 +276,17 @@ public final class SidebarController {
     page.outlineController.setRowStates(resolver)
     pages[id] = page
     return page
+  }
+
+  // MARK: Selection and rename (#105)
+
+  /// The current Space page's multi-selection, in display order (BH-028).
+  public var selectedNodes: [NodeID] { currentPage?.outlineController.selectedNodes ?? [] }
+
+  /// Opens the rename field on `node` in the current Space page (BH-026). False when that page does not show it.
+  @discardableResult
+  public func beginRename(node: NodeID) -> Bool {
+    currentPage?.outlineController.beginRename(node) ?? false
   }
 
   // MARK: Activation
@@ -289,6 +308,9 @@ public final class SidebarController {
       favoriteLoadOrder.append(tab)
     }
     if tab != current {
+      // Another tab coming forward (a Favorite click, Ctrl-Tab, the command bar) ends a multi-selection, so a later
+      // Cmd-W closes the tab on screen rather than rows chosen earlier (design 6, BH-072).
+      for page in pages.values { page.outlineController.clearSelection() }
       previous = current
       current = tab
       applyRowStates()                          // the favorites refresh their visible tiles, a newly loaded one too

@@ -1438,3 +1438,63 @@ Tests (after rebasing on main with #336, #341, #342 and #349): ShellKit unit 830
 alternating single runs at load1 about 5.5 passed 3 of 3 on this branch and 2 of 3 on `main`. UI tests: 34 run, 33
 passed, 1 skipped, outside `OnboardingTests`, whose 4 tests fail identically on `main`. The switcher stays closed while
 the first run covers the window.
+
+## Sidebar tab actions: rename, duplicate, multi-select and the context menus (#105) (2026-10-26)
+
+Built against `design/tab-context-menus/tab-context-menus.md` (#321).
+
+- **Menus (design 3).** `SidebarContextMenu` builds each menu as values (`SidebarMenuEntry`: title, action, key,
+  enabled, Option alternate, submenu) for the eight targets: Today tab, pinned tab, Favorite tile, folder, Split Tab
+  row, pane row, a multi-selection and the empty area. `SidebarContextMenu.menu(_:target:action:)` turns them into
+  plain `NSMenu`s (`autoenablesItems` off, no custom views, no attributed titles, no brand color). The outline runs
+  the items that already had callbacks (split items, pin, reset family, Move To > Favorites) through them; every
+  other action goes to the window (`ShellWindowController+TabActions`). Move To lists Favorites, then every Space
+  of the profile in order with the row's own Space disabled. Option alternates: Copy Link as Markdown, Copy Links as
+  Markdown, Copy All as Markdown Links.
+- **Rename (BH-026).** Double-click a tab row (folders open and close on click, so they rename from their menu), or
+  Rename. The cell shows a native rounded `NSTextField` over the title, 13 pt, title selected, system focus ring and
+  selection color, no animation. Return or a click anywhere in the outline commits, Escape cancels; a row reload
+  for that node waits until the field closes. Tabs store the name as `TabItem.customTitle` through the new
+  `Sidebar.rename` (`SidebarSource.renameNode`), so page titles no longer replace it and it survives a relaunch;
+  an empty name clears it. Folders take the name as their title.
+- **Duplicate (BH-027).** `SidebarSource.duplicateNode`: a copy with new ids right after the original (custom title
+  kept). A loaded tab's copy is mapped to `EngineClient.duplicateTab`, so its history comes along; a single
+  duplicate becomes current [I]. Splits use Duplicate Split View; folders copy their rows.
+- **Multi-selection (BH-028).** `SidebarSelection`: Cmd-click toggles, Shift-click selects the contiguous range from
+  the anchor; the current row seeds an empty selection. Tabs and split rows are selectable; panes and folders are
+  not. Selected rows draw the `contentVisible` fill, the current row keeps `current`. A plain click, a Space switch
+  or a right-click on an unselected row ends it; rows that leave the outline leave it. The Ctrl-Space focus ring is
+  untouched (a click still removes it).
+- **Bulk actions.** Cmd-W (BH-072), Archive on the multi menu, Archive Below (BH-077) and Clear Today Tabs (BH-075)
+  go through `closeAll`: whole tabs and splits only (`SidebarSelection.bulkTargets`), each through `close(node:)`,
+  the node holding the current tab last, and "Archived N tabs" when two or more Today tabs go. `successor(of:)` now
+  skips siblings whose archive waits on a leave-site prompt. Archive Below on a pane archives the panes below it,
+  one by one. Cmd-D pins or unpins a selection (Pin Tabs / Unpin Tabs). Open in Split View (2 to 4 plain tabs,
+  BH-117), New Folder (BH-094: a new pinned folder takes the selection, then opens for naming [I]), Move To and Copy
+  Links act on the selection.
+- **Empty area (BH-021, BH-023).** In the outline below and between rows, a press drags the window
+  (`performDrag`), a double-click opens the command bar for a new tab, and a right-click shows New Tab, New Folder,
+  Paste URL as New Tab and Clear Today Tabs.
+- **Non-key dimming (BH-025).** `SidebarContainerView.isDimmed`: URL bar, Favorites, Space pages and bottom bar at
+  0.6 opacity, instant. The window's own command bar panel taking key does not dim it (`dimsSidebar`).
+- **Not built, shown disabled (design OQ6).** Share, Share Split View, Change Icon, Edit Pinned URL, Mute (no
+  engine mute), Rename on a Favorite tile (no title is drawn) and on a Split Tab row (no stored title).
+
+Deviations: no key equivalents on Copy Link (Shift-Cmd-C), Paste URL as New Tab (Opt-Cmd-V) and Clear Today Tabs
+(Shift-Cmd-K), because a context menu's key fires only while it is open and the menu bar has no such items yet;
+Separate From Pinned Tab (BH-061, #108) stays in the pinned menu, as its only entry point; Copy Link copies the page
+URL as is (no tracker stripping); "Archived N tabs" has no Undo button yet; the dimming has no 12 % theme wash.
+
+Tests (rebased on main with #357): ArktCore 393 (387 + 6). ShellKit unit 900 (862 + 38). ShellKitGUITests 730 run
+(702 + 28), 7 skipped; 2 failures, both the Space pager frame-time gate
+(`SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) at load 7 to 8 on 10 cores, which fails the same way
+on `main` at that load. The Peek frame-time gate failed once at that load and passed 2 of 3 reruns. Debug app build
+succeeds. UI tests (XCUITest) not run here.
+
+Review fixes: committing the rename field unchanged stores no custom title (an accidental double-click no longer
+freezes the page title); another tab coming forward or a plain press on empty sidebar space ends the
+multi-selection, so a later Cmd-W closes the tab on screen; a right-click commits a rename in progress; sheets and
+child windows taking key keep the sidebar lit. ShellKitGUITests 734 run (730 + 4), 5 skipped; the only failures are
+the load-dependent frame-time gates noted above. Disabled items now tracked: Share (#362), Edit Pinned URL and
+Favorite rename (#363), Mute (#364); Change Icon (#339, #109), the Undo toast (#308), Copy Link keys and tracker
+stripping (#118), Clear Today Tabs key (#110), Split Tab rename (#27, BH-115).

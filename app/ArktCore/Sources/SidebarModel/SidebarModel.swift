@@ -262,8 +262,10 @@ public struct Sidebar: Hashable, Sendable {
   }
 
   @discardableResult
-  public mutating func addFolder(title: String, in location: Location, createdAt: Date = .now) throws -> NodeID {
-    try insert(.folder(FolderItem(title: title)), in: location, createdAt: createdAt)
+  public mutating func addFolder(
+    title: String, in location: Location, at index: Int? = nil, createdAt: Date = .now
+  ) throws -> NodeID {
+    try insert(.folder(FolderItem(title: title)), in: location, at: index, createdAt: createdAt)
   }
 
   @discardableResult
@@ -390,6 +392,25 @@ public struct Sidebar: Hashable, Sendable {
     if let title { tab.title = title }
     if let lastActiveAt { tab.lastActiveAt = lastActiveAt }
     nodes[id]?.kind = .tab(tab)
+  }
+
+  /// Rename (BH-026). A tab gets `title` as its custom title, trimmed; an empty or nil name clears it, so the row
+  /// shows the page title again. Page titles keep arriving through `updateTab` and never replace a custom title. A
+  /// folder takes the trimmed name as its title; an empty name leaves it unchanged. Throws `.unknownNode` for an
+  /// unknown id or a split (splits have no stored title yet); the sidebar is unchanged on throw.
+  public mutating func rename(_ id: NodeID, to title: String?) throws {
+    let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    switch nodes[id]?.kind {
+    case .tab(var tab)?:
+      tab.customTitle = trimmed.isEmpty ? nil : trimmed
+      nodes[id]?.kind = .tab(tab)
+    case .folder(var folder)?:
+      guard !trimmed.isEmpty else { return }
+      folder.title = trimmed
+      nodes[id]?.kind = .folder(folder)
+    case .split?, nil:
+      throw SidebarError.unknownNode(id)
+    }
   }
 
   /// The subtree rooted at `id`, in child order, or nil for an unknown id.

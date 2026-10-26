@@ -186,6 +186,16 @@ public protocol SidebarSource: AnyObject {
   /// `.spaceChanged` when it changed; an unknown id or the same theme is ignored.
   func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo?)
   func updateTab(_ id: NodeID, url: URL?, title: String?)
+  /// Rename (BH-026). A tab takes `title`, trimmed, as its custom title: `node(_:)` reports it from then on and page
+  /// titles from `updateTab` no longer replace it; nil or an empty name clears it. A folder takes the trimmed name as
+  /// its title; an empty name keeps the old one. Emits `.node(id)` when the shown title changed; splits (no stored
+  /// title yet) and unknown ids are ignored.
+  func renameNode(_ id: NodeID, to title: String?)
+  /// Duplicate (BH-027, BH-095): a copy of `id` and its subtree with new ids, right after the original in the same
+  /// location. Tabs keep their URL and custom title. Emits `.structure` for that location. Returns the copy.
+  @discardableResult func duplicateNode(_ id: NodeID) throws -> NodeID
+  /// New Folder (KB-040, BH-094): an empty folder at `index` (clamped; nil appends). Emits `.structure`.
+  @discardableResult func addFolder(title: String, in location: SidebarLocation, at index: Int?) throws -> NodeID
 
   /// Moves a node to `location` at `index` (measured before removal, clamped). Emits `.structure` for every
   /// location whose child order changed. Throws `SidebarMoveError.favoritesFull` when the destination is a full

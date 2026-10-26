@@ -496,6 +496,22 @@ public final class SidebarContainerView: NSView {
     page?.setAccessibilitySelected(true)
   }
 
+  // MARK: Non-key dimming (BH-025)
+
+  /// The sidebar's content opacity while the window is not key (design 5, OQ8). The traffic lights are the
+  /// system's and keep their look; the content card is not part of this view.
+  public static let dimmedAlpha: CGFloat = 0.6
+
+  /// Dims the URL bar, Favorites, the Space pages and the bottom bar at once, without animation (design 5 and 8).
+  /// Purely visual: hit-testing and accessibility do not change.
+  public var isDimmed = false {
+    didSet {
+      guard isDimmed != oldValue else { return }
+      let alpha = isDimmed ? Self.dimmedAlpha : 1
+      for view in [urlBar, favorites, pager, bottomBar] as [NSView] { view.alphaValue = alpha }
+    }
+  }
+
   /// Flavor of the chrome around the pages (favorites, dots, buttons). Each page keeps its own Space's flavor.
   public private(set) var flavor: ThemeFlavor = .light
 

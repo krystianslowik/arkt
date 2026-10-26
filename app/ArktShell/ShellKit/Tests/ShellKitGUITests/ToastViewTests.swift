@@ -133,6 +133,11 @@ private final class FailingSpaceSidebar: SidebarSource {
   func setIcon(_ id: SpaceID, to icon: SpaceIconInfo?) { base.setIcon(id, to: icon) }
   func setTheme(_ id: SpaceID, to theme: SpaceThemeInfo?) { base.setTheme(id, to: theme) }
   func updateTab(_ id: NodeID, url: URL?, title: String?) { base.updateTab(id, url: url, title: title) }
+  func renameNode(_ id: NodeID, to title: String?) { base.renameNode(id, to: title) }
+  func duplicateNode(_ id: NodeID) throws -> NodeID { try base.duplicateNode(id) }
+  func addFolder(title: String, in location: SidebarLocation, at index: Int?) throws -> NodeID {
+    base.addFolder(title: title, in: location, at: index)
+  }
   func moveNode(_ id: NodeID, to location: SidebarLocation, at index: Int) throws {
     base.moveNode(id, to: location, at: index)
   }

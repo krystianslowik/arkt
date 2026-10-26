@@ -141,6 +141,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 
   public override func mouseDown(with event: NSEvent) {
     keyboardFocusRow = nil                       // the next pointer click removes the keyboard focus ring
+    commitRenameInProgress()                     // any click, a Ctrl-click too, ends a rename first
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
     // A Ctrl-click is a secondary click: the row's context menu, as a right-click shows, never the click action.
     // Left to the table, it sends the row action with Control set, which activates the row (#277).
@@ -153,10 +154,48 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     let point = convert(event.locationInWindow, from: nil)
     lastClickPoint = point
     let row = self.row(at: point)
+    guard row >= 0 else {
+      emptyAreaMouseDown(event)
+      return
+    }
     let rowView = row >= 0 ? self.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView : nil
     rowView?.isPressed = true
     super.mouseDown(with: event)
     rowView?.isPressed = false
+  }
+
+  // MARK: Empty area (BH-021, BH-023)
+
+  /// A double-click on the outline below or between rows (BH-021): the window opens the command bar for a new tab.
+  var onEmptyAreaDoubleClick: (@MainActor () -> Void)?
+  /// A plain press on empty outline space; the controller ends the multi-selection.
+  var onEmptyAreaClick: (@MainActor () -> Void)?
+  /// Drags the window from empty outline space (BH-023); tests replace it, since a drag runs a tracking loop.
+  var performWindowDrag: @MainActor (NSEvent, NSWindow?) -> Void = { event, window in window?.performDrag(with: event) }
+
+  /// The same empty area moves the window and opens a new tab (design 4.3): the gesture decides. A press that moves
+  /// drags; a second click without motion is a double-click.
+  private func emptyAreaMouseDown(_ event: NSEvent) {
+    if clickModifiers.intersection([.command, .shift]).isEmpty { onEmptyAreaClick?() }
+    if event.clickCount == 2 {
+      onEmptyAreaDoubleClick?()
+    } else {
+      performWindowDrag(event, window)
+    }
+  }
+
+  /// A right-click ends a rename in progress first too, as a left click does.
+  public override func rightMouseDown(with event: NSEvent) {
+    commitRenameInProgress()
+    super.rightMouseDown(with: event)
+  }
+
+  /// A click anywhere in the outline ends a rename in progress first, keeping the typed name (design 4.1): the
+  /// outline itself never takes first responder from the field, so the field would stay open otherwise.
+  private func commitRenameInProgress() {
+    guard let editor = window?.firstResponder as? NSTextView, editor.isFieldEditor,
+          let field = editor.delegate as? NSView, field.isDescendant(of: self) else { return }
+    window?.makeFirstResponder(nil)
   }
 
   // MARK: Keyboard focus (BH-019, BH-020)
@@ -295,6 +334,19 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Whether a pinned tab sits away from its pinned URL; drives the reset-family items' enabled state (the window
   /// knows the live page's URL).
   public var pinnedNavigatedProvider: (@MainActor (NodeID) -> Bool)?
+  /// Every context menu action the outline does not run through the callbacks above (#105); the window runs it.
+  public var onMenuAction: (@MainActor (SidebarMenuAction) -> Void)?
+  /// Double-click on empty outline space (BH-021); the window opens the command bar for a new tab.
+  public var onEmptyAreaDoubleClick: (@MainActor () -> Void)? {
+    get { outlineView.onEmptyAreaDoubleClick }
+    set { outlineView.onEmptyAreaDoubleClick = newValue }
+  }
+  /// The URL on the clipboard, if any (Paste URL as New Tab, KB-016); tests replace it.
+  var clipboardURL: @MainActor () -> URL? = {
+    NSPasteboard.general.string(forType: .string).flatMap {
+      URLInputParser.url(from: $0.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+  }
   /// A tab row started a drag (S7, GS-011); the window shows its drop overlay above the page.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   /// The drag that `onNodeDragBegan` reported ended, dropped or not.
@@ -353,6 +405,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.autoresizesOutlineColumn = false
     outlineView.target = self
     outlineView.action = #selector(rowClicked(_:))
+    outlineView.doubleAction = #selector(rowDoubleClicked(_:))
+    outlineView.onEmptyAreaClick = { [weak self] in self?.clearSelection() }   // a plain click ends it (design 6)
     outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
     outlineView.setDraggingSourceOperationMask([], forLocal: false)   // tabs stay inside the app
     let menu = NSMenu()
@@ -638,6 +692,13 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     return .normal
   }
 
+  /// The state a row draws: a selected row takes the `contentVisible` fill (design 6, OQ9) unless it is current,
+  /// which wins.
+  func displayedState(for id: NodeID) -> TabRowState {
+    let base = state(for: id)
+    return selection.contains(id) && base != .current ? .contentVisible : base
+  }
+
   /// Row configurations so far (tests check that state pushes touch only changed rows).
   private(set) var rowConfigureCount = 0
 
@@ -646,7 +707,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     row.flavor = flavor
     if let id = item?.nodeID {
       row.isInteractive = true
-      row.state = state(for: id)
+      row.state = displayedState(for: id)
     } else {
       row.isInteractive = false
       row.state = .normal
@@ -709,6 +770,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   /// Refreshes one row's cell (title or favicon) without touching any other row.
   public func reload(node id: NodeID) {
+    if id == renamingNode {
+      renameReloadPending = true             // a reload would replace the cell and close the field
+      return
+    }
     guard let existing = items[id] else { return }
     let row = outlineView.row(forItem: existing)
     guard row >= 0 else { return }
@@ -784,6 +849,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
         expandContainer(id)
       }
     }
+    pruneSelection()
   }
 
   /// Expands `id` (unless it is a folder the user collapsed) and any non-collapsed containers inside it (#94).
@@ -819,7 +885,19 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   func handleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
     defer { outlineView.lastClickPoint = nil }
     guard row >= 0, let item = outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }
-    let option = modifiers.intersection([.command, .option, .control, .shift]) == .option
+    let flags = modifiers.intersection([.command, .option, .control, .shift])
+    let option = flags == .option
+    if flags == .command || flags == .shift, isSelectable(id), !isPinnedFaviconClick(row: row, id: id) {
+      var next = selection
+      if flags == .command {
+        next.toggle(id, seed: selectionSeed)
+      } else {
+        next.extend(to: id, seed: selectionSeed, order: selectableOrder)
+      }
+      setSelection(next)
+      return
+    }
+    clearSelection()                                  // a plain click collapses the selection (design 6)
     switch source.node(id) {
     case .folder?:
       if outlineView.isItemExpanded(item) {
@@ -861,7 +939,124 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     if case .split? = source.parent(of: id) { true } else { false }
   }
 
-  // MARK: Context menu
+  // MARK: Multi-selection (BH-028, GS-031)
+
+  /// The rows selected with Cmd-click and Shift-click in this outline.
+  public private(set) var selection = SidebarSelection()
+
+  /// The selected nodes in display order.
+  public var selectedNodes: [NodeID] { selection.ordered(by: displayedNodes) }
+
+  /// Ends the selection (a plain click, a Space switch); only rows that change are redrawn.
+  public func clearSelection() {
+    guard !selection.isEmpty else { return }
+    setSelection(SidebarSelection())
+  }
+
+  private func setSelection(_ next: SidebarSelection) {
+    let changed = Set(selection.nodes).symmetricDifference(next.nodes)
+    selection = next
+    guard !changed.isEmpty else { return }
+    outlineView.enumerateAvailableRowViews { rowView, row in
+      guard let rowView = rowView as? SidebarRowView, let item = self.outlineView.item(atRow: row) as? OutlineItem,
+            let id = item.nodeID, changed.contains(id) else { return }
+      self.configure(rowView, for: item)
+    }
+    outlineView.axProxyRows.selectionDidChange()
+  }
+
+  /// Selected rows that left the outline (archived, moved, pinned out, collapsed away) leave the selection.
+  private func pruneSelection() {
+    guard !selection.isEmpty else { return }
+    var next = selection
+    next.retain { row(for: $0) >= 0 }
+    if next != selection { setSelection(next) }
+  }
+
+  /// Tabs and splits may be selected; a pane stays with its split and a folder only opens and closes, so no bulk
+  /// action ever receives a pane or a folder from a click.
+  private func isSelectable(_ id: NodeID) -> Bool {
+    switch source.node(id) {
+    case .tab?: !isPane(id)
+    case .split?: true
+    case .folder?, nil: false
+    }
+  }
+
+  /// Every node row in display order.
+  private var displayedNodes: [NodeID] { (0..<outlineView.numberOfRows).compactMap(nodeID(atRow:)) }
+
+  private var selectableOrder: [NodeID] { displayedNodes.filter(isSelectable) }
+
+  /// The current row (a pane: its split), when this outline shows it: the row an empty selection starts from.
+  private var selectionSeed: NodeID? {
+    guard let current = resolver.current else { return nil }
+    let seed = if case .split(let split)? = source.parent(of: current) { split } else { current }
+    return row(for: seed) >= 0 && isSelectable(seed) ? seed : nil
+  }
+
+  // MARK: Rename (BH-026)
+
+  /// The node whose rename field is open in this outline.
+  public private(set) var renamingNode: NodeID?
+  private var renameReloadPending = false
+  /// The title the row showed when the field opened. Committing it unchanged stores nothing, so an accidental
+  /// double-click never freezes the page title as a custom title.
+  private var renameOriginalTitle: String?
+
+  /// Double-click on a tab row opens its rename field (BH-026, GS-004). Folders open and close on the first click
+  /// and are renamed from their menu; splits have no stored title.
+  @objc private func rowDoubleClicked(_ sender: Any?) {
+    handleDoubleClick(row: outlineView.clickedRow, modifiers: outlineView.clickModifiers)
+  }
+
+  func handleDoubleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
+    guard row >= 0, modifiers.intersection([.command, .option, .control, .shift]).isEmpty,
+          let id = nodeID(atRow: row), case .tab? = source.node(id) else { return }
+    beginRename(id)
+  }
+
+  /// Opens the inline rename field on `id`'s row (tabs and folders). The typed name goes to the source on Return or
+  /// a click elsewhere; Escape keeps the title. False when the row is not shown or the field could not open.
+  @discardableResult
+  public func beginRename(_ id: NodeID) -> Bool {
+    guard renamingNode == nil else { return false }
+    switch source.node(id) {
+    case .tab?, .folder?: break
+    case .split?, nil: return false
+    }
+    let row = row(for: id)
+    guard row >= 0 else { return false }
+    outlineView.scrollRowToVisible(row)
+    guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: true) as? SidebarTabCellView
+    else { return false }
+    renamingNode = id
+    renameReloadPending = false
+    renameOriginalTitle = Self.shownTitle(of: source.node(id))
+    let opened = cell.beginRename(flavor: flavor) { [weak self] typed in self?.finishRename(id, typed: typed) }
+    if !opened { renamingNode = nil }
+    return opened
+  }
+
+  private func finishRename(_ id: NodeID, typed: String?) {
+    renamingNode = nil
+    let pending = renameReloadPending
+    renameReloadPending = false
+    let original = renameOriginalTitle
+    renameOriginalTitle = nil
+    let changed = typed.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) != original } ?? false
+    if changed { source.renameNode(id, to: typed) }     // persisted by the source (autosave); emits `.node`
+    if pending || !changed { reload(node: id) }
+  }
+
+  private static func shownTitle(of node: SidebarNodeInfo?) -> String? {
+    switch node {
+    case .tab(_, _, let title)?, .folder(_, let title)?: title
+    default: nil
+    }
+  }
+
+  // MARK: Context menu (design/tab-context-menus)
 
   public func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
@@ -871,84 +1066,64 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
   }
 
-  /// The context menu of `row`, nil for rows without one (folders, the divider). A split row: Separate
-  /// All Tabs, Convert to Vertical / Horizontal Split View and Duplicate Split View (BH-120, BH-121, BH-126); a pane
-  /// row: Remove Tab from Split View (BH-121, [S] string); any other tab row: Move To > Favorites (BH-047), then the
-  /// pin items (BH-055) and, for pinned tabs, the reset family (BH-057, BH-060, BH-061; [S] strings).
-  /// Mute, Share and Archive Below are deferred (BH-126); the full menu set is #105.
+  /// The context menu for a right-click on `row` (-1 and the divider: the empty area). A right-click on a selected
+  /// row of a multi-selection gets the multi-selection menu; on any other row the selection ends first and the
+  /// row's own menu shows (OQ10, the standard macOS rule).
   func menu(forRow row: Int) -> NSMenu? {
-    guard row >= 0, let id = (outlineView.item(atRow: row) as? OutlineItem)?.nodeID else { return nil }
-    let menu = NSMenu()
-    menu.autoenablesItems = false
-    switch source.node(id) {
-    case .split(_, let layout)?:
-      menu.addItem(menuItem("Separate All Tabs", #selector(separateSplitChosen(_:)), id))
-      menu.addItem(menuItem(SplitMenu.convertTitle(for: layout.orientation), #selector(convertSplitChosen(_:)), id))
-      menu.addItem(menuItem("Duplicate Split View", #selector(duplicateSplitChosen(_:)), id))   // [I] title
-    case .tab? where isPane(id):
-      menu.addItem(menuItem("Remove Tab from Split View", #selector(removePaneChosen(_:)), id))
-    case .tab?:
-      menu.addItem(moveToItem(id))
-      switch source.parent(of: id) {
-      case .today?:
-        menu.addItem(menuItem("Pin Tab", #selector(pinToggleChosen(_:)), id))
-      case .pinned?:
-        menu.addItem(menuItem("Unpin Tab", #selector(pinToggleChosen(_:)), id))
-        addResetItems(to: menu, for: id)
-      case .folder?:
-        addResetItems(to: menu, for: id)          // foldered tabs are pinned through their folder
-      default:
-        break
+    let target: SidebarMenuTarget
+    if row >= 0, let id = nodeID(atRow: row) {
+      if selection.count >= 2, selection.contains(id) {
+        target = .rows(selectedNodes)
+      } else {
+        clearSelection()
+        target = .rows([id])
       }
-    default:
-      return nil
+    } else {
+      target = .empty(spaceID)
     }
-    return menu
+    let entries = SidebarContextMenu.entries(for: target, in: source, context: menuContext(for: target))
+    return entries.isEmpty ? nil
+      : SidebarContextMenu.menu(entries, target: self, action: #selector(menuActionChosen(_:)))
   }
 
-  /// Back to Pinned URL, Replace Pin with Current Page and Separate From Pinned Tab (BH-057, BH-060, BH-061);
-  /// enabled only while the tab sits away from its pinned URL.
-  private func addResetItems(to menu: NSMenu, for id: NodeID) {
-    let navigated = pinnedNavigatedProvider?(id) ?? false
-    menu.addItem(.separator())
-    for (title, action) in [("Back to Pinned URL", #selector(resetPinnedChosen(_:))),
-                            ("Replace Pin with Current Page", #selector(replacePinChosen(_:))),
-                            ("Separate From Pinned Tab", #selector(separateFromPinnedChosen(_:)))] {
-      let item = menuItem(title, action, id)
-      item.isEnabled = navigated
-      menu.addItem(item)
+  private func menuContext(for target: SidebarMenuTarget) -> SidebarMenuContext {
+    let profile = source.space(spaceID)?.profile
+    let spaces = source.spaceOrder.compactMap { id -> (id: SpaceID, title: String)? in
+      guard let info = source.space(id), info.profile == profile else { return nil }
+      return (id, info.title)
+    }
+    var navigated: Set<NodeID> = []
+    if case .rows(let ids) = target, ids.count == 1, let id = ids.first, pinnedNavigatedProvider?(id) == true {
+      navigated.insert(id)
+    }
+    return SidebarMenuContext(spaces: spaces, navigatedPins: navigated, clipboardHasURL: clipboardURL() != nil)
+  }
+
+  @objc private func menuActionChosen(_ sender: NSMenuItem) {
+    guard let action = sender.representedObject as? SidebarMenuAction else { return }
+    perform(action)
+  }
+
+  /// Runs a menu action: the row actions that already have callbacks go through them, rename opens here, and every
+  /// other action goes to the window.
+  func perform(_ action: SidebarMenuAction) {
+    switch action {
+    case .rename(let id): beginRename(id)
+    case .separateSplit(let id): run(onSeparateSplit, on: id)
+    case .convertSplit(let id): run(onConvertSplit, on: id)
+    case .duplicateSplit(let id): run(onDuplicateSplit, on: id)
+    case .removePane(let id): run(onRemovePane, on: id)
+    case .resetPinned(let id): run(onResetPinned, on: id)
+    case .replacePin(let id): run(onReplacePin, on: id)
+    case .separateFromPinned(let id): run(onSeparateFromPinned, on: id)
+    case .moveToFavorites(let ids) where ids.count == 1: run(onMoveToFavorites, on: ids[0])
+    case .pinToggle(let ids) where ids.count == 1: run(onPinToggle, on: ids[0])
+    default: onMenuAction?(action)
     }
   }
 
-  /// "Move To" with its submenu (BH-047): Favorites; the Spaces join it with #105 (BH-042).
-  private func moveToItem(_ id: NodeID) -> NSMenuItem {
-    let item = NSMenuItem(title: "Move To", action: nil, keyEquivalent: "")
-    let submenu = NSMenu()
-    submenu.autoenablesItems = false
-    submenu.addItem(menuItem("Favorites", #selector(moveToFavoritesChosen(_:)), id))
-    item.submenu = submenu
-    return item
-  }
-
-  private func menuItem(_ title: String, _ action: Selector, _ id: NodeID) -> NSMenuItem {
-    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-    item.target = self
-    item.representedObject = id
-    return item
-  }
-
-  @objc private func separateSplitChosen(_ sender: NSMenuItem) { chosen(sender, onSeparateSplit) }
-  @objc private func convertSplitChosen(_ sender: NSMenuItem) { chosen(sender, onConvertSplit) }
-  @objc private func duplicateSplitChosen(_ sender: NSMenuItem) { chosen(sender, onDuplicateSplit) }
-  @objc private func removePaneChosen(_ sender: NSMenuItem) { chosen(sender, onRemovePane) }
-  @objc private func moveToFavoritesChosen(_ sender: NSMenuItem) { chosen(sender, onMoveToFavorites) }
-  @objc private func pinToggleChosen(_ sender: NSMenuItem) { chosen(sender, onPinToggle) }
-  @objc private func resetPinnedChosen(_ sender: NSMenuItem) { chosen(sender, onResetPinned) }
-  @objc private func replacePinChosen(_ sender: NSMenuItem) { chosen(sender, onReplacePin) }
-  @objc private func separateFromPinnedChosen(_ sender: NSMenuItem) { chosen(sender, onSeparateFromPinned) }
-
-  private func chosen(_ item: NSMenuItem, _ handler: (@MainActor (NodeID) -> Void)?) {
-    guard let id = item.representedObject as? NodeID, source.node(id) != nil else { return }
+  private func run(_ handler: (@MainActor (NodeID) -> Void)?, on id: NodeID) {
+    guard source.node(id) != nil else { return }
     handler?(id)
   }
 

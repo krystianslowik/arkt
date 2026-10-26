@@ -3,7 +3,7 @@ import AppKit
 /// Favicon (16 pt at x 10), title (14 pt medium at x 34) and the hover close (X) button at the trailing edge
 /// (GS-043). Frames set in `layout()`; no constraints.
 @MainActor
-public final class SidebarTabCellView: NSTableCellView {
+public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
   public static let reuseIdentifier = NSUserInterfaceItemIdentifier("SidebarTabCellView")
 
   public let faviconView = NSImageView()
@@ -75,7 +75,7 @@ public final class SidebarTabCellView: NSTableCellView {
   /// Shows or hides the X (only when there is a close action), fading with the row's hover state. Only the button's
   /// opacity and hidden flag and the title's width change: two frames set directly, nothing else is laid out.
   public func setCloseButtonShown(_ shown: Bool, animated: Bool) {
-    let shown = shown && closeAction != nil
+    let shown = shown && closeAction != nil && renameField == nil
     guard shown != isCloseButtonShown || !animated else { return }   // unanimated calls always settle the state
     isCloseButtonShown = shown
     layoutTitle()
@@ -85,6 +85,100 @@ public final class SidebarTabCellView: NSTableCellView {
   public override func prepareForReuse() {
     super.prepareForReuse()
     setCloseButtonShown(false, animated: false)
+    if isRenaming { endRename(commit: true) }
+  }
+
+  // MARK: Rename (BH-026, design 4.1)
+
+  /// The inline rename field: a native rounded text field over the title's bounds, 13 pt, the whole title selected,
+  /// the system focus ring (`NSColor.keyboardFocusIndicatorColor`, so the accent color) and the system selection
+  /// color. No brand color and no animation: the field is simply there.
+  public private(set) var renameField: NSTextField?
+  /// Called once when the field closes: the typed name on Return or focus loss, nil on Escape.
+  private var onRenameEnd: (@MainActor (String?) -> Void)?
+  private var renameCancelled = false
+  public var isRenaming: Bool { renameField != nil }
+
+  /// The rename field's font size (design 4.1) and height (the native rounded field at that size).
+  static let renameFontSize: CGFloat = 13
+  static let renameFieldHeight: CGFloat = 22
+
+  /// Opens the field over the title with the title selected. False when the cell has no window or the field could
+  /// not take focus (nothing changes then).
+  @discardableResult
+  public func beginRename(flavor: ThemeFlavor, onEnd: @escaping @MainActor (String?) -> Void) -> Bool {
+    guard !isRenaming, let window else { return false }
+    let field = NSTextField(string: titleField.stringValue)
+    field.font = .systemFont(ofSize: Self.renameFontSize)
+    field.isBezeled = true
+    field.bezelStyle = .roundedBezel
+    field.focusRingType = .default
+    field.usesSingleLineMode = true
+    field.cell?.isScrollable = true
+    field.cell?.wraps = false
+    field.lineBreakMode = .byClipping
+    field.appearance = NSAppearance(named: flavor == .dark ? .darkAqua : .aqua)
+    field.delegate = self
+    field.setAccessibilityLabel("Tab name")
+    renameField = field
+    onRenameEnd = onEnd
+    renameCancelled = false
+    titleField.isHidden = true
+    setCloseButtonShown(false, animated: false)
+    addSubview(field)
+    layoutRenameField()
+    guard window.makeFirstResponder(field) else {
+      endRename(commit: false)
+      return false
+    }
+    field.currentEditor()?.selectAll(nil)
+    NSAccessibility.post(element: field, notification: .focusedUIElementChanged)
+    return true
+  }
+
+  /// Return commits, Escape cancels; both resign the field, so `controlTextDidEndEditing` is the single exit.
+  /// A pasted newline arrives as `insertNewline` too in a single-line field, so it commits as well.
+  public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+    guard control === renameField else { return false }
+    switch selector {
+    case #selector(NSResponder.cancelOperation(_:)):
+      renameCancelled = true
+    case #selector(NSResponder.insertNewline(_:)):
+      break
+    default:
+      return false
+    }
+    if window?.makeFirstResponder(nil) != true { endRename(commit: !renameCancelled) }
+    return true
+  }
+
+  /// Return, Escape, a click elsewhere, the cell leaving its window: every way out ends here.
+  public func controlTextDidEndEditing(_ notification: Notification) {
+    guard (notification.object as? NSTextField) === renameField else { return }
+    endRename(commit: !renameCancelled)
+  }
+
+  /// Closes the field (commit: hands the typed text on; else nil) and shows the title again.
+  public func endRename(commit: Bool) {
+    guard let field = renameField else { return }
+    let typed = field.stringValue
+    renameField = nil
+    field.delegate = nil
+    field.abortEditing()
+    field.removeFromSuperview()
+    titleField.isHidden = false
+    let end = onRenameEnd
+    onRenameEnd = nil
+    end?(commit ? typed : nil)
+  }
+
+  /// The field takes the title's horizontal bounds and the native field height, centered on the row.
+  private func layoutRenameField() {
+    guard let field = renameField else { return }
+    let height = Self.renameFieldHeight
+    let x = SidebarMetrics.titleLeading - 4
+    let end = bounds.width - SidebarMetrics.titleTrailing
+    field.frame = NSRect(x: x, y: ((bounds.height - height) / 2).rounded(), width: max(0, end - x), height: height)
   }
 
   /// The proxy of the row this cell is in (#269): the proxy lists the cell as its child. Outside a sidebar outline,
@@ -110,6 +204,7 @@ public final class SidebarTabCellView: NSTableCellView {
     closeButton.frame = NSRect(x: bounds.width - SidebarMetrics.closeButtonTrailing - box,
                                y: ((bounds.height - box) / 2).rounded(), width: box, height: box)
     layoutTitle()
+    layoutRenameField()
   }
 
   /// The title ends before the X while it is shown, else at the usual trailing inset.
