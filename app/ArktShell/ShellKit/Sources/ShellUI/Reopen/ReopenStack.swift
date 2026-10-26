@@ -28,20 +28,24 @@ public struct ClosedNode: Equatable, Sendable {
   public var node: NodeID
   /// The row went to the Archive (Today); it comes back through the archive record.
   public var isArchived: Bool
-  /// Where the row sat when it closed, so it comes back at its place.
+  /// Where the row sat when it closed, so it comes back at its place: a Today row at its index, a pane into its split
+  /// (when that split still exists) at its index with `splitShare` (#403).
   public var location: SidebarLocation?
   public var index: Int?
+  /// A pane's share of its split when it closed; nil for any other row.
+  public var splitShare: Double?
   /// Unloaded copies of the row's pages (a split: one per pane), keyed by the tab node they belong to.
   public var parked: [NodeID: TabID]
   /// The Peek that was open over it and closed with it; both reopen together.
   public var peek: ClosedPeek?
 
-  public init(node: NodeID, isArchived: Bool, location: SidebarLocation?, index: Int?, parked: [NodeID: TabID],
-              peek: ClosedPeek? = nil) {
+  public init(node: NodeID, isArchived: Bool, location: SidebarLocation?, index: Int?, splitShare: Double? = nil,
+              parked: [NodeID: TabID], peek: ClosedPeek? = nil) {
     self.node = node
     self.isArchived = isArchived
     self.location = location
     self.index = index
+    self.splitShare = splitShare
     self.parked = parked
     self.peek = peek
   }

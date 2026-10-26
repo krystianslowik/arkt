@@ -111,6 +111,18 @@ public enum SplitLayout {
     }
   }
 
+  /// The factors of a split after a closed pane comes back (#403): `share` at `index` (clamped), the panes already
+  /// there scaled into the rest, so they keep their proportions; the result sums to 1. Without a usable share (nil,
+  /// not finite, or not strictly between 0 and 1) every pane gets an equal share, as for any added pane (RT-35).
+  public static func inserting(share: Double?, at index: Int, into factors: [Double]) -> [Double] {
+    let count = factors.count + 1
+    guard let share, share.isFinite, share > 0, share < 1 else { return equalShares(count) }
+    guard !factors.isEmpty else { return [1] }
+    var result = normalized(factors, count: factors.count).map { $0 * (1 - share) }
+    result.insert(share, at: min(max(index, 0), result.count))
+    return result
+  }
+
   static func equalShares(_ count: Int) -> [Double] {
     count > 0 ? Array(repeating: 1 / Double(count), count: count) : []
   }

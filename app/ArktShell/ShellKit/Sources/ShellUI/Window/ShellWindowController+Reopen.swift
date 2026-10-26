@@ -79,7 +79,17 @@ extension ShellWindowController {
     }
     let location = sidebar.parent(of: node)
     let index = location.flatMap { sidebar.children(of: $0).firstIndex(of: node) }
-    remember(.node(ClosedNode(node: node, isArchived: archived, location: location, index: index, parked: parked)))
+    remember(.node(ClosedNode(node: node, isArchived: archived, location: location, index: index,
+                              splitShare: splitShare(of: node, at: location, index: index), parked: parked)))
+  }
+
+  /// A pane's share of its split, so a reopen gives it back (#403); nil for any other row.
+  private func splitShare(of node: NodeID, at location: SidebarLocation?, index: Int?) -> Double? {
+    guard case .split(let split)? = location, let index, case .split(_, let layout)? = sidebar.node(split) else {
+      return nil
+    }
+    let shares = SplitLayout.normalized(layout.widthFactors, count: sidebar.children(of: .split(split)).count)
+    return shares.indices.contains(index) ? shares[index] : nil
   }
 
   /// The close of `node` was cancelled at a leave-site prompt (Decision 11): it never happened. A pane's close is
@@ -197,8 +207,31 @@ extension ShellWindowController {
   private func restoredNode(for closed: ClosedNode) -> NodeID? {
     if sidebar.node(closed.node) != nil { return closed.node }
     guard closed.isArchived, let node = onReopenArchived?(closed.node), sidebar.node(node) != nil else { return nil }
-    putBack(node, at: closed.location, index: closed.index)
+    if case .split(let split)? = closed.location {
+      putBack(node, into: split, index: closed.index, share: closed.splitShare)
+    } else {
+      putBack(node, at: closed.location, index: closed.index)
+    }
     return node
+  }
+
+  /// A pane goes back into its split, at its old index with its old share (#403), when that split still exists and
+  /// has room; otherwise it stays where the restore put it, a Today tab. The panes on screen reflow when the split
+  /// is the one shown.
+  private func putBack(_ node: NodeID, into split: NodeID, index: Int?, share: Double?) {
+    guard case .split(_, let layout)? = sidebar.node(split), case .tab? = sidebar.node(node),
+          sidebar.parent(of: node) != .split(split) else { return }
+    let before = sidebar.children(of: .split(split))
+    let factors = SplitLayout.normalized(layout.widthFactors, count: before.count)
+    let at = min(max(index ?? before.count, 0), before.count)
+    do {
+      try sidebar.addToSplit(.existing(node), target: split, at: at, orientation: layout.orientation)
+    } catch {
+      return                                                    // full, or refused: a Today tab, as before #403
+    }
+    if splitState.split == split { splitState.reflowAfterReopen = (split, node) }
+    // A refused factor write leaves the equal shares `addToSplit` gave; the pane is back either way.
+    try? sidebar.setSplitWidthFactors(split, SplitLayout.inserting(share: share, at: at, into: factors))
   }
 
   /// A restore lands on top of Today (`Archiver.restore`); a reopen puts the row back where it was.
