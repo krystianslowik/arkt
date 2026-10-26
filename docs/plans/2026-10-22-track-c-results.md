@@ -2268,9 +2268,26 @@ the first red. With the implementation in place they pass:
 ### Acceptance: idle smoke (#24 criterion 4)
 
 Three `-ArktSmokeRepeat 25` runs of the Profile copy, sequentially, hands off the pointer and keyboard, each after
-waiting for load1 below 11. Each run was launched as the app binary with an `osascript` frontmost call two seconds in:
+waiting for load1 below 11. Each run was launched as the app binary with an `osascript` frontmost call one second in:
 a bare direct launch leaves the app inactive and the smoke's own KB-003 check fails (`bar key true, hidden false`,
 exit 2); `open -W` activates it but does not propagate the app's exit status. With the activation step the functional
 checks pass and the binary's exit code is captured.
 
-Wait for results.
+Two sets were run. The first set hit a bug in the harness's retry condition (shell arithmetic outside `(( ))`), so a
+NOT-MEASURABLE and a functional-FAIL attempt were not retried; it is recorded anyway. Loads are the app's own
+`load1` sample, and "late" is the number of display-link intervals over 8.6 ms in 100 interactions.
+
+| set | run | load1 | functional | pacing | late intervals |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 11.11 | PASS | FAIL | 6 (swipe-back 62 at 17.65 ms; swipe-next 4 at 13.77, 5 at 11.22; three more interactions at frame 9, 16.66 ms each) |
+| 1 | 2 | 14.34 | PASS | NOT-MEASURABLE | 6 |
+| 1 | 3 | 10.77 | FAIL (KB-003) | FAIL | 0 |
+| 2 | 1 | 6.35 | PASS | FAIL | 37 (key-previous 1-20; swipe-next 39-45 up to 59.11 ms; swipe-back 42-55) |
+| 2 | 2 | 4.86 | PASS | FAIL | 1 (key-next 59 at 16.66 ms) |
+| 2 | 3 | 6.29 | PASS | FAIL | 28 (one 16.66 ms interval at frame 9 of almost every swipe, plus swipe-back 7 at 12.50 and 62 at 16.91) |
+
+No set passed 3 of 3, so criterion 4 is not met. Set 2 is the closer one: run 2 missed by a single interval, and
+run 3's dominant hitch is one 16.66 ms interval at frame 9 of a swipe, the same frame the pre-#415 trace saw late
+under load. The machine was not idle even at load 4.9: WindowServer ran at 23-70% CPU, `searchpartyd` at up to 86%,
+`bird` at up to 62%, and `coreaudiod` and browser helpers stayed busy. A 3 of 3 run on a quiet machine is still
+needed; it is a maintainer step, not something this tree can force from a shared machine.
