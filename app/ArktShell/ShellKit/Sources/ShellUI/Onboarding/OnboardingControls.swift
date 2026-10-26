@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 // MARK: - Swatches
 
@@ -249,9 +250,13 @@ final class SwatchView: NSView {
 // MARK: - Appearance
 
 /// The segmented pill "Light" / "Dark" beside the swatches: track `brandControlFill`, thumb `surfaceBrand` with a
-/// hairline, sliding 300 ms on the drawer curve (M6). Disabled at 40 % while an own gradient is selected.
+/// hairline. The thumb's base position (bounds and position, set in `layout()`) is the first segment; its travel is
+/// a transform translation driven by one interruptible spring on position only (`firm`), so a layout pass never
+/// moves it. Reduce Motion jumps without travel. Disabled at 40 % while an own gradient is selected.
 @MainActor
 final class AppearanceSegmentView: NSView {
+  private enum Motion: Hashable, Sendable { case thumb }
+
   static let segmentWidth: CGFloat = 70
   static let segmentHeight: CGFloat = 36
   static let inset: CGFloat = 4
@@ -269,6 +274,19 @@ final class AppearanceSegmentView: NSView {
   private let thumb = CALayer()
   private let focus = CAShapeLayer()
   private let segments: [AppearanceSegment]
+
+  /// The clock the thumb's spring reads; tests pass their own.
+  var now: @MainActor () -> CFTimeInterval = { CACurrentMediaTime() }
+  /// Off in tests, which present frames on their own clock with `presentFrame()`.
+  var drivesFramesItself = true
+  /// The thumb's place as a share of the travel between the segments: 0 under Light, 1 under Dark.
+  private var restProgress = 0.0
+  private var field = SpringField<Motion>()
+  private var link: CADisplayLink?
+
+  var isAnimating: Bool { !field.keys.isEmpty }
+
+  isolated deinit { link?.invalidate() }
 
   init(appearance: OnboardingAppearance) {
     self.appearanceModel = appearance
@@ -295,6 +313,10 @@ final class AppearanceSegmentView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  /// The thumb's frame and a segment's frame in this control's coordinate space.
+  var thumbFrame: CGRect { thumb.frame }
+  func segmentFrame(for flavor: ThemeFlavor) -> CGRect { segments.first { $0.flavor == flavor }?.frame ?? .zero }
+
   override var isFlipped: Bool { true }
   override var acceptsFirstResponder: Bool { isEnabled }
   override var canBecomeKeyView: Bool { isEnabled }
@@ -307,10 +329,48 @@ final class AppearanceSegmentView: NSView {
   func setValue(_ flavor: ThemeFlavor, animated: Bool) {
     value = flavor
     for segment in segments { segment.setChecked(segment.flavor == flavor, appearance: appearanceModel) }
-    let x = flavor == .light ? 0 : Self.segmentWidth
-    let transform = NSValue(caTransform3D: CATransform3DMakeTranslation(x, 0, 0))
-    let duration = animated && !appearanceModel.reduceMotion ? 0.3 : 0
-    OnboardingMotion.animate(thumb, "transform", to: transform, duration: duration, timing: OnboardingMotion.drawer)
+    let target = flavor == .light ? 0.0 : 1.0
+    let t = now()
+    let from = field.value(of: .thumb, at: t) ?? restProgress
+    guard animated, !appearanceModel.reduceMotion, (window != nil || !drivesFramesItself), from != target else {
+      field = SpringField()
+      restProgress = target
+      stopLinkIfIdle()
+      applyThumbTransform(progress: target)
+      return
+    }
+    field.retarget(.thumb, to: target, from: from, at: t, parameters: SpringPreset.firm.parameters)
+    restProgress = target
+    startLinkIfNeeded()
+    presentFrame()
+  }
+
+  /// Presents the thumb for now; once the spring has settled the thumb rests under its segment.
+  func presentFrame() {
+    let t = now()
+    if field.settledKeys(at: t).count == field.keys.count { field = SpringField() }
+    applyThumbTransform(progress: field.value(of: .thumb, at: t) ?? restProgress)
+    stopLinkIfIdle()
+  }
+
+  private func applyThumbTransform(progress: Double) {
+    let x = CGFloat(progress) * Self.segmentWidth
+    OnboardingMotion.set { thumb.transform = CATransform3DMakeTranslation(x, 0, 0) }
+  }
+
+  private func startLinkIfNeeded() {
+    guard drivesFramesItself, link == nil else { return }
+    let link = displayLink(target: AppearanceSegmentLinkTarget(view: self),
+                           selector: #selector(AppearanceSegmentLinkTarget.tick(_:)))
+    link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+    link.add(to: .main, forMode: .common)
+    self.link = link
+  }
+
+  private func stopLinkIfIdle() {
+    guard !isAnimating else { return }
+    link?.invalidate()
+    link = nil
   }
 
   private func choose(_ flavor: ThemeFlavor) {
@@ -340,7 +400,10 @@ final class AppearanceSegmentView: NSView {
     super.layout()
     OnboardingMotion.set {
       layer?.cornerRadius = bounds.height / 2
-      thumb.frame = CGRect(x: Self.inset, y: Self.inset, width: Self.segmentWidth, height: Self.segmentHeight)
+      // Bounds and position, never `frame`: a frame set while the travel transform is on would be read through it.
+      thumb.anchorPoint = .zero
+      thumb.bounds = CGRect(x: 0, y: 0, width: Self.segmentWidth, height: Self.segmentHeight)
+      thumb.position = CGPoint(x: Self.inset, y: Self.inset)
       thumb.cornerRadius = Self.segmentHeight / 2
       let ringRect = bounds.insetBy(dx: -3 - appearanceModel.focusRingWidth / 2, dy: -3 - appearanceModel.focusRingWidth / 2)
       focus.path = CGPath(roundedRect: ringRect, cornerWidth: ringRect.height / 2, cornerHeight: ringRect.height / 2,
@@ -376,6 +439,17 @@ final class AppearanceSegmentView: NSView {
   }
 
   override func accessibilityChildren() -> [Any]? { segments }
+}
+
+/// Display-link target that does not retain the control.
+@MainActor
+private final class AppearanceSegmentLinkTarget: NSObject {
+  weak var view: AppearanceSegmentView?
+  init(view: AppearanceSegmentView) { self.view = view }
+  @objc func tick(_ link: CADisplayLink) {
+    guard let view else { link.invalidate(); return }
+    view.presentFrame()
+  }
 }
 
 /// One segment of the appearance control: a radio button for VoiceOver, its label drawn in a layer.
