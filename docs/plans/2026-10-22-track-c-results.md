@@ -1984,6 +1984,7 @@ instead of resetting to the defaults.
   (`ShellWindowSet.make`, first window only): the saved width, or a concealed hidden sidebar with no reveal until
   the pointer reaches the edge and no traffic lights over the page. New windows (New Window, a Dock reopen) keep
   the defaults, and so does a profile that never changed its sidebar (the store reads nil).
+- **Saving.** Only the first window saves; a later window never overwrites the saved state.
 - **Shape note.** There is no window restoration yet (BH-173), so "restored with that window" is the launch window;
   when windows are restored, each window takes its own saved state through the same store.
 
@@ -1992,7 +1993,7 @@ no visible flag, the ephemeral store. `SidebarStatePersistenceTests` (GUI, 8): C
 back, the edge drag and its hide, the double-click reset, the toast action, adoption (width, concealed overlay, no
 traffic lights, clamping) and first-window-only adoption across a `ShellWindowSet`. Full gates: ShellKit unit 1134
 passed, 0 failures; ShellKitGUITests 997 executed, 13 skipped, 0 failures.
-=======
+
 ## Reopen a closed Split View pane back into its split (#403) (2026-10-26)
 
 Maintainer decision on #403: a pane closed with its X (#388) or Cmd-W and reopened with Cmd-Shift-T or Cmd-Z (#378)
@@ -2027,4 +2028,3 @@ frame-time gates named under #388 (`SidebarHideTests.testRevealPacing`,
 `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) failed under a load average near 10 and pass when
 rerun alone. Debug app build
 succeeds. XCUITest not run: no UI flow covers split panes.
->>>>>>> origin/main
