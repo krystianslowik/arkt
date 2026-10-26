@@ -509,7 +509,7 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// Clear Today Tabs comes back whole with one Undo, its rows in their order.
+  /// Clear Today Tabs comes back with one Undo, its rows in their order; the shown tab never left (#429).
   func testUndoAfterClearTodayRestoresEveryRow() throws {
     var world = try Self.makeWorld()
     let folder = try world.sidebar.addFolder(title: "F", in: .today(world.work))
@@ -518,7 +518,7 @@ final class TabActionsTests: XCTestCase {
     let before = harness.children(.today(world.work))
     harness.controller.activate(node: world.today[0])
     try harness.choose("Clear Today Tabs", on: nil)
-    XCTAssertEqual(harness.children(.today(world.work)), [])
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[0]], "the shown tab stays (#429)")
 
     harness.controller.toasts.performActionForTesting()
 
@@ -668,7 +668,8 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// BH-075: Clear Today Tabs on the empty area archives every Today tab of the Space.
+  /// BH-075 as amended by #429: Clear Today Tabs on the empty area archives every Today tab of the Space but the
+  /// shown one.
   func testClearTodayTabsFromTheEmptyAreaMenu() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
@@ -676,8 +677,40 @@ final class TabActionsTests: XCTestCase {
 
     try harness.choose("Clear Today Tabs", on: nil)
 
-    XCTAssertEqual(harness.children(.today(world.work)), [])
-    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 6 tabs")
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[0]])
+    XCTAssertEqual(harness.current, world.today[0])
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 5 tabs")
+    harness.controller.close()
+  }
+
+  /// #429: with a Split View shown, both panes stay, so the split stays whole.
+  func testClearTodayTabsKeepsBothPanesOfTheShownSplit() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.panes[1])
+
+    try harness.choose("Clear Today Tabs", on: nil)
+
+    XCTAssertEqual(harness.children(.today(world.work)), [world.split])
+    XCTAssertEqual(harness.children(.split(world.split)), world.panes)
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 4 tabs")
+    harness.controller.close()
+  }
+
+  /// #429: Undo brings back exactly the archived set, as one unit, and not the rows that stayed twice.
+  func testUndoAfterClearTodayRestoresExactlyTheArchivedSet() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let before = harness.children(.today(world.work))
+    harness.controller.activate(node: world.today[2])
+    try harness.choose("Clear Today Tabs", on: nil)
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[2]])
+
+    harness.controller.toasts.performActionForTesting()
+
+    XCTAssertEqual(harness.children(.today(world.work)), before)
+    XCTAssertEqual(harness.current, world.today[2])
+    XCTAssertNil(harness.controller.toasts.current)
     harness.controller.close()
   }
 
@@ -698,9 +731,9 @@ final class TabActionsTests: XCTestCase {
     XCTAssertTrue(menu.items[1].isEnabled)
 
     menu.performActionForItem(at: 0)
-    XCTAssertEqual(harness.children(.today(world.work)), [])
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[0]], "the shown tab stays (#429)")
     menu.delegate?.menuNeedsUpdate?(menu)
-    XCTAssertFalse(menu.items[0].isEnabled, "the Space has no Today tabs left")
+    XCTAssertFalse(menu.items[0].isEnabled, "only the shown tab is left")
     XCTAssertFalse(menu.items[1].isEnabled, "the cleared rows left the selection with them")
     harness.controller.close()
   }
@@ -815,10 +848,10 @@ final class TabActionsTests: XCTestCase {
 
     try harness.choose("Clear Today Tabs", on: nil)
 
-    XCTAssertEqual(harness.children(.today(world.work)), [folder])
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[0], folder])
     XCTAssertEqual(harness.children(.folder(folder)), [inside])
     XCTAssertNotNil(harness.tab(inside), "its page stays open")
-    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 6 tabs")
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 5 tabs")
     harness.controller.close()
   }
 
@@ -835,9 +868,9 @@ final class TabActionsTests: XCTestCase {
 
     harness.controller.clearTodayTabs(nil)
 
-    XCTAssertEqual(harness.children(.today(world.work)), [])
-    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 7 tabs")
-    XCTAssertFalse(harness.controller.validateMenuItem(item))
+    XCTAssertEqual(harness.children(.today(world.work)), [world.today[0]])
+    XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 6 tabs")
+    XCTAssertFalse(harness.controller.validateMenuItem(item), "only the shown tab is left (#429)")
     harness.controller.close()
   }
 

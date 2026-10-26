@@ -286,6 +286,11 @@ rules are in section 5, not here.
 | BH-088 | Given the Archive view, then it can filter by Space, by Little Arc, and by close type (manual vs auto). | [S] filter strings; P B-LA9 (RN24 v1.35.0); DM 2.2 [O] `reason`, `source` | CONFIRMED |
 | BH-089 | Given a first auto-archive context, then an auto-archive education banner is shown once and not again after dismissal. | P B-AA9 (RN24 v1.42.0); [S] banner; [O] dismissal counters | CONFIRMED |
 
+> **Deviation from BH-075 (maintainer decision, #429).** Clear Today Tabs (Shift-Cmd-K and the bottom bar menu) does not
+> archive every Today tab. It leaves the tab shown in the window (both panes of a Split View) and any Today tab shown
+> in another window. Undo restores exactly the archived set as one unit (#394). BH-076 (media) and BH-078 (unselected
+> rows) still apply on top, and the "with an animation" clause stays on #413.
+
 ### 2.6 Folders
 
 | ID | Rule | Evidence | Status |
