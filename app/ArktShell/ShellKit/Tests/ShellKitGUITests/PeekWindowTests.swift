@@ -758,16 +758,25 @@ final class PeekWindowTests: XCTestCase {
     XCTAssertTrue(overlay.splitButton.nextKeyView === page, "back to the page, never out of the Peek")
 
     XCTAssertTrue(window.makeFirstResponder(page))
-    window.selectNextKeyView(nil)
-    XCTAssertTrue(window.firstResponder === overlay.closeButton, "Tab reaches the controls")
-    window.selectNextKeyView(nil)
-    XCTAssertTrue(window.firstResponder === overlay.expandButton)
-    window.selectNextKeyView(nil)
-    XCTAssertTrue(window.firstResponder === overlay.splitButton)
-    window.selectNextKeyView(nil)
-    XCTAssertTrue(window.firstResponder === page, "Tab wraps from the last control to the page")
-    window.selectPreviousKeyView(nil)
-    XCTAssertTrue(window.firstResponder === overlay.splitButton, "Shift-Tab wraps back the same way")
+    if NSApp.isFullKeyboardAccessEnabled {
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === overlay.closeButton, "Tab reaches the controls")
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === overlay.expandButton)
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === overlay.splitButton)
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === page, "Tab wraps from the last control to the page")
+      window.selectPreviousKeyView(nil)
+      XCTAssertTrue(window.firstResponder === overlay.splitButton, "Shift-Tab wraps back the same way")
+    } else {
+      // Without Full Keyboard Access (the CI runners) buttons refuse key view, as everywhere in macOS: Tab and
+      // Shift-Tab skip the controls and the focus stays on the Peek's page instead of leaving the Peek.
+      window.selectNextKeyView(nil)
+      XCTAssertTrue(window.firstResponder === page, "Tab stays inside the Peek")
+      window.selectPreviousKeyView(nil)
+      XCTAssertTrue(window.firstResponder === page, "Shift-Tab stays inside the Peek")
+    }
 
     overlay.closeButton.performClick(nil)
     harness.settle()
