@@ -275,3 +275,4 @@ Rendered at 2x with the project's Chromium in headless mode from the prototype (
 `design/alerts-sheets-toasts/screens/<state>-<light|dark>.png`: delete-space, delete-space-empty, launch-failure,
 launch-newer, toast-undo, toast-restored, toast-error, toast-recovery, ext-install, ext-remove, permission, infobar
 (24 files).
+
