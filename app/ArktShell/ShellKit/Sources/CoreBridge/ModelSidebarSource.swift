@@ -133,9 +133,26 @@ public final class ModelSidebarSource: SidebarSource {
 
   /// BH-046 and BH-047 surface the refusal: `.favoritesFull` crosses as `SidebarMoveError.favoritesFull`; every
   /// other model refusal is `.invalid`.
+  /// A pane moved anywhere but into a split leaves its split through `moveNodes`, which shrinks the split, so a drag
+  /// never leaves a one-pane split behind (#104).
   public func moveNode(_ id: UUID, to location: SidebarLocation, at index: Int) throws {
+    try mapMoveErrors {
+      if case .split = location {
+        try mutate { try $0.move(id, to: BridgeMapping.location(location), at: index) }
+      } else {
+        try mutate { try $0.moveNodes([id], to: BridgeMapping.location(location), at: index) }
+      }
+    }
+  }
+
+  /// The model's `moveNodes` (#104) as one mutation: one diff, one `onDidChange`.
+  public func moveNodes(_ ids: [UUID], to location: SidebarLocation, at index: Int) throws {
+    try mapMoveErrors { try mutate { try $0.moveNodes(ids, to: BridgeMapping.location(location), at: index) } }
+  }
+
+  private func mapMoveErrors(_ body: () throws -> Void) throws {
     do {
-      try mutate { try $0.move(id, to: BridgeMapping.location(location), at: index) }
+      try body()
     } catch SidebarError.favoritesFull {
       throw SidebarMoveError.favoritesFull
     } catch {

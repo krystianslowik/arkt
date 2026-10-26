@@ -96,6 +96,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var linkPasteboard: NSPasteboard = .general
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
   private var sidebarObservation: SidebarObservation?
+  /// A tab dragged out of the sidebar over no window (GS-013): the window set opens a window at the screen point and
+  /// shows the tab there, taking its page over (#300). Nil: the drag-out does nothing.
+  var onDragOutToNewWindow: (@MainActor (NodeID, NSPoint) -> Void)?
   /// New Window (Cmd-N, `IDC_NEW_WINDOW`): set by the window set that owns this window. Nil: New Window is disabled.
   public var onNewWindow: (@MainActor () -> Void)?
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
@@ -173,6 +176,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onClose = { [weak self] node in self?.close(node: node) }       // hover X (GS-043)
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
     wireFavorites()                                   // Move To, the sidebar drop and the BH-049 unload
+    wireSidebarDrop()                                 // drag and drop on the Space pages (#104)
     wirePinned()                                      // pin/unpin, reset, Replace Pin, Separate, the favicon click
     wireTabActions()                                  // the row context menus, multi-selection, empty-area click
     commandBar.onOpen = { [weak self] url, target in

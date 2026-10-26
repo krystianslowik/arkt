@@ -98,6 +98,17 @@ public final class ShellWindowSet {
     return openWindow()
   }
 
+  /// GS-013: a new window whose top-left corner is at `point` (screen coordinates), showing `node`. The page moves
+  /// over from the window that had it, without a reload (#300).
+  @discardableResult
+  public func openWindow(showing node: NodeID, at point: NSPoint) -> ShellWindowController {
+    let controller = make(opensFirstTab: false)
+    controller.showWindow(nil)
+    controller.window?.setFrameTopLeftPoint(point)   // after showing: the first show places a window itself
+    controller.activate(node: node)
+    return controller
+  }
+
   // MARK: Engine-initiated windows
 
   /// The engine's host provider (`EngineWindowHostProvider`). A Dock reopen reuses an open window that has no engine
@@ -219,6 +230,7 @@ public final class ShellWindowSet {
     controller.onTakeOverLiveTab = { [weak self, weak controller] node in
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
     }
+    controller.onDragOutToNewWindow = { [weak self] node, point in self?.openWindow(showing: node, at: point) }
     windows.append(controller)
     trackMain(controller)
     configure?(controller)

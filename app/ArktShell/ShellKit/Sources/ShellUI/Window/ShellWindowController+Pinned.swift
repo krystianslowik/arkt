@@ -16,9 +16,9 @@ enum PinnedTabState: Equatable, Sendable {
 /// The pinned URL is the sidebar node's `url`: engine navigations of a pinned or Favorite tab never reach it
 /// (`writesLiveURL(toSection:)`), as in the browser's own data model (`savedURL`); the node's title still follows
 /// the page (BH-062). A reset navigates the live engine tab back to the node URL; Replace Pin writes the page's
-/// URL into the node. Dragging above the divider is #104 (GS-007), command bar actions are #112, BH-056's Peek is
-/// #349's link-activation routing, and the hover affordance of BH-061 waits on the design pass (#304); the action
-/// is on the row's context menu meanwhile.
+/// URL into the node. Dragging across the divider (GS-007) is `ShellWindowController+SidebarDrop` (#104), command
+/// bar actions are #112, BH-056's Peek is #349's link-activation routing, and the hover affordance of BH-061 waits on
+/// the design pass (#304); the action is on the row's context menu meanwhile.
 extension ShellWindowController {
   /// Wires the sidebar's pinned-tab entry points: the context menu items and the favicon click.
   func wirePinned() {

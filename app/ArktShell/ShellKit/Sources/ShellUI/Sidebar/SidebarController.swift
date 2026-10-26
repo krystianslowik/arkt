@@ -32,6 +32,15 @@ public final class SidebarController {
   /// A sidebar drag settled on a location (BH-047): the Favorites band, or the Space page for a Favorite. The
   /// window moves the node; false means the move was refused.
   public var onSidebarDrop: (@MainActor (_ node: NodeID, _ location: SidebarLocation) -> Bool)?
+  /// A drop on a Space page's outline (#104); the window performs it. False: refused.
+  public var onSidebarDropRequest: (@MainActor (SidebarDropRequest) -> Bool)?
+  /// Text or a link dropped on a Space page (GS-015): a new tab at `placement`. False: refused.
+  public var onSidebarTextDrop: (@MainActor (_ url: URL, _ title: String, _ placement: SidebarDropPlacement)
+    -> Bool)?
+  /// A tab dragged out of the sidebar and released over no window (GS-013), at a screen point.
+  public var onSidebarDragOut: (@MainActor (NodeID, NSPoint) -> Void)?
+  /// The nodes of the sidebar drag in progress (the multi-selection, #105), empty between drags.
+  public private(set) var dragNodes: [NodeID] = []
   /// A row's "Move To > Favorites" (BH-047); the window moves the node.
   public var onMoveToFavorites: (@MainActor (NodeID) -> Void)?
   /// Pin / Unpin Tab on a row's context menu (BH-055); the window moves the node.
@@ -274,6 +283,13 @@ public final class SidebarController {
     page.outlineController.onEmptyAreaDoubleClick = { [weak self] in self?.onEmptyAreaDoubleClick?() }
     page.outlineController.onNodeDragBegan = { [weak self] node in self?.nodeDragBegan(node) }
     page.outlineController.onNodeDragEnded = { [weak self] in self?.nodeDragEnded() }
+    let drop = page.outlineController.drop
+    drop.onDrop = { [weak self] request in self?.onSidebarDropRequest?(request) ?? false }
+    drop.onTextDrop = { [weak self] url, title, placement in
+      self?.onSidebarTextDrop?(url, title, placement) ?? false
+    }
+    drop.onEdgeDwell = { [weak self] step in step > 0 ? self?.nextSpace() : self?.previousSpace() }
+    drop.onDragOut = { [weak self] node, point in self?.onSidebarDragOut?(node, point) }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
     page.outlineController.closingProvider = { [weak self] node in self?.closingNodes.contains(node) ?? false }
     page.outlineController.onFolderHover = { [weak self, weak page] folder, hovered in
@@ -430,19 +446,24 @@ public final class SidebarController {
   // MARK: Sidebar drag and drop (BH-047)
 
   private func nodeDragBegan(_ id: NodeID) {
+    let payload = pages.values.lazy.compactMap { $0.outlineController.drop.sourcePayload }.first
+    dragNodes = payload.map(\.nodes) ?? [id]
+    folderPreview.hide(animated: false)                                             // BH-093: a drag ends it
     showDropOverlay(for: id)
     onNodeDragBegan?(id)
   }
 
   private func nodeDragEnded() {
+    dragNodes = []
     dropOverlay?.end()
     dropOverlay?.removeFromSuperview()
     dropOverlay = nil
     onNodeDragEnded?()
   }
 
-  /// Covers the Favorites band and the Space page below it for the drag; the zones resolve through
-  /// `FavoritesDrop` and the drop itself is the window's (`onSidebarDrop`).
+  /// Covers the Favorites band only, for the drag: the rows below are the page outline's drop target (#104), which
+  /// takes a Favorite dropped on the page where its indicator stands. The band resolves through `FavoritesDrop` and
+  /// the drop itself is the window's (`onSidebarDrop`).
   private func showDropOverlay(for id: NodeID) {
     let overlay = FavoritesDropOverlayView()
     overlay.onTarget = { [weak self] node, point, band, bounds in
@@ -455,8 +476,7 @@ public final class SidebarController {
     }
     overlay.onDrop = { [weak self] node, location in self?.onSidebarDrop?(node, location) ?? false }
     let band = FavoritesDrop.band(favoritesFrame: view.favorites.frame)
-    overlay.frame = NSRect(x: 0, y: band.minY, width: view.bounds.width,
-                           height: max(0, view.pager.frame.maxY - band.minY))
+    overlay.frame = NSRect(x: 0, y: band.minY, width: view.bounds.width, height: band.height)
     overlay.autoresizingMask = []
     view.addSubview(overlay, positioned: .above, relativeTo: view.pager)
     overlay.begin(node: id, band: CGRect(x: band.minX, y: 0, width: band.width, height: band.height))

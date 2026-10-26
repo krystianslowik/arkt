@@ -91,11 +91,6 @@ final class FavoritesMoveTests: XCTestCase {
 
     /// A point inside the Favorites band, in overlay coordinates (the band starts at the overlay's top).
     func bandPoint() -> CGPoint { CGPoint(x: 20, y: 5) }
-    /// A point over the Space page, in overlay coordinates.
-    func pagePoint() throws -> CGPoint {
-      let overlay = try XCTUnwrap(self.overlay)
-      return CGPoint(x: 20, y: overlay.bounds.height - 20)
-    }
 
     func children(_ location: SidebarLocation) -> [UUID] { source.children(of: location) }
   }
@@ -239,26 +234,35 @@ final class FavoritesMoveTests: XCTestCase {
 
   // MARK: Drag below the Space title (BH-047)
 
+  /// Since #104 the page's outline takes a Favorite dropped below the Space title, where its indicator stands: on
+  /// the Pinned side of the divider it is pinned in the current Space.
   func testDropOfAFavoriteOnThePagePinsItInTheCurrentSpace() throws {
     let world = try Self.makeWorld(favorites: 2)
     let harness = Harness(world.sidebar)
     try harness.beginTileDrag(world.favorites[0])
-    let overlay = try XCTUnwrap(harness.overlay)
-    XCTAssertEqual(overlay.preview(at: try harness.pagePoint()), .pinned(world.space))
-    XCTAssertTrue(overlay.drop(node: world.favorites[0], at: try harness.pagePoint()))
+    let outline = try harness.outline()
+    let divider = outline.outlineView.rect(ofRow: outline.dividerRow)
+    let point = NSPoint(x: divider.midX, y: divider.minY + divider.height * 0.3)
+    let payload = SidebarDragPayload(nodes: [world.favorites[0]], isSingleTab: true)
+    XCTAssertEqual(outline.drop.update(at: point, payload: payload),
+                   .insert(location: .pinned(world.space), index: 1, gapBeforeRow: outline.dividerRow, level: 0))
+    XCTAssertTrue(outline.drop.perform(payload: payload, at: point, duplicate: false, fromOtherWindow: false))
     XCTAssertEqual(harness.children(.favorites(profile: "default")), [world.favorites[1]])
     XCTAssertEqual(harness.children(.pinned(world.space)), [world.pinned, world.favorites[0]])
     harness.endTileDrag()
     harness.controller.close()
   }
 
-  func testDropOfATodayTabOnThePageIsRefused() throws {
+  /// The Favorites overlay covers the band only: a point below it is outside the overlay, so the outline below
+  /// takes the drag (#104).
+  func testTheOverlayLeavesThePageToTheOutline() throws {
     let world = try Self.makeWorld(favorites: 2)
     let harness = Harness(world.sidebar)
     try harness.beginOutlineDrag(world.today[0])
     let overlay = try XCTUnwrap(harness.overlay)
-    XCTAssertNil(overlay.preview(at: try harness.pagePoint()))
-    XCTAssertFalse(overlay.drop(node: world.today[0], at: try harness.pagePoint()))
+    let page = try harness.outline().outlineView
+    let pageTop = page.convert(NSPoint(x: 10, y: page.visibleRect.minY), to: overlay.superview)
+    XCTAssertLessThanOrEqual(overlay.frame.maxY, pageTop.y + 0.5)
     try harness.endOutlineDrag()
     harness.controller.close()
   }

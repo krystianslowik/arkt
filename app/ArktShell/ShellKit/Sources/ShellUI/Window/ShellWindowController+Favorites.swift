@@ -10,8 +10,11 @@ extension ShellWindowController {
       guard let self else { return }
       self.move(node, to: .favorites(profile: self.sidebarController.profile))
     }
-    sidebarController.onSidebarDrop = { [weak self] node, location in
-      self?.move(node, to: location) ?? false
+    sidebarController.onSidebarDrop = { [weak self] node, location in   // the band: the whole dragged set (#105)
+      guard let self else { return false }
+      let dragged = self.sidebarController.dragNodes
+      let nodes = dragged.contains(node) ? Self.moveTargets(dragged, in: self.sidebar) : [node]
+      return self.move(nodes, to: location, at: self.sidebar.children(of: location).count)
     }
     sidebarController.onFavoriteUnload = { [weak self] node in self?.close(node: node) }
   }
@@ -29,6 +32,30 @@ extension ShellWindowController {
       return false
     }
     if enteringToday { didEnterToday(node) }
+    return true
+  }
+
+  /// Moves a dragged set (#104) as one source write: `nodes` land together at `index` (measured before removal).
+  /// Every node arriving in Today from another section goes through `didEnterToday(_:)`, as one moved alone does.
+  @discardableResult
+  func move(_ nodes: [NodeID], to location: SidebarLocation, at index: Int) -> Bool {
+    enteringToday(nodes) {
+      do {
+        try sidebar.moveNodes(nodes, to: location, at: index)
+        return true
+      } catch {
+        onError?(.moveNode, error)
+        return false
+      }
+    }
+  }
+
+  /// Runs `write`, then sends each of `nodes` that it brought into Today from another section, directly or inside a
+  /// folder or a split, through `didEnterToday(_:)`. Returns what `write` returns.
+  func enteringToday(_ nodes: [NodeID], _ write: () -> Bool) -> Bool {
+    let outside = nodes.filter { !Self.isToday(sidebar.section(containing: $0)) }
+    guard write() else { return false }
+    for node in outside where Self.isToday(sidebar.section(containing: node)) { didEnterToday(node) }
     return true
   }
 
