@@ -66,6 +66,27 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     XCTAssertEqual(commandS.count, 1, "no other item binds Cmd-S")
   }
 
+  /// #118 (KB-013 to KB-016): the copy-link items sit in the Edit menu with Arc's keys.
+  func testCopyLinkItemsSitInTheEditMenuWithArcsKeys() throws {
+    _ = NSApplication.shared
+    let edit = try XCTUnwrap(MainMenu.make(commands: AppCommands()).menu.items.first { $0.title == "Edit" }?.submenu)
+    let expected: [(String, Selector, String, NSEvent.ModifierFlags)] = [
+      ("Copy URL", #selector(ShellWindowController.copyCurrentURL(_:)), "c", [.command, .shift]),
+      ("Copy URL as Markdown", #selector(ShellWindowController.copyCurrentURLAsMarkdown(_:)), "c",
+       [.command, .shift, .option]),
+      ("Copy URL as Quote", #selector(ShellWindowController.copyCurrentURLAsQuote(_:)), "c",
+       [.command, .shift, .control]),
+      ("Paste URL as New Tab", #selector(ShellWindowController.pasteURLAsNewTab(_:)), "v", [.command, .option]),
+    ]
+    for (title, action, key, modifiers) in expected {
+      let item = try XCTUnwrap(edit.items.first { $0.title == title }, title)
+      XCTAssertEqual(item.action, action, title)
+      XCTAssertEqual(item.keyEquivalent, key, title)
+      XCTAssertEqual(item.keyEquivalentModifierMask, modifiers, title)
+      XCTAssertNil(item.target, "reaches the main window's controller through the responder chain")
+    }
+  }
+
   // MARK: Split View (S5)
 
   /// RT-38 (passive read, #78): Arc's View menu holds these four directly, with these titles and keys.

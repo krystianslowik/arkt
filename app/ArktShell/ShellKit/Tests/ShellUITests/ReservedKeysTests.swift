@@ -16,6 +16,10 @@ struct ReservedKeysTests {
     (kVK_ANSI_Q, "q", NSEvent.ModifierFlags.command.rawValue),
     (kVK_ANSI_D, "d", NSEvent.ModifierFlags.command.rawValue),    // KB-012 (#108)
     (kVK_ANSI_T, "t", NSEvent.ModifierFlags([.command, .shift]).rawValue),   // KB-010 (#346): reopen
+    (kVK_ANSI_C, "c", NSEvent.ModifierFlags([.command, .shift]).rawValue),             // KB-013 (#118)
+    (kVK_ANSI_C, "c", NSEvent.ModifierFlags([.command, .shift, .option]).rawValue),    // KB-014 (#118)
+    (kVK_ANSI_C, "c", NSEvent.ModifierFlags([.command, .shift, .control]).rawValue),   // KB-015 (#118)
+    (kVK_ANSI_V, "v", NSEvent.ModifierFlags([.command, .option]).rawValue),            // KB-016 (#118)
   ])
   func `every reserved letter key matches`(keyCode: Int, character: String, modifiers: UInt) {
     #expect(keys.matches(keyCode: UInt16(keyCode), character: character,
