@@ -1317,8 +1317,8 @@ Spec section 2.3 (BH-046 to BH-053).
 - **BH-049 (unloading).** Loading a Favorite past `FavoritesUnloadPolicy.maximumLoadedFavorites` closes the least
   recently used one's page (same close as the tile's X), so the row stays and the page - and with it any playback
   (BH-053) - is gone. Activations track recency per window; the current tab, visible panes and held closes never
-  unload. The threshold (4) is [I] PARITY(NEEDS-RUNTIME-CHECK): Arc's count is unpublished (BH-049 is
-  single-source).
+  unload. The threshold was four as a guess; the maintainer set it to eight on #376 (Arc's count is unpublished and
+  BH-049 is single-source), pinned by `FavoritesUnloadPolicyTests.theLimitIsTheDecidedEight`.
 - **BH-050 / RT-15 (grid above 4).** Deferred: NEEDS-RUNTIME-CHECK. The exact layout above 4 Favorites is
   unpublished; RT-15 measures it against the reference browser (add 1..12 Favorites, screenshot at each count and
   two sidebar widths), a maintainer runtime step. The 3-column grid stays for all counts meanwhile.

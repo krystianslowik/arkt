@@ -58,10 +58,10 @@ final class FavoritesUnloadTests: XCTestCase {
   /// Loading more Favorites than the limit unloads the least recently used; the rows stay (the page goes, not the
   /// Favorite, so its playback stops with the page, BH-053).
   func testLoadingBeyondTheLimitUnloadsTheLeastRecentlyUsedFavorites() throws {
-    let world = try Self.makeWorld(favorites: 6)
+    let limit = FavoritesUnloadPolicy.maximumLoadedFavorites
+    let world = try Self.makeWorld(favorites: limit + 2)
     let harness = Harness(world.sidebar)
     for favorite in world.favorites { harness.activate(favorite) }
-    let limit = FavoritesUnloadPolicy.maximumLoadedFavorites
     for favorite in world.favorites.prefix(world.favorites.count - limit) {
       XCTAssertNil(harness.tab(of: favorite), "the least recently used Favorite unloads")
     }
@@ -74,11 +74,12 @@ final class FavoritesUnloadTests: XCTestCase {
 
   /// Re-activating a Favorite makes it the most recently used: the next eviction skips it.
   func testReactivatingRefreshesRecency() throws {
-    let world = try Self.makeWorld(favorites: 5)
+    let limit = FavoritesUnloadPolicy.maximumLoadedFavorites
+    let world = try Self.makeWorld(favorites: limit + 1)
     let harness = Harness(world.sidebar)
-    for favorite in world.favorites.prefix(4) { harness.activate(favorite) }
+    for favorite in world.favorites.prefix(limit) { harness.activate(favorite) }
     harness.activate(world.favorites[0])      // f0 is now the most recently used
-    harness.activate(world.favorites[4])
+    harness.activate(world.favorites[limit])  // the ninth load: one eviction past the limit
     XCTAssertNotNil(harness.tab(of: world.favorites[0]))
     XCTAssertNil(harness.tab(of: world.favorites[1]))
     harness.controller.close()
@@ -86,7 +87,8 @@ final class FavoritesUnloadTests: XCTestCase {
 
   /// A loaded Favorite that moved to Pinned leaves the recency order: later evictions never close it.
   func testAFavoriteMovedToPinnedIsNeverUnloaded() throws {
-    let world = try Self.makeWorld(favorites: 6)
+    let limit = FavoritesUnloadPolicy.maximumLoadedFavorites
+    let world = try Self.makeWorld(favorites: limit + 2)
     let harness = Harness(world.sidebar)
     harness.activate(world.favorites[0])
     try harness.source.moveNode(world.favorites[0], to: .pinned(world.space), at: 0)
@@ -98,7 +100,7 @@ final class FavoritesUnloadTests: XCTestCase {
 
   /// Pinned and Today tabs are never unloaded by the Favorites limit.
   func testTodayTabsStayLoaded() throws {
-    let world = try Self.makeWorld(favorites: 5)
+    let world = try Self.makeWorld(favorites: FavoritesUnloadPolicy.maximumLoadedFavorites + 1)
     let harness = Harness(world.sidebar)
     harness.activate(world.today)
     for favorite in world.favorites { harness.activate(favorite) }
