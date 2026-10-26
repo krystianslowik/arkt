@@ -2948,4 +2948,11 @@ Date 2026-10-26. Branch `feat/345-peek-modifier-links` off `main` at `55fb137`. 
   throttle asking about the new tab's own first navigation; it navigates because the shell does not list that tab yet.
 - A `target=_blank` tab taken into a Peek replaces a Peek that is already open, whatever its source (one Peek per
   window at a time, as before).
+- The window cannot tell a link from other engine tabs with an opener: `chrome.tabs.create` with `openerTabId` sets
+  the tab strip opener too, so an extension that opens a cross-site tab from a
+  pinned tab or a Favorite gets a Peek. This bends the popup decision ("Peek is only for link clicks").
+  NEEDS-RUNTIME-CHECK against Arc; fixing it needs the facade to report how a tab was opened.
+- Why patch 0009 has no alternative without a patch: `Browser::SetAsDelegate` sets `BrowserWebContentsDelegate` on
+  every tab insert, detach and replace, so a forwarding delegate the facade installed would be overwritten on every
+  tab strip change and would have to forward the whole `WebContentsDelegate` interface.
 
