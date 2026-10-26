@@ -29,6 +29,7 @@ final class ThemeCreatorController {
   private var dragHue: Double?
   private var leavingDot: Int?
   private var outsideClickMonitor: Any?
+  private var imagesObserver: (any NSObjectProtocol)?
   private(set) var isClosed = false
   /// Runs once the popover has closed.
   var onClose: (() -> Void)?
@@ -50,6 +51,15 @@ final class ThemeCreatorController {
     modelAtOpen = model
     view.pad.reducesMotion = reducesMotion
     wire()
+    imagesObserver = NotificationCenter.default.addObserver(
+      forName: ThemeCreatorImages.didLoad, object: nil, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self, !self.isClosed else { return }
+        self.view.imagesDidLoad()
+        self.apply(animated: false)
+      }
+    }
   }
 
   private var flavor: ThemeFlavor { sidebar?.themeContext.appearance ?? .light }
@@ -93,6 +103,8 @@ final class ThemeCreatorController {
     isClosed = true
     if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
     outsideClickMonitor = nil
+    if let imagesObserver { NotificationCenter.default.removeObserver(imagesObserver) }
+    imagesObserver = nil
     sidebar?.previewTheme(nil, for: spaceID)
     registerUndo()
     let window = view.window

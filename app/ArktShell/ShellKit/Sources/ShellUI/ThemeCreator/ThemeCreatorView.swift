@@ -29,6 +29,9 @@ final class ThemeCreatorView: NSView {
   private let opacityChecker = CALayer()
   private let opacityGradient = CAGradientLayer()
   private(set) var flavor: ThemeFlavor = .light
+  /// What was last styled: restyling (colours, shadows, track patterns) happens only when these change, not on every
+  /// drag event.
+  private var styled: (flavor: ThemeFlavor, texture: ThemeTexture?)?
 
   override init(frame: NSRect) {
     super.init(frame: NSRect(x: frame.minX, y: frame.minY, width: ThemeCreatorMetrics.width,
@@ -192,29 +195,37 @@ final class ThemeCreatorView: NSView {
 
   /// Shows `model` in `flavor`. `animated`: dots added or removed animate (not a drag frame).
   func apply(_ model: ThemeCreatorModel, title: String, flavor: ThemeFlavor, animated: Bool) {
-    let flavorChanged = flavor != self.flavor
+    let flavorChanged = styled?.flavor != flavor
+    let textureChanged = flavorChanged || styled.map { $0.texture != model.theme.textureKind } ?? true
+    styled = (flavor, model.theme.textureKind)
     self.flavor = flavor
-    titleLabel.stringValue = title
-    setAccessibilityTitle(title)
-    titleLabel.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
-    for label in [textureLabel, opacityLabel] { label.textColor = ShellTokens.secondaryText.resolve(flavor).nsColor() }
+    if titleLabel.stringValue != title {
+      titleLabel.stringValue = title
+      setAccessibilityTitle(title)
+    }
+    if flavorChanged {
+      titleLabel.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
+      for label in [textureLabel, opacityLabel] { label.textColor = ShellTokens.secondaryText.resolve(flavor).nsColor() }
+      for slider in [amountSlider, opacitySlider] { slider.applyColors(flavor) }
+    }
     let stored = model.theme.baseColors
     let dotColors = model.dots.map(\.color)
     let surfaceColor = ShellTokens.themePopoverSurface.resolve(flavor)
     countButton.update(colors: dotColors, flavor: flavor, surface: surfaceColor, animated: animated)
     pad.update(points: model.dots.map(\.point), colors: dotColors, animated: animated)
-    swatches.update(selected: model.theme.textureKind, flavor: flavor)
+    if textureChanged { swatches.update(selected: model.theme.textureKind, flavor: flavor) }
     amountSlider.setValue(model.theme.noiseFactor)
-    amountSlider.isEnabled = model.isAmountEnabled
+    if amountSlider.isEnabled != model.isAmountEnabled { amountSlider.isEnabled = model.isAmountEnabled }
     opacitySlider.setValue(model.theme.opacity)
-    for slider in [amountSlider, opacitySlider] { slider.applyColors(flavor) }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    // The amount track previews the selected texture (or the last one) fading in from left to right.
-    let texture = model.theme.textureKind ?? .grain
-    amountGradient.backgroundColor = ThemeTextureInk.pattern(texture, dark: flavor == .dark)
-    // The opacity track shows the colours fading in over a checkerboard.
-    opacityChecker.backgroundColor = ThemeTextureInk.checkerboard(ShellTokens.sidebarItemHovered.resolve(flavor))
+    if textureChanged {
+      // The amount track previews the selected texture (grain with None) fading in from left to right.
+      let texture = model.theme.textureKind ?? .grain
+      amountGradient.backgroundColor = ThemeTextureInk.pattern(texture, dark: flavor == .dark)
+      // The opacity track shows the colours fading in over a checkerboard.
+      opacityChecker.backgroundColor = ThemeTextureInk.checkerboard(ShellTokens.sidebarItemHovered.resolve(flavor))
+    }
     let ends = stored.isEmpty ? dotColors : stored
     let colors = ends.count > 1 ? [ends[0], ends[ends.count - 1]] : ends
     var stops: [CGColor] = [(colors.first ?? .white(1)).cgColor.copy(alpha: 0) ?? CGColor.clear]
@@ -229,8 +240,13 @@ final class ThemeCreatorView: NSView {
     opacityGradient.colors = stops
     opacityGradient.locations = locations
     CATransaction.commit()
-    if flavorChanged { needsLayout = true }
-    layoutSurface()
+    if flavorChanged { layoutSurface() }
+  }
+
+  /// The images arrived (`ThemeCreatorImages`): the next `apply` restyles the swatches and tracks.
+  func imagesDidLoad() {
+    styled = nil
+    pad.drawFieldIfNeeded()
   }
 
   // MARK: - Keyboard order

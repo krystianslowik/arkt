@@ -368,6 +368,37 @@ final class ThemeCreatorTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// Real Tab and Escape key events through the window: Tab follows the key view loop (Shift-Tab back), Escape
+  /// closes.
+  func testTabAndEscapeThroughTheWindow() throws {
+    let harness = Harness()
+    let window = try XCTUnwrap(harness.controller.window)
+    let popover = try harness.open()
+    let dots = popover.pad.dots
+    XCTAssertTrue(window.firstResponder === dots[0])
+    window.sendEvent(try harness.key(48))
+    XCTAssertTrue(window.firstResponder === dots[1])
+    window.sendEvent(try harness.key(48))
+    XCTAssertTrue(window.firstResponder === popover.swatches)
+    window.sendEvent(try harness.key(48, shift: true))
+    XCTAssertTrue(window.firstResponder === dots[1])
+    window.sendEvent(try harness.key(53))
+    XCTAssertNil(harness.creator)
+    harness.controller.close()
+  }
+
+  /// The pad field and texture previews are built off the main thread; the popover shows them once they are ready.
+  func testThePadFieldAndPreviewsArriveFromTheBackground() async throws {
+    let harness = Harness()
+    let popover = try harness.open()
+    let scale = harness.controller.window?.backingScaleFactor ?? 2
+    await ThemeCreatorImages.prepare(scale: scale).value
+    waitUntil("the pad field is drawn") { popover.pad.fieldImageForTesting != nil }
+    XCTAssertNotNil(ThemeTextureInk.image(.sand, dark: false))
+    XCTAssertNotNil(ThemeTextureInk.image(.tweed, dark: true))
+    harness.controller.close()
+  }
+
   /// A Space on the default theme starts at 80 % and stores nothing until something changes.
   func testANewThemeStartsAtEightyPercentAndStoresOnlyAChange() throws {
     let harness = Harness()

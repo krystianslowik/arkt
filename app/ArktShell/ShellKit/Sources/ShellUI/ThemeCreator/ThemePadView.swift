@@ -90,13 +90,20 @@ final class ThemePadView: NSView {
     drawFieldIfNeeded()
   }
 
-  /// The field at the backing scale, drawn once per scale from `ThemePad.color`.
-  private func drawFieldIfNeeded() {
+  /// The field at the backing scale, set once per scale when its image is ready.
+  func drawFieldIfNeeded() {
     let scale = window?.backingScaleFactor ?? 2
     guard scale != fieldScale, bounds.width > 0 else { return }
+    guard let image = ThemePadField.image(size: bounds.size, scale: scale) else {
+      ThemeCreatorImages.prepare(scale: scale)
+      return
+    }
     fieldScale = scale
-    field.contents = ThemePadField.image(size: bounds.size, scale: scale)
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    field.contents = image
     field.contentsScale = scale
+    CATransaction.commit()
   }
 
   // MARK: - Dots
@@ -189,6 +196,7 @@ final class ThemePadView: NSView {
   }
 
   var isDragging: Bool { dragging != nil }
+  var fieldImageForTesting: Any? { field.contents }
 }
 
 // MARK: - Dot
@@ -386,16 +394,24 @@ final class ThemeDotView: ThemeFocusableView {
 // MARK: - Field image
 
 /// The pad's colour field as an image, drawn pixel by pixel from `ThemePad.color` so the pad shows exactly the
-/// colours it stores. Cached per size and scale.
+/// colours it stores. Built off the main thread per size and scale (`ThemeCreatorImages`).
 @MainActor
 enum ThemePadField {
   private static var cache: [String: CGImage] = [:]
 
-  static func image(size: CGSize, scale: CGFloat) -> CGImage? {
+  /// The field, once `ThemeCreatorImages.prepare(scale:)` built it; nil before.
+  static func image(size: CGSize, scale: CGFloat) -> CGImage? { cache[key(size: size, scale: scale)] }
+
+  nonisolated static func key(size: CGSize, scale: CGFloat) -> String {
+    "\(Int((size.width * scale).rounded()))x\(Int((size.height * scale).rounded()))"
+  }
+
+  static func store(_ image: CGImage, key: String) { cache[key] = image }
+
+  /// Builds the field pixel by pixel; runs off the main thread (`ThemeCreatorImages`).
+  nonisolated static func makeImage(size: CGSize, scale: CGFloat) -> CGImage? {
     let width = Int((size.width * scale).rounded()), height = Int((size.height * scale).rounded())
     guard width > 0, height > 0 else { return nil }
-    let key = "\(width)x\(height)"
-    if let cached = cache[key] { return cached }
     var pixels = [UInt8](repeating: 255, count: width * height * 4)
     // The middle band per column, then each row blends it toward an end (the same arithmetic as `ThemePad.color`).
     let middles = (0..<width).map { x in
@@ -414,13 +430,10 @@ enum ThemePadField {
       }
     }
     guard let provider = CGDataProvider(data: Data(pixels) as CFData),
-          let space = CGColorSpace(name: CGColorSpace.sRGB),
-          let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                              bytesPerRow: width * 4, space: space,
-                              bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-                              provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+          let space = CGColorSpace(name: CGColorSpace.sRGB)
     else { return nil }
-    cache[key] = image
-    return image
+    return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                   space: space, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                   provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
   }
 }

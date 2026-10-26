@@ -60,7 +60,8 @@ final class ThemeCreatorScreenshotTests: XCTestCase {
     XCTAssertEqual(capture.terminationStatus, 0)
   }
 
-  func testThemeCreatorShots() throws {
+  func testThemeCreatorShots() async throws {
+    await ThemeCreatorImages.prepare(scale: NSScreen.main?.backingScaleFactor ?? 2).value
     var single = Self.studio
     single.baseColors = [Self.studio.baseColors[0]]
     var none = Self.studio

@@ -114,7 +114,12 @@ class ThemeFocusableView: NSView {
       onCancel?()
       return
     }
-    if !handleKey(event) { super.keyDown(with: event) }
+    if handleKey(event) { return }
+    if event.keyCode == 48 {                                    // Tab, Shift-Tab: the popover's key view loop
+      if event.isShiftDown { window?.selectPreviousKeyView(self) } else { window?.selectNextKeyView(self) }
+      return
+    }
+    super.keyDown(with: event)
   }
 
   /// The control's own keys; false passes the event on (Tab moves focus).
@@ -555,12 +560,19 @@ final class ThemeSwatchElement: NSAccessibilityElement {
 @MainActor
 enum ThemeTextureInk {
   private static var cache: [String: CGImage] = [:]
+  private static var patterns: [String: CGColor] = [:]
   /// The average ink alpha of a preview.
-  static let averageInk = 0.16
+  nonisolated static let averageInk = 0.16
 
-  static func image(_ texture: ThemeTexture, dark: Bool) -> CGImage? {
-    let key = "\(texture.rawValue)-\(dark)"
-    if let cached = cache[key] { return cached }
+  /// The preview, once `ThemeCreatorImages.prepare(scale:)` built it; nil before.
+  static func image(_ texture: ThemeTexture, dark: Bool) -> CGImage? { cache[key(texture, dark: dark)] }
+
+  nonisolated static func key(_ texture: ThemeTexture, dark: Bool) -> String { "\(texture.rawValue)-\(dark)" }
+
+  static func store(_ images: [String: CGImage]) { cache.merge(images) { $1 } }
+
+  /// Builds a preview; synthesizes the texture tile, so it runs off the main thread (`ThemeCreatorImages`).
+  nonisolated static func makeImage(_ texture: ThemeTexture, dark: Bool) -> CGImage? {
     let tile = texture.tile(scale: 2)
     var pixels = [UInt8](repeating: 0, count: tile.pixels * tile.pixels * 4)
     let ink: UInt8 = dark ? 255 : 0
@@ -575,31 +587,37 @@ enum ThemeTextureInk {
       pixels[index * 4 + 3] = a
     }
     guard let provider = CGDataProvider(data: Data(pixels) as CFData),
-          let space = CGColorSpace(name: CGColorSpace.sRGB),
-          let image = CGImage(width: tile.pixels, height: tile.pixels, bitsPerComponent: 8, bitsPerPixel: 32,
-                              bytesPerRow: tile.pixels * 4, space: space,
-                              bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                              provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+          let space = CGColorSpace(name: CGColorSpace.sRGB)
     else { return nil }
-    cache[key] = image
-    return image
+    return CGImage(width: tile.pixels, height: tile.pixels, bitsPerComponent: 8, bitsPerPixel: 32,
+                   bytesPerRow: tile.pixels * 4, space: space,
+                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                   provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
   }
 
   /// The ink as a repeating pattern, 100 pt per tile.
   static func pattern(_ texture: ThemeTexture, dark: Bool) -> CGColor? {
+    let key = key(texture, dark: dark)
+    if let cached = patterns[key] { return cached }
     guard let image = image(texture, dark: dark) else { return nil }
     let points = CGFloat(ThemeTexture.tilePoints)
-    return NSColor(patternImage: NSImage(cgImage: image, size: NSSize(width: points, height: points))).cgColor
+    let color = NSColor(patternImage: NSImage(cgImage: image, size: NSSize(width: points, height: points))).cgColor
+    patterns[key] = color
+    return color
   }
 
   /// An 8 pt checkerboard of `fill` on clear, for the opacity track.
   static func checkerboard(_ fill: RGBA) -> CGColor {
+    let key = "checker-\(fill.red)-\(fill.green)-\(fill.blue)-\(fill.alpha)"
+    if let cached = patterns[key] { return cached }
     let image = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { _ in
       fill.nsColor().setFill()
       NSRect(x: 0, y: 0, width: 4, height: 4).fill()
       NSRect(x: 4, y: 4, width: 4, height: 4).fill()
       return true
     }
-    return NSColor(patternImage: image).cgColor
+    let color = NSColor(patternImage: image).cgColor
+    patterns[key] = color
+    return color
   }
 }

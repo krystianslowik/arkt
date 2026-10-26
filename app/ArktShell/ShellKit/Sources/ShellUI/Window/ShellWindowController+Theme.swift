@@ -16,6 +16,8 @@ extension ShellWindowController {
     sidebarController.onThemeCreatorChange = { [weak self] open in
       self?.rootView.themeBackground.crossfadeSpring = open ? SpringPreset.firm.parameters : nil
     }
+    // The creator's pad field and texture previews, built off the main thread before anyone opens it.
+    ThemeCreatorImages.prepare(scale: window?.backingScaleFactor ?? 2)
   }
 
   /// One drawn theme per paged Space, so theme index == page index even if a Space lookup fails.
