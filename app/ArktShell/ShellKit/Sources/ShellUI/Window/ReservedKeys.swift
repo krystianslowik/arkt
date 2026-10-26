@@ -31,10 +31,10 @@ public struct ReservedKeys: Sendable {
   public init(_ keys: [Key]) { self.keys = keys }
 
   /// Cmd-T, Shift-Cmd-T (Reopen Closed Tab, KB-010, #346), Cmd-L, Cmd-W, Shift-Cmd-W, Cmd-N, Cmd-Q, Cmd-D (KB-012,
-  /// #108), Cmd-Opt-Right, Cmd-Opt-Left, and the tab switcher's Ctrl-Tab and Ctrl-Shift-Tab (#103;
-  /// `ShellWindow.sendEvent` already hands those to the switcher before any view). The copy-link keys (KB-013 to
-  /// KB-016, #118) are here too: a page must not swallow them. Incognito (Shift-Cmd-N) joins when Arkt has it.
-  /// Cmd-Z stays the page's first (`ReopenUndoRouter`).
+  /// #108), Shift-Cmd-K (Clear Today Tabs, KB-019, #110), Cmd-Opt-Right, Cmd-Opt-Left, and the tab switcher's
+  /// Ctrl-Tab and Ctrl-Shift-Tab (#103; `ShellWindow.sendEvent` already hands those to the switcher before any view).
+  /// The copy-link keys (KB-013 to KB-016, #118) are here too: a page must not swallow them. Incognito
+  /// (Shift-Cmd-N) joins when Arkt has it. Cmd-Z stays the page's first (`ReopenUndoRouter`).
   public static let arkt = ReservedKeys([
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: .command),
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: [.command, .shift]),
@@ -48,6 +48,7 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_ANSI_C, character: "c", modifiers: [.command, .shift, .option]),    // KB-014
     Key(keyCode: kVK_ANSI_C, character: "c", modifiers: [.command, .shift, .control]),   // KB-015
     Key(keyCode: kVK_ANSI_V, character: "v", modifiers: [.command, .option]),            // KB-016
+    Key(keyCode: kVK_ANSI_K, character: "k", modifiers: [.command, .shift]),             // KB-019 (#110)
     Key(keyCode: kVK_RightArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_LeftArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_Tab, character: "", modifiers: .control),
