@@ -54,6 +54,16 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// Rows ask on every tracking-area update (a scroll updates all of them); one lookup serves them all.
   func setNeedsHoverResync() { hoverResync.setNeeded() }
 
+  /// A row's hover state changed (the pointer entered or left it); the controller turns it into Folder Preview's
+  /// hover (BH-093).
+  var onRowHover: (@MainActor (_ row: Int, _ hovered: Bool) -> Void)?
+
+  func rowHoverChanged(_ rowView: NSTableRowView, hovered: Bool) {
+    let row = self.row(for: rowView)
+    guard row >= 0 else { return }
+    onRowHover?(row, hovered)
+  }
+
   /// Reads the pointer once and sets the hover state of every realized row from it.
   func resyncHoverWithPointer() { hoverResync.resyncNow() }
 
@@ -442,7 +452,16 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     syncAllFolders()
     folderMotion.onFrame = { [weak self] progress in self?.presentFolderMotion(progress) }
     folderMotion.onSettle = { [weak self] folder, open in self?.folderMotionSettled(folder, open: open) }
+    outlineView.onRowHover = { [weak self] row, hovered in
+      guard let self, let id = self.nodeID(atRow: row), case .folder? = self.source.node(id) else { return }
+      self.onFolderHover?(id, hovered)
+    }
   }
+
+  /// The pointer entered or left a folder row (Folder Preview, BH-093).
+  public var onFolderHover: (@MainActor (NodeID, Bool) -> Void)?
+  /// A folder of this outline opened or closed.
+  public var onFoldersChanged: (@MainActor () -> Void)?
 
   // MARK: Items
 
@@ -992,6 +1011,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
     for folder in before.collapsed.symmetricDifference(collapsed) { reload(node: folder) }   // the folder glyph
     presentFolderMotion(folderMotion.progress())
+    if before.collapsed != collapsed { onFoldersChanged?() }
   }
 
   /// The folders whose shown rows change between `before` and `after` (or whose close is reversed while it still

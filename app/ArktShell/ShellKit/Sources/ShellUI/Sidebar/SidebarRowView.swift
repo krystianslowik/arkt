@@ -23,6 +23,7 @@ public final class SidebarRowView: NSTableRowView {
       guard isHovered != oldValue else { return }
       needsDisplay = true
       tabCell?.setCloseButtonShown(isHovered, animated: true)
+      (superview as? SidebarOutlineView)?.rowHoverChanged(self, hovered: isHovered)
     }
   }
   public var isPressed = false {

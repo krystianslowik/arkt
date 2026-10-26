@@ -129,6 +129,17 @@ final class FolderTests: XCTestCase {
     XCTAssertEqual(try harness.rowLayer(world.pinnedTab).transform.m42, below.offsetY,
                    "the frame reaches the row view as a layer transform, not a frame change")
     XCTAssertEqual(CGFloat(try harness.rowLayer(world.folderTabs[1]).opacity), child.alpha, accuracy: 0.001)
+    // Whatever way the layers are flipped, the row below draws closer to the folder row by the offset.
+    let folderLayer = try harness.rowLayer(world.folder)
+    let belowLayer = try harness.rowLayer(world.pinnedTab)
+    let common = try XCTUnwrap(harness.controller.window?.contentView?.layer)
+    func drawnGap() -> CGFloat {
+      abs(belowLayer.convert(CGPoint(x: belowLayer.bounds.midX, y: belowLayer.bounds.midY), to: common).y
+          - folderLayer.convert(CGPoint(x: folderLayer.bounds.midX, y: folderLayer.bounds.midY), to: common).y)
+    }
+    let layoutGap = try harness.outline().outlineView.rect(ofRow: try harness.row(world.pinnedTab)).midY
+      - (try harness.outline().outlineView.rect(ofRow: try harness.row(world.folder)).midY)
+    XCTAssertEqual(drawnGap(), layoutGap + below.offsetY, accuracy: 0.5, "the row below draws closer to the folder")
 
     try harness.advance(by: 2)
     XCTAssertEqual(try harness.row(world.folderTabs[0]), -1, "settled: the children left the outline")
@@ -394,6 +405,145 @@ final class FolderTests: XCTestCase {
     let made = try XCTUnwrap(pinned.last)
     XCTAssertTrue(harness.children(.folder(made)).isEmpty)
     XCTAssertEqual(try harness.outline().renamingNode, made)
+  }
+
+  // MARK: Folder Preview (BH-093, GS-019)
+
+  /// Shows the window with the folder closed and hovers its row the way the pointer does (the row view's hover).
+  private func hoverClosedFolder(_ harness: Harness, _ world: World) throws -> FolderPreviewController {
+    try harness.show(current: world.today[0])
+    try harness.outline().toggleFolder(world.folder, animated: false)
+    let rowView = try XCTUnwrap(try harness.outline().outlineView.rowView(
+      atRow: try harness.row(world.folder), makeIfNecessary: false) as? SidebarRowView)
+    rowView.isHovered = true
+    return harness.controller.sidebarController.folderPreview
+  }
+
+  func testHoveringAClosedFolderShowsItsPreviewWithTheSearchFieldFocused() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let preview = try hoverClosedFolder(harness, world)
+    XCTAssertNil(preview.shownFolder, "the preview waits for the hover delay")
+
+    preview.firePendingTimer()
+
+    XCTAssertEqual(preview.shownFolder, world.folder)
+    XCTAssertEqual(preview.view.rowViews.prefix(preview.view.rowCount).map(\.titleField.stringValue),
+                   ["F0", "F1", "G0"], "every tab of the folder, nested ones included")
+    XCTAssertEqual(preview.view.highlightedRow, 0)
+    let window = try XCTUnwrap(harness.controller.window)
+    XCTAssertTrue((window.firstResponder as? NSTextView)?.delegate === preview.view.searchField,
+                  "typing goes to the search field")
+    XCTAssertTrue(preview.view.isDescendant(of: try XCTUnwrap(window.contentView)))
+    let sidebarRight = harness.controller.sidebarController.view.convert(
+      harness.controller.sidebarController.view.bounds, to: nil).maxX
+    XCTAssertGreaterThanOrEqual(preview.view.convert(preview.view.bounds, to: nil).minX, sidebarRight,
+                                "it opens beside the sidebar")
+    XCTAssertEqual(preview.view.accessibilityIdentifier(), AXID.FolderPreview.panel)
+  }
+
+  /// Typing selects the first match; Return activates it, the folder stays closed and the tab peeks out under it.
+  func testTypingSelectsTheFirstMatchAndReturnActivatesItPeekingOut() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let preview = try hoverClosedFolder(harness, world)
+    preview.firePendingTimer()
+    let window = try XCTUnwrap(harness.controller.window)
+    let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+
+    editor.insertText("g", replacementRange: editor.selectedRange())
+    XCTAssertEqual(preview.view.rowViews.prefix(preview.view.rowCount).map(\.titleField.stringValue), ["G0"])
+    XCTAssertEqual(preview.view.highlightedRow, 0)
+    editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+
+    XCTAssertEqual(harness.controller.sidebarController.current, world.innerTab)
+    XCTAssertNil(preview.shownFolder)
+    let outline = try harness.outline()
+    XCTAssertFalse(outline.isFolderOpen(world.folder), "the folder stays closed")
+    XCTAssertGreaterThanOrEqual(try harness.row(world.innerTab), 0, "the chosen tab peeks out")
+    XCTAssertEqual(try harness.row(world.folderTabs[0]), -1)
+    XCTAssertFalse((window.firstResponder as? NSTextView)?.delegate === preview.view.searchField,
+                   "the field gave focus back")
+  }
+
+  func testArrowsMoveTheHighlightAndAClickChoosesARow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let preview = try hoverClosedFolder(harness, world)
+    preview.firePendingTimer()
+    let editor = try XCTUnwrap(harness.controller.window?.firstResponder as? NSTextView)
+    editor.doCommand(by: #selector(NSResponder.moveDown(_:)))
+    XCTAssertEqual(preview.view.highlightedRow, 1)
+    preview.view.rowViews[0].onClick?()
+    XCTAssertEqual(harness.controller.sidebarController.current, world.folderTabs[0])
+    XCTAssertNil(preview.shownFolder)
+  }
+
+  func testEscapeClosesThePreviewAndGivesFocusBack() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let preview = try hoverClosedFolder(harness, world)
+    preview.firePendingTimer()
+    let editor = try XCTUnwrap(harness.controller.window?.firstResponder as? NSTextView)
+    editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+    XCTAssertNil(preview.shownFolder)
+    XCTAssertEqual(harness.controller.sidebarController.current, world.today[0], "nothing was chosen")
+  }
+
+  /// An open folder shows its tabs already: no preview.
+  func testAnOpenFolderShowsNoPreview() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    let rowView = try XCTUnwrap(try harness.outline().outlineView.rowView(
+      atRow: try harness.row(world.folder), makeIfNecessary: false) as? SidebarRowView)
+    rowView.isHovered = true
+    let preview = harness.controller.sidebarController.folderPreview
+    preview.firePendingTimer()
+    XCTAssertNil(preview.shownFolder)
+  }
+
+  /// Leaving the folder row hides the preview after a short grace, unless the pointer went into the preview.
+  func testLeavingTheRowHidesThePreviewUnlessThePointerIsInIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let preview = try hoverClosedFolder(harness, world)
+    preview.firePendingTimer()
+
+    preview.folderHoverChanged(world.folder, hovered: false)
+    preview.pointerInPreviewChanged(true)
+    preview.firePendingTimer()
+    XCTAssertEqual(preview.shownFolder, world.folder, "the pointer moved into the preview")
+
+    preview.pointerInPreviewChanged(false)
+    preview.firePendingTimer()
+    XCTAssertNil(preview.shownFolder)
+  }
+
+  /// The preview scales in from its leading edge and fades; Reduce Motion keeps only the fade.
+  func testThePreviewFadesInAndReduceMotionDropsTheScale() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let preview = try hoverClosedFolder(harness, world)
+    preview.reduceMotion = { false }
+    preview.firePendingTimer()
+    let layer = try XCTUnwrap(preview.view.layer)
+    XCTAssertNotNil(layer.animation(forKey: FolderPreviewView.enterOpacityKey))
+    let scale = try XCTUnwrap(layer.animation(forKey: FolderPreviewView.enterScaleKey) as? CABasicAnimation)
+    XCTAssertLessThanOrEqual(scale.duration, 0.2)
+    preview.hide(animated: false)
+
+    preview.reduceMotion = { true }
+    preview.show(folder: world.folder)
+    XCTAssertNotNil(layer.animation(forKey: FolderPreviewView.enterOpacityKey))
+    XCTAssertNil(layer.animation(forKey: FolderPreviewView.enterScaleKey), "Reduce Motion: no scale")
   }
 
   // MARK: Rename (BH-096)

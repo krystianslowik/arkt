@@ -167,6 +167,7 @@ public final class SidebarController {
     guard let page = pages[id] else { return }
     let changed = currentSpace != id
     if changed, let old = currentSpace { pages[old]?.outlineController.clearSelection() }   // design 6
+    if changed { folderPreview.hide(animated: false) }                              // BH-093: the page left
     currentSpace = id
     if changed, tabToRestore(in: id) == nil {
       previous = current
@@ -273,6 +274,11 @@ public final class SidebarController {
     page.outlineController.onNodeDragEnded = { [weak self] in self?.nodeDragEnded() }
     page.outlineController.faviconProvider = { [weak self] node in self?.favicons[node] }
     page.outlineController.closingProvider = { [weak self] node in self?.closingNodes.contains(node) ?? false }
+    page.outlineController.onFolderHover = { [weak self, weak page] folder, hovered in
+      guard let self, page === self.currentPage else { return }
+      self.folderPreview.folderHoverChanged(folder, hovered: hovered)
+    }
+    page.outlineController.onFoldersChanged = { [weak self] in self?.folderPreview.folderStatesChanged() }
     page.outlineController.setRowStates(resolver)
     pages[id] = page
     return page
@@ -301,6 +307,42 @@ public final class SidebarController {
 
   /// Whether the current Space has a folder (the Collapse / Expand All items' enabled state).
   public var currentSpaceHasFolders: Bool { currentPage?.outlineController.hasFolders ?? false }
+
+  /// This window's Folder Preview (BH-093): a closed folder of the current page shows its tabs on hover.
+  private(set) lazy var folderPreview: FolderPreviewController = makeFolderPreview()
+
+  private func makeFolderPreview() -> FolderPreviewController {
+    let preview = FolderPreviewController(source: source)
+    preview.host = { [weak self] in self?.view.window?.contentView }
+    preview.anchor = { [weak self] folder in self?.folderRowFrame(folder) }
+    preview.isClosed = { [weak self] folder in
+      guard let outline = self?.currentPage?.outlineController else { return false }
+      return !outline.isFolderOpen(folder) && outline.row(for: folder) >= 0
+    }
+    preview.favicon = { [weak self] node, title, url in
+      if let image = self?.favicons[node] { return image }
+      let scale = self?.view.shellBackingScale ?? 2
+      return SidebarGlyphs.letter(for: title, url: url, flavor: self?.currentFlavor ?? .light,
+                                  size: SidebarMetrics.faviconSize, scale: scale)
+    }
+    preview.flavor = { [weak self] in self?.currentFlavor ?? .light }
+    preview.onChoose = { [weak self] node in self?.activate(node: node) }
+    return preview
+  }
+
+  /// The folder row's frame in the window's root view, stretched to the sidebar's right edge.
+  private func folderRowFrame(_ folder: NodeID) -> NSRect? {
+    guard let outline = currentPage?.outlineController, let host = view.window?.contentView else { return nil }
+    let row = outline.row(for: folder)
+    guard row >= 0 else { return nil }
+    let rect = outline.outlineView.convert(outline.outlineView.rect(ofRow: row), to: host)
+    let sidebar = view.convert(view.bounds, to: host)
+    return NSRect(x: rect.minX, y: rect.minY, width: max(sidebar.maxX - rect.minX, 0), height: rect.height)
+  }
+
+  private var currentFlavor: ThemeFlavor {
+    currentSpace.flatMap { source.space($0)?.theme.flavor } ?? .light
+  }
 
   // MARK: Activation
 
