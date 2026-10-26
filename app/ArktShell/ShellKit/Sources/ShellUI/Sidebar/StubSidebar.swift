@@ -13,13 +13,19 @@ public final class StubSidebar: SidebarSource {
   private var spaces: [SpaceID: SidebarSpaceInfo] = [:]
   private var nodes: [NodeID: Node] = [:]
   private var childOrder: [SidebarLocation: [NodeID]] = [:]
+  /// Custom titles (BH-026) by tab: `node(_:)` shows them over the page title that `updateTab` writes.
+  private var customTitles: [NodeID: String] = [:]
   private let hub = SidebarChangeHub()
 
   public init() {}
 
   public func space(_ id: SpaceID) -> SidebarSpaceInfo? { spaces[id] }
   public func children(of location: SidebarLocation) -> [NodeID] { childOrder[location] ?? [] }
-  public func node(_ id: NodeID) -> SidebarNodeInfo? { nodes[id]?.info }
+  public func node(_ id: NodeID) -> SidebarNodeInfo? {
+    guard let info = nodes[id]?.info else { return nil }
+    if case .tab(_, let url, _) = info, let custom = customTitles[id] { return .tab(id: id, url: url, title: custom) }
+    return info
+  }
   public func parent(of id: NodeID) -> SidebarLocation? { nodes[id]?.parent }
 
   public func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation {
@@ -156,9 +162,9 @@ public final class StubSidebar: SidebarSource {
   }
 
   @discardableResult
-  public func addFolder(title: String, in location: SidebarLocation) -> NodeID {
+  public func addFolder(title: String, in location: SidebarLocation, at index: Int? = nil) -> NodeID {
     let id = NodeID()
-    insert(.folder(id: id, title: title), id: id, in: location)
+    insert(.folder(id: id, title: title), id: id, in: location, at: index)
     return id
   }
 
@@ -178,6 +184,53 @@ public final class StubSidebar: SidebarSource {
     guard let node = nodes[id], case .tab(_, let oldURL, let oldTitle) = node.info else { return }
     nodes[id]?.info = .tab(id: id, url: url ?? oldURL, title: title ?? oldTitle)
     hub.emit(.node(id))
+  }
+
+  public func renameNode(_ id: NodeID, to title: String?) {
+    let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let before = node(id)
+    switch nodes[id]?.info {
+    case .tab?:
+      customTitles[id] = trimmed.isEmpty ? nil : trimmed
+    case .folder?:
+      guard !trimmed.isEmpty else { return }
+      nodes[id]?.info = .folder(id: id, title: trimmed)
+    case .split?, nil:
+      return
+    }
+    if node(id) != before { hub.emit(.node(id)) }
+  }
+
+  /// A copy of `id`'s subtree with new ids right after it; custom titles come along. Throws `SidebarMoveError.invalid`
+  /// for an unknown id.
+  @discardableResult
+  public func duplicateNode(_ id: NodeID) throws -> NodeID {
+    guard let original = nodes[id] else { throw SidebarMoveError.invalid }
+    let copy = copySubtree(id, into: original.parent)
+    var siblings = childOrder[original.parent] ?? []
+    siblings.removeAll { $0 == copy }
+    siblings.insert(copy, at: (siblings.firstIndex(of: id) ?? siblings.count - 1) + 1)
+    childOrder[original.parent] = siblings
+    hub.emit(.structure(original.parent))
+    return copy
+  }
+
+  /// Copies `id` and its children under `location` (appended) without emitting; returns the copy's id.
+  private func copySubtree(_ id: NodeID, into location: SidebarLocation) -> NodeID {
+    guard let original = nodes[id] else { return id }
+    let copy = NodeID()
+    let info: SidebarNodeInfo = switch original.info {
+    case .tab(_, let url, let title): .tab(id: copy, url: url, title: title)
+    case .folder(_, let title): .folder(id: copy, title: title)
+    case .split(_, let layout): .split(id: copy, layout: layout)
+    }
+    nodes[copy] = Node(info: info, parent: location)
+    customTitles[copy] = customTitles[id]
+    childOrder[location, default: []].append(copy)
+    if let inner = original.info.childLocation, let copyInner = info.childLocation {
+      for child in children(of: inner) { _ = copySubtree(child, into: copyInner) }
+    }
+    return copy
   }
 
   private func insert(_ info: SidebarNodeInfo, id: NodeID, in location: SidebarLocation, at index: Int? = nil) {

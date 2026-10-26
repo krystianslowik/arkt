@@ -262,8 +262,10 @@ public struct Sidebar: Hashable, Sendable {
   }
 
   @discardableResult
-  public mutating func addFolder(title: String, in location: Location, createdAt: Date = .now) throws -> NodeID {
-    try insert(.folder(FolderItem(title: title)), in: location, createdAt: createdAt)
+  public mutating func addFolder(
+    title: String, in location: Location, at index: Int? = nil, createdAt: Date = .now
+  ) throws -> NodeID {
+    try insert(.folder(FolderItem(title: title)), in: location, at: index, createdAt: createdAt)
   }
 
   @discardableResult
