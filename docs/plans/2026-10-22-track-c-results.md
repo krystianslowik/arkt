@@ -1826,10 +1826,11 @@ Built from `docs/design/alerts-sheets-toasts.md` as restyled in #377, with the m
   without a period, the error code on its own line, Try Again as the Return default, Show Data Folder as the footer
   link (decision 4), still run from the run-loop callout.
 
-Tests: ShellKit unit 1075 (baseline 1047 + 28), all passed. ShellKitGUITests 899 run, 9 skipped; new suites
-`ToastLayoutTests`, `DialogTests`, the Undo / Cmd-Z / Clear Today tests in `TabActionsTests`, and the rewritten Delete
-Space sheet tests. Debug app build succeeds. The two frame-pacing tests failed once in a full run with the machine
-under heavy load and passed or skipped in repeats.
+Tests: ShellKit unit 1075 (baseline 1047 + 28), all passed. ShellKitGUITests 906 run, 12 skipped (9 as before plus the
+three `AlertScreenshotTests`, which run only with `ARKT_ALERT_SHOTS_DIR`), 0 failures; new suites `ToastLayoutTests`
+and `DialogTests`, the Undo / Cmd-Z / Clear Today tests in `TabActionsTests`, and the rewritten Delete Space sheet
+tests. Debug app build succeeds. An undo batch shows only the row that held the current tab, so undoing an
+auto-archive pass loads no page.
 
 Deferred: the engine part (section 6: panel radius and padding, shadow, entrance, button press, `destructivePrimary`
 and `DestructiveTextColor()`) needs a Chromium build and moves to a follow-up engine issue.
