@@ -1790,3 +1790,46 @@ log. Esc then closed it with the "Peek closed" toast.
 
 Still open on #348: Settings > Links toggles, the source card hidden from VoiceOver and the Tab loop, XCUITest flows,
 and the Instruments trace at 120 Hz.
+
+## Dialogs and toasts (#308, design #306) (2026-10-26)
+
+Built from `docs/design/alerts-sheets-toasts.md` as restyled in #377, with the maintainer decisions of 2026-10-25.
+
+- **One toast system.** `Toast` carries a kind (notice, error, undo, persistent) with its glyph and lifetime (4 s,
+  6 s for undo, persistent until dismissed). `ToastPresenter` pauses a timer while the pointer is over the toast and
+  while the window is not key, and restarts it at full length (`ToastPause`). Every existing caller moved onto it:
+  sidebar hide, pin and unpin, Favorites and sidebar errors, the Archive window, the Peek closed toast (#346, its
+  Reopen key kept), restore, import and recovery. The restore toast drops "Click to view." next to its View button;
+  the import failure says "Couldn't import browser data."
+- **Toast look.** `ToastView`: leading 16 pt glyph, the text, and the action as a small neutral pill (the brand pill
+  at 24 pt, 12 semibold), no hairline and no key hint on Undo. Recovery notices use the multi-line variant: a 300 pt
+  column, up to three lines at 1.38, radius 12, Show Files and a dismiss button on the first line; none of the four
+  `RecoveryNotice` texts truncates. Surface: `AlertTokens.toastSurface(theme:)`, `toastSurface` with the Space
+  theme's first stop mixed in (22 % light, 30 % dark), a plain fill with `toastShadow` and `toastEdge`; opaque under
+  Reduce Transparency; the action pill gains the 1 pt edge under Increase Contrast. Width still follows the text
+  (#378).
+- **Undo toast (decision 3).** A bulk archive (multi-selection Cmd-W, Archive Below, Clear Today Tabs, folders
+  included) and an auto-archive pass become one `ClosedBatch` on the window's reopen stack. "Archived N tabs" /
+  "Auto archived N tabs" with Undo shows only for two or more tabs; Undo restores exactly that batch and Cmd-Z pops
+  the same batch while nothing else closed, and either one takes the toast down. A single Cmd-W and a one-tab pass
+  show no toast. The stack holds its capacity while a batch is open, so a large bulk archive never loses rows.
+- **Motion.** In: translateY 12 and scale 0.96 on `springyFast`, opacity 0.16 s; out 0.15 s ease-out; a replaced toast
+  leaves as a snapshot while the new one springs in at its own width. Reduce Motion: fades only. Layers only. A
+  hidden toast is skipped by the card's and split container's layout and recolors only when it shows.
+- **Dialogs.** `DialogContent` (the shell twin of `ArktDialogSheetContent`), one `DialogSheetView` with the brand
+  pills (`ArchivePillButton` generalized with `Metrics`, not a second pill), hosted as `DialogSheet` (window sheet),
+  `DialogPanel` (non-activating child panel 12 pt inside the anchor, `firmFast` from its top-leading corner, 0.10 s
+  exit, instant from the keyboard) and `DialogAlert` (app-modal, `firmFast` from its center). Delete Space (decision
+  1) shows the Space's swatch and mark, the existing strings plus the counts line, Cancel and a quiet red Delete Space
+  with no key; focus starts on Cancel, Escape cancels, Return deletes nothing (GUI test). Clear Archive moved onto the
+  same sheet. The launch failure and newer schema alerts use `DialogAlert`: plain app icon (decision 5), titles
+  without a period, the error code on its own line, Try Again as the Return default, Show Data Folder as the footer
+  link (decision 4), still run from the run-loop callout.
+
+Tests: ShellKit unit 1075 (baseline 1047 + 28), all passed. ShellKitGUITests 899 run, 9 skipped; new suites
+`ToastLayoutTests`, `DialogTests`, the Undo / Cmd-Z / Clear Today tests in `TabActionsTests`, and the rewritten Delete
+Space sheet tests. Debug app build succeeds. The two frame-pacing tests failed once in a full run with the machine
+under heavy load and passed or skipped in repeats.
+
+Deferred: the engine part (section 6: panel radius and padding, shadow, entrance, button press, `destructivePrimary`
+and `DestructiveTextColor()`) needs a Chromium build and moves to a follow-up engine issue.
