@@ -68,6 +68,17 @@ enum AppEnvironment {
     return .standard
   }
 
+  /// Copies the settings of the old bundle id `dev.arkt.ArktShell` into the standard defaults once (#128). Called first
+  /// thing in `main.swift`, before the delegate, the engine or any settings object reads a default. A run with an
+  /// `ARKT_DEFAULTS_SUITE` override never touches the real defaults, so it skips this.
+  static func migrateLegacyDefaults() {
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
+    if overrides.defaultsSuiteName != nil { return }
+    #endif
+    guard let bundle = Bundle.main.bundleIdentifier, bundle != LegacyDefaultsMigration.legacyBundleID else { return }
+    LegacyDefaultsMigration.forThisApp(bundleIdentifier: bundle).runIfNeeded()
+  }
+
   /// The sidebar autosave debounce. Debug and Profile builds take `ARKT_AUTOSAVE_DELAY_MS` (0 to 600000), so a test
   /// can quit inside the debounce deterministically.
   static var autosaveDelay: Duration {

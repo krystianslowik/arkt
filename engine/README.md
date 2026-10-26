@@ -139,7 +139,7 @@ replace WebKit's platform and engine tokens with a hand-written copy that drifts
 A self-contained, Arkt-branded, non-component build in its own output directory (`$REL=$CR/out/Arkt`). It shares no
 objects with the component build in `out/Spike`. Branding comes from the GN arg `branding_file_path`, which points at
 `arkt/branding/BRANDING` (no patch): it renames the app (`Arkt.app`), the framework (`Arkt Framework`), the helpers
-(`Arkt Helper*.app`) and the bundle id (`com.arkt.Arkt`, a placeholder). Icons and UI strings stay Chromium's.
+(`Arkt Helper*.app`) and the bundle id (`dev.arkt.Arkt`, #73 and #128; helpers and the framework derive theirs from it). Icons and UI strings stay Chromium's.
 
 `$REL/args.gn`:
 
@@ -207,7 +207,7 @@ personal-information entitlements only on the app):
     $S "Arkt.app/Contents/Frameworks/Arkt Framework.framework"
     $S --options runtime --entitlements $ENT/app-entitlements.plist Arkt.app
     codesign --verify --deep --strict --verbose=2 Arkt.app      # valid on disk, satisfies its Designated Requirement
-    codesign -dv Arkt.app 2>&1 | grep -E '^(Identifier|CodeDirectory)'   # com.arkt.Arkt, flags=0x10000(runtime)
+    codesign -dv Arkt.app 2>&1 | grep -E '^(Identifier|CodeDirectory)'   # dev.arkt.Arkt, flags=0x10000(runtime)
 
 List `"$F"/Helpers` first: every executable there must be covered (11 entries on 156: eight `Arkt Helper*.app`,
 including the four `Aperitif` ones, plus the three tools above). `--timestamp=none` keeps signing offline; a
@@ -291,7 +291,7 @@ not on the Chromium disk (a launch from a removable volume shows the removable-v
 
 **Launch** the executable directly, with the launch flags above, a profile under
 `~/Library/Application Support/ArktTest`, and the `ARKT_*` overrides so the shell's own data, Arc folder and
-defaults stay away from the real ones (the bundle id is the dev app's, `dev.arkt.ArktShell`):
+defaults stay away from the real ones (the bundle id is the product's, `dev.arkt.Arkt`, unless the build overrides it):
 
     T=~/Library/Application\ Support/ArktTest/<run>
     ARKT_DATA_DIR=$T/shell ARKT_ARC_DIR=$T/arc ARKT_DEFAULTS_SUITE=arkt-test-<run> \
@@ -302,7 +302,31 @@ Add `--enable-sandbox-logging` to see seatbelt denials in the unified log (Chrom
 otherwise), and use `/usr/bin/log`, not zsh's `log` builtin:
 `/usr/bin/log show --start '<launch time>' --style compact --predicate 'sender == "Sandbox"' | grep -i arkt`.
 
-Ids in this bundle (until #128 aligns them): app `dev.arkt.ArktShell`; framework `com.arkt.Arkt.framework`; helpers
-`com.arkt.Arkt.helper` (Helper, GPU, Aperitif, Aperitif GPU), `com.arkt.Arkt.helper.renderer` (Renderer, Aperitif
-Renderer), `com.arkt.Arkt.framework.AlertNotificationService` (Alerts, Aperitif Alerts). The Mach rendezvous service
-follows the outer app: `dev.arkt.ArktShell.MachPortRendezvousServer.<browser pid>`.
+Ids in this bundle: see "Product identity" below.
+
+## Product identity (#128)
+
+One prefix, `dev.arkt.*` (#73), for everything a user's machine binds to: app `dev.arkt.Arkt` (`PRODUCT_BUNDLE_IDENTIFIER`,
+shown as "Arkt"), framework `dev.arkt.Arkt.framework`, helpers `dev.arkt.Arkt.helper` (Helper, GPU, Aperitif, Aperitif
+GPU), `dev.arkt.Arkt.helper.renderer` (Renderer, Aperitif Renderer) and
+`dev.arkt.Arkt.framework.AlertNotificationService` (Alerts, Aperitif Alerts). The framework and helper ids come from
+`MAC_BUNDLE_ID` in `arkt/branding/BRANDING`, which must equal the app id (`ProductIdentityTests` pins it). The Mach
+rendezvous service follows the outer app: `<app id>.MachPortRendezvousServer.<browser pid>`.
+
+Data folders, all under `~/Library/Application Support`:
+
+| Folder | Holds | Set by |
+|---|---|---|
+| `Arkt` | the shell's database, backups, favicons | `DatabaseLocation.productFolderName` |
+| `Arkt/Engine` | the product engine's default user-data-dir | `CrProductDirName` in the app's Info.plist |
+| `Arkt Dev Engine` | the development engine's default user-data-dir | the same key, from `Engine.xcconfig` |
+
+`CrProductDirName` is written by the Engine build phase from the build setting `ARKT_PRODUCT_DIR_NAME`
+(`app/ArktShell/Engine.xcconfig`, default `Arkt Dev Engine`, so a development build never shares a profile with the
+product). A product build passes the product value; the release configuration (#334) sets it in its own xcconfig:
+
+    xcodebuild -scheme ArktShell -configuration Engine ARKT_PRODUCT_DIR_NAME=Arkt/Engine ...
+
+The key is a seam (Chromium's `chrome_paths_mac.mm` reads it from the outer bundle; its fallback is `Chromium`), so there
+is no patch. The keychain item stays "Arkt Safe Storage" (patch 0003); the existing "Chromium Safe Storage" item is
+the maintainer's and is never touched (#20).
