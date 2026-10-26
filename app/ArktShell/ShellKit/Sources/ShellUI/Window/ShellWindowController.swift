@@ -156,6 +156,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onClose = { [weak self] node in self?.close(node: node) }       // hover X (GS-043)
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
     wireFavorites()                                   // Move To, the sidebar drop and the BH-049 unload
+    wirePinned()                                      // pin/unpin, reset, Replace Pin, Separate, the favicon click
     commandBar.onOpen = { [weak self] url, target in
       switch target {
       case .currentTab, .newTab: self?.open(url, inNewTab: target == .newTab)
@@ -569,7 +570,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
     guard case .tab(_, let url, let title)? = sidebar.node(node) else { return }
-    let newURL = snapshot.url.flatMap { $0 == url ? nil : $0 }
+    // Pinned and Favorite nodes keep the pinned URL (BH-057, BH-048); only their title follows the page (BH-062).
+    let tracksURL = Self.writesLiveURL(toSection: sidebar.section(containing: node))
+    let newURL = tracksURL ? snapshot.url.flatMap { $0 == url ? nil : $0 } : nil
     let newTitle = snapshot.title.isEmpty || snapshot.title == title ? nil : snapshot.title
     if newURL != nil || newTitle != nil { sidebar.updateTab(node, url: newURL, title: newTitle) }
     if let favicon = snapshot.faviconData { faviconChanged(favicon, for: node) }
@@ -595,7 +598,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .titleChanged(_, let title) where !title.isEmpty:
       sidebar.updateTab(node, url: nil, title: title)
     case .urlChanged(let tab, let url):
-      if let url { sidebar.updateTab(node, url: url, title: nil) }
+      // Pinned and Favorite nodes keep the pinned URL (BH-057, BH-048); Today nodes track the page.
+      if let url, Self.writesLiveURL(toSection: sidebar.section(containing: node)) {
+        sidebar.updateTab(node, url: url, title: nil)
+      }
       if tab == currentTab { refreshAddress() }
       refreshPaneToolbar(of: node)
     case .faviconChanged(_, let data):
@@ -720,6 +726,7 @@ extension ShellWindowController: NSMenuItemValidation {
     if let enabled = validateSplitMenuItem(menuItem) { return enabled }
     if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
+    if let enabled = validatePinnedMenuItem(menuItem) { return enabled }
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
     }

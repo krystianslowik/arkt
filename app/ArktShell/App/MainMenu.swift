@@ -104,6 +104,10 @@ enum MainMenu {
       item("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w"),             // KB-008
       item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]), // KB-009
       .separator(),
+      item("Pin Tab", #selector(ShellWindowController.pinTab(_:)), "d"),                   // KB-012, BH-055
+      // KB-041 (unbound in Arc), BH-057; enabled for a navigated pinned tab.
+      item("Back to Pinned URL", #selector(ShellWindowController.resetTab(_:)), ""),
+      .separator(),
       page("Save Page As...", .savePage, "s", [.command, .shift]),                         // KB-060 (Arc's key)
       page("Print...", .print, "p"),                                                       // KB-060
       .separator(),
@@ -183,6 +187,8 @@ enum MainMenu {
       item("Rename Space", #selector(ShellWindowController.renameSpace(_:)), "", []),
       item("Move Space Left", #selector(ShellWindowController.moveSpaceLeft(_:)), "", []),
       item("Move Space Right", #selector(ShellWindowController.moveSpaceRight(_:)), "", []),
+      // BH-059: every navigated pinned tab of the current Space returns to its pinned URL.
+      item("Reset Space", #selector(ShellWindowController.resetSpace(_:)), "", []),
       .separator(),
       item("Next Space", #selector(ShellWindowController.nextSpace(_:)), right, [.command, .option]),
       item("Previous Space", #selector(ShellWindowController.previousSpace(_:)), left, [.command, .option]),

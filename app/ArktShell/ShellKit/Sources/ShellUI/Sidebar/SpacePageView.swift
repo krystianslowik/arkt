@@ -31,10 +31,18 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   public let editButton = HoverCloseButton(frame: .zero)
   /// BH-038: the header "..." menu (icon, theme, disabled Profile). Shown with the edit button.
   public let optionsButton = HoverCloseButton(frame: .zero)
+  /// BH-065: the caret that collapses / expands the Pinned section; shown only while the Space has pinned tabs.
+  public let collapsePinnedButton = NSButton(frame: .zero)
   public let scrollView: SidebarScrollView
   public let outlineController: SidebarOutlineController
   /// The title field is open for editing.
   public private(set) var isRenaming = false
+  /// BH-065: this window's Pinned section is collapsed. Per window (DM 3.1); it lives as long as the page and is
+  /// not persisted across launches [I] (window-state persistence is #331's shape).
+  public private(set) var isPinnedCollapsed = false
+  /// The window's current tab sits in this Space's Pinned section; a collapsed header draws its title bold [I]
+  /// (PARITY: "the last pinned tab is in view", BH-065).
+  private var currentTabInPinned = false
   private let source: any SidebarSource
   /// Behind the open field, so it reads as editable.
   private let renameFill = NSView(frame: .zero)
@@ -97,11 +105,20 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
     optionsButton.toolTip = "Space Options"
     optionsButton.setAccessibilityLabel("Space Options")
     optionsButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.spaceOptions)
+    collapsePinnedButton.isBordered = false
+    collapsePinnedButton.title = ""
+    collapsePinnedButton.target = self
+    collapsePinnedButton.action = #selector(collapsePinnedPressed(_:))
+    collapsePinnedButton.setAccessibilityLabel("Collapse Pinned")
+    collapsePinnedButton.toolTip = "Collapse Pinned"
+    collapsePinnedButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.spaceCollapsePinned)
+    collapsePinnedButton.isHidden = true          // refreshCollapseAffordance decides below
     scrollView.autoresizingMask = []
     addSubview(renameFill)
     addSubview(titleLabel)
     addSubview(editButton)
     addSubview(optionsButton)
+    addSubview(collapsePinnedButton)
     addSubview(scrollView)
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
@@ -109,6 +126,7 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
     setAccessibilityLabel(titleLabel.stringValue)
     outlineView.axProxyRows.setParent(self)
     setFlavor(info?.theme.flavor ?? .light)
+    refreshCollapseAffordance()
   }
 
   /// The header, then the proxy outline (`sidebar.outline`, #269) in place of the scroll view that holds the real
@@ -175,6 +193,9 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
       "pencil", box: SidebarMetrics.spaceEditGlyphSize, weight: .semibold, color: color, scale: scale)
     optionsButton.image = SymbolImageCache.shared.symbol(
       "ellipsis", box: SidebarMetrics.spaceEditGlyphSize, weight: .semibold, color: color, scale: scale)
+    collapsePinnedButton.image = SymbolImageCache.shared.symbol(
+      isPinnedCollapsed ? "chevron.right" : "chevron.down", box: SidebarMetrics.spaceEditGlyphSize,
+      weight: .semibold, color: color, scale: scale)
   }
 
   /// Glyph bitmaps are per backing scale; re-render the realized rows when the window's scale changes.
@@ -200,12 +221,20 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   /// The header strip above the outline, in this (flipped) view.
   private var headerRect: NSRect { NSRect(x: 0, y: 0, width: bounds.width, height: SidebarMetrics.spaceTitleHeight) }
 
+  /// Where the title starts: right of the collapse caret while the Space has pinned tabs (BH-065), else at the
+  /// measured leading.
+  private var titleLeading: CGFloat {
+    collapsePinnedButton.isHidden
+      ? SidebarMetrics.spaceTitleLeading
+      : SidebarMetrics.spaceTitleLeading + SidebarMetrics.closeButtonSize + SidebarMetrics.spaceEditButtonGap
+  }
+
   /// The title hugs its text (so only the text takes the click), leaving room for the edit and options buttons after
   /// it even while they are hidden; the open field takes the whole header width. A header drag only moves the title
   /// (`headerDragOffset`); the buttons stay at the title's resting place.
   private func layoutHeader() {
     let header = SidebarMetrics.spaceTitleHeight
-    let titleX = SidebarMetrics.spaceTitleLeading
+    let titleX = titleLeading
     let button = SidebarMetrics.closeButtonSize
     let available = max(0, bounds.width - titleX - SidebarMetrics.horizontalPadding)
     let textHeight = ceil(titleLabel.intrinsicContentSize.height)
@@ -220,6 +249,8 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
     let rest = NSRect(x: titleX, y: textY, width: textWidth, height: textHeight)
     titleLabel.frame = rest.offsetBy(dx: titleOffset(headerDragOffset), dy: 0)
     let buttonY = ((header - button) / 2).rounded()
+    collapsePinnedButton.frame = NSRect(x: SidebarMetrics.spaceTitleLeading, y: buttonY,
+                                        width: button, height: button)
     editButton.frame = NSRect(x: rest.maxX + gap, y: buttonY, width: button, height: button)
     optionsButton.frame = NSRect(x: editButton.frame.maxX + gap, y: buttonY, width: button, height: button)
     renameFill.frame = titleLabel.frame.insetBy(dx: -SidebarMetrics.spaceRenameFillInsetX,
@@ -347,7 +378,7 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   /// Moves only the title's frame origin; nothing else in the header is laid out again.
   private func setHeaderDragOffset(_ offset: CGFloat) {
     headerDragOffset = offset
-    titleLabel.setFrameOrigin(NSPoint(x: SidebarMetrics.spaceTitleLeading + titleOffset(offset),
+    titleLabel.setFrameOrigin(NSPoint(x: titleLeading + titleOffset(offset),
                                       y: titleLabel.frame.minY))
   }
 
@@ -393,7 +424,8 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
                in: optionsButton)
   }
 
-  /// Icon and theme submenus, plus Profile disabled: profiles are not in the model yet (#279).
+  /// Icon and theme submenus, plus Profile disabled: profiles are not in the model yet (#279). Collapse / Expand
+  /// Pinned (BH-065, [S] command names) ends it, enabled while the Space has pinned tabs.
   func makeOptionsMenu() -> NSMenu {
     let info = source.space(spaceID)
     let menu = NSMenu(title: "Space Options")
@@ -404,6 +436,12 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
     let profile = NSMenuItem(title: "Profile", action: nil, keyEquivalent: "")
     profile.isEnabled = false
     menu.addItem(profile)
+    menu.addItem(.separator())
+    let collapse = NSMenuItem(title: isPinnedCollapsed ? "Expand Pinned" : "Collapse Pinned",
+                              action: #selector(collapsePinnedPressed(_:)), keyEquivalent: "")
+    collapse.target = self
+    collapse.isEnabled = !collapsePinnedButton.isHidden
+    menu.addItem(collapse)
     return menu
   }
 
@@ -520,6 +558,49 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
 
   /// Every way out of the field ends here: Return, Escape, a click elsewhere, the page leaving its window.
   public func controlTextDidEndEditing(_ notification: Notification) { finishRename() }
+
+  // MARK: - Collapse Pinned (BH-065)
+
+  /// The caret ("clicks the caret next to the Space title") and the options menu item toggle this window's Pinned
+  /// section. The title click keeps opening the rename field (BH-038; TB24's title-toggle variant is not taken).
+  @objc private func collapsePinnedPressed(_ sender: Any?) { setPinnedCollapsed(!isPinnedCollapsed) }
+
+  /// Collapses or expands the Pinned section in this window: the outline drops the pinned rows, the chevron
+  /// flips, and the title weight follows `currentTabInPinned`.
+  public func setPinnedCollapsed(_ collapsed: Bool) {
+    guard collapsed != isPinnedCollapsed else { return }
+    isPinnedCollapsed = collapsed
+    outlineController.isPinnedCollapsed = collapsed
+    let title = collapsed ? "Expand Pinned" : "Collapse Pinned"
+    collapsePinnedButton.setAccessibilityLabel(title)
+    collapsePinnedButton.toolTip = title
+    applyHeaderGlyphs()
+    applyTitleWeight()
+  }
+
+  /// The caret shows only while the Space holds pinned tabs (an unpinned Space's header has nothing to collapse);
+  /// the title shifts right for it. Called on every change of the Space's pinned child list. The collapse ends
+  /// with the last pin, so the next pin never lands in a hidden section.
+  func refreshCollapseAffordance() {
+    let shown = !source.children(of: .pinned(spaceID)).isEmpty
+    if !shown && isPinnedCollapsed { setPinnedCollapsed(false) }
+    guard shown != !collapsePinnedButton.isHidden else { return }
+    collapsePinnedButton.isHidden = !shown
+    needsLayout = true
+  }
+
+  /// The window reports its current tab entering or leaving this Space's Pinned section.
+  func setCurrentTabInPinned(_ inPinned: Bool) {
+    guard inPinned != currentTabInPinned else { return }
+    currentTabInPinned = inPinned
+    applyTitleWeight()
+  }
+
+  /// Bold only while the section is collapsed and the window shows one of its tabs (BH-065) [I].
+  private func applyTitleWeight() {
+    let weight: NSFont.Weight = isPinnedCollapsed && currentTabInPinned ? .bold : .medium
+    titleLabel.font = .systemFont(ofSize: SidebarMetrics.spaceTitleFontSize, weight: weight)
+  }
 
   private func finishRename() {
     guard isRenaming else { return }

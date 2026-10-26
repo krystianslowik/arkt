@@ -69,6 +69,10 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// GS-033) instead of `NSApp.currentEvent`, which is not always the click.
   private(set) var clickModifiers: NSEvent.ModifierFlags = []
 
+  /// The mouse-down's point in this outline's coordinates; the click action hit-tests the pinned rows' favicons
+  /// with it (GS-005). Kept until the next mouse-down.
+  var lastClickPoint: NSPoint?
+
   /// Number of `reloadData()` calls so far; exists for tests (checks that split edits never reload the whole outline).
   private(set) var reloadDataCount = 0
 
@@ -144,7 +148,9 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     }
     clickModifiers = modifiers
     defer { clickModifiers = [] }
-    let row = self.row(at: convert(event.locationInWindow, from: nil))
+    let point = convert(event.locationInWindow, from: nil)
+    lastClickPoint = point
+    let row = self.row(at: point)
     let rowView = row >= 0 ? self.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView : nil
     rowView?.isPressed = true
     super.mouseDown(with: event)
@@ -193,6 +199,20 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
   /// Move To > Favorites on a tab row's context menu (BH-047); the window moves the node.
   public var onMoveToFavorites: (@MainActor (NodeID) -> Void)?
+  /// Pin / Unpin Tab on a row's context menu (BH-055); the window moves the node.
+  public var onPinToggle: (@MainActor (NodeID) -> Void)?
+  /// Back to Pinned URL on a pinned row's context menu (BH-057); the window navigates the live tab.
+  public var onResetPinned: (@MainActor (NodeID) -> Void)?
+  /// Replace Pin with Current Page on a pinned row's context menu (BH-060).
+  public var onReplacePin: (@MainActor (NodeID) -> Void)?
+  /// Separate From Pinned Tab on a pinned row's context menu (BH-061).
+  public var onSeparateFromPinned: (@MainActor (NodeID) -> Void)?
+  /// A pinned tab row's favicon was clicked (GS-005), with the click's modifiers (Cmd: BH-058); the window resets
+  /// or activates.
+  public var onPinnedFaviconClick: (@MainActor (NodeID, NSEvent.ModifierFlags) -> Void)?
+  /// Whether a pinned tab sits away from its pinned URL; drives the reset-family items' enabled state (the window
+  /// knows the live page's URL).
+  public var pinnedNavigatedProvider: (@MainActor (NodeID) -> Bool)?
   /// A tab row started a drag (S7, GS-011); the window shows its drop overlay above the page.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   /// The drag that `onNodeDragBegan` reported ended, dropped or not.
@@ -206,7 +226,19 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private var items: [NodeID: OutlineItem] = [:]
   private var pinnedIDs: [NodeID] = []
   private var todayIDs: [NodeID] = []
-  /// Pinned items, the divider, then Today items. Rebuilt only when the pinned or Today ids change.
+  /// BH-065: the Pinned section of this page is collapsed (per window). Pinned rows leave the outline; the divider
+  /// stays [I], so the boundary the pinned tabs sit above keeps drawing (PARITY: Arc's collapsed look is
+  /// unmeasured).
+  public var isPinnedCollapsed = false {
+    didSet {
+      guard isPinnedCollapsed != oldValue else { return }
+      let old = rootItems
+      rebuildRootItems()
+      applyDiff(old: old, new: rootItems, parent: nil)
+    }
+  }
+  /// Pinned items (unless collapsed), the divider, then Today items. Rebuilt only when the pinned or Today ids
+  /// change, or the collapse toggles.
   private var rootItems: [OutlineItem] = []
   private var containerChildren: [NodeID: [NodeID]] = [:]
   /// Folders the user collapsed in this outline; preserved across moves and sibling removals (#94).
@@ -268,7 +300,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   }
 
   private func rebuildRootItems() {
-    rootItems = pinnedIDs.map(item(for:)) + [divider] + todayIDs.map(item(for:))
+    let pinned = isPinnedCollapsed ? [] : pinnedIDs.map(item(for:))
+    rootItems = pinned + [divider] + todayIDs.map(item(for:))
   }
 
   /// Row index of the divider (equals the pinned count).
@@ -644,8 +677,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// A click on `row`. Folders toggle. Opt-click on a split row separates it (GS-033); Opt-click on the current tab
   /// duplicates it into a split (GS-032). Arc gates both behind `newSplitSeparationMechanismsEnabled` and
   /// `dragToCombineTabsIntoSplitEnabled` [S]; here they are always on [I]. An Opt-click on any other tab, or on a
-  /// pane, activates it like a plain click [I].
+  /// pane, activates it like a plain click [I]. A click on a pinned tab's favicon goes to the window's reset path
+  /// (GS-005, BH-057, BH-058); anywhere else on the row activates it. The recorded click point serves this click
+  /// only, so an activation without a mouse-down (an AX press) is never hit-tested against a stale point.
   func handleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
+    defer { outlineView.lastClickPoint = nil }
     guard row >= 0, let item = outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }
     let option = modifiers.intersection([.command, .option, .control, .shift]) == .option
     switch source.node(id) {
@@ -662,11 +698,23 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       onSeparateSplit?(id)
     case .tab? where option && resolver.current == id && !isPane(id):
       onDuplicateIntoSplit?(id)
+    case .tab? where isPinnedFaviconClick(row: row, id: id):
+      onPinnedFaviconClick?(id, modifiers)
     case .tab?, .split?:
       onActivate?(id)
     case nil:
       return
     }
+  }
+
+  /// GS-005: true when the recorded click point lands in the favicon of a pinned tab's row (foldered tabs
+  /// included; panes have no favicon path of their own — they sit in a split).
+  private func isPinnedFaviconClick(row: Int, id: NodeID) -> Bool {
+    guard !isPane(id), case .pinned? = source.section(containing: id),
+          let point = outlineView.lastClickPoint,
+          let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarTabCellView
+    else { return false }
+    return cell.faviconView.frame.contains(cell.convert(point, from: outlineView))
   }
 
   private func isTab(_ id: NodeID) -> Bool {
@@ -689,7 +737,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   /// The context menu of `row`, nil for rows without one (folders, the divider). A split row: Separate
   /// All Tabs, Convert to Vertical / Horizontal Split View and Duplicate Split View (BH-120, BH-121, BH-126); a pane
-  /// row: Remove Tab from Split View (BH-121, [S] string); any other tab row: Move To > Favorites (BH-047).
+  /// row: Remove Tab from Split View (BH-121, [S] string); any other tab row: Move To > Favorites (BH-047), then the
+  /// pin items (BH-055) and, for pinned tabs, the reset family (BH-057, BH-060, BH-061; [S] strings).
   /// Mute, Share and Archive Below are deferred (BH-126); the full menu set is #105.
   func menu(forRow row: Int) -> NSMenu? {
     guard row >= 0, let id = (outlineView.item(atRow: row) as? OutlineItem)?.nodeID else { return nil }
@@ -704,10 +753,35 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       menu.addItem(menuItem("Remove Tab from Split View", #selector(removePaneChosen(_:)), id))
     case .tab?:
       menu.addItem(moveToItem(id))
+      switch source.parent(of: id) {
+      case .today?:
+        menu.addItem(menuItem("Pin Tab", #selector(pinToggleChosen(_:)), id))
+      case .pinned?:
+        menu.addItem(menuItem("Unpin Tab", #selector(pinToggleChosen(_:)), id))
+        addResetItems(to: menu, for: id)
+      case .folder?:
+        addResetItems(to: menu, for: id)          // foldered tabs are pinned through their folder
+      default:
+        break
+      }
     default:
       return nil
     }
     return menu
+  }
+
+  /// Back to Pinned URL, Replace Pin with Current Page and Separate From Pinned Tab (BH-057, BH-060, BH-061);
+  /// enabled only while the tab sits away from its pinned URL.
+  private func addResetItems(to menu: NSMenu, for id: NodeID) {
+    let navigated = pinnedNavigatedProvider?(id) ?? false
+    menu.addItem(.separator())
+    for (title, action) in [("Back to Pinned URL", #selector(resetPinnedChosen(_:))),
+                            ("Replace Pin with Current Page", #selector(replacePinChosen(_:))),
+                            ("Separate From Pinned Tab", #selector(separateFromPinnedChosen(_:)))] {
+      let item = menuItem(title, action, id)
+      item.isEnabled = navigated
+      menu.addItem(item)
+    }
   }
 
   /// "Move To" with its submenu (BH-047): Favorites; the Spaces join it with #105 (BH-042).
@@ -732,6 +806,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   @objc private func duplicateSplitChosen(_ sender: NSMenuItem) { chosen(sender, onDuplicateSplit) }
   @objc private func removePaneChosen(_ sender: NSMenuItem) { chosen(sender, onRemovePane) }
   @objc private func moveToFavoritesChosen(_ sender: NSMenuItem) { chosen(sender, onMoveToFavorites) }
+  @objc private func pinToggleChosen(_ sender: NSMenuItem) { chosen(sender, onPinToggle) }
+  @objc private func resetPinnedChosen(_ sender: NSMenuItem) { chosen(sender, onResetPinned) }
+  @objc private func replacePinChosen(_ sender: NSMenuItem) { chosen(sender, onReplacePin) }
+  @objc private func separateFromPinnedChosen(_ sender: NSMenuItem) { chosen(sender, onSeparateFromPinned) }
 
   private func chosen(_ item: NSMenuItem, _ handler: (@MainActor (NodeID) -> Void)?) {
     guard let id = item.representedObject as? NodeID, source.node(id) != nil else { return }
