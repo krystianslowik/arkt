@@ -8,6 +8,15 @@ public final class FavoriteTileView: NSView {
   /// Shown while the tile is hovered and has a close action (its page is loaded). Target and action are set by the
   /// grid; hidden (so neither hit-tested nor in the accessibility tree) otherwise.
   public let closeButton = HoverCloseButton()
+  /// The Ctrl-Space cursor, in the same system color as outline-row focus (#343).
+  let keyboardFocusRing = KeyboardFocusRingView(frame: .zero)
+  var isKeyboardFocused = false {
+    didSet {
+      guard isKeyboardFocused != oldValue else { return }
+      keyboardFocusRing.isHidden = !isKeyboardFocused
+      keyboardFocusRing.needsDisplay = true
+    }
+  }
   public var flavor: ThemeFlavor = .light {
     didSet {
       guard flavor != oldValue else { return }
@@ -47,6 +56,8 @@ public final class FavoriteTileView: NSView {
     faviconView.setAccessibilityElement(false)
     addSubview(faviconView)
     addSubview(closeButton)
+    keyboardFocusRing.cornerRadius = FavoritesLayout.tileCornerRadius
+    addSubview(keyboardFocusRing)
     closeButton.setAccessibilityIdentifierWithCell(AXID.Favorites.tileClose)
     setAccessibilityElement(true)
     setAccessibilityRole(.button)
@@ -84,6 +95,7 @@ public final class FavoriteTileView: NSView {
     let box = SidebarMetrics.favoriteCloseButtonSize
     let inset = SidebarMetrics.favoriteCloseButtonInset
     closeButton.frame = NSRect(x: bounds.width - inset - box, y: bounds.height - inset - box, width: box, height: box)
+    keyboardFocusRing.frame = bounds
   }
 
   public override func viewDidChangeBackingProperties() {
@@ -131,6 +143,7 @@ public final class FavoriteTileView: NSView {
     super.prepareForReuse()
     isHovered = false
     isCurrent = false
+    isKeyboardFocused = false
     nodeID = nil
     setCloseAction(nil)
     setCloseButtonShown(false, animated: false)        // no fade on a reused tile
@@ -166,6 +179,9 @@ final class FavoritesCollectionView: NSCollectionView {
   var onMouseDownBegan: (@MainActor () -> Void)?
   var onMouseDownEnded: (@MainActor (IndexPath?, NSPoint) -> Void)?
   var onMoveCommand: (@MainActor (_ deltaColumns: Int, _ deltaRows: Int) -> Void)?
+  var onKeyboardReturn: (@MainActor () -> Void)?
+  var onKeyboardEscape: (@MainActor () -> Void)?
+  var onKeyboardFocusResigned: (@MainActor () -> Void)?
   /// The context menu of the tile at an index path (design 3.3); nil: none.
   var menuProvider: (@MainActor (IndexPath) -> NSMenu?)?
 
@@ -192,6 +208,8 @@ final class FavoritesCollectionView: NSCollectionView {
     case 124: moveRight(self)
     case 125: moveDown(self)
     case 126: moveUp(self)
+    case 36, 76: onKeyboardReturn?()
+    case 53: onKeyboardEscape?()
     default: super.keyDown(with: event)
     }
   }
@@ -200,6 +218,12 @@ final class FavoritesCollectionView: NSCollectionView {
   override func moveLeft(_ sender: Any?) { onMoveCommand?(-1, 0) }
   override func moveDown(_ sender: Any?) { onMoveCommand?(0, 1) }
   override func moveUp(_ sender: Any?) { onMoveCommand?(0, -1) }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { onKeyboardFocusResigned?() }
+    return resigned
+  }
 
   /// Not an accessibility element: `NSCollectionView`, like `NSTableView`, answers its children out of process from
   /// its own internals rather than from overridden children, so `FavoritesGridView` (a plain view, whose overridden
@@ -225,8 +249,22 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   public private(set) var nodeIDs: [NodeID]
   public var flavor: ThemeFlavor = .light { didSet { if flavor != oldValue { refreshVisibleTiles() } } }
   public private(set) var resolver: TabRowState.Resolver = .empty
+  /// The tile cursor after Ctrl-Space; moving it never activates a tab (#343).
+  public internal(set) var keyboardFocusID: NodeID? {
+    didSet {
+      guard keyboardFocusID != oldValue else { return }
+      if let keyboardFocusID { lastKeyboardFocusID = keyboardFocusID }
+      updateKeyboardFocusRing()
+    }
+  }
+  private var lastKeyboardFocusID: NodeID?
 
   public var onActivate: (@MainActor (NodeID) -> Void)?
+  /// Return or Esc leaves keyboard navigation; Down below the last tile enters the outline.
+  var onKeyboardFocusExit: (@MainActor () -> Void)?
+  var onKeyboardFocusBelow: (@MainActor () -> Void)?
+  /// Left / Right / vertical grid movement changed the destination VoiceOver should read (#343).
+  var onKeyboardFocusMoved: (@MainActor (NodeID) -> Void)?
   public var faviconProvider: (@MainActor (NodeID) -> NSImage?)?
   /// A tile's hover close (X) or its VoiceOver close action was used (#82); the window runs the same close as Cmd-W.
   public var onClose: (@MainActor (NodeID) -> Void)?
@@ -273,6 +311,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     collectionView.setDraggingSourceOperationMask([], forLocal: false)
     if let favoritesCollectionView = collectionView as? FavoritesCollectionView {
       favoritesCollectionView.onMouseDownBegan = { [weak self] in
+        self?.keyboardFocusID = nil
         self?.isTrackingMouse = true
         self?.didDragInMouseDown = false
       }
@@ -286,6 +325,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       favoritesCollectionView.onMoveCommand = { [weak self] deltaColumns, deltaRows in
         self?.moveKeyboardFocus(deltaColumns: deltaColumns, deltaRows: deltaRows)
       }
+      favoritesCollectionView.onKeyboardReturn = { [weak self] in self?.activateKeyboardFocus() }
+      favoritesCollectionView.onKeyboardEscape = { [weak self] in
+        guard let self else { return }
+        keyboardFocusID = nil
+        onKeyboardFocusExit?()
+      }
+      favoritesCollectionView.onKeyboardFocusResigned = { [weak self] in self?.keyboardFocusID = nil }
     }
     collectionView.dataSource = self
     collectionView.delegate = self
@@ -355,6 +401,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     let tile = item.tileView
     tile.flavor = flavor
     tile.isCurrent = resolver.state(for: id) == .current
+    tile.isKeyboardFocused = keyboardFocusID == id
     var title = "", url: URL?
     if case .tab(_, let tabURL, let tabTitle)? = source.node(id) { title = tabTitle; url = tabURL }
     tile.faviconView.image = faviconProvider?(id)
@@ -453,11 +500,27 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     onActivate?(id)
   }
 
-  /// Moves keyboard focus across the 3-column Favorites grid from the current Favorite (or the first tile when none is
-  /// current) and activates the destination tile (#94).
+  /// Gives a tile the keyboard cursor. With no explicit id (Up from the outline), returns to the last focused tile.
+  func focusKeyboard(on id: NodeID? = nil) {
+    guard let id = id ?? lastKeyboardFocusID ?? nodeIDs.last, nodeIDs.contains(id) else { return }
+    keyboardFocusID = id
+  }
+
+  /// In the Ctrl-Space focus mode arrows move only the cursor (RT-13 assumed); Down at the bottom enters the outline.
+  /// Outside that mode the original direct navigation (#94) still activates the destination.
   private func moveKeyboardFocus(deltaColumns: Int, deltaRows: Int) {
     guard !nodeIDs.isEmpty else { return }
     let step = deltaColumns + deltaRows * FavoritesLayout.columns
+    if let focused = keyboardFocusID, let currentIndex = nodeIDs.firstIndex(of: focused) {
+      let proposed = currentIndex + step
+      if nodeIDs.indices.contains(proposed) {
+        keyboardFocusID = nodeIDs[proposed]
+        onKeyboardFocusMoved?(nodeIDs[proposed])
+      } else if deltaRows > 0 {
+        onKeyboardFocusBelow?()
+      }
+      return
+    }
     let targetIndex: Int
     if let current = resolver.current, let currentIndex = nodeIDs.firstIndex(of: current) {
       let proposed = currentIndex + step
@@ -467,6 +530,19 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       targetIndex = step >= 0 ? 0 : nodeIDs.count - 1
     }
     onActivate?(nodeIDs[targetIndex])
+  }
+
+  private func activateKeyboardFocus() {
+    guard let id = keyboardFocusID else { return }
+    keyboardFocusID = nil
+    onActivate?(id)
+    onKeyboardFocusExit?()
+  }
+
+  private func updateKeyboardFocusRing() {
+    for case let item as FavoriteTileItem in collectionView.visibleItems() {
+      item.tileView.isKeyboardFocused = item.tileView.nodeID == keyboardFocusID
+    }
   }
 
   // MARK: State and changes
@@ -516,6 +592,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     let old = nodeIDs
     let new = source.children(of: location)
     nodeIDs = new
+    if let keyboardFocusID, !new.contains(keyboardFocusID) { self.keyboardFocusID = nil }
+    if let lastKeyboardFocusID, !new.contains(lastKeyboardFocusID) { self.lastKeyboardFocusID = nil }
     let difference = new.difference(from: old)
     if difference.isEmpty { return false }
     // Without a size (an empty grid is 0 pt tall, so the first Favorites of an Arc import arrive that way) a batch

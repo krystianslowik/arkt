@@ -108,36 +108,102 @@ extension ShellWindowController {
     activateByKeyboard(target)
   }
 
-  /// Ctrl-Space (BH-019, KB-036): reveals the current tab in the sidebar (opening a closed folder) and moves keyboard
-  /// focus to its row, drawn with the system focus ring. A hidden sidebar is shown first [I]. Up / Down, Return and
-  /// Esc then work as `SidebarOutlineView` describes (BH-020, PARITY(NEEDS-RUNTIME-CHECK RT-13)). A Favorite current
-  /// tab puts the focus on the first row: the Favorites grid has no keyboard focus yet.
+  /// Ctrl-Space (BH-019, KB-036): reveals the current tab and moves keyboard focus to its outline row or Favorite
+  /// tile, drawn with the system focus ring. A hidden sidebar is shown first [I]. Arrows, Return and Esc are RT-13's
+  /// assumed keys (BH-020, PARITY(NEEDS-RUNTIME-CHECK RT-13)); Up / Down cross the grid / outline boundary (#343).
   @objc public func revealCurrentTab(_ sender: Any?) {
     guard let page = sidebarController.currentPage else { return }
     if !rootView.sidebarVisible { rootView.sidebarVisible = true }
     rootView.layoutSubtreeIfNeeded()
+    if let current = currentNode, let tile = favoriteTileID(containing: current) {
+      focusFavoriteKeyboard(on: tile, page: page)
+      return
+    }
     let controller = page.outlineController
     let row = currentNode.flatMap { revealInSidebar($0) }
       ?? (0..<page.outlineView.numberOfRows).first { controller.isKeyboardFocusable(row: $0) }
     guard let row else { return }
+    focusOutlineKeyboard(on: row, page: page)
+  }
+
+  /// The top-level Favorite tile holding `node`, through any folders (#343).
+  private func favoriteTileID(containing node: NodeID) -> NodeID? {
+    var current = node
+    for _ in 0..<64 {
+      let parent = sidebar.parent(of: current)
+      if parent == .favorites(profile: sidebarController.profile) { return current }
+      guard let container = parent?.containerNode else { return nil }
+      current = container
+    }
+    return nil
+  }
+
+  private func focusFavoriteKeyboard(on id: NodeID?, page: SpacePageView) {
+    let grid = sidebarController.view.favorites
+    grid.onKeyboardFocusExit = { [weak self] in self?.returnFocusToPage() }
+    grid.onKeyboardFocusBelow = { [weak self, weak page] in
+      guard let self, let page else { return }
+      let outline = page.outlineView
+      let controller = page.outlineController
+      guard let row = (0..<outline.numberOfRows).first(where: { controller.isKeyboardFocusable(row: $0) }) else {
+        return
+      }
+      focusOutlineKeyboard(on: row, page: page)
+    }
+    grid.onKeyboardFocusMoved = { [weak self, weak grid] id in
+      guard let self, let grid else { return }
+      self.announceSidebarFocus(on: grid.tile(for: id) ?? grid, nodeID: id)
+    }
+    grid.focusKeyboard(on: id)
+    guard let focused = grid.keyboardFocusID else { return }   // an empty grid must not take the outline's focus
+    guard window?.makeFirstResponder(grid.collectionView) == true,
+          window?.firstResponder === grid.collectionView else {
+      grid.keyboardFocusID = nil
+      return
+    }
+    announceSidebarFocus(on: grid, nodeID: focused)
+  }
+
+  private func focusOutlineKeyboard(on row: Int, page: SpacePageView) {
+    let controller = page.outlineController
     controller.onKeyboardFocusExit = { [weak self] in self?.returnFocusToPage() }
     page.outlineView.onKeyboardFocusMoved = { [weak self, weak page] row in
       guard let self, let page else { return }
       self.sidebarReveal.reveal(row: row, in: page, flavor: self.currentFlavor)
+      if let id = page.outlineController.nodeID(atRow: row) {
+        self.announceSidebarFocus(on: page.outlineView, nodeID: id)
+      }
+    }
+    page.outlineView.onKeyboardFocusAbove = { [weak self, weak page] in
+      guard let self, let page else { return }
+      focusFavoriteKeyboard(on: nil, page: page)
     }
     controller.focusKeyboard(on: row)
     guard window?.makeFirstResponder(page.outlineView) == true, window?.firstResponder === page.outlineView else {
       page.outlineView.keyboardFocusRow = nil
       return
     }
-    let title = currentNode.flatMap { node -> String? in
-      if case .tab(_, _, let title)? = sidebar.node(node) { return title }
-      return nil
-    }
-    NSAccessibility.post(element: page.outlineView, notification: .announcementRequested, userInfo: [
-      .announcement: ["Sidebar", title].compactMap { $0 }.joined(separator: ", "),
+    announceSidebarFocus(on: page.outlineView, nodeID: controller.nodeID(atRow: row))
+  }
+
+  private func announceSidebarFocus(on element: NSView, nodeID: NodeID?) {
+    let announcement = nodeID.map { sidebarAnnouncementText(for: $0) } ?? "Sidebar"
+    NSAccessibility.post(element: element, notification: .announcementRequested, userInfo: [
+      .announcement: announcement,
       .priority: NSAccessibilityPriorityLevel.high.rawValue,
     ])
+  }
+
+  /// The destination's name, not the still-current tab's: arrows and grid / outline hand-offs use the same text.
+  func sidebarAnnouncementText(for node: NodeID) -> String {
+    let title: String?
+    switch sidebar.node(node) {
+    case .tab(_, _, let tabTitle)?: title = tabTitle
+    case .folder(_, let folderTitle)?: title = folderTitle
+    case .split?: title = "Split View"
+    case nil: title = nil
+    }
+    return ["Sidebar", title].compactMap { $0 }.joined(separator: ", ")
   }
 
   /// Return or Esc in the sidebar: the current page takes keyboard focus again.

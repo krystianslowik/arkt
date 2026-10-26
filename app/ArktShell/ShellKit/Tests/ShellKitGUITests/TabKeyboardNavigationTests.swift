@@ -272,6 +272,105 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertNotNil(outline.keyboardFocusRow)
   }
 
+  /// #343: a Favorite current puts the system keyboard-focus ring on its tile, not on an unrelated outline row.
+  func testCtrlSpaceFocusesTheCurrentFavoriteTileWithTheSystemRing() throws {
+    controller.activate(node: favorites[0])
+    controller.revealCurrentTab(nil)
+
+    let grid = controller.sidebarController.view.favorites
+    let tile = try XCTUnwrap(grid.tile(for: favorites[0]))
+    XCTAssertTrue(controller.window?.firstResponder === grid.collectionView)
+    XCTAssertEqual(grid.keyboardFocusID, favorites[0])
+    XCTAssertFalse(tile.keyboardFocusRing.isHidden)
+    XCTAssertEqual(tile.keyboardFocusRing.frame, tile.bounds)
+    tile.keyboardFocusRing.updateLayer()
+    XCTAssertEqual(tile.keyboardFocusRing.ring.strokeColor, tile.keyboardFocusRing.strokeColor)
+    XCTAssertEqual(tile.keyboardFocusRing.ring.lineWidth, KeyboardFocusRingView.lineWidth)
+    XCTAssertNil(outline.keyboardFocusRow)
+  }
+
+  /// #343: arrows move only the tile cursor; Return activates that tile and gives focus back to the page.
+  func testFavoriteArrowsMoveFocusAndReturnOpensTheTile() throws {
+    controller.activate(node: favorites[0])
+    controller.revealCurrentTab(nil)
+    let grid = controller.sidebarController.view.favorites
+
+    grid.collectionView.keyDown(with: try key(kVK_RightArrow))
+    XCTAssertEqual(grid.keyboardFocusID, favorites[1])
+    XCTAssertEqual(current, favorites[0], "moving focus does not activate the destination")
+    grid.collectionView.keyDown(with: try key(kVK_LeftArrow))
+    XCTAssertEqual(grid.keyboardFocusID, favorites[0])
+    grid.collectionView.keyDown(with: try key(kVK_RightArrow))
+    grid.collectionView.keyDown(with: try key(kVK_Return))
+
+    XCTAssertEqual(current, favorites[1])
+    XCTAssertNil(grid.keyboardFocusID)
+    XCTAssertFalse(controller.window?.firstResponder === grid.collectionView)
+    XCTAssertEqual(grid.tile(for: favorites[1])?.keyboardFocusRing.isHidden, true)
+  }
+
+  /// #343: Down leaves the grid for the first outline row; Up returns to the tile that had focus.
+  func testUpAndDownMoveBetweenTheFavoritesGridAndOutline() throws {
+    controller.activate(node: favorites[0])
+    controller.revealCurrentTab(nil)
+    let grid = controller.sidebarController.view.favorites
+
+    grid.collectionView.keyDown(with: try key(kVK_DownArrow))
+    let firstRow = try XCTUnwrap(outline.keyboardFocusRow)
+    XCTAssertTrue(controller.window?.firstResponder === outline)
+    XCTAssertTrue(page.outlineController.isKeyboardFocusable(row: firstRow))
+    XCTAssertNil(grid.keyboardFocusID)
+
+    outline.keyDown(with: try key(kVK_UpArrow))
+    XCTAssertTrue(controller.window?.firstResponder === grid.collectionView)
+    XCTAssertEqual(grid.keyboardFocusID, favorites[0])
+    XCTAssertNil(outline.keyboardFocusRow)
+  }
+
+  /// #343: with no Favorites, Up at the first outline row keeps the outline cursor and its ring.
+  func testUpAtTheFirstOutlineRowWithoutFavoritesKeepsOutlineFocus() throws {
+    for favorite in favorites { source.removeNode(favorite) }
+    controller.activate(node: pinned)
+    controller.revealCurrentTab(nil)
+    let row = try XCTUnwrap(outline.keyboardFocusRow)
+
+    outline.keyDown(with: try key(kVK_UpArrow))
+
+    XCTAssertTrue(controller.window?.firstResponder === outline)
+    XCTAssertEqual(outline.keyboardFocusRow, row)
+    XCTAssertFalse(outline.keyboardFocusRing.isHidden)
+  }
+
+  /// #343 / design VoiceOver: a moved tile cursor reports its destination, and announcement text uses that
+  /// destination's title rather than the still-current tab's title.
+  func testFavoriteCursorMovementReportsItsDestinationForVoiceOver() throws {
+    controller.activate(node: favorites[0])
+    controller.revealCurrentTab(nil)
+    let grid = controller.sidebarController.view.favorites
+    var destinations: [NodeID] = []
+    grid.onKeyboardFocusMoved = { destinations.append($0) }
+
+    grid.collectionView.keyDown(with: try key(kVK_RightArrow))
+
+    XCTAssertEqual(destinations, [favorites[1]])
+    XCTAssertEqual(controller.sidebarAnnouncementText(for: favorites[1]), "Sidebar, F1")
+    XCTAssertEqual(controller.sidebarAnnouncementText(for: pinned), "Sidebar, P")
+  }
+
+  /// #343: Esc leaves a moved tile cursor without opening it.
+  func testEscapeFromAFavoriteGivesFocusBackWithoutOpeningAnything() throws {
+    controller.activate(node: favorites[0])
+    controller.revealCurrentTab(nil)
+    let grid = controller.sidebarController.view.favorites
+    grid.collectionView.keyDown(with: try key(kVK_RightArrow))
+
+    grid.collectionView.keyDown(with: try key(kVK_Escape))
+
+    XCTAssertEqual(current, favorites[0])
+    XCTAssertNil(grid.keyboardFocusID)
+    XCTAssertFalse(controller.window?.firstResponder === grid.collectionView)
+  }
+
   /// The next pointer click removes the ring.
   func testAClickInTheSidebarRemovesTheFocusRing() throws {
     controller.activate(node: pinned)
