@@ -175,12 +175,65 @@ struct SidebarContextMenuTests {
     let menu = entries(.rows([left]))
     #expect(titles(menu) == ["Mute", "Duplicate Split View", "Archive Below", "Share", "",
                              "Remove Tab from Split View", "Archive"])
-    #expect(try !entry("Mute", in: menu).isEnabled)
+    #expect(try !entry("Mute", in: menu).isEnabled, "a pane without a page has nothing to mute")
     #expect(try entry("Duplicate Split View", in: menu).action == .duplicateSplit(split))
     #expect(try entry("Archive Below", in: menu).isEnabled)
     #expect(try !entry("Archive Below", in: entries(.rows([right]))).isEnabled)
     #expect(try entry("Remove Tab from Split View", in: menu).action == .removePane(left))
     #expect(try entry("Archive", in: menu).action == .archive([left]))
+  }
+
+  // MARK: Mute (#364, BH-126)
+
+  @Test func paneMuteTogglesForALoadedPane() throws {
+    let split = sidebar.addSplit(in: .today(work))
+    let left = sidebar.addTab(url: url, title: "L", in: .split(split))
+    sidebar.addTab(url: url, title: "R", in: .split(split))
+    var loaded = context
+    loaded.loadedTabs = [left]
+    let mute = try entry("Mute", in: entries(.rows([left]), loaded))
+    #expect(mute.isEnabled)
+    #expect(mute.action == .toggleMute(left))
+
+    loaded.audio = [left: .muted]
+    let menu = entries(.rows([left]), loaded)
+    #expect(titles(menu).first == "Unmute")
+    #expect(try entry("Unmute", in: menu).action == .toggleMute(left))
+  }
+
+  @Test func todayTabOffersMuteOnlyWhilePlayingOrMuted() throws {
+    let tab = sidebar.addTab(url: url, title: "T", in: .today(work))
+    var playing = context
+    playing.loadedTabs = [tab]
+    #expect(!titles(entries(.rows([tab]), playing)).contains("Mute"), "a silent tab keeps the design's menu")
+
+    playing.audio = [tab: .playing]
+    #expect(titles(entries(.rows([tab]), playing)) == ["Rename", "Duplicate", "Pin Tab", "Move To", "", "Mute", "",
+                                                       "Copy Link", "", "Archive Below", "Archive"])
+    #expect(try entry("Mute", in: entries(.rows([tab]), playing)).action == .toggleMute(tab))
+
+    playing.audio = [tab: .muted]
+    #expect(try entry("Unmute", in: entries(.rows([tab]), playing)).isEnabled)
+  }
+
+  @Test func pinnedTabOffersMuteWhilePlaying() throws {
+    let tab = sidebar.addTab(url: url, title: "P", in: .pinned(work))
+    var playing = context
+    playing.loadedTabs = [tab]
+    playing.audio = [tab: .playing]
+    let menu = titles(entries(.rows([tab]), playing))
+    let moveTo = try #require(menu.firstIndex(of: "Move To"))
+    #expect(Array(menu[moveTo...(moveTo + 3)]) == ["Move To", "", "Mute", ""])
+  }
+
+  @Test func audioStateFollowsMuteFirst() {
+    #expect(TabAudio(isAudible: false, isMuted: false) == .silent)
+    #expect(TabAudio(isAudible: true, isMuted: false) == .playing)
+    #expect(TabAudio(isAudible: true, isMuted: true) == .muted)
+    #expect(TabAudio(isAudible: false, isMuted: true) == .muted, "a muted tab shows its state so it can be unmuted")
+    #expect(TabAudio.playing.toggleTitle == "Mute")
+    #expect(TabAudio.muted.toggleTitle == "Unmute")
+    #expect(TabAudio.silent.toggleTitle == "Mute")
   }
 
   // MARK: 3.7 Multi-selection
