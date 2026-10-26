@@ -22,6 +22,10 @@ final class PeekAnimator {
   private(set) var lastPacing: FrameStats?
   private(set) var lastLabel = ""
 
+  /// Tests turn this off to step a run by hand: `run` then applies its first frame and waits for `settleNow`, with
+  /// no display link, so what a test reads does not depend on how long the machine took to get there.
+  var drivesDisplayLink = true
+
   var isRunning: Bool { completion != nil || link != nil }
 
   init(scene: PeekScene, now: @escaping @MainActor () -> CFTimeInterval = { CACurrentMediaTime() }) {
@@ -52,7 +56,8 @@ final class PeekAnimator {
     self.label = label
     generation += 1
     interval = ShellSignposts.signposter.beginInterval("Peek", "\(label, privacy: .public)")
-    guard view.window != nil else {
+    guard drivesDisplayLink, view.window != nil else {
+      if !drivesDisplayLink { onFrame?(springs.scene(at: now())); return }
       settleNow()
       return
     }
