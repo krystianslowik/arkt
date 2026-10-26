@@ -482,4 +482,96 @@ final class PeekWindowTests: XCTestCase {
                                    charactersIgnoringModifiers: code == 53 ? "\u{1b}" : "\r", isARepeat: false,
                                    keyCode: code))
   }
+
+  // MARK: Tabs the engine opens (#345)
+
+  /// A `target=_blank` link (or `window.open` without features) in a pinned tab to another site: the engine's new
+  /// foreground tab, opened by the pinned tab, becomes the Peek; no Today row is added.
+  func testAnEngineTabOpenedByAPinnedTabToAnotherSiteBecomesThePeek() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.pinned)
+    let source = try XCTUnwrap(harness.tab(world.pinned))
+    let window = try XCTUnwrap(harness.controller.engineWindow)
+    let rows = harness.source.children(of: .today(world.space))
+
+    let opened = harness.engine.engineCreateTab(url: Self.atlas, in: window, opener: source, active: true)
+
+    // Decided after the engine's batch: the tab's URL and activation follow its creation.
+    waitUntil("the engine's tab becomes the Peek") { harness.peek.session != nil }
+    let session = try XCTUnwrap(harness.peek.session)
+    XCTAssertEqual(session.tab, opened, "the engine's tab itself is the Peek: no second page")
+    XCTAssertEqual(session.source, source)
+    XCTAssertNil(harness.controller.nodeByTab[opened], "no row for the Peek")
+    XCTAssertEqual(harness.source.children(of: .today(world.space)), rows)
+    XCTAssertTrue(harness.peek.overlay?.card.page === harness.engine.contentView(for: opened))
+    XCTAssertEqual(harness.controller.currentTab, source)
+    harness.peek.close(.keyboard)
+    harness.settle()
+    XCTAssertNil(harness.engine.snapshot(of: opened), "closing the Peek closes the engine's tab")
+    harness.controller.close()
+  }
+
+  /// The engine's tab stays a Today row when it is same-site, opened in the background (Command-click), or opened
+  /// from a Today tab.
+  func testOtherEngineTabsStayTodayRows() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.pinned)
+    let pinned = try XCTUnwrap(harness.tab(world.pinned))
+    let window = try XCTUnwrap(harness.controller.engineWindow)
+    let sameSite = URL(string: "https://docs.example.com/page")!
+
+    let same = harness.engine.engineCreateTab(url: sameSite, in: window, opener: pinned, active: true)
+    waitUntil("a row for the same-site tab") { harness.controller.nodeByTab[same] != nil }
+    XCTAssertNil(harness.peek.session)
+    XCTAssertEqual(harness.controller.currentTab, same, "a foreground tab is selected")
+
+    harness.controller.activate(node: world.pinned)
+    let background = harness.engine.engineCreateTab(url: Self.atlas, in: window, opener: pinned, active: false)
+    waitUntil("a row for the background tab") { harness.controller.nodeByTab[background] != nil }
+    XCTAssertNil(harness.peek.session)
+    XCTAssertEqual(harness.controller.currentTab, pinned, "a background tab is not selected")
+
+    harness.controller.activate(node: world.today[0])
+    let fromToday = try XCTUnwrap(harness.tab(world.today[0]))
+    let todays = harness.engine.engineCreateTab(url: Self.atlas, in: window, opener: fromToday, active: true)
+    waitUntil("a row for the Today tab's tab") { harness.controller.nodeByTab[todays] != nil }
+    XCTAssertNil(harness.peek.session)
+    harness.controller.close()
+  }
+
+  /// Command-Shift-click is the engine's (a foreground tab): the window was asked first and answered navigate, so
+  /// the foreground tab that follows is not taken for a `target=_blank` link.
+  func testACommandShiftClickInAPinnedTabStaysAForegroundTodayTab() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.pinned)
+    let pinned = try XCTUnwrap(harness.tab(world.pinned))
+    let window = try XCTUnwrap(harness.controller.engineWindow)
+
+    XCTAssertEqual(try harness.click(Self.atlas, in: world.pinned, modifiers: [.command, .shift],
+                                     disposition: .newForegroundTab), .navigate)
+    let opened = harness.engine.engineCreateTab(url: Self.atlas, in: window, opener: pinned, active: true)
+
+    waitUntil("a row for the foreground tab") { harness.controller.nodeByTab[opened] != nil }
+    XCTAssertNil(harness.peek.session)
+    harness.controller.close()
+  }
+
+  /// Shift-click inside a Peek opens a Today tab, not a Peek on the Peek (docs/design/peek.md, Open, step 5).
+  func testAShiftClickInsideAPeekOpensATodayTab() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let session = try openPeek(harness, world)
+    let other = URL(string: "https://maps.example/route")!
+    let rows = harness.source.children(of: .today(world.space)).count
+
+    let decision = harness.engine.simulateLinkActivation(in: session.tab, url: other, modifiers: .shift,
+                                                         disposition: .newWindow)
+    XCTAssertEqual(decision, .cancel)
+    waitUntil("the Today tab opens") { harness.source.children(of: .today(world.space)).count == rows + 1 }
+    XCTAssertNil(harness.peek.session, "the Peek gives way to the new tab")
+    harness.controller.close()
+  }
 }

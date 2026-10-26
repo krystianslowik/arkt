@@ -103,4 +103,41 @@ struct ChromiumLinkActivationTests {
     engine.focusPage(of: tab)
     #expect(handle.focusCount == 1)
   }
+
+  // MARK: Links opened outside the tab (#345)
+
+  /// The facade reports Shift-, Command- and Command-Shift-clicks from `OpenURLFromTab` with Chromium's disposition
+  /// and the modifiers Blink derived it from.
+  @Test(arguments: [
+    (NSEvent.ModifierFlags.shift, 6, EngineLinkModifiers.shift, EngineDisposition.newWindow),
+    (NSEvent.ModifierFlags.command, 4, EngineLinkModifiers.command, EngineDisposition.newBackgroundTab),
+    (NSEvent.ModifierFlags([.command, .shift]), 3, EngineLinkModifiers([.command, .shift]),
+     EngineDisposition.newForegroundTab),
+  ])
+  func aModifiedClickReachesTheHostWithItsDisposition(flags: NSEvent.ModifierFlags, raw: Int,
+                                                      modifiers: EngineLinkModifiers,
+                                                      disposition: EngineDisposition) throws {
+    let (engine, host, tab, browser) = try makeEngine()
+    let activation = Activation(url: Self.target, tab: try #require(engine.handle(of: tab)), sourceURL: Self.source,
+                                modifierFlags: flags, disposition: raw)
+    _ = browser.host.decideLinkActivation?(activation)
+    #expect(host.activations.first?.modifiers == modifiers)
+    #expect(host.activations.first?.disposition == disposition)
+  }
+
+  /// A `target=_blank` tab arrives as an engine tab with its opener, active once the batch is delivered: what the
+  /// window needs to turn it into a Peek.
+  @Test func anEngineTabOpenedByATabCarriesItsOpenerAndActivation() async throws {
+    let (engine, _, tab, browser) = try makeEngine()
+    let opener = try #require(engine.handle(of: tab))
+    let opened = browser.insertTab(opener: opener, origin: .engine, active: true)
+    opened.startLoad(Self.target, title: nil)
+    try await EngineContract.waitUntil(timeout: .seconds(5)) { facade.isIdle }
+    let id = try #require(engine.tabIDs.first { $0 != tab })
+    let snapshot = try #require(engine.snapshot(of: id))
+    #expect(snapshot.opener == tab)
+    #expect(snapshot.origin == .engine)
+    #expect(snapshot.isActive)
+    #expect(snapshot.url == Self.target)
+  }
 }

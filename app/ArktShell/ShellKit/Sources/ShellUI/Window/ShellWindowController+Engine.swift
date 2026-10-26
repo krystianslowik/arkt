@@ -86,6 +86,32 @@ extension ShellWindowController {
       engine.closeTab(tab, mode: .skipUnloadHandlers)
       return
     }
+    if let opener = snapshot.opener, nodeByTab[opener] != nil || opener == peek.session?.tab {
+      // Opened by a tab of this window (#345): a `target=_blank` link can become a Peek. Its URL and activation
+      // arrive as their own events after the creation, in the same batch, so the window decides one turn later.
+      DispatchQueue.main.async { [weak self] in self?.placeOpenedTab(tab) }
+      return
+    }
+    addTodayRow(for: tab, snapshot: snapshot)
+  }
+
+  /// An engine tab opened by another tab of this window, once its first events are in: the Peek takes it, or it
+  /// becomes a Today row, selected when the engine made it the active tab.
+  private func placeOpenedTab(_ tab: TabID) {
+    guard nodeByTab[tab] == nil, peek.session?.tab != tab, let snapshot = engine.snapshot(of: tab),
+          snapshot.window != nil, snapshot.window == engineWindow else { return }
+    guard !isWindowCloseRequested else {
+      engine.closeTab(tab, mode: .skipUnloadHandlers)
+      return
+    }
+    if peek.adoptOpenedTab(snapshot) { return }
+    addTodayRow(for: tab, snapshot: snapshot)
+    if let node = nodeByTab[tab], let engineWindow, engine.latestActiveTab(in: engineWindow) == tab {
+      activate(node: node)
+    }
+  }
+
+  private func addTodayRow(for tab: TabID, snapshot: TabSnapshot) {
     let url = snapshot.url ?? Self.blankPage
     let title = snapshot.title.isEmpty ? (url.host() ?? url.absoluteString) : snapshot.title
     let node: NodeID
