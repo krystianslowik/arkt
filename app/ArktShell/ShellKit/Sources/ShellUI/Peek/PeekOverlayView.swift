@@ -14,7 +14,7 @@ public final class PeekOverlayView: NSView {
   public let card = PeekCardView(frame: .zero)
   let grabber = NSView(frame: .zero)
   let dragHandle = PeekDragHandleView(frame: .zero)
-  let controlsView = NSView(frame: .zero)
+  let controlsView = PeekFlippedView(frame: .zero)
   public let closeButton = PeekControlButton(symbol: "xmark", label: "Close Peek", help: "Esc",
                                              toolTip: "Close (Esc)", identifier: AXID.Peek.close)
   public let expandButton = PeekControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Open as Tab",
@@ -195,6 +195,12 @@ public final class PeekOverlayView: NSView {
   }
 }
 
+/// A plain container measured from the top, like the overlay.
+@MainActor
+final class PeekFlippedView: NSView {
+  override var isFlipped: Bool { true }
+}
+
 // MARK: - Scrim
 
 /// The scrim over the source, clipped to the source card's corners. A click on it closes the Peek.
@@ -358,14 +364,11 @@ public final class PeekCardView: NSView {
   /// An Esc a page passed up the responder chain.
   public override func keyDown(with event: NSEvent) {
     if event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty, let onEscape {
+      PeekController.logger.notice("peek Esc from the responder chain")
       onEscape()
       return
     }
     super.keyDown(with: event)
-  }
-
-  public override func cancelOperation(_ sender: Any?) {
-    if let onEscape { onEscape() } else { super.cancelOperation(sender) }
   }
 
   /// VoiceOver's escape gesture and AXCancel close the Peek.

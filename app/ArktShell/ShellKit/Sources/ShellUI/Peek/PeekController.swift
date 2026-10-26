@@ -1,5 +1,6 @@
 import AppKit
 import EngineAPI
+import os
 
 /// One open Peek: a tab with no sidebar row (BH-152) shown over the tab it came from.
 public struct PeekSession: Equatable, Sendable {
@@ -29,6 +30,7 @@ public enum PeekCloseKind: Equatable, Sendable {
 /// content card or a pane only at the end, at rest.
 @MainActor
 public final class PeekController {
+  static let logger = Logger(subsystem: ShellSignposts.subsystem, category: "peek")
   unowned let shell: ShellWindowController
   public private(set) var session: PeekSession?
   public private(set) var overlay: PeekOverlayView?
@@ -125,7 +127,7 @@ public final class PeekController {
   /// Opens `url` in a Peek over `source`. A second request for the same source while one is open replaces its URL
   /// without restarting the open.
   public func open(_ url: URL, from source: TabID, at point: CGPoint? = nil) {
-    guard let window = shell.window else { return }
+    guard shell.window != nil else { return }
     if let session {
       if session.source == source, session.phase == .opening || session.phase == .open {
         shell.engine.navigate(session.tab, to: url)
@@ -152,8 +154,8 @@ public final class PeekController {
       guard done, self?.session?.phase == .opening else { return }
       self?.session?.phase = .open
     }
-    window.makeFirstResponder(page)
     shell.activateEngineTab(tab)
+    shell.engine.focusPage(of: tab)
     refreshAccessibility()
     shell.refreshAddress()
     let title = shell.engine.snapshot(of: tab)?.title ?? ""
@@ -248,6 +250,7 @@ public final class PeekController {
   /// Closes the Peek (BH-149). The source tab is left as it was and gets the focus back at once.
   public func close(_ kind: PeekCloseKind) {
     guard var session, let overlay, session.phase != .closing, session.phase != .expanding else { return }
+    Self.logger.notice("peek close \(String(describing: kind), privacy: .public)")
     session.phase = .closing
     self.session = session
     let transition: PeekTransition = switch kind {
@@ -270,8 +273,8 @@ public final class PeekController {
   }
 
   private func restoreSourceFocus() {
-    guard let session, let page = shell.engine.contentView(for: session.source) else { return }
-    shell.window?.makeFirstResponder(page)
+    guard let session else { return }
+    shell.engine.focusPage(of: session.source)
   }
 
   /// Removes the Peek now: the overlay goes, the source stands back up, and the Peek's tab closes unless it moved
@@ -303,6 +306,7 @@ public final class PeekController {
   /// An Esc the page did not use (the engine's unhandled key path, or the responder chain): closes the Peek when the
   /// focus is in it. True when it did.
   public func handleEscape(in tab: TabID?) -> Bool {
+    Self.logger.notice("peek unhandled Esc (\(tab == nil ? "no tab" : "tab", privacy: .public))")
     guard let session, session.phase != .closing, session.phase != .expanding, let overlay else { return false }
     if let tab, tab != session.tab { return false }
     if tab == nil {

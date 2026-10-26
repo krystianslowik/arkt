@@ -251,7 +251,9 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     return .closed
   }
 
-  func focus() {}
+  /// How often the client asked for focus.
+  private(set) var focusCount = 0
+  func focus() { focusCount += 1 }
 
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }

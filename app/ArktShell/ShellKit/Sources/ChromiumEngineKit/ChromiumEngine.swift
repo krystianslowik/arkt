@@ -182,6 +182,9 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   /// The handle's stable container (Decision 6): the same view across contents replacement and moves.
   public func contentView(for id: TabID) -> NSView? { tabs[id]?.handle.containerView }
 
+  /// The container is not the page: the facade focuses the tab's contents (`WebContents::Focus`).
+  public func focusPage(of id: TabID) { tabs[id]?.handle.focus() }
+
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
     hub.add(handler)
   }

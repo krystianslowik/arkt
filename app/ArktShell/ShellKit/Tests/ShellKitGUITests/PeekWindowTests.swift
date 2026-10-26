@@ -116,6 +116,10 @@ final class PeekWindowTests: XCTestCase {
     XCTAssertEqual(overlay.card.frame, CGRect(x: content.minX + 56, y: content.minY + 34, width: content.width - 112,
                                               height: content.height - 60))
     XCTAssertEqual(overlay.controlsView.frame.minX, overlay.card.frame.maxX + 12)
+    let close = overlay.convert(overlay.closeButton.frame, from: overlay.controlsView)
+    let split = overlay.convert(overlay.splitButton.frame, from: overlay.controlsView)
+    XCTAssertEqual(close.minY, overlay.card.frame.minY, "Close is the top control, top-aligned with the card")
+    XCTAssertGreaterThan(split.minY, close.minY, "Close, Open as Tab, Add to Split View, top to bottom")
     let transform = try XCTUnwrap(harness.controller.rootView.card.layer?.transform)
     XCTAssertEqual(transform.m11, 0.985, accuracy: 1e-6)
     XCTAssertEqual(overlay.closeButton.accessibilityLabel(), "Close Peek")

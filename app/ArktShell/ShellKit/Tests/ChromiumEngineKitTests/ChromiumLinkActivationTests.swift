@@ -94,4 +94,13 @@ struct ChromiumLinkActivationTests {
     browser.host.unhandledKeyDown?(escape, in: nil)
     #expect(host.keys == [tab, nil])
   }
+
+  /// Peek gives its page the keyboard (#313): the facade's focus, not a responder change on the container.
+  @Test func focusPageAsksTheTabHandleToFocus() throws {
+    let (engine, _, tab, _) = try makeEngine()
+    let handle = try #require(engine.handle(of: tab) as? ScriptedTab)
+    #expect(handle.focusCount == 0)
+    engine.focusPage(of: tab)
+    #expect(handle.focusCount == 1)
+  }
 }

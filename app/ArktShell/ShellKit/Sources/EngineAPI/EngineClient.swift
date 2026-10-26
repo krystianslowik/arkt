@@ -173,6 +173,10 @@ public protocol EngineClient: AnyObject {
   func snapshot(of id: TabID) -> TabSnapshot?
   /// The view that draws the tab's page. Same instance for the tab's whole life; nil once closed.
   func contentView(for id: TabID) -> NSView?
+  /// Gives the tab's page the keyboard focus (#313: a Peek's page, the source page after a close). The default makes
+  /// `contentView(for:)` its window's first responder; an engine whose content view is a container focuses the page
+  /// inside it.
+  func focusPage(of id: TabID)
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it
   /// arrives after the call that caused it returns. During queued delivery `snapshot(of:)`
@@ -207,6 +211,11 @@ public protocol EngineClient: AnyObject {
 }
 
 extension EngineClient {
+  public func focusPage(of id: TabID) {
+    guard let view = contentView(for: id) else { return }
+    view.window?.makeFirstResponder(view)
+  }
+
   /// Immediate-state engines already expose the latest selection through `activeTab(in:)`.
   public func latestActiveTab(in window: EngineWindowID) -> TabID? { activeTab(in: window) }
 }
