@@ -50,10 +50,11 @@ final class ScriptedRequest: NSObject, ArktWindowRequest {
   let hasBounds: Bool
   let profileId = "Default"
   let initialURL: URL?
+  let isPopup: Bool
   init(kind: ArktWindowRequestKind, opener: (any ArktBrowserHandle)? = nil, bounds: NSRect? = nil,
-       initialURL: URL? = nil) {
+       initialURL: URL? = nil, isPopup: Bool = false) {
     self.kind = kind; self.opener = opener; self.bounds = bounds ?? .zero; self.hasBounds = bounds != nil
-    self.initialURL = initialURL
+    self.initialURL = initialURL; self.isPopup = isPopup
   }
 }
 
@@ -254,6 +255,19 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   /// How often the client asked for focus.
   private(set) var focusCount = 0
   func focus() { focusCount += 1 }
+
+  /// Little Arkt's Open in (#314): `TabMoved`, then the tab becomes the target's active tab; an emptied window
+  /// closes, as Chromium closes a Browser whose last tab left.
+  func move(to browser: any ArktBrowserHandle) {
+    whenInserted { [self] in
+      guard let source = owner, let target = browser as? ScriptedBrowser, target !== source, !target.isClosed else {
+        return
+      }
+      source.move(self, to: target)
+      target.activate(self)
+      if source.tabList.isEmpty { source.finishClose(reason: .windowClosing) }
+    }
+  }
 
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }

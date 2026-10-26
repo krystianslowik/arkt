@@ -34,6 +34,7 @@
 // target cannot depend on it; the symbol is in the same framework.
 #include "chrome/browser/ui/browser_tabstrip.h"  // nogncheck
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/browser_window/public/create_browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths_internal.h"
@@ -53,6 +54,7 @@
 @property(nonatomic, nullable) id<ArktBrowserHandle> opener;
 @property(nonatomic) NSRect bounds;
 @property(nonatomic) BOOL hasBounds;
+@property(nonatomic) BOOL isPopup;
 @property(nonatomic, copy) NSString* profileId;
 @property(nonatomic, nullable, copy) NSURL* initialURL;
 @end
@@ -62,6 +64,7 @@
 @synthesize opener = _opener;
 @synthesize bounds = _bounds;
 @synthesize hasBounds = _hasBounds;
+@synthesize isPopup = _isPopup;
 @synthesize profileId = _profileId;
 @synthesize initialURL = _initialURL;
 @end
@@ -117,6 +120,8 @@ struct RequestFields {
   // Default params: Dock reopen, New Window, a page's NEW_WINDOW, or a URL
   // opened by another application (#299).
   bool default_params = false;
+  // A popup Browser (TYPE_POPUP or TYPE_APP_POPUP), not a normal window.
+  bool popup = false;
 };
 
 // Chromium's New Tab page or the initial about:blank: no page of its own.
@@ -443,6 +448,26 @@ class Embedder : public FacadeDelegate {
       case BrowserWindowCreateParams::CreationSource::kUnknown:
         break;
     }
+    // Popups are told apart by their Browser type (no patch): a page's
+    // window.open with window features navigates with NEW_POPUP, which
+    // creates a TYPE_POPUP Browser with the features' bounds
+    // (browser_navigator.cc); chrome.windows.create({type: "popup"}) creates
+    // a TYPE_APP_POPUP Browser with a show state (tabs_api.cc).
+    switch (params.type) {
+      case BrowserWindowInterface::TYPE_POPUP:
+        fields.kind = ArktWindowRequestKindPage;
+        fields.popup = true;
+        fields.source = "popup Browser (window.open with window features)";
+        CenterUnplacedPopup(params, fields.bounds);
+        return fields;
+      case BrowserWindowInterface::TYPE_APP_POPUP:
+        fields.kind = ArktWindowRequestKindExtension;
+        fields.popup = true;
+        fields.source = "app popup Browser (chrome.windows.create popup)";
+        return fields;
+      default:
+        break;
+    }
     if (params.initial_show_state != ui::mojom::WindowShowState::kDefault ||
         !params.initial_bounds.IsEmpty()) {
       fields.kind = ArktWindowRequestKindExtension;
@@ -453,6 +478,28 @@ class Embedder : public FacadeDelegate {
       fields.default_params = true;
     }
     return fields;
+  }
+
+  // A page that asked for a popup size but no position (no left and top
+  // features) gets it centered over the last active window, the opener's
+  // window in practice (docs/design/little-arkt.md, Popups). Without a
+  // window the origin stays and the shell keeps the frame on screen.
+  static void CenterUnplacedPopup(const BrowserWindowCreateParams& params,
+                                  gfx::Rect& bounds) {
+    if (bounds.IsEmpty() ||
+        params.initial_origin_specified ==
+            BrowserWindowCreateParams::ValueSpecified::kSpecified) {
+      return;
+    }
+    BrowserWindowInterface* last =
+        GetLastActiveBrowserWindowInterfaceWithAnyProfile();
+    ui::BaseWindow* window = last ? last->GetWindow() : nullptr;
+    if (!window) {
+      return;
+    }
+    gfx::Rect opener = window->GetBounds();
+    bounds.set_origin(gfx::Point(opener.CenterPoint().x() - bounds.width() / 2,
+                                 opener.CenterPoint().y() - bounds.height() / 2));
   }
 
   void Replay() {
@@ -529,6 +576,7 @@ class Embedder : public FacadeDelegate {
         [[ArktEmbedderWindowRequest alloc] init];
     request.kind = fields.kind;
     request.profileId = @"default";
+    request.isPopup = fields.popup;
     if (fields.url.is_valid()) {
       request.initialURL =
           [NSURL URLWithString:base::SysUTF8ToNSString(fields.url.spec())];
@@ -541,6 +589,7 @@ class Embedder : public FacadeDelegate {
     std::string missing;
     bool usable = host && IsUsableWindowHost(host, &missing);
     LOG(WARNING) << "ARKT: host asked kind=" << RequestKindName(fields.kind)
+                 << (fields.popup ? " popup" : "")
                  << " (" << fields.source << ") window session id "
                  << browser->GetSessionID().id()
                  << (fields.bounds.IsEmpty()

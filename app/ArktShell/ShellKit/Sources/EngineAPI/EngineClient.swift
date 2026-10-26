@@ -177,6 +177,12 @@ public protocol EngineClient: AnyObject {
   /// `contentView(for:)` its window's first responder; an engine whose content view is a container focuses the page
   /// inside it.
   func focusPage(of id: TabID)
+  /// Moves the tab, with its page, history and content view, to the end of `window`'s tabs and makes it active there,
+  /// without a reload (#314, Little Arkt's Open in). The tab keeps its id; the move itself has no event, the tab's
+  /// later events go to `window`, starting with its `.activeTabChanged`. A window left without tabs closes
+  /// (`.windowClosed`, no `.tabClosed`). A no-op for an unknown or closing tab, an unknown window, or the tab's own
+  /// window. Default: a no-op, for an engine that cannot move tabs.
+  func moveTab(_ id: TabID, to window: EngineWindowID)
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it
   /// arrives after the call that caused it returns. During queued delivery `snapshot(of:)`
@@ -215,6 +221,8 @@ extension EngineClient {
     guard let view = contentView(for: id) else { return }
     view.window?.makeFirstResponder(view)
   }
+
+  public func moveTab(_ id: TabID, to window: EngineWindowID) {}
 
   /// Immediate-state engines already expose the latest selection through `activeTab(in:)`.
   public func latestActiveTab(in window: EngineWindowID) -> TabID? { activeTab(in: window) }

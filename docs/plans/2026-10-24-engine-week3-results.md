@@ -2763,3 +2763,74 @@ on the shared machine; its variants are covered by the unit and GUI tests.
 - #348: Settings > Links UI, the full VoiceOver and keyboard path, XCUITest flows, Peek across tab and Space
   switches, an Instruments trace.
 - BH-147 waits on #113; BH-153 and OS-03 stay out of scope.
+
+## #314: Little Arkt (core)
+
+Branch `feat/314-little-arkt`. Design: `docs/design/little-arkt.md`. Follow-ups: #352 (the Open in flight), #353
+(links from other apps, nudge, profile), #354 (quick lookup and hotkey), #355 (archive), #356 (Dock and Window
+menus, Opt-Cmd-click, UI tests).
+
+### What landed
+
+- **Overlay, no Chromium patch.** The window factory (`CreateArktBrowserWindow`) kept every Browser that is not
+  `TYPE_NORMAL` as a Views window, so popups never reached the shell; `TYPE_POPUP` and `TYPE_APP_POPUP` now get an
+  `ArktBrowserWindow` and the embedder's host. `ClassifyRequest` tells popups by their Browser type: a page's
+  `window.open` with features (`NEW_POPUP`, `browser_navigator.cc`) is `TYPE_POPUP`, reported as `page`;
+  `chrome.windows.create({type: "popup"})` is `TYPE_APP_POPUP` (`tabs_api.cc`), reported as `extension`; both carry
+  the new `isPopup`. A size-only request (no left and top features) is centered over the last active window.
+- **Tab move.** `ArktTabHandle.move(to:)` (facade, `DetachTabAtForInsertion` + `InsertDetachedTabAt`, active) and
+  `EngineClient.moveTab(_:to:)`. The facade already reported a cross-window insert as `TabMoved` with the same handle
+  and container; Chromium closes the emptied Browser (`WindowClosed`, no `TabClosed`). FakeEngine and InMemoryEngine
+  do the same. Header change in both copies of `arkt_engine.h`.
+- **Shell.** `LittleArktWindowController` (an `EngineWindowHosting` through `LittleArktEngineHost`), picked by
+  `ShellWindowSet.host(for:)` for `.page` and `isPopup` requests: brand frame (`surfaceBrand`), 40 pt top bar with
+  the host (lock only for https), Copy Link, the split button (mustard "Open in <Space>", quiet "Open as Tab" for a
+  popup) and the Space chooser (Cmd-Opt-O); the requested page frame or 480 x 620 at the top-right with a 28 pt
+  cascade; Open in (Cmd-O) fades the window out, then the main window adds the first Today row, maps it to the tab
+  and calls `moveTab`; close by button, Cmd-W or Close Window goes through the engine; a page's `window.close()`
+  fades the window out. Motion: `LittleArktMotion` on `SpringChannelSet` (Motion), transform on the content layer and
+  opacity on the window (the system shadow fades with it), interruptible, fade-only Reduce Motion.
+
+### Checks (Engine app on `out/Spike`, profile `$PROF/314-try`, scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and defaults suite, loopback pages on `127.0.0.1`, clicks in the page through CDP with a user gesture)
+
+| Check | Result | Evidence |
+|---|---|---|
+| `window.open` with width and height opens in Little Arkt | PASS | `host asked kind=page popup ... bounds 660,227 480x560 answered ChromiumEngineKit.WindowHostAdapter`; window 492 x 606 centered over the opener; window-only screenshot |
+| `left` and `top` honoured | PASS | `bounds 160,140 520x420`; the page's top-left at 160,140 under the top bar |
+| Size-less popups cascade | PASS | 480 x 620, each 28 pt left and down from the frontmost Little Arkt window; first at 24 pt from the right, 20 pt under the menu bar |
+| Page closes its popup (`window.close()`) | PASS | `browsers ... arkt=3`, the window and its target gone |
+| Close button | PASS | real click (cliclick) on the red light; window and target gone |
+| Open as Tab (click) and Cmd-O | PASS | `facade moving session id ...`, then `TabMoved,ActiveTabChanged,...,WindowClosed`; same DevTools target, an in-page marker and typed text kept (no reload), `window.opener` kept; "Sign In Popup" first in Today, selected |
+| Space chooser | PASS after a fix | opens below the chevron with "Open in", the Space with Cmd-O, Copy Link |
+| Extension popup window (`action-probe` worker over CDP: `chrome.windows.create({type: "popup"})`) | PASS | `host asked kind=extension popup (app popup Browser ...) bounds 322,129 420x520`; a 432 x 566 Little Arkt window |
+| Extension normal window (`chrome.windows.create({url})`) | PASS | `kind=extension (show state or bounds given ...)`; a browser window, not Little Arkt |
+| Cmd-W and Cmd-Shift-W in a Little Arkt window (real keys through the main menu) | PASS | each closed the frontmost Little Arkt window and its target |
+
+Found by the check and fixed (tests first where testable): popups were Views windows (the factory filter), the chevron
+drew NSButton's default title, the lock showed for http, the chooser opened over the chevron (a flipped button). An
+instant synthetic first click (cliclick down and up together) on a top bar control of a window that is not key stays
+in AppKit's tracking until another mouse-up; a held click and a quick click on the key window work. To recheck by
+hand with a trackpad. Reduce Motion was not toggled on the shared machine; covered by unit and GUI tests.
+
+### Verification
+
+- `nice -n 15 autoninja -C out/Spike chrome`: `The build has finished successfully.` (three incremental builds).
+- Debug and Engine apps: `BUILD SUCCEEDED` (after the rebase on `56de14b`).
+- ShellKit `swift test --skip ShellKitGUITests`: 823 passed (798 + 25). `swift test --filter ShellKitGUITests`:
+  659 run (645 + 14), 5 skipped (not applicable to FakeEngine). The frame-time gates `PeekMotionOnScreenTests` and
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` failed in the full run beside two app builds and
+  intermittently alone at load 6 on 10 cores (other builds); both passed in a run alone. Neither touches
+  Little Arkt. ArktCore is not touched.
+- Red first: the engine seams, the pure models and the window tests were written first and run failing (compile
+  errors, then the close race and the test timing). The checks for the chevron title, the http lock and the chooser
+  anchor were added together with their fixes after the real-app check and did not run red.
+
+### Deviations from the plan
+
+- Open in takes the design's no-flight path (fade out, then move) in every case; the flight with a snapshot is #352.
+- Opacity is the window's (`alphaValue`) rather than the content layer's, so the system shadow fades with the
+  content instead of a stand-in layer shadow.
+- Reduce Motion's nudge dips the whole window to about 60 %, not only the frame (no nudge trigger until #353).
+- A popup without a position is centered over the last active window by the engine, not over its opener window: the
+  request does not carry the opener.
+- The remembered size lasts for the session (#353 persists it).

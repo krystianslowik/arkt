@@ -39,6 +39,7 @@
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_close_types_data.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
+#include "chrome/browser/ui/tabs/tab_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/unload_controller.h"
@@ -1631,6 +1632,48 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   if (content::WebContents* contents = self.contents) {
     contents->Focus();
   }
+}
+
+- (void)moveToBrowser:(id<ArktBrowserHandle>)target {
+  ArktFacadeBrowser* destination =
+      [(NSObject*)target isKindOfClass:[ArktFacadeBrowser class]]
+          ? static_cast<ArktFacadeBrowser*>(target)
+          : nil;
+  // The TabModel leaves its strip and joins the other one: the contents,
+  // their history and this handle's container stay (Decision 5), and the
+  // facade reports TabMoved from the insert. Chromium closes a Browser whose
+  // last tab left (Little Arkt's Open in, #314).
+  [self runOrQueue:"moveToBrowser"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that,
+                          ArktFacadeBrowser* destination) {
+                         ArktFacadeTab* tab = that;
+                         ArktFacadeBrowser* source =
+                             static_cast<ArktFacadeBrowser*>(tab.browser);
+                         if (!tab.tabInterface || !source || !destination ||
+                             source == destination ||
+                             !source.browserInterface ||
+                             !destination.browserInterface) {
+                           return;
+                         }
+                         TabStripModel* from =
+                             source.browserInterface->GetTabStripModel();
+                         TabStripModel* to =
+                             destination.browserInterface->GetTabStripModel();
+                         int index = from->GetIndexOfTab(tab.tabInterface);
+                         if (index == TabStripModel::kNoTab) {
+                           return;
+                         }
+                         LOG(WARNING) << "ARKT: facade moving session id "
+                                      << tab.sessionId << " to window "
+                                      << destination.windowId;
+                         std::unique_ptr<tabs::TabModel> detached =
+                             from->DetachTabAtForInsertion(index);
+                         to->InsertDetachedTabAt(to->count(),
+                                                 std::move(detached),
+                                                 AddTabTypes::ADD_ACTIVE);
+                       },
+                       self, destination)];
 }
 
 - (id<ArktTabHandle>)duplicate {

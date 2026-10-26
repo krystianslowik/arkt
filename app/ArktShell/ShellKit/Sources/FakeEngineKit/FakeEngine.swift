@@ -272,6 +272,26 @@ public final class FakeEngine: EngineClient {
 
   public func activateTab(_ id: TabID) { setActive(id) }
 
+  /// The web view moves with the tab: the shell remounts it in the new window, nothing reloads.
+  public func moveTab(_ id: TabID, to window: EngineWindowID) {
+    guard let entry = entries[id], let source = entry.snapshot.window, source != window,
+          windowIDs.contains(window) else { return }
+    if activeTabs[source] == id { activeTabs[source] = nil }
+    entry.snapshot.window = window
+    entry.snapshot.isActive = false
+    tabIDs.removeAll { $0 == id }
+    tabIDs.append(id)
+    hub.assign(id, to: window)
+    setActive(id)
+    let left = tabs(in: source)
+    if left.isEmpty {
+      closeWindow(source)
+    } else if activeTabs[source] == nil, let successor = left.last {
+      setActive(successor)
+      lastActiveWindow = window
+    }
+  }
+
   /// Asks the tab's window host about a link click (#313). WebKit runs a modified click in the same frame, so the
   /// disposition is the one Chromium would give it: Shift a new window, Command a background tab.
   private func linkActivated(_ id: TabID, url: URL, flags: NSEvent.ModifierFlags) -> Bool {
