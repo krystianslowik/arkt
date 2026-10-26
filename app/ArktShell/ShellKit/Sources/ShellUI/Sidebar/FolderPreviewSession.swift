@@ -4,7 +4,7 @@ import Foundation
 /// and split panes included [I]), filtered by the search text. Typing highlights the first match; the arrows move
 /// the highlight within the matches. Pure: the controller and the view read it.
 struct FolderPreviewSession {
-  struct Item: Equatable {
+  struct Item: Equatable, Sendable {
     var node: NodeID
     var title: String
     var url: URL
@@ -14,14 +14,18 @@ struct FolderPreviewSession {
 
   let folder: NodeID
   let items: [Item]
+  /// A folder with this many tabs is searched off the main thread, so typing in it never waits on the filter [I].
+  static let offMainThreshold = 256
+
   /// The search text; a new value highlights its first match.
-  var query = "" {
-    didSet {
-      guard query != oldValue else { return }
-      matches = Self.filter(items, by: query)
-      highlighted = matches.isEmpty ? nil : 0
+  var query: String {
+    get { appliedQuery }
+    set {
+      guard newValue != appliedQuery else { return }
+      apply(query: newValue, matches: Self.filter(items, by: newValue))
     }
   }
+  private var appliedQuery = ""
   private(set) var matches: [Item]
   /// Index into `matches`.
   private(set) var highlighted: Int?
@@ -36,6 +40,21 @@ struct FolderPreviewSession {
     items = tabs
     matches = tabs
     highlighted = tabs.isEmpty ? nil : 0
+  }
+
+  /// Whether typing searches off the main thread (`matches(of:in:)`, then `apply(query:matches:)`).
+  var searchesOffMain: Bool { items.count >= Self.offMainThreshold }
+
+  /// The items matching `query`, filtered on the concurrent pool.
+  @concurrent static func matches(of query: String, in items: [Item]) async -> [Item] {
+    filter(items, by: query)
+  }
+
+  /// Takes the matches of `query` found elsewhere and highlights the first.
+  mutating func apply(query: String, matches: [Item]) {
+    appliedQuery = query
+    self.matches = matches
+    highlighted = matches.isEmpty ? nil : 0
   }
 
   /// Moves the highlight by `step` matches, stopping at either end.

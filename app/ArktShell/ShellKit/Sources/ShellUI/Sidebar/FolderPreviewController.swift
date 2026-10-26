@@ -43,6 +43,8 @@ final class FolderPreviewController: NSObject, NSTextFieldDelegate {
   private var pendingAction: (@MainActor () -> Void)?
   /// Set while the preview closes itself, so the field's end-of-editing is not taken for a click elsewhere.
   private var isClosing = false
+  /// A large folder's search running off the main thread; its result is dropped when the text changed meanwhile.
+  private(set) var pendingSearch: Task<Void, Never>?
 
   init(source: any SidebarSource) {
     self.source = source
@@ -122,6 +124,8 @@ final class FolderPreviewController: NSObject, NSTextFieldDelegate {
     cancelTimer()
     let session = FolderPreviewSession(folder: folder, in: source)
     self.session = session
+    pendingSearch?.cancel()
+    pendingSearch = nil
     let wasShown = shownFolder != nil
     shownFolder = folder
     if view.superview !== host { host.addSubview(view, positioned: .above, relativeTo: nil) }
@@ -144,6 +148,8 @@ final class FolderPreviewController: NSObject, NSTextFieldDelegate {
     guard shownFolder != nil else { return }
     shownFolder = nil
     session = nil
+    pendingSearch?.cancel()
+    pendingSearch = nil
     pointerInPreview = false
     isClosing = true
     if let window = view.window, isOurs(window.firstResponder) {
@@ -217,13 +223,42 @@ final class FolderPreviewController: NSObject, NSTextFieldDelegate {
 
   func controlTextDidChange(_ notification: Notification) {
     guard var session else { return }
+    let text = view.searchField.stringValue
+    pendingSearch?.cancel()
+    pendingSearch = nil
+    guard session.searchesOffMain else {
+      session.query = text
+      self.session = session
+      view.update(rows: rows(for: session), highlighted: session.highlighted)
+      return
+    }
+    let items = session.items
+    let folder = session.folder
+    pendingSearch = Task { [weak self] in
+      let matches = await FolderPreviewSession.matches(of: text, in: items)
+      guard let self, !Task.isCancelled, var session = self.session, session.folder == folder,
+            self.view.searchField.stringValue == text else { return }
+      self.pendingSearch = nil
+      session.apply(query: text, matches: matches)
+      self.session = session
+      self.view.update(rows: self.rows(for: session), highlighted: session.highlighted)
+    }
+  }
+
+  /// Applies the field's text now when a search is still running, so Return or an arrow acts on what was typed.
+  private func finishPendingSearch() {
+    guard pendingSearch != nil, var session else { return }
+    pendingSearch?.cancel()
+    pendingSearch = nil
     session.query = view.searchField.stringValue
     self.session = session
     view.update(rows: rows(for: session), highlighted: session.highlighted)
   }
 
   func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-    guard control === view.searchField, var session else { return false }
+    guard control === view.searchField else { return false }
+    finishPendingSearch()
+    guard var session else { return false }
     switch selector {
     case #selector(NSResponder.moveDown(_:)):
       session.move(by: 1)

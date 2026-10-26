@@ -97,10 +97,11 @@ extension ShellWindowController {
 
   // MARK: Delete folder (BH-095)
 
-  /// The folder and every tab in it go to the Archive (restorable from there); their pages close with the rows.
+  /// The folder and every tab in it go to the Archive (restorable from there); their pages close with the rows. When
+  /// it held the current tab, the next tab becomes current, as Close Tab does.
   func deleteFolder(_ id: NodeID) {
     guard case .folder? = sidebar.node(id) else { return }
-    onArchive?([id])
+    archive(id, heldCurrent: currentNode.map(tabs(in: id).contains) ?? false)
   }
 
   // MARK: Duplicate (BH-027, BH-095)

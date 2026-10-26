@@ -58,6 +58,19 @@ struct FolderPreviewSessionTests {
     #expect(session.highlightedNode == tabs[3], "a new query highlights its first match again")
   }
 
+  @Test func aSearchFoundOffTheMainThreadAppliesLikeTyping() async throws {
+    let (sidebar, folder, tabs) = try makeFolder()
+    var session = FolderPreviewSession(folder: folder, in: sidebar)
+    #expect(!session.searchesOffMain, "a small folder filters as it types")
+    session.move(by: 2)
+    let matches = await FolderPreviewSession.matches(of: "BOA", in: session.items)
+    session.apply(query: "BOA", matches: matches)
+    #expect(session.query == "BOA")
+    #expect(session.highlightedNode == tabs[3], "the first match is highlighted")
+    session.query = "BOA"
+    #expect(session.matches.map(\.node) == [tabs[3]], "the same text again changes nothing")
+  }
+
   @Test func anEmptyFolderHasNoHighlight() {
     let sidebar = StubSidebar()
     let space = sidebar.addSpace(title: "Work")

@@ -196,6 +196,38 @@ final class FolderTests: XCTestCase {
     XCTAssertEqual(try harness.style(world.pinnedTab), .rest)
   }
 
+  /// A click mid-open reverses the same way: the rows close from where they are, keep their velocity, and leave
+  /// once, when the close settles (#109 review).
+  func testAClickMidOpenReversesFromWhereTheRowsAre() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    try harness.outline().toggleFolder(world.folder, animated: false)
+    let closedRows = try harness.outline().outlineView.numberOfRows
+
+    try harness.click(world.folder)
+    try harness.advance(by: 0.06)
+    let mid = try harness.style(world.pinnedTab)
+    XCTAssertLessThan(mid.offsetY, 0, "mid-open: the row below is still on its way down")
+    let rowsMidOpen = try harness.outline().outlineView.numberOfRows
+    try harness.click(world.folder)
+    XCTAssertFalse(try harness.outline().isFolderOpen(world.folder))
+    XCTAssertEqual(try harness.outline().outlineView.numberOfRows, rowsMidOpen, "the rows stay while it closes")
+    try harness.outline().folderMotion.presentFrame()
+    XCTAssertEqual(try harness.style(world.pinnedTab).offsetY, mid.offsetY, accuracy: 0.001,
+                   "the reversal starts from the presented offset")
+    try harness.advance(by: 0.02)
+    XCTAssertGreaterThan(try harness.style(world.pinnedTab).offsetY, mid.offsetY,
+                         "the rows still move down for a moment: the spring carries its velocity into the reversal")
+
+    try harness.advance(by: 2)
+    XCTAssertEqual(try harness.outline().outlineView.numberOfRows, closedRows, "no row left behind and none twice")
+    XCTAssertEqual(try harness.row(world.folderTabs[0]), -1)
+    XCTAssertEqual(try harness.style(world.pinnedTab), .rest)
+    XCTAssertFalse(try harness.outline().folderMotion.isRunning)
+  }
+
   /// Reduce Motion: no movement. A close applies at once; an open shows the rows in place and fades them in.
   func testReduceMotionAppliesAtOnceAndFadesNewRowsIn() throws {
     let world = try Self.makeWorld()
@@ -553,6 +585,37 @@ final class FolderTests: XCTestCase {
     XCTAssertEqual(try harness.row(world.folderTabs[0]), -1)
     XCTAssertFalse((window.firstResponder as? NSTextView)?.delegate === preview.view.searchField,
                    "the field gave focus back")
+  }
+
+  /// A large folder is searched off the main thread: typing returns before the list changes, the result lands for
+  /// the latest text only, and Return right after typing acts on what was typed (#109 review).
+  func testALargeFolderIsSearchedOffTheMainThread() async throws {
+    var world = try Self.makeWorld()
+    var large: [UUID] = []
+    for index in 0..<FolderPreviewSession.offMainThreshold {
+      large.append(try world.sidebar.addTab(url: Self.url("l\(index)"), title: "Large \(index)",
+                                            in: .folder(world.folder)))
+    }
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let preview = try hoverClosedFolder(harness, world)
+    preview.firePendingTimer()
+    let editor = try XCTUnwrap(harness.controller.window?.firstResponder as? NSTextView)
+    let shown = preview.view.rowCount
+
+    editor.insertText("Large 1", replacementRange: editor.selectedRange())
+    XCTAssertNotNil(preview.pendingSearch, "the filter runs off the main thread")
+    XCTAssertEqual(preview.view.rowCount, shown, "the list waits for the search")
+    editor.insertText("7", replacementRange: editor.selectedRange())
+    await preview.pendingSearch?.value
+    XCTAssertEqual(preview.view.rowViews.prefix(preview.view.rowCount).map(\.titleField.stringValue),
+                   ["Large 17"] + (170..<180).map { "Large \($0)" }, "the result is for the latest text")
+    XCTAssertEqual(preview.view.highlightedRow, 0)
+
+    editor.insertText("5", replacementRange: editor.selectedRange())
+    XCTAssertNotNil(preview.pendingSearch)
+    editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+    XCTAssertEqual(harness.controller.sidebarController.current, large[175], "Return acts on the typed text")
   }
 
   func testArrowsMoveTheHighlightAndAClickChoosesARow() throws {
