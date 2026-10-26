@@ -281,10 +281,9 @@ final class TabActionsTests: XCTestCase {
     try harness.cell(world.today[2]).endRename(commit: false)
 
     let folderPoint = try point(of: folder, in: harness, view)
-    let item = try XCTUnwrap(view.item(atRow: try harness.row(folder)))
     try click(at: folderPoint, in: window, view)
     try click(at: folderPoint, count: 2, in: window, view)
-    XCTAssertFalse(view.isItemExpanded(item), "the first click collapsed it and the second did not reopen it")
+    XCTAssertFalse(try harness.outline().isFolderOpen(folder), "the first click closed it and the second did not reopen it")
     XCTAssertNil(try harness.outline().renamingNode)
   }
 

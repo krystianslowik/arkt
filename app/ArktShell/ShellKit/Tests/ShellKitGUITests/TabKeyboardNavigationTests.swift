@@ -186,12 +186,15 @@ final class TabKeyboardNavigationTests: XCTestCase {
   func testCtrlSpaceOpensTheFolderAndFocusesTheCurrentRowWithTheSystemRing() throws {
     controller.activate(node: folderTabs[1])
     page.outlineController.handleClick(row: page.outlineController.row(for: folder), modifiers: [])   // collapse
-    XCTAssertEqual(page.outlineController.row(for: folderTabs[1]), -1)
+    XCTAssertFalse(page.outlineController.isFolderOpen(folder))
+    XCTAssertEqual(page.outlineController.row(for: folderTabs[1]), page.outlineController.row(for: folder) + 1,
+                   "the current tab peeks out of its closed folder (#109)")
 
     controller.revealCurrentTab(nil)
 
     let row = page.outlineController.row(for: folderTabs[1])
     XCTAssertGreaterThanOrEqual(row, 0, "the folder opened")
+    XCTAssertTrue(page.outlineController.isFolderOpen(folder))
     XCTAssertTrue(controller.window?.firstResponder === outline)
     XCTAssertEqual(outline.keyboardFocusRow, row)
     let ring = outline.keyboardFocusRing
