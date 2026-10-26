@@ -32,6 +32,9 @@ final class ThemeCreatorController {
   private var imagesObserver: (any NSObjectProtocol)?
   private var resignKeyObserver: (any NSObjectProtocol)?
   private(set) var isClosed = false
+  /// Views a click may land on without closing the popover: the Space's options button, whose Theme submenu picks
+  /// a preset while the creator is open.
+  var passThroughViews: [NSView] = []
   /// Runs once the popover has closed.
   var onClose: (() -> Void)?
 
@@ -99,11 +102,16 @@ final class ThemeCreatorController {
     }
   }
 
-  private func handleOutsideClick(_ event: NSEvent) {
+  func handleOutsideClick(_ event: NSEvent) {
     guard !isClosed, let host = view.superview else { return }
-    if event.window !== host.window || !view.frame.contains(host.convert(event.locationInWindow, from: nil)) {
-      close(animated: true)
+    guard event.window === host.window else { return close(animated: true) }
+    let point = host.convert(event.locationInWindow, from: nil)
+    if view.frame.contains(point) { return }
+    let passesThrough = passThroughViews.contains { passThrough in
+      passThrough.window === host.window && !passThrough.isHiddenOrHasHiddenAncestor
+        && passThrough.bounds.contains(passThrough.convert(event.locationInWindow, from: nil))
     }
+    if !passesThrough { close(animated: true) }
   }
 
   /// Closes the popover (fade out 0.12 s), keeps every change and registers one undo step for the session.

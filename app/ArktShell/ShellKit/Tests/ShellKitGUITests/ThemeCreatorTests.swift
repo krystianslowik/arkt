@@ -388,7 +388,8 @@ final class ThemeCreatorTests: XCTestCase {
   }
 
   /// It behaves like a transient popover: a click inside keeps it, a click outside it closes it, and so does the
-  /// window resigning key. It stays level with the Space name when the window resizes.
+  /// window resigning key. A click on the Space's options button keeps it, so a preset can be picked while it is
+  /// open. It stays level with the Space name when the window resizes.
   func testOutsideClickAndResignKeyCloseAndResizeKeepsItAnchored() throws {
     let harness = Harness()
     let window = try XCTUnwrap(harness.controller.window)
@@ -401,9 +402,19 @@ final class ThemeCreatorTests: XCTestCase {
         : popover.frame.maxY - ThemeCreatorMetrics.arrowCenterY
       return arrowY - titleMid.y
     }
+    let heightBefore = root.bounds.height
     window.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 700), display: false)
     root.layoutSubtreeIfNeeded()
+    XCTAssertEqual(root.bounds.height, heightBefore - 100, accuracy: 0.5)
     XCTAssertEqual(arrowOffset(), 0, accuracy: 0.5)
+
+    // The options button opens the Theme submenu: a click there passes through (called directly, since a real
+    // click would run the menu's tracking loop).
+    let options = try XCTUnwrap(harness.page(harness.ids[0])?.optionsButton)
+    options.isHidden = false
+    let onOptions = NSPoint(x: options.bounds.midX, y: options.bounds.midY)
+    try XCTUnwrap(harness.creator).handleOutsideClick(try harness.event(.leftMouseDown, at: onOptions, in: options))
+    XCTAssertNotNil(harness.creator)
 
     // Local monitors see events only through NSApp.sendEvent.
     let inside = NSPoint(x: popover.bounds.midX, y: popover.bounds.maxY - 12)

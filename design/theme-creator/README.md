@@ -119,7 +119,8 @@ Rule, per colour of the theme, in the current appearance:
 As built (#410), one check comes before step 3: when either text tone already reaches the target with no mix for
 every colour (the appearance's own tone first), that tone is used and nothing is mixed. Without it a dark preset in
 light mode would be mixed 35 to 49 % toward porcelain instead of keeping its light text, and the presets would not
-pass unchanged. The design's example below draws the same with or without it.
+pass unchanged. It also means a theme whose own tone would need a small mix but whose other tone passes as it is
+takes the other tone, unmixed. The design's example below draws the same with or without it.
 
 The stored colours never change: the adjustment is applied when drawing, so a theme looks right in both
 appearances and nothing drifts each time the popover opens. Secondary sidebar text and glyphs follow the same tone.

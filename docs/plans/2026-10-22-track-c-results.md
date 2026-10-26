@@ -2052,7 +2052,8 @@ and registers one undo step for the session.
 Deviations: before the README's step 3, when either text tone already passes with no mix for every colour (the
 appearance's own tone first), that tone is used unmixed; the literal rule mixes every dark preset 35 to 49 % toward
 porcelain in light mode (noted in the design README). The popover is an overlay in the shell window, not a separate
-panel. A created theme's stored `isDark` follows its colours. Arc's `noiseFactor` is not imported yet (the synthetic
+panel; it closes like a transient popover (a click outside it other than the Space's options button, Escape, or the
+window resigning key). A created theme's stored `isDark` follows its colours. Arc's `noiseFactor` is not imported yet (the synthetic
 fixture pairs 0.0 with an active overlay; needs a runtime check). No display link: AppKit coalesces drag events and
 Core Animation commits once per frame.
 
@@ -2061,7 +2062,7 @@ fails, v2 ignores the v3 keys, defaults, round-trip). ShellKit unit 1196 passed 
 (every preset unchanged in both appearances, pale in dark, deep in light, the blue and copper example, Increase
 Contrast), `ThemePadTests`, `ThemeCreatorModelTests`, `ThemeHapticGateTests`, the popover surface pair in
 `ShellTokensContrastTests`, the spring crossfade and preview in `ThemeCrossfadeTests`, three bridge round-trips in
-`SpaceEditingContractTests`). ShellKitGUITests 1031 run (baseline 1013 + 18: `ThemeCreatorTests` 17 and the env-gated
+`SpaceEditingContractTests`). ShellKitGUITests 1032 run (baseline 1013 + 19: `ThemeCreatorTests` 18 and the env-gated
 `ThemeCreatorScreenshotTests`), 15 skipped, 0 failures, with frame-time gates skipped as not measurable at a load
 average near 30. Debug app build succeeds. XCUITest not run: no existing flow or identifier changed. The pad field
 and texture previews took about 250 ms and 530 ms to synthesize in Debug, so they are built off the main thread when

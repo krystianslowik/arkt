@@ -182,6 +182,7 @@ public final class SidebarController {
       self.themeCreator = nil
       self.onThemeCreatorChange?(false)
     }
+    creator.passThroughViews = [page.optionsButton]
     themeCreator = creator
     onThemeCreatorChange?(true)
     creator.show(in: host, anchor: anchor, edge: edge)
