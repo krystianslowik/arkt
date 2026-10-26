@@ -215,6 +215,85 @@ final class LastTabCloseTests: XCTestCase {
     XCTAssertNil(controller.engineWindow, "no new engine window: nothing was shown again")
   }
 
+  // MARK: - Why the engine window closed (#401)
+
+  /// A Today Cmd-W whose sibling loaded in the surviving engine window leaves the window keeping itself; an extension
+  /// then closing the engine window (`chrome.windows.remove`) closes the shell window, and the row is not shown again.
+  func testAnExtensionClosingTheWindowAfterATodayCloseClosesTheWindow() throws {
+    let (controller, engine, rows) = try Self.inMemoryWindow(today: 2)
+    controller.activate(node: rows[0])
+    let window = try XCTUnwrap(controller.engineWindow)
+    controller.closeTab(nil)
+    XCTAssertEqual(controller.engineWindow, window, "the sibling loaded in the same engine window")
+    XCTAssertTrue(controller.keepsWindowWithoutEngine)
+
+    engine.engineCloseWindow(window, reason: .extension)
+
+    XCTAssertEqual(controller.window?.isVisible, false)
+    XCTAssertNil(controller.engineWindow, "no new engine window: nothing was shown again")
+    XCTAssertFalse(controller.keepsWindowWithoutEngine)
+  }
+
+  /// The same with no page left: the engine kept its emptied window after a pinned Cmd-W, and an extension closes it.
+  func testAnExtensionClosingTheEmptiedWindowClosesTheWindow() throws {
+    let (controller, engine, rows) = try Self.inMemoryWindow(pinned: 2)
+    controller.activate(node: rows[0])
+    let window = try XCTUnwrap(controller.engineWindow)
+    controller.closeTab(nil)
+    XCTAssertEqual(controller.window?.isVisible, true)
+
+    engine.engineCloseWindow(window, reason: .extension)
+
+    XCTAssertEqual(controller.window?.isVisible, false)
+  }
+
+  /// Keeping the window is for a last-page close only: any other close the engine reports while the window would keep
+  /// itself (Chromium's own Close Window, quitting) closes it.
+  func testOnlyALastTabCloseKeepsTheWindow() throws {
+    for reason in [WindowCloseReason.userClose, .appQuit, .extension, .lastTabClosed] {
+      let (controller, engine, rows) = try Self.inMemoryWindow(pinned: 1)
+      controller.activate(node: rows[0])
+      let window = try XCTUnwrap(controller.engineWindow)
+      controller.closeTab(nil)
+
+      engine.engineCloseWindow(window, reason: reason)
+
+      XCTAssertEqual(controller.window?.isVisible, reason == .lastTabClosed, "\(reason)")
+      XCTAssertNil(controller.engineWindow, "\(reason)")
+      controller.close()
+    }
+  }
+
+  /// A window with pages that an extension closes goes away; it never kept itself.
+  func testAnExtensionClosingAWindowWithPagesClosesIt() throws {
+    let (controller, engine, rows) = try Self.inMemoryWindow(pinned: 2)
+    controller.activate(node: rows[0])
+    controller.activate(node: rows[1])
+
+    engine.engineCloseWindow(try XCTUnwrap(controller.engineWindow), reason: .extension)
+
+    XCTAssertEqual(controller.window?.isVisible, false)
+  }
+
+  private static func inMemoryWindow(pinned pinnedCount: Int = 0, today todayCount: Int = 0) throws
+    -> (ShellWindowController, InMemoryEngine, [UUID]) {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let pinned = try (0..<pinnedCount).map {
+      try sidebar.addTab(url: Harness.url("p\($0)"), title: "P\($0)", in: .pinned(space))
+    }
+    let today = try (0..<todayCount).map {
+      try sidebar.addTab(url: Harness.url("t\($0)"), title: "T\($0)", in: .today(space))
+    }
+    let source = ModelSidebarSource(sidebar: sidebar, now: { LastTabCloseTests.now })
+    let engine = InMemoryEngine()
+    let controller = ShellWindowController(engine: engine, sidebar: source, opensFirstTab: false)
+    controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 800), display: false)
+    controller.onArchive = { ids in _ = source.archive(ids, reason: .manual, at: LastTabCloseTests.now) }
+    controller.showWindow(nil)
+    return (controller, engine, pinned + today)
+  }
+
   /// A window that never showed a page closes on Cmd-W too.
   func testCmdWInAFreshEmptyWindowClosesIt() throws {
     let harness = try Harness(pinned: 1)
@@ -241,7 +320,7 @@ private final class LastTabClosesWindowEngine: EngineClient {
     let isLast = tabs(in: window) == [id]
     inner.closeTab(id, mode: mode)
     guard isLast, inner.snapshot(of: id) == nil, inner.windowIDs.contains(window) else { return }
-    inner.closeWindow(window)
+    inner.engineCloseWindow(window, reason: .lastTabClosed)
   }
   func navigate(_ id: TabID, to url: URL) { inner.navigate(id, to: url) }
   func reload(_ id: TabID) { inner.reload(id) }

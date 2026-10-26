@@ -87,8 +87,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The placeholder shown where a page moved to another window (#300); made on the first handoff.
   var handoffPlaceholder: HandoffPlaceholderView?
   /// This window let go of its last page: it moved to another window (#300), or it closed (#386; Chromium closes a
-  /// `Browser` with its last tab). The engine may close the emptied engine window; this window then stays open
-  /// without one, and the next page it shows makes a new one.
+  /// `Browser` with its last tab). The engine may close the emptied engine window; when it reports that close as
+  /// `.lastTabClosed`, this window stays open without one, and the next page it shows makes a new one (#401).
   var keepsWindowWithoutEngine = false
   /// The current row whose page went with an engine window this window keeps going without (#386): a page opened in
   /// the closing window, such as the sibling a Cmd-W makes current. It is shown again once that window has closed.
@@ -144,6 +144,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
   var pasteboard: NSPasteboard = .general
+  /// Where the sidebar width and hidden state are saved on change (#331).
+  let sidebarStateStore: SidebarWindowStateStore
+  /// False for a window that is not the one a relaunch restores: its changes must not overwrite the saved state.
+  var savesSidebarState = true
   /// Scrolls the sidebar to a row a keyboard command landed on, with the overflow pill (BH-018).
   public let sidebarReveal = SidebarRevealer()
   /// How Cmd-1 ... Cmd-9 count (BH-014, BH-015). Defaults until the Settings window exists.
@@ -155,7 +159,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// gets its window through `adopt(engineWindow:)`.
   public init(engine: any EngineClient, sidebar: any SidebarSource,
               metrics: ShellMetrics = .standard, toolbarSetting: ToolbarSetting = .ephemeral(),
-              opensFirstTab: Bool = true) {
+              sidebarStateStore: SidebarWindowStateStore = .ephemeral(), opensFirstTab: Bool = true) {
     let window = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800))
     // Symbol bitmaps at the shell window's scale, before the first row or button draws. A later scale change
     // re-renders the views' glyphs (viewDidChangeBackingProperties) and prewarms again below.
@@ -170,8 +174,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.commandBar = CommandBarController(parent: window)
     self.toasts = ToastPresenter()
     self.toolbarSetting = toolbarSetting
+    self.sidebarStateStore = sidebarStateStore
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
+    root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
     engineHost.controller = self
     window.commandHost = engineHost
     let toastView = ToastView(frame: .zero)

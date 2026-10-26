@@ -228,7 +228,7 @@ struct ChromiumEngineScriptTests {
     facade.isNested = false
     try await delivered()
     #expect(recorder.events(for: id) == [.tabCreated(id), .tabClosed(id, reason: .windowClosing)])
-    #expect(recorder.windowEvents.last == .windowClosed(window))
+    #expect(recorder.windowEvents.last == .windowClosed(window, reason: .userClose))
   }
 
   // MARK: Contents, moves
@@ -417,7 +417,7 @@ struct ChromiumEngineScriptTests {
     browser.close()
     try await delivered()
     #expect(engine.windowIDs.isEmpty && recorder.events.isEmpty)
-    #expect(recorder.windowEvents == [.windowOpened(window), .windowClosed(window)])
+    #expect(recorder.windowEvents == [.windowOpened(window), .windowClosed(window, reason: .userClose)])
   }
 
   /// A startup window without a URL (the first Dock reopen of a session can take Chromium's startup path) keeps its
@@ -538,7 +538,7 @@ struct ChromiumEngineScriptTests {
     try await delivered()
     #expect(recorder.events(for: a).last == .tabClosed(a, reason: .appTerminating))
     #expect(recorder.events(for: b).last == .tabClosed(b, reason: .appTerminating))
-    #expect(recorder.windowEvents.last == .windowClosed(window) && engine.windowIDs.isEmpty)
+    #expect(recorder.windowEvents.last == .windowClosed(window, reason: .appQuit) && engine.windowIDs.isEmpty)
   }
 
   @Test func testAPIAnswersValuesAndErrors() async throws {

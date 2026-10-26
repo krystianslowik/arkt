@@ -222,6 +222,22 @@ const char* ReasonName(ArktCloseReason reason) {
   return "unknown";
 }
 
+const char* WindowReasonName(ArktWindowCloseReason reason) {
+  switch (reason) {
+    case ArktWindowCloseReasonNone:
+      return "none";
+    case ArktWindowCloseReasonUser:
+      return "user";
+    case ArktWindowCloseReasonExtension:
+      return "extension";
+    case ArktWindowCloseReasonLastTabClosed:
+      return "lastTabClosed";
+    case ArktWindowCloseReasonAppTerminating:
+      return "appTerminating";
+  }
+  return "unknown";
+}
+
 // .skipUnloadHandlers (Decision 11): while set, UnloadController answers
 // that no unload listener needs to run before closing, so TabStripModel
 // detaches and deletes the tab at once without dispatching beforeunload. The
@@ -305,6 +321,7 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic) BOOL isActive;
 @property(nonatomic) BOOL isAudible;
 @property(nonatomic) BOOL isMuted;
+@property(nonatomic) ArktWindowCloseReason windowCloseReason;
 @end
 
 @implementation ArktFacadeEvent
@@ -323,6 +340,7 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize isActive = _isActive;
 @synthesize isAudible = _isAudible;
 @synthesize isMuted = _isMuted;
+@synthesize windowCloseReason = _windowCloseReason;
 @end
 
 // A link activation as plain values (#313).
@@ -623,12 +641,16 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     ++in_notification_;
     ArktFacadeBrowser* handle = HandleForBrowser(browser);
     if (handle) {
-      if (TabStripModel* model = browser->GetTabStripModel()) {
+      TabStripModel* model = browser->GetTabStripModel();
+      if (model) {
         model->RemoveObserver(this);
       }
       ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
       event.kind = ArktEngineEventKindWindowClosed;
       event.browser = handle;
+      event.windowCloseReason = WindowCloseReasonFor(browser, model);
+      LOG(WARNING) << "ARKT: facade window closed, reason "
+                   << WindowReasonName(event.windowCloseReason);
       Record(event);
       [handle unbind];
       [browsers_ removeObject:handle];
@@ -856,6 +878,30 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     return IsExtensionApiCallInFlight(model->profile(), "tabs.remove")
                ? ArktCloseReasonExtension
                : ArktCloseReasonPage;
+  }
+
+  // #401. Called from BrowserDidClose (UnloadController::OnWindowCloseComplete):
+  // the Browser and its ArktBrowserWindow are still alive, deletion is only
+  // scheduled. Quitting wins; then chrome.windows.remove (the window recorded
+  // it when Close() started); then a close that closed every tab at once
+  // (UnloadController::OnWindowClosing -> CloseAllTabs: the host's
+  // closeRequested, -close, Chromium's Close Window). Otherwise the strip
+  // emptied by a tab close or move and TabStripEmpty() closed the window. A
+  // window closed with no tabs at all also reads as lastTabClosed; the shell
+  // tells that case apart by its own close request.
+  ArktWindowCloseReason WindowCloseReasonFor(BrowserWindowInterface* browser,
+                                             TabStripModel* model) {
+    if (terminating_) {
+      return ArktWindowCloseReasonAppTerminating;
+    }
+    ArktBrowserWindow* window = ArktBrowserWindow::FromBrowser(browser);
+    if (window && window->IsClosedByExtension()) {
+      return ArktWindowCloseReasonExtension;
+    }
+    if (model && model->closing_all()) {
+      return ArktWindowCloseReasonUser;
+    }
+    return ArktWindowCloseReasonLastTabClosed;
   }
 
   void Deliver() {

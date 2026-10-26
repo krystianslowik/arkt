@@ -190,7 +190,7 @@ public protocol EngineClient: AnyObject {
   /// Moves the tab, with its page, history and content view, to the end of `window`'s tabs and makes it active there,
   /// without a reload (#314, Little Arkt's Open in). The tab keeps its id; the move itself has no event, the tab's
   /// later events go to `window`, starting with its `.activeTabChanged`. A window left without tabs closes
-  /// (`.windowClosed`, no `.tabClosed`). A no-op for an unknown or closing tab, an unknown window, or the tab's own
+  /// (`.windowClosed` with `.lastTabClosed`, no `.tabClosed`). A no-op for an unknown or closing tab, an unknown window, or the tab's own
   /// window. Default: a no-op, for an engine that cannot move tabs.
   func moveTab(_ id: TabID, to window: EngineWindowID)
   /// Mutes or unmutes the tab's sound (#364, BH-126, contract rule 17): `isMuted` in the snapshot and one
@@ -211,7 +211,7 @@ public protocol EngineClient: AnyObject {
   /// sets the host's `forward` and `onCloseRequested`.
   @discardableResult func createWindow(host: any EngineWindowHosting) -> EngineWindowID
   /// Closes the window: unload processing for its tabs first. Then `.tabClosed(reason: .windowClosing)` for each
-  /// tab and `.windowClosed`. If a tab holds and its close is cancelled, the window stays open: `.closeCancelled`
+  /// tab and `.windowClosed` (`.userClose`). If a tab holds and its close is cancelled, the window stays open: `.closeCancelled`
   /// for that tab and no `.windowClosed`.
   func closeWindow(_ id: EngineWindowID)
   /// Makes the tab its window's active tab: `.activeTabChanged` and `isActive` (contract rule 12); no event when it

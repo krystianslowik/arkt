@@ -23,6 +23,13 @@ extension EngineContract {
     recorder.events(for: id).compactMap { if case .tabClosed(_, let reason) = $0 { reason } else { nil } }
   }
 
+  /// The reasons of every `.windowClosed` reported for `window`, in order.
+  static func windowCloses(_ recorder: EventRecorder, _ window: EngineWindowID) -> [WindowCloseReason] {
+    recorder.windowEvents.compactMap {
+      if case .windowClosed(window, let reason) = $0 { reason } else { nil }
+    }
+  }
+
   static func wait(_ what: @autoclosure () -> String, _ condition: @MainActor () -> Bool) async throws {
     do {
       try await waitUntil(timeout: eventTimeout, condition)
@@ -61,10 +68,12 @@ extension EngineContract {
     try await h.settle(engine, b)
     let survivor = engine.createTab(url: nil, in: other)
     engine.closeWindow(window)
-    try await wait("windowClosed") { recorder.windowEvents.contains(.windowClosed(window)) }
+    try await wait("windowClosed") { !windowCloses(recorder, window).isEmpty }
+    try require(windowCloses(recorder, window) == [.userClose],
+                "closeWindow must report .windowClosed once with .userClose: \(recorder.windowEvents)")
     try require(!engine.windowIDs.contains(window), "a closed window must not be listed: \(engine.windowIDs)")
     try require(engine.windowIDs.contains(other), "closing one window must leave the other listed")
-    guard let closedAt = recorder.log.firstIndex(of: .window(.windowClosed(window))) else {
+    guard let closedAt = recorder.log.firstIndex(of: .window(.windowClosed(window, reason: .userClose))) else {
       throw ContractViolation(description: "windowClosed missing from the log")
     }
     for id in [a, b] {
@@ -88,8 +97,59 @@ extension EngineContract {
     let id = engine.createTab(url: nil, in: window)
     let onClose = try requireValue(host.onCloseRequested, "onCloseRequested")
     onClose()
-    try await wait("windowClosed after onCloseRequested") { recorder.windowEvents.contains(.windowClosed(window)) }
+    try await wait("windowClosed after onCloseRequested") { !windowCloses(recorder, window).isEmpty }
     try require(closes(recorder, id) == [.windowClosing], "the tab must close with .windowClosing")
+    try require(windowCloses(recorder, window) == [.userClose],
+                "the host's close request is the user's: \(recorder.windowEvents)")
+  }
+
+  /// #401: a window whose last tab moved to another window closes with `.lastTabClosed`, not as a close somebody
+  /// asked for; the moved tab does not close.
+  public static func emptiedWindowReportsLastTabClosed(_ h: EngineHarness) async throws {
+    let engine = h.makeEngine()
+    let recorder = EventRecorder(engine)
+    let source = engine.createWindow(host: h.makeWindowHost())
+    let target = engine.createWindow(host: h.makeWindowHost())
+    _ = engine.createTab(url: nil, in: target)
+    let moved = engine.createTab(url: try h.pageURL("MovedOut"), in: source)
+    try await h.settle(engine, moved)
+    engine.moveTab(moved, to: target)
+    try await wait("windowClosed of the emptied window") { !windowCloses(recorder, source).isEmpty }
+    try require(windowCloses(recorder, source) == [.lastTabClosed],
+                "an emptied window closes with .lastTabClosed: \(recorder.windowEvents)")
+    try require(closes(recorder, moved).isEmpty && engine.snapshot(of: moved)?.window == target,
+                "the moved tab stays open in the target: \(recorder.events(for: moved))")
+    try require(windowCloses(recorder, target).isEmpty, "the target stays open")
+  }
+
+  /// #401: a window an extension closes (`chrome.windows.remove`) reports `.windowClosed` with `.extension`, after
+  /// its tabs' `.tabClosed(reason: .extension)`. Needs `engineCloseWindow`.
+  public static func extensionWindowCloseReportsExtension(_ h: EngineHarness) async throws {
+    let close = try driver(h.engineCloseWindow, "engineCloseWindow")
+    let engine = h.makeEngine()
+    let recorder = EventRecorder(engine)
+    let window = engine.createWindow(host: h.makeWindowHost())
+    let other = engine.createWindow(host: h.makeWindowHost())
+    let a = engine.createTab(url: try h.pageURL("RemovedA"), in: window)
+    let b = engine.createTab(url: try h.pageURL("RemovedB"), in: window)
+    try await h.settle(engine, a)
+    try await h.settle(engine, b)
+    let survivor = engine.createTab(url: nil, in: other)
+    try await close(engine, window)
+    try await wait("windowClosed after the extension's close") { !windowCloses(recorder, window).isEmpty }
+    try require(windowCloses(recorder, window) == [.extension],
+                "an extension's window close reports .extension: \(recorder.windowEvents)")
+    guard let closedAt = recorder.log.firstIndex(of: .window(.windowClosed(window, reason: .extension))) else {
+      throw ContractViolation(description: "windowClosed missing from the log")
+    }
+    for id in [a, b] {
+      try require(closes(recorder, id) == [.extension],
+                  "each tab must close once with .extension: \(recorder.events(for: id))")
+      let tabClosedAt = recorder.log.firstIndex(of: .tab(.tabClosed(id, reason: .extension)))
+      try require(tabClosedAt.map { $0 < closedAt } ?? false, "tabClosed must precede windowClosed: \(recorder.log)")
+    }
+    try require(engine.snapshot(of: survivor)?.window == other && windowCloses(recorder, other).isEmpty,
+                "the other window and its tab stay")
   }
 
   // MARK: Rule 12
@@ -253,7 +313,7 @@ extension EngineContract {
     try await answer(engine, held, false)
     try await wait("closeCancelled") { recorder.events(for: held).contains(.closeCancelled(held)) }
     try await Task.sleep(for: .milliseconds(50))
-    try require(engine.windowIDs.contains(window) && !recorder.windowEvents.contains(.windowClosed(window)),
+    try require(engine.windowIDs.contains(window) && windowCloses(recorder, window).isEmpty,
                 "a cancelled window close keeps the window")
     try require(engine.tabIDs.contains(held) && engine.tabIDs.contains(plain), "and its tabs")
     try require(closes(recorder, held).isEmpty && closes(recorder, plain).isEmpty, "no tabClosed")
@@ -261,7 +321,8 @@ extension EngineContract {
     engine.closeWindow(window)
     try await wait("the held tab closing again") { engine.snapshot(of: held)?.isClosing == true }
     try await answer(engine, held, true)
-    try await wait("windowClosed") { recorder.windowEvents.contains(.windowClosed(window)) }
+    try await wait("windowClosed") { !windowCloses(recorder, window).isEmpty }
+    try require(windowCloses(recorder, window) == [.userClose], "a held window close is still the user's")
     try require(closes(recorder, held) == [.windowClosing] && closes(recorder, plain) == [.windowClosing],
                 "both tabs close with .windowClosing once the dialog is accepted")
   }

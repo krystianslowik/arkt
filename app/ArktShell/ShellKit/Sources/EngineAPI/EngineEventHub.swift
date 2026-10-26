@@ -115,7 +115,7 @@ public final class EngineEventHub {
 
   private func deliver(_ event: EngineWindowEvent) {
     guard !closedWindows.contains(event.windowID) else { return }
-    if case .windowClosed(let id) = event { closedWindows.insert(id) }
+    if case .windowClosed(let id, _) = event { closedWindows.insert(id) }
     for entry in windowHandlers where live.contains(entry.key) { entry.deliver(event) }
   }
 }

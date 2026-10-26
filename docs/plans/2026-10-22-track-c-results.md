@@ -1971,6 +1971,29 @@ Not done here: the sidebar width and hidden state (#331) have no designed row an
 unload limit (#376) has no designed row; "Websites use" waits for an engine appearance bridge; the shortcut recorder,
 conflicts and priority modes are #119.
 
+## Sidebar width and hidden state persist per window (#331) (2026-10-26)
+
+Window state (BH-001, KB-017; DM 3.1's per-window shape): the sidebar width and the hidden state survive a relaunch
+instead of resetting to the defaults.
+
+- **Store.** `SidebarWindowStateStore` (user defaults, injected like `ToolbarSetting`): `sidebarWidth` and
+  `sidebarVisible`, written on every change of either - Cmd-S, the View menu, the edge drag, the double-click reset,
+  a toast's action (`ShellRootView.onSidebarStateChange`). A stored width is clamped to
+  `sidebarMinWidth`...`sidebarMaxWidth` when it is read, so a stale or hand-edited value never reaches a window.
+- **Adoption.** The session's first window - the one a relaunch restores - adopts the saved state at open
+  (`ShellWindowSet.make`, first window only): the saved width, or a concealed hidden sidebar with no reveal until
+  the pointer reaches the edge and no traffic lights over the page. New windows (New Window, a Dock reopen) keep
+  the defaults, and so does a profile that never changed its sidebar (the store reads nil).
+- **Saving.** Only the first window saves; a later window never overwrites the saved state.
+- **Shape note.** There is no window restoration yet (BH-173), so "restored with that window" is the launch window;
+  when windows are restored, each window takes its own saved state through the same store.
+
+Tests: `SidebarWindowStateTests` (unit, 5): nil when nothing was saved, round-trip, clamping on read, a width with
+no visible flag, the ephemeral store. `SidebarStatePersistenceTests` (GUI, 8): Cmd-S saving the hidden state and
+back, the edge drag and its hide, the double-click reset, the toast action, adoption (width, concealed overlay, no
+traffic lights, clamping) and first-window-only adoption across a `ShellWindowSet`. Full gates: ShellKit unit 1134
+passed, 0 failures; ShellKitGUITests 997 executed, 13 skipped, 0 failures.
+
 ## Reopen a closed Split View pane back into its split (#403) (2026-10-26)
 
 Maintainer decision on #403: a pane closed with its X (#388) or Cmd-W and reopened with Cmd-Shift-T or Cmd-Z (#378)
