@@ -377,6 +377,14 @@ public struct Sidebar: Hashable, Sendable {
     }
   }
 
+  /// Replaces `location`'s child order with `order`, a permutation of it. For `moveNodes` in `Sidebar+Move.swift`,
+  /// which cannot write `childOrder` from another file; anything but a permutation is ignored.
+  mutating func reorderChildren(of location: Location, to order: [NodeID]) {
+    let current = childOrder[location] ?? []
+    guard order.count == current.count, Set(order) == Set(current) else { return }
+    childOrder[location] = order.isEmpty ? nil : order
+  }
+
   /// Replaces the payload of split `id`; a no-op when `id` is not a split. For the split operations in
   /// `Sidebar+Split.swift`, which cannot write `nodes` from another file.
   mutating func setSplitItem(_ id: NodeID, _ item: SplitItem) {
