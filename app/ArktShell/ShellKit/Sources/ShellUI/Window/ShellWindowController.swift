@@ -142,6 +142,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public private(set) lazy var peek = PeekController(shell: self)
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
+  /// Where the sidebar width and hidden state are saved on change (#331).
+  let sidebarStateStore: SidebarWindowStateStore
   /// Scrolls the sidebar to a row a keyboard command landed on, with the overflow pill (BH-018).
   public let sidebarReveal = SidebarRevealer()
   /// How Cmd-1 ... Cmd-9 count (BH-014, BH-015). Defaults until the Settings window exists.
@@ -153,7 +155,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// gets its window through `adopt(engineWindow:)`.
   public init(engine: any EngineClient, sidebar: any SidebarSource,
               metrics: ShellMetrics = .standard, toolbarSetting: ToolbarSetting = .ephemeral(),
-              opensFirstTab: Bool = true) {
+              sidebarStateStore: SidebarWindowStateStore = .ephemeral(), opensFirstTab: Bool = true) {
     let window = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800))
     // Symbol bitmaps at the shell window's scale, before the first row or button draws. A later scale change
     // re-renders the views' glyphs (viewDidChangeBackingProperties) and prewarms again below.
@@ -168,8 +170,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.commandBar = CommandBarController(parent: window)
     self.toasts = ToastPresenter()
     self.toolbarSetting = toolbarSetting
+    self.sidebarStateStore = sidebarStateStore
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
+    root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
     engineHost.controller = self
     window.commandHost = engineHost
     let toastView = ToastView(frame: .zero)

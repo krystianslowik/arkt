@@ -78,6 +78,7 @@ final class AppSession {
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
     self.windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
+                                  sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
                                   hostLookup: hostLookup)
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)

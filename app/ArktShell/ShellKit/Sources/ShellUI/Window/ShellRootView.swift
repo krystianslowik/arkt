@@ -22,7 +22,11 @@ public final class ShellRootView: NSView {
   public let resizeHandle: SidebarResizeHandle
 
   public var sidebarWidth: CGFloat {
-    didSet { if sidebarWidth != oldValue { needsLayout = true } }
+    didSet {
+      guard sidebarWidth != oldValue else { return }
+      needsLayout = true
+      onSidebarStateChange?()
+    }
   }
   /// The sidebar is shown (docked). Hidden, the card takes the full width (BH-001) and the left edge reveals the
   /// sidebar as an overlay. Instant either way: Cmd-S is a keyboard action. Each window keeps its own value.
@@ -33,10 +37,13 @@ public final class ShellRootView: NSView {
       needsLayout = true
       updateTrackingAreas()
       onSidebarVisibilityChange?(sidebarVisible)
+      onSidebarStateChange?()
     }
   }
   /// Called when `sidebarVisible` changes, whatever changed it (Cmd-S, the edge drag, a toast's action).
   public var onSidebarVisibilityChange: (@MainActor (Bool) -> Void)?
+  /// Called when the width or the visibility changes, whatever changed it; the window saves its state here (#331).
+  public var onSidebarStateChange: (@MainActor () -> Void)?
   /// The split container replaces the single card (S4). The toast moves along, so notices stay on screen.
   public var showsSplit = false {
     didSet {

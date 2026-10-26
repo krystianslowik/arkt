@@ -11,11 +11,28 @@ public enum SidebarCreation: Sendable {
 /// `SidebarOverlayView`. BH-005 (a brief Option press shows the sidebar, 2021) is not implemented: expected absent in
 /// Arc 1.168, PARITY(NEEDS-RUNTIME-CHECK RT-11).
 ///
-/// The state belongs to this window (`rootView.sidebarVisible`) and lives as long as it, like the sidebar width; it is
-/// not persisted across launches (neither is the width).
+/// The state belongs to this window (`rootView.sidebarVisible`, `rootView.sidebarWidth`) and is saved on every change
+/// (#331): the session's first window adopts the saved state at open, later windows keep the defaults.
 extension ShellWindowController {
   /// The sidebar is shown (docked) in this window.
   public var isSidebarVisible: Bool { rootView.sidebarVisible }
+
+  /// Saves this window's sidebar state (#331). Called by the root view whenever the width or the visibility changes,
+  /// whatever changed it: Cmd-S, the View menu, the edge drag, the double-click reset, a toast's action.
+  func saveSidebarState() {
+    sidebarStateStore.save(width: rootView.sidebarWidth, isVisible: rootView.sidebarVisible)
+  }
+
+  /// Adopts the saved sidebar state (#331). The session's first window - the one a relaunch restores - opens with the
+  /// stored width and hidden state: a stored hidden window opens concealed, with no reveal until the pointer reaches
+  /// the edge and no traffic lights over the page (`ShellRootView.reapplyTrafficLights` follows the visibility).
+  /// New windows (New Window, a Dock reopen) keep the defaults.
+  public func adoptSavedSidebarState() {
+    guard let state = sidebarStateStore.state(metrics: rootView.metrics) else { return }
+    rootView.sidebarWidth = CGFloat(state.width)
+    rootView.sidebarVisible = state.isVisible
+    rootView.layoutSubtreeIfNeeded()
+  }
 
   /// Cmd-S (KB-017, BH-001) and View > Show / Hide Sidebar: hides or shows this window's sidebar at once. Not a reserved
   /// key: a page that handles Cmd-S itself (an editor's Save) keeps it, as with any menu key.
