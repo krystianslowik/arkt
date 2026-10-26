@@ -402,8 +402,11 @@ final class ThemeCreatorTests: XCTestCase {
         : popover.frame.maxY - ThemeCreatorMetrics.arrowCenterY
       return arrowY - titleMid.y
     }
+    // Relative to the current frame: a small CI screen may already have constrained the window.
     let heightBefore = root.bounds.height
-    window.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 700), display: false)
+    var frame = window.frame
+    frame.size.height -= 100
+    window.setFrame(frame, display: false)
     root.layoutSubtreeIfNeeded()
     XCTAssertEqual(root.bounds.height, heightBefore - 100, accuracy: 0.5)
     XCTAssertEqual(arrowOffset(), 0, accuracy: 0.5)
