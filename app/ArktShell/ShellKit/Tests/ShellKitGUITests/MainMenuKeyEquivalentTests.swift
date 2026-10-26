@@ -419,7 +419,7 @@ final class MainMenuInventoryTests: XCTestCase {
     let menu = built.menu
     let file = try XCTUnwrap(menu.items.first { $0.title == "File" }?.submenu)
     let pin = try XCTUnwrap(file.items.first { $0.title == "Pin Tab" })
-    XCTAssertEqual(pin.action, #selector(ShellWindowController.pinTab(_:)))
+    XCTAssertEqual(pin.action, #selector(ShellWindowController.pinCurrentTab(_:)))
     XCTAssertEqual(pin.keyEquivalent, "d")
     XCTAssertEqual(pin.keyEquivalentModifierMask, [.command])
     XCTAssertNil(pin.target, "reaches the main window's controller through the responder chain")
@@ -432,6 +432,28 @@ final class MainMenuInventoryTests: XCTestCase {
     XCTAssertEqual(resetSpace.keyEquivalent, "")
     let commandD = allItems().filter { $0.keyEquivalent == "d" && $0.keyEquivalentModifierMask == [.command] }
     XCTAssertEqual(commandD.count, 1, "no other item binds Cmd-D")
+  }
+
+  /// #373: a nil-target action whose selector `NSWindow` implements is dead: the window comes before its controller in
+  /// the responder chain, so the menu resolves the target to the window and the action goes nowhere. Found with
+  /// Cmd-D: `NSWindow` has a private `pinTab:` (window tabbing), which swallowed File > Pin Tab while a text field
+  /// held focus and (through the same chain) elsewhere. `toggleSidebarVisibility(_:)` exists for the same reason.
+  func testNilTargetWindowItemsDoNotUseSelectorsTheWindowImplements() throws {
+    let file = try XCTUnwrap(built.menu.items.first { $0.title == "File" }?.submenu)
+    let pin = try XCTUnwrap(file.items.first { $0.title == "Pin Tab" })
+    let pinAction = try XCTUnwrap(pin.action)
+    XCTAssertFalse(NSWindow.instancesRespond(to: pinAction),
+                   "NSWindow implements \(pinAction); Pin Tab would reach the window, not the controller")
+    // Every nil-target item meant for the controller: none may be claimed by the window first.
+    let controllerItems = allItems().filter {
+      $0.target == nil && $0.action.map { ShellWindowController.instancesRespond(to: $0) } == true
+    }
+    XCTAssertFalse(controllerItems.isEmpty)
+    for item in controllerItems {
+      let action = try XCTUnwrap(item.action)
+      XCTAssertFalse(NSWindow.instancesRespond(to: action),
+                     "\(item.title): NSWindow implements \(action), so the controller never receives it")
+    }
   }
 
   /// Decision 9: no menu item names Arc.

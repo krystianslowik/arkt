@@ -153,7 +153,7 @@ final class PinnedTabTests: XCTestCase {
   func testPinMenuItemTitleAndEnabledStateFollowTheCurrentTab() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
-    let item = harness.menuItem(#selector(ShellWindowController.pinTab(_:)))
+    let item = harness.menuItem(#selector(ShellWindowController.pinCurrentTab(_:)))
     XCTAssertFalse(harness.controller.validateMenuItem(item), "no current tab")
 
     for node in [world.today[0], world.p0, world.panes[0]] {
@@ -183,7 +183,7 @@ final class PinnedTabTests: XCTestCase {
     harness.controller.activate(node: world.today[0])
     let tab = try XCTUnwrap(harness.controller.tabsByNode[world.today[0]])
 
-    harness.controller.pinTab(nil)
+    harness.controller.pinCurrentTab(nil)
 
     XCTAssertEqual(harness.children(.pinned(world.space)), [world.p0, world.p1, world.folder, world.today[0]])
     XCTAssertEqual(harness.children(.today(world.space)), [world.today[1], world.split])
@@ -202,7 +202,7 @@ final class PinnedTabTests: XCTestCase {
     harness.controller.activate(node: world.p0)
     let tab = try XCTUnwrap(harness.controller.tabsByNode[world.p0])
 
-    harness.controller.pinTab(nil)
+    harness.controller.pinCurrentTab(nil)
 
     XCTAssertEqual(harness.children(.pinned(world.space)), [world.p1, world.folder])
     XCTAssertEqual(harness.children(.today(world.space)), [world.p0, world.today[0], world.today[1], world.split],
@@ -219,7 +219,7 @@ final class PinnedTabTests: XCTestCase {
     let harness = Harness(world.sidebar)
     harness.controller.activate(node: world.panes[0])
 
-    harness.controller.pinTab(nil)
+    harness.controller.pinCurrentTab(nil)
 
     XCTAssertEqual(harness.children(.pinned(world.space)), [world.p0, world.p1, world.folder, world.split])
     XCTAssertEqual(harness.children(.split(world.split)), world.panes)
@@ -227,7 +227,7 @@ final class PinnedTabTests: XCTestCase {
     XCTAssertNotNil(harness.controller.tabsByNode[world.panes[0]])
     XCTAssertEqual(harness.controller.toasts.current?.text, "Pinned Tab to Work")
 
-    harness.controller.pinTab(nil)
+    harness.controller.pinCurrentTab(nil)
     XCTAssertEqual(harness.children(.today(world.space)), [world.split, world.today[0], world.today[1]])
     XCTAssertEqual(harness.children(.split(world.split)), world.panes)
     harness.controller.close()
@@ -341,7 +341,7 @@ final class PinnedTabTests: XCTestCase {
     let harness = Harness(world.sidebar)
     try harness.navigate(world.p0, to: "p0/other", title: "Other")
 
-    harness.controller.pinTab(nil)
+    harness.controller.pinCurrentTab(nil)
 
     XCTAssertEqual(harness.children(.today(world.space)).first, world.p0)
     XCTAssertEqual(harness.tabURL(world.p0), Self.url("p0/other"))
