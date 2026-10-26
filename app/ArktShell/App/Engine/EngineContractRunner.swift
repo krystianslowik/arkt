@@ -8,7 +8,7 @@ import EngineAPITestSupport
 /// `--arkt-engine-contract` and `--arkt-engine-test-api` (plus the tabs probe extension loaded with
 /// `--load-extension`); the shell's session is not started. Every check gets a fresh `ChromiumEngine` from
 /// `ChromiumEmbedding.makeEngine()`, its own windows, and pages from a loopback server. Prints one
-/// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when all 17 rules pass, 1 when any check fails or
+/// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when all 18 rules pass, 1 when any check fails or
 /// reports not applicable, 2 when the runner cannot start.
 ///
 /// The switch is a Chromium-style switch, not `-ArktEngineContract YES` as the plan wrote it: Chromium reads every
@@ -119,6 +119,11 @@ final class EngineContractRunner {
       let elapsed = started.duration(to: .now).components
       let ms = elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000
       print("ARKT_CONTRACT rule \(check.rule) \(check.rawValue) \(outcome) (\(ms) ms)")
+      if check == .pageImageFitsTheCaps, let (image, duration) = EngineContract.lastPageImageMeasurement {
+        // The engine smoke's size and time (#370): sizes only, never the page.
+        let took = duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000
+        print("ARKT_CONTRACT page image \(image) in \(took) ms")
+      }
     }
     let rules = Set(checks.map(\.rule)).sorted()
     for rule in rules {
@@ -217,6 +222,10 @@ final class EngineContractRunner {
         let action = "const r = await chrome.runtime.sendMessage({ arktRemoveWindow: t.windowId }); "
           + "if (r !== \"ok\") throw new Error(String(r))"
         try await probeTab(engine, tab, action: action)
+      },
+      showPage: { [unowned self] engine, id in
+        // The window's active tab is mounted already (`LoadLog`); mounting again makes sure the page is on screen.
+        mount(id, of: try chromium(engine))
       }
     )
   }

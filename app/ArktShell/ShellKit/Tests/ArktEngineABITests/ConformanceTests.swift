@@ -164,6 +164,15 @@ final class TestTab: NSObject, ArktTabHandle {
     event.isMuted = muted
     owner?.engine.record(event)
   }
+  /// A copy of the current frame (#370, #352): a 2 x 1 pixel PNG stand-in at scale 1, or nil with no URL.
+  private(set) var copyRequests: [NSSize] = []
+  func copyFrame(maxPixelSize: NSSize, completion: @escaping (Data?, NSSize, CGFloat) -> Void) {
+    copyRequests.append(maxPixelSize)
+    let hasFrame = url != nil
+    Task { @MainActor in
+      completion(hasFrame ? Data("png".utf8) : nil, hasFrame ? NSSize(width: 2, height: 1) : .zero, hasFrame ? 1 : 0)
+    }
+  }
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }
     let copy = owner.insertTab(url: url, active: false, opener: self, origin: .client)
@@ -603,5 +612,28 @@ struct MuteABITests {
     let events = try #require(batches.last)
     #expect(events.map(\.kind) == [.mutedChanged])
     #expect(events.first?.isMuted == true && events.first?.tab === tab)
+  }
+}
+
+/// The frame copy seam (#370, #352): an asynchronous completion with the PNG, its pixel size and scale, and the cap
+/// passed through as given.
+@MainActor
+struct FrameCopyABITests {
+  @Test func copyFrameAnswersLaterWithTheFrame() async throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: URL(string: "arkt-test://page/Frame"), active: true)
+    var answered = false
+    let result: (Data?, NSSize, CGFloat) = await withCheckedContinuation { continuation in
+      tab.copyFrame(maxPixelSize: NSSize(width: 600, height: 360)) { png, size, scale in
+        answered = true
+        continuation.resume(returning: (png, size, scale))
+      }
+      #expect(!answered, "the completion runs later, never inside the call")
+    }
+    #expect(result.0 == Data("png".utf8))
+    #expect(result.1 == NSSize(width: 2, height: 1))
+    #expect(result.2 == 1)
+    #expect((tab as? TestTab)?.copyRequests == [NSSize(width: 600, height: 360)])
   }
 }

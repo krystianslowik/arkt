@@ -75,7 +75,9 @@ enum ScriptedHarness {
         let chromium = try chromium(engine)
         try scriptedBrowser(chromium, window).closeByExtension()
         try await delivered(chromium)
-      }
+      },
+      // A scripted tab has a frame once its load finished; nothing to show.
+      showPage: { _, _ in }
     )
   }
 

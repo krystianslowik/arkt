@@ -197,6 +197,11 @@ public protocol EngineClient: AnyObject {
   /// `.mutedChanged` per change; setting the state the tab already has reports nothing. The page keeps playing and
   /// keeps its `isAudible`. A no-op for an unknown or closed tab.
   func setMuted(_ id: TabID, muted: Bool)
+  /// An image of the tab's current frame within `request`'s caps (#370 thumbnails, #352 Little Arkt's flight; contract
+  /// rule 18). The copy, scale and encode run off the main thread; the caller only awaits. Nil for an unknown or closed
+  /// tab and for a tab with no frame to copy (not drawn yet, hidden long enough to be evicted, discarded); the tab is
+  /// never shown, woken or reloaded for it. Default: nil, for an engine that cannot copy frames.
+  func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage?
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it
   /// arrives after the call that caused it returns. During queued delivery `snapshot(of:)`
@@ -237,6 +242,8 @@ extension EngineClient {
   }
 
   public func moveTab(_ id: TabID, to window: EngineWindowID) {}
+
+  public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? { nil }
 
   /// Immediate-state engines already expose the latest selection through `activeTab(in:)`.
   public func latestActiveTab(in window: EngineWindowID) -> TabID? { activeTab(in: window) }

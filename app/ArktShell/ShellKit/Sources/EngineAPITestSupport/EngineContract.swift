@@ -52,6 +52,9 @@ public struct EngineHarness {
   public let makeAudible: EngineTabAction?
   /// Makes an extension close the window (rule 11, #401).
   public let engineCloseWindow: EngineWindowAction?
+  /// Shows the page of `id` on screen at a real size, as the shell mounts a window's active tab (rule 18). An engine
+  /// that draws without being shown passes a closure that does nothing.
+  public let showPage: EngineTabAction?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -65,12 +68,14 @@ public struct EngineHarness {
               holdClose: EngineTabAction? = nil,
               answerDialog: AnswerDialog? = nil,
               makeAudible: EngineTabAction? = nil,
-              engineCloseWindow: EngineWindowAction? = nil) {
+              engineCloseWindow: EngineWindowAction? = nil,
+              showPage: EngineTabAction? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
     self.engineActivate = engineActivate; self.holdClose = holdClose; self.answerDialog = answerDialog
     self.makeAudible = makeAudible; self.engineCloseWindow = engineCloseWindow
+    self.showPage = showPage
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -99,7 +104,9 @@ public struct EngineHarness {
         }
       },
       makeAudible: { engine, id in try inMemory(engine).setAudible(id, true) },
-      engineCloseWindow: { engine, window in try inMemory(engine).engineCloseWindow(window, reason: .extension) }
+      engineCloseWindow: { engine, window in try inMemory(engine).engineCloseWindow(window, reason: .extension) },
+      // In-memory pages draw without a window.
+      showPage: { _, _ in }
     )
   }
 
@@ -153,6 +160,9 @@ public struct EngineHarness {
 /// 17. `setMuted(_:muted:)` sets `isMuted` in the snapshot and reports each change with one `.mutedChanged`; setting
 ///     the state the tab already has reports nothing (#364). A page that plays sound reports `.audibleChanged(true)`
 ///     and `isAudible` (needs `makeAudible`).
+/// 18. `pageImage(of:_:)` gives a loaded, shown tab's image within the request's pixel and byte caps, decodable at the
+///     size it reports; `.fullFrame` is at least as large as `.thumbnail`. An unknown or closed tab gives nil (#370,
+///     #352). Needs `showPage`.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
