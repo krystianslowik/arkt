@@ -2114,3 +2114,44 @@ default, the conflict line, the switch writing the setting). ShellKit unit 1158 
 `LittleArktLookupScreenshotTests`, which skip unless `ARKT_LOOKUP_SHOTS_DIR` is set), 16 skipped, 0 failures, 176 s.
 Debug app build succeeds. ArktCore untouched, not run. XCUITests not run: the new identifiers have no existing flow,
 and the suite drives the real pointer and keyboard while two other issues run GUI suites on this machine.
+
+## Archive actions: bottom bar menu, Clear unselected, media exemption, Cmd-Shift-K (#110) (2026-10-26)
+
+Audited on `main` before writing code. Already shipped: BH-072 (multi-selection Cmd-W), BH-074 / KB-010 / KB-011
+(Reopen Closed Tab and Cmd-Z, #346/#378), BH-075 and BH-077 (Clear Today Tabs and Archive Below, #105/#361), each with
+its GUI tests. This change adds only what was missing.
+
+- **Bottom bar menu (BH-033).** The archive button carries a native context menu with "Clear Today Tabs" (Shift-Cmd-K
+  shown now that the menu bar owns the key) and "Clear unselected Today tabs", disabled until a selection of Today
+  rows exists. The spec gives the strings but not the control, and the archive button is the bottom bar's only item
+  without an action, so the placement is [I]. "Organize Today Tabs" is Arc Max; #124 decided no Arc extras for v1.
+- **Clear Today Tabs (KB-019, BH-075).** File > Clear Today Tabs on Shift-Cmd-K, next to the close actions. The key is
+  reserved before the page (`ReservedKeys`) like Cmd-W, and the item is disabled while the current Space has no Today
+  rows. The row menu and the empty-area menu already had the action; the empty-area item now prints the key that #361
+  deferred to this issue.
+- **Media exemption (BH-076).** Clear leaves a Today row whose page is audible in the engine snapshot (`isAudible`,
+  which Chromium also reports for a muted page that plays). A folder or split holding a playing tab stays whole: its
+  page is the one that must not close, and tearing the container apart would close it. A row without a loaded page
+  cannot play, so it is never exempt. The auto-archive half of BH-076 stays on #92 (blocked on the engine).
+- **Clear unselected Today tabs (BH-078).** Every top-level Today row of the current Space with nothing selected goes,
+  as the same undo batch and "Archived N tabs" toast as Clear Today Tabs. A row counts as selected when it or a tab
+  inside it is (a selected tab in a folder keeps the folder). The item needs at least one selected Today row and one
+  unselected row.
+
+Deviations: BH-033's strings lower-case "tabs" in "Clear Today tabs"; the bottom bar keeps #321's shipped title
+"Clear Today Tabs" so the same action is not named two ways, and uses the spec's "Clear unselected Today tabs" for the
+new item. `TodayClearPolicy` is a pure value rule so the two Clear scopes and the media exemption are testable without
+a window.
+
+Not here: BH-075's click on "Clear" above the Today section and its "with an animation" clause wait on a decision
+(Arc's clear motion is unmeasured): #413. BH-076's auto-archive half stays on #92 (blocked on the engine). BH-033's
+"Organize Today Tabs" is Arc Max, out of scope by #124. The bottom bar control is [I]: the spec gives the strings but
+not the control, so the items sit on the archive button's context menu.
+
+Tests (written first: the policy suite and the new GUI cases failed to compile/assert before the code): 7
+`TodayClearPolicyTests` (the two scopes, a playing row, order, empty), 1 `ReservedKeysTests` case, 1
+`MainMenuInventoryTests` case and the extended `SidebarContextMenuTests`; 6 new `TabActionsTests` GUI cases (bottom bar
+menu and enabled rules, unselected rows, a selected tab inside a folder, a playing Today tab, a folder holding one, the
+menu bar item). ShellKit unit 1154 Swift Testing tests (baseline 1146 after #408 and #411 + 8), all passed.
+ShellKitGUITests 1019 run (baseline 1012 + 7), 14 skipped, 0 failures. Debug app build succeeds. ArktCore untouched. XCUITest not run: no
+UI flow covers these menus.

@@ -108,6 +108,8 @@ enum MainMenu {
       item("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w"),             // KB-008
       // KB-010, BH-074 (#346): also reopens a closed Peek. PARITY(NEEDS-RUNTIME-CHECK): Arc's title and place.
       item("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift]),
+      // KB-019, BH-075 (#110): the current Space's Today tabs go to the Archive; no row plays media (BH-076).
+      item("Clear Today Tabs", #selector(ShellWindowController.clearTodayTabs(_:)), "k", [.command, .shift]),
       item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]), // KB-009
       .separator(),
       item("Pin Tab", #selector(ShellWindowController.pinCurrentTab(_:)), "d"),             // KB-012, BH-055

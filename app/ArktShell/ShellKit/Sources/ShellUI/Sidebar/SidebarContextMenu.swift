@@ -39,7 +39,7 @@ public enum SidebarMenuAction: Hashable, Sendable {
   case pasteURLAsNewTab(SidebarLocation)
   /// New Tab (KB-001): the command bar, as Cmd-T and the BH-021 double-click.
   case newTab
-  /// Clear Today Tabs (BH-075): every Today tab of the Space is archived.
+  /// Clear Today Tabs (BH-075): every Today tab of the Space is archived, except a row whose page plays media (BH-076).
   case clearToday(SpaceID)
   /// Mute / Unmute (BH-126, #364): the tab's page is muted or unmuted.
   case toggleMute(NodeID)
@@ -111,8 +111,8 @@ public enum SidebarMenuTarget: Equatable, Sendable {
 
 /// The sidebar context menus of design/tab-context-menus (#105), section 3: one builder per row kind, plain native
 /// items only. Separator placement follows the prototype. Key equivalents are shown only where the menu bar owns
-/// the same key (Cmd-D, Cmd-W, Cmd-T), because a context menu's key fires only while that menu is open; Copy Link
-/// (Shift-Cmd-C), Paste URL as New Tab (Opt-Cmd-V) and Clear Today Tabs (Shift-Cmd-K) get theirs with their menu bar
+/// the same key (Cmd-D, Cmd-W, Cmd-T, and Shift-Cmd-K since #110), because a context menu's key fires only while
+/// that menu is open; Copy Link (Shift-Cmd-C) and Paste URL as New Tab (Opt-Cmd-V) get theirs with their menu bar
 /// items.
 public enum SidebarContextMenu {
   @MainActor
@@ -313,7 +313,8 @@ public enum SidebarContextMenu {
      SidebarMenuEntry(title: "Paste URL as New Tab", action: .pasteURLAsNewTab(.today(space)),
                       isEnabled: context.clipboardHasURL),
      .separator,
-     SidebarMenuEntry(title: "Clear Today Tabs", action: .clearToday(space),
+     SidebarMenuEntry(title: "Clear Today Tabs", action: .clearToday(space), key: "k",
+                      modifiers: [.command, .shift],
                       isEnabled: !source.children(of: .today(space)).isEmpty)]
   }
 

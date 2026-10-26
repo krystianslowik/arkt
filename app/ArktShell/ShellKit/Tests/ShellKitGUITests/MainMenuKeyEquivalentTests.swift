@@ -331,6 +331,7 @@ final class MainMenuInventoryTests: XCTestCase {
       ("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l", .command),
       ("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w", .command),
       ("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift]),   // KB-010
+      ("Clear Today Tabs", #selector(ShellWindowController.clearTodayTabs(_:)), "k", [.command, .shift]),     // KB-019
       ("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
       ("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
       ("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m", .command),
@@ -360,6 +361,7 @@ final class MainMenuInventoryTests: XCTestCase {
       (kVK_LeftArrow, [.maskCommand, .maskAlternate], "Previous Space"),
       (kVK_ANSI_D, .maskCommand, "Pin Tab"),                                    // KB-012 (#108)
       (kVK_ANSI_T, [.maskCommand, .maskShift], "Reopen Closed Tab"),            // KB-010 (#346)
+      (kVK_ANSI_K, [.maskCommand, .maskShift], "Clear Today Tabs"),             // KB-019 (#110)
     ]
     let source = CGEventSource(stateID: .privateState)
     for (keyCode, flags, title) in cases {
@@ -412,6 +414,20 @@ final class MainMenuInventoryTests: XCTestCase {
     XCTAssertEqual(first.action, #selector(AppCommands.showWelcome(_:)))
     XCTAssertTrue(first.target === commands)
     XCTAssertEqual(first.keyEquivalent, "")
+  }
+
+  /// KB-019 (#110): Clear Today Tabs sits in the File menu on Shift-Cmd-K, with the close actions.
+  func testClearTodayTabsSitsInTheFileMenuOnShiftCommandK() throws {
+    let file = try XCTUnwrap(built.menu.items.first { $0.title == "File" }?.submenu)
+    let clear = try XCTUnwrap(file.items.first { $0.title == "Clear Today Tabs" })
+    XCTAssertEqual(clear.action, #selector(ShellWindowController.clearTodayTabs(_:)))
+    XCTAssertEqual(clear.keyEquivalent, "k")
+    XCTAssertEqual(clear.keyEquivalentModifierMask, [.command, .shift])
+    XCTAssertNil(clear.target, "reaches the main window's controller through the responder chain")
+    let shiftCommandK = allItems().filter {
+      $0.keyEquivalent == "k" && $0.keyEquivalentModifierMask == [.command, .shift]
+    }
+    XCTAssertEqual(shiftCommandK.count, 1, "no other item binds Shift-Cmd-K")
   }
 
   /// KB-012 and KB-041 (#108): Pin Tab sits in the File menu on Cmd-D; Back to Pinned URL is unbound, as in Arc.
