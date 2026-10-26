@@ -152,6 +152,8 @@ public enum AXID {
     /// Value: pane share factor (`NSNumber`).
     public static let divider = "split.divider"
     public static let reopen = "split.reopen"
+    /// Label "Close Pane": the X at the top of a pane with a page (#388).
+    public static let close = "split.close"
   }
 
   /// The first run over the whole window (`OnboardingView`, onboarding spec sections 6 and 11); absent once it ends.

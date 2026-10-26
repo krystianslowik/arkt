@@ -990,7 +990,7 @@ a US keyboard layout.
 | What Ctrl-Shift-= shows in the new pane | RT-34, KB-070 | The command bar in `.newSplitPane` mode |
 | Pane shares after adding a pane | RT-35 | Equal shares |
 | A Pinned split pane after Cmd-W | RT-36 | Placeholder; a click reopens |
-| Gap, focus indicator, pane header controls ("Split Controls" button, X above a pane) | RT-37, BH-120, BH-121 | 10 pt gap, border emphasis; header controls deferred to a follow-up after measurement |
+| Gap, focus indicator, pane header controls ("Split Controls" button, X above a pane) | RT-37, BH-120, BH-121 | 10 pt gap, border emphasis; the X is a 24 pt circle at the pane's top trailing corner, shown on hover (#388); the "Split Controls" button is still deferred until measurement |
 | Menu location and titles | RT-38 | View > Split View |
 | Next / previous pane keys and direction | RT-06, CF-16 | Ctrl-Shift-] next, Ctrl-Shift-[ previous |
 | Where a pane removed with Ctrl-Shift-- goes; Cmd-W in a split | RT-21, CF-18 | Right after the split, not archived; Cmd-W per user decision 4 |

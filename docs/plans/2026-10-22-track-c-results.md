@@ -1834,3 +1834,39 @@ auto-archive pass loads no page.
 
 Deferred: the engine part (section 6: panel radius and padding, shadow, entrance, button press, `destructivePrimary`
 and `DestructiveTextColor()`) needs a Chromium build and moves to a follow-up engine issue.
+
+## Split View pane close button (#388) (2026-10-26)
+
+Each split pane gets a close (X), BH-121 "the X above a pane". Earlier decisions stay: the sidebar pane row's X
+separates the pane, Cmd-W closes the focused pane only.
+
+- **Button.** `SplitPaneCloseButton`, a 24 pt circle at the pane card's top trailing corner, 8 pt from both edges;
+  with the Toolbar on it sits centered in the Toolbar strip at the Toolbar's 5 pt padding. Surface as the Peek
+  controls: `toastSurface` fill, `cardBorder` hairline, `secondaryText` glyph that turns `primaryText` on hover; no
+  mustard. System focus ring around the circle. PARITY(NEEDS-RUNTIME-CHECK RT-37): Arc's exact chrome is unmeasured.
+- **Showing.** Shown while the pointer is over the pane (a card-wide tracking area, `.inVisibleRect`, added once so a
+  moving card rebuilds nothing) or while the X has keyboard focus. A 0.15 s fade with a strong ease-out; an
+  interrupted fade covers only what is left; Reduce Motion shows and hides it at once. While not shown it is
+  transparent and passes clicks to the page, but it is never `isHidden`, so VoiceOver ("Close Pane",
+  `split.close`) and Full Keyboard Access always reach it. A closed pane's placeholder has no X.
+- **Closing.** The X calls `close(node:)` for that pane, the Cmd-W path: a Today pane is archived and goes on the
+  reopen stack (Cmd-Shift-T brings it back as a Today tab, as for Cmd-W), a Pinned or Favorite pane closes its page and
+  keeps its placeholder. A mouse-down on a shown X does not focus its pane first, so closing a pane that is not
+  focused leaves focus where it is.
+- **Reflow.** After a close by the X, the panes left move from where they are on screen to their new frames on one
+  spring (`SpringPreset.firm`, run in points along the longest edge move so it rests within half a pixel). Each page is
+  matched by identity, since the cards are reused by index. The model (`paneCount`, factors, pages) changes at once;
+  only the presented frames move. A second close mid-flight carries the panes' position and speed; a divider drag or a
+  plain show ends the reflow at the layout. With one pane left the split ends and that page grows from its pane into
+  the single card on the same spring. Reduce Motion: the frames change at once under a 0.15 s crossfade. Keyboard
+  closes (Cmd-W, Ctrl-Shift--) stay instant.
+
+Tests: ShellKit unit 1054 (baseline 1047 + 7 `SplitReflowTests`), all passed. ShellKitGUITests 907 run (baseline
+886 + 21 `SplitPaneCloseTests`; `AccessibilityIdentifierTests` checks `split.close`), 5 skipped (engine contract),
+0 failures in isolation; in the full run three frame-time gates (`PeekMotionOnScreenTests`,
+`SidebarHideTests.testRevealPacing`, `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) failed under a
+load average near the core count and pass when rerun. The reflow tests freeze the spring's clock or use
+`PacingEnvironment.requireCaught`, so they do not depend on the machine's speed. Debug app build succeeds. XCUITest not run: no UI flow covers split panes.
+
+Cmd-Shift-T brings a closed pane back as a Today tab (the archive restore), as for Cmd-W; whether it should go back
+into its split is left to the maintainer (#388).
