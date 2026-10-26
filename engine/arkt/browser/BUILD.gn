@@ -24,19 +24,21 @@ source_set("extension_dialog_hook") {
 }
 
 # The link activation throttle (#313), added to every primary main-frame
-# navigation from ChromeContentBrowserClient's throttle list (patch 0008).
-# Kept light: //chrome/browser:core includes its header.
+# navigation from ChromeContentBrowserClient's throttle list (patch 0008), and
+# the modified-click check BrowserWebContentsDelegate::OpenURLFromTab calls
+# (patch 0009, #345). Kept light: //chrome/browser:core and
+# //chrome/browser/ui/browser_web_contents_delegate include its header.
 source_set("link_activation") {
   sources = [
     "arkt_link_activation.cc",
     "arkt_link_activation.h",
   ]
-  public_deps = [ "//base" ]
-  deps = [
-    "//content/public/browser",
+  public_deps = [
+    "//base",
     "//ui/base",
     "//url",
   ]
+  deps = [ "//content/public/browser" ]
 }
 
 # In-process browser hook, registered from

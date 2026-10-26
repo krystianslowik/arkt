@@ -7,6 +7,7 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/navigation_throttle_registry.h"
+#include "content/public/browser/page_navigator.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
@@ -33,9 +34,12 @@ class LinkActivationThrottle : public content::NavigationThrottle {
     if (!IsUserLinkActivation(navigation) || Decider().is_null()) {
       return PROCEED;
     }
+    LinkActivation activation;
+    activation.source = navigation.GetWebContents();
+    activation.url = navigation.GetURL();
     // Copied: the decider may replace itself (a facade restart) while it runs.
     LinkActivationDecider decider = Decider();
-    return decider.Run(navigation) ? CANCEL_AND_IGNORE : PROCEED;
+    return decider.Run(activation) ? CANCEL_AND_IGNORE : PROCEED;
   }
 
   const char* GetNameForLogging() override { return "ArktLinkActivation"; }
@@ -63,6 +67,33 @@ void MaybeAddLinkActivationThrottle(
     return;
   }
   registry.AddThrottle(std::make_unique<LinkActivationThrottle>(registry));
+}
+
+bool ShouldDropLinkOpenedFromTab(content::WebContents* source,
+                                 const content::OpenURLParams& params) {
+  switch (params.disposition) {
+    case WindowOpenDisposition::NEW_WINDOW:
+    case WindowOpenDisposition::NEW_FOREGROUND_TAB:
+    case WindowOpenDisposition::NEW_BACKGROUND_TAB:
+      break;
+    default:
+      return false;
+  }
+  if (!source || Decider().is_null() || !params.user_gesture ||
+      !params.is_renderer_initiated || params.started_from_context_menu ||
+      params.post_data ||
+      !ui::PageTransitionCoreTypeIs(params.transition,
+                                    ui::PAGE_TRANSITION_LINK) ||
+      !params.url.SchemeIsHTTPOrHTTPS()) {
+    return false;
+  }
+  LinkActivation activation;
+  activation.source = source;
+  activation.url = params.url;
+  activation.disposition = params.disposition;
+  // Copied, as in the throttle.
+  LinkActivationDecider decider = Decider();
+  return decider.Run(activation);
 }
 
 }  // namespace arkt
