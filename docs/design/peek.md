@@ -166,10 +166,15 @@ with the Peek over the whole content area.
 
 ### Edge cases
 
-- Switching tab or Space while a Peek is open: the Peek stays attached to its source tab, hidden, and comes back
-  when the tab is shown again. It is not saved and does not survive quit (BH-152). PARITY(NEEDS-RUNTIME-CHECK).
-  Implemented differently for now (#349): the switch closes the Peek, and Cmd-Shift-T or Cmd-Z brings it back over
-  its source (#346).
+- Switching tab or Space while a Peek is open: the Peek stays attached to its source tab, hidden with its live
+  page (scroll, history and state kept), and comes back with the Open motion (Reduce Motion: the fade) when the tab
+  is shown again. One hidden Peek per source tab; it has no row and is not in the tab switcher, the Archive or the
+  saved session, and it does not survive quit (BH-152). A hidden Peek is not a closed one: nothing goes on the
+  reopen stack until the user closes it. Decided on #348 (memory cost accepted). PARITY(NEEDS-RUNTIME-CHECK).
+- The source tab closing or archived while its Peek is hidden closes the Peek too; Cmd-Shift-T brings both back
+  together.
+- Tab Handoff (#300) moving the source's page to another window closes its Peek, shown or hidden, in the window it
+  was in, onto that window's reopen stack; the Peek does not move with the page.
 - Window resize while a Peek is open: the Peek frame follows the layout directly, without animation.
 - Sidebar hidden (Cmd-S): the content card is wider and Peek follows it; nothing else changes.
 - Full screen video inside a Peek goes full screen from the Peek; leaving full screen returns to the Peek.
