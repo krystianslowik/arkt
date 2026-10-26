@@ -72,7 +72,9 @@ final class ArchiveChipView: NSView {
   }
 
   var preferredWidth: CGFloat {
-    10 + markWidth + 6 + ceil(label.intrinsicContentSize.width) + 6 + 16 + 5
+    let font = label.font ?? .systemFont(ofSize: 12, weight: .medium)
+    let text = ceil((filterName as NSString).size(withAttributes: [.font: font]).width) + 4
+    return 10 + markWidth + 6 + text + 6 + 16 + 5
   }
 
   private var markWidth: CGFloat {

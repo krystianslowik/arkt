@@ -572,22 +572,24 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     guard entries.indices.contains(row) else { return nil }
     let scale = window?.backingScaleFactor ?? 2
+    let flavor = tableView.archiveFlavor            // the cell is not in the window yet; the table is
     switch entries[row] {
     case .loading:
       let cell = tableView.makeView(withIdentifier: ArchiveLoadingCellView.identifier, owner: self)
         as? ArchiveLoadingCellView ?? ArchiveLoadingCellView()
-      cell.start()
+      cell.start(flavor: flavor)
       return cell
     case .item(let index):
       let cell = rowCell(in: tableView)
       let item = rows[index]
-      cell.show(item, query: query.text, favicon: favicons[item.id], scale: scale)
+      cell.show(item, query: query.text, favicon: favicons[item.id], flavor: flavor, scale: scale)
       return cell
     case .child(let index, let child):
       let cell = rowCell(in: tableView)
       let parent = rows[index]
       let tab = parent.matchedChildren[child]
-      cell.showChild(tab, parentTitle: parent.title, query: query.text, favicon: favicons[tab.id], scale: scale)
+      cell.showChild(tab, parentTitle: parent.title, query: query.text, favicon: favicons[tab.id], flavor: flavor,
+                     scale: scale)
       return cell
     }
   }

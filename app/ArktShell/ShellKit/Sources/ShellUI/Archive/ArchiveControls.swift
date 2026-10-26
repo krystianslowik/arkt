@@ -489,4 +489,17 @@ final class ArchiveSearchFieldCell: NSSearchFieldCell {
   }
 
   override func drawingRect(forBounds rect: NSRect) -> NSRect { searchTextRect(forBounds: rect) }
+
+  /// The field editor sits where the text is drawn, between the magnifier and the clear button.
+  override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?,
+                     event: NSEvent?) {
+    super.edit(withFrame: searchTextRect(forBounds: rect), in: controlView, editor: textObj, delegate: delegate,
+               event: event)
+  }
+
+  override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?,
+                       start selStart: Int, length selLength: Int) {
+    super.select(withFrame: searchTextRect(forBounds: rect), in: controlView, editor: textObj, delegate: delegate,
+                 start: selStart, length: selLength)
+  }
 }

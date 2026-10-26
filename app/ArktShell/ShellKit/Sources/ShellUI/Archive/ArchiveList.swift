@@ -373,8 +373,7 @@ final class ArchiveRowCellView: NSTableCellView {
   var title: String { titleView.text }
 
   /// An archived item: its kind's icon, the title, the folder count, the place mark and the time.
-  func show(_ row: ArchiveRow, query: String, favicon: NSImage?, scale: CGFloat) {
-    let flavor = archiveFlavor
+  func show(_ row: ArchiveRow, query: String, favicon: NSImage?, flavor: ThemeFlavor, scale: CGFloat) {
     opened = !row.matchedChildren.isEmpty
     indent = 0
     titleView.show(row.title, query: query, font: .systemFont(ofSize: 13, weight: .medium),
@@ -420,8 +419,8 @@ final class ArchiveRowCellView: NSTableCellView {
   }
 
   /// A tab under an opened folder: indented 22, no trailing metadata.
-  func showChild(_ child: ArchiveChildRow, parentTitle: String, query: String, favicon: NSImage?, scale: CGFloat) {
-    let flavor = archiveFlavor
+  func showChild(_ child: ArchiveChildRow, parentTitle: String, query: String, favicon: NSImage?, flavor: ThemeFlavor,
+                 scale: CGFloat) {
     opened = false
     indent = ArchiveMetrics.childIndent
     titleView.show(child.title, query: query, font: .systemFont(ofSize: 13, weight: .medium),
@@ -492,8 +491,8 @@ final class ArchiveLoadingCellView: NSTableCellView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-  func start() {
-    label.textColor = ShellTokens.secondaryText.resolve(archiveFlavor).nsColor()
+  func start(flavor: ThemeFlavor) {
+    label.textColor = ShellTokens.secondaryText.resolve(flavor).nsColor()
     spinner.startAnimation(nil)
   }
 
