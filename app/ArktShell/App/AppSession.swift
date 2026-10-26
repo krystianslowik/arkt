@@ -37,6 +37,10 @@ final class AppSession {
   let autoArchive: AutoArchiveTimer
   /// Archived matches in every window's command bar (#111).
   let archiveSearch: ArchiveCommandBarSearch
+  /// The command bar preview's page thumbnails (#370): live tabs through the engine, history items from the cache.
+  let pageThumbnails: PageThumbnails
+  /// Emptied with Clear Archive.
+  private let pageImageCache: PageImageCache?
   /// The archive held an item at the last check (Window > Clear Archive... is enabled then); refreshed off the main
   /// actor each time the menu is validated, like `isArcImportAvailable`.
   private(set) var archiveHasItems = false
@@ -96,6 +100,9 @@ final class AppSession {
     self.autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
     self.archiveSearch = ArchiveCommandBarSearch(source: source, store: archiveStore, coordinator: archive)
     self.faviconStore = faviconStore
+    let pageImageCache = AppEnvironment.pageImageCache(in: location)
+    self.pageImageCache = pageImageCache
+    self.pageThumbnails = PageThumbnails(engine: engine, cache: pageImageCache)
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
       autosaver.scheduleSave(sidebar)                 // every model change
@@ -288,6 +295,7 @@ final class AppSession {
     model.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     model.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
+    model.onCleared = { [pageImageCache] in await pageImageCache?.removeAll() }     // cleared pages lose their thumbnails
     let controller = ArchiveWindowController(dataSource: model)
     controller.onOpenSettings = { [weak self] in self?.showSettings(pane: .spaces) }   // the education banner
     archiveWindow = controller

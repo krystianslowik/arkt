@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import ArktEngineABI
 import EngineAPITestSupport
 
@@ -266,6 +267,46 @@ final class ScriptedTab: NSObject, ArktTabHandle {
       isMuted = muted
       record(.mutedChanged) { $0.isMuted = muted }
     }
+  }
+
+  // MARK: Frame copy (#370, #352)
+
+  /// The page's size in points and its backing scale, for `copyFrame`.
+  var frameSize = NSSize(width: 1280, height: 800)
+  var frameScale: CGFloat = 2
+  /// False models a tab whose surface Chromium cannot copy: hidden and evicted, discarded, or never drawn.
+  var frameAvailable = true
+  /// The `maxPixelSize` of every `copyFrame`, in order.
+  private(set) var copyRequests: [NSSize] = []
+
+  /// `RenderWidgetHostView::CopyFromSurface` as the facade runs it: nil without a drawn frame, else a PNG scaled down
+  /// to fit `maxPixelSize` (zero: full size), answered later on the main thread.
+  func copyFrame(maxPixelSize: NSSize, completion: @escaping (Data?, NSSize, CGFloat) -> Void) {
+    copyRequests.append(maxPixelSize)
+    let frame = owner != nil && committedHost != nil && frameAvailable ? renderFrame(fitting: maxPixelSize) : nil
+    Task { @MainActor in completion(frame?.png, frame?.size ?? .zero, frame?.scale ?? 0) }
+  }
+
+  private func renderFrame(fitting cap: NSSize) -> (png: Data, size: NSSize, scale: CGFloat)? {
+    var width = (frameSize.width * frameScale).rounded()
+    var height = (frameSize.height * frameScale).rounded()
+    if cap.width > 0, cap.height > 0 {
+      let factor = min(1, cap.width / width, cap.height / height)
+      width = max(1, (width * factor).rounded(.down))
+      height = max(1, (height * factor).rounded(.down))
+    }
+    guard let context = CGContext(data: nil, width: Int(width), height: Int(height), bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                    | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+    context.setFillColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let data = NSMutableData()
+    guard let image = context.makeImage(),
+          let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+    CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination) else { return nil }
+    return (data as Data, NSSize(width: width, height: height), width / frameSize.width)
   }
 
   /// The page starts or stops playing sound (`OnAudioStateChanged`).

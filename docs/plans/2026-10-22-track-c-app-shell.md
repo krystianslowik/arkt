@@ -3209,6 +3209,11 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
 - Space themes (BH-034), decision D2 on [#279](https://github.com/krystianslowik/arkt/issues/279), 2026-10-25: the
   header's Theme menu has a "Default" choice that clears the Space's theme (stored as no theme), so the Space draws
   the bridge default.
+- Favorites grid (BH-050), decision on [#337](https://github.com/krystianslowik/arkt/issues/337), 2026-10-26,
+  replacing the RT-15 runtime check: the grid adapts its column count to the sidebar width, 1 to 4 tiles per row,
+  and rows fill evenly (4 Favorites in a wide sidebar make one row of 4, not 3 + 1). Tiles keep a minimum width
+  (the measured 52 pt tile) and grow to fill the row. Column changes during a sidebar resize animate on a spring
+  (Reduce Motion: instant). Ctrl-Space focus (#343) and the Favorites drop band (#104) follow the grid.
 
 ## C3 review follow-ups (deferred)
 

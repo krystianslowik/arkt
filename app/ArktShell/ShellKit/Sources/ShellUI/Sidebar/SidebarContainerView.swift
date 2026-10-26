@@ -558,10 +558,11 @@ public final class SidebarContainerView: NSView {
     topBar.frame = NSRect(x: 0, y: 0, width: width, height: topBarHeight)
     urlBar.frame = NSRect(x: padding, y: topBarHeight + SidebarMetrics.urlBarTopGap,
                           width: max(0, width - 2 * padding), height: SidebarMetrics.urlBarHeight)
+    let favoritesWidth = FavoritesLayout.contentWidth(sidebarWidth: width)
+    favorites.updateColumns(contentWidth: favoritesWidth)     // before its height: the columns set the rows
     let favoritesHeight = favorites.preferredHeight
     let favoritesY = (showsURLBar ? urlBar.frame.maxY : topBarHeight) + SidebarMetrics.favoritesTopGap
-    favorites.frame = NSRect(x: padding, y: favoritesY,
-                             width: FavoritesLayout.contentWidth(sidebarWidth: width), height: favoritesHeight)
+    favorites.frame = NSRect(x: padding, y: favoritesY, width: favoritesWidth, height: favoritesHeight)
     let pagesY = favoritesY + favoritesHeight + (favoritesHeight > 0 ? SidebarMetrics.favoritesBottomGap : 0)
     let pagerFrame = NSRect(x: 0, y: pagesY, width: width, height: max(0, bounds.height - pagesY - bottomHeight))
     if pager.frame != pagerFrame { pager.frame = pagerFrame }

@@ -18,7 +18,12 @@ final class FakeEngineContractTests: XCTestCase {
     harness = EngineHarness.fake(pages: pages, port: server.port)
   }
 
+  /// Windows the `showPage` driver ordered in, closed after each test.
+  static var shownWindows: [NSWindow] = []
+
   override func tearDown() async throws {
+    for window in Self.shownWindows { window.close() }
+    Self.shownWindows = []
     server?.stop()
     if let pages { try? FileManager.default.removeItem(at: pages) }
   }
@@ -72,6 +77,18 @@ final class FakeEngineContractTests: XCTestCase {
   func testMuteIsReportedOnce() async throws { try await EngineContract.muteIsReportedOnce(harness) }
   func testAudibleStateIsReported() async throws {
     try await notApplicable { try await EngineContract.audibleStateIsReported(harness) }
+  }
+  // Rule 18 (#370): WKWebView's takeSnapshot of a page shown in a window.
+  func testPageImageFitsTheCaps() async throws { try await EngineContract.pageImageFitsTheCaps(harness) }
+  func testPageImageOfAClosedTabIsNil() async throws { try await EngineContract.pageImageOfAClosedTabIsNil(harness) }
+
+  /// FakeEngine only: a tab that is not in a window has nothing to snapshot.
+  func testPageImageOfAnUnshownTabIsNil() async throws {
+    let engine = FakeEngine()
+    let id = engine.createTab(url: try harness.pageURL("Unshown"))
+    try await harness.settle(engine, id)
+    let image = await engine.pageImage(of: id, .thumbnail)
+    XCTAssertNil(image)
   }
 
   /// Reports a rule without its driver as skipped (not applicable), never as passed.
@@ -158,6 +175,18 @@ extension EngineHarness {
       },
       pagesOnTwoHosts: {
         (URL(string: "http://127.0.0.1:\(port)/icon.html")!, URL(string: "http://localhost:\(port)/icon.html")!)
+      },
+      showPage: { engine, id in
+        let view = try XCTUnwrap(engine.contentView(for: id))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 500), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        view.frame = window.contentLayoutRect
+        window.contentView?.addSubview(view)
+        window.orderFrontRegardless()
+        // One turn for WebKit to lay out and draw at the new size.
+        try await Task.sleep(for: .milliseconds(300))
+        FakeEngineContractTests.shownWindows.append(window)
       }
     )
   }

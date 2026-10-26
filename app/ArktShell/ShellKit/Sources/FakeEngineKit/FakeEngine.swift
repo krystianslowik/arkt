@@ -245,6 +245,27 @@ public final class FakeEngine: EngineClient {
 
   public func snapshot(of id: TabID) -> TabSnapshot? { entries[id]?.snapshot }
   public func contentView(for id: TabID) -> NSView? { entries[id]?.webView }
+
+  /// WebKit's snapshot of the shown page (#370, #352), asked at the width that fits the pixel cap so WebKit does the
+  /// downscale; the caps are applied by `PageImageEncoder` off the main thread. Nil for a tab that is not in a window
+  /// or has no size (nothing drawn), and for one that closed meanwhile.
+  public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? {
+    guard let web = entries[id]?.webView, web.url != nil, let window = web.window,
+          web.bounds.width > 0, web.bounds.height > 0 else { return nil }
+    let scale = window.backingScaleFactor
+    let configuration = WKSnapshotConfiguration()
+    if let cap = request.maxPixelSize {
+      let factor = min(1, Double(cap.width) / (web.bounds.width * scale), Double(cap.height) / (web.bounds.height * scale))
+      configuration.snapshotWidth = NSNumber(value: web.bounds.width * factor)
+    }
+    guard let snapshot = try? await web.takeSnapshot(configuration: configuration),
+          let frame = snapshot.cgImage(forProposedRect: nil, context: nil, hints: nil),
+          entries[id]?.webView === web else { return nil }
+    // Pixels per point of the page: the snapshot's pixels over the page's width in points.
+    let pageScale = Double(frame.width) / web.bounds.width
+    return await PageImageEncoder.encode(frame, scale: pageScale, request)
+  }
+
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation { hub.add(handler) }
 
   // MARK: - Windows

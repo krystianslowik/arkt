@@ -334,6 +334,20 @@ NS_SWIFT_UI_ACTOR
 // Mutes or unmutes the tab's sound (WebContents::SetAudioMuted), reported
 // with MutedChanged when the state changes (#364).
 - (void)setMuted:(BOOL)muted NS_SWIFT_NAME(setMuted(_:));
+// A copy of the tab's current frame as PNG (#370, #352), from the
+// compositor surface (RenderWidgetHostView::CopyFromSurface), scaled down on
+// the GPU to fit `maxPixelSize`; NSZeroSize copies the full frame at the
+// backing scale. `pixelSize` is the PNG's size and `scale` its pixels per
+// point of the page. Never shows, wakes or reloads the tab: a closed or
+// discarded tab, or one without a surface to copy (not drawn yet, hidden
+// long enough to be evicted), answers nil, NSZeroSize and 0. The copy and the
+// encode run off the main thread; `completion` runs later on the main
+// thread, never inside the call.
+- (void)copyFrameWithMaxPixelSize:(NSSize)maxPixelSize
+                       completion:(void (^)(NSData* _Nullable png,
+                                            NSSize pixelSize,
+                                            CGFloat scale))completion
+    NS_SWIFT_NAME(copyFrame(maxPixelSize:completion:)) NS_SWIFT_DISABLE_ASYNC;
 @end
 
 // An engine window (one Browser).
