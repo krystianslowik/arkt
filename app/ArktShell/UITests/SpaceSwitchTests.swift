@@ -189,7 +189,7 @@ final class SpaceSwitchTests: ArktUITestCase {
     XCTAssertTrue(waitFor(app.buttons[AXID.Sidebar.spaceOptions]))
     let attachment = XCTAttachment(screenshot: shellWindow(of: app).screenshot())
     attachment.name = name
-    attachment.lifetime = .keepAlways
+    attachment.lifetime = .deleteOnSuccess
     add(attachment)
   }
 

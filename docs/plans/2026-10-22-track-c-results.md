@@ -2065,6 +2065,56 @@ title, parentheses in the URL). `CopyLinkTests` (GUI, 8) drives the actions: the
 toast, the current-URL toast, the multi-selection copy, the Peek's page, Markdown, Quote, Paste URL as New Tab and
 the ignored non-URL clipboard. `ReservedKeysTests` covers the four keys; `MainMenuKeyEquivalentTests` the Edit menu
 items and keys.
+## Little Arkt quick lookup: the bar, Cmd-Opt-N and the system-wide hotkey (#354, BH-130, BH-131, KB-044, KB-045) (2026-10-26)
+
+The lookup path of `docs/design/little-arkt.md` ("Quick lookup", `la-lookup-*`): File > New Little Arkt Window on
+Cmd-Opt-N opens the command bar with the "Little Arkt" tag, Return opens the result in a new Little Arkt window, and
+the same bar is reachable system-wide from the Option-Command-N hotkey, off until the user turns it on in
+Settings > Links.
+
+- **The bar.** `LittleArktLookupController` (ShellUI) is a screen-anchored floating panel, not a parent-window bar: the
+  hotkey must work with no browser window and over another app's full-screen Space, and the shell's bar is tied to its
+  parent window's Space. It reuses `CommandBarGeometry` (766 pt, 34 % of the screen, 60 pt input, 50 pt rows),
+  `CommandBarResults`, `CommandBarSelection` and the result row views; no `CommandBar/*` file changes, so the command
+  bar work in #322 keeps its hunks. The "Little Arkt" tag is the design's `accent` / `onAccent` pill before the field;
+  the field keeps "Search or Enter URL..." and is labelled "Little Arkt: Search or Enter URL". Esc closes with
+  nothing opened; a "Switch to Tab" result fronts the main window's tab; the panel has no open or close animation
+  (`animationBehavior = .none`, one alpha step, `.statusBar` level with `.canJoinAllSpaces` /
+  `.fullScreenAuxiliary`). It closes when the app loses activation.
+- **The result window.** `ShellWindowSet.openLittleArkt(url:)` builds the window through the same placement and wiring
+  as the engine's own Little Arkt windows (cascaded 28 pt from the frontmost, remembered size, top-right of the main
+  screen), creates its engine window and adopts it, then opens the page. The engine-request path is unchanged: the
+  request's frame is computed and handed to the shared `makeLittleArkt(isPopup:frame:)`.
+- **The hotkey.** `LittleArktHotKeyMonitor` (ShellUI) registers `RegisterEventHotKey` (kVK_ANSI_N with Command and
+  Option) on the app event target, so no accessibility permission is needed and the press arrives while another app is
+  frontmost. Off by default (decision 2026-10-25); `AppSettings.opensLittleArktWithHotKey` (`globalLittleBrowserHotkeyEnabled`,
+  Arc's key) applies from the app launch and on every change. `eventHotKeyExistsErr` becomes `.taken`, which the app
+  reports into `AppSettings` and Settings > Links shows as "⌥⌘N is used by another app." under the switch; the setting
+  stays on, the in-app menu item keeps working, and turning the switch off and on registers again.
+- **Settings.** One row, "Open Little Arkt when I press ⌥⌘N", in the existing General > Links section. The row and its
+  live update live in `SettingsPanes+LittleArktLookup.swift`; the Links section gains one `littleArktLookupRow()` line,
+  so a parallel Peek edit to the same section merges around it. `SettingsRowView.setCaption` replaces a caption in
+  place (the conflict line).
+
+Deviations: the bar is a separate screen-anchored controller instead of a mode of `CommandBarController` (the shell bar
+positions over its parent and follows its Space; the lookup has no parent and must reach another app's Space). The
+Settings row sits in General > Links, the pane copy the settings design uses for the Peek switches, not a new top-level
+Links pane (Arkt has none; `docs/design/settings.md` section 9). Placing the bar over another app's full-screen Space and
+a real Carbon press are runtime checks (the tests inject the registrar and cannot switch Spaces): follow-up issue
+#416.
+
+Tests (written first, failing before the change): Swift Testing +12 (`LittleArktLookupTests`: copy, panel geometry on
+a wide and a narrow screen, off-by-default and Arc's key, runtime-only conflict state, the monitor's off/active/taken/
+failed states, one registration per change, retry after off and on, the press, one state report). ShellKitGUITests +11
+(`LittleArktLookupBarTests`: the File menu item on Cmd-Opt-N after New Window, the tag/placeholder/field label and the
+34 % frame, the tag before the input, Return opening the URL and closing the bar, Esc through the field's delegate,
+a Switch to Tab result, the result's Little Arkt window with its page, two windows cascading, the Links switch off by
+default, the conflict line, the switch writing the setting). ShellKit unit 1158 Swift Testing tests passed (baseline
+1146 + 12). ShellKitGUITests 1025 run (baseline 1012 + 13: 11 `LittleArktLookupBarTests` and the 2 optional
+`LittleArktLookupScreenshotTests`, which skip unless `ARKT_LOOKUP_SHOTS_DIR` is set), 16 skipped, 0 failures, 176 s.
+Debug app build succeeds. ArktCore untouched, not run. XCUITests not run: the new identifiers have no existing flow,
+and the suite drives the real pointer and keyboard while two other issues run GUI suites on this machine.
+
 ## Archive actions: bottom bar menu, Clear unselected, media exemption, Cmd-Shift-K (#110) (2026-10-26)
 
 Audited on `main` before writing code. Already shipped: BH-072 (multi-selection Cmd-W), BH-074 / KB-010 / KB-011
@@ -2105,6 +2155,45 @@ menu and enabled rules, unselected rows, a selected tab inside a folder, a playi
 menu bar item). ShellKit unit 1154 Swift Testing tests (baseline 1146 after #408 and #411 + 8), all passed.
 ShellKitGUITests 1019 run (baseline 1012 + 7), 14 skipped, 0 failures. Debug app build succeeds. ArktCore untouched. XCUITest not run: no
 UI flow covers these menus.
+
+## Space theme creator (#410) (2026-10-26)
+
+Built to `design/theme-creator/README.md` (#405). Space header > Theme > Edit Theme... (after a separator, below the
+#279 presets) opens a 300 pt popover beside the Space name, hosted in the window's root view: a colour pad with one or
+two dots, texture swatches with an amount slider, and an opacity slider. Every change applies live; closing keeps it
+and registers one undo step for the session.
+
+- **Model.** `SidebarModel.SpaceTheme` stores `noiseFactor` and `opacity`; the sidebar document is format version 3
+  (frozen `sidebar-v3.json`). Versions 1 and 2 decode themes through the older shape with the values they drew with
+  (0.5 with a texture, 0 without; opacity 1). `BridgeMapping` maps both fields; `SpaceThemeInfo` gains `opacity`.
+- **Automatic contrast** (`ThemeContrast`, pure). Applied when drawing to every Space theme through
+  `SidebarController.drawnSpace(_:)`: pages, sidebar chrome, the window background and toasts. The window's appearance
+  and Increase Contrast come from `ThemeContextObserver`. Stored colours never change.
+- **Live re-tint.** Drags preview through `ThemeBackgroundView.previewTheme(_:at:)` and the sidebar flavor with no
+  write and no animation, and store on release (no crossfade, the preview already matches). Discrete pointer changes
+  crossfade on `firm` while the creator is open; a tone flip from them cross-fades the sidebar 0.2 s.
+- **Haptics** (`ThemeHapticGate`, pure; `ThemeHaptics` with an injected performer): detents, preset hue crossings
+  (hues from `SpaceThemeCatalog.families`: 45, 238, 37, 107, 338, 250), the tone-limit soft stop and texture steps,
+  each with its re-arm rule, and one every 50 ms globally (dropped).
+
+Deviations: before the README's step 3, when either text tone already passes with no mix for every colour (the
+appearance's own tone first), that tone is used unmixed; the literal rule mixes every dark preset 35 to 49 % toward
+porcelain in light mode (noted in the design README). The popover is an overlay in the shell window, not a separate
+panel; it closes like a transient popover (a click outside it other than the Space's options button, Escape, or the
+window resigning key). A created theme's stored `isDark` follows its colours. Arc's `noiseFactor` is not imported yet (the synthetic
+fixture pairs 0.0 with an active overlay; needs a runtime check). No display link: AppKit coalesces drag events and
+Core Animation commits once per frame.
+
+Tests (written first): ArktCore 428 passed (baseline 423 + 5: v1 and v2 migrations, v3 golden, v3 without a new key
+fails, v2 ignores the v3 keys, defaults, round-trip). ShellKit unit 1196 passed (baseline 1146 + 50: `ThemeContrastTests`
+(every preset unchanged in both appearances, pale in dark, deep in light, the blue and copper example, Increase
+Contrast), `ThemePadTests`, `ThemeCreatorModelTests`, `ThemeHapticGateTests`, the popover surface pair in
+`ShellTokensContrastTests`, the spring crossfade and preview in `ThemeCrossfadeTests`, three bridge round-trips in
+`SpaceEditingContractTests`). ShellKitGUITests 1032 run (baseline 1013 + 19: `ThemeCreatorTests` 18 and the env-gated
+`ThemeCreatorScreenshotTests`), 15 skipped, 0 failures, with frame-time gates skipped as not measurable at a load
+average near 30. Debug app build succeeds. XCUITest not run: no existing flow or identifier changed. The pad field
+and texture previews took about 250 ms and 530 ms to synthesize in Debug, so they are built off the main thread when
+the window opens (`ThemeCreatorImages`).
 
 ## Space titles drawn while the strip moves (#415) (2026-10-26)
 

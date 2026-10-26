@@ -178,8 +178,27 @@ public final class ShellWindowSet {
     let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: LittleArktLayout.defaultSize)
     let frame = request.bounds.map { LittleArktLayout.frame(forRequestedPage: $0, in: visible) }
       ?? LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
-    let little = LittleArktWindowController(engine: engine, isPopup: request.isPopup || request.kind == .page,
-                                            frame: frame)
+    return makeLittleArkt(isPopup: request.isPopup || request.kind == .page, frame: frame)
+  }
+
+  /// The quick lookup bar's result (#354, KB-044): a new Little Arkt window on `url`. The shell builds it rather than
+  /// the engine, so it creates the engine window itself and adopts it; placement and wiring are the engine's own
+  /// windows' (`makeLittleArkt`).
+  @discardableResult
+  public func openLittleArkt(url: URL) -> LittleArktWindowController {
+    let screen = NSScreen.main ?? NSScreen.screens.first
+    let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: LittleArktLayout.defaultSize)
+    let frame = LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
+    let little = makeLittleArkt(isPopup: false, frame: frame)
+    let id = engine.createWindow(host: little.engineHost)
+    little.adopt(engineWindow: id)              // no-op when the engine announced and adopted it already
+    engine.createTab(url: url, in: id)
+    return little
+  }
+
+  /// Places, wires and records a Little Arkt window; shared by the engine's requests and the lookup's result.
+  private func makeLittleArkt(isPopup: Bool, frame: CGRect) -> LittleArktWindowController {
+    let little = LittleArktWindowController(engine: engine, isPopup: isPopup, frame: frame)
     little.reduceMotion = { [weak self] in self?.littleArktReduceMotion() ?? false }
     little.targetSpace = { [weak self] in self?.primary?.littleArktTargetSpace }
     little.spaces = { [weak self] in

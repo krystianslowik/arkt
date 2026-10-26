@@ -120,6 +120,7 @@ final class AppSession {
     if !defersWindows { finishLaunch(opensWindow: true) }
     refreshArcImportAvailability()
     refreshArchiveHasItems()
+    syncLittleArktHotKey()                            // #354: off by default, so usually nothing is registered
     switch outcome {
     case .opened, .restoredFromBackup: backUp()
     case .created, .recreatedEmpty: break           // nothing to back up; never seed (decision 3)
@@ -338,6 +339,64 @@ final class AppSession {
       let loaded = await load.value
       self?.setFavicons(loaded)
     }
+  }
+
+  // MARK: - Little Arkt lookup (#354)
+
+  /// One lookup bar per app, built on first use: it outlives any window (the system-wide hotkey reaches it with no
+  /// browser window open).
+  private var lookupBar: LittleArktLookupController?
+  /// The system-wide ⌥⌘N (KB-045), created on the first sync; nil until then.
+  private var littleArktHotKey: LittleArktHotKeyMonitor?
+
+  /// File > New Little Arkt Window (Cmd-Opt-N, KB-044) and the system-wide hotkey (KB-045): the quick lookup bar over
+  /// the current desktop. Return opens the result in a new Little Arkt window.
+  func showLittleArktLookup() {
+    let bar = lookupBar ?? makeLittleArktLookup()
+    lookupBar = bar
+    bar.show(on: Self.screenWithPointer())
+  }
+
+  private func makeLittleArktLookup() -> LittleArktLookupController {
+    let bar = LittleArktLookupController()
+    bar.onOpen = { [weak self] url in self?.windows.openLittleArkt(url: url) }
+    bar.onSwitch = { [weak self] node in
+      guard let window = self?.windows.primary else { return }
+      window.showWindow(nil)
+      window.activate(node: node)
+    }
+    // Open tabs as suggestions, from the window the result would switch to.
+    bar.openTabsProvider = { [weak self] in
+      guard let self, let window = self.windows.primary, let space = window.currentSpace else { return [] }
+      return CommandBarResults.openTabs(in: window.sidebar, space: space)
+    }
+    return bar
+  }
+
+  /// The display with the pointer (docs/design/little-arkt.md, edge cases), else the main one.
+  private static func screenWithPointer() -> NSScreen? {
+    let point = NSEvent.mouseLocation
+    return NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
+  }
+
+  /// Applies Settings > Links to the hotkey. Off by default (decision 2026-10-25), so a fresh launch registers
+  /// nothing; the monitor ignores a repeated value, so an observer call cannot register twice.
+  private func syncLittleArktHotKey() {
+    let monitor: LittleArktHotKeyMonitor
+    if let littleArktHotKey {
+      monitor = littleArktHotKey
+    } else {
+      monitor = LittleArktHotKeyMonitor()
+      monitor.onPress = { [weak self] in self?.showLittleArktLookup() }
+      monitor.onStateChange = { [weak self] state in self?.littleArktHotKeyDidChange(state) }
+      littleArktHotKey = monitor
+    }
+    monitor.setEnabled(settings.opensLittleArktWithHotKey)
+  }
+
+  /// A taken combination reaches the Settings window's conflict line; a free one takes it away.
+  private func littleArktHotKeyDidChange(_ state: LittleArktHotKeyMonitor.State) {
+    settings.setLittleArktHotKeyTaken(state == .taken)
   }
 
   // MARK: - Settings window (#307)
@@ -586,5 +645,6 @@ extension AppSession: AppSettingsObserver {
   /// A Settings change reaches every browser window at once (the Toolbar has its own observer).
   func appSettingsDidChange(_ settings: AppSettings) {
     for window in windows.controllers { window.tabNavigationSettings = settings.tabNavigation }
+    syncLittleArktHotKey()                            // #354: the Links switch turns the system-wide hotkey on
   }
 }

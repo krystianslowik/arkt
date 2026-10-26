@@ -157,7 +157,7 @@
                   "durationInSeconds": 0.3,
                   "children": [
                     {
-                      "nodeType": "Failure Message",
+                      "nodeType": "Skip Message",
                       "name": "GS-002: XCUITest scroll has no gesture phases; manual check in #26"
                     }
                   ]
