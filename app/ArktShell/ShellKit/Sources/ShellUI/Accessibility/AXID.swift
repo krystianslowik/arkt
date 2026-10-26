@@ -177,4 +177,14 @@ public enum AXID {
     /// The stage image of Welcome, Done and tips 1 and 2.
     public static let stage = "onboarding.stage"
   }
+
+  /// The Ctrl-Tab switcher and the sidebar overflow pill (#103).
+  public enum TabSwitcher {
+    /// The floating panel (a dialog group labelled "Recent tabs"); absent while closed.
+    public static let panel = "tabSwitcher"
+    /// Label: "title, Space, k of n". Selected: the highlighted row.
+    public static let row = "tabSwitcher.row"
+    /// "3 more above" / "2 more below" after a keyboard reveal; absent otherwise.
+    public static let overflowPill = "sidebar.overflowPill"
+  }
 }

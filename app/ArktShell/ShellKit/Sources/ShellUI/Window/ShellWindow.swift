@@ -80,8 +80,18 @@ public final class ShellWindow: NSWindow {
     }
   }
 
+  /// Sees key-down, flags-changed and mouse-down events before anything else in the window and returns true for the
+  /// ones that must go no further: the Ctrl-Tab switcher (#103), which a page must never take.
+  public var eventInterceptor: (@MainActor (NSEvent) -> Bool)?
+
   /// Mouse buttons 3 and 4 switch to the previous / next Space anywhere in the window (GS-002, BH-035, #98).
   public override func sendEvent(_ event: NSEvent) {
+    switch event.type {
+    case .keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown:
+      if eventInterceptor?(event) == true { return }
+    default:
+      break
+    }
     if event.type == .otherMouseDown, event.buttonNumber == 3 || event.buttonNumber == 4 {
       otherMouseDown(with: event)
       return

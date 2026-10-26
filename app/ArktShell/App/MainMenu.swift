@@ -62,6 +62,7 @@ enum MainMenu {
     main.addItem(submenu(title: "View", items: viewItems()))
     main.addItem(submenu(title: "History", items: historyItems()))
     main.addItem(submenu(title: "Spaces", items: spaceItems()))
+    main.addItem(submenu(title: TabsMenu.title, items: TabsMenu.items()))               // #103, built in ShellUI
     windowItems(commands: commands).forEach { windows.addItem($0) }
     // Onboarding spec, section 12: the first Help item, no shortcut.
     help.addItem(item("Welcome to Arkt", #selector(AppCommands.showWelcome(_:)), "", [], target: commands))

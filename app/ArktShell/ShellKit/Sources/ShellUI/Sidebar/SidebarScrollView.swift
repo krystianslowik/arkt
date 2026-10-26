@@ -7,6 +7,8 @@ public final class SidebarScrollView: NSScrollView {
   /// Receives horizontal gestures (the `SpacePagerView`).
   public weak var horizontalGestureTarget: SpacePagerView?
   private var lock = ScrollAxisLock<NSEvent>()
+  /// A scroll by the user (wheel or trackpad); the overflow pill leaves on it (BH-018).
+  var onUserScroll: (@MainActor () -> Void)?
 
   public override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -27,6 +29,7 @@ public final class SidebarScrollView: NSScrollView {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   public override func scrollWheel(with event: NSEvent) {
+    onUserScroll?()
     guard event.phase != [] else {
       // Momentum after a horizontal gesture belongs to the pager (it ignores it: the spring owns the
       // settle). Legacy mouse wheels have no phases and always scroll.

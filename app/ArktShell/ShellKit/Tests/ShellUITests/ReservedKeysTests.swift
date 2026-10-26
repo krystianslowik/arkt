@@ -78,4 +78,11 @@ struct ReservedKeysTests {
   func `other command keys are not reserved`(keyCode: Int, character: String) {
     #expect(!keys.matches(keyCode: UInt16(keyCode), character: character, modifiers: .command))
   }
+
+  /// #103: the tab switcher's keys are reserved, as Chromium reserves them for its own tab cycling.
+  @Test func `ctrl tab and ctrl shift tab are reserved`() {
+    #expect(keys.matches(keyCode: UInt16(kVK_Tab), character: "\t", modifiers: .control))
+    #expect(keys.matches(keyCode: UInt16(kVK_Tab), character: "\t", modifiers: [.control, .shift]))
+    #expect(!keys.matches(keyCode: UInt16(kVK_Tab), character: "\t", modifiers: []))
+  }
 }
