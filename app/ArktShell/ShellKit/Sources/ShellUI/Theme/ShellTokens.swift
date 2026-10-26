@@ -41,9 +41,10 @@ public enum ShellTokens {
   public static let primaryText = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.90), dark: .white(0.84))
   /// Text (Space title, URL bar label, toolbar buttons): WCAG AA 4.5:1 over every shipped Space theme, the URL bar
   /// fills and the toolbar strip. Raised from Arc's 0.50 / 0.50 (#72), and light from 0.64 to 0.65 for the Blossom
-  /// family's sRGB pink stop (#310); the worst case is the hovered URL bar (`sidebarItemHovered`) over that stop
-  /// (light) and the Dev theme's light stop (dark).
-  public static let secondaryText = TokenPair(light: .black(0.65), dark: .white(0.76))
+  /// family's sRGB pink stop (#310), then to 0.66 for the Personal sample's pink stop darkened by its grain (the
+  /// texture multiplies, #120); the worst case is the hovered URL bar (`sidebarItemHovered`) over that stop (light)
+  /// and the Dev theme's light stop (dark).
+  public static let secondaryText = TokenPair(light: .black(0.66), dark: .white(0.76))
   // Tab cell states (C3 tests these levels).
   public static let tabCurrent = TokenPair(light: .white(0.85), dark: .p3(hex: 0xFAFBFF, alpha: 0.20))
   public static let tabContentVisible = TokenPair(light: .white(0.70), dark: .p3(hex: 0xFAFBFF, alpha: 0.15))
@@ -90,8 +91,7 @@ public enum ShellTokens {
   /// The 0.5 pt edge of a toast-style pill.
   public static let toastEdge = TokenPair(light: .black(0.10), dark: .white(0.14))
   // Space theme background (C6).
-  /// Texture layer opacity at noiseFactor 1. TODO(parity): match Arc's grain intensity.
-  public static let themeTextureMaxOpacity = 0.16
-  /// Grain tile edge in points (Arc's `grain` texture is 155 pt).
-  public static let themeGrainTile: CGFloat = 155
+  /// Texture overlay alpha at noiseFactor 1. Arc multiplies the gradient by `mix(1, texel, alpha)` with alpha the
+  /// noiseFactor itself; each texture's strength is in its texels (`ThemeTexture`), not in this scale (#120).
+  public static let themeTextureMaxOpacity = 1.0
 }

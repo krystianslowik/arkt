@@ -26,8 +26,7 @@ public struct SpaceThemeInfo: Equatable, Sendable {
   public var baseColors: [RGBA]
   /// Arc's second gradient layer (Track B: `SpaceTheme.overlayColors`). Not rendered yet.
   public var overlayColors: [RGBA]
-  /// Tiled overlay texture: "grain", "sand", "denim" or "tweed" (Track B: `SpaceTheme.texture`).
-  /// The Core Animation renderer draws every texture as grain.
+  /// Tiled overlay texture: "grain", "sand", "denim" or "tweed" (Track B: `SpaceTheme.texture`); see `ThemeTexture`.
   public var texture: String?
   /// Texture strength 0...1 (Arc: `Modifiers.noiseFactor`).
   public var noiseFactor: Double
@@ -40,9 +39,19 @@ public struct SpaceThemeInfo: Equatable, Sendable {
     self.texture = texture; self.noiseFactor = noiseFactor; self.isDark = isDark
   }
 
-  /// Opacity of the texture layer for this theme (0 without a texture).
+  /// The texture's overlay alpha for this theme (0 without a texture): the gradient is multiplied by
+  /// `mix(1, texel, textureOpacity)`.
   public var textureOpacity: Double {
     texture == nil ? 0 : min(max(noiseFactor, 0), 1) * ShellTokens.themeTextureMaxOpacity
+  }
+
+  /// The texture this theme draws, nil for none.
+  public var textureKind: ThemeTexture? { ThemeTexture(name: texture) }
+
+  /// The average factor the texture multiplies the gradient by (1 without a texture).
+  public var meanTextureFactor: Double {
+    guard let textureKind else { return 1 }
+    return 1 - textureOpacity * (1 - textureKind.meanFactor)
   }
 }
 
