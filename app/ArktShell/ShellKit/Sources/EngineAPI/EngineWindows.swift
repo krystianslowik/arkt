@@ -16,20 +16,35 @@ public struct EngineProfileID: Hashable, Sendable, CustomStringConvertible {
   public var description: String { rawValue }
 }
 
+/// Why an engine window closed (#401). The shell keeps its window without an engine window only after
+/// `.lastTabClosed`; every other close takes the shell window with it.
+public enum WindowCloseReason: Equatable, Sendable {
+  /// The user or the shell asked: `closeWindow`, the host's `onCloseRequested` (close button, Close Window), or the
+  /// engine's own Close Window command.
+  case userClose
+  /// An extension closed it (`chrome.windows.remove`).
+  case `extension`
+  /// Its last tab closed or moved to another window, and the engine closed the emptied window (Chromium closes a
+  /// `Browser` with its last tab).
+  case lastTabClosed
+  /// The application is quitting.
+  case appQuit
+}
+
 /// Window events, on their own stream (`EngineClient.observeWindows(_:)`): an `EngineEvent` always has a tab.
 /// Delivered through the same FIFO as tab events, so a window's `.windowClosed` follows the `.tabClosed` events of
 /// its tabs (contract rule 11). Nothing follows `.windowClosed` for that window.
 public enum EngineWindowEvent: Equatable, Sendable {
   /// The window was created and is listed in `windowIDs`.
   case windowOpened(EngineWindowID)
-  /// The window is gone, after the `.tabClosed(reason: .windowClosing)` events of its tabs.
-  case windowClosed(EngineWindowID)
+  /// The window is gone, after the `.tabClosed` events of its tabs, with the reason it closed.
+  case windowClosed(EngineWindowID, reason: WindowCloseReason)
   /// The extension action list of the window changed (`EngineExtensions`).
   case extensionActionsChanged(EngineWindowID)
 
   public var windowID: EngineWindowID {
     switch self {
-    case .windowOpened(let id), .windowClosed(let id), .extensionActionsChanged(let id): id
+    case .windowOpened(let id), .windowClosed(let id, _), .extensionActionsChanged(let id): id
     }
   }
 }
@@ -73,7 +88,7 @@ public protocol EngineWindowHosting: AnyObject {
   /// Set by the engine: `validate` and `execute` for the commands the host does not claim.
   var forward: EngineCommandForwarding? { get set }
   /// Set by the engine. The host calls it when the user asks to close the window (close button, Close Window) and
-  /// never closes the window itself: the engine closes its tabs and then reports `.windowClosed`.
+  /// never closes the window itself: the engine closes its tabs and then reports `.windowClosed` (`.userClose`).
   var onCloseRequested: (@MainActor () -> Void)? { get set }
   /// A user link activation in one of this window's tabs, before the engine navigates (#313). Called from inside the
   /// engine's navigation start: it must not call the engine. To open the link elsewhere, answer `.cancel` and act

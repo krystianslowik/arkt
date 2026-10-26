@@ -39,7 +39,7 @@ struct MoveTabTests {
     engine.moveTab(tab, to: main)
 
     #expect(!engine.windowIDs.contains(little))
-    #expect(recorder.windowEvents.last == .windowClosed(little))
+    #expect(recorder.windowEvents.last == .windowClosed(little, reason: .lastTabClosed))
     #expect(engine.tabIDs == [tab])
     #expect(!recorder.events.contains(.tabClosed(tab, reason: .windowClosing)))
   }

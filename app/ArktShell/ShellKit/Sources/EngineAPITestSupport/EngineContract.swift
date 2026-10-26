@@ -21,6 +21,9 @@ public struct EngineHarness {
                                                  _ opener: TabID?, _ active: Bool) async throws -> TabID
   /// Makes the engine (the page or an extension) close `id` on its own.
   public typealias EngineTabAction = @MainActor (_ engine: any EngineClient, _ id: TabID) async throws -> Void
+  /// Makes an extension close `window` on its own (`chrome.windows.remove`).
+  public typealias EngineWindowAction = @MainActor (_ engine: any EngineClient, _ window: EngineWindowID) async throws
+    -> Void
   /// Answers the pending leave-site dialog of `id`: stay (`false`) or leave (`true`).
   public typealias AnswerDialog = @MainActor (_ engine: any EngineClient, _ id: TabID, _ accept: Bool) async throws
     -> Void
@@ -47,6 +50,8 @@ public struct EngineHarness {
   public let answerDialog: AnswerDialog?
   /// Makes the page of `id` play sound (rule 17), for example `EngineContract.toneScript` run with a user gesture.
   public let makeAudible: EngineTabAction?
+  /// Makes an extension close the window (rule 11, #401).
+  public let engineCloseWindow: EngineWindowAction?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -59,12 +64,13 @@ public struct EngineHarness {
               engineActivate: EngineTabAction? = nil,
               holdClose: EngineTabAction? = nil,
               answerDialog: AnswerDialog? = nil,
-              makeAudible: EngineTabAction? = nil) {
+              makeAudible: EngineTabAction? = nil,
+              engineCloseWindow: EngineWindowAction? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
     self.engineActivate = engineActivate; self.holdClose = holdClose; self.answerDialog = answerDialog
-    self.makeAudible = makeAudible
+    self.makeAudible = makeAudible; self.engineCloseWindow = engineCloseWindow
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -92,7 +98,8 @@ public struct EngineHarness {
           throw ContractViolation(description: "no pending dialog in \(id)")
         }
       },
-      makeAudible: { engine, id in try inMemory(engine).setAudible(id, true) }
+      makeAudible: { engine, id in try inMemory(engine).setAudible(id, true) },
+      engineCloseWindow: { engine, window in try inMemory(engine).engineCloseWindow(window, reason: .extension) }
     )
   }
 
@@ -127,7 +134,9 @@ public struct EngineHarness {
 ///     GS-026); nil for an unknown or closed tab.
 /// 11. A window from `createWindow(host:)` is listed in `windowIDs` and announced with `.windowOpened`; every tab's
 ///     snapshot names its window; `closeWindow` (or the host's `onCloseRequested`) closes its tabs
-///     (`.tabClosed(reason: .windowClosing)` each) and then reports `.windowClosed`.
+///     (`.tabClosed(reason: .windowClosing)` each) and then reports `.windowClosed` with reason `.userClose`. A window
+///     whose last tab moved to another window closes with `.lastTabClosed`; one an extension closes reports its tabs
+///     and itself with `.extension` (needs `engineCloseWindow`). Quitting reports `.appQuit` (#401).
 /// 12. `activateTab` makes the tab its window's active tab: `.activeTabChanged(id)` and `isActive` in the snapshot,
 ///     with exactly one active tab per window that has tabs (the first tab of a window is active; closing the
 ///     active tab activates another).

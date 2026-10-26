@@ -569,7 +569,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
         break;
       case ArktEngineEventKindWindowClosed: {
         windows_changed = true;
-        LOG(WARNING) << "ARKT selftest windowClosed window=" << window;
+        LOG(WARNING) << "ARKT selftest windowClosed window=" << window
+                     << " reason=" << event.windowCloseReason;
         ArktSelfTestWindowHost* host = [self hostOf:event.browser];
         if (host) {
           [_hosts removeObject:host];

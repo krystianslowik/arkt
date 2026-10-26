@@ -13,6 +13,7 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   let tab: (any ArktTabHandle)?
   let browser: (any ArktBrowserHandle)?
   var closeReason: ArktCloseReason = .none
+  var windowCloseReason: ArktWindowCloseReason = .none
   var url: URL?
   var title: String?
   var faviconPNG: Data?
@@ -292,7 +293,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
       }
       source.move(self, to: target)
       target.activate(self)
-      if source.tabList.isEmpty { source.finishClose(reason: .windowClosing) }
+      if source.tabList.isEmpty { source.finishClose(reason: .windowClosing, window: .lastTabClosed) }
     }
   }
 
@@ -449,9 +450,19 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     if target.active == nil { target.activate(tab) }
   }
 
+  /// What the window close under way reports: its tabs' reason and its own.
+  private var closing: (tabs: ArktCloseReason, window: ArktWindowCloseReason) = (.windowClosing, .user)
+
+  /// The host's close request (the user): tabs `windowClosing`, the window `user`.
+  func close() { close(tabs: .windowClosing, window: .user) }
+
+  /// `chrome.windows.remove`: tabs and window report `extension` (Decision 12, #401).
+  func closeByExtension() { close(tabs: .extension, window: .extension) }
+
   /// Unload processing first: a tab with a `beforeunload` handler holds the whole window close.
-  func close() {
+  private func close(tabs tabReason: ArktCloseReason, window windowReason: ArktWindowCloseReason) {
     guard !isClosed, !isClosingWindow else { return }
+    closing = (tabReason, windowReason)
     let holding = tabList.filter(\.wouldHoldClose)
     guard holding.isEmpty else {
       isClosingWindow = true
@@ -461,7 +472,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
       }
       return
     }
-    finishClose(reason: .windowClosing)
+    finishClose(reason: tabReason, window: windowReason)
   }
 
   func windowDialogAnswered(by tab: ScriptedTab, accept: Bool) {
@@ -470,7 +481,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
       tab.isClosing = false
       guard !tabList.contains(where: { $0.dialog != nil }) else { return }
       isClosingWindow = false
-      finishClose(reason: .windowClosing)
+      finishClose(reason: closing.tabs, window: closing.window)
     } else {
       isClosingWindow = false
       for held in tabList where held.isClosing {
@@ -481,10 +492,10 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     }
   }
 
-  func finishClose(reason: ArktCloseReason) {
+  func finishClose(reason: ArktCloseReason, window windowReason: ArktWindowCloseReason) {
     for tab in tabList { remove(tab, reason: reason, reactivate: false) }
     isClosed = true
-    facade.closed(self)
+    facade.closed(self, reason: windowReason)
   }
 }
 
@@ -547,11 +558,13 @@ final class ScriptedFacade: NSObject, ArktEngine {
     for entry in sinks { entry.sink(batch) }
   }
 
-  func closed(_ browser: ScriptedBrowser) {
+  func closed(_ browser: ScriptedBrowser, reason: ArktWindowCloseReason) {
     browser.host.closeRequested = nil
     browser.host.validateCommand = nil
     browser.host.executeCommand = nil
-    record(ScriptedEvent(.windowClosed, tab: nil, browser: browser))
+    let event = ScriptedEvent(.windowClosed, tab: nil, browser: browser)
+    event.windowCloseReason = reason
+    record(event)
   }
 
   // MARK: ArktEngine
@@ -704,7 +717,7 @@ final class ScriptedFacade: NSObject, ArktEngine {
 
   /// Quit: every tab closes with `.appTerminating`, then every window.
   func terminate() {
-    for browser in browsers.compactMap({ $0 as? ScriptedBrowser }) { browser.finishClose(reason: .appTerminating) }
+    for browser in browsers.compactMap({ $0 as? ScriptedBrowser }) { browser.finishClose(reason: .appTerminating, window: .appTerminating) }
   }
 
   /// The page's title for a test URL: its last path component.

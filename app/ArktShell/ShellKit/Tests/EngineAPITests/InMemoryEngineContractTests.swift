@@ -27,6 +27,12 @@ struct InMemoryEngineContractTests {
     try await EngineContract.closeWindowClosesItsTabsThenReportsWindowClosed(harness)
   }
   @Test func hostCloseRequestClosesTheWindow() async throws { try await EngineContract.hostCloseRequestClosesTheWindow(harness) }
+  @Test func emptiedWindowReportsLastTabClosed() async throws {
+    try await EngineContract.emptiedWindowReportsLastTabClosed(harness)
+  }
+  @Test func extensionWindowCloseReportsExtension() async throws {
+    try await EngineContract.extensionWindowCloseReportsExtension(harness)
+  }
   @Test func activationIsOneTabPerWindow() async throws { try await EngineContract.activationIsOneTabPerWindow(harness) }
   @Test func engineCreatedTabIsAnnounced() async throws { try await EngineContract.engineCreatedTabIsAnnounced(harness) }
   @Test func engineCloseIsTerminal() async throws { try await EngineContract.engineCloseIsTerminal(harness) }
@@ -50,6 +56,9 @@ struct InMemoryEngineContractTests {
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.skipUnloadHandlersNeverHolds(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.cancelledWindowCloseKeepsTheWindow(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.audibleStateIsReported(bare) }
+    await #expect(throws: ContractNotApplicable.self) {
+      try await EngineContract.extensionWindowCloseReportsExtension(bare)
+    }
   }
 }
 

@@ -43,6 +43,12 @@ final class FakeEngineContractTests: XCTestCase {
     try await EngineContract.closeWindowClosesItsTabsThenReportsWindowClosed(harness)
   }
   func testHostCloseRequestClosesTheWindow() async throws { try await EngineContract.hostCloseRequestClosesTheWindow(harness) }
+  func testEmptiedWindowReportsLastTabClosed() async throws {
+    try await EngineContract.emptiedWindowReportsLastTabClosed(harness)
+  }
+  func testExtensionWindowCloseReportsExtension() async throws {
+    try await notApplicable { try await EngineContract.extensionWindowCloseReportsExtension(harness) }
+  }
   func testActivationIsOneTabPerWindow() async throws { try await EngineContract.activationIsOneTabPerWindow(harness) }
   func testWindowlessCreateTabLandsInMostRecentlyActiveWindow() async throws {
     try await EngineContract.windowlessCreateTabLandsInMostRecentlyActiveWindow(harness)

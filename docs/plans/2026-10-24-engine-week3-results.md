@@ -3033,3 +3033,71 @@ The cause was not found. After a relaunch with the `dev.arkt.shell:audio` log, a
   muted, and Favorites not at all (their playing indicator, BH-051, and the media tray, BH-184, stay with #117).
   PARITY(NEEDS-RUNTIME-CHECK) for the audio button's place and glyphs.
 - A hidden Peek's video keeps decoding, muted; pausing it would need the page.
+
+## #401: why an engine window closed
+
+Date 2026-10-26. Branch `feat/401-window-close-reason` off `main` at `fbe0e5a`, rebased on `8e44130`. Follow-up from
+#386 (#392, "Known limitation").
+
+### What landed
+
+- **Engine API.** `.windowClosed(EngineWindowID, reason: WindowCloseReason)` with `userClose` (`closeWindow`, the
+  host's `onCloseRequested`, the engine's own Close Window), `extension` (`chrome.windows.remove`), `lastTabClosed`
+  (the engine closed a window emptied by a tab close or a tab moved out) and `appQuit`. Contract rule 11 checks the
+  reason: `closeWindow` and the host's close request report `.userClose`, a window whose last tab moved out
+  `.lastTabClosed` (new check `emptiedWindowReportsLastTabClosed`), and an extension's close reports its tabs and
+  itself with `.extension` (new check `extensionWindowCloseReportsExtension`, driver `engineCloseWindow`).
+- **Facade header (both copies, additive).** `ArktWindowCloseReason` (`None`, `User`, `Extension`, `LastTabClosed`,
+  `AppTerminating`) and `windowCloseReason` on `ArktEngineEvent`, set on `WindowClosed` only. Justification: the
+  header had no way to tell a window close the user or an extension asked for from Chromium closing an emptied
+  `Browser`, and #378's parked copies made the difference reach the shell. Existing values and members are unchanged.
+- **Facade.** `OnBrowserClosed` (from `BrowserDidClose`, the `Browser` and `ArktBrowserWindow` still alive) reads the
+  reason: quitting wins, then `ArktBrowserWindow::IsClosedByExtension()` (already used for the tabs' reason), then
+  `TabStripModel::closing_all()` (a window close: `user`), else `lastTabClosed`. Logged as `facade window closed,
+  reason ...`; the self-test embedder logs it too. **No Chromium patch**; `.patches` 9 = `rev-list --count` 9.
+- **Engines.** `ChromiumEngine` maps the facade value (`None` maps to `userClose`, so a close the facade did not
+  classify takes the shell window with it). `InMemoryEngine` reports all four and gains the
+  `engineCloseWindow(_:reason:)` driver; `FakeEngine` reports `userClose` and `lastTabClosed` (no extensions).
+- **Shell.** On `.windowClosed` the window stays without an engine window only for `.lastTabClosed` (with
+  `keepsWindowWithoutEngine` set and no close request of its own). An extension's close, the user's and quitting
+  take it with them, which closes #392's known gap.
+- **Contract runner and tabs probe.** The runner's `engineCloseWindow` asks the probe's service worker to call
+  `chrome.windows.remove`: the facade tells an extension call by its keepalive, which a worker call holds and a call
+  from the probe's control page does not (a first run from the control page reported `user`).
+
+### Checks (Engine app on `out/Spike`, built into `$CHROMIUM_ROOT/embed-364`, profile `$PROF/401-try`, scratch `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and defaults suite, tabs probe loaded, loopback pages on `127.0.0.1`, Cmd-W through System Events into the app's own frontmost window, `chrome.windows.remove` through CDP in the probe's worker)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Contract on real Chromium | PASS | `--arkt-engine-contract --arkt-engine-test-api` with the tabs probe: 28 checks, `ARKT_CONTRACT result 17/17`; `native window close by chrome.windows.remove`, both tabs `reason extension`, `facade window closed, reason extension` |
+| Cmd-W on the last loaded Today tab keeps the window | PASS | three Today rows, one loaded: `tab closed ... reason client`, the sibling shown, the window stays (the parked copy keeps the `Browser`, so no `WindowClosed`) |
+| `chrome.windows.remove` right after that Today close | PASS | `reason extension` for both tabs and the window; the shell window is gone (no window left for the process), the app keeps running |
+| Cmd-W down to the last Today tab | PASS | two Cmd-W: the window stays on the empty card of the Space |
+
+A first launch showed onboarding (the Engine configuration is not `DEBUG`, so `ARKT_SKIP_ONBOARDING` is ignored);
+it was finished through AX presses. One launch lost its window to a `user` close eight seconds in, with no input of
+this check in flight while another worktree's first-run check had an app on the same screen; the cause was not found
+and the next launches did not repeat it.
+
+### Verification
+
+- `nice -n 15 autoninja -j 4 -C out/Spike chrome`: `The build has finished successfully.` `git -C $CR rev-list
+  --count 156.0.8078.48..arkt` 9 = `.patches` 9.
+- Debug and Engine apps: `BUILD SUCCEEDED`.
+- Red first: the new tests failed to compile (`ArktWindowCloseReason`, `WindowCloseReason`, `engineCloseWindow`
+  missing). With the reason gate taken out of the shell again, the 4 new `LastTabCloseTests` failed (the window
+  stayed), then passed.
+- ShellKit `swift test --skip ShellKitGUITests`: 1137 passed (1129 + 8).
+- ShellKit `swift test --filter ShellKitGUITests`: 996 run (990 + 6), 10 skipped (7 not applicable to FakeEngine,
+  `extensionWindowCloseReportsExtension` among them), 3 frame-time gates failed at load 7 to 10 on 10 cores
+  (`PeekMotionOnScreenTests`, `SidebarHideTests.testRevealPacing`, `SpacePagerTests` frame pacing) and passed when
+  run again on their own (7 tests, 0 failures); no other failure.
+
+### Deviations
+
+- A window the user closes with no tab at all reads as `lastTabClosed` at the facade (no `CloseAllTabs` ran). The
+  shell's own close request covers the close button and Close Window; Chromium's own Close Window command on an
+  emptied window that keeps itself would keep the shell window.
+- FakeEngine has no extensions: `extensionWindowCloseReportsExtension` is not applicable there.
+- An extension call from an extension page that holds no keepalive (a popup, an options page) is still told apart
+  only as `user` (week-3 Decision 12's limit, `arkt_extension_calls.h`).

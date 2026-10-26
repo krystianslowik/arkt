@@ -87,8 +87,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The placeholder shown where a page moved to another window (#300); made on the first handoff.
   var handoffPlaceholder: HandoffPlaceholderView?
   /// This window let go of its last page: it moved to another window (#300), or it closed (#386; Chromium closes a
-  /// `Browser` with its last tab). The engine may close the emptied engine window; this window then stays open
-  /// without one, and the next page it shows makes a new one.
+  /// `Browser` with its last tab). The engine may close the emptied engine window; when it reports that close as
+  /// `.lastTabClosed`, this window stays open without one, and the next page it shows makes a new one (#401).
   var keepsWindowWithoutEngine = false
   /// The current row whose page went with an engine window this window keeps going without (#386): a page opened in
   /// the closing window, such as the sibling a Cmd-W makes current. It is shown again once that window has closed.
