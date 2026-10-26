@@ -96,7 +96,7 @@ The column holds, top to bottom:
    favicon on a neutral well. The thumbnail never blocks the bar: until it loads, the well shows.
 2. The title, 14 semibold, one line, tail truncation.
 3. A meta line, "<host> · open in <Space>, <time>", for example "github.com · open in Work, 12 min ago", led by the
-   open-dot. The dot is the open-dot, 6 pt green, shown only when the page is open in a tab. A history row shows "<host>, visited
+   open-dot (6 pt, green), which shows only when the page is open in a tab. A history row shows "<host>, visited
    <time>" with no dot.
 4. Two buttons, side by side:
    - **Split View** (Cmd-Return), the secondary button.
