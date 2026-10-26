@@ -55,12 +55,12 @@ extension ShellWindowController {
       break
     case .extensionActionsChanged:
       refreshExtensions()
-    case .windowClosed:
-      // Its tabs reported `.tabClosed(reason: .windowClosing)` already (contract rule 11). A window whose last page
-      // moved to another window (#300) or closed (#386) stays open without an engine window; the next page it shows
-      // makes a new one. Only a close the user asked for (close button, Close Window) or one the engine made on its
-      // own (`chrome.windows.remove`) closes it.
-      let keepsWindow = keepsWindowWithoutEngine && !isWindowCloseRequested
+    case .windowClosed(_, let reason):
+      // Its tabs reported `.tabClosed` already (contract rule 11). A window whose last page moved to another window
+      // (#300) or closed (#386) stays open without an engine window when the engine closed the emptied window
+      // (`.lastTabClosed`); the next page it shows makes a new one. Every other close takes the window with it: the
+      // user's (close button, Close Window), an extension's (`chrome.windows.remove`, #401) and quitting.
+      let keepsWindow = reason == .lastTabClosed && keepsWindowWithoutEngine && !isWindowCloseRequested
       keepsWindowWithoutEngine = false
       engineWindow = nil
       engineActiveTab = nil
