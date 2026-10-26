@@ -1629,8 +1629,8 @@ further.
   table's Reopen row: from scale 0.96 and opacity 0 at its frame, `firm`; controls after 60 ms, grabber after 90 ms;
   Reduce Motion fades in over 0.20 s. A later close of a reopened Peek still goes back towards the original link.
 - **Cmd-Z.** Edit > Undo targets `ReopenUndoRouter`: it reopens when the key browser window has something to reopen
-  and no text is being edited there (a text view, or a view with an input context: Chromium's page view has one only
-  while an editable field has the focus); otherwise it sends `undo:` down the responder chain as before. A page keeps
+  and no text is being edited there (a text view, or a page view whose focused field has a text input type, a password field
+  included; any other view with an input context); otherwise it sends `undo:` down the responder chain as before. A page keeps
   Cmd-Z first: the engine gives the main menu only the key equivalents the page did not handle, so a web app's own
   undo keeps working.
 - **Toast motion** (alerts design, section 7): in, 12 pt up and from 0.96 on `springyFast` with a 0.16 s ease-out

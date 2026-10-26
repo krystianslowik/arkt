@@ -164,6 +164,23 @@ final class ReopenClosedTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// Chromium makes each copy its window's active tab after the shell may have activated another one: while a Peek is
+  /// open, its tab stays the active one, not the tab under it.
+  func testAParkedCopyTakingActivationLeavesItWithTheOpenPeek() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[1])
+    let session = try harness.openPeek(over: world.pinned)
+    XCTAssertNotNil(harness.tab(world.today[1]), "the closed row has a page to park")
+    harness.controller.close(node: world.today[1])
+    let parked = try XCTUnwrap(harness.controller.reopenStack.parkedTabs.last)
+    XCTAssertNotNil(harness.peek.session, "the Peek stays over its source")
+
+    harness.engine.engineActivate(parked)
+    XCTAssertEqual(harness.engine.activeTab(in: try XCTUnwrap(harness.controller.engineWindow)), session.tab)
+    harness.controller.close()
+  }
+
   /// A close the user cancelled at a leave-site prompt did not happen: nothing to reopen, no copy left behind.
   func testACancelledCloseLeavesNothingToReopen() throws {
     let world = try Self.makeWorld()

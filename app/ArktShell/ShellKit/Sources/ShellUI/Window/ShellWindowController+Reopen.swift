@@ -85,9 +85,13 @@ extension ShellWindowController {
       // Its window closed, or the stack let it go: an item still holding it reopens without history.
       parkedTabs.remove(tab)
       reopenStack.forget(parked: tab)
-    case .activeTabChanged:
-      // Chromium makes a duplicate its window's active tab; the window's own tab stays the active one.
-      if let currentTab { activateEngineTab(currentTab) }
+    case .activeTabChanged(let tab):
+      // Chromium makes a duplicate its window's active tab, after the shell may have picked another (a new Peek's
+      // tab): what the shell last asked for stays active, else the current tab.
+      guard let engineWindow, engine.latestActiveTab(in: engineWindow) == tab,
+            let mine = [engineActiveTab, currentTab].compactMap({ $0 }).first(where: { !parkedTabs.contains($0) })
+      else { break }
+      activateEngineTab(mine)
     default:
       break
     }
