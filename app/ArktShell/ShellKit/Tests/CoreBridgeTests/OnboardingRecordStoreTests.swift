@@ -5,6 +5,9 @@ import Testing
 
 @MainActor
 struct OnboardingRecordStoreTests {
+  /// A deadline these tests never mean to reach: a busy CI runner can take over a second to run the opened write.
+  private static let waitsForTheWrite = Duration.seconds(60)
+
   /// #344: a quit immediately after a step change waits for the queued record write, including earlier queued saves.
   @Test func terminationFlushPersistsTheLatestProgress() async {
     let gate = Gate()
@@ -21,8 +24,7 @@ struct OnboardingRecordStoreTests {
 
     store.saveProgress(first)
     store.saveProgress(last)
-    let sleeper = ManualSleeper()      // the deadline never fires: only the write ends the flush
-    let terminationFlush = Task { await store.flush(atMost: .seconds(1), sleep: sleeper.sleep) }
+    let terminationFlush = Task { await store.flush(atMost: Self.waitsForTheWrite) }
     _ = await writeStarts.next()
     #expect(store.needsFlush)
 
@@ -56,7 +58,7 @@ struct OnboardingRecordStoreTests {
     #expect(await storage.record == nil)
 
     await gate.open()
-    #expect(await store.flush(atMost: .seconds(1), sleep: ManualSleeper().sleep))
+    #expect(await store.flush(atMost: Self.waitsForTheWrite))
     #expect(await storage.record?.isCompleted == true)
   }
 
@@ -73,8 +75,7 @@ struct OnboardingRecordStoreTests {
     var writeStarts = starts.makeAsyncIterator()
 
     store.markCompleted()
-    let sleeper = ManualSleeper()      // the deadline never fires: only the write ends the flush
-    let terminationFlush = Task { await store.flush(atMost: .seconds(1), sleep: sleeper.sleep) }
+    let terminationFlush = Task { await store.flush(atMost: Self.waitsForTheWrite) }
     _ = await writeStarts.next()
     #expect(store.needsFlush)
 

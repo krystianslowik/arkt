@@ -224,6 +224,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onSpacesChanged = { [weak self] _ in
       self?.refreshThemes()
       self?.updateEmptyState()
+      NotificationCenter.default.post(name: SpacesMenu.listDidChangeNotification, object: self)   // #387
     }
     refreshThemes()
     updateEmptyState()

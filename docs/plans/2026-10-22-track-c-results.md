@@ -1870,3 +1870,27 @@ load average near the core count and pass when rerun. The reflow tests freeze th
 
 Cmd-Shift-T brings a closed pane back as a Today tab (the archive restore), as for Cmd-W; whether it should go back
 into its split is left to the maintainer (#388).
+
+## Spaces menu lists the real Spaces (#387) (2026-10-26)
+
+Maintainer report: with one Space, the Spaces menu listed "Space 1" ... "Space 9". Reproduced on main with the Debug
+app (FakeEngine, throwaway data folder): after New Space the menu held nine Space items.
+
+- **Cause.** `MainMenu.spaceItems()` built nine fixed "Space N" items (Ctrl-1 ... Ctrl-9) at launch, whatever the
+  Spaces were.
+- **Fix.** `SpacesMenu` (ShellUI, next to `TabsMenu`) is the Spaces submenu. It keeps the fixed items and lists the
+  main window's Spaces between them, in sidebar order, titled with each Space's name ("Space N" by place for an
+  untitled one), Ctrl-1 ... Ctrl-9 on the first nine, the zero-based index as tag, nil target. With no Space nothing
+  is listed. `ShellWindowController` posts `SpacesMenu.listDidChangeNotification` from `onSpacesChanged` (add,
+  remove, rename, move), and a window becoming main refreshes it too, so the keys follow the Spaces with the menu
+  closed: AppKit does not ask the menu's delegate before it matches a key equivalent (checked in a test).
+  `menuNeedsUpdate` checks once more before it shows. `MainMenu.swift` only hands over the fixed items.
+- **Keys.** Ctrl-1 ... Ctrl-9 as before: KB-035 and BH-041 (CONFIRMED) put Go to Space N on Ctrl; Cmd-1 ... Cmd-9 are
+  KB-020 / KB-021 (sidebar items, Tabs menu).
+
+Tests: `SpacesMenuTests` (9, GUI): one Space lists one item, none lists none without a doubled separator, eleven
+Spaces list eleven with keys on the first nine, add / rename / move / remove followed, an untitled Space named by
+place, a Space added and a rename reach the closed menu (Ctrl-2 matches the new item), the window's list in sidebar
+order, the tag goes to its Space. `MainMenuKeyEquivalentTests` fills nine Spaces before checking keys. Real-app check
+(Debug, FakeEngine): no Space, no item; New Space, "Space 1" with Ctrl-1; a second, "Space 2" with Ctrl-2; Delete
+Space, back to one. XCUITests not run: the machine was in use.
