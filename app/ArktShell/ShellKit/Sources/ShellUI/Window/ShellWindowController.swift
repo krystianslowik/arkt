@@ -113,6 +113,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var parkedTabs: Set<TabID> = []
   /// The reopen batch the visible undo toast belongs to; nil without one.
   var undoToastBatch: UUID?
+  /// The Delete Space sheet while it is up.
+  var spaceRemovalSheet: DialogSheet?
   /// Removes a Space (the app's ArchiveCoordinator: its pinned and Today items are archived, decision on #86); Delete
   /// Space calls it once `confirmSpaceRemoval` said yes. Nil: Delete Space is disabled.
   public var onRemoveSpace: (@MainActor (SpaceID) -> Void)?
