@@ -238,11 +238,12 @@ final class PinnedTabTests: XCTestCase {
   func testATodayRowOffersPinTabAndAPinnedRowThePinnedItems() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
-    XCTAssertEqual(try harness.menuTitles(world.today[0]), ["Move To", "Pin Tab"])
+    XCTAssertEqual(try harness.menuTitles(world.today[0]), SplitSidebarTests.todayMenu)
     XCTAssertEqual(try harness.menuTitles(world.p0),
-                   ["Move To", "Unpin Tab", "", "Back to Pinned URL", "Replace Pin with Current Page",
-                    "Separate From Pinned Tab"])
-    XCTAssertEqual(try harness.menuTitles(world.panes[0]), ["Remove Tab from Split View"],
+                   ["Rename", "Duplicate", "Unpin Tab", "", "Back to Pinned URL", "Replace Pin with Current Page",
+                    "Separate From Pinned Tab", "Edit Pinned URL", "", "Move To", "", "Copy Link",
+                    "Copy Link as Markdown", "", "Close and Keep Pinned"])
+    XCTAssertEqual(try harness.menuTitles(world.panes[0]), SplitSidebarTests.paneMenu,
                    "a pane row never offers pin items")
     harness.controller.close()
   }

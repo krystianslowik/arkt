@@ -13,6 +13,14 @@ import XCTest
 @MainActor
 final class SplitSidebarTests: XCTestCase {
   private static let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
+  /// The design's menus (design/tab-context-menus, #105), as `NSMenu` item titles: separators are "", Option
+  /// alternates are listed.
+  static let todayMenu = ["Rename", "Duplicate", "Pin Tab", "Move To", "", "Copy Link", "Copy Link as Markdown", "",
+                          "Archive Below", "Archive"]
+  static let splitMenu = ["Rename", "Duplicate Split View", "", "Separate All Tabs", "Convert to Vertical Split View",
+                          "", "Pin Tab", "Move To", "Share Split View"]
+  static let paneMenu = ["Mute", "Duplicate Split View", "Archive Below", "Share", "", "Remove Tab from Split View",
+                         "Archive"]
 
   /// A Space with Today `[t0, split(s0 ... sN-1), t1]`.
   private struct World {
@@ -109,8 +117,8 @@ final class SplitSidebarTests: XCTestCase {
     let harness = Harness(world.sidebar)
 
     XCTAssertEqual(try harness.menuTitles(world.split),
-                   ["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"])
-    XCTAssertEqual(try harness.menuTitles(world.today[0]), ["Move To", "Pin Tab"],
+                   Self.splitMenu)
+    XCTAssertEqual(try harness.menuTitles(world.today[0]), Self.todayMenu,
                    "a plain tab row has no split items; the pin item is BH-055's")
     harness.controller.close()
   }
@@ -133,9 +141,9 @@ final class SplitSidebarTests: XCTestCase {
     }
 
     XCTAssertEqual(try rightClick(world.split),
-                   ["Separate All Tabs", "Convert to Vertical Split View", "Duplicate Split View"])
-    XCTAssertEqual(try rightClick(world.panes[0]), ["Remove Tab from Split View"])
-    XCTAssertEqual(try rightClick(world.today[0]), ["Move To", "Pin Tab"],
+                   Self.splitMenu)
+    XCTAssertEqual(try rightClick(world.panes[0]), Self.paneMenu)
+    XCTAssertEqual(try rightClick(world.today[0]), Self.todayMenu,
                    "a plain tab row gets Move To (BH-047) and Pin Tab (BH-055)")
     harness.controller.close()
   }
@@ -144,7 +152,7 @@ final class SplitSidebarTests: XCTestCase {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
 
-    XCTAssertEqual(try harness.menuTitles(world.panes[1]), ["Remove Tab from Split View"])
+    XCTAssertEqual(try harness.menuTitles(world.panes[1]), Self.paneMenu)
     harness.controller.close()
   }
 
@@ -208,7 +216,7 @@ final class SplitSidebarTests: XCTestCase {
     try harness.choose("Convert to Vertical Split View", on: world.split)
 
     waitUntil("the shown split's axis to become .stacked") { harness.split.axis == .stacked }
-    XCTAssertEqual(try harness.menuTitles(world.split)?[1], "Convert to Horizontal Split View")
+    XCTAssertEqual(try harness.menuTitles(world.split)?[4], "Convert to Horizontal Split View")
     try harness.choose("Convert to Horizontal Split View", on: world.split)
     waitUntil("the shown split's axis to become .sideBySide again") { harness.split.axis == .sideBySide }
     harness.controller.close()
@@ -364,14 +372,13 @@ final class SplitSidebarTests: XCTestCase {
   /// does, and does not activate the row.
   func testCtrlClickOnASplitRowAsksForItsMenuAndDoesNotActivateIt() throws {
     try assertCtrlClickAsksForTheMenu(of: \.split,
-                                      titles: ["Separate All Tabs", "Convert to Vertical Split View",
-                                               "Duplicate Split View"])
+                                      titles: Self.splitMenu)
   }
 
   /// On a plain tab row a Ctrl-click gets the same menu a right-click gets
   /// (`testRightClickFillsTheMenuForTheClickedRow`), and does not activate the row.
   func testCtrlClickOnAPlainTabRowDoesNotActivateIt() throws {
-    try assertCtrlClickAsksForTheMenu(of: { $0.today[1] }, titles: ["Move To", "Pin Tab"])
+    try assertCtrlClickAsksForTheMenu(of: { $0.today[1] }, titles: Self.todayMenu)
   }
 
   func testPlainClickOnASplitRowActivatesIt() throws {

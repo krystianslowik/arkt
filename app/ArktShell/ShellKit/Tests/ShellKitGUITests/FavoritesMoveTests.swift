@@ -126,15 +126,18 @@ final class FavoritesMoveTests: XCTestCase {
   func testTodayAndPinnedRowsOfferMoveToFavorites() throws {
     let world = try Self.makeWorld(favorites: 2)
     let harness = Harness(world.sidebar)
-    XCTAssertEqual(try harness.moveToTitles(world.today[0]), ["Favorites"])
-    XCTAssertEqual(try harness.moveToTitles(world.pinned), ["Favorites"])
+    // Favorites, then the Spaces (#105); the only Space is the row's own, so it is listed disabled.
+    XCTAssertEqual(try harness.moveToTitles(world.today[0]), ["Favorites", "", "Work"])
+    XCTAssertEqual(try harness.moveToTitles(world.pinned), ["Favorites", "", "Work"])
     harness.controller.close()
   }
 
-  func testSplitAndPaneRowsHaveNoMoveTo() throws {
+  /// A split row moves whole (BH-115, design 3.5); a pane row has no Move To, so a pane never leaves its split
+  /// this way.
+  func testSplitRowsMoveWholeAndPaneRowsHaveNoMoveTo() throws {
     let world = try Self.makeWorld(favorites: 2)
     let harness = Harness(world.sidebar)
-    XCTAssertNil(try harness.moveToTitles(world.split))
+    XCTAssertEqual(try harness.moveToTitles(world.split), ["Favorites", "", "Work"])
     XCTAssertNil(try harness.moveToTitles(world.pane))
     harness.controller.close()
   }
