@@ -57,9 +57,11 @@ extension ShellWindowController {
       refreshExtensions()
     case .windowClosed:
       // Its tabs reported `.tabClosed(reason: .windowClosing)` already (contract rule 11). A window whose last page
-      // moved to another window (#300) stays open without an engine window; the next page it shows makes a new one.
-      let keepsWindow = handsOffEngineWindow && !isWindowCloseRequested
-      handsOffEngineWindow = false
+      // moved to another window (#300) or closed (#386) stays open without an engine window; the next page it shows
+      // makes a new one. Only a close the user asked for (close button, Close Window) or one the engine made on its
+      // own (`chrome.windows.remove`) closes it.
+      let keepsWindow = keepsWindowWithoutEngine && !isWindowCloseRequested
+      keepsWindowWithoutEngine = false
       engineWindow = nil
       engineActiveTab = nil
       isWindowCloseRequested = false
@@ -69,7 +71,14 @@ extension ShellWindowController {
       pendingArchives = [:]
       expectsEngineReactivation = false
       refreshExtensions()
-      if !keepsWindow { window?.close() }
+      let reshow = nodeToReshow
+      nodeToReshow = nil
+      guard keepsWindow else {
+        window?.close()
+        return
+      }
+      // A page opened in the closing window went with it (#386): the row still current shows it again.
+      if let reshow, sidebar.node(reshow) != nil, sidebarController.current == nil { activate(node: reshow) }
     }
   }
 

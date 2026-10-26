@@ -1790,3 +1790,37 @@ log. Esc then closed it with the "Peek closed" toast.
 
 Still open on #348: Settings > Links toggles, the source card hidden from VoiceOver and the Tab loop, XCUITest flows,
 and the Instruments trace at 120 Hz.
+
+## Cmd-W on the last page keeps the window (#386) (2026-10-26)
+
+Maintainer report: a Space with five rows, one loaded; Cmd-W on it closed the window. Expected: the window stays with
+an empty page and the other rows.
+
+- **Cause.** Chromium closes a `Browser` with its last tab. The engine window then reports `.windowClosed`, and the
+  shell closed its own window on every `.windowClosed` except after a Tab Handoff (#300). A Today tab's successor
+  (BH-071) did not help: its page was created in the closing `Browser` and went with it. The FakeEngine build does
+  not show it: FakeEngine keeps a window with no tabs open (checked in the Debug app: Cmd-W on the last loaded Today
+  tab archived it and showed the next row). On current main a parked reopen copy (#378) can also keep the `Browser`
+  alive; the fix does not rely on it.
+- **Fix (shell only).** The #300 flag becomes `keepsWindowWithoutEngine`: set when the window lets go of its last page,
+  by a handoff or by a page close (Cmd-W, the row's X, the page or an extension closing it). On `.windowClosed` the
+  shell window then stays open without an engine window, unless the user asked to close it (close button, Close
+  Window) or the engine closed the window on its own (`chrome.windows.remove`). A current row whose page went with the
+  closing window is shown again, in a new engine window. Chromium tears the closed window down against the stand-in
+  host window from #360 (`WindowHostAdapter.detach()`), so the shell window is not ordered out; no engine change.
+- **Empty state.** The card shows what an empty Space shows (#301): the themed card with no page, no new design and
+  no animation (Cmd-W is a keyboard action).
+- **Cmd-W with no page shown** closes the window, as Close Window does (CF-03: Arc's "Close current tab or window";
+  issue criterion). Before, it did nothing.
+
+- **Known limitation.** After a Today close whose successor loaded in the same, surviving engine window (FakeEngine,
+  or Chromium with a parked copy), the flag stays set until the next page this window opens. An extension's
+  `chrome.windows.remove` in that gap keeps the shell window and shows the current row again instead of closing it.
+
+Tests: `LastTabCloseTests` (9, GUI) with an engine double that closes a window with its last tab and parks no copy:
+pinned row with Cmd-W and with the row X (window open, empty card, all rows kept), the next row opens a new engine
+window, a Today row archives and its sibling shows in a new engine window, the engine closing the window (flag not
+set) and the close button still close it, Cmd-W with no page and in a fresh empty window closes it, and with
+`InMemoryEngine` (the emptied engine window stays, as in FakeEngine) a second Cmd-W closes the window. Real-app check
+(Debug, FakeEngine): Cmd-W with no page closed the window. Engine build and XCUITests not run: the shared engine
+worktree is in use (#364), and the machine was in use.
