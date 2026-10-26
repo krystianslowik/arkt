@@ -153,7 +153,7 @@ public final class ContentCardView: NSView {
 
   /// Centered, `ToastView.bottomInset` above the bottom edge, at most `ToastView.maxWidth` wide.
   private func layoutToast() {
-    guard let toastView else { return }
+    guard let toastView, !toastView.isHidden else { return }       // laid out again when it shows
     toastView.frame = toastView.frame(centeredIn: bounds)
   }
 

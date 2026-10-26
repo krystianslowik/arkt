@@ -40,7 +40,8 @@ final class ToastView: NSView {
   weak var presenter: ToastPresenter?
   /// The Space theme the toast takes its flavor and tint from (BH-190, decision 2); nil: the plain light toast.
   var theme: SpaceThemeInfo? {
-    didSet { if theme != oldValue { applyColors() } }
+    // A hidden toast recolors when it next shows (`configure`), so a Space swipe that crosses flavors costs nothing.
+    didSet { if theme != oldValue, isShowingToast { applyColors() } }
   }
   /// Dark text on a light fill for light themes, light on dark for dark ones (BH-190).
   var flavor: ThemeFlavor { theme?.flavor ?? .light }
@@ -231,7 +232,6 @@ final class ToastView: NSView {
     layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: layer?.cornerRadius ?? 0,
                                cornerHeight: layer?.cornerRadius ?? 0, transform: nil)
     if isMultiLine { layoutMultiLine() } else { layoutSingleLine() }
-    updateTrackingAreas()
   }
 
   private func layoutSingleLine() {
