@@ -84,6 +84,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Engine tabs are created lazily, when a sidebar node is first shown (`openEngineTab(for:)`).
   var tabsByNode: [NodeID: TabID] = [:]
   var nodeByTab: [TabID: NodeID] = [:]
+  /// Where Copy Link writes and Paste URL as New Tab reads (#105); tests use a private pasteboard.
+  var linkPasteboard: NSPasteboard = .general
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
   private var sidebarObservation: SidebarObservation?
   /// New Window (Cmd-N, `IDC_NEW_WINDOW`): set by the window set that owns this window. Nil: New Window is disabled.
@@ -164,6 +166,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
     wireFavorites()                                   // Move To, the sidebar drop and the BH-049 unload
     wirePinned()                                      // pin/unpin, reset, Replace Pin, Separate, the favicon click
+    wireTabActions()                                  // the row context menus, multi-selection, empty-area click
     commandBar.onOpen = { [weak self] url, target in
       switch target {
       case .currentTab, .newTab: self?.open(url, inNewTab: target == .newTab)
@@ -423,6 +426,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// NEEDS-RUNTIME-CHECK and not implemented).
   @objc public func closeTab(_ sender: Any?) {
     if peek.isOpen { peek.close(.keyboard); return }                // KB-078: Cmd-W closes the Peek
+    if closeSelection() { return }                                  // BH-072: a multi-selection closes at once
     guard let node = currentNode else { return }
     close(node: node)
   }
@@ -691,10 +695,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public func windowDidExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidBecomeKey(_ notification: Notification) {
     reapplyTrafficLights()
+    updateSidebarDimming(isKey: true)                // BH-025
     if !commandBarPrewarmed { commandBarPrewarmed = true; commandBar.prewarm() }
   }
   public func windowDidResignKey(_ notification: Notification) {
     reapplyTrafficLights()
+    updateSidebarDimming(isKey: false)               // BH-025
     tabSwitcher.windowDidResignKey()
   }
   public func windowDidChangeBackingProperties(_ notification: Notification) {
