@@ -186,6 +186,35 @@ final class LastTabCloseTests: XCTestCase {
     XCTAssertEqual(controller.window?.isVisible, false)
   }
 
+  /// The known gap: after a Today Cmd-W whose sibling loaded in the surviving engine window, the window still keeps
+  /// itself without an engine window. A close the user asks for (Close Window, Shift-Cmd-W) wins over it: the window
+  /// closes and nothing is shown again.
+  func testCloseWindowAfterATodayCloseInASurvivingEngineWindowClosesTheWindow() throws {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let first = try sidebar.addTab(url: Harness.url("t0"), title: "T0", in: .today(space))
+    let second = try sidebar.addTab(url: Harness.url("t1"), title: "T1", in: .today(space))
+    let source = ModelSidebarSource(sidebar: sidebar, now: { LastTabCloseTests.now })
+    let engine = InMemoryEngine()
+    let controller = ShellWindowController(engine: engine, sidebar: source, opensFirstTab: false)
+    controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 800), display: false)
+    controller.onArchive = { ids in source.archive(ids, reason: .manual, at: LastTabCloseTests.now) }
+    controller.showWindow(nil)
+    controller.activate(node: first)
+    let window = try XCTUnwrap(controller.engineWindow)
+
+    controller.closeTab(nil)
+    XCTAssertEqual(controller.engineWindow, window, "the sibling loaded in the same engine window")
+    XCTAssertEqual(controller.sidebarController.current, second)
+    XCTAssertTrue(controller.keepsWindowWithoutEngine)
+
+    controller.window?.performClose(nil)
+
+    XCTAssertFalse(engine.windowIDs.contains(window))
+    XCTAssertEqual(controller.window?.isVisible, false)
+    XCTAssertNil(controller.engineWindow, "no new engine window: nothing was shown again")
+  }
+
   /// A window that never showed a page closes on Cmd-W too.
   func testCmdWInAFreshEmptyWindowClosesIt() throws {
     let harness = try Harness(pinned: 1)
