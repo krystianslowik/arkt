@@ -14,6 +14,10 @@ public struct SettingsServices {
   public var importBrowserData: @MainActor () -> Void = {}
   /// Reveals Arkt's data folder in the Finder (the recovery toast's Show Files); the row is disabled while nil.
   public var showDataFolder: (@MainActor () -> Void)?
+  /// Crash reports kept on this Mac (#129). Cached by the app; the pane never waits on disk.
+  public var crashReportCount: @MainActor () -> Int = { 0 }
+  /// Send Crash Report: opens the newest kept report as a prefilled GitHub issue in the browser.
+  public var sendCrashReport: @MainActor () -> Void = {}
   /// The menu Settings > Shortcuts lists.
   public var shortcutsMenu: @MainActor () -> NSMenu? = { NSApp.mainMenu }
   /// The Spaces, in sidebar order.

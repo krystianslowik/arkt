@@ -99,6 +99,41 @@ struct CoreIsolationTests {
     #expect(offenders.isEmpty, "\(offenders)")
   }
 
+  // MARK: Crash reporting (#129)
+
+  /// The crash report target is pure Foundation: no ArktCore module, no GRDB, no UI, no engine.
+  @Test func crashReportingImportsOnlyFoundation() throws {
+    let modules = try Self.imports(under: "Sources/CrashReporting")
+    #expect(!modules.isEmpty, "the scanner sees the target")
+    let offenders = modules.filter { !["Foundation"].contains($0.module) }
+    #expect(offenders.isEmpty, "\(offenders)")
+  }
+
+  @Test func crashReportingDeclaresNoDependencies() throws {
+    let manifest = try String(contentsOf: Self.kit.appendingPathComponent("Package.swift"), encoding: .utf8)
+    let declaration = try #require(WebKitIsolationTests.declaration("target", named: "CrashReporting", in: manifest))
+    #expect(Self.quotedDependencies(in: declaration).isEmpty)
+  }
+
+  /// Only the app target links CrashReporting: no other ShellKit source imports it, so ShellUI stays free of it.
+  @Test func onlyTheAppImportsCrashReporting() throws {
+    let offenders = try Self.imports(under: "Sources").filter { $0.module == "CrashReporting" }
+    #expect(offenders.isEmpty, "\(offenders)")
+  }
+
+  /// The app's crash capture imports no ArktCore database module: reports are files, not rows.
+  @Test func crashCaptureInTheAppImportsNoPersistence() throws {
+    let app = Self.kit.appendingPathComponent("../App/CrashCapture").standardizedFileURL
+    let files = (FileManager.default.enumerator(at: app, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL } ?? [])
+      .filter { $0.pathExtension == "swift" }
+    #expect(!files.isEmpty, "the scanner sees App/CrashCapture")
+    let pattern = Self.importPattern
+    for file in files {
+      let modules = Self.importedModules(in: try String(contentsOf: file, encoding: .utf8), matching: pattern)
+      #expect(!modules.contains("Persistence") && !modules.contains("GRDB"), "\(file.lastPathComponent)")
+    }
+  }
+
   /// Guards against a vacuous pass: CoreBridge must import SidebarModel, so the scanner sees real imports.
   @Test func scannerSeesCoreBridgeImports() throws {
     #expect(try Self.imports(under: "Sources/CoreBridge").contains { $0.module == "SidebarModel" })

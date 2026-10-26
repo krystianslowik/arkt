@@ -28,6 +28,8 @@ final class AppSession {
   /// The app-level settings the Settings window edits (#307), over the same defaults and Toolbar setting; every
   /// browser window applies them.
   private(set) lazy var settings = AppSettings(defaults: AppEnvironment.userDefaults, toolbar: toolbarSetting)
+  /// Crash reporting (#129): capture behind the Settings > Privacy switch, local reports, the one-time ask.
+  private(set) lazy var crashCapture = CrashCapture(directory: location.directory, settings: settings)
   let archiveStore: ArchiveStore
   let settingsStore: SettingsStore
   let importer: ArcImportCoordinator
@@ -118,6 +120,7 @@ final class AppSession {
   /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine
   /// calls it after `embedderReady`, when the windows it queued exist).
   func start(outcome: OpenOutcome, defersWindows: Bool = false) {
+    crashCapture.start()                              // #129: before anything else can crash
     startFavicons(prune: outcome == .opened)          // before a window can create engine tabs
     launchNotice = Self.notice(for: outcome)
     if let notice = launchNotice {
@@ -152,6 +155,7 @@ final class AppSession {
   func finishLaunch(opensWindow: Bool) {
     let window = opensWindow ? windows.openWindow() : windows.primary
     if let window { presentOnboardingIfNeeded(on: window) }
+    askAboutCrashIfNeeded()
     if let notice = launchNotice, let window {
       launchNotice = nil
       window.toasts.show(notice.toast) { [location] in
@@ -159,6 +163,15 @@ final class AppSession {
       }
     }
     startAutoArchive()
+  }
+
+  /// The launch's one-time crash report ask (#129), on the primary window unless a first run covers it.
+  private func askAboutCrashIfNeeded() {
+    crashCapture.askAgain = { [weak self] in self?.askAboutCrashIfNeeded() }
+    crashCapture.askIfNeeded { [weak self] in
+      guard let window = self?.windows.primary, !window.isShowingOnboarding else { return nil }
+      return window.window
+    }
   }
 
   /// The app's hooks on every browser window, before it is shown. Its stored favicons load off the main actor
@@ -430,6 +443,8 @@ final class AppSession {
     }
     services.importBrowserData = { [weak self] in self?.importFromArc() }
     services.showDataFolder = { [location] in NSWorkspace.shared.activateFileViewerSelecting([location.directory]) }
+    services.crashReportCount = { [weak self] in self?.crashCapture.storedCount ?? 0 }     // #129
+    services.sendCrashReport = { [weak self] in self?.crashCapture.sendNewest() }
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
     return services
   }
@@ -654,5 +669,6 @@ extension AppSession: AppSettingsObserver {
   func appSettingsDidChange(_ settings: AppSettings) {
     for window in windows.controllers { window.tabNavigationSettings = settings.tabNavigation }
     syncLittleArktHotKey()                            // #354: the Links switch turns the system-wide hotkey on
+    crashCapture.settingsDidChange()                  // #129: the Privacy switch gates what is kept
   }
 }

@@ -42,6 +42,41 @@ final class DialogTests: XCTestCase {
     XCTAssertEqual(view.accessibilityLabel(), "Arkt couldn't open its data")
   }
 
+  /// The crash report ask (#129) in its sheet: Send is the mustard Return default on the trailing edge, Always Send
+  /// and Don't Send neutral to its left in that order, all inside the 420 pt width, nothing clipped.
+  func testTheCrashReportAskLaysOutThreeAnswers() throws {
+    let view = DialogSheetView(content: .crashReportAsk, insets: .sheet)
+    let height = view.layoutContent(width: 420)
+    view.frame = NSRect(x: 0, y: 0, width: 420, height: height)
+    let send = view.primaryButton
+    let always = try XCTUnwrap(view.secondaryButton)
+    let dont = try XCTUnwrap(view.cancelButton)
+    XCTAssertEqual(send.style, .primary)
+    XCTAssertEqual(send.keyEquivalent, "\r")
+    XCTAssertEqual(send.frame.maxX, 400)
+    XCTAssertEqual(always.frame.maxX, send.frame.minX - 8)
+    XCTAssertEqual(dont.frame.maxX, always.frame.minX - 8)
+    XCTAssertGreaterThanOrEqual(dont.frame.minX, 20, "the row fits the sheet")
+    XCTAssertEqual(view.paragraphFields.count, 2)
+    for field in view.paragraphFields {
+      XCTAssertLessThanOrEqual(field.frame.maxX, 400)
+      XCTAssertLessThanOrEqual(field.frame.maxY, send.frame.minY)
+    }
+    XCTAssertEqual(view.titleField.stringValue, "Arkt quit unexpectedly. Send a report?")
+    XCTAssertTrue(view.initialFocus === send)
+  }
+
+  /// Each answer reports itself once: Send primary, Always Send secondary, Don't Send cancel (Escape).
+  func testTheCrashReportAskAnswers() {
+    let view = DialogSheetView(content: .crashReportAsk)
+    var answers: [DialogContent.Answer] = []
+    view.onAnswer = { answers.append($0) }
+    view.primaryButton.performClick(nil)
+    view.secondaryButton?.performClick(nil)
+    view.cancelButton?.performClick(nil)
+    XCTAssertEqual(answers, [.primary, .secondary, .cancel])
+  }
+
   /// A 32 pt icon sits beside the title (5 pt lower), and the body is indented 44 under it.
   func testABesideIconIndentsTheBody() throws {
     let prompt = SpaceRemovalPrompt(space: UUID(), title: "Work", hasItems: true)
