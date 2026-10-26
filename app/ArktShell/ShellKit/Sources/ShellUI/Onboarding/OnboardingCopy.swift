@@ -77,10 +77,10 @@ public enum OnboardingCopy {
     }
   }
 
+  /// "All of it" only when nothing failed (#375), so the note never contradicts itself.
   public static func importedNote(skipped: Int) -> String {
-    let base = "All of it came over. Your other browser stays as it is."
-    guard skipped > 0 else { return base }
-    return base + " \(skipped) \(skipped == 1 ? "item" : "items") couldn't be imported."
+    guard skipped > 0 else { return "All of it came over. Your other browser stays as it is." }
+    return "Most of it came over. \(skipped) \(skipped == 1 ? "item" : "items") couldn't be imported."
   }
 
   public static let importButton = "Import"

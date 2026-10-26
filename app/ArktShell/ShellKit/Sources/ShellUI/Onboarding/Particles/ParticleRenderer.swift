@@ -17,22 +17,42 @@ final class ParticleRenderer {
     var preferredFrameRate: Float { self == .full ? 120 : 60 }
   }
 
+  /// Which of the last 60 frames went over 2 ms of GPU time (section 7.4): a sliding window, so a sustained
+  /// alternating overload trips the fallback tier while a lone spike does not. Bit 0 is the newest frame.
+  struct GPUBudgetWindow: Equatable, Sendable {
+    static let frames = 60
+    static let tripCount = 30
+    static let budgetMilliseconds = 2.0
+    private static let mask: UInt64 = (1 << UInt64(frames)) - 1
+
+    private var bits: UInt64 = 0
+
+    mutating func record(_ milliseconds: Double) {
+      bits = (bits << 1 | (milliseconds > Self.budgetMilliseconds ? 1 : 0)) & Self.mask
+    }
+
+    /// Frames over budget among the last 60.
+    var overBudget: Int { bits.nonzeroBitCount }
+    /// 30 of the last 60 frames over budget: 8,192 motes at 60 Hz from here on.
+    var tripsFallback: Bool { overBudget >= Self.tripCount }
+  }
+
   /// GPU milliseconds of the frames completed so far, written from Metal's completion queue.
   final class GPUTimes: Sendable {
-    private let state = Mutex<(last: Double, overBudget: Int, samples: [Double])>((0, 0, []))
+    private let state = Mutex<(last: Double, window: GPUBudgetWindow, samples: [Double])>((0, .init(), []))
 
     func record(_ milliseconds: Double) {
       state.withLock {
         $0.last = milliseconds
-        $0.overBudget = milliseconds > 2 ? $0.overBudget + 1 : 0
+        $0.window.record(milliseconds)
         if $0.samples.count < 4_096 { $0.samples.append(milliseconds) }
       }
     }
 
-    /// Consecutive frames over 2 ms of GPU time.
-    var consecutiveOverBudget: Int { state.withLock { $0.overBudget } }
+    /// 30 of the last 60 frames went over 2 ms of GPU time.
+    var tripsFallback: Bool { state.withLock { $0.window.tripsFallback } }
     var samples: [Double] { state.withLock { $0.samples } }
-    func reset() { state.withLock { $0 = (0, 0, []) } }
+    func reset() { state.withLock { $0 = (0, .init(), []) } }
   }
 
   let device: any MTLDevice

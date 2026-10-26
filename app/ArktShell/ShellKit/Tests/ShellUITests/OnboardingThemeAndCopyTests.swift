@@ -110,12 +110,21 @@ struct OnboardingCopyTests {
     #expect(C.foundAnnouncement(one) == "Found 1 Space, 1 pinned tab, 1 Favorite and 1 folder.")
   }
 
-  @Test func importedNoteMentionsSkippedItemsOnlyWhenThereAreSome() {
+  /// Decision of #375: "All of it came over." only when nothing failed; otherwise "Most of it came over." and the
+  /// count, so the note never contradicts itself.
+  @Test func importedNoteSaysAllOnlyWhenNothingFailed() {
     #expect(C.importedNote(skipped: 0) == "All of it came over. Your other browser stays as it is.")
-    #expect(C.importedNote(skipped: 1)
-            == "All of it came over. Your other browser stays as it is. 1 item couldn't be imported.")
-    #expect(C.importedNote(skipped: 4)
-            == "All of it came over. Your other browser stays as it is. 4 items couldn't be imported.")
+    #expect(C.importNote(.imported(skipped: 0), mode: .firstRun)
+            == "All of it came over. Your other browser stays as it is.")
+  }
+
+  @Test(arguments: [(1, "Most of it came over. 1 item couldn't be imported."),
+                    (4, "Most of it came over. 4 items couldn't be imported.")])
+  func importedNoteSaysMostWhenSomeFailed(skipped: Int, note: String) {
+    #expect(C.importedNote(skipped: skipped) == note)
+    #expect(C.importNote(.imported(skipped: skipped), mode: .firstRun) == note)
+    #expect(C.importNote(.imported(skipped: skipped), mode: .reentry) == note)
+    #expect(!note.contains("All of it"))
   }
 
   @Test func progressAndTips() {

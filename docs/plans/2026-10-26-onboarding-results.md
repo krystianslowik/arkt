@@ -55,3 +55,16 @@ Machine: Apple M2 Pro (10 cores), macOS 27.0, built-in display at 120 Hz. Not me
 | Mark samples at 140 px | as PR 1 |
 
 Metal System Trace was not recorded; the GPU times above come from the command buffers' `gpuStartTime` / `gpuEndTime`, and each display-link callback is a `particles.frame` interval in `ShellSignposts` for Instruments.
+
+## #375: Imported copy, fallback window, footer fade
+
+Maintainer decisions after the PR 1 and PR 2 review notes, recorded as decisions 10 to 12 in the spec.
+
+| Change | Where |
+|---|---|
+| Imported note: "All of it came over. Your other browser stays as it is." only with nothing skipped; otherwise "Most of it came over. {n} items couldn't be imported." | `OnboardingCopy.importedNote`, `OnboardingCopyTests`, `ShellKitGUITests/OnboardingTests.testImportedNoteSaysAllOrMostByWhatFailed` |
+| Fallback tier when 30 of the last 60 frames are over 2 ms of GPU time: a 60-bit window, newest frame in bit 0, no allocation | `ParticleRenderer.GPUBudgetWindow`, `MetalOnboardingStage`, `ParticleFallbackTriggerTests` |
+| Footer (Back, "N of 6", Skip setup) fades out with the content as the fold begins: 160 ms strong ease-out, text kept while it fades, buttons and VoiceOver off at once; under Reduce Motion it goes at once | `OnboardingView.concealFooter`, `OnboardingController.finish`, `ShellKitGUITests/OnboardingTests.testFooterFadesOutAsTheFoldBegins`, `testFooterGoesAtOnceUnderReduceMotion` |
+
+Before, the finish hid the footer through the step-change path: a 250 ms fade, with the progress text blanked in
+the same frame instead of fading.

@@ -46,6 +46,9 @@ the system font) were rejected as generic. Three directions were then drawn from
 | 7 | First-launch window size | **At least 1000 x 680 pt**, clamped to the screen's visible frame |
 | 8 | Look and experience | **Hero**: every step is the arkt.dev hero. Window-wide brand field, Avenir Next at the website's scale, the website's pill buttons, one particle field as the stage |
 | 9 | Arc in the product | **The word "Arc" never appears in the product's UI** (onboarding copy, swatch names, alerts, menu items, accessibility labels and announcements), and no visual depicts Arc. The copy speaks of "your browser data" and "your other browser". This spec and engineering text still name Arc as the data source |
+| 10 | Imported note when items were skipped (#375) | **"All of it came over." only when nothing failed**; otherwise "Most of it came over. {n} items couldn't be imported." |
+| 11 | Particle fallback trigger (#375) | **30 of the last 60 frames over 2 ms of GPU time** (a sliding window), not 30 consecutive frames |
+| 12 | Footer during the finish fold (#375) | **The footer fades out at the start of the fold**, with the content, so the ribbon never passes behind it |
 
 Changes the Hero layout makes to the earlier spec, for review:
 
@@ -253,7 +256,7 @@ also real text for accessibility (drawn transparent over the field, visible with
 | Counting | Looking for your browser data | Bring your stuff over. | Your other browser stays as it is. | Start fresh, Import (disabled). Numbers rise as the pass finds items |
 | Ready | We found your browser data | Bring your stuff over. | Your other browser stays as it is. | Start fresh, **Import** |
 | Importing | Importing your browser data | Bringing it over. | Your other browser stays as it is. | Start fresh (disabled), Importing... (disabled). Each category's number turns mustard and its label gets a tick as it lands, in the importer's real order |
-| Imported | Imported | Your setup is here. | All of it came over. Your other browser stays as it is. Plus "{n} items couldn't be imported." only when some were skipped | **Continue**. Every label ticked |
+| Imported | Imported | Your setup is here. | Nothing skipped: All of it came over. Your other browser stays as it is. Some skipped: Most of it came over. {n} items couldn't be imported. ("1 item" for one; decision 10) | **Continue**. Every label ticked |
 | Failed | Your browser data | Couldn't import your data. | Arkt couldn't read it. Try again, or import later from File > Import Browser Data. | Start fresh, **Try again**. The numbers scatter into a loose cloud and the labels hide |
 
 Counts only: no Space names, titles, URLs or paths. The first-run import shows Imported instead of the
@@ -436,7 +439,8 @@ path (streams, orbits, rising, paging).
   0.4 ms), CPU at most 0.3 ms per display-link callback. `ShellSignposts` intervals around each frame and Metal
   System Trace verify it; the frame-pacing probe must show no new hitches.
 - **Fallback tier:** N = 8,192 at 60 Hz in Low Power Mode, at serious or critical thermal state, on Intel GPUs, or
-  after 30 consecutive frames over 2 ms of GPU time.
+  when 30 of the last 60 frames took over 2 ms of GPU time (a sliding window, decision 11: a sustained alternating
+  overload trips it, a single spike does not).
 - **No particle layer:** if Metal is unavailable or setup fails, the flow works unchanged: the raster mark on
   Welcome, Default browser, Extensions and Done; the counts as Avenir Next text; the CSS-style key caps and demos of
   the first draft in the tour; the browser appears with a 240 ms fade.
@@ -463,7 +467,7 @@ uses ease-in. Every transition retargets from the presented value when interrupt
 | M5 Imported | Import done | Eyebrow, title and note change; P5 back to ink | Text crossfade 200 ms |
 | M6 Theme preview | Swatch, appearance | Preview gradient crossfade, wash, swatch ring (opacity and scale 0.92 to 1), segmented thumb, P6 | Crossfade 0.28 s; ring 160 ms opacity, 220 ms scale; thumb 300 ms `cubic-bezier(0.32, 0.72, 0, 1)` |
 | M7 Name field | Focus | The underline widens 120 to 180 and turns mustard | 300 ms ease-out |
-| M8 Finish | Start browsing, confirmed Skip setup | Content out; P9; the browser fades in at +650 ms; the command bar at +900 ms; the field fades from +900 ms | Content 160 ms ease-out; browser 240 ms ease-out; command bar opacity 200 ms and scale 0.97 to 1 over 260 ms |
+| M8 Finish | Start browsing, confirmed Skip setup | Content and footer out as P9 begins (decision 12: the ribbon never passes behind Back, "N of 6" or Skip setup); P9; the browser fades in at +650 ms; the command bar at +900 ms; the field fades from +900 ms | Content and footer 160 ms ease-out, the footer's text kept while it fades; Reduce Motion: the footer goes at once with the browser's reveal. Browser 240 ms ease-out; command bar opacity 200 ms and scale 0.97 to 1 over 260 ms |
 | M9 Press | Any button or swatch | Scale 0.97 (swatches 0.95) with the pressed fill | 160 ms ease-out |
 | M10 Skip setup sheet | Skip setup, Escape on Welcome | The system sheet animation | System |
 

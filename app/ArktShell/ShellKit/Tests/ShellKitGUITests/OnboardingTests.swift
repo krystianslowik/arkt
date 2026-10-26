@@ -18,6 +18,8 @@ final class FakeOnboardingServices: OnboardingServices {
     ("Personal", SpaceThemeInfo(baseColors: [.srgb(hex: 0xF4E4EC), .srgb(hex: 0xEFA8C4)], isDark: false)),
   ]
   var importFails = false
+  /// Items the fake import reports as not imported.
+  var importSkipped = 0
   private var importContinuation: CheckedContinuation<Void, Never>?
   private(set) var importStarted = false
   let sidebar: StubSidebar
@@ -42,7 +44,7 @@ final class FakeOnboardingServices: OnboardingServices {
     await withCheckedContinuation { importContinuation = $0 }
     if importFails { return .failed }
     let added = importSpaces.map { sidebar.addSpace(title: $0.0, theme: $0.1) }
-    return .imported(skipped: 0, addedSpaces: added)
+    return .imported(skipped: importSkipped, addedSpaces: added)
   }
 
   /// Lets the running import finish.
@@ -75,6 +77,21 @@ final class LateFoldStage: OnboardingStage {
     self.completion = nil
     completion?()
   }
+}
+
+/// A stage that reports what the footer looked like the moment the fold began.
+@MainActor
+final class FoldWatchStage: OnboardingStage {
+  let view = NSView()
+  var drawsCounts: Bool { false }
+  var onFoldStart: (@MainActor () -> Void)?
+
+  func show(_ formation: OnboardingFormation, appearance: OnboardingAppearance, animated: Bool) {}
+  func finish(onto card: CGRect, appearance: OnboardingAppearance, completion: @escaping @MainActor () -> Void) {
+    onFoldStart?()
+    completion()
+  }
+  func setVisible(_ visible: Bool) {}
 }
 
 /// The first run over a real shell window (onboarding spec sections 2, 6, 10 to 13): both branches to the browser,
@@ -505,7 +522,105 @@ final class OnboardingTests: XCTestCase {
     window.close()
   }
 
+  // MARK: - Imported note
+
+  /// Decision of #375: the Imported note says "All of it" only when nothing failed.
+  func testImportedNoteSaysAllOrMostByWhatFailed() throws {
+    for (skipped, note) in [(0, "All of it came over. Your other browser stays as it is."),
+                            (3, "Most of it came over. 3 items couldn't be imported.")] {
+      let stub = StubSidebar()
+      let window = makeWindow(stub)
+      let services = FakeOnboardingServices(sidebar: stub, arcFound: true)
+      services.importSkipped = skipped
+      let onboarding = present(window, services)
+      onboarding.performPrimary()                                         // Get started
+      XCTAssertTrue(spin { onboarding.flow.importPhase == .ready })
+      onboarding.performPrimary()                                         // Import
+      XCTAssertTrue(spin { services.importStarted })
+      services.finishImport()
+      XCTAssertTrue(spin { onboarding.flow.importPhase == .imported(skipped: skipped) })
+      XCTAssertEqual(try stepView(onboarding).ledeLabel.text, note)
+      window.close()
+    }
+  }
+
   // MARK: - Finish
+
+  /// The footer (Back, progress, Skip setup) the moment the fold began.
+  private struct FooterAtFoldStart {
+    var opacities: [Float]
+    var fades: [CABasicAnimation?]
+    var progress: String
+    var enabled: [Bool]
+    var inTree: Bool
+  }
+
+  /// Opens the flow on Default browser (Back, "2 of 4" and Skip setup all shown), confirms Skip setup and returns
+  /// the footer's layers as they were when the fold began.
+  private func footerAtFoldStart(reduceMotion: Bool) throws -> FooterAtFoldStart {
+    let stub = StubSidebar()
+    let window = makeWindow(stub)
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: false)
+    let stage = FoldWatchStage()
+    let onboarding = window.presentOnboarding(
+      services: services, options: .init(mode: .firstRun, includesExtensions: false), stage: stage)
+    onboarding.view.layoutSubtreeIfNeeded()
+    spin { onboarding.flow.conditions.arc != .checking }
+    var appearance = onboarding.view.appearanceModel
+    appearance.reduceMotion = reduceMotion
+    onboarding.appearanceChanged(appearance)
+    onboarding.performPrimary()                                           // Welcome to Make it yours
+    onboarding.performEscape()                                            // Skip to Default browser
+    XCTAssertEqual(onboarding.flow.step, .defaultBrowser)
+    settle(0.3)
+    let footer: [NSView] = [onboarding.view.backButton, onboarding.view.progressLabel, onboarding.view.skipButton]
+    let layers = try footer.map { try XCTUnwrap($0.layer) }
+    XCTAssertEqual(layers.map(\.opacity), [1, 1, 1], "the whole footer shows before the finish")
+    let shownProgress = onboarding.view.progressLabel.text
+    XCTAssertFalse(shownProgress.isEmpty)
+    var seen: FooterAtFoldStart?
+    stage.onFoldStart = { [view = onboarding.view] in
+      seen = FooterAtFoldStart(
+        opacities: layers.map(\.opacity),
+        fades: layers.map { $0.animation(forKey: "opacity") as? CABasicAnimation },
+        progress: view.progressLabel.text,
+        enabled: [view.backButton.isEnabled, view.skipButton.isEnabled],
+        inTree: (view.accessibilityChildren() ?? []).contains { ($0 as? NSView) === view.progressLabel })
+    }
+    onboarding.confirmSkip = { answer in answer(true) }
+    onboarding.view.onSkipSetup?()
+    let result = try XCTUnwrap(seen, "the fold began")
+    XCTAssertEqual(result.progress, shownProgress, "the progress fades with its text, it does not blank first")
+    XCTAssertTrue(spin { !window.isShowingOnboarding })
+    window.commandBar.hide()
+    window.close()
+    return result
+  }
+
+  /// Decision of #375: the footer fades out at the start of the fold, with the content (160 ms, the strong
+  /// ease-out), so the ribbon never passes behind it.
+  func testFooterFadesOutAsTheFoldBegins() throws {
+    let footer = try footerAtFoldStart(reduceMotion: false)
+    XCTAssertEqual(footer.opacities, [0, 0, 0])
+    for fade in footer.fades {
+      let fade = try XCTUnwrap(fade, "the footer fades")
+      XCTAssertEqual(fade.duration, 0.16, accuracy: 0.001)
+      XCTAssertEqual(fade.fromValue as? Float, 1)
+      XCTAssertEqual(fade.timingFunction, OnboardingMotion.easeOut)
+    }
+    XCTAssertEqual(footer.enabled, [false, false], "Back and Skip setup stop taking clicks at once")
+    XCTAssertFalse(footer.inTree, "VoiceOver no longer reads the progress")
+  }
+
+  /// Reduce Motion: the browser appears at once (section 9), and the footer goes with it, without a fade.
+  func testFooterGoesAtOnceUnderReduceMotion() throws {
+    let footer = try footerAtFoldStart(reduceMotion: true)
+    XCTAssertEqual(footer.opacities, [0, 0, 0])
+    XCTAssertEqual(footer.fades.compactMap { $0 }.count, 0, "no fade under Reduce Motion")
+    XCTAssertEqual(footer.enabled, [false, false])
+    XCTAssertFalse(footer.inTree)
+  }
+
 
   /// The particle field folds for about 1.7 s, longer than the 0.9 s until the browser shows and the window lets the
   /// controller go. The overlay still leaves when the fold ends, with nothing but the window holding the flow.

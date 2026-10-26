@@ -10,7 +10,7 @@ import os
 /// miniaturized or hidden, under Reduce Motion once a change has settled, and for good after the finish (P9).
 ///
 /// Tiers: 20,480 motes at 120 Hz; 8,192 at 60 Hz in Low Power Mode, at serious or critical thermal state, on a GPU
-/// that is not Apple silicon, or after 30 consecutive frames over 2 ms of GPU time.
+/// that is not Apple silicon, or after 30 of the last 60 frames over 2 ms of GPU time.
 @MainActor
 public final class MetalOnboardingStage: NSObject, OnboardingStage {
   public var view: NSView { particleView }
@@ -199,12 +199,12 @@ public final class MetalOnboardingStage: NSObject, OnboardingStage {
     let additive = appearance.flavor == .dark && !appearance.reduceTransparency
     renderer.frame(into: drawable, uniforms: uniforms, additive: additive)
     // Not during the fold: a new renderer would rebuild the last step's shape instead of the card.
-    if renderer.tier == .full, finishCompletion == nil, renderer.gpuTimes.consecutiveOverBudget >= 30 {
+    if renderer.tier == .full, finishCompletion == nil, renderer.gpuTimes.tripsFallback {
       dropToFallbackTier()
     }
   }
 
-  /// After 30 consecutive frames over 2 ms of GPU time: 8,192 motes at 60 Hz from here on.
+  /// After 30 of the last 60 frames over 2 ms of GPU time: 8,192 motes at 60 Hz from here on.
   private func dropToFallbackTier() {
     let size = particleView.bounds.size
     guard let fallback = ParticleRenderer(device: renderer.device, tier: .fallback,
