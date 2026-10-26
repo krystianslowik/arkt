@@ -36,7 +36,7 @@ Write down before commenting:
 Check each item that the diff can touch. For each, point to the line or test that shows it holds.
 
 - [ ] **Split View survives sidebar moves.** Moving, pinning, reordering or dragging a tab in a Split View keeps or
-      dissolves the split on purpose, never leaves it broken (#374, #407).
+      dissolves the split on purpose, never leaves it broken (#374). Reopening a closed pane restores its split (#407).
 - [ ] **Automatic policies spare what the user sees.** Auto-archive and Clear Today never archive the current tab or
       a tab shown in another window (#429, #435).
 - [ ] **No stale state after moves.** After a tab moves between Spaces, windows or panes, its URL and `lastActiveAt`
@@ -52,7 +52,7 @@ Check each item that the diff can touch. For each, point to the line or test tha
       `CoreBridge` and the rest of `ShellKit/Sources` do not import `Persistence` or `GRDB`; only `App/*` imports
       `Persistence`; only `FakeEngineKit` imports WebKit. The isolation tests are the gate.
 - [ ] **No user-facing "Arc".** Menus, toasts, alerts, empty states and accessibility labels say "browser data".
-- [ ] **Mustard is a fill only.** Never text or a stroke; text on mustard is graphite.
+- [ ] **Mustard is a fill.** Never a stroke; text on mustard is graphite; mustard text only on graphite.
 - [ ] **Reduce Motion.** Every new animation has a Reduce Motion variant, and a test covers it.
 - [ ] **Tests fail without the fix.** The author names the line they broke and shows the test failing. If not, ask.
 - [ ] **Key routing.** Shortcuts reach the controller, not a focused text field or the window (#373, #397).
@@ -72,7 +72,7 @@ Merge the latest upstream `main` into a pushed branch; never force-push a branch
 
 ```zsh
 git fetch origin
-git merge origin/main
+git merge origin/main   # upstream/main in a fork
 git push
 ```
 
@@ -81,7 +81,7 @@ Rerun the tests after the merge and post the new counts. Never push to someone e
 ## CI
 
 - The required check is **Swift tests** (`CONTRIBUTING.md`, section 12). GUI and UI test jobs are informative.
-- A test with a known flaky issue may be rerun once: `gh run rerun <run-id> --failed`. A second failure is real.
+- Team convention: a test with a known flaky issue may be rerun once: `gh run rerun <run-id> --failed`. A second failure is real.
   A flake without an issue gets one (see `arkt-flaky-tests`).
 
 ## Merge
