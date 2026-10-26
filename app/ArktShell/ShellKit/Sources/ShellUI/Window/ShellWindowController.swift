@@ -100,6 +100,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var linkPasteboard: NSPasteboard = .general
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
   private var sidebarObservation: SidebarObservation?
+  /// The window's appearance and Increase Contrast, for the Space themes (#410).
+  var themeContextObserver: ThemeContextObserver?
   /// A tab dragged out of the sidebar over no window (GS-013): the window set opens a window at the screen point and
   /// shows the tab there, taking its page over (#300). Nil: the drag-out does nothing.
   var onDragOutToNewWindow: (@MainActor (NodeID, NSPoint) -> Void)?
@@ -216,6 +218,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     wireSplit()
     wireExtensions()                        // tab and window events start with the engine window (attach)
     wireTabNavigation()
+    wireThemeDrawing()
     // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
       switch change {
@@ -256,12 +259,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var currentSpace: SpaceID? { sidebarController.currentSpace }
 
   private func refreshThemes() {
-    // One theme per paged Space, so theme index == page index even if a Space lookup fails.
     // Crossfade only when the current Space's theme changed; a reorder snaps (the pager already jumped).
     let crossfade = sidebarController.consumeThemeCrossfade()
-    rootView.themeBackground.replaceThemes(sidebarController.spaces.map {
-      sidebar.space($0)?.theme ?? SpaceThemeInfo(baseColors: [.white(1)], isDark: false)
-    }, crossfade: crossfade)
+    rootView.themeBackground.replaceThemes(drawnThemes(), crossfade: crossfade)
     refreshToastFlavor()
   }
 
