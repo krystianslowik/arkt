@@ -225,6 +225,10 @@ user decision 4.
     `ShellUI.SplitEditError.splitFull` and the other split errors into `.invalid`. New `SidebarMutation` cases are
     `.addPane` and `.editSplit`. `errorText(for:)` returns "Cannot Add New Pane" (BH-116, exact [S] string) for
     `.splitFull`.
+14. **Reopen a closed pane (maintainer, 2026-10-26, #403).** A pane closed with its X (#388) or Cmd-W and reopened
+    with Cmd-Shift-T or Cmd-Z goes back into the same split at its old index and width share, if that split still
+    exists and has room; otherwise it reopens as a Today tab. The panes on screen reflow on the #388 spring; Reduce
+    Motion crossfades.
 
 ## New runtime checks (added to the spec's RT table in S0)
 

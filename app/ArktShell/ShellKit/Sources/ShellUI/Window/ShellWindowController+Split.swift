@@ -27,8 +27,11 @@ struct SplitWindowState {
   var dropOverlay: SplitDropOverlayView?
   /// A pane closed by its X (#388) whose split has not shown without it yet: the next show of that split reflows on
   /// the spring (or, with one pane left, the last page grows into the single card). Keyboard closes (Cmd-W,
-  /// Ctrl-Shift--) stay instant: a keyboard action is never animated.
+  /// Ctrl-Shift--) stay instant.
   var reflowAfterClose: (split: NodeID, pane: NodeID)?
+  /// A closed pane reopened into the split on screen (#403, Cmd-Shift-T or Cmd-Z, by maintainer decision on the
+  /// issue): the next show of that split with the pane back reflows the panes on screen on the spring.
+  var reflowAfterReopen: (split: NodeID, pane: NodeID)?
 }
 
 /// Where a new pane goes relative to the focused tab, and the orientation of a split made from a plain tab (BH-117).
@@ -81,7 +84,10 @@ extension ShellWindowController {
       return openEngineTab(for: pane).flatMap { engine.contentView(for: $0) }
     }
     let focusMoved = currentTab != focusTab || splitState.split != split
-    let animated = consumeReflow(showing: split, panes: panes)
+    // A re-show of the same panes while they reflow (the resync after a reopen) carries the spring on.
+    let continuesReflow = rootView.split.isReflowing && splitState.split == split && splitState.panes == panes
+    let reopened = consumeReopenReflow(showing: split, panes: panes)
+    let animated = consumeReflow(showing: split, panes: panes) || reopened || continuesReflow
     rootView.card.setContent(nil)                               // a page shown alone may move into a pane card
     splitState.split = split
     splitState.panes = panes
@@ -102,6 +108,7 @@ extension ShellWindowController {
   /// ended because a pane closed by its X, the page left alone grows from its pane into the card (#388).
   func hideSplit() {
     guard splitState.split != nil else { return }
+    splitState.reflowAfterReopen = nil
     let survivorFrame = consumeReflow(showing: nil, panes: []) ? lastPaneFrame() : nil
     splitState.split = nil
     splitState.panes = []
@@ -141,6 +148,19 @@ extension ShellWindowController {
       return false
     }
     splitState.reflowAfterClose = nil
+    return true
+  }
+
+  /// Whether this show of `split` is the one after a pane was reopened into it (#403): true once the pane is back.
+  /// A show of another split forgets the reopen.
+  private func consumeReopenReflow(showing split: NodeID, panes: [NodeID]) -> Bool {
+    guard let pending = splitState.reflowAfterReopen else { return false }
+    guard pending.split == split, pending.split == splitState.split else {
+      splitState.reflowAfterReopen = nil
+      return false
+    }
+    guard panes.contains(pending.pane) else { return false }
+    splitState.reflowAfterReopen = nil
     return true
   }
 
