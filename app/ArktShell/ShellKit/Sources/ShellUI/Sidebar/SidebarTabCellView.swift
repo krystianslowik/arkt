@@ -1,7 +1,7 @@
 import AppKit
 
-/// Favicon (16 pt at x 10), title (14 pt medium at x 34) and the hover close (X) button at the trailing edge
-/// (GS-043). Frames set in `layout()`; no constraints.
+/// Favicon (16 pt at x 10), title (14 pt medium at x 34), the audio button of a page that plays or is muted (#364)
+/// and the hover close (X) button at the trailing edge (GS-043). Frames set in `layout()`; no constraints.
 @MainActor
 public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
   public static let reuseIdentifier = NSUserInterfaceItemIdentifier("SidebarTabCellView")
@@ -11,6 +11,10 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
   /// Shown while the row is hovered and the row has a close action. Its target and action are set by the
   /// outline controller; it is hidden (so neither hit-tested nor in the accessibility tree) otherwise.
   public let closeButton = HoverCloseButton()
+  /// The page's sound (#364): shown while it plays or is muted, left of the X's slot so the hover X never moves it.
+  /// A click mutes or unmutes; the outline sets its target and action.
+  public let audioButton = HoverCloseButton()
+  public private(set) var audio: TabAudio = .silent
 
   /// What the X does for this row; nil (folders) never shows it.
   public private(set) var closeAction: RowCloseAction?
@@ -30,8 +34,11 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
     titleField.autoresizingMask = []
     addSubview(faviconView)
     addSubview(titleField)
+    addSubview(audioButton)
     addSubview(closeButton)
     closeButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.rowClose)
+    audioButton.setAccessibilityIdentifierWithCell(AXID.Sidebar.rowAudio)
+    audioButton.fadeDuration = SidebarMetrics.audioButtonFadeDuration
     // The row's proxy lists this cell as its one child (#269); the title and the X sit under it.
     setAccessibilityElement(true)
     setAccessibilityRole(.cell)
@@ -50,7 +57,7 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
   public private(set) var isClosing = false
 
   public func configure(title: String, image: NSImage, flavor: ThemeFlavor, closeAction: RowCloseAction? = nil,
-                        isClosing: Bool = false) {
+                        isClosing: Bool = false, audio: TabAudio = .silent) {
     if isClosing != self.isClosing {
       self.isClosing = isClosing
       let alpha: CGFloat = isClosing ? Self.closingAlpha : 1
@@ -61,10 +68,12 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
     titleField.stringValue = title
     titleField.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     faviconView.image = image
-    if flavor != self.flavor || closeButton.image == nil {
+    let restyled = flavor != self.flavor || closeButton.image == nil
+    if restyled {
       self.flavor = flavor
       closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale)
     }
+    applyAudio(audio, restyled: restyled, animated: false)
     self.closeAction = closeAction
     closeButton.toolTip = closeAction?.tooltip
     closeButton.setAccessibilityLabel(closeAction?.tooltip)
@@ -82,9 +91,34 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
     closeButton.setShown(shown, animated: animated)
   }
 
+  /// A live change of the page's sound (#364): the button fades in or out when the sound starts or stops (a few
+  /// times an hour, not on every hover); the glyph swaps at once on a click, which is the feedback. `configure` and
+  /// reuse set the state without a fade, so a recycled or reloaded cell never animates another row's state.
+  public func setAudio(_ audio: TabAudio, animated: Bool) {
+    applyAudio(audio, restyled: false, animated: animated)
+  }
+
+  private func applyAudio(_ audio: TabAudio, restyled: Bool, animated: Bool) {
+    let changed = audio != self.audio
+    guard changed || restyled || !animated else { return }
+    let wasShown = self.audio != .silent
+    self.audio = audio
+    if let symbol = audio.symbolName {
+      audioButton.image = SidebarGlyphs.audio(symbol, flavor: flavor, scale: shellBackingScale)
+    }
+    audioButton.toolTip = audio.tooltip
+    audioButton.setAccessibilityLabel(audio.toggleTitle)
+    let shown = audio != .silent
+    if shown != wasShown || restyled || !animated {         // unanimated calls always settle the state
+      audioButton.setShown(shown, animated: animated && changed && window != nil)
+      layoutTitle()
+    }
+  }
+
   public override func prepareForReuse() {
     super.prepareForReuse()
     setCloseButtonShown(false, animated: false)
+    applyAudio(.silent, restyled: false, animated: false)
     if isRenaming { endRename(commit: true) }
   }
 
@@ -193,6 +227,9 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
   public override func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
     closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale)
+    if let symbol = audio.symbolName {
+      audioButton.image = SidebarGlyphs.audio(symbol, flavor: flavor, scale: shellBackingScale)
+    }
   }
 
   public override func layout() {
@@ -203,18 +240,26 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
     let box = SidebarMetrics.closeButtonSize
     closeButton.frame = NSRect(x: bounds.width - SidebarMetrics.closeButtonTrailing - box,
                                y: ((bounds.height - box) / 2).rounded(), width: box, height: box)
+    let audioBox = SidebarMetrics.audioButtonSize
+    audioButton.frame = NSRect(x: closeButton.frame.minX - SidebarMetrics.audioButtonGap - audioBox,
+                               y: ((bounds.height - audioBox) / 2).rounded(), width: audioBox, height: audioBox)
     layoutTitle()
     layoutRenameField()
   }
 
-  /// The title ends before the X while it is shown, else at the usual trailing inset.
+  /// The title ends before the audio button while there is one, else before the X while it is shown, else at the
+  /// usual trailing inset.
   private func layoutTitle() {
     let titleHeight = ceil(titleField.intrinsicContentSize.height)
     let titleX = SidebarMetrics.titleLeading
-    let end = isCloseButtonShown
-      ? bounds.width - SidebarMetrics.closeButtonTrailing - SidebarMetrics.closeButtonSize
-        - SidebarMetrics.closeButtonTitleGap
-      : bounds.width - SidebarMetrics.titleTrailing
+    let closeStart = bounds.width - SidebarMetrics.closeButtonTrailing - SidebarMetrics.closeButtonSize
+    let end = if audio != .silent {
+      closeStart - SidebarMetrics.audioButtonGap - SidebarMetrics.audioButtonSize - SidebarMetrics.closeButtonTitleGap
+    } else if isCloseButtonShown {
+      closeStart - SidebarMetrics.closeButtonTitleGap
+    } else {
+      bounds.width - SidebarMetrics.titleTrailing
+    }
     titleField.frame = NSRect(x: titleX, y: ((bounds.height - titleHeight) / 2).rounded(),
                               width: max(0, end - titleX), height: titleHeight)
   }
@@ -291,6 +336,13 @@ enum SidebarGlyphs {
       let textSize = text.size()
       text.draw(at: NSPoint(x: rect.midX - textSize.width / 2, y: rect.midY - textSize.height / 2))
     }
+  }
+
+  /// The audio button's glyph (#364): `symbol` in the X's color, a little larger than the X.
+  static func audio(_ symbol: String, flavor: ThemeFlavor, scale: CGFloat,
+                    cache: SymbolImageCache = .shared) -> NSImage {
+    cache.symbol(symbol, box: SidebarMetrics.audioButtonGlyphSize, weight: .semibold,
+                 color: ShellTokens.sidebarForeground.resolve(flavor), scale: scale)
   }
 
   /// The hover close (X) glyph for `flavor` (GS-043).

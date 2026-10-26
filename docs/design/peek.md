@@ -171,6 +171,9 @@ with the Peek over the whole content area.
   is shown again. One hidden Peek per source tab; it has no row and is not in the tab switcher, the Archive or the
   saved session, and it does not survive quit (BH-152). A hidden Peek is not a closed one: nothing goes on the
   reopen stack until the user closes it. Decided on #348 (memory cost accepted). PARITY(NEEDS-RUNTIME-CHECK).
+- A hidden Peek's page keeps running, so it is muted while hidden (#364): nothing plays from a page that is not
+  shown. Coming back puts back the mute it had, so a Peek the user muted stays muted. Video keeps running muted
+  (pausing it would need the page). PARITY(NEEDS-RUNTIME-CHECK).
 - The source tab closing or archived while its Peek is hidden closes the Peek too; Cmd-Shift-T brings both back
   together.
 - Tab Handoff (#300) moving the source's page to another window closes its Peek, shown or hidden, in the window it

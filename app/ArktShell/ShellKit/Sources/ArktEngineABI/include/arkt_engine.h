@@ -111,6 +111,10 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   ArktEngineEventKindWindowClosed = 12,
   // The extension action list of `browser` changed.
   ArktEngineEventKindExtensionActionsChanged = 13,
+  // The page started or stopped playing sound (#364). Values: isAudible.
+  ArktEngineEventKindAudibleChanged = 14,
+  // The tab was muted or unmuted (#364). Values: isMuted.
+  ArktEngineEventKindMutedChanged = 15,
 };
 
 // Why the engine asks the embedder for a window host.
@@ -151,6 +155,8 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable) id<ArktTabHandle> opener;
 @property(nonatomic, readonly) ArktTabOrigin origin;
 @property(nonatomic, readonly) BOOL isActive;
+@property(nonatomic, readonly) BOOL isAudible;
+@property(nonatomic, readonly) BOOL isMuted;
 @end
 
 // A request for a window the engine creates on its own, after
@@ -278,6 +284,11 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL isClosing;
 // A close with ArktCloseModeHonourUnloadHandlers would be held now.
 @property(nonatomic, readonly) BOOL wouldHoldClose;
+// The page plays sound now (WebContents::IsCurrentlyAudible). A muted page
+// that plays stays audible.
+@property(nonatomic, readonly) BOOL isAudible;
+// The tab's sound is muted (WebContents::IsAudioMuted).
+@property(nonatomic, readonly) BOOL isMuted;
 
 - (void)navigateToURL:(NSURL*)url;
 - (void)reload;
@@ -303,6 +314,9 @@ NS_SWIFT_UI_ACTOR
 // with TabMoved (same handle). A window left without tabs closes. A no-op for
 // a closed tab, a closed `browser` or the tab's own window.
 - (void)moveToBrowser:(id<ArktBrowserHandle>)browser NS_SWIFT_NAME(move(to:));
+// Mutes or unmutes the tab's sound (WebContents::SetAudioMuted), reported
+// with MutedChanged when the state changes (#364).
+- (void)setMuted:(BOOL)muted NS_SWIFT_NAME(setMuted(_:));
 @end
 
 // An engine window (one Browser).

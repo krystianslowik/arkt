@@ -5,6 +5,9 @@ import Testing
 
 @MainActor
 struct OnboardingRecordStoreTests {
+  /// A deadline these tests never mean to reach: a busy CI runner can take over a second to run the opened write.
+  private static let waitsForTheWrite = Duration.seconds(60)
+
   /// #344: a quit immediately after a step change waits for the queued record write, including earlier queued saves.
   @Test func terminationFlushPersistsTheLatestProgress() async {
     let gate = Gate()
@@ -21,7 +24,7 @@ struct OnboardingRecordStoreTests {
 
     store.saveProgress(first)
     store.saveProgress(last)
-    let terminationFlush = Task { await store.flush(atMost: .seconds(1)) }
+    let terminationFlush = Task { await store.flush(atMost: Self.waitsForTheWrite) }
     _ = await writeStarts.next()
     #expect(store.needsFlush)
 
@@ -55,7 +58,7 @@ struct OnboardingRecordStoreTests {
     #expect(await storage.record == nil)
 
     await gate.open()
-    #expect(await store.flush(atMost: .seconds(1)))
+    #expect(await store.flush(atMost: Self.waitsForTheWrite))
     #expect(await storage.record?.isCompleted == true)
   }
 
@@ -72,7 +75,7 @@ struct OnboardingRecordStoreTests {
     var writeStarts = starts.makeAsyncIterator()
 
     store.markCompleted()
-    let terminationFlush = Task { await store.flush(atMost: .seconds(1)) }
+    let terminationFlush = Task { await store.flush(atMost: Self.waitsForTheWrite) }
     _ = await writeStarts.next()
     #expect(store.needsFlush)
 

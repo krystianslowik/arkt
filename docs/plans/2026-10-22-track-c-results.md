@@ -1791,6 +1791,100 @@ log. Esc then closed it with the "Peek closed" toast.
 Still open on #348: Settings > Links toggles, the source card hidden from VoiceOver and the Tab loop, XCUITest flows,
 and the Instruments trace at 120 Hz.
 
+## Split View pane close button (#388) (2026-10-26)
+
+Each split pane gets a close (X), BH-121 "the X above a pane". Earlier decisions stay: the sidebar pane row's X
+separates the pane, Cmd-W closes the focused pane only.
+
+- **Button.** `SplitPaneCloseButton`, a 24 pt circle at the pane card's top trailing corner, 8 pt from both edges;
+  with the Toolbar on it sits centered in the Toolbar strip at the Toolbar's 5 pt padding. Surface as the Peek
+  controls: `toastSurface` fill, `cardBorder` hairline, `secondaryText` glyph that turns `primaryText` on hover; no
+  mustard. System focus ring around the circle. PARITY(NEEDS-RUNTIME-CHECK RT-37): Arc's exact chrome is unmeasured.
+- **Showing.** Shown while the pointer is over the pane (a card-wide tracking area, `.inVisibleRect`, added once so a
+  moving card rebuilds nothing) or while the X has keyboard focus. A 0.15 s fade with a strong ease-out; an
+  interrupted fade covers only what is left; Reduce Motion shows and hides it at once. While not shown it is
+  transparent and passes clicks to the page, but it is never `isHidden`, so VoiceOver ("Close Pane",
+  `split.close`) and Full Keyboard Access always reach it. A closed pane's placeholder has no X.
+- **Closing.** The X calls `close(node:)` for that pane, the Cmd-W path: a Today pane is archived and goes on the
+  reopen stack (Cmd-Shift-T brings it back as a Today tab, as for Cmd-W), a Pinned or Favorite pane closes its page and
+  keeps its placeholder. A mouse-down on a shown X does not focus its pane first, so closing a pane that is not
+  focused leaves focus where it is.
+- **Reflow.** After a close by the X, the panes left move from where they are on screen to their new frames on one
+  spring (`SpringPreset.firm`, run in points along the longest edge move so it rests within half a pixel). Each page is
+  matched by identity, since the cards are reused by index. The model (`paneCount`, factors, pages) changes at once;
+  only the presented frames move. A second close mid-flight carries the panes' position and speed; a divider drag or a
+  plain show ends the reflow at the layout. With one pane left the split ends and that page grows from its pane into
+  the single card on the same spring. Reduce Motion: the frames change at once under a 0.15 s crossfade. Keyboard
+  closes (Cmd-W, Ctrl-Shift--) stay instant.
+
+Tests: ShellKit unit 1054 (baseline 1047 + 7 `SplitReflowTests`), all passed. ShellKitGUITests 907 run (baseline
+886 + 21 `SplitPaneCloseTests`; `AccessibilityIdentifierTests` checks `split.close`), 5 skipped (engine contract),
+0 failures in isolation; in the full run three frame-time gates (`PeekMotionOnScreenTests`,
+`SidebarHideTests.testRevealPacing`, `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch`) failed under a
+load average near the core count and pass when rerun. The reflow tests freeze the spring's clock or use
+`PacingEnvironment.requireCaught`, so they do not depend on the machine's speed. Debug app build succeeds. XCUITest not run: no UI flow covers split panes.
+
+Cmd-Shift-T brings a closed pane back as a Today tab (the archive restore), as for Cmd-W; whether it should go back
+into its split is left to the maintainer (#388).
+
+## Spaces menu lists the real Spaces (#387) (2026-10-26)
+
+Maintainer report: with one Space, the Spaces menu listed "Space 1" ... "Space 9". Reproduced on main with the Debug
+app (FakeEngine, throwaway data folder): after New Space the menu held nine Space items.
+
+- **Cause.** `MainMenu.spaceItems()` built nine fixed "Space N" items (Ctrl-1 ... Ctrl-9) at launch, whatever the
+  Spaces were.
+- **Fix.** `SpacesMenu` (ShellUI, next to `TabsMenu`) is the Spaces submenu. It keeps the fixed items and lists the
+  main window's Spaces between them, in sidebar order, titled with each Space's name ("Space N" by place for an
+  untitled one), Ctrl-1 ... Ctrl-9 on the first nine, the zero-based index as tag, nil target. With no Space nothing
+  is listed. `ShellWindowController` posts `SpacesMenu.listDidChangeNotification` from `onSpacesChanged` (add,
+  remove, rename, move), and a window becoming main refreshes it too, so the keys follow the Spaces with the menu
+  closed: AppKit does not ask the menu's delegate before it matches a key equivalent (checked in a test).
+  `menuNeedsUpdate` checks once more before it shows. `MainMenu.swift` only hands over the fixed items.
+- **Keys.** Ctrl-1 ... Ctrl-9 as before: KB-035 and BH-041 (CONFIRMED) put Go to Space N on Ctrl; Cmd-1 ... Cmd-9 are
+  KB-020 / KB-021 (sidebar items, Tabs menu).
+
+Tests: `SpacesMenuTests` (9, GUI): one Space lists one item, none lists none without a doubled separator, eleven
+Spaces list eleven with keys on the first nine, add / rename / move / remove followed, an untitled Space named by
+place, a Space added and a rename reach the closed menu (Ctrl-2 matches the new item), the window's list in sidebar
+order, the tag goes to its Space. `MainMenuKeyEquivalentTests` fills nine Spaces before checking keys. Real-app check
+(Debug, FakeEngine): no Space, no item; New Space, "Space 1" with Ctrl-1; a second, "Space 2" with Ctrl-2; Delete
+Space, back to one. XCUITests not run: the machine was in use.
+
+## Cmd-W on the last page keeps the window (#386) (2026-10-26)
+
+Maintainer report: a Space with five rows, one loaded; Cmd-W on it closed the window. Expected: the window stays with
+an empty page and the other rows.
+
+- **Cause.** Chromium closes a `Browser` with its last tab. The engine window then reports `.windowClosed`, and the
+  shell closed its own window on every `.windowClosed` except after a Tab Handoff (#300). A Today tab's successor
+  (BH-071) did not help: its page was created in the closing `Browser` and went with it. The FakeEngine build does
+  not show it: FakeEngine keeps a window with no tabs open (checked in the Debug app: Cmd-W on the last loaded Today
+  tab archived it and showed the next row). On current main a parked reopen copy (#378) can also keep the `Browser`
+  alive; the fix does not rely on it.
+- **Fix (shell only).** The #300 flag becomes `keepsWindowWithoutEngine`: set when the window lets go of its last page,
+  by a handoff or by a page close (Cmd-W, the row's X, the page or an extension closing it). On `.windowClosed` the
+  shell window then stays open without an engine window, unless the user asked to close it (close button, Close
+  Window) or the engine closed the window on its own (`chrome.windows.remove`). A current row whose page went with the
+  closing window is shown again, in a new engine window. Chromium tears the closed window down against the stand-in
+  host window from #360 (`WindowHostAdapter.detach()`), so the shell window is not ordered out; no engine change.
+- **Empty state.** The card shows what an empty Space shows (#301): the themed card with no page, no new design and
+  no animation (Cmd-W is a keyboard action).
+- **Cmd-W with no page shown** closes the window, as Close Window does (CF-03: Arc's "Close current tab or window";
+  issue criterion). Before, it did nothing.
+
+- **Known limitation.** After a Today close whose successor loaded in the same, surviving engine window (FakeEngine,
+  or Chromium with a parked copy), the flag stays set until the next page this window opens. An extension's
+  `chrome.windows.remove` in that gap keeps the shell window and shows the current row again instead of closing it.
+
+Tests: `LastTabCloseTests` (9, GUI) with an engine double that closes a window with its last tab and parks no copy:
+pinned row with Cmd-W and with the row X (window open, empty card, all rows kept), the next row opens a new engine
+window, a Today row archives and its sibling shows in a new engine window, the engine closing the window (flag not
+set) and the close button still close it, Cmd-W with no page and in a fresh empty window closes it, and with
+`InMemoryEngine` (the emptied engine window stays, as in FakeEngine) a second Cmd-W closes the window. Real-app check
+(Debug, FakeEngine): Cmd-W with no page closed the window. Engine build and XCUITests not run: the shared engine
+worktree is in use (#364), and the machine was in use.
+
 ## Settings window (#307, design #305) (2026-10-26)
 
 Built from the restyled design (`docs/design/settings.md`, `design/settings/`): one window, seven panes, width 680,

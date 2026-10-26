@@ -19,6 +19,12 @@ public enum SidebarMetrics {
   public static let closeButtonTrailing: CGFloat = 7     // TODO(measure): cell trailing edge to hit box
   public static let closeButtonTitleGap: CGFloat = 4     // TODO(measure): title end to hit box
   public static let closeButtonFadeDuration: Double = 0.12  // TODO(measure): fade in and out with the hover
+  // Audio button of a page that plays or is muted (#364), left of the X's slot. [I] PARITY(NEEDS-RUNTIME-CHECK)
+  public static let audioButtonSize: CGFloat = 20        // hit box, as the X's
+  public static let audioButtonGlyphSize: CGFloat = 12
+  public static let audioButtonGap: CGFloat = 2          // audio hit box to the X's hit box
+  /// Fade when the sound starts or stops: ease-out, under the X's 120 ms is too quick to read as a change of state.
+  public static let audioButtonFadeDuration: Double = 0.18
   public static let titleFontSize: CGFloat = 14          // measured, medium weight
   public static let spaceTitleFontSize: CGFloat = 12     // measured, secondary, left 16
   public static let spaceTitleLeading: CGFloat = 16      // measured

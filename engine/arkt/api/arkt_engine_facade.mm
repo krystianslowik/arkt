@@ -275,6 +275,10 @@ const char* KindName(ArktEngineEventKind kind) {
       return "WindowClosed";
     case ArktEngineEventKindExtensionActionsChanged:
       return "ExtensionActionsChanged";
+    case ArktEngineEventKindAudibleChanged:
+      return "AudibleChanged";
+    case ArktEngineEventKindMutedChanged:
+      return "MutedChanged";
   }
   return "unknown";
 }
@@ -299,6 +303,8 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic, nullable) id<ArktTabHandle> opener;
 @property(nonatomic) ArktTabOrigin origin;
 @property(nonatomic) BOOL isActive;
+@property(nonatomic) BOOL isAudible;
+@property(nonatomic) BOOL isMuted;
 @end
 
 @implementation ArktFacadeEvent
@@ -315,6 +321,8 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize opener = _opener;
 @synthesize origin = _origin;
 @synthesize isActive = _isActive;
+@synthesize isAudible = _isAudible;
+@synthesize isMuted = _isMuted;
 @end
 
 // A link activation as plain values (#313).
@@ -926,9 +934,10 @@ class TabObserver : public content::WebContentsObserver,
     }
   }
 
-  // The values TabCreated carries, taken without recording events. Loading
-  // and history start from false, so a tab inserted while loading or with
-  // history reports it right after TabCreated.
+  // The values TabCreated carries, taken without recording events. Loading,
+  // history, sound and mute start from false, so a tab inserted while
+  // loading, with history, playing or muted reports it right after
+  // TabCreated.
   void Seed() {
     content::WebContents* contents = web_contents();
     if (!contents) {
@@ -939,6 +948,8 @@ class TabObserver : public content::WebContentsObserver,
     loading_ = false;
     can_go_back_ = false;
     can_go_forward_ = false;
+    audible_ = false;
+    muted_ = false;
     host_ = std::string(contents->GetLastCommittedURL().host());
     favicon_ = nil;
   }
@@ -952,6 +963,8 @@ class TabObserver : public content::WebContentsObserver,
     ReportTitle();
     ReportLoading(contents->IsLoading());
     ReportHistory();
+    ReportAudible(contents->IsCurrentlyAudible());
+    ReportMuted(contents->IsAudioMuted());
     // New contents without a favicon (yet) clear the old one (#256
     // review); a later OnFaviconUpdated sets it.
     favicon::FaviconDriver* driver = favicon_observation_.GetSource();
@@ -1017,6 +1030,12 @@ class TabObserver : public content::WebContentsObserver,
   void BeforeUnloadFired(bool proceed) override {
     [handle_ beforeUnloadFired:proceed];
   }
+
+  // Sound (#364). The audio stream monitor reports a muted page that plays
+  // as audible; the shell shows the muted state first.
+  void OnAudioStateChanged(bool audible) override { ReportAudible(audible); }
+
+  void DidUpdateAudioMutingState(bool muted) override { ReportMuted(muted); }
 
   // favicon::FaviconDriverObserver:
   void OnFaviconUpdated(favicon::FaviconDriver* driver,
@@ -1095,6 +1114,26 @@ class TabObserver : public content::WebContentsObserver,
     Emit(event);
   }
 
+  void ReportAudible(bool audible) {
+    if (audible == audible_) {
+      return;
+    }
+    audible_ = audible;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindAudibleChanged);
+    event.isAudible = audible;
+    Emit(event);
+  }
+
+  void ReportMuted(bool muted) {
+    if (muted == muted_) {
+      return;
+    }
+    muted_ = muted;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindMutedChanged);
+    event.isMuted = muted;
+    Emit(event);
+  }
+
   void ReportFavicon(NSData* png) {
     if (png == favicon_ || [png isEqualToData:favicon_]) {
       return;
@@ -1111,6 +1150,8 @@ class TabObserver : public content::WebContentsObserver,
   bool loading_ = false;
   bool can_go_back_ = false;
   bool can_go_forward_ = false;
+  bool audible_ = false;
+  bool muted_ = false;
   std::string host_;
   NSData* __strong favicon_ = nil;
   base::ScopedObservation<favicon::FaviconDriver,
@@ -1517,6 +1558,31 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   UnloadController* unload =
       browser ? UnloadController::From(browser) : nullptr;
   return unload && unload->ShouldRunUnloadListenerBeforeClosing(contents);
+}
+
+- (BOOL)isAudible {
+  arkt::CheckFacadeEntry();
+  content::WebContents* contents = self.contents;
+  return contents && contents->IsCurrentlyAudible();
+}
+
+- (BOOL)isMuted {
+  arkt::CheckFacadeEntry();
+  content::WebContents* contents = self.contents;
+  return contents && contents->IsAudioMuted();
+}
+
+- (void)setMuted:(BOOL)muted {
+  // WebContents::SetAudioMuted notifies DidUpdateAudioMutingState only when
+  // the state changes; the observer records MutedChanged from there.
+  [self runOrQueue:"setMuted"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, bool muted) {
+                         if (content::WebContents* contents = that.contents) {
+                           contents->SetAudioMuted(muted);
+                         }
+                       },
+                       self, static_cast<bool>(muted))];
 }
 
 - (void)navigateToURL:(NSURL*)url {

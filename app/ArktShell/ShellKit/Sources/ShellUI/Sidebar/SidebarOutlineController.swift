@@ -374,6 +374,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public var faviconProvider: (@MainActor (NodeID) -> NSImage?)?
   /// True while the row's page close is held behind a leave-site prompt (week-3 Decision 11).
   public var closingProvider: (@MainActor (NodeID) -> Bool)?
+  /// The sound of the row's page (#364); nil means silent.
+  public var audioProvider: (@MainActor (NodeID) -> TabAudio)?
+  /// True while the row's tab has a page open; the menu's Mute needs one (#364).
+  public var loadedProvider: (@MainActor (NodeID) -> Bool)?
 
   private let divider = OutlineItem(.divider)
   private var items: [NodeID: OutlineItem] = [:]
@@ -648,6 +652,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     configure(cell, for: id)
     cell.closeButton.target = self
     cell.closeButton.action = #selector(closeClicked(_:))
+    cell.audioButton.target = self
+    cell.audioButton.action = #selector(audioClicked(_:))
     return cell
   }
 
@@ -656,7 +662,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let (title, image) = presentation(of: id)
     let closing = closingProvider?(id) ?? false
     cell.configure(title: title, image: image, flavor: flavor,
-                   closeAction: closing ? nil : RowCloseAction.resolve(id, in: source), isClosing: closing)
+                   closeAction: closing ? nil : RowCloseAction.resolve(id, in: source), isClosing: closing,
+                   audio: audio(of: id))
   }
 
   public func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { false }
@@ -837,6 +844,16 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
         divider.flavor = self.flavor
       }
     }
+  }
+
+  /// A live change of a row's sound (#364): a realized cell fades its audio button in place, without a reload; a row
+  /// not on screen picks the state up from `audioProvider` when its cell is made.
+  public func audioChanged(node id: NodeID) {
+    guard let item = items[id] else { return }
+    let row = outlineView.row(forItem: item)
+    guard row >= 0, let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+            as? SidebarTabCellView else { return }
+    cell.setAudio(audio(of: id), animated: true)
   }
 
   /// Refreshes one row's cell (title or favicon) without touching any other row.
@@ -1458,10 +1475,15 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       return (id, info.title)
     }
     var navigated: Set<NodeID> = []
-    if case .rows(let ids) = target, ids.count == 1, let id = ids.first, pinnedNavigatedProvider?(id) == true {
-      navigated.insert(id)
+    var loaded: Set<NodeID> = []
+    var sound: [NodeID: TabAudio] = [:]
+    if case .rows(let ids) = target, ids.count == 1, let id = ids.first {
+      if pinnedNavigatedProvider?(id) == true { navigated.insert(id) }
+      if loadedProvider?(id) == true { loaded.insert(id) }
+      sound[id] = audio(of: id)
     }
-    return SidebarMenuContext(spaces: spaces, navigatedPins: navigated, clipboardHasURL: clipboardURL() != nil)
+    return SidebarMenuContext(spaces: spaces, navigatedPins: navigated, clipboardHasURL: clipboardURL() != nil,
+                              loadedTabs: loaded, audio: sound)
   }
 
   @objc private func menuActionChosen(_ sender: NSMenuItem) {
@@ -1503,19 +1525,45 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     closeAction(for: id)?(id)
   }
 
+  /// A row's audio button mutes or unmutes its page through the window (#364), like the menu's Mute.
+  @objc private func audioClicked(_ sender: NSButton) {
+    let row = outlineView.row(for: sender)
+    guard row >= 0, let id = (outlineView.item(atRow: row) as? OutlineItem)?.nodeID, source.node(id) != nil else {
+      return
+    }
+    onMenuAction?(.toggleMute(id))
+  }
+
+  /// The window's Mute / Unmute, as the row's VoiceOver action runs it.
+  private var muteToggle: (@MainActor (NodeID) -> Void)? {
+    guard let onMenuAction else { return nil }
+    return { onMenuAction(.toggleMute($0)) }
+  }
+
+  /// The sound a row shows: only a tab has one.
+  private func audio(of id: NodeID) -> TabAudio {
+    guard case .tab? = source.node(id) else { return .silent }
+    return audioProvider?(id) ?? .silent
+  }
+
   /// Where a row's X (and its VoiceOver equivalent) goes: `onRemovePane` on a pane row, else `onClose`.
   private func closeAction(for id: NodeID) -> (@MainActor (NodeID) -> Void)? {
     RowCloseAction.resolve(id, in: source) == .removeFromSplit ? onRemovePane : onClose
   }
 
   /// VoiceOver actions of a row: the X's action ("Close", "Archive", or "Remove Tab from Split View" on a pane row),
-  /// plus "Separate All Tabs" on a split row; none for folders and the divider. The row's proxy lists their names and
+  /// "Mute" or "Unmute" while the audio button shows (#364), plus "Separate All Tabs" on a split row; none for
+  /// folders and the divider. The row's proxy lists their names and
   /// performs one through `performAccessibilityAction(named:on:)`.
   func accessibilityActions(for id: NodeID?) -> [NSAccessibilityCustomAction] {
     guard let id else { return [] }
     var actions: [NSAccessibilityCustomAction] = []
     if let action = RowCloseAction.resolve(id, in: source) {
       actions.append(customAction(action.accessibilityName, id) { $0.closeAction(for: id) })
+    }
+    let sound = audio(of: id)
+    if sound != .silent {
+      actions.append(customAction(sound.toggleTitle, id) { $0.muteToggle })
     }
     if case .split? = source.node(id) {
       actions.append(customAction("Separate All Tabs", id) { $0.onSeparateSplit })

@@ -195,6 +195,9 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
     record.handle.move(to: target)
   }
 
+  /// The facade mutes the contents (`WebContents::SetAudioMuted`); its `MutedChanged` updates the snapshot.
+  public func setMuted(_ id: TabID, muted: Bool) { tabs[id]?.handle.setMuted(muted) }
+
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
     hub.add(handler)
   }
@@ -308,7 +311,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
     TabSnapshot(id: id, url: handle.url, title: handle.title, faviconData: handle.faviconPNG,
                 isLoading: handle.isLoading, canGoBack: handle.canGoBack, canGoForward: handle.canGoForward,
                 window: window, opener: handle.opener.flatMap { tabByHandle[ObjectIdentifier($0)] },
-                origin: origin)
+                origin: origin, isAudible: handle.isAudible, isMuted: handle.isMuted)
   }
 
   func insert(_ handle: any ArktTabHandle, snapshot: TabSnapshot) {
