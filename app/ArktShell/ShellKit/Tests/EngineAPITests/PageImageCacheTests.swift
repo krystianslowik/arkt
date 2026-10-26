@@ -110,6 +110,19 @@ struct PageImageCacheTests {
     #expect(await second.image(for: url(1)) == nil)
   }
 
+  /// Eviction order is the store order, not the wall clock: a clock that steps backwards must not make the newest
+  /// entry look like the oldest (#442).
+  @Test func aBackwardsClockDoesNotEvictTheNewestEntry() async {
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let backwards = TestClock(step: -1)
+    let cache = PageImageCache(directory: directory, maxEntries: 1, maxBytes: 20_000_000, now: backwards.now)
+    await cache.store(image(1), for: url(1))
+    await cache.store(image(2), for: url(2))
+    #expect(await cache.count == 1)
+    #expect(await cache.image(for: url(1)) == nil)
+    #expect(await cache.image(for: url(2)) != nil)
+  }
+
   @Test func removeAllEmptiesTheCacheAndItsFolder() async throws {
     defer { try? FileManager.default.removeItem(at: directory) }
     let cache = cache()
@@ -127,13 +140,18 @@ struct PageImageCacheTests {
   }
 }
 
-/// A clock that moves one second per read, so store order is the age order whatever the file system's timestamp
-/// resolution.
+/// A clock that moves `step` seconds per read, so store order is the age order whatever the file system's timestamp
+/// resolution. A negative step moves it backwards, as a clock correction can.
 final class TestClock: Sendable {
   private let start = Date(timeIntervalSince1970: 1_800_000_000)
+  private let step: Int
   private let ticks = Ticks()
 
-  var now: @Sendable () -> Date { { [start, ticks] in start.addingTimeInterval(Double(ticks.next())) } }
+  init(step: Int = 1) { self.step = step }
+
+  var now: @Sendable () -> Date {
+    { [start, step, ticks] in start.addingTimeInterval(Double(ticks.next() * step)) }
+  }
 
   private final class Ticks: Sendable {
     private let value = Mutex(0)
