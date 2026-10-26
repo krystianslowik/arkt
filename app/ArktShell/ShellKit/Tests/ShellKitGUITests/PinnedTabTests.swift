@@ -332,6 +332,47 @@ final class PinnedTabTests: XCTestCase {
     harness.controller.close()
   }
 
+  // MARK: Unpin and the live URL
+
+  /// A pinned tab that navigated away and is unpinned keeps the page it shows: the Today node takes the live URL.
+  func testUnpinningANavigatedPinnedTabWritesTheLiveURL() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    try harness.navigate(world.p0, to: "p0/other", title: "Other")
+
+    harness.controller.pinTab(nil)
+
+    XCTAssertEqual(harness.children(.today(world.space)).first, world.p0)
+    XCTAssertEqual(harness.tabURL(world.p0), Self.url("p0/other"))
+    harness.controller.close()
+  }
+
+  /// An unpinned split writes each pane's live URL.
+  func testUnpinningASplitWritesEachPanesLiveURL() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    try harness.source.moveNode(world.split, to: .pinned(world.space), at: 3)
+    try harness.navigate(world.panes[1], to: "s1/other", title: "Other")
+
+    harness.controller.togglePin(of: world.split)
+
+    XCTAssertEqual(harness.tabURL(world.panes[0]), Self.url("s0"))
+    XCTAssertEqual(harness.tabURL(world.panes[1]), Self.url("s1/other"))
+    harness.controller.close()
+  }
+
+  /// A navigated Favorite moved to Today takes the live URL the same way.
+  func testMovingANavigatedFavoriteToTodayWritesTheLiveURL() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    try harness.navigate(world.favorite, to: "f0/other", title: "Elsewhere")
+
+    XCTAssertTrue(harness.controller.move(world.favorite, to: .today(world.space)))
+
+    XCTAssertEqual(harness.tabURL(world.favorite), Self.url("f0/other"))
+    harness.controller.close()
+  }
+
   /// The reset-family items stay disabled while the pinned tab shows its pinned URL.
   func testTheResetItemsAreDisabledUntilTheTabNavigates() throws {
     let world = try Self.makeWorld()

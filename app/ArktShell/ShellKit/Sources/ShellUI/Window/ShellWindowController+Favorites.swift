@@ -32,11 +32,18 @@ extension ShellWindowController {
     return true
   }
 
-  /// A pinned or Favorite node never ages (BH-054, BH-048), so its `lastActiveAt` can be days old: once in Today
-  /// the idle timer would archive it on its next pass. Leaving its section restarts the clock of every tab it holds
-  /// (a split's panes), through the same stamp a tab leaving the content area gets (decision 10).
+  /// A pinned or Favorite node never ages (BH-054, BH-048) and keeps its pinned URL on navigation (BH-057), so
+  /// once in Today it could be archived on the next idle pass, or come back at the pinned URL after a relaunch.
+  /// For every tab it holds (a split's panes), the node takes the loaded page's URL and its idle clock restarts,
+  /// through the same stamp a tab leaving the content area gets (decision 10).
   private func didEnterToday(_ node: NodeID) {
-    for tab in tabs(in: node) { onTabHidden?(tab) }
+    for tab in tabs(in: node) {
+      if case .tab(_, let stored, _)? = sidebar.node(tab),
+         let live = tabsByNode[tab].flatMap({ engine.snapshot(of: $0)?.url }), live != stored {
+        sidebar.updateTab(tab, url: live, title: nil)
+      }
+      onTabHidden?(tab)
+    }
   }
 
   /// `node` itself when it is a tab, else every tab below it (a split's panes, a folder's tabs).
