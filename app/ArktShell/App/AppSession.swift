@@ -48,6 +48,8 @@ final class AppSession {
   /// The latest backup task; the DEBUG smoke phases await it before printing and quitting (E6), so a quick quit
   /// cannot race the launch backup.
   private(set) var lastBackup: Task<Void, Never>?
+  /// The first run's saved state, loaded with the data folder (`AppComposition.start`); see `AppOnboarding.swift`.
+  var onboardingRecord = OnboardingRecord.defaultValue
 
   /// `hostLookup` pairs the engine's own windows with the windows built for them (`ChromiumEngine.host(of:)`); nil
   /// for an engine that never asks for a window (FakeEngine).
@@ -118,6 +120,7 @@ final class AppSession {
   /// extension's `chrome.windows.create`) opened one already.
   func finishLaunch(opensWindow: Bool) {
     let window = opensWindow ? windows.openWindow() : windows.primary
+    if let window { presentOnboardingIfNeeded(on: window) }
     if let notice = launchNotice, let window {
       launchNotice = nil
       window.toasts.show(notice.toast) { [location] in
@@ -293,13 +296,13 @@ final class AppSession {
   }
 
   private func runImport() async {
-    guard let summary = await performImport() else { return }
-    showSummary(summary)
+    guard let outcome = await performImport() else { return }
+    showSummary(outcome.summary)
   }
 
   /// Runs the import and applies its favicons; nil when it was already running or failed (the failure toast is
-  /// shown here).
-  private func performImport() async -> ArcImportSummary? {
+  /// shown here unless the first run shows the failure itself).
+  func performImport(showsFailureToast: Bool = true) async -> ArcImportOutcome? {
     do {
       let outcome = try await importer.run(arcFiles)
       faviconWriter?.save(outcome.favicons)
@@ -316,13 +319,13 @@ final class AppSession {
         "arc import favorites \(favorites, privacy: .public) archive \(archived, privacy: .public)")
       if archiveFailed { Self.log.error("arc import archive failed") }
       if summary.recordFailed { Self.log.error("arc import record not saved") }
-      return summary
+      return outcome
     } catch ArcImportCoordinatorError.alreadyRunning {
       return nil
     } catch {
       let (errorType, code) = (String(describing: type(of: error)), (error as NSError).code)
       Self.log.error("arc import failed \(errorType, privacy: .public) \(code, privacy: .public)")
-      shownWindow().toasts.show(Toast(text: "Couldn't import your browser data."))
+      if showsFailureToast { shownWindow().toasts.show(Toast(text: "Couldn't import your browser data.")) }
       return nil
     }
   }
@@ -410,7 +413,7 @@ extension AppSession {
       await self.lastBackup?.value
       var summary: ArcImportSummary?
       if phase == .import {
-        summary = await self.performImport()
+        summary = await self.performImport()?.summary
       }
       let archive: String
       do {
