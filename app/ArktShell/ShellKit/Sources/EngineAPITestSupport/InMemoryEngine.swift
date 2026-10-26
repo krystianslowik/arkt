@@ -167,6 +167,48 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
 
   public func snapshot(of id: TabID) -> TabSnapshot? { snapshots[id] }
 
+  // MARK: - Page images (#370, #352, contract rule 18)
+
+  /// The size of an in-memory page's frame: a 600 x 360 pt page at 2x.
+  public static let framePixelSize = PixelSize(width: 1200, height: 720)
+  /// Tabs whose frame cannot be copied (`setFrameAvailable`), as a hidden-and-evicted or discarded tab.
+  private var framesUnavailable: Set<TabID> = []
+  /// Test hook: runs after the frame is copied and before the image is returned, as page events can arrive while a
+  /// real engine encodes.
+  public var beforePageImageReturns: (@MainActor () -> Void)?
+
+  /// A deterministic image per URL (a fill derived from it), so tests need no engine: nil for an unknown or closed
+  /// tab, one without a URL, and one whose frame is unavailable.
+  public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? {
+    guard let url = snapshots[id]?.url, !framesUnavailable.contains(id),
+          let frame = Self.syntheticFrame(for: url) else { return nil }
+    let image = await PageImageEncoder.encode(frame, scale: 2, request)
+    beforePageImageReturns?()
+    return snapshots[id] == nil ? nil : image
+  }
+
+  /// Test driver: the tab has (true) or has no (false) frame to copy; the tab itself does not change.
+  public func setFrameAvailable(_ id: TabID, _ available: Bool) {
+    if available { framesUnavailable.remove(id) } else { framesUnavailable.insert(id) }
+  }
+
+  private static func syntheticFrame(for url: URL) -> CGImage? {
+    var hash: UInt64 = 0xCBF2_9CE4_8422_2325
+    for byte in url.absoluteString.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01B3 }
+    let size = framePixelSize
+    guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(data: nil, width: size.width, height: size.height, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                    | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+    let channel = { (shift: UInt64) in Double((hash >> shift) & 0xFF) / 255 }
+    context.setFillColor(red: channel(0), green: channel(8), blue: channel(16), alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: size.width, height: size.height))
+    context.setFillColor(red: channel(24), green: channel(32), blue: channel(40), alpha: 1)
+    context.fill(CGRect(x: 0, y: size.height - 120, width: size.width, height: 120))
+    return context.makeImage()
+  }
+
   public func contentView(for id: TabID) -> NSView? {
     guard snapshots[id] != nil else { return nil }
     if let view = views[id] { return view }
