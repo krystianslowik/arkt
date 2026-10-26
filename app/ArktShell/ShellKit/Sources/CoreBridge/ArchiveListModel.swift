@@ -386,10 +386,14 @@ public final class ArchiveListModel: ArchiveListDataSource {
     return date.formatted(style)
   }
 
-  private func placeTitle(of item: ArchivedItem) -> String {
+  private func placeTitle(of item: ArchivedItem) -> String { Self.placeTitle(of: item, in: source.sidebar) }
+
+  /// Where an item was archived from, for row details and the command bar: the Space's title, "Favorites",
+  /// "Little Arkt" or "Unknown Space".
+  static func placeTitle(of item: ArchivedItem, in sidebar: SidebarModel.Sidebar) -> String {
     if case .favorites? = item.section { return "Favorites" }   // [I] Favorites entries carry no Space
     switch item.source {
-    case .space(let id): return source.sidebar.spaces[id]?.title ?? "Unknown Space"
+    case .space(let id): return sidebar.spaces[id]?.title ?? "Unknown Space"
     case .littleArc: return "Little Arkt"
     case .unknown: return "Unknown Space"
     }

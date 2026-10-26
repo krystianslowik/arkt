@@ -230,6 +230,7 @@ final class CommandBarCellView: NSTableCellView {
     case .open: "globe"
     case .switchTo: "square.on.square"
     case .search: "magnifyingglass"
+    case .restore: "archivebox"
     }
     icon.image = SymbolImageCache.shared.symbol(symbol, box: Self.iconSize, color: ShellTokens.commandBarText,
                                                 scale: scale)

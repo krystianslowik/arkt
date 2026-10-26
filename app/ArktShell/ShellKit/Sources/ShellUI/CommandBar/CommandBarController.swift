@@ -29,6 +29,11 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Cmd-L then Enter without editing (KB-004).
   public var onReload: (() -> Void)?
   public var openTabsProvider: () -> [CommandBarResults.OpenTab] = { [] }
+  /// Archived matches for a query (#111): the store search runs off the main actor; the bar lists the matches when
+  /// they land, if the query is still the same.
+  public var archivedProvider: (@MainActor (String) async -> [CommandBarResults.ArchivedMatch])?
+  /// Enter on an archived match: restore it (BH-086).
+  public var onRestoreArchived: ((UUID) -> Void)?
 
   public private(set) var isVisible = false
   public private(set) var mode: Mode = .newTab
@@ -47,6 +52,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   let panel = CommandBarPanel()
   let barView = CommandBarView()
   private(set) var results: [CommandBarResults.Result] = []
+  /// The archived matches of `archivedQuery`, shown while the field still holds that query.
+  private var archived: [CommandBarResults.ArchivedMatch] = []
+  private var archivedQuery = ""
+  private var archivedSearch: Task<Void, Never>?
   /// Backing scale the table's cells were configured at; a show at another scale reloads them.
   private var cellScale: CGFloat = 0
   /// Test seam: stands in for the parent window's backing scale.
@@ -264,6 +273,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   // MARK: Field and keys
 
   public func controlTextDidChange(_ obj: Notification) {
+    searchArchive()
     reloadResults()
     if let parent { setPanelFrame(frame(in: parent), display: true) }
   }
@@ -322,6 +332,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     case .open(let url), .search(let url): onOpen?(url, target)
     // [I] A "Switch to Tab" result switches in every mode, the split pane bar included: the tab is already open.
     case .switchTo(let node): onSwitch?(node)
+    case .restore(let id): onRestoreArchived?(id)
     }
   }
 
@@ -359,8 +370,38 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Reloads the table only when the results (or the backing scale of the icon bitmaps) changed. A warm show usually repeats the previous results, and
   /// NSTableView drops its reuse queue between shows, so a reload rebuilt every cell (about 8 ms of main-thread
   /// layout and text drawing in the show's commit, which made every other show land a frame late; C7 phase 3).
+  /// Asks for the archived matches of the field's text; a reply for an older text is dropped.
+  private func searchArchive() {
+    archivedSearch?.cancel()
+    let query = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let archivedProvider, !query.isEmpty else {
+      archivedSearch = nil
+      return
+    }
+    archivedSearch = Task { [weak self] in
+      let matches = await archivedProvider(query)
+      guard let self, !Task.isCancelled,
+            self.barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+      self.archived = matches
+      self.archivedQuery = query
+      self.reloadResults()
+      if let parent = self.parent, self.isVisible { self.setPanelFrame(self.frame(in: parent), display: true) }
+    }
+  }
+
   private func reloadResults() {
-    let fresh = CommandBarResults.make(query: barView.field.stringValue, openTabs: openTabsProvider())
+    let text = barView.field.stringValue
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    // While the store answers a longer query, the previous matches that still contain it stay, so rows do not
+    // blink out and back per keystroke.
+    let current: [CommandBarResults.ArchivedMatch] = if archivedQuery == trimmed {
+      archived
+    } else if !archivedQuery.isEmpty, trimmed.hasPrefix(archivedQuery) {
+      archived.filter { $0.title.localizedStandardContains(trimmed) || $0.subtitle.localizedStandardContains(trimmed) }
+    } else {
+      []
+    }
+    let fresh = CommandBarResults.make(query: text, openTabs: openTabsProvider(), archived: current)
     let scale = backingScale
     if fresh != results || scale != cellScale {
       results = fresh
