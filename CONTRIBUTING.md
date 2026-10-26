@@ -299,7 +299,8 @@ build the app (`xcodegen generate`, then `xcodebuild`, see `README.md`) when you
 `project.yml`.
 
 Run the UI tests (XCUITest, scheme `ArktShellUITests`) when you touch `app/ArktShell/App`, `ShellUI` accessibility
-identifiers or a flow they cover. They launch the Debug app into a throwaway data folder and defaults suite and drive
+identifiers or a flow they cover. CI runs them only nightly and by hand (section 12), so on a pull request your local
+run is the check; report its counts in the pull request. They launch the Debug app into a throwaway data folder and defaults suite and drive
 it with the real pointer and keyboard, so run them in a logged-in GUI session with the display awake and unlocked,
 and keep your hands off the keyboard and mouse until they finish:
 
@@ -424,19 +425,55 @@ Recommendations only; repository settings are changed by the maintainer.
 - **Projects board:** a GitHub Projects board for the repository with a Status field whose values mirror the labels
   (Triage, Ready, In progress, In review, Blocked, Needs user, Done), plus Order and Area fields. The labels stay the
   source of truth until the board is automated.
-- **CI:** `.github/workflows/swift-tests.yml` runs on every pull request and on pushes to `main`, on GitHub-hosted
-  `macos-26` runners with a pinned Xcode. Jobs: "Isolation greps" (the import layering rules of section 6 as a
-  source grep), "ArktCore tests" (`swift test` in `app/ArktCore`), "ShellKit tests"
-  (`swift test --skip ShellKitGUITests`), and "App build (Debug)" (`xcodegen generate`, then a Debug `xcodebuild`
-  without signing). The gate job **`Swift tests`** passes only when all four pass; it is the one check to require on
-  `main`. "ShellKit GUI tests (informative)" runs the GUI suite on the runner's virtual display and may fail without
+- **CI:** `.github/workflows/swift-tests.yml` runs on every pull request, on pushes to `main`, nightly on `main` and
+  by hand, on GitHub-hosted `macos-26` runners with a pinned Xcode. Hosted macOS runners are capped at 5 at once for
+  the repository, so a run starts only the macOS jobs the change needs:
+
+  | Job | Runner | Runs when the change touches |
+  |---|---|---|
+  | "Changes" | Ubuntu | always (works out the areas below) |
+  | "Isolation greps and lint" | Ubuntu | always |
+  | "ArktCore tests" | macOS | core, ci |
+  | "ShellKit tests" | macOS | shell, core, app, engine, design, ci |
+  | "App build (Debug)" | macOS | app, shell, core, ci |
+  | "ShellKit GUI tests (informative)" | macOS | shell, app, ci (pull requests only) |
+  | "UI tests (informative)" | macOS | never on a change: nightly and by hand |
+
+  Areas: core is `app/ArktCore`; shell is `app/ArktShell/ShellKit`; app is the rest of `app/ArktShell` (`App`,
+  `project.yml`, `Engine.xcconfig`, `UITests`); engine is `engine/`; design is `design/`; ci is `.github/`. ShellKit
+  depends on ArktCore, its isolation tests read every Swift file under `app/ArktShell` and the engine header, and its
+  brand tests read `design/brand/tokens`, which is why so many areas run it. Anything else (`docs/`, `README.md`,
+  this file, `scripts/`) is docs only and starts no macOS job. A pull request is compared with its base (only its own
+  changes count); a push to `main` with the commit before it, and a push to `main` runs the required jobs only.
+  Nightly and manual runs run every job.
+
+  "Isolation greps and lint" holds the import layering rules of section 6 as a source grep, the UI test source lint
+  (no sleeps, no network) and the parity report script tests. "ArktCore tests" runs `swift test` in `app/ArktCore`,
+  "ShellKit tests" runs `swift test --skip ShellKitGUITests`, and "App build (Debug)" runs `xcodegen generate`, then a
+  Debug `xcodebuild` without signing. The gate job **`Swift tests`** always runs; it passes when "Changes" and the
+  isolation job passed and every other required job passed or was skipped, and fails on any failed or cancelled job.
+  It is the one check to require on `main`. A newer push to the same pull request, or to `main`, cancels the run it
+  supersedes; a cancelled `main` run leaves its areas to the next push that touches them and to the nightly run.
+
+  "ShellKit GUI tests (informative)" runs the GUI suite on the runner's virtual display and may fail without
   blocking; its frame-timing gates (command bar latency, Space swipe pacing) and the two tests that catch a Space
   settle mid-flight skip themselves as NOT-MEASURABLE on a screen below 120 Hz or a load at or above the core count
   (the rule of the app's SmokeRunner), which shared runners always meet, and assert on a developer machine. GUI tests
-  and timing gates stay a local check (section 7). "UI tests (informative)" builds the Debug app and runs the
-  XCUITest scheme `ArktShellUITests` with
-  wait timeouts scaled by 3; it is not part of the gate and may fail without blocking. When it fails it uploads the
-  result bundle (`ui-tests-xcresult`, kept 7 days) with the failing test's window screenshot, accessibility tree and
-  sandbox file listing. It is promoted to a required check only after 10 consecutive green runs on `main` and a local
-  20-iteration run without a failure (`-test-iterations 20 -run-tests-until-failure`). Chromium is not built in CI (hours of build time and over 100 GB of disk); engine changes are verified
-  locally and reported in the pull request.
+  and timing gates stay a local check (section 7).
+
+  "UI tests (informative)" builds the Debug app and runs the XCUITest scheme `ArktShellUITests` with wait timeouts
+  scaled by 3. It takes about 20 minutes of a macOS runner, so it runs nightly on `main` (02:23 UTC) and by hand, not
+  on pull requests; run it locally when your change needs it (section 7). To run it in CI for a branch, start the
+  workflow by hand, which runs every job:
+
+  ```zsh
+  gh workflow run swift-tests.yml --ref <branch>
+  gh run list --workflow swift-tests.yml --event workflow_dispatch --limit 1
+  ```
+
+  It is not part of the gate and may fail without blocking. When it fails it uploads the result bundle
+  (`ui-tests-xcresult`, kept 7 days) with the failing test's window screenshot, accessibility tree and sandbox file
+  listing. It is promoted to a required check only after 10 consecutive green nightly runs on `main` and a local
+  20-iteration run without a failure (`-test-iterations 20 -run-tests-until-failure`). Chromium is not built in CI
+  (hours of build time and over 100 GB of disk); engine changes are verified locally and reported in the pull
+  request.
