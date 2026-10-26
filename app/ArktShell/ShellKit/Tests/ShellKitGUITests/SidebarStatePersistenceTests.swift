@@ -150,6 +150,10 @@ final class SidebarStatePersistenceTests: XCTestCase {
     let second = set.openWindow()
     XCTAssertEqual(second.rootView.sidebarWidth, ShellMetrics.standard.sidebarDefaultWidth)
     XCTAssertTrue(second.isSidebarVisible, "a new window opens with the defaults")
+
+    second.rootView.sidebarWidth = 400
+    XCTAssertEqual(store.state(), SidebarWindowState(width: 300, isVisible: false),
+                   "a later window does not overwrite the restored window's saved state")
     first.close()
     second.close()
   }

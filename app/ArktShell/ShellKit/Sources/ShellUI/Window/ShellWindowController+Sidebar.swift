@@ -20,6 +20,7 @@ extension ShellWindowController {
   /// Saves this window's sidebar state (#331). Called by the root view whenever the width or the visibility changes,
   /// whatever changed it: Cmd-S, the View menu, the edge drag, the double-click reset, a toast's action.
   func saveSidebarState() {
+    guard savesSidebarState else { return }
     sidebarStateStore.save(width: rootView.sidebarWidth, isVisible: rootView.sidebarVisible)
   }
 

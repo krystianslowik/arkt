@@ -144,6 +144,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public let tabSwitcher = TabSwitcherController()
   /// Where the sidebar width and hidden state are saved on change (#331).
   let sidebarStateStore: SidebarWindowStateStore
+  /// False for a window that is not the one a relaunch restores: its changes must not overwrite the saved state.
+  var savesSidebarState = true
   /// Scrolls the sidebar to a row a keyboard command landed on, with the overflow pill (BH-018).
   public let sidebarReveal = SidebarRevealer()
   /// How Cmd-1 ... Cmd-9 count (BH-014, BH-015). Defaults until the Settings window exists.

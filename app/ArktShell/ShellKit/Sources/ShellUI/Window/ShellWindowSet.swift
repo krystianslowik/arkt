@@ -245,6 +245,8 @@ public final class ShellWindowSet {
     if !adoptedSavedSidebarState {
       adoptedSavedSidebarState = true
       controller.adoptSavedSidebarState()
+    } else {
+      controller.savesSidebarState = false
     }
     return controller
   }
