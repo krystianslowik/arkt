@@ -283,7 +283,8 @@ final class TabActionsTests: XCTestCase {
     let folderPoint = try point(of: folder, in: harness, view)
     try click(at: folderPoint, in: window, view)
     try click(at: folderPoint, count: 2, in: window, view)
-    XCTAssertFalse(try harness.outline().isFolderOpen(folder), "the first click closed it and the second did not reopen it")
+    XCTAssertFalse(try harness.outline().isFolderOpen(folder),
+                   "the first click closed it and the second did not reopen it")
     XCTAssertNil(try harness.outline().renamingNode)
   }
 

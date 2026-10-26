@@ -71,7 +71,8 @@ struct FolderDisplay: Equatable {
     return tab
   }
 
-  @MainActor private func collect(_ container: NodeID, into rows: inout [NodeID], in source: any SidebarSource, depth: Int) {
+  @MainActor private func collect(_ container: NodeID, into rows: inout [NodeID], in source: any SidebarSource,
+                                  depth: Int) {
     guard depth < Self.depthGuard else { return }
     for child in children(of: container, in: source) {
       rows.append(child)

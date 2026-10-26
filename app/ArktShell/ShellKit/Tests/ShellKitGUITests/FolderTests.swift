@@ -208,11 +208,11 @@ final class FolderTests: XCTestCase {
     try harness.click(world.folder)
     XCTAssertGreaterThanOrEqual(try harness.row(world.folderTabs[0]), 0)
     XCTAssertEqual(try harness.style(world.pinnedTab), .rest, "nothing moves")
-    let fade = try XCTUnwrap(try harness.rowLayer(world.folderTabs[0]).animation(forKey: SidebarOutlineController.folderFadeKey)
-      as? CABasicAnimation)
+    let key = SidebarOutlineController.folderFadeKey
+    let fade = try XCTUnwrap(try harness.rowLayer(world.folderTabs[0]).animation(forKey: key) as? CABasicAnimation)
     XCTAssertEqual(fade.keyPath, "opacity")
     XCTAssertEqual(fade.fromValue as? Float, 0)
-    XCTAssertNil(try harness.rowLayer(world.pinnedTab).animation(forKey: SidebarOutlineController.folderFadeKey),
+    XCTAssertNil(try harness.rowLayer(world.pinnedTab).animation(forKey: key),
                  "rows that were there already do not fade")
   }
 

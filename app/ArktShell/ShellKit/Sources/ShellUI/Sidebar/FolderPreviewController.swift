@@ -178,7 +178,9 @@ final class FolderPreviewController: NSObject, NSTextFieldDelegate {
   }
 
   private func rows(for session: FolderPreviewSession) -> [FolderPreviewRow] {
-    session.matches.map { FolderPreviewRow(node: $0.node, title: $0.title, favicon: favicon($0.node, $0.title, $0.url)) }
+    session.matches.map {
+      FolderPreviewRow(node: $0.node, title: $0.title, favicon: favicon($0.node, $0.title, $0.url))
+    }
   }
 
   /// A folder of the current page opened or closed: an open folder shows its tabs already, so its preview closes.
