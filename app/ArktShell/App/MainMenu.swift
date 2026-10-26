@@ -107,7 +107,7 @@ enum MainMenu {
       item("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift]),
       item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]), // KB-009
       .separator(),
-      item("Pin Tab", #selector(ShellWindowController.pinTab(_:)), "d"),                   // KB-012, BH-055
+      item("Pin Tab", #selector(ShellWindowController.pinCurrentTab(_:)), "d"),             // KB-012, BH-055
       // KB-041 (unbound in Arc), BH-057; enabled for a navigated pinned tab.
       item("Back to Pinned URL", #selector(ShellWindowController.resetTab(_:)), ""),
       .separator(),
