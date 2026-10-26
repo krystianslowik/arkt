@@ -281,7 +281,8 @@ extension ShellWindowController {
   // MARK: Non-key dimming (BH-025)
 
   /// Only the sidebar dims while another window is key; the content card is untouched (design 5). This window's
-  /// own panels taking key (the command bar) do not count, or every Cmd-T would dim the sidebar.
+  /// own panels taking key (the command bar, a sheet such as Delete Space, a child window) do not count, or every
+  /// Cmd-T would dim the sidebar.
   func windowKeyStateChanged(isKey: Bool) {
     guard !isKey else {
       sidebarController.view.isDimmed = false
@@ -291,8 +292,15 @@ extension ShellWindowController {
     Task { @MainActor [weak self] in
       guard let self, let window = self.window else { return }
       self.sidebarController.view.isDimmed = Self.dimsSidebar(
-        window: window, keyWindow: NSApp.keyWindow, isKey: window.isKeyWindow, ownPanels: [self.commandBar.panel])
+        window: window, keyWindow: NSApp.keyWindow, isKey: window.isKeyWindow, ownPanels: self.ownKeyableWindows)
     }
+  }
+
+  /// The windows that may take key without dimming this window's sidebar: the command bar panel, attached sheets and
+  /// child windows.
+  var ownKeyableWindows: [NSWindow] {
+    guard let window else { return [commandBar.panel] }
+    return [commandBar.panel] + window.sheets + (window.childWindows ?? [])
   }
 
   /// The sidebar dims unless this window or one of its own panels is key; with no key window (the app is in the

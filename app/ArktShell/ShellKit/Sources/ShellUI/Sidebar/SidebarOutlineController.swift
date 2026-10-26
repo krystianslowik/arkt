@@ -168,17 +168,26 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 
   /// A double-click on the outline below or between rows (BH-021): the window opens the command bar for a new tab.
   var onEmptyAreaDoubleClick: (@MainActor () -> Void)?
+  /// A plain press on empty outline space; the controller ends the multi-selection.
+  var onEmptyAreaClick: (@MainActor () -> Void)?
   /// Drags the window from empty outline space (BH-023); tests replace it, since a drag runs a tracking loop.
   var performWindowDrag: @MainActor (NSEvent, NSWindow?) -> Void = { event, window in window?.performDrag(with: event) }
 
   /// The same empty area moves the window and opens a new tab (design 4.3): the gesture decides. A press that moves
   /// drags; a second click without motion is a double-click.
   private func emptyAreaMouseDown(_ event: NSEvent) {
+    if clickModifiers.intersection([.command, .shift]).isEmpty { onEmptyAreaClick?() }
     if event.clickCount == 2 {
       onEmptyAreaDoubleClick?()
     } else {
       performWindowDrag(event, window)
     }
+  }
+
+  /// A right-click ends a rename in progress first too, as a left click does.
+  public override func rightMouseDown(with event: NSEvent) {
+    commitRenameInProgress()
+    super.rightMouseDown(with: event)
   }
 
   /// A click anywhere in the outline ends a rename in progress first, keeping the typed name (design 4.1): the
@@ -397,6 +406,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.target = self
     outlineView.action = #selector(rowClicked(_:))
     outlineView.doubleAction = #selector(rowDoubleClicked(_:))
+    outlineView.onEmptyAreaClick = { [weak self] in self?.clearSelection() }   // a plain click ends it (design 6)
     outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
     outlineView.setDraggingSourceOperationMask([], forLocal: false)   // tabs stay inside the app
     let menu = NSMenu()
@@ -990,6 +1000,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// The node whose rename field is open in this outline.
   public private(set) var renamingNode: NodeID?
   private var renameReloadPending = false
+  /// The title the row showed when the field opened. Committing it unchanged stores nothing, so an accidental
+  /// double-click never freezes the page title as a custom title.
+  private var renameOriginalTitle: String?
 
   /// Double-click on a tab row opens its rename field (BH-026, GS-004). Folders open and close on the first click
   /// and are renamed from their menu; splits have no stored title.
@@ -1019,6 +1032,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     else { return false }
     renamingNode = id
     renameReloadPending = false
+    renameOriginalTitle = Self.shownTitle(of: source.node(id))
     let opened = cell.beginRename(flavor: flavor) { [weak self] typed in self?.finishRename(id, typed: typed) }
     if !opened { renamingNode = nil }
     return opened
@@ -1028,8 +1042,18 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     renamingNode = nil
     let pending = renameReloadPending
     renameReloadPending = false
-    if let typed { source.renameNode(id, to: typed) }   // persisted by the source (autosave); emits `.node`
-    if pending || typed == nil { reload(node: id) }
+    let original = renameOriginalTitle
+    renameOriginalTitle = nil
+    let changed = typed.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) != original } ?? false
+    if changed { source.renameNode(id, to: typed) }     // persisted by the source (autosave); emits `.node`
+    if pending || !changed { reload(node: id) }
+  }
+
+  private static func shownTitle(of node: SidebarNodeInfo?) -> String? {
+    switch node {
+    case .tab(_, _, let title)?, .folder(_, let title)?: title
+    default: nil
+    }
   }
 
   // MARK: Context menu (design/tab-context-menus)

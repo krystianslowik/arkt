@@ -308,6 +308,9 @@ public final class SidebarController {
       favoriteLoadOrder.append(tab)
     }
     if tab != current {
+      // Another tab coming forward (a Favorite click, Ctrl-Tab, the command bar) ends a multi-selection, so a later
+      // Cmd-W closes the tab on screen rather than rows chosen earlier (design 6, BH-072).
+      for page in pages.values { page.outlineController.clearSelection() }
       previous = current
       current = tab
       applyRowStates()                          // the favorites refresh their visible tiles, a newly loaded one too

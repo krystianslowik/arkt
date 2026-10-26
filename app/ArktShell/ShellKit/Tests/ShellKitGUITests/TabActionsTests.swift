@@ -169,6 +169,26 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// An accidental double-click followed by Return (or a click elsewhere) stores no custom title: the row keeps
+  /// following the page title.
+  func testCommittingAnUnchangedTitleStoresNoCustomTitle() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    XCTAssertTrue(try harness.outline().beginRename(world.today[0]))
+    let field = try XCTUnwrap(try harness.cell(world.today[0]).renameField)
+    try XCTUnwrap(field.currentEditor() as? NSTextView).insertNewline(nil)
+
+    XCTAssertNil(try harness.cell(world.today[0]).renameField, "Return closes the field")
+    guard case .tab(let item)? = harness.source.sidebar.nodes[world.today[0]]?.kind else {
+      return XCTFail("not a tab")
+    }
+    XCTAssertNil(item.customTitle, "an unchanged name is not a rename")
+    harness.engine.setDocumentTitle(try XCTUnwrap(harness.tab(world.today[0])), "Page title")
+    XCTAssertEqual(harness.title(world.today[0]), "Page title", "the row still follows the page")
+    harness.controller.close()
+  }
+
   /// A page title arriving while the field is open leaves the field open (the row reload waits for it).
   func testAPageTitleDuringRenameDoesNotCloseTheField() throws {
     let world = try Self.makeWorld()
@@ -354,6 +374,42 @@ final class TabActionsTests: XCTestCase {
     outline.focusKeyboard(on: try harness.row(world.today[2]))
     XCTAssertFalse(outline.outlineView.keyboardFocusRing.isHidden)
     XCTAssertEqual(outline.selectedNodes, [world.today[0], world.today[1]], "focus does not change the selection")
+    harness.controller.close()
+  }
+
+  /// Another tab coming forward (here a Favorite-style activation, not a row click) ends the selection, so Cmd-W then
+  /// closes only the tab on screen.
+  func testActivatingAnotherTabEndsTheSelection() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.today[1], .command)
+    XCTAssertEqual(try harness.outline().selectedNodes, [world.today[0], world.today[1]])
+
+    harness.controller.activate(node: world.today[3])
+    XCTAssertEqual(try harness.outline().selectedNodes, [], "the selection ends")
+    XCTAssertEqual(try harness.rowState(world.today[1]), .normal)
+    harness.controller.closeTab(nil)
+    XCTAssertEqual(harness.archived, [world.today[3]], "only the tab on screen is archived")
+    harness.controller.close()
+  }
+
+  /// A plain press on empty sidebar space ends the selection, as a plain click on a row does (design 6).
+  func testAPlainClickOnEmptySpaceEndsTheSelection() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.today[1], .command)
+    let view = try harness.outline().outlineView
+    view.performWindowDrag = { _, _ in }
+    let below = view.convert(NSPoint(x: 40, y: view.rect(ofRow: view.numberOfRows - 1).maxY + 40), to: nil)
+    let press = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseDown, location: below, modifierFlags: [], timestamp: 0,
+      windowNumber: view.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+
+    view.mouseDown(with: press)
+
+    XCTAssertEqual(try harness.outline().selectedNodes, [])
     harness.controller.close()
   }
 
@@ -615,6 +671,22 @@ final class TabActionsTests: XCTestCase {
     XCTAssertFalse(harness.controller.commandBar.isVisible)
     view.mouseDown(with: try mouseDown(2))
     XCTAssertTrue(harness.controller.commandBar.isVisible, "a double-click opens the command bar (BH-021)")
+    harness.controller.close()
+  }
+
+  /// A sheet (Delete Space) or a child window taking key is the window's own, like the command bar panel.
+  func testSheetsAndChildWindowsDoNotDimTheSidebar() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    let child = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 50, height: 50), styleMask: [.borderless],
+                         backing: .buffered, defer: true)
+    window.addChildWindow(child, ordered: .above)
+    let own = harness.controller.ownKeyableWindows
+    XCTAssertTrue(own.contains { $0 === harness.controller.commandBar.panel })
+    XCTAssertTrue(own.contains { $0 === child })
+    XCTAssertFalse(ShellWindowController.dimsSidebar(window: window, keyWindow: child, isKey: false, ownPanels: own))
+    window.removeChildWindow(child)
     harness.controller.close()
   }
 
