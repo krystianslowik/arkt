@@ -30,7 +30,8 @@ enum ShellContrastProbe {
   }
 
   /// Bridge default (`SpaceThemeInfo.bridgeDefault` in CoreBridge, not visible to this target), the empty-theme
-  /// fallback `ThemeBackgroundView` draws as white, and the sample Spaces of `StubSidebar.sample()`.
+  /// fallback `ThemeBackgroundView` draws as white, the sample Spaces of `StubSidebar.sample()` and both stops of
+  /// every first-run theme family (`SpaceThemeCatalog.families`).
   @MainActor
   static func shippedThemes() -> [SpaceThemeInfo] {
     let bridgeDefault = SpaceThemeInfo(baseColors: [.p3(hex: 0xF2F0EE, alpha: 1), .p3(hex: 0xE4E1DD, alpha: 1)],
@@ -38,7 +39,8 @@ enum ShellContrastProbe {
     let emptyFallback = SpaceThemeInfo(baseColors: [.white(1)], isDark: false)
     let sample = StubSidebar.sample()
     let sampleThemes = sample.spaceOrder.compactMap { sample.space($0)?.theme }
-    return [bridgeDefault, emptyFallback] + sampleThemes
+    let families = SpaceThemeCatalog.families.flatMap { [$0.light, $0.dark] }
+    return [bridgeDefault, emptyFallback] + sampleThemes + families
   }
 
   static func sampleGradient(_ theme: SpaceThemeInfo) -> [RGBA] {

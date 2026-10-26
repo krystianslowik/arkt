@@ -45,6 +45,8 @@ final class AppComposition {
         let session = AppSession(state: state, location: location, engine: engine, faviconStore: favicons,
                                  hostLookup: hostLookup)
         self.session = session
+        // The first run's record decides whether the launch window opens on it; loaded before the window exists.
+        session.onboardingRecord = (try? await session.settingsStore.load(OnboardingRecord.self)) ?? .defaultValue
         session.start(outcome: state.outcome, defersWindows: defersWindows)
         return
       } catch {

@@ -4,7 +4,9 @@ Design for issue #303. This document is the spec for the native implementation (
 [`design/onboarding/prototype/`](../../design/onboarding/prototype/) shows the same layout, copy and motion for
 review. Where the two disagree, this document wins.
 
-Status: design. Nothing here is implemented yet.
+Status: implementation in progress (#310). The flow ships first with the no-particle stage of section 7.4; the
+Metal particle field follows behind the same `OnboardingStage` protocol. Results:
+`docs/plans/2026-10-26-onboarding-results.md`.
 
 ## Contents
 
@@ -204,9 +206,9 @@ New `BrandTokens`, with `BrandTokensTests` covering every pair:
 |---|---|---|---|---|
 | `brandTextPrimary` | #202321 | #FAF9F5 | 15.06:1 | Titles, labels on glass |
 | `brandTextSecondary` | #62655F | #B6BAB3 | 5.62:1 / 8.06:1 | Ledes, eyebrow-free labels, footer |
-| `brandTextSecondaryContrast` | #3D403B | #E3E6DF | 10.1:1 / 12.9:1 | `brandTextSecondary` under Increase Contrast |
+| `brandTextSecondaryContrast` | #3D403B | #E3E6DF | 9.99:1 / 12.58:1 | `brandTextSecondary` under Increase Contrast |
 | `brandHairline` | graphite 12 % | porcelain 12 % | decorative | Glass edge, option pill edge |
-| `brandHairlineContrast` | graphite 45 % | porcelain 50 % | 3:1 or more | Hairlines under Increase Contrast |
+| `brandHairlineContrast` | graphite 50 % | porcelain 50 % | 3.13:1 / 4.8:1 | Hairlines under Increase Contrast (45 % measured 2.73:1) |
 | `brandControlFill` | graphite 5 % | porcelain 6 % | n/a | Hover, option pill, segmented track |
 | `brandControlFillPressed` | graphite 10 % | porcelain 12 % | n/a | Pressed fills |
 

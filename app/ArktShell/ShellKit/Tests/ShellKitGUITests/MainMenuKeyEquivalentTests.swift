@@ -11,6 +11,7 @@ final class AppCommands: NSObject {
   @objc func showSettings(_ sender: Any?) {}
   @objc func importFromArc(_ sender: Any?) {}
   @objc func showArchive(_ sender: Any?) {}
+  @objc func showWelcome(_ sender: Any?) {}
 }
 
 /// `CommandBarPanel.sendEvent` takes Cmd-Return and Opt-Return before anything else in the panel (KB-085). That
@@ -356,5 +357,26 @@ final class MainMenuInventoryTests: XCTestCase {
       let target = try XCTUnwrap(target, name)
       XCTAssertTrue(submenus.contains { $0 === target }, "\(name) menu is inside Arkt's menu")
     }
+  }
+
+  /// Onboarding spec, section 12: "Welcome to Arkt" is the first Help item, with no shortcut and an explicit target.
+  func testHelpMenuStartsWithWelcomeToArkt() throws {
+    let commands = AppCommands()
+    let built = MainMenu.make(commands: commands)
+    let first = try XCTUnwrap(built.help.items.first)
+    XCTAssertEqual(first.title, "Welcome to Arkt")
+    XCTAssertEqual(first.action, #selector(AppCommands.showWelcome(_:)))
+    XCTAssertTrue(first.target === commands)
+    XCTAssertEqual(first.keyEquivalent, "")
+  }
+
+  /// Decision 9: no menu item names Arc.
+  func testNoMenuItemNamesArc() throws {
+    let word = try Regex("\\bArc\\b")
+    let built = MainMenu.make(commands: AppCommands())
+    func walk(_ menu: NSMenu) -> [String] {
+      menu.items.flatMap { [$0.title] + ($0.submenu.map(walk) ?? []) }
+    }
+    for title in walk(built.menu) { XCTAssertNil(title.firstMatch(of: word), title) }
   }
 }

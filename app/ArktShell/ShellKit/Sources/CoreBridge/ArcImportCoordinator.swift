@@ -92,6 +92,8 @@ public struct ArcImportOutcome: Sendable {
   public var summary: ArcImportSummary
   /// Favicons of the nodes this import added, by Arkt node id.
   public var favicons: [UUID: Data]
+  /// The Spaces this import added, in Arc's order; the first run lands on the first one.
+  public var addedSpaces: [UUID] = []
 }
 
 public enum ArcImportCoordinatorError: Error, Equatable, Sendable {
@@ -230,6 +232,6 @@ public final class ArcImportCoordinator {
       }
     }
     let favicons = bundle.favicons.filter { counts.addedNodes.contains($0.key) }
-    return ArcImportOutcome(summary: summary, favicons: favicons)
+    return ArcImportOutcome(summary: summary, favicons: favicons, addedSpaces: counts.addedSpaces)
   }
 }

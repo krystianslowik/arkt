@@ -1,7 +1,7 @@
 import AppKit
 
-/// The target of the main menu's app-level items (week-3 results, W3-8 step 3): New Window, Settings, Import from Arc
-/// and Show Archive. Explicit, so the items never reach the end of the responder chain, which in the Engine build is
+/// The target of the main menu's app-level items (week-3 results, W3-8 step 3): New Window, Settings, Import Browser
+/// Data, Show Archive and Welcome to Arkt. Explicit, so the items never reach the end of the responder chain, which in the Engine build is
 /// Chromium's `AppController`. Enabled from the session: nothing is enabled before the data folder loaded.
 @MainActor
 final class AppCommands: NSObject {
@@ -20,6 +20,9 @@ final class AppCommands: NSObject {
 
   /// Window > Show Archive (E5c, unbound by default, KB-043).
   @objc func showArchive(_ sender: Any?) { session?.showArchive() }
+
+  /// Help > Welcome to Arkt (onboarding spec, section 12): the first run again over the frontmost window.
+  @objc func showWelcome(_ sender: Any?) { session?.showWelcome() }
 }
 
 extension AppCommands: NSMenuItemValidation {
@@ -31,6 +34,8 @@ extension AppCommands: NSMenuItemValidation {
       return session.canImportFromArc
     case #selector(showSettings(_:)):
       return false
+    case #selector(showWelcome(_:)):
+      return session.canShowWelcome
     default:
       return true
     }

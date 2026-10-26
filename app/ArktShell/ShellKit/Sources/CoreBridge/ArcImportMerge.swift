@@ -27,6 +27,8 @@ public struct ArcImportMergeCounts: Equatable, Sendable {
   public var refused = 0
   /// Every node id added, for favicons.
   public var addedNodes: Set<NodeID> = []
+  /// The Spaces added, in Arc's order.
+  public var addedSpaces: [SpaceID] = []
   /// The Arc ids this merge handled: added, already in Arkt, duplicate URL, or recorded before. Adding them to the
   /// stored `ArcImportRecord` keeps every later import from adding them again.
   public var handled = ArcImportRecord()
@@ -98,6 +100,7 @@ public enum ArcImportMerge {
       }
       if let arcID { counts.handled.spaceIDs.insert(arcID) }
       counts.spaces += 1
+      counts.addedSpaces.append(id)
       if space.profile != profile { counts.otherProfileSpaces += 1 }
       for location in [Location.pinned(id), .today(id)] {
         for child in source.children(of: location) {

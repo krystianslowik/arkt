@@ -14,6 +14,9 @@ final class Sandbox {
   let defaultsSuite: String
   /// `ARKT_AUTOSAVE_DELAY_MS` for the launch, when a test needs a fixed debounce.
   var autosaveDelayMilliseconds: Int?
+  /// The first run (onboarding) is shown on a new profile. Off by default, so tests start from the empty state;
+  /// `OnboardingTests` turn it on.
+  var showsOnboarding = false
 
   init() throws {
     let id = UUID().uuidString
@@ -43,6 +46,9 @@ final class Sandbox {
     if let autosaveDelayMilliseconds {
       env["ARKT_AUTOSAVE_DELAY_MS"] = String(autosaveDelayMilliseconds)
     }
+    if !showsOnboarding { env["ARKT_SKIP_ONBOARDING"] = "1" }
+    // Never the real default browser: the first run's check answers "not default" and Make default asks nobody.
+    env["ARKT_DEFAULT_BROWSER"] = "notDefault"
     return env
   }
 

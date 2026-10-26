@@ -68,6 +68,17 @@ targets:
         ArktEnvironmentOverrides: $(ARKT_ENV_OVERRIDES)
         NSHighResolutionCapable: true
         LSApplicationCategoryType: public.app-category.productivity
+        # Default browser (onboarding spec, section 15, item 3): web links and web documents, so macOS lists Arkt
+        # as a browser and the first run's "Make default" can ask for it.
+        CFBundleURLTypes:
+          - CFBundleURLName: Web site URL
+            CFBundleURLSchemes: [http, https]
+            CFBundleTypeRole: Viewer
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: HTML document
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.html, public.xhtml]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.arkt.ArktShell

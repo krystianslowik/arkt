@@ -30,7 +30,9 @@ let package = Package(
     .target(name: "ArktEngineABI"),
     // ChromiumEngine (EngineClient, EngineExtensions) over the facade, and the typed ArktShellEmbedder (W3-6).
     .target(name: "ChromiumEngineKit", dependencies: ["EngineAPI", "ArktEngineABI"]),
-    .target(name: "ShellUI", dependencies: ["EngineAPI", "Motion"]),
+    // The mark artwork (design/brand/logos/01-mustard-on-white.png, byte-identical) for the first run's stage.
+    .target(name: "ShellUI", dependencies: ["EngineAPI", "Motion"],
+            resources: [.copy("Resources/01-mustard-on-white.png")]),
     .target(
       name: "CoreBridge",
       dependencies: [

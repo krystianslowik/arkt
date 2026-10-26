@@ -63,6 +63,8 @@ enum MainMenu {
     main.addItem(submenu(title: "History", items: historyItems()))
     main.addItem(submenu(title: "Spaces", items: spaceItems()))
     windowItems(commands: commands).forEach { windows.addItem($0) }
+    // Onboarding spec, section 12: the first Help item, no shortcut.
+    help.addItem(item("Welcome to Arkt", #selector(AppCommands.showWelcome(_:)), "", [], target: commands))
     main.addItem(holder(for: windows))
     main.addItem(holder(for: help))
     main.addItem(bookmarksPlaceholder())

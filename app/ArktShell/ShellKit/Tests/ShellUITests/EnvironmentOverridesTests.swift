@@ -20,6 +20,30 @@ import Testing
     ]
   }
 
+  // MARK: - First run (onboarding)
+
+  @Test func skipOnboardingOnlyForTheValueOne() {
+    #expect(overrides(["ARKT_SKIP_ONBOARDING": "1"]).skipsOnboarding)
+    #expect(!overrides([:]).skipsOnboarding)
+    #expect(!overrides(["ARKT_SKIP_ONBOARDING": "0"]).skipsOnboarding)
+  }
+
+  /// A run that sets it never asks macOS: the check answers the given value and Make default only records the ask.
+  @Test func defaultBrowserOverride() {
+    #expect(overrides(["ARKT_DEFAULT_BROWSER": "default"]).defaultBrowser == .isDefault)
+    #expect(overrides(["ARKT_DEFAULT_BROWSER": "notDefault"]).defaultBrowser == .notDefault)
+    #expect(overrides([:]).defaultBrowser == nil)
+    #expect(overrides(["ARKT_DEFAULT_BROWSER": "yes"]).defaultBrowser == nil)
+  }
+
+  /// A UI-test run never touches the real default browser, whatever it sets.
+  @Test func uiTestModeFakesTheDefaultBrowser() {
+    #expect(overrides(complete).defaultBrowser == .notDefault)
+    var env = complete
+    env["ARKT_DEFAULT_BROWSER"] = "default"
+    #expect(overrides(env).defaultBrowser == .isDefault)
+  }
+
   // MARK: - Strict UI-test mode
 
   @Test func uiTestModeOnlyForTheValueOne() {
