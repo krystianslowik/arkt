@@ -310,6 +310,13 @@ Add `-only-testing:ArktShellUITests/<Class>/<test>` for one test. To scale the h
 set `TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE=3` in the environment of `xcodebuild`; as a build setting argument it does
 not reach the test runner.
 
+Attachments: XCUITest keeps screenshots and attachments in testmanagerd's container,
+`~/Library/Daemon Containers/<id>/Data/tmp/Attachments`, outside the repo and outside `build/`. The scheme's test plan
+(`app/ArktShell/ArktShellUITests.xctestplan`) sets the system and user attachment lifetimes to `deleteOnSuccess`, and
+the tests' own `XCTAttachment`s use `.deleteOnSuccess`, so a passing run leaves nothing there and only failures keep
+their screenshots. Keep the lifetime when you add an attachment. If old runs left files behind, clear them with
+`rm -rf ~/Library/Daemon\ Containers/*/Data/tmp/Attachments/*` (quit Xcode and `xcodebuild` first).
+
 One-time setup on a developer Mac (admin password once each):
 
 1. Developer mode for the tools: `DevToolsSecurity -enable` (your account must be in the `_developer` group).
