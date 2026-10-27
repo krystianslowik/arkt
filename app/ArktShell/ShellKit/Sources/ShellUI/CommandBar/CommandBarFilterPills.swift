@@ -27,6 +27,10 @@ final class CommandBarFilterPills: NSView {
     var isOn = false
     var countText = ""
     var flavor: ThemeFlavor = .dark
+    var onSelect: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) { onSelect?() }
+    override func accessibilityPerformPress() -> Bool { onSelect?(); return onSelect != nil }
 
     init(filter: CommandBarFilter) {
       self.filter = filter
@@ -77,7 +81,13 @@ final class CommandBarFilterPills: NSView {
     }
   }
 
-  private let pills = CommandBarFilter.allCases.map { Pill(filter: $0) }
+  private lazy var pills = CommandBarFilter.allCases.map { filter -> Pill in
+    let pill = Pill(filter: filter)
+    pill.onSelect = { [weak self] in self?.onSelect?(filter) }
+    return pill
+  }
+  /// A pill was clicked, or pressed by VoiceOver.
+  var onSelect: ((CommandBarFilter) -> Void)?
   private(set) var selected: CommandBarFilter = .all
   private(set) var counts: [CommandBarFilter: Int] = [:]
   private(set) var showsCounts = false
@@ -122,8 +132,10 @@ final class CommandBarFilterPills: NSView {
       pill.setAccessibilitySelected(pill.isOn)
       pill.applyColors()
     }
+    let before = frame.size
     invalidateIntrinsicContentSize()
     needsLayout = true
+    if size != before { superview?.needsLayout = true }      // a count's digits changed the capsule's width
   }
 
   /// "<name>, <count> results, selected"; without counts (empty query) just the name and state.

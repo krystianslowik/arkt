@@ -146,6 +146,25 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(bar.filter, .history)
   }
 
+  func testEnteringAScopeResetsTheFilter() throws {
+    bar.actionsProvider = { [CommandBarAction(id: "a", title: "A")] }
+    bar.toggle(.newTab)
+    try command(3)
+    XCTAssertTrue(tab())                                   // empty new-tab bar: a Tab key cap shows, action search
+    XCTAssertEqual(bar.scope, .actions)
+    XCTAssertEqual(bar.filter, .all)
+    XCTAssertEqual(bar.barView.pills.selected, .all)
+  }
+
+  func testClickingAPillPicksIt() throws {
+    showMixed()
+    bar.barView.pills.onSelect?(.actions)
+    XCTAssertEqual(bar.filter, .actions)
+    let pill = try XCTUnwrap(bar.barView.pills.subviews.first { $0.accessibilityIdentifier() == "commandBar.filter.tabs" })
+    XCTAssertTrue(pill.accessibilityPerformPress(), "VoiceOver can press it")
+    XCTAssertEqual(bar.filter, .tabs)
+  }
+
   func testNoFilterKeyWorksInsideAScope() throws {
     bar.actionsProvider = { [CommandBarAction(id: "a", title: "A")] }
     bar.toggle(.newTab)
@@ -156,6 +175,13 @@ final class CommandBarBehaviourTests: XCTestCase {
     try command(2)
     XCTAssertEqual(bar.filter, .all)
     XCTAssertEqual(bar.scope, .actions)
+  }
+
+  func testTheEmptyRowIsNotSelected() throws {
+    showMixed()
+    try command(3)
+    XCTAssertEqual(bar.barView.table.selectedRow, -1)
+    XCTAssertTrue(bar.barView.selectionIndicator.isHidden, "no fill or tick on a row that does nothing")
   }
 
   func testTheEmptyRowDoesNothingOnReturn() throws {
@@ -242,6 +268,12 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(opened?.absoluteString, "https://github.com/search?q=git")
   }
 
+  func testTheCaretIsMustard() throws {
+    bar.toggle(.newTab)
+    let editor = try XCTUnwrap(bar.barView.field.currentEditor() as? NSTextView)
+    XCTAssertEqual(editor.insertionPointColor, ShellTokens.commandBarTick.resolve(bar.flavor).nsColor())
+  }
+
   func testTheHintStripOnAnEmptyNewTabBarAdvertisesActionSearch() throws {
     bar.actionsProvider = { [CommandBarAction(id: "a", title: "A")] }
     bar.toggle(.newTab)
@@ -318,6 +350,11 @@ final class CommandBarBehaviourTests: XCTestCase {
     try key(9, "v", [.command, .shift])
     XCTAssertFalse(opened)
     XCTAssertTrue(bar.isVisible)
+  }
+
+  func testCmdLLeavesPasteAndGoOutOfTheHintStrip() throws {
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    XCTAssertNil(bar.barView.hintStrip.hints.trailing)
   }
 
   func testCommandShiftVIsNotOfferedFromCmdL() throws {
@@ -399,22 +436,25 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(bar.results.first?.accessibilityCaption, "Switch to Tab", "VoiceOver still hears the action")
   }
 
-  func testTheWindowsRecentTabsPutTheTabsItShowedFirstWithATimeAndTheCurrentSpaceFirst() throws {
+  func testTheWindowsRecentTabsAreTheViewedOnesNewestFirstWithoutTheTabOnScreen() throws {
     let sidebar = shell.sidebar
     let current = try XCTUnwrap(shell.sidebarController.currentSpace)
     let other = try sidebar.addSpace(title: "Other")
     let second = try sidebar.addTab(url: URL(string: "https://second.example")!, title: "Second", in: .today(current))
     let third = try sidebar.addTab(url: URL(string: "https://third.example")!, title: "Third", in: .today(current))
     let elsewhere = try sidebar.addTab(url: URL(string: "https://else.example")!, title: "Elsewhere", in: .today(other))
-    shell.activate(node: third)
+    shell.activate(node: elsewhere)                        // viewed in another Space
+    shell.activate(node: second)
+    shell.activate(node: third)                            // the tab on screen
 
     let recents = shell.commandBar.recentTabsProvider()
-    XCTAssertEqual(recents.first?.node, third, "the tab just shown leads")
-    XCTAssertNotNil(recents.first?.lastViewed, "and has a time")
-    let secondIndex = try XCTUnwrap(recents.firstIndex { $0.node == second })
-    XCTAssertNil(recents[secondIndex].lastViewed, "a tab not shown since the app started has none")
-    let elsewhereIndex = try XCTUnwrap(recents.firstIndex { $0.node == elsewhere })
-    XCTAssertLessThan(secondIndex, elsewhereIndex, "the current Space comes before the others (BH-111)")
+    XCTAssertFalse(recents.contains { $0.node == third }, "the tab on screen is not offered")
+    XCTAssertEqual(recents.prefix(2).map(\.node), [second, elsewhere], "viewed tabs, newest first, across Spaces")
+    XCTAssertNotNil(recents.first?.lastViewed)
+    let firstUnviewed = recents.firstIndex { $0.lastViewed == nil } ?? recents.count
+    XCTAssertTrue(recents[firstUnviewed...].allSatisfy { $0.lastViewed == nil }, "then the ones never shown")
+    let times = recents[..<firstUnviewed].compactMap(\.lastViewed)
+    XCTAssertEqual(times, times.sorted(by: >), "viewed tabs are newest first")
   }
 
   // MARK: Screenshots
@@ -630,6 +670,17 @@ final class CommandBarBehaviourTests: XCTestCase {
     try XCTUnwrap(end)()
     XCTAssertEqual(bar.panel.alphaValue, 1, "the old fade's end does not hide a bar that is back")
     XCTAssertTrue(bar.isVisible)
+  }
+
+  func testAShowDuringTheFadeOutStartsFromWhereTheLayerIsDrawn() throws {
+    bar.dismissFinisher = { _ in }
+    bar.openTabsProvider = { [self] in tabs(2) }
+    bar.toggle(.newTab)
+    bar.hide()
+    bar.toggle(.newTab)
+    let fade = try XCTUnwrap(bar.barView.layer?.animation(forKey: "commandBar.fade") as? CABasicAnimation)
+    XCTAssertEqual(fade.toValue as? Float, 1)
+    XCTAssertEqual(fade.fromValue as? Float, bar.barView.layer?.presentation()?.opacity ?? 0, "no jump to 0")
   }
 
   func testTheFadesRunWithReduceMotionToo() throws {

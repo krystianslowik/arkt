@@ -630,22 +630,22 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
   }
 
-  /// BH-104: open tabs of every Space of this profile, the current Space first (so the BH-111 refresh reorders).
-  /// The command bar's Recent tabs (#371): per Space, current Space first like the suggestions (BH-111), the tabs shown
-  /// in this window most recently first with when, then the ones not shown since the app started in sidebar order.
+  /// The command bar's Recent tabs (#371): the tabs shown in this window most recently first, across Spaces, without the
+  /// tab on screen (Return on it would only close the bar), then the tabs not shown since the app started, current
+  /// Space first like the suggestions (BH-111). Forgets the time of a tab that is gone.
   private func recentTabs() -> [CommandBarResults.OpenTab] {
-    let spaces = sidebarController.spaces
-    let ordered = sidebarController.currentSpace.map { current in [current] + spaces.filter { $0 != current } } ?? spaces
-    return ordered.flatMap { space -> [CommandBarResults.OpenTab] in
-      let tabs = CommandBarResults.openTabs(in: sidebar, space: space).map { tab in
-        CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
-                                  lastViewed: viewedAt[tab.node])
-      }
-      let viewed = tabs.filter { $0.lastViewed != nil }.sorted { ($0.lastViewed ?? .distantPast) > ($1.lastViewed ?? .distantPast) }
-      return viewed + tabs.filter { $0.lastViewed == nil }
+    let open = openTabs().map { tab in
+      CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
+                                lastViewed: viewedAt[tab.node])
     }
+    viewedAt = viewedAt.filter { entry in open.contains { $0.node == entry.key } }
+    let candidates = open.filter { $0.node != currentNode }
+    let viewed = candidates.filter { $0.lastViewed != nil }
+      .sorted { ($0.lastViewed ?? .distantPast) > ($1.lastViewed ?? .distantPast) }
+    return viewed + candidates.filter { $0.lastViewed == nil }
   }
 
+  /// BH-104: open tabs of every Space of this profile, the current Space first (so the BH-111 refresh reorders).
   private func openTabs() -> [CommandBarResults.OpenTab] {
     let spaces = sidebarController.spaces
     guard let current = sidebarController.currentSpace else {

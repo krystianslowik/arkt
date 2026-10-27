@@ -145,6 +145,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
     barView.onDismissNotice = { [weak self] in self?.dismissNotice() }
     barView.onEscapeKey = { [weak self] in self?.hide() }
+    barView.pills.onSelect = { [weak self] in self?.setFilter($0) }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
     for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification,
                  NSWindow.didChangeBackingPropertiesNotification] {
@@ -239,6 +240,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     fadeLayers(CommandBarMotion.entrance(reduceMotion: false), toModel: 1)
     panel.makeKey()
     if barView.field.currentEditor() == nil { panel.makeFirstResponder(barView.field) }   // kept across hides
+    applyCaretColor()
     if !targetText.isEmpty { barView.field.currentEditor()?.selectAll(nil) }
     showGeneration += 1
     let generation = showGeneration
@@ -294,11 +296,14 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Runs `fade` on the bar and the scrim and leaves `toModel` as their opacity. Reduce Motion keeps fades.
   private func fadeLayers(_ fade: CommandBarMotion.Fade, toModel: Float) {
     for layer in fadingLayers {
-      let from = layer.presentation()?.opacity ?? fade.fromOpacity
+      // A fade interrupting another starts where the layer is drawn now, so a show in the middle of a fade-out does not
+      // jump to 0 first.
+      let isInterrupting = layer.animation(forKey: Self.fadeKey) != nil
+      let from = isInterrupting ? (layer.presentation()?.opacity ?? fade.fromOpacity) : fade.fromOpacity
       layer.removeAnimation(forKey: Self.fadeKey)
       layer.opacity = toModel
       var run = fade
-      run.fromOpacity = fade.toOpacity == 0 ? from : fade.fromOpacity
+      run.fromOpacity = from
       layer.add(CommandBarMotion.animation(run), forKey: Self.fadeKey)
     }
   }
@@ -348,6 +353,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.apply(flavor: flavor)
     scrim.apply(flavor: flavor)
     if flavorChanged, !results.isEmpty { reapplyCells() }
+    applyCaretColor()
+  }
+
+  /// The caret is a mustard fill (README, Brand rules).
+  private func applyCaretColor() {
+    (barView.field.currentEditor() as? NSTextView)?.insertionPointColor = ShellTokens.commandBarTick.resolve(flavor).nsColor()
   }
 
   /// The flavor the bar draws in (tests).
@@ -448,7 +459,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       setFilter(picked)                                // Cmd-1 to Cmd-4
       return true
     }
-    if modifiers == [.command, .shift], event.keyCode == 9 {      // Cmd-Shift-V: Paste and Go from any state
+    if modifiers == [.command, .shift], event.charactersIgnoringModifiers?.lowercased() == "v" {      // Cmd-Shift-V: Paste and Go from any state
       pasteAndGo()
       return true
     }
@@ -528,6 +539,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   private func enterScope(_ newScope: CommandBarResults.Scope) {
     scope = newScope
+    filter = .all                                      // the pills do not apply inside a scope
     barView.field.stringValue = ""
     updateScopeChrome()
     reloadResults()
@@ -718,8 +730,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       barView.setHoveredRow(nil)                      // the rows shifted; no honest hover target anymore
       barView.table.reloadData()
     }
-    if !results.isEmpty, barView.table.selectedRow != 0 {
+    if results.first?.isActionable == true, barView.table.selectedRow != 0 {
       barView.table.selectRowIndexes([0], byExtendingSelection: false)
+    } else if results.first?.isActionable == false {
+      barView.table.deselectAll(nil)                   // the empty row of a filter is not selectable
     }
     barView.selectionAnimates = true
     updatePillsAndHints(query: text, trimmed: trimmed)
@@ -738,7 +752,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     let row = barView.table.selectedRow
     let tab = CommandBarTabAction.hint(scope: scope, queryIsEmpty: queryIsEmpty, isNewTab: mode == .newTab,
                                        selected: results.indices.contains(row) ? results[row] : nil)
-    barView.hintStrip.update(CommandBarHints.content(isEmptyQuery: queryIsEmpty, tab: tab), flavor: flavor)
+    barView.hintStrip.update(CommandBarHints.content(isEmptyQuery: queryIsEmpty, tab: tab,
+                                                     offersPasteAndGo: mode == .newTab), flavor: flavor)
   }
 
   // MARK: Notice (BH-113) and refresh (BH-111)

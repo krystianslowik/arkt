@@ -22,15 +22,16 @@ struct CommandBarHints: Equatable {
 
   /// Move, Open (empty state), Filter, and the Tab item when Tab scopes (`CommandBarTabAction.hint`); on the right the
   /// empty state's line, or Paste and Go with its shortcut.
-  static func content(isEmptyQuery: Bool, tab: Item?) -> CommandBarHints {
+  static func content(isEmptyQuery: Bool, tab: Item?, offersPasteAndGo: Bool = true) -> CommandBarHints {
     var items = [Item(keyCaps: [CommandBarKeyCaps.up, CommandBarKeyCaps.down], caption: "Move")]
     if isEmptyQuery { items.append(Item(keyCaps: [CommandBarKeyCaps.return], caption: "Open")) }
     items.append(Item(keyCaps: [CommandBarKeyCaps.command, "1\u{2013}4"], caption: "Filter"))
     if let tab { items.append(tab) }
-    let trailing = isEmptyQuery
+    // Paste and Go is a new-tab surface: Cmd-L and the split pane bar leave it out.
+    let trailing: Trailing? = isEmptyQuery
       ? Trailing(text: emptyStateLine)
-      : Trailing(text: CommandBarResults.pasteAndGoTitle,
-                 keyCaps: [CommandBarKeyCaps.command, CommandBarKeyCaps.shift, "V"])
+      : offersPasteAndGo ? Trailing(text: CommandBarResults.pasteAndGoTitle,
+                                    keyCaps: [CommandBarKeyCaps.command, CommandBarKeyCaps.shift, "V"]) : nil
     return CommandBarHints(items: items, trailing: trailing)
   }
 }
