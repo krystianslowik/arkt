@@ -138,19 +138,18 @@ public final class JavaScriptDialogPresenter {
     guard pending[tab] != nil else { return }
     guard let view = anchor(tab) else {
       retryOnLayout = true
-      dismissPanel(of: tab)
+      hidePanel(of: tab)
       return
     }
     guard let window = view.window, windowIsVisible(window) else {
-      dismissPanel(of: tab)                  // a window coming back (deminiaturize, unhide, occlusion) refreshes
+      hidePanel(of: tab)                     // a window coming back (deminiaturize, unhide, occlusion) refreshes
       return
     }
     // The tab reached another window or page view without a hand-off (a pane or Peek move): the panel and its
     // observers belong to the old ones, so it goes down unanswered and a new one is made for the new view. A prompt's
     // typed text comes along.
     if let entry = entries[tab], entry.panel.panel.parent !== window || entry.anchorView !== view {
-      if pending[tab]?.kind == .prompt, let typed = entry.panel.inputText { pending[tab]?.defaultPromptText = typed }
-      dismissPanel(of: tab)
+      hidePanel(of: tab)
     }
     guard let dialog = pending[tab] else { return }
     let frame = Self.screenFrame(of: view)
@@ -181,6 +180,13 @@ public final class JavaScriptDialogPresenter {
 
   private static func screenFrame(of view: NSView) -> NSRect {
     view.window?.convertToScreen(view.convert(view.bounds, to: nil)) ?? .zero
+  }
+
+  /// Takes the tab's panel down because its page is off screen or elsewhere, keeping what a prompt's field holds as
+  /// the dialog's text, so the panel that comes back shows it.
+  private func hidePanel(of tab: TabID) {
+    if pending[tab]?.kind == .prompt, let typed = entries[tab]?.panel.inputText { pending[tab]?.defaultPromptText = typed }
+    dismissPanel(of: tab)
   }
 
   /// Takes the tab's panel down at once, with no answer to the engine.

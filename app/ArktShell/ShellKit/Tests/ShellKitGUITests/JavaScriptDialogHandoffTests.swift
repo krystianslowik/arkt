@@ -129,11 +129,13 @@ final class JavaScriptDialogHandoffTests: XCTestCase {
 
   // MARK: Teardown on the other paths: nothing answers, nothing is left behind
 
-  private func assertNoPanelAnywhere(_ scene: Scene, _ message: String) {
+  /// `dialogEnded` is false for a closed window whose tab the test leaves open in the engine: the dialog is still
+  /// pending there, with no panel and no way to show one.
+  private func assertNoPanelAnywhere(_ scene: Scene, _ message: String, dialogEnded: Bool = true) {
     XCTAssertNil(scene.first.javaScriptDialogs.panel(for: scene.tab), message)
     XCTAssertNil(scene.second.javaScriptDialogs.panel(for: scene.tab), message)
     XCTAssertTrue(scene.first.javaScriptDialogs.pending.isEmpty, message)
-    XCTAssertTrue(scene.second.javaScriptDialogs.pending.isEmpty, message)
+    if dialogEnded { XCTAssertTrue(scene.second.javaScriptDialogs.pending.isEmpty, message) }
     XCTAssertEqual(scene.first.window?.childWindows?.count ?? 0, 0, message)
     XCTAssertEqual(scene.second.window?.childWindows?.count ?? 0, 0, message)
     XCTAssertTrue(scene.engine.dialogAnswers.isEmpty, message)
@@ -183,7 +185,7 @@ final class JavaScriptDialogHandoffTests: XCTestCase {
 
       XCTAssertNil(panel.panel.parent, "\(kind)")
       XCTAssertNil(panel.onAnswer, "\(kind)")
-      assertNoPanelAnywhere(scene, "\(kind)")
+      assertNoPanelAnywhere(scene, "\(kind)", dialogEnded: false)
     }
   }
 }
