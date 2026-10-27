@@ -19,7 +19,7 @@ public enum LittleArktLookup {
   /// The command bar panel on the current screen: 766 pt wide (narrower on small screens), 60 pt input, 50 pt rows,
   /// its top at 34 % of the screen. `screen` is a visible frame in screen coordinates.
   public static func frame(in screen: CGRect, rowCount: Int) -> CGRect {
-    CommandBarGeometry.frame(parentFrame: screen,
-                             contentHeight: CommandBarGeometry.contentHeight(rowCount: rowCount))
+    LittleArktGeometry.frame(parentFrame: screen,
+                             contentHeight: LittleArktGeometry.contentHeight(rowCount: rowCount))
   }
 }

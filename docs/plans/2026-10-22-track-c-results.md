@@ -2466,3 +2466,163 @@ run 3's dominant hitch is one 16.66 ms interval at frame 9 of a swipe, the same 
 under load. The machine was not idle even at load 4.9: WindowServer ran at 23-70% CPU, `searchpartyd` at up to 86%,
 `bird` at up to 62%, and `coreaudiod` and browser helpers stayed busy. A 3 of 3 run on a quiet machine is still
 needed; it is a maintainer step, not something this tree can force from a shared machine.
+## Command bar: action search, site search, Paste and Go, suggestion removal (#112)
+
+Plan: parity spec section 2.7 (BH-104 to BH-114); Track C open question 5 (default search engine stays the
+Google placeholder). Pull request: see #112.
+
+### Per rule
+
+- BH-104 (partially, rest deferred): results now collect open tabs from every Space of the window's profile,
+  the current Space first, and matching Spaces appear as "Switch to Space" results. Deferred: archived tabs
+  (no shell-facing archive provider; `Archive` lives in ArktCore), history (no history store yet) and
+  extensions (no extension list provider) as result sources, and folders as results (tied to the BH-105
+  deferral below). Arc actions are covered by BH-106's action search.
+- BH-105 DEFERRED: showing only the switched-to tab under its closed folder needs the sidebar outline's
+  peek-row rendering, which BH-092 also waits on; it is sidebar outline work, not command bar work. The
+  command bar side (matching tabs inside closed folders, across Spaces) is done: `openTabs` walks folders.
+- BH-106 / KB-081: Tab on the empty bar just opened with Cmd-T enters action search (chip "Actions",
+  placeholder "Search actions..."); the window's verbs are New Space, Next Space, Previous Space, Toggle
+  Toolbar. Tab elsewhere is left alone; Backspace on the empty scoped field leaves the scope [I] (Arc
+  unverified).
+- BH-107 / KB-082: a typed alias plus Tab scopes the query to the engine (chip with the engine name); Enter
+  opens the engine's search URL. Tab is the only trigger, per the spec (`migratedToTabOnlySiteSearchTrigger`).
+  Seeded engines (`seededPopularSiteSearches`): YouTube `yt`, Wikipedia `wiki`, GitHub `gh`,
+  Stack Overflow `so`, behind `SiteSearchEngines.seeded`; the window can substitute a real keyword store later.
+- BH-108 / GS-035: a URL on the clipboard at bar open makes "Paste and Go" the top suggestion of the empty
+  Cmd-T bar (Cmd-L never offers it); Enter opens it. The bottom bar's "+" button turns into "Paste and Go"
+  (symbol, tooltip, accessibility label) while hovered with Cmd held and a URL on the clipboard, and clicking
+  in that state opens the URL; a `flagsChanged` monitor lives only for the hover. The pasteboard read is
+  `CommandBarController.pasteboardURL(_:)`: URLs only; a schemeless host is not Paste and Go.
+- BH-109 / KB-083: the hovered removable row shows an X, and Cmd-Opt-Delete removes the selected row;
+  removal is session-scoped (the row stays hidden for the controller's lifetime) and `onRemoveSuggestion` is
+  the hook a history store will persist through. The typed-URL row, Paste and Go, actions and Spaces are not
+  removable. After a removal the next suggestion takes the row's place.
+- BH-110: covered by `CommandBarTests.testSidebarClickWorksWhileTheBarIsOpen`: with the bar open and key, a
+  click on a sidebar row hit-tests to the row (the centered panel is not in its way), activates it and
+  resigns the bar.
+- BH-111: `SidebarController.onCurrentSpaceChanged` fires when a Space commits; the window refreshes the open
+  bar's suggestions on it (current Space first, so the order flips on a switch).
+- BH-112: already done before #112; `CommandBarTests.testGeometryAndDarkSurface` pins the centered frame
+  (midX == parent midX, top at 34% of the window height).
+- BH-113: the notice "We talk to your search engine to help us suggest results." rides with the rows that
+  send the query to the engine (it adds `CommandBarGeometry.noticeHeight`, top edge pinned); the X dismisses
+  it for good under Arc's key `commandBarSearchSuggestionsPrivacyHasBeenExplicitlyDismissed`, and
+  `searchSuggestEnabled` off drops the search rows and the notice. Both live in `CommandBarSettings`,
+  defaults-backed in the app, ephemeral in tests.
+- BH-114 / KB-038 DEFERRED: NEEDS-RUNTIME-CHECK (RT-03). Whether holding Cmd / Ctrl alone opens anything in
+  Arc, and with which defaults and timing, is unverified; it needs a maintainer runtime check and a product
+  decision before implementation.
+- Search engine choice and the suggestions setting wired to the Settings window: DEFERRED, as the issue
+  prefers: the Settings window (#307) waits on the #305 design review. `CommandBarSettings` persists both
+  under Arc's keys, so the wiring is a read of the same defaults once #307 exists.
+
+### Tests
+
+TDD: failing tests first (compile errors counted), then implementation.
+
+- `app/ArktCore`: `swift test` — 368 passed (103 + 102 + 65 + 98), unchanged by this branch.
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` — 610 passed (ShellUITests 266, 47 suites;
+  +28 vs main: SiteSearchEnginesTests 4, CommandBarActionsTests 3, CommandBarSettingsTests 4,
+  CommandBarResultsScopeTests 15, CommandBarGeometryTests +1, CommandBarOpenTabsTests +1).
+- `swift test --filter ShellKitGUITests` — 515 cases, 514 passed; the one failure is
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` under heavy machine load (load1 6.3-9.4 on 10
+  cores, just under the gate's NOT-MEASURABLE cutoff; the hitch moves between labels across runs).
+  A/B: origin/main versions of the touched files pass 3/3 standalone, this branch passes 3/3 standalone and
+  4/4 including an earlier run; the swipe/settle path is unchanged by this branch (the BH-111 hook early
+  returns while the bar is closed). New GUI tests: CommandBarTests +14, SidebarViewTests +5.
+- App build (App target touched): `xcodegen generate` + Debug `xcodebuild build` — BUILD SUCCEEDED.
+- XCUITest (`ArktShellUITests/CommandBarKeyTests` + `FirstRunAndOpenTests`): 13 tests, 0 failures,
+  `** TEST SUCCEEDED **` (result bundle `build/ui-112b.xcresult`). A first run under load had two harness
+  timeouts (window and results-table snapshot at load1 14-19); both passed in the rerun and are the
+  harness's known load sensitivity.
+
+### Deviations and leftovers
+
+- The search engine for the search row stays the Google placeholder (open question 5); its display name is
+  `CommandBarSettings.searchEngineName`.
+- Suggestion removal is session-scoped; persisting removals waits on a history store (`onRemoveSuggestion`
+  is the seam).
+- The seeded site-search list is a placeholder set of four popular engines; a Chromium keyword store replaces
+  it behind `siteSearchProvider`.
+- `CommandBarGeometry.noticeHeight` (32) is TODO(measure), like the other unmeasured chrome constants
+  (open question 2).
+
+## Command bar, hybrid design, part 1: restyle and layout (#371, supersedes draft #322)
+
+Part 1 of two pull requests for #371 (`Refs #371`). It carries #322's eight commits (authorship kept) onto current
+`main`, then restyles the bar to `design/command-bar/`. Part 2 (filters, Tab rule, Esc, empty-state groups, motion,
+Cmd-Shift-V) stacks on this branch.
+
+### What changed
+
+- `CommandBarGeometry` is the README's table: 680 wide, 16 corners, 58 field, 40 rows, 9 selected radius, 6 list
+  padding, 34 hint strip, top edge at 22 % of the window (176 of 800) so results grow downward, at most five rows
+  without scrolling (seven in the empty state, group headers 26 each, used by part 2). Little Arkt keeps the old
+  look: its metrics, tokens and row views moved to `LittleArktGeometry`, `ShellTokens.lookup*` and
+  `LittleArktLookupRows`.
+- Tokens: `ShellTokens.commandBar*` are light and dark pairs (glass, opaque surface, text, secondary, tertiary,
+  divider, edges, selected row, key cap, scrim, pill well, pill on, pill on text, tick). `ShellTokensContrastTests`
+  gained six tests: text on the opaque surface and on every fill a row puts under it (selected row, key cap, pill
+  well) at 4.5:1 in both appearances, the selected pill and its count, graphite on mustard above 7:1, and mustard
+  only as a fill.
+- View: glass surface (`NSVisualEffectView`, opaque under Reduce Transparency), magnifier, 22 pt field, filter pills
+  with per-filter counts (hidden for an empty query), Esc key cap (closes the bar), hint strip, scope chip and notice
+  kept. The panel no longer forces dark: the bar, its cells and the scrim take the window behind it, light or dark.
+- Scrim: a click-through child window of the parent, black 28 % in dark and graphite 10 % in light, ordered in
+  once at alpha 0 like the panel, so a show orders no window.
+- Rows by the README's anatomy: 20 pt slot with a 16 pt symbol, title with the query match in semibold, secondary
+  URL, right-aligned trailing caption and key caps (Return on the selected row, action shortcuts). The selected row's
+  fill and its 3 pt mustard tick are one view behind the rows (`CommandBarSelectionIndicator`), instant here.
+- Accessibility: dialog group "Command bar"; rows read "<title>, <host>, <kind>, <k> of <n>"; pills are a tab group
+  announcing "<name>, <count> results, selected"; new `AXID`s `commandBar.filters`, `commandBar.filter.<name>`,
+  `commandBar.hints`, `commandBar.escape`. The UI test harness matches a row by title prefix.
+- Site-search rows read "Search <site> for <query>"; placeholder "Search or enter address".
+
+### Deviations from the design
+
+- The design's `--ink-3` (.36 / .44) and the selected pill's count at 55 % fail the README's own 4.5:1 rule on the
+  surfaces; the tokens are raised (tertiary .62 dark, .68 light; count 75 %), found by the new contrast tests.
+- Favicons are not in the bar yet (the symbol slot carries a generic symbol); history rows have no source (no
+  history store), so the History pill counts 0. Recent tabs with relative times and the preview column are #372 and
+  part 2.
+
+### Tests
+
+TDD: the failing tests came first (compile errors counted: the new geometry, row content, filter count and token
+tests referenced values that did not exist), then the implementation.
+
+- `app/ArktCore`: `swift test` - 556 passed (145 + 117 + 70 + 8 + 216), untouched by this branch.
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` - 1643 passed in nine runs (origin/main at the same
+  point: 1587; +56: 27 are #322's carried tests, 29 are new here: `CommandBarRowContentTests` 13, `CommandBarFilterTests` 5,
+  `CommandBarGeometryTests` +4, `ShellTokensContrastTests` +6, `CommandBarResultsScopeTests` +1).
+- `swift test --filter ShellKitGUITests` - 1398 cases, 30 skipped, 4 failures in 3 tests, none in the command bar:
+  `SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU` (22.9 s; a frame-pacing gate under
+  load), `SplitDragTests.testDropFavoriteOnPlainTabMovesItIntoSplitAndClickVsDrag` (an event-queue test; passes
+  14 of 14 standalone), `OnboardingTests.testFooterFadesOutAsTheFoldBegins` (0.9999998 against 1.0). A baseline run
+  of origin/main (1352 cases, 28 skipped) fails the first two as well plus `SpacePagerTests`'
+  `testFramePacingDuringSwipeAndKeyboardSwitch`; the onboarding one is a float comparison and is not near this code.
+- New GUI tests: `CommandBarHybridTests` 27. Existing command bar GUI tests: `CommandBarTests` 67,
+  `CommandBarArchivedTests` 2, `AXProxyRowsTests`, `AccessibilityIdentifierTests`, `LittleArkt*` and
+  `JavaScriptDialog*` all pass after the changes below.
+- `CommandBarHybridTests` 20 times in a row on the final commit under load (load1 9.2 to 22.4): 20 of 20 passed, 27
+  tests each. The existing latency gate `CommandBarTests.testAppearsUnder16ms` passes.
+- App build (App target touched): `xcodegen generate` + Debug `xcodebuild build` - BUILD SUCCEEDED; UI tests
+  `xcodebuild build-for-testing` (scheme `ArktShellUITests`) - TEST BUILD SUCCEEDED. UI tests were not run (the
+  harness drives the real app; this run was told not to launch it). `Shell.selectCommandBarRow` now matches a row by
+  its title, since a row's label is the whole sentence.
+
+### Existing tests changed
+
+- `CommandBarTests.testGeometryAndDarkSurface` is now `testGeometryAndFollowsTheWindowAppearance` (680 wide, top at
+  22 %, appearance follows the window).
+- `testShowWithUnchangedResultsKeepsTheCells`: the marker moved to the cell's tooltip, because the selected row's
+  title is redrawn when it loses selection.
+- `CommandBarArchivedTests`: the caption reads "Restore from Archive" without the arrow.
+- `AXProxyRowsTests` and `AccessibilityIdentifierTests`: row labels are "<title>, <host>, <kind>, <k> of <n>".
+
+### Deferred to part 2
+
+Filter state and Cmd-1 to Cmd-4, Tab and Shift-Tab (the smart rule), Esc clearing first, the empty state's groups and
+Recent tabs with times, the selection slide, the fades and Cmd-Shift-V. The preview column and Cmd-Return stay in
+#372. History rows need a history store; the pill is there and counts 0.

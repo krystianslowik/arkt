@@ -48,7 +48,7 @@ final class CommandBarArchivedTests: XCTestCase {
     XCTAssertEqual(bar.results.map(\.kind.name), ["restore", "search"])
     let cell = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 0, makeIfNecessary: true)
       as? CommandBarCellView)
-    XCTAssertEqual(cell.hint.stringValue, "Restore from Archive \u{2192}")
+    XCTAssertEqual(cell.hint.stringValue, "Restore from Archive")
 
     bar.commit()
 
