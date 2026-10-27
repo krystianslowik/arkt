@@ -25,6 +25,8 @@ let package = Package(
     ),
     .target(name: "Archive", dependencies: ["SidebarModel"]),
     .executableTarget(name: "arkt-import-check", dependencies: ["ArcImport"]),
+    .target(name: "ArcProbe", dependencies: ["ArcImport"]),
+    .executableTarget(name: "arkt-arc-probe", dependencies: ["ArcProbe"]),
     .testTarget(
       name: "SidebarModelTests",
       dependencies: ["SidebarModel", "CoreTestSupport"],
@@ -35,6 +37,7 @@ let package = Package(
       dependencies: ["ArcImport", "SidebarModel", "Archive", "CoreTestSupport"],
       resources: [.copy("Fixtures")]
     ),
+    .testTarget(name: "ArcProbeTests", dependencies: ["ArcProbe"]),
     .testTarget(
       name: "PersistenceTests",
       dependencies: [
