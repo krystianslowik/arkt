@@ -382,7 +382,7 @@ private final class LoadLog {
 
 /// A plain window per engine window, shown without activating the app, with the active tab mounted in its card.
 @MainActor
-private final class RunnerWindowHost: EngineWindowHosting {
+final class RunnerWindowHost: EngineWindowHosting {
   let window: NSWindow
   let cardView: NSView
   var forward: EngineCommandForwarding?

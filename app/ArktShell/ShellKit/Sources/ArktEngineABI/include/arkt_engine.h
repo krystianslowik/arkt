@@ -31,6 +31,9 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
 @protocol ArktHistoryEntry;
+@protocol ArktImportCookie;
+@protocol ArktImportLogin;
+@protocol ArktImportResult;
 @protocol ArktInfobar;
 @protocol ArktJavaScriptDialog;
 @protocol ArktLinkActivation;
@@ -427,6 +430,68 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, copy) NSString* title;
 @end
 
+// One cookie to write into the profile (#512). Implemented by the shell; the
+// engine reads it during the call and never keeps it. The value is lent, not
+// copied: the shell zeroes its buffer after the completion runs.
+NS_SWIFT_UI_ACTOR
+@protocol ArktImportCookie <NSObject>
+// Chromium's host_key: a leading dot makes a domain cookie, none a host
+// cookie.
+@property(nonatomic, readonly, copy) NSString* hostKey;
+@property(nonatomic, readonly, copy) NSString* name;
+@property(nonatomic, readonly, copy) NSString* path;
+// Lends the value's UTF-8 bytes to `body` for the duration of the call.
+- (void)withValueBytes:(void(NS_NOESCAPE ^)(const void* bytes, NSUInteger length))body
+    NS_SWIFT_NAME(withValueBytes(_:));
+@property(nonatomic, readonly, copy) NSDate* expires;
+@property(nonatomic, readonly, nullable, copy) NSDate* creation;
+@property(nonatomic, readonly, nullable, copy) NSDate* lastAccess;
+@property(nonatomic, readonly) BOOL isSecure;
+@property(nonatomic, readonly) BOOL isHTTPOnly;
+// Chromium's samesite values: -1 unspecified, 0 none, 1 lax, 2 strict.
+@property(nonatomic, readonly) NSInteger sameSite;
+// 0 low, 1 medium, 2 high.
+@property(nonatomic, readonly) NSInteger priority;
+// 0 unset, 1 non-secure, 2 secure.
+@property(nonatomic, readonly) NSInteger sourceScheme;
+// -1 when unspecified.
+@property(nonatomic, readonly) NSInteger sourcePort;
+// Chromium's top_frame_site_key: empty for an ordinary cookie. The engine
+// skips a partitioned cookie (non-empty): written without its partition key it
+// would be readable in every top-level context.
+@property(nonatomic, readonly, copy) NSString* partitionKey;
+@end
+
+// One saved login to write into the profile's password store (#512). Same
+// lending rules as ArktImportCookie.
+NS_SWIFT_UI_ACTOR
+@protocol ArktImportLogin <NSObject>
+@property(nonatomic, readonly, copy) NSString* originURL;
+@property(nonatomic, readonly, nullable, copy) NSString* actionURL;
+@property(nonatomic, readonly, copy) NSString* signonRealm;
+@property(nonatomic, readonly, copy) NSString* username;
+- (void)withPasswordBytes:(void(NS_NOESCAPE ^)(const void* bytes, NSUInteger length))body
+    NS_SWIFT_NAME(withPasswordBytes(_:));
+@property(nonatomic, readonly, nullable, copy) NSDate* dateCreated;
+@property(nonatomic, readonly, nullable, copy) NSDate* dateLastUsed;
+@end
+
+// The counts of one import call. written + skipped + failed equals the
+// batch size. Never carries a host, a name or a value.
+NS_SWIFT_UI_ACTOR
+@protocol ArktImportResult <NSObject>
+// Stored.
+@property(nonatomic, readonly) NSInteger written;
+// Not stored on purpose: a duplicate in the batch, an expired or partitioned
+// cookie, or a cookie the profile already holds that is as new or newer.
+@property(nonatomic, readonly) NSInteger skipped;
+// Refused by the cookie store or the password store.
+@property(nonatomic, readonly) NSInteger failed;
+// Failure reasons with their counts, as "reason: count" lines; nil when
+// nothing failed.
+@property(nonatomic, readonly, nullable, copy) NSString* failureReason;
+@end
+
 // A user link activation in a tab's main frame (a click or key press on a
 // link, with a user gesture), before Chromium starts the navigation (#313).
 // Script navigations, forms, reloads and history moves are never reported.
@@ -643,6 +708,35 @@ NS_SWIFT_UI_ACTOR
 // pending.
 - (BOOL)answerDialogInTab:(id<ArktTabHandle>)tab
                    accept:(BOOL)accept NS_SWIFT_NAME(answerDialog(in:accept:));
+
+// Import writes (#512), into the profile the engine started with. Plaintext
+// crosses in-process only; the engine builds its own copies inside the
+// lending blocks and zeroes them once it has handed them on, and the shell
+// zeroes its buffers after `completion`. Copies Chromium makes itself (the
+// cookie and its mojo message, the password store's) are not zeroed.
+// `completion` runs on the main thread after the writes reached the store (a
+// cookie batch is flushed to disk first), never inside the call, and also for
+// an empty batch.
+//
+// Cookies: written through the profile's CookieManager
+// (SetCanonicalCookie) with HttpOnly and an inclusive SameSite context.
+// Duplicates in the batch by (name, domain, path) keep the newest by last
+// access, then creation, then the later entry; a cookie that already expired
+// or is partitioned, and one the profile holds that was last used at or after the imported one's
+// last access, are skipped. The network service caps an expiry at 400 days
+// after the creation date, so a cookie created longer ago keeps its expiry by
+// moving its creation date forward to expiry - 400 days (never past now).
+- (void)importCookies:(NSArray<id<ArktImportCookie>>*)cookies
+           completion:(void (^)(id<ArktImportResult> result))completion
+    NS_SWIFT_NAME(importCookies(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
+// Passwords: written through the profile's password store (AddLogin).
+// Duplicates in the batch by (signon_realm, username, action) keep the later
+// entry. A login the store already holds under that key is skipped unless the
+// imported one is newer (the later of date_last_used and date_created, against
+// the stored one's). `written` counts logins after the store answered.
+- (void)importPasswords:(NSArray<id<ArktImportLogin>>*)logins
+             completion:(void (^)(id<ArktImportResult> result))completion
+    NS_SWIFT_NAME(importPasswords(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
 @end
 
 // Implemented by the Swift app: @objc(ArktShellEmbedder), in the main

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "arkt/api/arkt_embedder.h"
+#include "arkt/api/arkt_import_writer.h"
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extensions_container.h"
@@ -31,6 +32,8 @@
 #include "base/no_destructor.h"
 #include "base/scoped_observation.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
@@ -739,6 +742,21 @@ NSData* PNGForInfobarIcon(NSImage* image) {
 @synthesize sourceURL = _sourceURL;
 @synthesize modifierFlags = _modifierFlags;
 @synthesize disposition = _disposition;
+@end
+
+// The counts of one import call (#512).
+@interface ArktFacadeImportResult : NSObject <ArktImportResult>
+@property(nonatomic, assign) NSInteger written;
+@property(nonatomic, assign) NSInteger skipped;
+@property(nonatomic, assign) NSInteger failed;
+@property(nonatomic, copy, nullable) NSString* failureReason;
+@end
+
+@implementation ArktFacadeImportResult
+@synthesize written = _written;
+@synthesize skipped = _skipped;
+@synthesize failed = _failed;
+@synthesize failureReason = _failureReason;
 @end
 
 // One registered event sink.
@@ -3039,6 +3057,32 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 
 // -----------------------------------------------------------------------------
 
+namespace arkt {
+namespace {
+
+// The shell's completion for an import: the counts as an engine-private
+// result, delivered from a posted task (ImportCookies and ImportLogins post).
+void DeliverImportResult(void (^completion)(id<ArktImportResult>),
+                         ImportCounts counts) {
+  ArktFacadeImportResult* result = [[ArktFacadeImportResult alloc] init];
+  result.written = counts.written;
+  result.skipped = counts.skipped;
+  result.failed = counts.failed;
+  if (!counts.reasons.empty()) {
+    std::string lines;
+    for (const auto& [reason, count] : counts.reasons) {
+      lines += reason + ": " + base::NumberToString(count) + "\n";
+    }
+    result.failureReason = base::SysUTF8ToNSString(lines);
+  }
+  LOG(WARNING) << "ARKT: facade import written " << counts.written
+               << " skipped " << counts.skipped << " failed " << counts.failed;
+  completion(result);
+}
+
+}  // namespace
+}  // namespace arkt
+
 @interface ArktFacadeEngine : NSObject <ArktEngine>
 @end
 
@@ -3254,7 +3298,75 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   return answered;
 }
 
+- (void)importCookies:(NSArray<id<ArktImportCookie>>*)cookies
+           completion:(void (^)(id<ArktImportResult> result))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<arkt::ImportCookie> batch;
+  batch.reserve(cookies.count);
+  for (id<ArktImportCookie> cookie in cookies) {
+    arkt::ImportCookie out;
+    out.host_key = base::SysNSStringToUTF8(cookie.hostKey);
+    out.name = base::SysNSStringToUTF8(cookie.name);
+    out.path = base::SysNSStringToUTF8(cookie.path);
+    out.expires = base::Time::FromNSDate(cookie.expires);
+    out.creation = cookie.creation ? base::Time::FromNSDate(cookie.creation)
+                                   : base::Time();
+    out.last_access = cookie.lastAccess
+                          ? base::Time::FromNSDate(cookie.lastAccess)
+                          : base::Time();
+    out.secure = cookie.isSecure;
+    out.http_only = cookie.isHTTPOnly;
+    out.same_site = static_cast<int>(cookie.sameSite);
+    out.priority = static_cast<int>(cookie.priority);
+    out.source_scheme = static_cast<int>(cookie.sourceScheme);
+    out.source_port = static_cast<int>(cookie.sourcePort);
+    out.partition_key = base::SysNSStringToUTF8(cookie.partitionKey);
+    // The engine's own copy is built inside the lending block.
+    std::string* value = &out.value;
+    [cookie withValueBytes:^(const void* bytes, NSUInteger length) {
+      value->assign(static_cast<const char*>(bytes), length);
+    }];
+    batch.push_back(std::move(out));
+  }
+  LOG(WARNING) << "ARKT: facade importCookies " << batch.size();
+  arkt::ImportCookies(
+      arkt::EmbedderProfile(), std::move(batch),
+      base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
+- (void)importPasswords:(NSArray<id<ArktImportLogin>>*)logins
+             completion:(void (^)(id<ArktImportResult> result))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<arkt::ImportLogin> batch;
+  batch.reserve(logins.count);
+  for (id<ArktImportLogin> login in logins) {
+    arkt::ImportLogin out;
+    out.origin_url = base::SysNSStringToUTF8(login.originURL);
+    out.action_url =
+        login.actionURL ? base::SysNSStringToUTF8(login.actionURL) : "";
+    out.signon_realm = base::SysNSStringToUTF8(login.signonRealm);
+    out.username = base::SysNSStringToUTF16(login.username);
+    out.date_created = login.dateCreated
+                           ? base::Time::FromNSDate(login.dateCreated)
+                           : base::Time();
+    out.date_last_used = login.dateLastUsed
+                             ? base::Time::FromNSDate(login.dateLastUsed)
+                             : base::Time();
+    std::u16string* password = &out.password;
+    [login withPasswordBytes:^(const void* bytes, NSUInteger length) {
+      *password = base::UTF8ToUTF16(std::string_view(
+          static_cast<const char*>(bytes), length));
+    }];
+    batch.push_back(std::move(out));
+  }
+  LOG(WARNING) << "ARKT: facade importPasswords " << batch.size();
+  arkt::ImportLogins(
+      arkt::EmbedderProfile(), std::move(batch),
+      base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
 @end
+
 
 namespace arkt {
 

@@ -986,6 +986,70 @@ final class ScriptedFacade: NSObject, ArktEngine {
     return nil
   }
 
+  // MARK: Import (#512)
+
+  /// What one import call carried, read through the lending blocks as the engine reads it.
+  struct ScriptedImportedCookie: Equatable {
+    var hostKey: String, name: String, path: String, value: String
+    var expires: Date, creation: Date?, lastAccess: Date?
+    var isSecure: Bool, isHTTPOnly: Bool, sameSite: Int, priority: Int, sourceScheme: Int, sourcePort: Int
+    var partitionKey: String
+  }
+  struct ScriptedImportedLogin: Equatable {
+    var originURL: String, actionURL: String?, signonRealm: String, username: String, password: String
+    var dateCreated: Date?, dateLastUsed: Date?
+  }
+  private final class ScriptedImportResult: NSObject, ArktImportResult {
+    let written: Int, skipped: Int, failed: Int
+    let failureReason: String?
+    init(written: Int, skipped: Int, failed: Int, failureReason: String?) {
+      self.written = written; self.skipped = skipped; self.failed = failed; self.failureReason = failureReason
+    }
+  }
+
+  private(set) var importedCookieBatches: [[ScriptedImportedCookie]] = []
+  private(set) var importedLoginBatches: [[ScriptedImportedLogin]] = []
+  /// The answer to an import: every record written, unless a test sets this.
+  var importAnswer: (written: Int?, skipped: Int, failed: Int, failureReason: String?) = (nil, 0, 0, nil)
+
+  private func importResult(count: Int) -> any ArktImportResult {
+    let written = importAnswer.written ?? count - importAnswer.skipped - importAnswer.failed
+    return ScriptedImportResult(written: written, skipped: importAnswer.skipped, failed: importAnswer.failed,
+                                failureReason: importAnswer.failureReason)
+  }
+
+  func importCookies(_ cookies: [any ArktImportCookie], completion: @escaping (any ArktImportResult) -> Void) {
+    importedCookieBatches.append(cookies.map { cookie in
+      var value = ""
+      cookie.withValueBytes { bytes, count in
+        value = String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self)
+      }
+      return ScriptedImportedCookie(
+        hostKey: cookie.hostKey, name: cookie.name, path: cookie.path, value: value, expires: cookie.expires,
+        creation: cookie.creation, lastAccess: cookie.lastAccess, isSecure: cookie.isSecure,
+        isHTTPOnly: cookie.isHTTPOnly, sameSite: cookie.sameSite, priority: cookie.priority,
+        sourceScheme: cookie.sourceScheme, sourcePort: cookie.sourcePort, partitionKey: cookie.partitionKey)
+    })
+    let result = importResult(count: cookies.count)
+    // The real facade answers from a posted task.
+    Task { @MainActor in completion(result) }
+  }
+
+  func importPasswords(_ logins: [any ArktImportLogin], completion: @escaping (any ArktImportResult) -> Void) {
+    importedLoginBatches.append(logins.map { login in
+      var password = ""
+      login.withPasswordBytes { bytes, count in
+        password = String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self)
+      }
+      return ScriptedImportedLogin(
+        originURL: login.originURL, actionURL: login.actionURL, signonRealm: login.signonRealm,
+        username: login.username, password: password, dateCreated: login.dateCreated,
+        dateLastUsed: login.dateLastUsed)
+    })
+    let result = importResult(count: logins.count)
+    Task { @MainActor in completion(result) }
+  }
+
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool {
     guard testAPIEnabled, let tab = tab as? ScriptedTab else { return false }
     return tab.answer(accept: accept)

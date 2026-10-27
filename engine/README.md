@@ -75,8 +75,10 @@ The pin moves by rebase only, following `engine/REBASE.md` step by step, tracked
 Every test launch of a built engine (`out/Spike`, `out/Arkt`, or an installed test bundle) passes both of these:
 
 - `--use-mock-keychain`: an in-memory fake keychain, so a test run never reads, creates or changes an item in the
-  login keychain and never shows a keychain prompt. Encrypted profile data (cookies, saved passwords) therefore does
-  not survive a relaunch of a test profile; extension installs and extension state do.
+  login keychain and never shows a keychain prompt. The fake keychain answers with one fixed password
+  (`FakeKeychainV2`, `"mock_password"`), so cookies and saved passwords are still encrypted (`v10` values) and a
+  relaunch of the same test profile reads them back; they are not readable with a real profile's key, and nothing
+  reaches the login keychain (#512 checked both the encrypted rows and the relaunch).
 - `--user-data-dir=<test profile>`: a throwaway profile under `$CHROMIUM_ROOT/profiles` (or
   `~/Library/Application Support/ArktTest` for an installed bundle), never a real browser profile.
 

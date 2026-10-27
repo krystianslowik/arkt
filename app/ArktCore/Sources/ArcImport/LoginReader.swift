@@ -11,6 +11,16 @@ public struct ArcLogin: Sendable {
   public let dateLastUsed: Date?
   /// Always false: rows the user marked "never save" are skipped and counted, not delivered.
   public let blacklistedByUser: Bool
+
+  /// For code that builds records without the reader (engine tests, previews). The reader fills every field.
+  public init(
+    originURL: String, actionURL: String? = nil, signonRealm: String, username: String, password: SecretBytes,
+    dateCreated: Date? = nil, dateLastUsed: Date? = nil, blacklistedByUser: Bool = false
+  ) {
+    self.originURL = originURL; self.actionURL = actionURL; self.signonRealm = signonRealm; self.username = username
+    self.password = password; self.dateCreated = dateCreated; self.dateLastUsed = dateLastUsed
+    self.blacklistedByUser = blacklistedByUser
+  }
 }
 
 /// Counts for one login read. Never holds row data.

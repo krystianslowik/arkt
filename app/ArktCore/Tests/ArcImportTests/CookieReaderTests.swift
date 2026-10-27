@@ -45,6 +45,38 @@ struct CookieReaderTests {
     }
   }
 
+  @Test func extraFixtureCookiesAndLoginsAreWrittenAfterTheFixedOnes() throws {
+    let extra = FixtureManifest.Cookie(
+      hostKey: "127.0.0.1", name: "local", value: "loopback-value", path: "/", isSecure: false, isHTTPOnly: false,
+      expiresWebKitTime: ChromiumTime.webKit(fromUnixSeconds: 4_102_444_800))
+    let login = FixtureManifest.Login(
+      originURL: "http://127.0.0.1/", signonRealm: "http://127.0.0.1/", username: "local-user", password: "local-pass")
+    try Support.withProfile(.init(extraCookies: [extra], extraLogins: [login])) { manifest in
+      #expect(manifest.cookies.last == extra)
+      #expect(manifest.logins.last == login)
+      let (cookies, _) = try readAll(manifest)
+      let read = try #require(cookies.first { $0.name == "local" })
+      #expect(read.hostKey == "127.0.0.1" && Support.text(read.value) == "loopback-value")
+    }
+  }
+
+  @Test func partitionedCookiesAreSkippedAndCounted() throws {
+    let future = ChromiumTime.webKit(fromUnixSeconds: 4_102_444_800)
+    let partitioned = FixtureManifest.Cookie(
+      hostKey: ".tracker.example", name: "partitioned", value: "p", path: "/", isSecure: true, isHTTPOnly: false,
+      expiresWebKitTime: future, topFrameSiteKey: "https://news.example")
+    let plain = FixtureManifest.Cookie(
+      hostKey: ".tracker.example", name: "plain", value: "q", path: "/", isSecure: true, isHTTPOnly: false,
+      expiresWebKitTime: future)
+    try Support.withProfile(.init(extraCookies: [partitioned, plain])) { manifest in
+      let (cookies, summary) = try readAll(manifest)
+      #expect(summary.skippedPartitioned == 1)
+      #expect(!cookies.contains { $0.name == "partitioned" })
+      #expect(cookies.contains { $0.name == "plain" && $0.partitionKey.isEmpty })
+      #expect(summary.description.contains("partitioned 1"))
+    }
+  }
+
   @Test func countsMatchTheManifest() throws {
     try Support.withProfile { manifest in
       let (cookies, summary) = try readAll(manifest)

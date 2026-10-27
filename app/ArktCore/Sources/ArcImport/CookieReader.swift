@@ -22,6 +22,22 @@ public struct ArcCookie: Sendable {
   public let sourcePort: Int
   public let hasExpires: Bool
   public let isPersistent: Bool
+  /// Chromium's `top_frame_site_key`: empty for an ordinary cookie, the top-level site for a partitioned one. The reader
+  /// never delivers a partitioned cookie; the field lets a writer refuse one it is handed.
+  public let partitionKey: String
+
+  /// For code that builds records without the reader (engine tests, previews). The reader fills every field.
+  public init(
+    hostKey: String, name: String, value: SecretBytes, path: String, expires: Date, creation: Date? = nil,
+    lastAccess: Date? = nil, isSecure: Bool = false, isHTTPOnly: Bool = false, sameSite: Int = -1, priority: Int = 1,
+    sourceScheme: Int = 0, sourcePort: Int = -1, hasExpires: Bool = true, isPersistent: Bool = true,
+    partitionKey: String = ""
+  ) {
+    self.hostKey = hostKey; self.name = name; self.value = value; self.path = path; self.expires = expires
+    self.creation = creation; self.lastAccess = lastAccess; self.isSecure = isSecure; self.isHTTPOnly = isHTTPOnly
+    self.sameSite = sameSite; self.priority = priority; self.sourceScheme = sourceScheme; self.sourcePort = sourcePort
+    self.hasExpires = hasExpires; self.isPersistent = isPersistent; self.partitionKey = partitionKey
+  }
 }
 
 /// Counts for one cookie read. Never holds row data.
@@ -38,10 +54,14 @@ public struct CookieReadSummary: Sendable, Equatable, CustomStringConvertible {
   public var skippedUndecryptable = 0
   /// Rows with a missing or invalid required field.
   public var skippedMalformed = 0
+  /// Partitioned cookies (a non-empty `top_frame_site_key`): importing one as an ordinary cookie would let the site read
+  /// it in every top-level context.
+  public var skippedPartitioned = 0
 
   public var description: String {
     "cookies: version \(metaVersion), scanned \(scanned), delivered \(delivered), session \(skippedSession), "
-      + "expired \(skippedExpired), undecryptable \(skippedUndecryptable), malformed \(skippedMalformed)"
+      + "expired \(skippedExpired), undecryptable \(skippedUndecryptable), malformed \(skippedMalformed), "
+      + "partitioned \(skippedPartitioned)"
   }
 }
 
@@ -57,7 +77,7 @@ public struct CookieReader: Sendable {
   private static let required = ["host_key", "name", "encrypted_value", "path", "expires_utc"]
   private static let optional = [
     "value", "creation_utc", "last_access_utc", "is_secure", "is_httponly", "samesite", "priority", "source_scheme",
-    "source_port", "has_expires", "is_persistent",
+    "source_port", "has_expires", "is_persistent", "top_frame_site_key",
   ]
 
   private let now: @Sendable () -> Date
@@ -109,6 +129,11 @@ public struct CookieReader: Sendable {
       let isPersistent = cursor.int("is_persistent").map { $0 != 0 } ?? hasExpires
       guard hasExpires, isPersistent else {
         summary.skippedSession += 1
+        continue
+      }
+      let partitionKey = cursor.text("top_frame_site_key") ?? ""
+      guard partitionKey.isEmpty else {
+        summary.skippedPartitioned += 1
         continue
       }
       let expires = WebKitTimestamp.date(expiresMicros)
