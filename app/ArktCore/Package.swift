@@ -32,7 +32,7 @@ let package = Package(
     ),
     .testTarget(
       name: "ArcImportTests",
-      dependencies: ["ArcImport", "SidebarModel", "Archive"],
+      dependencies: ["ArcImport", "SidebarModel", "Archive", "CoreTestSupport"],
       resources: [.copy("Fixtures")]
     ),
     .testTarget(
