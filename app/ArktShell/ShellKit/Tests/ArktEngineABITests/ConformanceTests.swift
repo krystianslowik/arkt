@@ -260,6 +260,51 @@ final class TestBrowser: NSObject, ArktBrowserHandle {
   }
 }
 
+/// An import record as the shell writes it (#512): the value is lent as bytes, never handed over as an object.
+final class TestImportCookie: NSObject, ArktImportCookie {
+  let hostKey = ".example.com"
+  let name = "session"
+  let path = "/"
+  let expires = Date(timeIntervalSince1970: 2_000_000_000)
+  let creation: Date? = nil
+  let lastAccess: Date? = Date(timeIntervalSince1970: 1_000)
+  let isSecure = true
+  let isHTTPOnly = true
+  let sameSite = 1
+  let priority = 2
+  let sourceScheme = 2
+  let sourcePort = -1
+  let value: [UInt8]
+  init(value: String) { self.value = Array(value.utf8) }
+  func withValueBytes(_ body: (UnsafeRawPointer, UInt) -> Void) {
+    value.withUnsafeBytes { body($0.baseAddress!, UInt($0.count)) }
+  }
+}
+
+final class TestImportLogin: NSObject, ArktImportLogin {
+  let originURL = "https://example.com/login"
+  let actionURL: String? = nil
+  let signonRealm = "https://example.com/"
+  let username = "user"
+  let dateCreated: Date? = nil
+  let dateLastUsed: Date? = nil
+  let password: [UInt8]
+  init(password: String) { self.password = Array(password.utf8) }
+  func withPasswordBytes(_ body: (UnsafeRawPointer, UInt) -> Void) {
+    password.withUnsafeBytes { body($0.baseAddress!, UInt($0.count)) }
+  }
+}
+
+final class TestImportResult: NSObject, ArktImportResult {
+  let written: Int
+  let skipped: Int
+  let failed: Int
+  let failureReason: String?
+  init(written: Int, skipped: Int, failed: Int, failureReason: String?) {
+    self.written = written; self.skipped = skipped; self.failed = failed; self.failureReason = failureReason
+  }
+}
+
 /// A facade that records events and delivers them as one batch on `flush()`, as the real facade does from a posted
 /// task.
 final class TestEngine: NSObject, ArktEngine {
@@ -327,6 +372,26 @@ final class TestEngine: NSObject, ArktEngine {
   }
 
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool { false }
+
+  private(set) var importedValues: [String] = []
+
+  func importCookies(_ cookies: [any ArktImportCookie], completion: @escaping (any ArktImportResult) -> Void) {
+    for cookie in cookies {
+      cookie.withValueBytes { bytes, count in
+        importedValues.append(String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self))
+      }
+    }
+    completion(TestImportResult(written: cookies.count, skipped: 0, failed: 0, failureReason: nil))
+  }
+
+  func importPasswords(_ logins: [any ArktImportLogin], completion: @escaping (any ArktImportResult) -> Void) {
+    for login in logins {
+      login.withPasswordBytes { bytes, count in
+        importedValues.append(String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self))
+      }
+    }
+    completion(TestImportResult(written: 0, skipped: 0, failed: logins.count, failureReason: "refused: 1\n"))
+  }
 }
 
 /// The app's embedder, as `ArktShellEmbedder` will be: found by name, never linked by the engine.
@@ -850,5 +915,16 @@ struct InfobarABITests {
     #expect(carried.act(.ok, linkIndex: 0))
     #expect(!carried.act(.close, linkIndex: 0), "an action after the end is refused")
     #expect(infobar.actions.map(\.0) == [.messageLink, .ok])
+  }
+
+  @Test func importRecordsLendTheirBytesAndTheFacadeAnswersWithCounts() {
+    let engine = TestEngine()
+    var cookieResult: (any ArktImportResult)?
+    engine.importCookies([TestImportCookie(value: "cookie-secret")]) { cookieResult = $0 }
+    var loginResult: (any ArktImportResult)?
+    engine.importPasswords([TestImportLogin(password: "login-secret")]) { loginResult = $0 }
+    #expect(engine.importedValues == ["cookie-secret", "login-secret"])
+    #expect(cookieResult.map { ($0.written, $0.skipped, $0.failed, $0.failureReason) }.map { $0 == (1, 0, 0, nil) } ?? false)
+    #expect(loginResult?.failed == 1 && loginResult?.failureReason == "refused: 1\n")
   }
 }

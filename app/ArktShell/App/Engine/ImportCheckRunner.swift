@@ -1,0 +1,120 @@
+#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES
+import AppKit
+import ArcImport
+import ChromiumEngineKit
+import EngineAPI
+import EngineAPITestSupport
+import Foundation
+
+/// The engine check for the import writes (#512), against the real engine. Runs with `--arkt-import-check=import` or
+/// `=verify` and `--arkt-engine-test-api`; the shell's session is not started. `ARKT_IMPORT_FIXTURE_DIR` names a profile
+/// folder made by `FakeChromiumProfile` (invented values, a fake Safe Storage key): the runner reads its cookies and
+/// logins with the Arc readers, writes them through `ChromiumEngine.importCookies` and `importPasswords`, loads a page on
+/// 127.0.0.1 and prints what `document.cookie` shows. `verify` skips the import and only loads the page, for the run
+/// after a relaunch. Prints one `ARKT_IMPORT` line per step and quits through the application's own terminate.
+@MainActor
+final class ImportCheckRunner {
+  static let switchName = "--arkt-import-check"
+  static var phase: String? {
+    CommandLine.arguments.first { $0.hasPrefix(switchName + "=") }.map { String($0.dropFirst(switchName.count + 1)) }
+  }
+  static var isRequested: Bool { phase != nil }
+
+  /// The fixture's invented Safe Storage password.
+  private struct FixtureKey: SafeStorageKeyProvider {
+    func withPassword<R>(_ body: ([UInt8]) throws -> R) throws -> R { try body(Array("fixture-password".utf8)) }
+  }
+
+  /// One run-loop turn after `embedderReady`, like the contract runner.
+  static func start() {
+    setvbuf(stdout, nil, _IOLBF, 0)
+    Task { @MainActor in
+      let status = await run()
+      print("ARKT_IMPORT exit \(status)")
+      if status == 0 { NSApp.terminate(nil) } else { exit(status) }
+    }
+  }
+
+  private static func run() async -> Int32 {
+    do {
+      guard let engine = ChromiumEmbedding.makeEngine() else { throw RunnerError("no engine (before engineDidStart)") }
+      guard engine.testAPIEnabled else { throw RunnerError("launch with --arkt-engine-test-api") }
+      if phase == "import" { try await importFixture(into: engine) }
+      if phase == "verify" {
+        // An empty batch writes nothing; the engine logs how many logins its store holds.
+        print("ARKT_IMPORT passwords (empty batch) \(describe(await engine.importPasswords([])))")
+      }
+      try await showCookies(in: engine)
+      return 0
+    } catch {
+      print("ARKT_IMPORT failed: \(error)")
+      return 1
+    }
+  }
+
+  private static func importFixture(into engine: ChromiumEngine) async throws {
+    guard let path = ProcessInfo.processInfo.environment["ARKT_IMPORT_FIXTURE_DIR"] else {
+      throw RunnerError("ARKT_IMPORT_FIXTURE_DIR is not set")
+    }
+    let directory = URL(fileURLWithPath: path, isDirectory: true)
+    // The fixture's fixed cookies expire in 2024 and 2025: the reader's clock is set to its base date so it delivers
+    // them, and the engine then skips them as expired (counted). The 127.0.0.1 cookie expires in 2100.
+    var cookies: [ArcCookie] = []
+    let clock = Date(timeIntervalSince1970: 1_704_067_200 + 60)
+    let cookieSummary = try CookieReader(now: { clock }).read(
+      cookiesDatabase: directory.appendingPathComponent("Network/Cookies"), keyProvider: FixtureKey()
+    ) { cookies += $0 }
+    print("ARKT_IMPORT read \(cookieSummary)")
+    var logins: [ArcLogin] = []
+    let loginSummary = try LoginReader().read(
+      loginDatabase: directory.appendingPathComponent("Login Data"), keyProvider: FixtureKey()
+    ) { logins += $0 }
+    print("ARKT_IMPORT read \(loginSummary)")
+
+    let cookieResult = await engine.importCookies(cookies)
+    print("ARKT_IMPORT cookies \(describe(cookieResult))")
+    let loginResult = await engine.importPasswords(logins)
+    print("ARKT_IMPORT passwords \(describe(loginResult))")
+    // Importing the same batch again is all skipped for the cookies that were written (no newer cookie), and the
+    // store updates the logins it holds.
+    var again: [ArcCookie] = []
+    _ = try CookieReader(now: { clock }).read(
+      cookiesDatabase: directory.appendingPathComponent("Network/Cookies"), keyProvider: FixtureKey()
+    ) { again += $0 }
+    print("ARKT_IMPORT cookies again \(describe(await engine.importCookies(again)))")
+  }
+
+  private static func showCookies(in engine: ChromiumEngine) async throws {
+    let server = try await ContractPageServer.start()
+    defer { server.stop() }
+    let host = RunnerWindowHost(index: 0)
+    let window = engine.createWindow(host: host)
+    let page = server.page("ImportCheck", serial: 1)
+    let tab = engine.createTab(url: page, in: window)
+    try await EngineContract.waitUntil(timeout: .seconds(15)) {
+      engine.snapshot(of: tab).map { !$0.isLoading && $0.url == page } ?? false
+    }
+    let seen = try await engine.evaluateScript("document.cookie", in: tab, userGesture: false)
+    print("ARKT_IMPORT document.cookie \(String(describing: seen))")
+    if phase == "import" {
+      _ = try await engine.evaluateScript("document.cookie = 'control=page-set; max-age=3600; path=/'; true", in: tab,
+                                          userGesture: false)
+      let after = try await engine.evaluateScript("document.cookie", in: tab, userGesture: false)
+      print("ARKT_IMPORT document.cookie with control \(String(describing: after))")
+    }
+    engine.closeTab(tab, mode: .skipUnloadHandlers)
+    engine.closeWindow(window)
+    host.window.orderOut(nil)
+  }
+
+  private static func describe(_ result: ImportWriteResult) -> String {
+    "written=\(result.written) skipped=\(result.skipped) failed=\(result.failed) "
+      + "reason=\(result.failureReason?.replacingOccurrences(of: "\n", with: "; ") ?? "none")"
+  }
+
+  struct RunnerError: Error, CustomStringConvertible {
+    let description: String
+    init(_ description: String) { self.description = description }
+  }
+}
+#endif

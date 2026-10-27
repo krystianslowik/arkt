@@ -30,11 +30,20 @@ public enum FakeChromiumProfile {
     public var cookieFormat: CookieFormat = .v24
     public var bookmarks: BookmarksVariant = .populated
     public var drift: SchemaDrift = .none
+    /// Cookies and logins written after the fixed ones (an engine check needs a cookie for 127.0.0.1 that does not
+    /// expire in the past, which the fixed ones do).
+    public var extraCookies: [FixtureManifest.Cookie] = []
+    public var extraLogins: [FixtureManifest.Login] = []
 
-    public init(cookieFormat: CookieFormat = .v24, bookmarks: BookmarksVariant = .populated, drift: SchemaDrift = .none) {
+    public init(
+      cookieFormat: CookieFormat = .v24, bookmarks: BookmarksVariant = .populated, drift: SchemaDrift = .none,
+      extraCookies: [FixtureManifest.Cookie] = [], extraLogins: [FixtureManifest.Login] = []
+    ) {
       self.cookieFormat = cookieFormat
       self.bookmarks = bookmarks
       self.drift = drift
+      self.extraCookies = extraCookies
+      self.extraLogins = extraLogins
     }
   }
 
@@ -77,14 +86,14 @@ public enum FakeChromiumProfile {
     )
 
     let loginDataURL = directory.appendingPathComponent("Login Data")
-    let logins = FixtureData.logins
+    let logins = FixtureData.logins + options.extraLogins
     try writeLogins(
       to: loginDataURL, logins: logins, key: key,
       columns: columns("logins", LoginsSchema.logins, drops: "date_password_modified")
     )
 
     let cookiesURL = network.appendingPathComponent("Cookies")
-    let cookies = FixtureData.cookies
+    let cookies = FixtureData.cookies + options.extraCookies
     let hostPrefixed = options.cookieFormat == .v24
     try writeCookies(
       to: cookiesURL, cookies: cookies, key: key, version: hostPrefixed ? 24 : 23, hostPrefixed: hostPrefixed,

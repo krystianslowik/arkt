@@ -23,9 +23,10 @@ let package = Package(
     .package(name: "ArktCore", path: "../../ArktCore"),
   ],
   targets: [
-    .target(name: "EngineAPI"),
-    .target(name: "EngineAPITestSupport", dependencies: ["EngineAPI"]),
-    .target(name: "FakeEngineKit", dependencies: ["EngineAPI"]),
+    // EngineAPI names the Arc import readers' records (ArcCookie, ArcLogin, SecretBytes) in EngineImporting (#512).
+    .target(name: "EngineAPI", dependencies: [.product(name: "ArcImport", package: "ArktCore")]),
+    .target(name: "EngineAPITestSupport", dependencies: ["EngineAPI", .product(name: "ArcImport", package: "ArktCore")]),
+    .target(name: "FakeEngineKit", dependencies: ["EngineAPI", .product(name: "ArcImport", package: "ArktCore")]),
     .target(name: "Motion"),
     // The report model, stripping, local store, consent policy and the GitHub hand-off. No dependencies at all.
     .target(name: "CrashReporting"),
@@ -33,7 +34,7 @@ let package = Package(
     // code. Only ChromiumEngineKit and its tests may depend on it (EngineABIIsolationTests).
     .target(name: "ArktEngineABI"),
     // ChromiumEngine (EngineClient, EngineExtensions) over the facade, and the typed ArktShellEmbedder (W3-6).
-    .target(name: "ChromiumEngineKit", dependencies: ["EngineAPI", "ArktEngineABI"]),
+    .target(name: "ChromiumEngineKit", dependencies: ["EngineAPI", "ArktEngineABI", .product(name: "ArcImport", package: "ArktCore")]),
     // The mark artwork (design/brand/logos/01-mustard-on-white.png, byte-identical) for the first run's stage.
     .target(name: "ShellUI", dependencies: ["EngineAPI", "Motion"],
             resources: [.copy("Resources/01-mustard-on-white.png")]),
@@ -46,7 +47,7 @@ let package = Package(
         .product(name: "ArcImport", package: "ArktCore"),
       ]
     ),
-    .testTarget(name: "EngineAPITests", dependencies: ["EngineAPI", "EngineAPITestSupport"]),
+    .testTarget(name: "EngineAPITests", dependencies: ["EngineAPI", "EngineAPITestSupport", .product(name: "ArcImport", package: "ArktCore")]),
     .testTarget(name: "MotionTests", dependencies: ["Motion"]),
     .testTarget(name: "CrashReportingTests", dependencies: ["CrashReporting"]),
     .testTarget(name: "ShellUITests", dependencies: ["ShellUI", "EngineAPITestSupport"]),
@@ -55,9 +56,9 @@ let package = Package(
     // The shared contract against a scripted facade, no Chromium.
     .testTarget(
       name: "ChromiumEngineKitTests",
-      dependencies: ["ChromiumEngineKit", "ArktEngineABI", "EngineAPI", "EngineAPITestSupport"]
+      dependencies: ["ChromiumEngineKit", "ArktEngineABI", "EngineAPI", "EngineAPITestSupport", .product(name: "ArcImport", package: "ArktCore")]
     ),
-    .testTarget(name: "FakeEngineKitTests", dependencies: ["FakeEngineKit"]),
+    .testTarget(name: "FakeEngineKitTests", dependencies: ["FakeEngineKit", "EngineAPI", "EngineAPITestSupport", .product(name: "ArcImport", package: "ArktCore")]),
     .testTarget(
       name: "CoreBridgeTests",
       dependencies: [

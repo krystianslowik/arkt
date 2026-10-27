@@ -26,6 +26,10 @@ public struct FixtureManifest: Sendable, Equatable {
     public let signonRealm: String
     public let username: String
     public let password: String
+
+    public init(originURL: String, signonRealm: String, username: String, password: String) {
+      self.originURL = originURL; self.signonRealm = signonRealm; self.username = username; self.password = password
+    }
   }
 
   public struct Cookie: Sendable, Equatable {
@@ -36,6 +40,14 @@ public struct FixtureManifest: Sendable, Equatable {
     public let isSecure: Bool
     public let isHTTPOnly: Bool
     public let expiresWebKitTime: Int64
+
+    public init(
+      hostKey: String, name: String, value: String, path: String, isSecure: Bool, isHTTPOnly: Bool,
+      expiresWebKitTime: Int64
+    ) {
+      self.hostKey = hostKey; self.name = name; self.value = value; self.path = path; self.isSecure = isSecure
+      self.isHTTPOnly = isHTTPOnly; self.expiresWebKitTime = expiresWebKitTime
+    }
   }
 
   public struct Bookmark: Sendable, Equatable {

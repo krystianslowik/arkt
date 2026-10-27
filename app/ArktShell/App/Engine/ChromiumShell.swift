@@ -49,6 +49,11 @@ final class ChromiumShell: ChromiumEmbedderDelegate {
       RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { EngineContractRunner.start() } }
       return
     }
+    if ImportCheckRunner.isRequested {
+      // The import check (#512), like the contract runner: the engine only, no session.
+      RunLoop.main.perform(inModes: [.common]) { MainActor.assumeIsolated { ImportCheckRunner.start() } }
+      return
+    }
     #endif
     try await composition.start(engine: engine, hostLookup: { [weak engine] id in engine?.host(of: id) },
                                 defersWindows: true)

@@ -45,6 +45,21 @@ struct CookieReaderTests {
     }
   }
 
+  @Test func extraFixtureCookiesAndLoginsAreWrittenAfterTheFixedOnes() throws {
+    let extra = FixtureManifest.Cookie(
+      hostKey: "127.0.0.1", name: "local", value: "loopback-value", path: "/", isSecure: false, isHTTPOnly: false,
+      expiresWebKitTime: ChromiumTime.webKit(fromUnixSeconds: 4_102_444_800))
+    let login = FixtureManifest.Login(
+      originURL: "http://127.0.0.1/", signonRealm: "http://127.0.0.1/", username: "local-user", password: "local-pass")
+    try Support.withProfile(.init(extraCookies: [extra], extraLogins: [login])) { manifest in
+      #expect(manifest.cookies.last == extra)
+      #expect(manifest.logins.last == login)
+      let (cookies, _) = try readAll(manifest)
+      let read = try #require(cookies.first { $0.name == "local" })
+      #expect(read.hostKey == "127.0.0.1" && Support.text(read.value) == "loopback-value")
+    }
+  }
+
   @Test func countsMatchTheManifest() throws {
     try Support.withProfile { manifest in
       let (cookies, summary) = try readAll(manifest)

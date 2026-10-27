@@ -22,6 +22,18 @@ public struct ArcCookie: Sendable {
   public let sourcePort: Int
   public let hasExpires: Bool
   public let isPersistent: Bool
+
+  /// For code that builds records without the reader (engine tests, previews). The reader fills every field.
+  public init(
+    hostKey: String, name: String, value: SecretBytes, path: String, expires: Date, creation: Date? = nil,
+    lastAccess: Date? = nil, isSecure: Bool = false, isHTTPOnly: Bool = false, sameSite: Int = -1, priority: Int = 1,
+    sourceScheme: Int = 0, sourcePort: Int = -1, hasExpires: Bool = true, isPersistent: Bool = true
+  ) {
+    self.hostKey = hostKey; self.name = name; self.value = value; self.path = path; self.expires = expires
+    self.creation = creation; self.lastAccess = lastAccess; self.isSecure = isSecure; self.isHTTPOnly = isHTTPOnly
+    self.sameSite = sameSite; self.priority = priority; self.sourceScheme = sourceScheme; self.sourcePort = sourcePort
+    self.hasExpires = hasExpires; self.isPersistent = isPersistent
+  }
 }
 
 /// Counts for one cookie read. Never holds row data.
