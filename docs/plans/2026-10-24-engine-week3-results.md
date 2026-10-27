@@ -3501,4 +3501,6 @@ Branch `feat/455-little-arkt-selection-fades`. Design: `docs/design/little-arkt.
 - Coverage: the pane-to-split mapping now has a GUI test (`testTheSplitRowFadesWhenTheOldSelectionIsAPane`). Not
   covered: an old row above the arrival (Pinned), a scrolled-out row, a closed-folder peek row and the Favorite tile
   (#465). The no-per-frame-reconfigure assertion checks `rowConfigureCount`, not layout.
-- These are local runs with a downloaded toolchain and a local XCTest runner, not CI.
+- These are local runs with a downloaded toolchain and a local XCTest runner, not CI. CI on the branch: Swift
+  tests, ShellKit tests, App build and lint pass; the informative GUI job ran 1162 tests with 27 skipped and one
+  failure, the `SplitDragTests` Favorite-tile click that also fails on #460 and #467 and is filed as #473.
