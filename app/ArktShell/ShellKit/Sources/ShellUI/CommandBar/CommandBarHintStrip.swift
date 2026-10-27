@@ -46,7 +46,7 @@ final class CommandBarHintStrip: NSView {
   private var trailingCaps: [CommandBarKeyCapView] = []
   private(set) var hints = CommandBarHints(items: [], trailing: nil)
   private var flavor: ThemeFlavor = .dark
-  /// Item key caps and captions in layout order, for tests: ("↑↓", "Move").
+  /// Item key caps and captions in layout order, for tests.
   private var itemRanges: [(caps: Range<Int>, label: Int)] = []
 
   override var isFlipped: Bool { true }
