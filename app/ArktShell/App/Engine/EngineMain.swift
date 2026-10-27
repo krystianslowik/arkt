@@ -40,12 +40,18 @@ func engineMain() -> Never {
     // references the class, which keeps dead stripping from dropping it.
     // The engine-lane probes (--arkt-reentrancy-probe, --arkt-embedder-fail)
     // keep the stand-in shell; every other launch runs the Arkt shell.
+    // Distribution has no probes (ARKT_TEST_SWITCHES is the Engine configuration's only).
+    #if ARKT_TEST_SWITCHES
     if StandInShell.isRequested {
         ChromiumEmbedding.install(StandInShell.shared)
     } else {
         ChromiumShell.shared.installMenuAfterLaunch()
         ChromiumEmbedding.install(ChromiumShell.shared)
     }
+    #else
+    ChromiumShell.shared.installMenuAfterLaunch()
+    ChromiumEmbedding.install(ChromiumShell.shared)
+    #endif
 
     let path = engineFrameworkPath()
     FileHandle.standardError.write(Data("ARKT engine shell: dlopen \(path)\n".utf8))
@@ -58,7 +64,13 @@ func engineMain() -> Never {
     let chromeMain = unsafeBitCast(symbol, to: ChromeMainFunction.self)
 
     // The switches every engine launch gets (no startup window, profile kept loaded): EngineLaunchArguments.
+    #if ARKT_TEST_SWITCHES
     let arguments = EngineLaunchArguments.applying(to: CommandLine.arguments)
+    #else
+    // The shipped app never passes a test switch (--arkt-engine-test-api and the rest) on to the framework.
+    let arguments = EngineLaunchArguments.applying(
+        to: EngineLaunchArguments.strippingTestSwitches(CommandLine.arguments))
+    #endif
     // Chromium keeps argv for the life of the process; the copies are never freed.
     let argv = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: arguments.count + 1)
     for (index, argument) in arguments.enumerated() {

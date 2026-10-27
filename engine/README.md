@@ -323,12 +323,13 @@ Data folders, all under `~/Library/Application Support`:
 
 `CrProductDirName` is written by the embed build phase from the build setting `ARKT_PRODUCT_DIR_NAME`
 (`app/ArktShell/Engine.xcconfig`, default `Arkt Dev Engine`, so a development build never shares a profile with the
-product). The Distribution configuration (#334) sets the product value in `app/ArktShell/Distribution.xcconfig`.
+product). The Distribution configuration (#334) sets the product value, `ARKT_PRODUCT_DIR_NAME=Arkt/Engine`, in
+`app/ArktShell/Distribution.xcconfig`.
 
 Distribution is the shipped app: the Engine configuration's engine-backed shell, optimized (`-O`, whole module), named
 `Arkt.app`, without the test-only code. It does not link `EngineAPITestSupport` (so the contract runner and its
 loopback server are not in the binary), compiles the `ARKT_*` overrides and the `--arkt-engine-contract` switch out
-(`ArktEnvironmentOverrides` is `NO`), and writes `CrProductDirName` = `Arkt/Engine`. Build it like the Engine
+(`ArktEnvironmentOverrides` is `NO`; the stand-in shell and its probes go with them), and writes `CrProductDirName` = `Arkt/Engine`. Build it like the Engine
 configuration, against the self-contained engine app:
 
     cd $REPO/app/ArktShell && xcodebuild -scheme ArktShell -configuration Distribution \

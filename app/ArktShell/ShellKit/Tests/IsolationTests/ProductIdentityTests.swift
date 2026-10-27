@@ -64,6 +64,7 @@ struct ProductIdentityTests {
   @Test func productEngineFolderIsInsideTheProductDataFolder() throws {
     let readme = try Self.text("engine/README.md")
     #expect(readme.contains("ARKT_PRODUCT_DIR_NAME=Arkt/Engine"))
+    #expect(readme.contains("`CrProductDirName` = `Arkt/Engine`"), "the Distribution paragraph names the value")
     let components = "Arkt/Engine".split(separator: "/")
     #expect(components.first == "Arkt")
   }

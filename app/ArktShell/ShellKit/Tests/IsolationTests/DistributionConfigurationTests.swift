@@ -142,10 +142,15 @@ struct DistributionConfigurationTests {
   /// A line that exists only for tests: an `ARKT_` key in a string, a `--arkt-engine-` switch, the contract runner
   /// or its page server, or an import of the shared contract.
   static func isTestOnly(_ line: String) -> Bool {
-    line.contains("\"ARKT_") || line.contains("\"--arkt-engine-") || line.contains("EngineContractRunner")
+    line.contains("\"ARKT_") || line.contains("\"--arkt") || line.contains("EngineContractRunner")
       || line.contains("ContractPageServer") || line.contains("import EngineAPITestSupport")
-      || line.contains("EnvironmentOverrides(")
+      || line.contains("EnvironmentOverrides(") || line.contains("StandInShell") || line.contains("ReentrancyProbe")
+      || (line.contains("CommandLine.arguments") && !line.contains(allowedArgumentsRead))
   }
+
+  /// The one read of the process arguments Distribution keeps: the engine launch, which passes them on (URLs and
+  /// Chromium's own switches) after `EngineLaunchArguments.strippingTestSwitches` removed the `--arkt-*` ones.
+  static let allowedArgumentsRead = "strippingTestSwitches(CommandLine.arguments)"
 
   @Test func overridesAndTestSwitchesAreCompiledOutOfDistribution() throws {
     let conditions = Self.distributionConditions(in: try Self.projectSpec())
@@ -168,8 +173,13 @@ struct DistributionConfigurationTests {
     #expect(lines.contains { $0.text.contains("\"ARKT_DATA_DIR\"") })
   }
 
-  @Test func contractRunnerFilesAreEngineAndTestSwitchesOnly() throws {
-    for name in ["EngineContractRunner", "ContractPageServer"] {
+  @Test func theEngineLaunchStripsTestSwitchesInDistribution() throws {
+    let main = try Self.text("App/Engine/EngineMain.swift")
+    #expect(main.contains(Self.allowedArgumentsRead))
+  }
+
+  @Test func contractRunnerAndProbeFilesAreEngineAndTestSwitchesOnly() throws {
+    for name in ["EngineContractRunner", "ContractPageServer", "StandInShell", "ReentrancyProbe"] {
       let source = try Self.text("App/Engine/\(name).swift")
       let first = source.split(separator: "\n").first.map(String.init)
       #expect(first == "#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES", "\(name).swift starts with \(first ?? "nothing")")

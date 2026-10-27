@@ -14,6 +14,18 @@ public enum EngineLaunchArguments {
   static let disableFeaturesPrefix = "--disable-features="
   static let requiredDisabledFeatures = ["DestroyProfileOnBrowserClose"]
 
+  /// Prefixes of the switches that exist for tests and engine-lane probes only (`--arkt-engine-contract`,
+  /// `--arkt-engine-test-api`, `--arkt-reentrancy-probe`, `--arkt-embedder-fail`).
+  static let testSwitchPrefixes = ["--arkt-"]
+
+  /// `arguments` without the test switches: the Distribution app drops them before they reach the engine framework,
+  /// so a shipped bundle never answers the engine test API (#334). Everything else is kept in order.
+  public static func strippingTestSwitches(_ arguments: [String]) -> [String] {
+    arguments.enumerated().filter { index, argument in
+      index == 0 || !testSwitchPrefixes.contains { argument.hasPrefix($0) }
+    }.map(\.element)
+  }
+
   /// `arguments` (the executable first) with the switches above added; every other argument is kept as it is.
   public static func applying(to arguments: [String]) -> [String] {
     var result = arguments
