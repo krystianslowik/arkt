@@ -11,7 +11,7 @@ import EngineAPI
 /// Nothing outside this file may import WebKit, and the import is `internal`, so the compiler
 /// rejects any WebKit type in the public surface (EngineAPI types and NSView only).
 @MainActor
-public final class FakeEngine: EngineClient {
+public final class FakeEngine: EngineClient, EngineDownloads {
   private final class Entry {
     let webView: WKWebView
     let navigation: NavigationObserver
@@ -41,7 +41,21 @@ public final class FakeEngine: EngineClient {
     var onCommit: (@MainActor () -> Void)?
     /// A user link activation in the main frame (#313): the link's URL and modifiers; true cancels it.
     var onLinkActivation: (@MainActor (URL, NSEvent.ModifierFlags) -> Bool)?
+    /// A response WebKit will not show (an attachment, a type with no viewer) or an action it turns into a download.
+    var onDownload: (@MainActor (WKDownload) -> Void)?
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { onCommit?() }
+    func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
+                 decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
+      let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")
+      let isAttachment = disposition?.lowercased().hasPrefix("attachment") ?? false
+      decisionHandler(response.isForMainFrame && (isAttachment || !response.canShowMIMEType) ? .download : .allow)
+    }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+      onDownload?(download)
+    }
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+      onDownload?(download)
+    }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
       guard action.navigationType == .linkActivated, action.targetFrame?.isMainFrame ?? true,
@@ -69,7 +83,7 @@ public final class FakeEngine: EngineClient {
 
   private var entries: [TabID: Entry] = [:]
   private let hoverBridge = LinkHoverBridge()
-  private let hub = EngineEventHub()
+  let hub = EngineEventHub()
   public private(set) var windowIDs: [EngineWindowID] = []
   private var hosts: [EngineWindowID: any EngineWindowHosting] = [:]
   private var activeTabs: [EngineWindowID: TabID] = [:]
@@ -80,8 +94,28 @@ public final class FakeEngine: EngineClient {
   private var faviconFetches: [TabID: Int] = [:]
   private var faviconFetchWaiters: [TabID: [FaviconFetchWaiter]] = [:]
   public private(set) var tabIDs: [TabID] = []
+  // Downloads (rule 24); the behavior is in FakeEngine+Downloads.swift.
+  var downloadItems: [DownloadItem] = []
+  var downloadRecords: [DownloadID: DownloadRecord] = [:]
+  /// A Retry's new download and the item it replaces, removed when the new one is listed.
+  var pendingReplacement: [DownloadID: DownloadID] = [:]
+  public var downloadSavePreference: DownloadSavePreference
+  public var downloadDestinationChooser: DownloadDestinationChooser?
+  public let downloadDefaultFolder: URL
+  /// Opens a finished file and reveals it in Finder; tests replace them so no application is launched.
+  public var downloadOpener: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
+  public var downloadRevealer: @MainActor (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+  /// The clock for a download's start and end time and its speed.
+  public var downloadClock: @MainActor () -> Date = { Date() }
+  /// Starts the downloads the engine itself begins (Retry, `startDownload(from:)`): a view no tab shows.
+  lazy var downloadWebView = WKWebView(frame: .zero, configuration: configuration)
 
-  public init() {
+  /// `downloadFolder`: where downloads go by default; the system Downloads folder when nil.
+  public init(downloadFolder: URL? = nil) {
+    downloadDefaultFolder = downloadFolder
+      ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+      ?? FileManager.default.temporaryDirectory
+    downloadSavePreference = .folder(downloadDefaultFolder)
     configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     // Appended to WebKit's own platform and engine tokens, so only the Safari part is ours to set.
@@ -111,6 +145,7 @@ public final class FakeEngine: EngineClient {
     let navigation = NavigationObserver()
     navigation.onCommit = { [weak self] in self?.didCommit(id) }
     navigation.onLinkActivation = { [weak self] url, flags in self?.linkActivated(id, url: url, flags: flags) ?? false }
+    navigation.onDownload = { [weak self] download in self?.adoptDownload(download) }
     webView.navigationDelegate = navigation
     let entry = Entry(webView: webView, navigation: navigation, snapshot: TabSnapshot(id: id, window: window))
     entries[id] = entry
