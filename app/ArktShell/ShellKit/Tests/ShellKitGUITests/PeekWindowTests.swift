@@ -941,6 +941,27 @@ final class PeekWindowTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// A Command-click and a middle-click (no flags, background-tab disposition) in a pinned tab are the engine's: the
+  /// window answers navigate, no Peek opens, and the background tab that follows is a Today row that is not selected
+  /// (BH-162, BH-163).
+  func testCommandAndMiddleClicksOpenBackgroundTodayTabs() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.pinned)
+    let pinned = try XCTUnwrap(harness.tab(world.pinned))
+    let window = try XCTUnwrap(harness.controller.engineWindow)
+
+    for (modifiers, label) in [(EngineLinkModifiers.command, "Command-click"), ([], "middle-click")] {
+      XCTAssertEqual(try harness.click(Self.atlas, in: world.pinned, modifiers: modifiers,
+                                       disposition: .newBackgroundTab), .navigate, label)
+      let opened = harness.engine.engineCreateTab(url: Self.atlas, in: window, opener: pinned, active: false)
+      waitUntil("a row for the \(label) tab") { harness.controller.nodeByTab[opened] != nil }
+      XCTAssertNil(harness.peek.session, label)
+      XCTAssertEqual(harness.controller.currentTab, pinned, "\(label) keeps the page in front")
+    }
+    harness.controller.close()
+  }
+
   /// Shift-click inside a Peek opens a Today tab, not a Peek on the Peek (docs/design/peek.md, Open, step 5).
   func testAShiftClickInsideAPeekOpensATodayTab() throws {
     let world = try Self.makeWorld()
