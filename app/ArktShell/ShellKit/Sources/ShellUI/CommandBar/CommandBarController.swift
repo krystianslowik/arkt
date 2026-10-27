@@ -74,6 +74,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   let panel = CommandBarPanel()
   let barView = CommandBarView()
+  /// The light dim over the parent window while the bar is open.
+  let scrim = CommandBarScrim()
+  /// The appearance the bar and its cells were last drawn in (the parent window's); a show in another one re-renders.
+  private var cellFlavor: ThemeFlavor?
   private(set) var results: [CommandBarResults.Result] = []
   /// The archived matches of `archivedQuery`, shown while the field still holds that query.
   private var archived: [CommandBarResults.ArchivedMatch] = []
@@ -81,6 +85,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   private var archivedSearch: Task<Void, Never>?
   /// Backing scale the table's cells were configured at; a show at another scale reloads them.
   private var cellScale: CGFloat = 0
+  /// The field text the cells' title emphasis was drawn for.
+  private var cellQuery = ""
   /// Test seam: stands in for the parent window's backing scale.
   var backingScaleOverride: CGFloat?
   /// The panel sits over the parent window, so it shares the parent's display. Read from the parent: the panel
@@ -113,11 +119,13 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     // Accessibility rows read the results, not row views: a row never laid out still has its title and caption.
     barView.table.axProxyRows.content = { [weak self] row in
       guard let self, results.indices.contains(row) else { return nil }
-      return AXProxyRowContent(identifier: AXID.CommandBar.row, label: results[row].title,
+      return AXProxyRowContent(identifier: AXID.CommandBar.row,
+                               label: results[row].accessibilityLabel(position: row + 1, of: results.count),
                                value: results[row].accessibilityCaption)
     }
     barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
     barView.onDismissNotice = { [weak self] in self?.dismissNotice() }
+    barView.onEscapeKey = { [weak self] in self?.hide() }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
     for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification,
                  NSWindow.didChangeBackingPropertiesNotification] {
@@ -131,6 +139,11 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// first-draw work or window ordering.
   public func prewarm() {
     cellScale = backingScale
+    applyAppearance(force: true)
+    if let parent {
+      scrim.cover(parent)
+      parent.addChildWindow(scrim, ordered: .above)   // ordered in for good, at alpha 0, like the panel
+    }
     results = CommandBarResults.make(query: "warm.example", openTabs: [
       .init(node: UUID(), title: "warm", url: URL(string: "https://warm.example")!),
     ])
@@ -162,6 +175,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     firstFrameLink?.invalidate()
     firstFrameLink = nil
     hide(restoreFocus: false)
+    parent?.removeChildWindow(scrim)
+    scrim.orderOut(nil)
     panel.orderOut(nil)
   }
 
@@ -188,6 +203,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     }
     let targetText = prefill ?? ""
     if barView.field.stringValue != targetText { barView.field.stringValue = targetText }
+    applyAppearance()
     reloadResults()
     setPanelFrame(frame(in: parent), display: false)
     // Already ordered in at alpha 0 (prewarm), so presenting is an alpha change and key status. Ordering in
@@ -200,6 +216,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       panel.orderFrontRegardless()
     }
     isVisible = true                                // before makeKey: windowDidBecomeKey reads it
+    scrim.cover(parent)
+    scrim.isPresented = true
     panel.isPresented = true
     panel.makeKey()
     if barView.field.currentEditor() == nil { panel.makeFirstResponder(barView.field) }   // kept across hides
@@ -246,6 +264,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     showCommitTime = nil
     endSignpost()
     panel.isPresented = false                       // stays ordered in; alpha 0, inert (CommandBarPanel)
+    scrim.isPresented = false
     if restoreFocus { parent?.makeKey() }
   }
 
@@ -253,6 +272,36 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     guard let state = signpostState else { return }
     ShellSignposts.signposter.endInterval("CommandBarShow", state)
     signpostState = nil
+  }
+
+  // MARK: Appearance
+
+  private var appliedReduceTransparency: Bool?
+
+  /// Draws the bar, its cells and the scrim in the window behind it: light or dark, opaque under Reduce Transparency.
+  /// Cheap when nothing changed (a show repeats it).
+  private func applyAppearance(force: Bool = false) {
+    guard let parent else { return }
+    let flavor = ThemeFlavor(appearance: parent.effectiveAppearance)
+    let opaque = barView.reduceTransparency()
+    guard force || flavor != cellFlavor || opaque != appliedReduceTransparency else { return }
+    let flavorChanged = flavor != cellFlavor
+    cellFlavor = flavor
+    appliedReduceTransparency = opaque
+    panel.appearance = NSAppearance(named: flavor == .dark ? .darkAqua : .aqua)
+    barView.apply(flavor: flavor)
+    scrim.apply(flavor: flavor)
+    if flavorChanged, !results.isEmpty { reapplyCells() }
+  }
+
+  /// The flavor the bar draws in (tests).
+  var flavor: ThemeFlavor { cellFlavor ?? .dark }
+
+  /// Re-renders the cells for a new appearance and keeps the selection.
+  private func reapplyCells() {
+    let selected = barView.table.selectedRow
+    barView.table.reloadData()
+    if selected >= 0, selected < results.count { barView.table.selectRowIndexes([selected], byExtendingSelection: false) }
   }
 
   // MARK: Panel
@@ -277,6 +326,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// ordinary moves and resizes while closed do nothing.
   @objc private func parentFrameDidChange(_ notification: Notification) {
     guard let parent else { return }
+    scrim.cover(parent)
     if isVisible {
       setPanelFrame(frame(in: parent), display: false)
       refreshCellScaleIfNeeded()
@@ -386,7 +436,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     switch scope {
     case .normal:
       title = nil
-      placeholder = "Search or Enter URL..."
+      placeholder = CommandBarView.placeholder
     case .actions:
       title = "Actions"
       placeholder = "Search actions..."
@@ -395,10 +445,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       placeholder = "Search \(engine.name)"
     }
     barView.setScope(title: title)
-    barView.field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
-      .font: NSFont.systemFont(ofSize: 18),
-      .foregroundColor: ShellTokens.commandBarSecondaryText.nsColor(),
-    ])
+    barView.refreshPlaceholder(placeholder)
   }
 
   /// True for a key-down of Return or keypad Enter whose Cmd / Opt / Ctrl / Shift modifiers are exactly one of
@@ -532,12 +579,16 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     input.archived = current
     let fresh = CommandBarResults.make(query: text, input: input)
     let scale = backingScale
-    if fresh != results || scale != cellScale {
+    if fresh != results || scale != cellScale || text != cellQuery {
       results = fresh
       cellScale = scale
+      cellQuery = text
       barView.setHoveredRow(nil)                      // the rows shifted; no honest hover target anymore
       barView.table.reloadData()
     }
+    barView.pills.update(selected: .all, counts: CommandBarFilter.counts(of: results),
+                         showsCounts: CommandBarFilter.showsCounts(forQuery: text), flavor: flavor)
+    barView.hintStrip.update(CommandBarHints.content(isEmptyQuery: trimmed.isEmpty), flavor: flavor)
     if !results.isEmpty, barView.table.selectedRow != 0 {
       barView.table.selectRowIndexes([0], byExtendingSelection: false)
     }
@@ -624,7 +675,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     let cell = tableView.makeView(withIdentifier: CommandBarCellView.identifier, owner: nil) as? CommandBarCellView
       ?? CommandBarCellView(frame: .zero)
-    cell.configure(results[row], scale: cellScale)
+    cell.configure(results[row], query: cellQuery, position: row + 1, count: results.count, flavor: flavor,
+                   scale: cellScale)
     cell.onRemove = results[row].removalID != nil ? { [weak self] in self?.removeSuggestion(at: row) } : nil
     cell.setCloseHovered(barView.hoveredRow == row)
     return cell
@@ -635,7 +687,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       ?? CommandBarRowView(frame: .zero)
     rowView.identifier = CommandBarRowView.identifier
     if results.indices.contains(row) {
-      rowView.setAccessibilityLabel(results[row].title)
+      rowView.setAccessibilityLabel(results[row].accessibilityLabel(position: row + 1, of: results.count))
       rowView.setAccessibilityValue(results[row].accessibilityCaption)
     }
     return rowView

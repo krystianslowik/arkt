@@ -102,6 +102,8 @@ public enum CommandBarResults {
     /// BH-109: identifies a removable suggestion ("tab:<node>", "search:<query>"); nil for the user's own input
     /// (the typed URL, Paste and Go) and for verbs (actions, Spaces), which removal makes no sense for.
     public let removalID: String?
+    /// Key caps drawn on an action's row: its shortcut ("command", "shift", "N").
+    public var keyCaps: [String] = []
 
     /// Accessibility value for `commandBar.row` ("Switch to Tab", "Switch to Split View", "Open", "Search").
     public var accessibilityCaption: String {
@@ -135,13 +137,17 @@ public enum CommandBarResults {
     switch input.scope {
     case .actions:
       // BH-106: action search lists the shell's actions only.
-      return CommandBarActions.filter(input.actions, query: query).map {
-        Result(kind: .action($0.id), title: $0.title, subtitle: "Action", trailingHint: nil, removalID: nil)
+      return CommandBarActions.filter(input.actions, query: query).map { action in
+        var row = Result(kind: .action(action.id), title: action.title, subtitle: "Action", trailingHint: nil,
+                         removalID: nil)
+        row.keyCaps = action.keyCaps
+        return row
       }
     case .siteSearch(let engine):
       // BH-107: one row per query, to the scoped engine.
       guard !query.isEmpty, let url = engine.url(for: query) else { return [] }
-      return [Result(kind: .siteSearch(url), title: query, subtitle: "Search \(engine.name)", trailingHint: nil,
+      return [Result(kind: .siteSearch(url), title: "Search \(engine.name) for \(query)", subtitle: "Search \(engine.name)",
+                     trailingHint: nil,
                      removalID: "sitesearch:\(url.absoluteString)")]
     case .normal:
       break

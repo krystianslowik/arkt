@@ -7,10 +7,13 @@ public struct CommandBarAction: Sendable, Equatable {
   public let id: String
   /// Display title ("New Space").
   public let title: String
+  /// The shortcut's key caps, as drawn on the row ("\u{2318}", "\u{21E7}", "N"); empty for an action with none.
+  public let keyCaps: [String]
 
-  public init(id: String, title: String) {
+  public init(id: String, title: String, keyCaps: [String] = []) {
     self.id = id
     self.title = title
+    self.keyCaps = keyCaps
   }
 }
 

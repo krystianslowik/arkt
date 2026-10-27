@@ -39,16 +39,16 @@ struct LittleArktLookupTests {
   @Test func theBarIsTheCommandBarPanelOnTheCurrentScreen() {
     let screen = CGRect(x: 0, y: 0, width: 1600, height: 1000)
     let frame = LittleArktLookup.frame(in: screen, rowCount: 3)
-    #expect(frame.width == CommandBarGeometry.preferredWidth)
-    #expect(frame.height == CommandBarGeometry.contentHeight(rowCount: 3))
-    #expect(abs(frame.maxY - (screen.maxY - CommandBarGeometry.topFraction * screen.height)) < 0.001)
+    #expect(frame.width == LittleArktGeometry.preferredWidth)
+    #expect(frame.height == LittleArktGeometry.contentHeight(rowCount: 3))
+    #expect(abs(frame.maxY - (screen.maxY - LittleArktGeometry.topFraction * screen.height)) < 0.001)
     #expect(frame.midX == screen.midX)
   }
 
   @Test func aNarrowScreenNarrowsTheBar() {
     let screen = CGRect(x: 0, y: 0, width: 700, height: 900)
     #expect(LittleArktLookup.frame(in: screen, rowCount: 0).width
-      == 700 - 2 * CommandBarGeometry.sideMargin)
+      == 700 - 2 * LittleArktGeometry.sideMargin)
   }
 
   // MARK: Settings

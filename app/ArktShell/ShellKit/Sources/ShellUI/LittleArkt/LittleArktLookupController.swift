@@ -195,16 +195,16 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
   public func numberOfRows(in tableView: NSTableView) -> Int { results.count }
 
   public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-    let cell = tableView.makeView(withIdentifier: CommandBarCellView.identifier, owner: nil) as? CommandBarCellView
-      ?? CommandBarCellView(frame: .zero)
+    let cell = tableView.makeView(withIdentifier: LittleArktLookupCellView.identifier, owner: nil) as? LittleArktLookupCellView
+      ?? LittleArktLookupCellView(frame: .zero)
     cell.configure(results[row], scale: cellScale)
     return cell
   }
 
   public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-    let rowView = tableView.makeView(withIdentifier: CommandBarRowView.identifier, owner: nil) as? CommandBarRowView
-      ?? CommandBarRowView(frame: .zero)
-    rowView.identifier = CommandBarRowView.identifier
+    let rowView = tableView.makeView(withIdentifier: LittleArktLookupRowView.identifier, owner: nil) as? LittleArktLookupRowView
+      ?? LittleArktLookupRowView(frame: .zero)
+    rowView.identifier = LittleArktLookupRowView.identifier
     rowView.setAccessibilityIdentifier(AXID.LittleArktLookup.row)
     if results.indices.contains(row) {
       rowView.setAccessibilityLabel(results[row].title)
@@ -222,8 +222,8 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
 @MainActor
 final class LittleArktLookupPanel: NSPanel {
   init() {
-    super.init(contentRect: NSRect(x: 0, y: 0, width: CommandBarGeometry.preferredWidth,
-                                   height: CommandBarGeometry.inputHeight),
+    super.init(contentRect: NSRect(x: 0, y: 0, width: LittleArktGeometry.preferredWidth,
+                                   height: LittleArktGeometry.inputHeight),
                styleMask: [.borderless, .fullSizeContentView], backing: .buffered, defer: false)
     level = .statusBar                              // over another app's full-screen window (needs a check on screen)
     hidesOnDeactivate = true
@@ -279,25 +279,25 @@ final class LittleArktLookupView: NSView {
     setAccessibilityRole(.group)
     setAccessibilityIdentifier(AXID.LittleArktLookup.root)
     setAccessibilityValue(AXID.LittleArktLookup.closed)
-    layer?.cornerRadius = CommandBarGeometry.cornerRadius
+    layer?.cornerRadius = LittleArktGeometry.cornerRadius
     layer?.cornerCurve = .continuous
     layer?.masksToBounds = true
-    layer?.backgroundColor = ShellTokens.commandBarSurface.cgColor
+    layer?.backgroundColor = ShellTokens.lookupSurface.cgColor
     layer?.borderWidth = 1
-    layer?.borderColor = ShellTokens.commandBarBorder.cgColor
+    layer?.borderColor = ShellTokens.lookupBorder.cgColor
 
     field.isBordered = false
     field.isBezeled = false
     field.drawsBackground = false
     field.focusRingType = .none
     field.font = .systemFont(ofSize: 18)
-    field.textColor = ShellTokens.commandBarText.nsColor()
+    field.textColor = ShellTokens.lookupText.nsColor()
     field.cell?.isScrollable = true
     field.cell?.wraps = false
     field.cell?.usesSingleLineMode = true
     field.placeholderAttributedString = NSAttributedString(string: LittleArktLookup.placeholder, attributes: [
       .font: NSFont.systemFont(ofSize: 18),
-      .foregroundColor: ShellTokens.commandBarSecondaryText.nsColor(),
+      .foregroundColor: ShellTokens.lookupSecondaryText.nsColor(),
     ])
     field.setAccessibilityIdentifierWithCell(AXID.LittleArktLookup.field)
     field.setAccessibilityLabel(LittleArktLookup.fieldLabel)
@@ -305,14 +305,14 @@ final class LittleArktLookupView: NSView {
     addSubview(field)
 
     divider.wantsLayer = true
-    divider.layer?.backgroundColor = ShellTokens.commandBarDivider.cgColor
+    divider.layer?.backgroundColor = ShellTokens.lookupDivider.cgColor
     addSubview(divider)
 
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result"))
     table.addTableColumn(column)
     table.headerView = nil
     table.style = .plain
-    table.rowHeight = CommandBarGeometry.rowHeight
+    table.rowHeight = LittleArktGeometry.rowHeight
     table.intercellSpacing = .zero
     table.selectionHighlightStyle = .none
     table.backgroundColor = .clear
@@ -354,7 +354,7 @@ final class LittleArktLookupView: NSView {
 
   override func layout() {
     super.layout()
-    let g = CommandBarGeometry.self
+    let g = LittleArktGeometry.self
     let tagSize = tagView.intrinsicSize
     tagView.frame = NSRect(x: g.inputLeading, y: ((g.inputHeight - tagSize.height) / 2).rounded(),
                        width: tagSize.width, height: tagSize.height)
