@@ -22,6 +22,7 @@ final class CommandBarTests: XCTestCase {
     // The geometry tests pin the notice (BH-113) off; the notice tests re-enable it on their own settings.
     bar.settings.dismissSearchSuggestionNotice()
     bar.dismissFinisher = { $0() }                  // the dismiss fade ends at once; its own tests step it by hand
+    bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
     bar.prewarm()
     try await Task.sleep(for: .milliseconds(300))   // let the window server settle
   }

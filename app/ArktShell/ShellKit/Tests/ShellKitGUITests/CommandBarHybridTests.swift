@@ -22,6 +22,8 @@ final class CommandBarHybridTests: XCTestCase {
     window.makeKeyAndOrderFront(nil)
     bar = CommandBarController(parent: window)
     bar.settings.dismissSearchSuggestionNotice()
+    bar.dismissFinisher = { $0() }
+    bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
     bar.prewarm()
   }
 

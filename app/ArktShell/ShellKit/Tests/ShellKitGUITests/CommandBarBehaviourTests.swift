@@ -25,6 +25,7 @@ final class CommandBarBehaviourTests: XCTestCase {
     bar.settings.dismissSearchSuggestionNotice()
     bar.announce = { [unowned self] in announcements.append($0) }
     bar.dismissFinisher = { _ in }            // the fade is ended by hand where a test looks at it
+    bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
     bar.prewarm()
     announcements = []
   }

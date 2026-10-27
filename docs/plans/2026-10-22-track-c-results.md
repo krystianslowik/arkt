@@ -2626,3 +2626,39 @@ tests referenced values that did not exist), then the implementation.
 Filter state and Cmd-1 to Cmd-4, Tab and Shift-Tab (the smart rule), Esc clearing first, the empty state's groups and
 Recent tabs with times, the selection slide, the fades and Cmd-Shift-V. The preview column and Cmd-Return stay in
 #372. History rows need a history store; the pill is there and counts 0.
+
+## Command bar, hybrid design, part 2: behaviour (#371, closes it; supersedes draft #322)
+
+Part 2 of two (part 1, the restyle and layout, is #527). It stacks on part 1's branch.
+
+### What changed
+
+- Filters: `CommandBarFilter` state on the controller (All on every open), Cmd-1 to Cmd-4 pick a pill, Tab and
+  Shift-Tab cycle. The query stays; the pills count the unfiltered rows; a filter that matches nothing shows one
+  non-actionable row, "No <filter> match <query>". Archived results belong to All and Tabs. VoiceOver hears "Tabs, 3
+  results" on a change. A typed query now also lists up to three matching actions, so the Actions pill counts them.
+- The smart Tab rule (`CommandBarTabAction`, the maintainer's decision on #371, which resolves the README's open
+  question 1): Tab scopes the search when something on screen shows a Tab key cap, and cycles the filters otherwise.
+  A Tab key cap shows on a site-search row (a typed alias or the start of a site name, "Search GitHub for git") and in
+  the hint strip of a bar just opened for a new tab with an empty field (action search, #322, KB-081). The hint strip
+  mirrors it: its Tab item is whatever Tab will do. A whole alias typed puts its row first, so Tab scopes at once
+  (#322's behaviour) and Return, with nothing yet to search for, scopes too. Inside a scope Tab is consumed.
+- Esc clears the query first and closes the bar when it is already empty (a Cmd-L prefill clears too).
+- Cmd-Shift-V is Paste and Go from any state of a new-tab bar; with nothing on the clipboard it beeps and the bar stays.
+- Empty state: Clipboard (Paste and Go, only for a URL), Recent tabs (up to four, "12 min", "1 h", "Yesterday") and two
+  Actions, each under a 26 pt header on the group's first row. Recent tabs are per Space, the current Space first like
+  the suggestions (BH-111), the tabs shown in this window by most recent view, then the rest in sidebar order. The
+  plain `make(query:openTabs:)` convenience (Little Arkt's lookup) keeps listing up to six open tabs.
+- Hint strip: Move, Open (empty state), "Cmd 1-4 Filter", the Tab item, and on the right the empty state's line or
+  "Paste and Go" with its shortcut. A row shows a URL without its scheme.
+- Motion (`CommandBarMotion`, `CommandBarSelectionMotion`): the selection fill and tick slide to the new row on
+  `SpringPreset.firmFast`, retargeted from where they are when a key repeats (a `SpringField` run, applied as a layer
+  transform; the indicator's frame is always the target row). New results do not slide; Reduce Motion moves it
+  instantly. The bar and the scrim fade in (0.1 s, no scale) and out (0.1 s); the panel goes to alpha 0 when the fade
+  ends, inert at once. Reduce Motion keeps both fades. Opacity and transform only.
+
+### Tests
+
+TDD: the new unit tests (tab rule, filter state, empty state, relative time, selection motion, fade data) and
+`CommandBarBehaviourTests` were written before the code (compile errors counted).
+
