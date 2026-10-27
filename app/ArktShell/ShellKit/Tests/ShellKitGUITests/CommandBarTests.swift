@@ -21,6 +21,7 @@ final class CommandBarTests: XCTestCase {
     bar = CommandBarController(parent: window)
     // The geometry tests pin the notice (BH-113) off; the notice tests re-enable it on their own settings.
     bar.settings.dismissSearchSuggestionNotice()
+    bar.dismissFinisher = { $0() }                  // the dismiss fade ends at once; its own tests step it by hand
     bar.prewarm()
     try await Task.sleep(for: .milliseconds(300))   // let the window server settle
   }
@@ -962,18 +963,22 @@ final class CommandBarTests: XCTestCase {
     XCTAssertFalse(bar.isVisible)
   }
 
-  /// KB-081 is about the bar just opened with Cmd-T: Cmd-L (even empty) and a typed query keep Tab unscoped.
+  /// KB-081 is about the bar just opened with Cmd-T: Cmd-L (even empty) and a typed query keep Tab unscoped. With
+  /// nothing to scope, Tab cycles the filters (the smart Tab rule, #371).
   func testTabOutsideCmdTDoesNotEnterActionSearch() async throws {
     bar.actionsProvider = { [CommandBarAction(id: "newSpace", title: "New Space")] }
     bar.toggle(.currentTab(nil))
     XCTAssertEqual(bar.barView.field.stringValue, "")
-    XCTAssertFalse(try insertTab())
+    XCTAssertTrue(try insertTab())
     XCTAssertEqual(bar.scope, .normal)
+    XCTAssertEqual(bar.filter, .tabs, "cycled")
 
     bar.toggle(.newTab)
+    bar.toggle(.newTab)
     bar.setQueryForTesting("zzz")                          // a query that is no alias
-    XCTAssertFalse(try insertTab())
+    XCTAssertTrue(try insertTab())
     XCTAssertEqual(bar.scope, .normal)
+    XCTAssertEqual(bar.filter, .tabs)
     bar.toggle(.newTab)
   }
 

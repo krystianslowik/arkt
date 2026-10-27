@@ -35,13 +35,18 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public static let newSpaceTitle = "Space"
   public var isShowingEmptyState: Bool { sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
+  /// When each tab was last shown in this window, for the command bar's "12 min" (not persisted).
+  private var viewedAt: [NodeID: Date] = [:]
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
   /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
   public internal(set) var currentTab: TabID? {
     didSet {
       guard let tab = currentTab, tab != oldValue else { return }
       activateEngineTab(tab)
-      if let node = nodeByTab[tab] { tabSwitcher.noteViewed(node) }      // the recent-tab list (#103)
+      if let node = nodeByTab[tab] {                                     // the recent-tab list (#103)
+        tabSwitcher.noteViewed(node)
+        viewedAt[node] = Date()                                          // the command bar's "12 min" (#371)
+      }
       saveSession()                                                      // #116
     }
   }
@@ -244,6 +249,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
     commandBar.onSwitch = { [weak self] node in self?.activate(node: node) }
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
+    commandBar.recentTabsProvider = { [weak self] in self?.recentTabs() ?? [] }
     // #112: settings, Paste and Go (BH-108, GS-035), Spaces as results (BH-104), action search (BH-106),
     // site-search aliases (BH-107) and the Space-switch refresh (BH-111).
     commandBar.settings = commandBarSettings
@@ -625,6 +631,21 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   /// BH-104: open tabs of every Space of this profile, the current Space first (so the BH-111 refresh reorders).
+  /// The command bar's Recent tabs (#371): per Space, current Space first like the suggestions (BH-111), the tabs shown
+  /// in this window most recently first with when, then the ones not shown since the app started in sidebar order.
+  private func recentTabs() -> [CommandBarResults.OpenTab] {
+    let spaces = sidebarController.spaces
+    let ordered = sidebarController.currentSpace.map { current in [current] + spaces.filter { $0 != current } } ?? spaces
+    return ordered.flatMap { space -> [CommandBarResults.OpenTab] in
+      let tabs = CommandBarResults.openTabs(in: sidebar, space: space).map { tab in
+        CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
+                                  lastViewed: viewedAt[tab.node])
+      }
+      let viewed = tabs.filter { $0.lastViewed != nil }.sorted { ($0.lastViewed ?? .distantPast) > ($1.lastViewed ?? .distantPast) }
+      return viewed + tabs.filter { $0.lastViewed == nil }
+    }
+  }
+
   private func openTabs() -> [CommandBarResults.OpenTab] {
     let spaces = sidebarController.spaces
     guard let current = sidebarController.currentSpace else {

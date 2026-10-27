@@ -150,7 +150,9 @@ final class CommandBarHybridTests: XCTestCase {
     XCTAssertEqual(v.escapeKey.frame.maxX, v.bounds.width - 14, accuracy: 0.5, "Esc is at the right end of the field row")
     XCTAssertLessThan(v.pills.frame.maxX, v.escapeKey.frame.minX)
     XCTAssertLessThanOrEqual(v.field.frame.maxX, v.pills.frame.minX)
-    XCTAssertEqual(bar.panel.frame.height, CommandBarGeometry.contentHeight(rowCount: bar.results.count))
+    XCTAssertEqual(bar.panel.frame.height, CommandBarGeometry.contentHeight(
+      rowCount: bar.results.count, headerCount: 1, maxRows: CommandBarGeometry.maxEmptyStateRows),
+      "three recent tabs under one header")
   }
 
   func testAtMostFiveRowsShowWithoutScrolling() throws {
@@ -192,7 +194,7 @@ final class CommandBarHybridTests: XCTestCase {
     let table = bar.barView.table
     let indicator = bar.barView.selectionIndicator
     XCTAssertFalse(indicator.isHidden)
-    XCTAssertEqual(indicator.frame, table.rect(ofRow: 0))
+    XCTAssertEqual(indicator.frame, bar.barView.selectionRect(ofRow: 0))
     XCTAssertEqual(indicator.frame.height, 40)
     table.selectRowIndexes([2], byExtendingSelection: false)
     XCTAssertEqual(indicator.frame, table.rect(ofRow: 2))
@@ -244,10 +246,12 @@ final class CommandBarHybridTests: XCTestCase {
 
   func testTheHintStripShowsTheEmptyStateLineOnlyForAnEmptyQuery() throws {
     showWithTabs(3)
-    XCTAssertEqual(bar.barView.hintStrip.hints.trailingText, "Type a URL, a search, or a command")
+    XCTAssertEqual(bar.barView.hintStrip.hints.trailing?.text, "Type a URL, a search, or a command")
+    XCTAssertEqual(bar.barView.hintStrip.hints.items.map(\.caption), ["Move", "Open", "Filter", "Actions"],
+                   "an empty new-tab bar: Tab enters action search")
     bar.setQueryForTesting("Tab")
-    XCTAssertNil(bar.barView.hintStrip.hints.trailingText)
-    XCTAssertEqual(bar.barView.hintStrip.hints.items.map(\.caption), ["Move", "Open"])
+    XCTAssertEqual(bar.barView.hintStrip.hints.trailing?.text, "Paste and Go")
+    XCTAssertEqual(bar.barView.hintStrip.hints.items.map(\.caption), ["Move", "Filter"])
   }
 
   func testTheEscKeyCapClosesTheBar() throws {
@@ -317,7 +321,7 @@ final class CommandBarHybridTests: XCTestCase {
       view.displayIfNeeded()
       let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
       view.cacheDisplay(in: view.bounds, to: rep)
-      let row = view.convert(view.table.rect(ofRow: 0), from: view.table)
+      let row = view.convert(view.selectionRect(ofRow: 0), from: view.table)
       let scale = CGFloat(rep.pixelsWide) / view.bounds.width
       let x = Int((row.minX + 1) * scale)
       let y = Int(row.midY * scale)

@@ -2,7 +2,7 @@ import AppKit
 
 /// The selected row's fill and its 3 pt mustard tick, one view behind the rows so it can move between them
 /// (design/command-bar/README.md, Selected row and Motion). Both are fills: the tick is mustard, never a stroke, and
-/// the fill carries a 0.5 pt inner edge only as a hairline. It moves to the new row at once.
+/// the fill carries a 0.5 pt inner edge only as a hairline. `CommandBarSelectionMotion` slides it between rows.
 @MainActor
 final class CommandBarSelectionIndicator: NSView {
   private let fill = CALayer()
@@ -59,6 +59,16 @@ final class CommandBarSelectionIndicator: NSView {
     CATransaction.setDisableActions(true)
     fill.frame = frames.fill
     tick.frame = frames.tick
+    CATransaction.commit()
+  }
+
+  /// Draws the indicator `offset` points from its frame, vertically: the spring's distance behind the target row. A
+  /// transform only, so a frame in flight costs no layout.
+  func setOffset(_ offset: CGFloat) {
+    let transform = offset == 0 ? CATransform3DIdentity : CATransform3DMakeTranslation(0, offset, 0)
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer?.transform = transform
     CATransaction.commit()
   }
 

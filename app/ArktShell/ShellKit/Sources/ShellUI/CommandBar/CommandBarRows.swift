@@ -73,6 +73,9 @@ final class CommandBarCellView: NSTableCellView {
   }
   /// The hovered row's remove button (BH-109); hidden unless the row is removable and hovered.
   let closeButton = NSButton()
+  /// The group header over the first row of a group (empty state): 11 pt semibold in the top 26 pt of the cell.
+  let header = NSTextField(labelWithString: "")
+  private var groupHeader: String?
 
   private(set) var result: CommandBarResults.Result?
   private var query = ""
@@ -92,7 +95,12 @@ final class CommandBarCellView: NSTableCellView {
     icon.imageScaling = .scaleProportionallyUpOrDown
     title.lineBreakMode = .byTruncatingTail
     title.cell?.usesSingleLineMode = true
-    [icon, title, subtitle, hint].forEach(addSubview)
+    header.font = .systemFont(ofSize: 11, weight: .semibold)
+    header.lineBreakMode = .byTruncatingTail
+    header.cell?.usesSingleLineMode = true
+    header.isHidden = true
+    header.setAccessibilityElement(false)
+    [icon, title, subtitle, hint, header].forEach(addSubview)
     keyCaps.forEach(addSubview)
     closeButton.isBordered = false
     closeButton.imagePosition = .imageOnly
@@ -107,6 +115,9 @@ final class CommandBarCellView: NSTableCellView {
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  /// Top-down, so a group header sits at the top of the cell.
+  override var isFlipped: Bool { true }
 
   private static func label(size: CGFloat) -> NSTextField {
     let label = NSTextField(labelWithString: "")
@@ -129,7 +140,10 @@ final class CommandBarCellView: NSTableCellView {
   /// `scale`: pixels per point for the icon bitmap (the bar's backing scale, which the cell's own window may
   /// not report yet while the panel is still on the previous display).
   func configure(_ result: CommandBarResults.Result, query: String, position: Int, count: Int, flavor: ThemeFlavor,
-                 scale: CGFloat) {
+                 scale: CGFloat, groupHeader: String? = nil) {
+    self.groupHeader = groupHeader
+    header.stringValue = groupHeader ?? ""
+    header.isHidden = groupHeader == nil
     self.result = result
     self.query = query
     self.position = position
@@ -163,6 +177,7 @@ final class CommandBarCellView: NSTableCellView {
     }
     title.attributedStringValue = attributed
     subtitle.textColor = ShellTokens.commandBarTertiaryText.resolve(flavor).nsColor()
+    header.textColor = ShellTokens.commandBarTertiaryText.resolve(flavor).nsColor()
 
     let trailing = result.trailing(isSelected: isRowSelected)
     var caption = ""
@@ -194,39 +209,46 @@ final class CommandBarCellView: NSTableCellView {
   override func layout() {
     super.layout()
     let g = CommandBarGeometry.self
+    // A row that starts a group is taller by its header; the row's own content sits in the bottom `rowHeight`.
+    let headerHeight = groupHeader == nil ? 0 : g.groupHeaderHeight
+    let content = NSRect(x: 0, y: headerHeight, width: bounds.width, height: bounds.height - headerHeight)
+    if headerHeight > 0 {
+      let h = ceil(header.fittingSize.height)
+      header.frame = NSRect(x: g.rowHorizontalPadding, y: g.groupHeaderHeight - 4 - h, width: max(0, bounds.width - 2 * g.rowHorizontalPadding), height: h)
+    }
     var trailing = bounds.width - g.rowHorizontalPadding
     if !closeButton.isHidden {
       let closeSize: CGFloat = 20
-      closeButton.frame = NSRect(x: trailing - closeSize, y: (bounds.height - closeSize) / 2,
+      closeButton.frame = NSRect(x: trailing - closeSize, y: content.minY + (content.height - closeSize) / 2,
                                  width: closeSize, height: closeSize)
       trailing = closeButton.frame.minX - 8
     }
     // The trailing group, right to left: key caps, then the caption.
     for view in keyCaps.reversed() where !view.isHidden {
       let size = view.size
-      view.frame = NSRect(x: trailing - size.width, y: (bounds.height - size.height) / 2, width: size.width,
+      view.frame = NSRect(x: trailing - size.width, y: content.minY + (content.height - size.height) / 2, width: size.width,
                           height: size.height)
       trailing = view.frame.minX - 4
     }
     if !hint.isHidden {
       let width = ceil(hint.fittingSize.width)
       if keyCaps.contains(where: { !$0.isHidden }) { trailing -= 2 }
-      hint.frame = centered(x: trailing - width, width: width, field: hint)
+      hint.frame = centered(x: trailing - width, width: width, field: hint, in: content)
       trailing = hint.frame.minX
     }
     let slotX = g.rowHorizontalPadding
-    icon.frame = NSRect(x: slotX + (g.slotWidth - g.iconSize) / 2, y: (bounds.height - g.iconSize) / 2,
+    icon.frame = NSRect(x: slotX + (g.slotWidth - g.iconSize) / 2, y: content.minY + (content.height - g.iconSize) / 2,
                         width: g.iconSize, height: g.iconSize)
     let textX = slotX + g.slotWidth + g.slotGap
     let textLimit = trailing - (hint.isHidden && !keyCaps.contains(where: { !$0.isHidden }) ? 0 : 12)
     let titleWidth = min(ceil(title.fittingSize.width), max(0, textLimit - textX))
-    title.frame = centered(x: textX, width: titleWidth, field: title)
+    title.frame = centered(x: textX, width: titleWidth, field: title, in: content)
     let subtitleX = title.frame.maxX + 10
-    subtitle.frame = centered(x: subtitleX, width: max(0, textLimit - subtitleX), field: subtitle)
+    subtitle.frame = centered(x: subtitleX, width: max(0, textLimit - subtitleX), field: subtitle, in: content)
   }
 
-  private func centered(x: CGFloat, width: CGFloat, field: NSTextField) -> NSRect {
+  private func centered(x: CGFloat, width: CGFloat, field: NSTextField, in content: NSRect) -> NSRect {
     let h = ceil(field.intrinsicContentSize.height)
-    return NSRect(x: x, y: ((bounds.height - h) / 2).rounded(), width: width, height: h)
+    return NSRect(x: x, y: (content.minY + (content.height - h) / 2).rounded(), width: width, height: h)
   }
 }

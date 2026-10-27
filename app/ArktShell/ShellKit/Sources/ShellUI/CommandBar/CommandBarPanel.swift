@@ -25,7 +25,7 @@ final class CommandBarPanel: NSPanel {
   var isPresented = false {
     didSet {
       guard isPresented != oldValue else { return }
-      alphaValue = isPresented ? 1 : 0
+      if isPresented { alphaValue = 1 }               // hiding fades out first; the controller then sets alpha 0
       ignoresMouseEvents = !isPresented
       contentView?.setAccessibilityValue(isPresented ? AXID.CommandBar.open : AXID.CommandBar.closed)
     }

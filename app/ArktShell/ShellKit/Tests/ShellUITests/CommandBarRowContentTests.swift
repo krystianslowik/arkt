@@ -40,7 +40,7 @@ struct CommandBarRowContentTests {
 
   @Test func `a typed address says Open and shows what it expands to`() {
     let open = result(.open(url), title: "github.com", subtitle: url.absoluteString)
-    #expect(open.secondaryText == url.absoluteString)
+    #expect(open.secondaryText == "github.com/krystianslowik/arkt/pulls", "the scheme is not shown")
     #expect(open.trailing(isSelected: false) == [.text("Open")])
     #expect(open.symbolName == "globe")
   }
@@ -71,7 +71,7 @@ struct CommandBarRowContentTests {
   @Test func `Paste and Go shows the clipboard URL and Return when selected`() {
     let paste = result(.pasteAndGo(url), title: "Paste and Go", subtitle: url.absoluteString)
     #expect(paste.symbolName == "doc.on.clipboard")
-    #expect(paste.secondaryText == url.absoluteString)
+    #expect(paste.secondaryText == "github.com/krystianslowik/arkt/pulls")
     #expect(paste.trailing(isSelected: false).isEmpty)
     #expect(paste.trailing(isSelected: true) == [.keyCap(CommandBarKeyCaps.return)])
   }
@@ -110,6 +110,13 @@ struct CommandBarRowContentTests {
       let label = result(kind, title: "t").accessibilityLabel(position: 1, of: 1)
       #expect(!label.localizedCaseInsensitiveContains("arc "), "\(label)")
     }
+  }
+
+  @Test func `a URL shows without its scheme and trailing slash`() {
+    #expect(CommandBarTitleMatch.displayURL("https://arkt.dev/changelog") == "arkt.dev/changelog")
+    #expect(CommandBarTitleMatch.displayURL("http://example.com/") == "example.com")
+    #expect(CommandBarTitleMatch.displayURL("chrome://settings") == "chrome://settings", "other schemes stay")
+    #expect(CommandBarTitleMatch.displayURL("example.com") == "example.com")
   }
 
   @Test func `a title bolds the part that matches the query`() {
