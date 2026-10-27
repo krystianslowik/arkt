@@ -319,11 +319,18 @@ of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the main
 ### 1. Freeze the overlay and build the engine
 
 Check out the commit to release in `$REPO` and leave it there until the build ends: the build compiles whatever
-overlay and patches are in `$CR`. Do not edit `engine/` or run Apply, Export or a rebase meanwhile. Then run the
-release build (disk and swap checks as in "Release build (out/Arkt)"):
+overlay and patches are in `$CR`. Do not edit `engine/` or run Apply, Export or a rebase meanwhile. `$REPO` must be
+the worktree that the overlay link points at: `readlink $CR/arkt` prints `$REPO/engine/arkt`, otherwise the build
+compiles another checkout's overlay. Run the disk and swap checks of "Release build (out/Arkt)" first (swap was
+12.8 of 14.3 GiB used on the dry run before the build started; record it), then the release build, with its PID
+recorded so it can be stopped:
 
     cd $CR && gn gen out/Arkt
-    cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1
+    cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1 &
+    echo $! > $CHROMIUM_ROOT/build-arkt.pid
+
+The build is incremental: with an up-to-date `out/Arkt` and one new patch it took 94 s (a clean build takes the hours
+listed in "Release build (out/Arkt)"). Wait for it to end before running the checks below.
 
 Check the result:
 
@@ -345,8 +352,16 @@ app, into a folder outside the repo (see "Embedding in the app" for what the con
     cd $REPO && xcodebuild -project app/ArktShell/ArktShell.xcodeproj -scheme ArktShell -configuration Distribution \
       ARKT_ENGINE_APP=$REL/Arkt.app CONFIGURATION_BUILD_DIR=$OUT/build build
 
-Expect `BUILD SUCCEEDED` and `Engine framework copied: Arkt Framework.framework <version>` in the log. The product
-is `$OUT/build/Arkt.app` (executable `Arkt`, bundle id `dev.arkt.Arkt`). Xcode signs only the app, ad hoc.
+Expect `BUILD SUCCEEDED` and `Engine framework copied: Arkt Framework.framework <version>` in the log (a
+"CoreSimulator is out of date" line from `xcodebuild` is harmless). The product is `$OUT/build/Arkt.app` (executable
+`Arkt`, bundle id `dev.arkt.Arkt`). Xcode signs only the app, ad hoc.
+
+On a machine that has a development build, this build registers `$OUT/build/Arkt.app` and its helpers with
+LaunchServices under the product bundle id. When you delete `$OUT/build` and `$OUT/stage` (after step 4), unregister
+them first, so a stale `dev.arkt.Arkt` entry cannot take over link opens: run
+`lsregister -u $OUT/build/Arkt.app` (`lsregister` is
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister`) and check
+`lsregister -dump | grep -c "path:.*$OUT"` prints `0`, unregistering any remaining helper path the same way.
 
 ### 3. Ad-hoc sign a copy
 
@@ -375,6 +390,7 @@ Zip with `ditto`, which keeps the bundle's symlinks and metadata (`zip` does not
 
     cd $OUT/stage && ditto -c -k --keepParent Arkt.app $OUT/Arkt-$VERSION-arm64.zip
     cd $OUT && shasum -a 256 Arkt-$VERSION-arm64.zip | tee Arkt-$VERSION-arm64.zip.sha256
+    ls -l Arkt-$VERSION-arm64.zip                                  # about 196 MB (569 MB unpacked) on 156
 
 ### 5. Draft the release and smoke test the asset
 
@@ -392,7 +408,13 @@ quarantine flag a user's download carries. Then, as that user:
     cd ~/Downloads && shasum -a 256 Arkt-$VERSION-arm64.zip        # equals the .sha256 file
     ditto -x -k Arkt-$VERSION-arm64.zip /Applications              # or drag Arkt.app to /Applications
 
-Open it as described in the README ("Download the preview"). Run the checklist below. If any item fails, delete the
+Open it as described in the README ("Download the preview"). What to expect on 156 (dry run, quarantine flag set with
+`xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;"`): `spctl -a -vv Arkt.app` prints `rejected`,
+and launching the executable directly shows the "Arkt Not Opened" dialog ("Apple could not verify ...") with the
+buttons Move to Trash and Done. Choose Done, never Move to Trash. The process sits at `_dyld_start` with no window
+until the dialog is answered, and the dialog stays on screen after you kill that process, so do not start a second
+launch before dismissing it. Do not dry-run this on the maintainer's own login: use the fresh user above. Run the
+checklist below. If any item fails, delete the
 draft (`gh release delete v$VERSION --yes --cleanup-tag`), fix the cause and start again from step 1 or 2.
 
 ### 6. Publish

@@ -155,6 +155,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private(set) lazy var infobarStrips = makeInfobarPresenter()
   /// The find bar's state and engine calls, and its view over the card (#134); see `+Find`.
   private(set) lazy var findBar = makeFindBar()
+  private(set) lazy var statusPill = makeStatusPillPresenter()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
@@ -666,6 +667,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     permissionPrompts.refresh()
     infobarStrips.refresh()
     refreshFindBar()
+    statusPill.refresh()
   }
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -695,6 +697,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       return
     case .infobarsChanged:
       infobarStrips.handle(event)
+      return
+    case .targetURLChanged:
+      statusPill.handle(event)                                      // #114: a Peek's page has no row, so before the map
       return
     default:
       break
@@ -738,7 +743,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .findResult:
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
-      break                                                         // link hover: the shell UI follows (#114)
+      break                                                         // routed above, before the row lookup (#114)
     }
   }
 
@@ -849,6 +854,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     javaScriptDialogs.closeAll()
     permissionPrompts.closeAll()
     infobarStrips.closeAll()
+    statusPill.closeAll()
     peek.invalidate()
     commandBar.invalidate()
     rootView.sidebarOverlay.invalidate()

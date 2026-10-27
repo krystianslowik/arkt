@@ -37,6 +37,10 @@ public final class ContentCardView: NSView {
       needsLayout = true
     }
   }
+  /// The link status pill (#114), above the page at a bottom corner; created on first use.
+  private(set) var statusPillView: StatusPillView?
+  /// The pointer moved over the card, in the card's coordinates; set with the pill, which it keeps out of the way.
+  var onPointerMoved: (@MainActor (CGPoint) -> Void)?
   /// Multiplies the hairline border's opacity. A split draws its focused pane at 1 and the others at 0.5 [I]
   /// PARITY(NEEDS-RUNTIME-CHECK RT-37).
   public var borderEmphasis: CGFloat = 1 {
@@ -169,6 +173,7 @@ public final class ContentCardView: NSView {
     contentView?.frame = split.contentFrame
     emptyStateView?.frame = clipView.bounds
     layoutFindBar()
+    layoutStatusPill()
     layoutToast()
     // An explicit shadow path avoids an offscreen pass to derive the shadow shape from content alpha.
     layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: metrics.cardCornerRadius,
@@ -264,6 +269,32 @@ public final class ContentCardView: NSView {
   private func layoutToast() {
     guard let toastView, !toastView.isHidden else { return }       // laid out again when it shows
     toastView.frame = toastView.frame(centeredIn: bounds)
+  }
+
+  // MARK: Status pill (#114)
+
+  /// The card's status pill, made (with the tracking area that follows the pointer for it) the first time it is needed.
+  func ensureStatusPill() -> StatusPillView {
+    if let statusPillView { return statusPillView }
+    let pill = StatusPillView(frame: .zero)
+    addSubview(pill, positioned: .above, relativeTo: clipView)            // above the page, below a toast
+    addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                   owner: self, userInfo: nil))
+    statusPillView = pill
+    return pill
+  }
+
+  /// Bottom corner of its side, `StatusPillGeometry.inset` in; the width follows the text and the card.
+  private func layoutStatusPill() {
+    guard let pill = statusPillView, !pill.isHidden else { return }
+    let width = pill.preferredWidth(maxWidth: StatusPillGeometry.maxWidth(cardWidth: bounds.width))
+    let frame = StatusPillGeometry.frame(corner: pill.corner, width: width, in: bounds)
+    if pill.frame != frame { pill.frame = frame }
+  }
+
+  public override func mouseMoved(with event: NSEvent) {
+    guard let onPointerMoved else { return super.mouseMoved(with: event) }
+    onPointerMoved(convert(event.locationInWindow, from: nil))
   }
 
   /// One physical pixel at the current backing scale.
