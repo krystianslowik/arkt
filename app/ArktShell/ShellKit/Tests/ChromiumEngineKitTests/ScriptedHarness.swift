@@ -82,6 +82,13 @@ enum ScriptedHarness {
         let (chromium, tab) = try parts(engine, id)
         tab.raiseDialog(ArktDialogKind(kind), message: message, defaultText: defaultText)
         try await delivered(chromium)
+      },
+      raisePermission: { engine, id, kinds in
+        let (chromium, tab) = try parts(engine, id)
+        tab.askPermission(kinds.map(ArktPermissionKind.init), items: kinds.map(Self.phrase), oneTime: kinds.allSatisfy {
+          $0 != .notifications && $0 != .other
+        })
+        try await delivered(chromium)
       }
     )
   }
@@ -124,6 +131,30 @@ enum ScriptedHarness {
   static func delivered(_ engine: ChromiumEngine) async throws {
     let facade = scripted(engine)
     try await ScriptedWait.until("the facade to deliver its batch") { facade.isIdle }
+  }
+}
+
+extension ScriptedHarness {
+  static func phrase(_ kind: PermissionKind) -> String {
+    switch kind {
+    case .geolocation: "Know your location"
+    case .notifications: "Show notifications"
+    case .camera: "Use your camera"
+    case .microphone: "Use your microphone"
+    case .other: "Use a permission"
+    }
+  }
+}
+
+extension ArktPermissionKind {
+  init(_ kind: PermissionKind) {
+    switch kind {
+    case .geolocation: self = .geolocation
+    case .notifications: self = .notifications
+    case .camera: self = .camera
+    case .microphone: self = .microphone
+    case .other: self = .other
+    }
   }
 }
 

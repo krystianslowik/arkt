@@ -44,7 +44,7 @@ engine as the existing comments already do.
 | Archive of several tabs (Clear, Archive Below, multi-selection) | no toast today | toast / undo (new) | `toast-undo` |
 | Recovery | persistent toast with Show Files, one line, truncates at 480 pt | toast / persistent, multi-line | `toast-recovery` |
 | Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn) | `ext-install`, `ext-remove` |
-| Permission prompts | engine `ArktDialogSheet` as an anchored panel, fade-in 0.14 s | dialog / anchored panel (engine-drawn) | `permission` |
+| Permission prompts | shell `DialogPanel` as an anchored panel (#400); the engine's `ArktDialogSheet` stays the fallback while no embedder presents it | dialog / anchored panel | `permission` |
 | Infobars | engine `ArktInfobarView` rows, 40 pt, fade-in 0.14 s | infobar (engine-drawn) | `infobar` |
 
 Found while inventorying: the recovery texts are about 100 characters and `ToastView` is one truncating line at most
@@ -97,7 +97,8 @@ Escape is Cancel, so a stray Return never deletes anything.
    (the Arkt window has no title bar, so the sheet hangs from the window's top edge).
 2. **Anchored panel** (child `NSPanel`, non-activating): permission prompts. Top-leading corner 12 pt inside the
    content card (or the focused split pane), so the prompt points at the page that asked. Never steals focus from a
-   text field on the page unless the user clicks it; Escape answers Never Allow only when the panel is key.
+   text field on the page unless the user clicks it; Escape dismisses it without choosing (the
+   engine's own panel does the same), and only while the panel is key.
 3. **App-modal alert** (`NSApp.runModal(for:)` on a centered panel): launch failure before any window exists. Icon is
    the plain app icon at 56 pt, no badge, with the brand clear space kept (decision 5); the title stacks under the
    icon, as in system alerts. Runs from the same run-loop callout `askAfterLaunchFailure` uses

@@ -593,6 +593,14 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       case ArktEngineEventKindDialogEnded:
         LOG(WARNING) << "ARKT selftest dialogEnded tab=" << tab;
         break;
+      case ArktEngineEventKindPermissionRequested:
+        // Nobody draws it here either; the page waits until the prompt ends.
+        LOG(WARNING) << "ARKT selftest permissionRequested tab=" << tab
+                     << " items=" << event.permission.items.count;
+        break;
+      case ArktEngineEventKindPermissionEnded:
+        LOG(WARNING) << "ARKT selftest permissionEnded tab=" << tab;
+        break;
       case ArktEngineEventKindExtensionActionsChanged:
         LOG(WARNING) << "ARKT selftest extensionActionsChanged window="
                      << window;

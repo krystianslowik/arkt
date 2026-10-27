@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/no_destructor.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/url_identity.h"
@@ -132,9 +133,43 @@ std::u16string OriginName(content::WebContents* contents,
   return identity.name;
 }
 
+PermissionPresenter& Presenter() {
+  static base::NoDestructor<PermissionPresenter> presenter;
+  return *presenter;
+}
+
+PermissionKind KindOf(RequestType type) {
+  switch (type) {
+    case RequestType::kGeolocation:
+      return PermissionKind::kGeolocation;
+    case RequestType::kNotifications:
+      return PermissionKind::kNotifications;
+    case RequestType::kCameraStream:
+    case RequestType::kCameraPanTiltZoom:
+      return PermissionKind::kCamera;
+    case RequestType::kMicStream:
+      return PermissionKind::kMicrophone;
+    default:
+      return PermissionKind::kOther;
+  }
+}
+
 class ArktPermissionPrompt : public PermissionPrompt {
  public:
   enum class Choice { kAllow, kAllowThisTime, kBlock, kDismiss };
+
+  static Choice ToChoice(PermissionChoice choice) {
+    switch (choice) {
+      case PermissionChoice::kAllow:
+        return Choice::kAllow;
+      case PermissionChoice::kAllowThisTime:
+        return Choice::kAllowThisTime;
+      case PermissionChoice::kBlock:
+        return Choice::kBlock;
+      case PermissionChoice::kDismiss:
+        return Choice::kDismiss;
+    }
+  }
 
   ArktPermissionPrompt(content::WebContents* contents,
                        Delegate* delegate,
@@ -145,17 +180,14 @@ class ArktPermissionPrompt : public PermissionPrompt {
     std::vector<PermissionRequest*> visible = VisibleRequests(delegate);
     const bool one_time = IsOneTime(delegate);
 
-    ArktDialogSheetContent* content = [[ArktDialogSheetContent alloc] init];
-    content.width = kPanelWidth;
-    content.title = base::SysUTF16ToNSString(l10n_util::GetStringFUTF16(
-        IDS_PERMISSIONS_BUBBLE_PROMPT, OriginName(contents, delegate)));
-    NSMutableArray<ArktDialogSheetItem*>* items = [NSMutableArray array];
+    ArktPermissionAsk::Values values;
+    values.origin = OriginName(contents, delegate);
+    values.title = l10n_util::GetStringFUTF16(IDS_PERMISSIONS_BUBBLE_PROMPT,
+                                               values.origin);
     for (PermissionRequest* request : visible) {
-      ArktDialogSheetItem* item = [[ArktDialogSheetItem alloc] init];
-      item.text = base::SysUTF16ToNSString(request->GetMessageTextFragment());
-      [items addObject:item];
+      values.items.push_back(request->GetMessageTextFragment());
+      values.kinds.push_back(KindOf(request->request_type()));
     }
-    content.listItems = items;
     if (one_time) {
       // Chrome's three answers, in its order and with its labels.
       std::optional<std::u16string> allow =
@@ -163,18 +195,56 @@ class ArktPermissionPrompt : public PermissionPrompt {
                               : std::nullopt;
       std::optional<std::u16string> block =
           visible.size() == 1 ? visible[0]->GetBlockText() : std::nullopt;
-      content.primaryTitle = base::SysUTF16ToNSString(allow.value_or(
-          l10n_util::GetStringUTF16(IDS_PERMISSION_ALLOW_WHILE_VISITING)));
-      content.secondaryTitle = base::SysUTF16ToNSString(
-          l10n_util::GetStringUTF16(IDS_PERMISSION_ALLOW_THIS_TIME));
-      content.cancelTitle = base::SysUTF16ToNSString(block.value_or(
-          l10n_util::GetStringUTF16(IDS_PERMISSION_NEVER_ALLOW)));
-      content.stackedButtons = YES;
+      values.allow_title = allow.value_or(
+          l10n_util::GetStringUTF16(IDS_PERMISSION_ALLOW_WHILE_VISITING));
+      values.allow_this_time_title =
+          l10n_util::GetStringUTF16(IDS_PERMISSION_ALLOW_THIS_TIME);
+      values.block_title = block.value_or(
+          l10n_util::GetStringUTF16(IDS_PERMISSION_NEVER_ALLOW));
     } else {
-      content.primaryTitle = base::SysUTF16ToNSString(
-          l10n_util::GetStringUTF16(IDS_PERMISSION_ALLOW));
-      content.cancelTitle = base::SysUTF16ToNSString(
-          l10n_util::GetStringUTF16(IDS_PERMISSION_DENY));
+      values.allow_title = l10n_util::GetStringUTF16(IDS_PERMISSION_ALLOW);
+      values.block_title = l10n_util::GetStringUTF16(IDS_PERMISSION_DENY);
+    }
+
+    base::WeakPtr<ArktPermissionPrompt> weak = weak_factory_.GetWeakPtr();
+    // The shell draws the request when the window's host presents it (issue
+    // #400); the panel below is the fallback.
+    if (window->host_mode() && Presenter()) {
+      ask_ = std::make_unique<ArktPermissionAsk>(
+          values, base::BindRepeating(
+                      [](base::WeakPtr<ArktPermissionPrompt> prompt,
+                         PermissionChoice choice) {
+                        if (prompt) {
+                          prompt->Answer(ToChoice(choice));
+                        }
+                      },
+                      weak));
+      if (Presenter().Run(contents, ask_->GetWeakPtr())) {
+        LOG(WARNING) << "ARKT: permission prompt presented to the shell "
+                     << "requests=" << visible.size()
+                     << " one_time=" << one_time
+                     << " quiet=" << delegate->ShouldCurrentRequestUseQuietUI();
+        return;
+      }
+      ask_.reset();
+    }
+
+    ArktDialogSheetContent* content = [[ArktDialogSheetContent alloc] init];
+    content.width = kPanelWidth;
+    content.title = base::SysUTF16ToNSString(values.title);
+    NSMutableArray<ArktDialogSheetItem*>* items = [NSMutableArray array];
+    for (const std::u16string& text : values.items) {
+      ArktDialogSheetItem* item = [[ArktDialogSheetItem alloc] init];
+      item.text = base::SysUTF16ToNSString(text);
+      [items addObject:item];
+    }
+    content.listItems = items;
+    content.primaryTitle = base::SysUTF16ToNSString(values.allow_title);
+    content.cancelTitle = base::SysUTF16ToNSString(values.block_title);
+    if (one_time) {
+      content.secondaryTitle =
+          base::SysUTF16ToNSString(*values.allow_this_time_title);
+      content.stackedButtons = YES;
     }
     // Equal weight for every answer and no Return default, as Chrome's tonal
     // buttons: the prompt does not steer toward Allow.
@@ -184,7 +254,6 @@ class ArktPermissionPrompt : public PermissionPrompt {
     content.primaryEnableDelay = kInputProtection;
 
     sheet_ = [[ArktDialogSheet alloc] initWithContent:content];
-    base::WeakPtr<ArktPermissionPrompt> weak = weak_factory_.GetWeakPtr();
     // Each answer may destroy this prompt (the manager finalizes the request
     // and deletes its view), so nothing is touched after the delegate call.
     sheet_.onPrimary = ^{
@@ -234,6 +303,9 @@ class ArktPermissionPrompt : public PermissionPrompt {
     // goes. None of that is an answer: close without a callback. The sheet
     // may be running the callback that led here, so it lives to the next
     // turn of the run loop.
+    if (ask_) {
+      ask_->End();
+    }
     ArktDialogSheet* sheet = sheet_;
     [sheet close];
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -305,6 +377,8 @@ class ArktPermissionPrompt : public PermissionPrompt {
   base::WeakPtr<Delegate> delegate_;
   base::WeakPtr<ArktBrowserWindow> window_;
   ArktDialogSheet* __strong sheet_ = nil;
+  // Set while the shell presents the request (no panel then).
+  std::unique_ptr<ArktPermissionAsk> ask_;
   base::WeakPtrFactory<ArktPermissionPrompt> weak_factory_{this};
 };
 
@@ -332,6 +406,40 @@ std::unique_ptr<PermissionPrompt> CreatePrompt(
 }
 
 }  // namespace
+
+ArktPermissionAsk::ArktPermissionAsk(Values values, AnswerCallback answer)
+    : values_(std::move(values)), answer_(std::move(answer)) {}
+
+ArktPermissionAsk::~ArktPermissionAsk() = default;
+
+bool ArktPermissionAsk::Respond(PermissionChoice choice) {
+  if (over_ || answered_) {
+    return false;
+  }
+  answered_ = true;
+  if (choice == PermissionChoice::kAllowThisTime &&
+      !values_.allow_this_time_title) {
+    choice = PermissionChoice::kAllow;
+  }
+  // The callback may delete the prompt, and this object with it: run a copy.
+  AnswerCallback answer = answer_;
+  answer.Run(choice);
+  return true;
+}
+
+void ArktPermissionAsk::End() {
+  if (over_) {
+    return;
+  }
+  over_ = true;
+  if (ended_) {
+    std::move(ended_).Run();
+  }
+}
+
+void SetPermissionPresenter(PermissionPresenter presenter) {
+  Presenter() = std::move(presenter);
+}
 
 void UseArktPermissionPrompts(content::WebContents* contents) {
   auto* manager =

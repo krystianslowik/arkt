@@ -27,6 +27,7 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var isAudible = false
   var isMuted = false
   var dialog: (any ArktJavaScriptDialog)?
+  var permission: (any ArktPermissionRequest)?
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -61,6 +62,44 @@ final class ScriptedDialog: NSObject, ArktJavaScriptDialog {
   }
 
   /// The engine's own end, or the end after an answer: once, reported with `DialogEnded`.
+  func end() {
+    guard !isEnded else { return }
+    isEnded = true
+    onEnd?()
+  }
+}
+
+/// A site's permission request (#400): plain values and the one answer. `choice` records what the shell answered.
+final class ScriptedPermission: NSObject, ArktPermissionRequest {
+  let tab: any ArktTabHandle
+  let origin: String
+  let kinds: [NSNumber]
+  let title: String
+  let items: [String]
+  let allowTitle: String
+  let allowThisTimeTitle: String?
+  let blockTitle: String
+  private(set) var isEnded = false
+  private(set) var choice: ArktPermissionChoice?
+  var onEnd: (() -> Void)?
+
+  init(tab: any ArktTabHandle, origin: String, kinds: [ArktPermissionKind], items: [String], oneTime: Bool) {
+    self.tab = tab; self.origin = origin; self.kinds = kinds.map { NSNumber(value: $0.rawValue) }
+    self.items = items
+    title = "\(origin) wants to"
+    allowTitle = oneTime ? "Allow while visiting the site" : "Allow"
+    allowThisTimeTitle = oneTime ? "Allow this time" : nil
+    blockTitle = oneTime ? "Never allow" : "Block"
+  }
+
+  func respond(choice: ArktPermissionChoice) -> Bool {
+    guard !isEnded else { return false }
+    self.choice = choice
+    end()
+    return true
+  }
+
+  /// The engine's own end, or the end after an answer: once, reported with `PermissionEnded`.
   func end() {
     guard !isEnded else { return }
     isEnded = true
@@ -185,6 +224,52 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   /// The engine ends the pending dialog (a navigation, a later dialog, the tab closing).
   func endJSDialog() { jsDialog?.end() }
 
+  // MARK: Permission requests (#400)
+
+  /// The pending request, and what asked for it (kept so a hidden tab can ask again, as Chromium's manager does).
+  private(set) var permission: ScriptedPermission?
+  private var permissionAsk: (origin: String, kinds: [ArktPermissionKind], items: [String], oneTime: Bool)?
+
+  /// The page asks for a permission: the earlier request ends first. Shown only while the tab is its window's active
+  /// tab (a hidden tab's ask stays pending until it is shown).
+  @discardableResult
+  func askPermission(_ kinds: [ArktPermissionKind], items: [String], oneTime: Bool) -> ScriptedPermission? {
+    endPermission()
+    permissionAsk = (url?.host() ?? "This page", kinds, items, oneTime)
+    return showPermission()
+  }
+
+  private func showPermission() -> ScriptedPermission? {
+    guard let ask = permissionAsk, isActive else { return nil }
+    let request = ScriptedPermission(tab: self, origin: ask.origin, kinds: ask.kinds, items: ask.items,
+                                     oneTime: ask.oneTime)
+    request.onEnd = { [weak self, unowned request] in
+      guard let self else { return }
+      if permission === request { permission = nil }
+      record(.permissionEnded) { $0.permission = request }
+    }
+    permission = request
+    record(.permissionRequested) { $0.permission = request }
+    return request
+  }
+
+  /// The tab stopped being its window's active tab: Chromium's manager deletes the prompt and keeps the ask pending.
+  func permissionHidden() { endPermissionView() }
+
+  /// The tab is its window's active tab again: the pending ask gets a new prompt.
+  func permissionShown() {
+    guard permission == nil, permissionAsk != nil else { return }
+    _ = showPermission()
+  }
+
+  /// The site withdraws the ask, or a navigation or the tab closing drops it: the prompt ends and the ask is gone.
+  func endPermission() {
+    permissionAsk = nil
+    permission?.end()
+  }
+
+  private func endPermissionView() { permission?.end() }
+
   private func record(_ kind: ArktEngineEventKind, _ fill: (ScriptedEvent) -> Void = { _ in }) {
     let event = ScriptedEvent(kind, tab: self, browser: owner)
     fill(event)
@@ -261,6 +346,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     whenInserted { [self] in
       guard owner != nil else { return }
       endJSDialog()                 // Chromium closes it when the navigation starts
+      endPermission()               // and drops the ask
       if let current, current.url != target, !isInitialBlank {
         back.insert(current, at: 0)
         forward = []
@@ -532,6 +618,8 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     active = tab
     facade.record(ScriptedEvent(.activeTabChanged, tab: tab, browser: self))
     previous?.hidden()
+    previous?.permissionHidden()
+    tab.permissionShown()
   }
 
   /// Removes a tab; closing the active tab activates its right neighbour, else the left one.
@@ -545,6 +633,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     closed.closeReason = reason
     facade.record(closed)
     tab.endJSDialog()           // the manager goes with the contents, after the tab strip reported the removal
+    tab.endPermission()
     if active === tab {
       active = nil
       if reactivate, !tabList.isEmpty { activate(tabList[min(index, tabList.count - 1)]) }

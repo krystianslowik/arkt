@@ -92,6 +92,7 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var isAudible = false
   var isMuted = false
   var dialog: (any ArktJavaScriptDialog)?
+  var permission: (any ArktPermissionRequest)?
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -569,8 +570,11 @@ struct ConformanceTests {
     #expect([ArktEngineEventKind.tabCreated, .tabClosed, .activeTabChanged, .closeCancelled, .urlChanged,
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
              .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged,
-             .dialogRequested, .dialogEnded].map(\.rawValue)
-      == Array(0...17))
+             .dialogRequested, .dialogEnded, .permissionRequested, .permissionEnded].map(\.rawValue)
+      == Array(0...19))
+    #expect([ArktPermissionKind.other, .geolocation, .notifications, .camera, .microphone].map(\.rawValue)
+      == Array(0...4))
+    #expect([ArktPermissionChoice.allow, .allowThisTime, .block, .dismiss].map(\.rawValue) == Array(0...3))
     #expect([ArktDialogKind.alert, .confirm, .prompt].map(\.rawValue) == [0, 1, 2])
     #expect([ArktWindowRequestKind.extension, .page, .reopen, .startupURL].map(\.rawValue) == Array(0...3))
     #expect([ArktLinkDecision.navigate, .cancel].map(\.rawValue) == [0, 1])
@@ -679,5 +683,48 @@ struct JavaScriptDialogABITests {
     #expect(carried.respond(accepted: true, userInput: "Grace"))
     #expect(!carried.respond(accepted: false, userInput: nil), "the answer after the end is refused")
     #expect(carried.isEnded && dialog.answers.count == 1 && dialog.answers.first?.1 == "Grace")
+  }
+}
+
+/// Permission requests (#400): the event carries the request, the request carries the engine's strings and takes one
+/// answer, and an answer after the end is refused.
+@MainActor
+struct PermissionRequestABITests {
+  final class Request: NSObject, ArktPermissionRequest {
+    let tab: any ArktTabHandle
+    let origin = "example.com"
+    let kinds: [NSNumber] = [NSNumber(value: ArktPermissionKind.geolocation.rawValue)]
+    let title = "example.com wants to"
+    let items = ["Know your location"]
+    let allowTitle = "Allow while visiting the site"
+    let allowThisTimeTitle: String? = "Allow this time"
+    let blockTitle = "Never allow"
+    private(set) var isEnded = false
+    private(set) var choices: [ArktPermissionChoice] = []
+    init(tab: any ArktTabHandle) { self.tab = tab }
+    func respond(choice: ArktPermissionChoice) -> Bool {
+      guard !isEnded else { return false }
+      isEnded = true
+      choices.append(choice)
+      return true
+    }
+  }
+
+  @Test func theEventCarriesTheRequestAndItTakesOneAnswer() throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+    let request = Request(tab: tab)
+    let event = TestEvent(.permissionRequested, tab: tab, browser: browser)
+    event.permission = request
+
+    let carried = try #require(event.permission)
+    #expect(carried.origin == "example.com" && carried.title == "example.com wants to")
+    #expect(carried.kinds == [1] && carried.items == ["Know your location"])
+    #expect(carried.allowTitle == "Allow while visiting the site" && carried.allowThisTimeTitle == "Allow this time")
+    #expect(carried.blockTitle == "Never allow" && carried.tab === tab)
+    #expect(carried.respond(choice: .allowThisTime))
+    #expect(!carried.respond(choice: .block), "the answer after the end is refused")
+    #expect(carried.isEnded && request.choices == [.allowThisTime])
   }
 }
