@@ -6,9 +6,9 @@ import QuartzCore
 /// `ArktDialogSheetContent`, so Delete Space, the launch alerts and later confirmations share one look with the
 /// engine's prompts. One content model, three hosts (`DialogSheet`, `DialogPanel`, `DialogAlert`).
 ///
-/// Not mirrored from the engine model, because no shell dialog uses them yet: the checkbox, the primary enable delay,
-/// stacked buttons and a neutral primary. The text field and the capped, scrolling body are for a page's `prompt()` and
-/// long `alert()` messages (#400).
+/// Not mirrored from the engine model, because no shell dialog uses it yet: the checkbox. The text field and the
+/// capped, scrolling body are for a page's `prompt()` and long `alert()` messages (#400); stacked buttons, a neutral
+/// primary, Escape dismissing and the input protection are for a site's permission request (#400).
 public struct DialogContent: Equatable, Sendable {
   public enum Icon: Equatable, Sendable {
     case none
@@ -76,13 +76,22 @@ public struct DialogContent: Equatable, Sendable {
   public var input: Input?
   /// The body (all paragraphs) scrolls inside this height when it needs more; nil: it takes the height it needs.
   public var bodyMaxHeight: CGFloat?
+  /// Full-width pills one above the other, primary first (a permission request: the answers carry equal weight).
+  public var stackedButtons: Bool
+  /// The primary is a neutral pill, not the mustard one: the dialog does not steer toward it.
+  public var neutralPrimary: Bool
+  /// Escape closes the dialog without an answer (`DialogPanel.onDismiss`), not as Cancel.
+  public var escapeDismisses: Bool
+  /// Seconds after the dialog appears in which button presses and Return are ignored; 0: none.
+  public var inputProtection: TimeInterval
 
   public init(title: String, icon: Icon = .none, iconPlacement: IconPlacement = .beside, subtitle: String? = nil,
               paragraphs: [Paragraph] = [], listHeading: String? = nil, listItems: [String] = [],
               footerLink: String? = nil, primaryTitle: String, secondaryTitle: String? = nil,
               cancelTitle: String? = nil, defaultButton: DefaultButton = .primary, isDestructive: Bool = false,
               escapeAnswersCancel: Bool = true, primaryHelp: String? = nil, width: CGFloat = 420,
-              input: Input? = nil, bodyMaxHeight: CGFloat? = nil) {
+              input: Input? = nil, bodyMaxHeight: CGFloat? = nil, stackedButtons: Bool = false,
+              neutralPrimary: Bool = false, escapeDismisses: Bool = false, inputProtection: TimeInterval = 0) {
     self.title = title
     self.icon = icon
     self.iconPlacement = iconPlacement
@@ -102,13 +111,24 @@ public struct DialogContent: Equatable, Sendable {
     self.width = width
     self.input = input
     self.bodyMaxHeight = bodyMaxHeight
+    self.stackedButtons = stackedButtons
+    self.neutralPrimary = neutralPrimary
+    self.escapeDismisses = escapeDismisses
+    self.inputProtection = inputProtection
   }
 
-  /// The body as VoiceOver describes the dialog: the paragraphs in order, then the list.
+  /// What VoiceOver speaks when the dialog appears: the title, then the list as items ("example.com wants to: Use your
+  /// camera, Use your microphone"); the title alone when there is no list.
+  public var announcement: String {
+    listItems.isEmpty ? title : "\(title): \(listItems.joined(separator: ", "))"
+  }
+
+  /// The body as VoiceOver describes the dialog: the paragraphs in order, then the list heading and its items, which
+  /// are separated by commas so they do not run into one sentence.
   public var accessibilityDescription: String {
     var parts = paragraphs.map(\.text)
     if let listHeading { parts.append(listHeading) }
-    parts += listItems
+    if !listItems.isEmpty { parts.append(listItems.joined(separator: ", ")) }
     return parts.joined(separator: " ")
   }
 }

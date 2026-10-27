@@ -33,6 +33,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktHistoryEntry;
 @protocol ArktJavaScriptDialog;
 @protocol ArktLinkActivation;
+@protocol ArktPermissionRequest;
 @protocol ArktTabHandle;
 @protocol ArktWindowHost;
 @protocol ArktWindowRequest;
@@ -140,6 +141,16 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // navigation, a later dialog, the tab closing, a confirm or prompt in a
   // tab that was hidden). Values: dialog. Exactly one per request.
   ArktEngineEventKindDialogEnded = 17,
+  // A site asks for a permission (camera, microphone, location, notifications
+  // and the like) in a window whose host presents it (#400). Values:
+  // permission. At most one is pending per tab. A tab that stops being shown
+  // ends its request without an answer and gets a new request when it is shown
+  // again (Chromium keeps the ask pending).
+  ArktEngineEventKindPermissionRequested = 18,
+  // The permission request is over: the shell answered it, or the engine ended
+  // it (a navigation, the tab hidden or closing, the site withdrawing it).
+  // Values: permission. Exactly one per request.
+  ArktEngineEventKindPermissionEnded = 19,
 };
 
 // Why the engine asks the embedder for a window host.
@@ -171,6 +182,25 @@ typedef NS_ENUM(NSInteger, ArktDialogKind) {
   ArktDialogKindPrompt = 2,
 };
 
+// What a permission request asks for (#400). Other covers the rest; its words
+// are in the request's items.
+typedef NS_ENUM(NSInteger, ArktPermissionKind) {
+  ArktPermissionKindOther = 0,
+  ArktPermissionKindGeolocation = 1,
+  ArktPermissionKindNotifications = 2,
+  ArktPermissionKindCamera = 3,
+  ArktPermissionKindMicrophone = 4,
+};
+
+// How the shell answers a permission request (#400). Dismiss is closing the
+// prompt without choosing (Escape): Chromium counts it as ignored.
+typedef NS_ENUM(NSInteger, ArktPermissionChoice) {
+  ArktPermissionChoiceAllow = 0,
+  ArktPermissionChoiceAllowThisTime = 1,
+  ArktPermissionChoiceBlock = 2,
+  ArktPermissionChoiceDismiss = 3,
+};
+
 // One recorded engine change, as plain values. Fields that do not apply to
 // the kind are nil, NO, ArktCloseReasonNone or ArktWindowCloseReasonNone.
 NS_SWIFT_UI_ACTOR
@@ -193,6 +223,8 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) ArktWindowCloseReason windowCloseReason;
 // DialogRequested and DialogEnded; nil on every other kind.
 @property(nonatomic, readonly, nullable) id<ArktJavaScriptDialog> dialog;
+// PermissionRequested and PermissionEnded; nil on every other kind.
+@property(nonatomic, readonly, nullable) id<ArktPermissionRequest> permission;
 @end
 
 // A page's alert, confirm or prompt, held until the shell answers it or the
@@ -220,6 +252,37 @@ NS_SWIFT_UI_ACTOR
 - (BOOL)respondAccepted:(BOOL)accepted
               userInput:(nullable NSString*)userInput
     NS_SWIFT_NAME(respond(accepted:userInput:));
+@end
+
+// A site's permission request, held until the shell answers it or the engine
+// ends it (#400). Every string is Chromium's.
+NS_SWIFT_UI_ACTOR
+@protocol ArktPermissionRequest <NSObject>
+// The tab whose page asked; stays valid after the tab has closed.
+@property(nonatomic, readonly) id<ArktTabHandle> tab;
+// The asking origin as the permission bubble names it ("example.com").
+@property(nonatomic, readonly, copy) NSString* origin;
+// What is asked for, one ArktPermissionKind (boxed) per item, in order.
+@property(nonatomic, readonly, copy) NSArray<NSNumber*>* kinds;
+// "example.com wants to".
+@property(nonatomic, readonly, copy) NSString* title;
+// What it wants to do, one phrase per kind ("Know your location").
+@property(nonatomic, readonly, copy) NSArray<NSString*>* items;
+// Allow (for a request that can be granted for one visit: Allow while visiting
+// the site).
+@property(nonatomic, readonly, copy) NSString* allowTitle;
+// Allow this time; nil when the request has no one-visit grant.
+@property(nonatomic, readonly, nullable, copy) NSString* allowThisTimeTitle;
+// Block (Never allow when the request has a one-visit grant).
+@property(nonatomic, readonly, copy) NSString* blockTitle;
+// The request is over, however it ended.
+@property(nonatomic, readonly) BOOL isEnded;
+// Answers the site's ask. Returns NO, and does nothing, when the request is
+// already over or already answered, so an answer that races the end is
+// harmless. Reported with one PermissionEnded. AllowThisTime on a request
+// without that answer counts as Allow.
+- (BOOL)respondWithChoice:(ArktPermissionChoice)choice
+    NS_SWIFT_NAME(respond(choice:));
 @end
 
 // A request for a window the engine creates on its own, after

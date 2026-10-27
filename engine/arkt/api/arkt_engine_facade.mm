@@ -17,6 +17,7 @@
 #include "arkt/browser/arkt_extensions_menu.h"
 #include "arkt/browser/arkt_javascript_dialog.h"
 #include "arkt/browser/arkt_link_activation.h"
+#include "arkt/browser/arkt_permission_prompt.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
 #include "base/command_line.h"
@@ -309,6 +310,10 @@ const char* KindName(ArktEngineEventKind kind) {
       return "DialogRequested";
     case ArktEngineEventKindDialogEnded:
       return "DialogEnded";
+    case ArktEngineEventKindPermissionRequested:
+      return "PermissionRequested";
+    case ArktEngineEventKindPermissionEnded:
+      return "PermissionEnded";
   }
   return "unknown";
 }
@@ -337,6 +342,7 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic) BOOL isMuted;
 @property(nonatomic) ArktWindowCloseReason windowCloseReason;
 @property(nonatomic, nullable) id<ArktJavaScriptDialog> dialog;
+@property(nonatomic, nullable) id<ArktPermissionRequest> permission;
 @end
 
 @implementation ArktFacadeEvent
@@ -357,6 +363,7 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize isMuted = _isMuted;
 @synthesize windowCloseReason = _windowCloseReason;
 @synthesize dialog = _dialog;
+@synthesize permission = _permission;
 @end
 
 // A page's alert, confirm or prompt (#400): plain values read once when the
@@ -434,6 +441,112 @@ const char* KindName(ArktEngineEventKind kind) {
   // The manager runs the page's callback; the ended callback then reports
   // DialogEnded.
   return _request->Respond(accepted, input);
+}
+
+@end
+
+// A site's permission request (#400): plain values read once when the prompt
+// is created, and the shell's one answer. The request is the prompt's own
+// ArktPermissionAsk, reached through a weak pointer that dies with the prompt
+// (Chromium's manager deletes it on a tab switch, a navigation, a withdrawn
+// request, an answer or the tab closing).
+@interface ArktFacadePermissionRequest : NSObject <ArktPermissionRequest>
+- (instancetype)initWithAsk:(base::WeakPtr<arkt::ArktPermissionAsk>)ask
+                        tab:(id<ArktTabHandle>)tab;
+// The request is over (answered or ended by the engine).
+- (void)markEnded;
+@end
+
+@implementation ArktFacadePermissionRequest {
+  base::WeakPtr<arkt::ArktPermissionAsk> _ask;
+  BOOL _ended;
+}
+
+@synthesize tab = _tab;
+@synthesize origin = _origin;
+@synthesize kinds = _kinds;
+@synthesize title = _title;
+@synthesize items = _items;
+@synthesize allowTitle = _allowTitle;
+@synthesize allowThisTimeTitle = _allowThisTimeTitle;
+@synthesize blockTitle = _blockTitle;
+
+- (instancetype)initWithAsk:(base::WeakPtr<arkt::ArktPermissionAsk>)ask
+                        tab:(id<ArktTabHandle>)tab {
+  if ((self = [super init])) {
+    _ask = ask;
+    _tab = tab;
+    const arkt::ArktPermissionAsk::Values& values = ask->values();
+    _origin = base::SysUTF16ToNSString(values.origin);
+    _title = base::SysUTF16ToNSString(values.title);
+    NSMutableArray<NSString*>* items = [NSMutableArray array];
+    for (const std::u16string& item : values.items) {
+      [items addObject:base::SysUTF16ToNSString(item)];
+    }
+    _items = items;
+    NSMutableArray<NSNumber*>* kinds = [NSMutableArray array];
+    for (arkt::PermissionKind kind : values.kinds) {
+      ArktPermissionKind mapped = ArktPermissionKindOther;
+      switch (kind) {
+        case arkt::PermissionKind::kGeolocation:
+          mapped = ArktPermissionKindGeolocation;
+          break;
+        case arkt::PermissionKind::kNotifications:
+          mapped = ArktPermissionKindNotifications;
+          break;
+        case arkt::PermissionKind::kCamera:
+          mapped = ArktPermissionKindCamera;
+          break;
+        case arkt::PermissionKind::kMicrophone:
+          mapped = ArktPermissionKindMicrophone;
+          break;
+        case arkt::PermissionKind::kOther:
+          break;
+      }
+      [kinds addObject:@(mapped)];
+    }
+    _kinds = kinds;
+    _allowTitle = base::SysUTF16ToNSString(values.allow_title);
+    if (values.allow_this_time_title) {
+      _allowThisTimeTitle =
+          base::SysUTF16ToNSString(*values.allow_this_time_title);
+    }
+    _blockTitle = base::SysUTF16ToNSString(values.block_title);
+  }
+  return self;
+}
+
+- (BOOL)isEnded {
+  return _ended || !_ask;
+}
+
+- (void)markEnded {
+  _ended = YES;
+}
+
+- (BOOL)respondWithChoice:(ArktPermissionChoice)choice {
+  arkt::CheckFacadeEntry();
+  if (self.isEnded) {
+    return NO;
+  }
+  arkt::PermissionChoice mapped = arkt::PermissionChoice::kDismiss;
+  switch (choice) {
+    case ArktPermissionChoiceAllow:
+      mapped = arkt::PermissionChoice::kAllow;
+      break;
+    case ArktPermissionChoiceAllowThisTime:
+      mapped = arkt::PermissionChoice::kAllowThisTime;
+      break;
+    case ArktPermissionChoiceBlock:
+      mapped = arkt::PermissionChoice::kBlock;
+      break;
+    case ArktPermissionChoiceDismiss:
+      mapped = arkt::PermissionChoice::kDismiss;
+      break;
+  }
+  // The permission delegate resolves the request and the manager deletes the
+  // prompt; its ended callback then reports PermissionEnded.
+  return _ask->Respond(mapped);
 }
 
 @end
@@ -548,6 +661,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
         &Facade::DecideLinkActivation, base::Unretained(this)));
     SetJavaScriptDialogPresenter(base::BindRepeating(
         &Facade::PresentJavaScriptDialog, base::Unretained(this)));
+    SetPermissionPresenter(base::BindRepeating(
+        &Facade::PresentPermission, base::Unretained(this)));
     observation_.Observe(GlobalBrowserCollection::GetInstance());
     GlobalBrowserCollection::GetInstance()->ForEach(
         [this](BrowserWindowInterface* browser) {
@@ -620,6 +735,38 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     event.dialog = dialog;
     LOG(WARNING) << "ARKT: facade dialog requested kind="
                  << static_cast<int>(dialog.kind);
+    RecordFromNotification(event);
+    return true;
+  }
+
+  // A site's permission request in an Arkt window with an embedder host
+  // (#400), called by the permission prompt factory when Chromium creates the
+  // prompt (a new request, or a tab that comes forward again). True takes the
+  // request: PermissionRequested goes to the shell, which answers with
+  // -respondWithChoice: or lets the engine end it. False leaves it to the
+  // engine-drawn panel: the tab has no handle, or nobody listens.
+  bool PresentPermission(content::WebContents* contents,
+                         base::WeakPtr<ArktPermissionAsk> ask) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil;
+    ArktFacadeBrowser* browser = handle.browser;
+    if (!ask || !handle || !browser || sinks_.count == 0) {
+      return false;
+    }
+    ArktFacadePermissionRequest* request =
+        [[ArktFacadePermissionRequest alloc] initWithAsk:ask tab:handle];
+    ask->SetEndedCallback(base::BindOnce(
+        &Facade::PermissionEnded, base::Unretained(this),
+        base::Owned(new PermissionReference(request))));
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindPermissionRequested;
+    event.tab = handle;
+    event.browser = browser;
+    event.permission = request;
+    LOG(WARNING) << "ARKT: facade permission requested items="
+                 << request.items.count;
     RecordFromNotification(event);
     return true;
   }
@@ -712,6 +859,25 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
         : dialog(dialog) {}
     ArktFacadeJavaScriptDialog* __strong dialog;
   };
+
+  // Keeps the Objective-C permission request alive until its prompt ends.
+  struct PermissionReference {
+    explicit PermissionReference(ArktFacadePermissionRequest* request)
+        : request(request) {}
+    ArktFacadePermissionRequest* __strong request;
+  };
+
+  // The prompt is over, answered or ended by the engine: one PermissionEnded.
+  void PermissionEnded(PermissionReference* reference) {
+    ArktFacadePermissionRequest* request = reference->request;
+    [request markEnded];
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindPermissionEnded;
+    event.tab = request.tab;
+    event.browser = request.tab.browser;
+    event.permission = request;
+    RecordFromNotification(event);
+  }
 
   // The request is over, answered or ended by the engine: one DialogEnded.
   void DialogEnded(DialogReference* reference) {
