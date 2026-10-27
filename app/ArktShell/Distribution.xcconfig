@@ -1,0 +1,14 @@
+// Distribution configuration of the ArktShell target (#334): the shipped app, Arkt.app, on the engine app named by
+// ARKT_ENGINE_APP (the self-contained framework build, out/Arkt/Arkt.app). Optimized, no test-only code.
+//
+// Local.xcconfig (not committed, see .gitignore) may name this machine's engine; the command line wins over both:
+//   xcodebuild -scheme ArktShell -configuration Distribution \
+//     ARKT_ENGINE_APP=<chromium src>/out/Arkt/Arkt.app CONFIGURATION_BUILD_DIR=<output dir> build
+
+ARKT_ENGINE_APP =
+
+#include? "Local.xcconfig"
+
+// CrProductDirName: the product's engine user-data-dir, inside the product data folder "Arkt" (engine/README.md,
+// "Product identity"). After the include on purpose: a machine-local file must not move the product's profile.
+ARKT_PRODUCT_DIR_NAME = Arkt/Engine

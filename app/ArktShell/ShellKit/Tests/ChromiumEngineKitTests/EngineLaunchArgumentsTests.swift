@@ -38,4 +38,12 @@ struct EngineLaunchArgumentsTests {
     let result = EngineLaunchArguments.applying(to: given)
     #expect(Array(result.prefix(3)) == given)
   }
+
+  @Test func testSwitchesAreStrippedAndOtherArgumentsKept() {
+    let arguments = ["/App/Arkt", "--arkt-engine-test-api", "--arkt-engine-contract=a,b", "--arkt-reentrancy-probe",
+                     "--arkt-embedder-fail", "--user-data-dir=/tmp/p", "https://example.com"]
+    #expect(EngineLaunchArguments.strippingTestSwitches(arguments)
+      == ["/App/Arkt", "--user-data-dir=/tmp/p", "https://example.com"])
+    #expect(EngineLaunchArguments.strippingTestSwitches(["/App/Arkt"]) == ["/App/Arkt"])
+  }
 }

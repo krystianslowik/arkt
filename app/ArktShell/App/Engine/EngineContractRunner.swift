@@ -1,4 +1,4 @@
-#if ARKT_CHROMIUM_ENGINE
+#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES
 import AppKit
 import ChromiumEngineKit
 import EngineAPI

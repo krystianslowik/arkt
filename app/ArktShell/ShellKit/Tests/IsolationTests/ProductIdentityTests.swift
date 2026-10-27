@@ -55,10 +55,31 @@ struct ProductIdentityTests {
     #expect(project.contains("CrProductDirName -string \"$ARKT_PRODUCT_DIR_NAME\""))
   }
 
+  /// The Distribution configuration (#334) carries the product value in its own xcconfig.
+  @Test func distributionWritesTheProductEngineFolder() throws {
+    let xcconfig = try Self.text("app/ArktShell/Distribution.xcconfig")
+    #expect(Self.setting("ARKT_PRODUCT_DIR_NAME", in: xcconfig) == "Arkt/Engine")
+  }
+
   @Test func productEngineFolderIsInsideTheProductDataFolder() throws {
     let readme = try Self.text("engine/README.md")
     #expect(readme.contains("ARKT_PRODUCT_DIR_NAME=Arkt/Engine"))
+    #expect(readme.contains("`CrProductDirName` = `Arkt/Engine`"), "the Distribution paragraph names the value")
     let components = "Arkt/Engine".split(separator: "/")
     #expect(components.first == "Arkt")
+  }
+
+  /// The TCC usage strings (#133): macOS asks for camera, microphone and location on behalf of a site, and shows
+  /// these texts in its own prompt. Short, neutral, and not user-facing "Arc".
+  @Test func infoPlistExplainsCameraMicrophoneAndLocationAccess() throws {
+    let project = try Self.text("app/ArktShell/project.yml")
+    for (key, subject) in [("NSCameraUsageDescription", "camera"), ("NSMicrophoneUsageDescription", "microphone"),
+                           ("NSLocationWhenInUseUsageDescription", "location")] {
+      let line = try #require(project.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        .first { $0.hasPrefix(key + ":") }, "project.yml has no \(key)")
+      let text = line.dropFirst(key.count + 1).trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\"")))
+      #expect(text == "A website you visit can ask to use your \(subject).", "\(key): \(text)")
+      #expect(!text.contains("Arc"))
+    }
   }
 }

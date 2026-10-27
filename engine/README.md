@@ -321,11 +321,22 @@ Data folders, all under `~/Library/Application Support`:
 | `Arkt/Engine` | the product engine's default user-data-dir | `CrProductDirName` in the app's Info.plist |
 | `Arkt Dev Engine` | the development engine's default user-data-dir | the same key, from `Engine.xcconfig` |
 
-`CrProductDirName` is written by the Engine build phase from the build setting `ARKT_PRODUCT_DIR_NAME`
+`CrProductDirName` is written by the embed build phase from the build setting `ARKT_PRODUCT_DIR_NAME`
 (`app/ArktShell/Engine.xcconfig`, default `Arkt Dev Engine`, so a development build never shares a profile with the
-product). A product build passes the product value; the release configuration (#334) sets it in its own xcconfig:
+product). The Distribution configuration (#334) sets the product value, `ARKT_PRODUCT_DIR_NAME=Arkt/Engine`, in
+`app/ArktShell/Distribution.xcconfig`.
 
-    xcodebuild -scheme ArktShell -configuration Engine ARKT_PRODUCT_DIR_NAME=Arkt/Engine ...
+Distribution is the shipped app: the Engine configuration's engine-backed shell, optimized (`-O`, whole module), named
+`Arkt.app`, without the test-only code. It does not link `EngineAPITestSupport` (so the contract runner and its
+loopback server are not in the binary), compiles the `ARKT_*` overrides and the `--arkt-engine-contract` switch out
+(`ArktEnvironmentOverrides` is `NO`; the stand-in shell and its probes go with them), and writes `CrProductDirName` = `Arkt/Engine`. Build it like the Engine
+configuration, against the self-contained engine app:
+
+    cd $REPO/app/ArktShell && xcodebuild -scheme ArktShell -configuration Distribution \
+      ARKT_ENGINE_APP=$REL/Arkt.app CONFIGURATION_BUILD_DIR=<output dir> build
+
+The result is `Arkt.app` with the engine framework embedded. Signing and the hardened-runtime check (#125) follow the
+steps above and are not part of the configuration yet.
 
 The key is a seam (Chromium's `chrome_paths_mac.mm` reads it from the outer bundle; its fallback is `Chromium`), so there
 is no patch. The keychain item stays "Arkt Safe Storage" (patch 0003); the existing "Chromium Safe Storage" item is

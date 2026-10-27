@@ -66,7 +66,9 @@ struct ChromiumEngineKitIsolationTests {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         return !trimmed.isEmpty && !trimmed.hasPrefix("//")
       }
-      #expect(firstCode.map(String.init) == Self.engineCondition,
+      // `#if ARKT_CHROMIUM_ENGINE` alone, or narrowed by `&&` (the test-only contract runner adds `DEBUG`).
+      let condition = firstCode.map(String.init) ?? ""
+      #expect(condition == Self.engineCondition || condition.hasPrefix(Self.engineCondition + " && "),
               "\(importer.path) must start with \(Self.engineCondition)")
     }
   }
@@ -109,7 +111,7 @@ struct ChromiumEngineKitIsolationTests {
 
   /// Configuration keys, by their lowercased spelling: XcodeGen matches `configs:` keys ignoring case.
   static let configurationKeys = ["debug": "Debug", "release": "Release", "profile": "Profile", "engine": "Engine",
-                                  "base": "base"]
+                                  "distribution": "Distribution", "base": "base"]
 
   /// Each `setting:` line of project.yml with the configuration key (`Engine:` and the like) it sits under, spelled
   /// canonically. A line indented no deeper than the key ends that key's block.
@@ -176,14 +178,22 @@ struct ChromiumEngineKitIsolationTests {
     #expect(unlinked == Self.engineOnlyProducts, "products with link: false: \(unlinked.sorted())")
   }
 
-  @Test func onlyTheEngineConfigurationLinksTheEngineOnlyObjects() throws {
+  /// Which configurations link which engine-only object: the kit in the two engine-backed ones (Engine for
+  /// development, Distribution for the product), the shared test contract in Engine alone (#334).
+  static let linkingConfigurations: [String: Set<String>] = [
+    "ChromiumEngineKit": ["Engine", "Distribution"],
+    "EngineAPITestSupport": ["Engine"],
+  ]
+
+  @Test func onlyTheEngineConfigurationsLinkTheEngineOnlyObjects() throws {
     let spec = try String(contentsOf: WebKitIsolationTests.projectSpec, encoding: .utf8)
     let flags = Self.settingLines("OTHER_LDFLAGS", in: spec)
-    for product in Self.engineOnlyProducts {
+    #expect(Set(Self.linkingConfigurations.keys) == Self.engineOnlyProducts)
+    for (product, configurations) in Self.linkingConfigurations {
       let object = "$(BUILT_PRODUCTS_DIR)/\(product).o"
-      let users = flags.filter { $0.value.contains(object) }
-      #expect(users.count == 1 && users.first?.configuration == "Engine",
-              "\(object) must be in exactly one OTHER_LDFLAGS, under Engine: \(users.map(\.configuration))")
+      let users = flags.filter { $0.value.contains(object) }.map(\.configuration)
+      #expect(users.count == configurations.count && Set(users.compactMap { $0 }) == configurations,
+              "\(object) must be linked by \(configurations.sorted()) only: \(users)")
     }
   }
 
