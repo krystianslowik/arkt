@@ -103,10 +103,10 @@ struct EngineABIIsolationTests {
     let spec = try String(contentsOf: WebKitIsolationTests.projectSpec, encoding: .utf8)
     let mentions = spec.split(separator: "\n").filter { $0.contains(Self.module) }
     let allowed = ChromiumEngineKitIsolationTests.settingLines("OTHER_SWIFT_FLAGS", in: spec).filter {
-      $0.configuration == "Engine" && $0.value.contains("-fmodule-map-file=") && $0.value.contains(Self.module)
+      ($0.configuration == "Engine" || $0.configuration == "Distribution") && $0.value.contains("-fmodule-map-file=") && $0.value.contains(Self.module)
     }
-    #expect(mentions.count == allowed.count, "project.yml mentions \(Self.module) outside the Engine module map flag")
-    #expect(allowed.count <= 1)
+    #expect(mentions.count == allowed.count, "project.yml mentions \(Self.module) outside the engine configurations' module map flags")
+    #expect(allowed.count <= 2, "one flag per engine-backed configuration")
     let products = ChromiumEngineKitIsolationTests.packageDependencies(in: spec).map(\.product)
     #expect(!products.contains(Self.module), "project.yml depends on \(Self.module)")
   }

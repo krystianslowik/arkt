@@ -12,6 +12,9 @@ configs:
   # Development build on the real engine (week-3 plan, Task W3-3): main.swift hands the process to the engine
   # framework's ChromeMain. Additive: Debug, Release and Profile build the FakeEngine app as before.
   Engine: debug
+  # The shipped app (#334): the Engine configuration's engine-backed app, optimized (-O, whole module), without the
+  # test-only code: no EngineAPITestSupport (so no contract runner), no ARKT_* overrides, product identity.
+  Distribution: release
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -33,7 +36,9 @@ settings:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_SMOKE_BUILD"
       ARKT_ENV_OVERRIDES: "YES"
     Engine:
-      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_CHROMIUM_ENGINE"
+      # ARKT_TEST_SWITCHES (#334): the test-only code of the engine app (the ARKT_* overrides, the contract runner
+      # and its switches). Distribution leaves it out.
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_CHROMIUM_ENGINE ARKT_TEST_SWITCHES"
       # Chromium CHECKs that NSApp is a BrowserCrApplication (chrome_browser_application_mac.mm).
       ARKT_PRINCIPAL_CLASS: BrowserCrApplication
       # Development only; the signed release bundle is Task W3-11, from a configuration that reads no overrides.
@@ -43,6 +48,12 @@ settings:
       ARKT_ENV_OVERRIDES: "YES"
       # Keep the Swift entry point in the main executable, like Chromium's stub, instead of
       # Xcode's debug stub plus ArktShell.debug.dylib.
+      ENABLE_DEBUG_DYLIB: NO
+    Distribution:
+      # No DEBUG, ARKT_SMOKE_BUILD or ARKT_TEST_SWITCHES, and ARKT_ENV_OVERRIDES stays at the base NO: the overrides
+      # and the test switches are compiled out (DistributionConfigurationTests).
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ARKT_CHROMIUM_ENGINE"
+      ARKT_PRINCIPAL_CLASS: BrowserCrApplication
       ENABLE_DEBUG_DYLIB: NO
 packages:
   ShellKit:
@@ -68,6 +79,11 @@ targets:
         ArktEnvironmentOverrides: $(ARKT_ENV_OVERRIDES)
         NSHighResolutionCapable: true
         LSApplicationCategoryType: public.app-category.productivity
+        # macOS shows these in its own camera, microphone and location prompts when a site asks (#133). The
+        # deployment target is macOS 15, so the deprecated NSLocationUsageDescription is not needed.
+        NSCameraUsageDescription: A website you visit can ask to use your camera.
+        NSMicrophoneUsageDescription: A website you visit can ask to use your microphone.
+        NSLocationWhenInUseUsageDescription: A website you visit can ask to use your location.
         # Default browser (onboarding spec, section 15, item 3): web links and web documents, so macOS lists Arkt
         # as a browser and the first run's "Make default" can ask for it.
         CFBundleURLTypes:
@@ -84,6 +100,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.arkt.Arkt
         PRODUCT_NAME: ArktShell
       configs:
+        # The product is Arkt.app (the executable is Arkt too).
+        Distribution:
+          PRODUCT_NAME: Arkt
+          # The kit only: EngineAPITestSupport (and with it the contract runner) is not linked.
+          OTHER_LDFLAGS: "$(inherited) $(BUILT_PRODUCTS_DIR)/ChromiumEngineKit.o"
+          OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -fmodule-map-file=$(SRCROOT)/ShellKit/Sources/ArktEngineABI/include/module.modulemap"
         Engine:
           # The engine-only products (`link: false` below): Xcode builds them for every configuration, but only the
           # Engine binary links their objects, so Debug, Release and Profile carry no engine kit code (#268).
@@ -91,17 +113,18 @@ targets:
           # The facade header's module map, which a linked product would have passed: the kit's swiftmodule loads
           # that module when App/Engine imports the kit. Not an import; App never imports the facade module.
           OTHER_SWIFT_FLAGS: "$(inherited) -Xcc -fmodule-map-file=$(SRCROOT)/ShellKit/Sources/ArktEngineABI/include/module.modulemap"
-    # Engine only: where the engine app is (Engine.xcconfig, which includes the uncommitted Local.xcconfig when it
-    # exists, and says where to build the bundle).
+    # Engine and Distribution: where the engine app is and the product dir name (Engine.xcconfig and
+    # Distribution.xcconfig, which include the uncommitted Local.xcconfig when it exists).
     configFiles:
       Engine: Engine.xcconfig
-    # Engine only (the script exits at once in every other configuration). Runs after the Info.plist is processed
-    # (its input) and before Xcode signs the app. Copies the engine framework into Contents/Frameworks when it changed (an APFS
+      Distribution: Distribution.xcconfig
+    # Engine and Distribution (the script exits at once in every other configuration). Runs after the Info.plist is
+    # processed (its input) and before Xcode signs the app. Copies the engine framework into Contents/Frameworks when it changed (an APFS
     # clone when on the same volume) and writes ArktEngineFrameworkName and ArktEngineFrameworkVersion from the
     # framework's own Info.plist and Versions/Current, plus CrProductDirName from ARKT_PRODUCT_DIR_NAME (Engine.xcconfig,
     # Decision 8, #128). The framework is in no embed phase, so Xcode never re-signs it.
     postBuildScripts:
-      - name: Embed the engine framework (Engine only)
+      - name: Embed the engine framework (Engine and Distribution)
         basedOnDependencyAnalysis: false
         # Orders the phase after Info.plist processing in incremental builds too (without it, Xcode ran the
         # phase first and then rewrote the Info.plist, dropping the keys).
@@ -109,13 +132,13 @@ targets:
           - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
         shell: /bin/zsh
         script: |
-          [[ $CONFIGURATION == Engine ]] || exit 0
+          [[ $CONFIGURATION == Engine || $CONFIGURATION == Distribution ]] || exit 0
           if [[ -z $ARKT_PRODUCT_DIR_NAME ]]; then
-            print -u2 "error: ARKT_PRODUCT_DIR_NAME is empty (Engine.xcconfig sets it)"
+            print -u2 "error: ARKT_PRODUCT_DIR_NAME is empty (Engine.xcconfig and Distribution.xcconfig set it)"
             exit 1
           fi
           if [[ -z $ARKT_ENGINE_APP || ! -d $ARKT_ENGINE_APP ]]; then
-            print -u2 "error: set ARKT_ENGINE_APP in app/ArktShell/Local.xcconfig to a built engine app (out/Spike/Chromium.app)"
+            print -u2 "error: set ARKT_ENGINE_APP in app/ArktShell/Local.xcconfig (or on the command line) to a built engine app (out/Spike/Chromium.app)"
             exit 1
           fi
           frameworks=( "$ARKT_ENGINE_APP"/Contents/Frameworks/*.framework(N) )
