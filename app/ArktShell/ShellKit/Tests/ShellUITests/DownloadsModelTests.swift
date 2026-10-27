@@ -88,6 +88,7 @@ struct DownloadsModelTests {
     engine.deliverDownloadBytes(done, 400)
     engine.interruptDownload(failed, reason: .networkFailed, canResume: true)
     engine.markDownloadDangerous(held, .dangerousFile)
+    engine.deliverDownloadBytes(held, 400)                       // finished, but still held for a decision
     let file = try #require(engine.download(done)?.targetPath)
     model.clearList()
     #expect(Set(model.items.map(\.id)) == [active, held])
