@@ -91,6 +91,7 @@ final class CommandBarFilterPills: NSView {
   private(set) var selected: CommandBarFilter = .all
   private(set) var counts: [CommandBarFilter: Int] = [:]
   private(set) var showsCounts = false
+  private var hasUpdated = false
   private var flavor: ThemeFlavor = .dark
 
   override var isFlipped: Bool { true }
@@ -113,6 +114,10 @@ final class CommandBarFilterPills: NSView {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   func update(selected: CommandBarFilter, counts: [CommandBarFilter: Int], showsCounts: Bool, flavor: ThemeFlavor) {
+    // A show repeats the previous state: touching nothing keeps the first frame cheap (no relayout, no redraw).
+    if hasUpdated, selected == self.selected, counts == self.counts, showsCounts == self.showsCounts,
+       flavor == self.flavor { return }
+    hasUpdated = true
     self.selected = selected
     self.counts = counts
     self.showsCounts = showsCounts

@@ -235,7 +235,12 @@ final class CommandBarView: NSView {
 
   private var scopePlaceholder: String?
 
+  private var shownPlaceholder: (text: String, flavor: ThemeFlavor)?
+
   func refreshPlaceholder(_ text: String) {
+    // A show repeats the previous placeholder: setting it again would redraw the field in the first frame's commit.
+    if let shown = shownPlaceholder, shown.text == text, shown.flavor == flavor { return }
+    shownPlaceholder = (text, flavor)
     scopePlaceholder = text == Self.placeholder ? nil : text
     field.placeholderAttributedString = NSAttributedString(string: text, attributes: [
       .font: NSFont.systemFont(ofSize: 22),
@@ -250,6 +255,7 @@ final class CommandBarView: NSView {
   }
 
   func setScope(title: String?) {
+    guard (title ?? "") != scopeChip.stringValue || (title == nil) != scopeChip.isHidden else { return }
     scopeChip.stringValue = title ?? ""
     scopeChip.isHidden = title == nil
     needsLayout = true

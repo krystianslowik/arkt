@@ -46,6 +46,7 @@ final class CommandBarHintStrip: NSView {
   private var trailingCaps: [CommandBarKeyCapView] = []
   private(set) var hints = CommandBarHints(items: [], trailing: nil)
   private var flavor: ThemeFlavor = .dark
+  private var hasUpdated = false
   /// Item key caps and captions in layout order, for tests.
   private var itemRanges: [(caps: Range<Int>, label: Int)] = []
 
@@ -71,6 +72,9 @@ final class CommandBarHintStrip: NSView {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   func update(_ hints: CommandBarHints, flavor: ThemeFlavor) {
+    // A show repeats the previous state: touching nothing keeps the first frame cheap.
+    if hasUpdated, hints == self.hints, flavor == self.flavor { return }
+    hasUpdated = true
     self.flavor = flavor
     hairline.layer?.backgroundColor = ShellTokens.commandBarDivider.resolve(flavor).cgColor
     trailingLabel.textColor = ShellTokens.commandBarTertiaryText.resolve(flavor).nsColor()
