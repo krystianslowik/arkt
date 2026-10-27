@@ -14,11 +14,6 @@ import Foundation
 private typealias ChromeMainFunction =
     @convention(c) (Int32, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Int32
 
-/// Switches every engine launch gets unless the caller passed them. The shell
-/// creates the windows once it is ready, so Chromium opens none at startup and
-/// restores no session (Decision 2).
-private let engineSwitches = ["--no-startup-window"]
-
 private func engineFail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("ARKT engine shell: \(message)\n".utf8))
     exit(1)
@@ -62,10 +57,8 @@ func engineMain() -> Never {
     }
     let chromeMain = unsafeBitCast(symbol, to: ChromeMainFunction.self)
 
-    var arguments = CommandLine.arguments
-    for engineSwitch in engineSwitches where !arguments.contains(engineSwitch) {
-        arguments.append(engineSwitch)
-    }
+    // The switches every engine launch gets (no startup window, profile kept loaded): EngineLaunchArguments.
+    let arguments = EngineLaunchArguments.applying(to: CommandLine.arguments)
     // Chromium keeps argv for the life of the process; the copies are never freed.
     let argv = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: arguments.count + 1)
     for (index, argument) in arguments.enumerated() {
