@@ -47,7 +47,10 @@ final class LittleArktDialogTests: XCTestCase {
 
   /// A main window and a Little Arkt popup, both with Reduce Motion as given. The popup's motion and flight are
   /// stepped by hand; its appear is at rest.
-  private func makeScene(reduceMotion: Bool = false) throws -> Scene {
+  /// `raisingRightAfterOpen` raises that kind of dialog on the popup's tab in the same turn as `openEngineWindow`,
+  /// before its appear is settled and before any layout pass.
+  private func makeScene(reduceMotion: Bool = false, raisingRightAfterOpen: JavaScriptDialog.Kind? = nil) throws
+    -> Scene {
     let engine = InMemoryEngine()
     let world = try EngineWorld.make()
     let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
@@ -72,6 +75,7 @@ final class LittleArktDialogTests: XCTestCase {
     let id = try XCTUnwrap(engine.openEngineWindow(request))
     let little = try XCTUnwrap(set.littleArkts.first { $0.engineWindow == id })
     let tab = try XCTUnwrap(engine.activeTab(in: id))
+    if let kind = raisingRightAfterOpen { engine.raiseDialog(in: tab, kind: kind, message: "Now?") }
     little.finishMotion()
     little.window.contentView?.layoutSubtreeIfNeeded()
     return Scene(set: set, engine: engine, main: main, little: little, littleWindow: id, tab: tab)
@@ -153,6 +157,19 @@ final class LittleArktDialogTests: XCTestCase {
     XCTAssertTrue(scene.engine.dialogAnswers.isEmpty)
   }
 
+  /// Pins the event ordering: the popup's observer starts when its window is announced, which is before the page's
+  /// first script can raise a dialog, so a dialog raised right after `openEngineWindow` is seen and shown.
+  func testADialogRaisedRightAfterThePopupOpensShowsItsPanel() throws {
+    for kind in [JavaScriptDialog.Kind.alert, .confirm, .prompt] {
+      let scene = try makeScene(raisingRightAfterOpen: kind)
+
+      let panel = try XCTUnwrap(scene.little.javaScriptDialogs.panel(for: scene.tab), "\(kind): up in the small window")
+      XCTAssertTrue(panel.panel.parent === scene.little.window)
+      panel.view.primaryButton.performClick(nil)
+      XCTAssertEqual(scene.engine.dialogAnswers.count, 1, "\(kind): answered once")
+    }
+  }
+
   // MARK: Open in with a pending dialog
 
   func testOpenInCarriesThePendingDialogToTheMainWindow() throws {
@@ -231,6 +248,74 @@ final class LittleArktDialogTests: XCTestCase {
     assertNoPanel(in: scene.main, scene, "the dialog ended while it was in the air")
     assertLittleHasNothing(scene, "and nothing came back")
     XCTAssertTrue(scene.engine.dialogAnswers.isEmpty)
+  }
+
+  /// The main window refuses the page at the no-flight handoff: the page stays in the small window, which shows the
+  /// dialog again and answers it once.
+  func testARefusedMoveGivesTheDialogBackToTheLittleArktWindow() throws {
+    let scene = try makeScene(reduceMotion: true)
+    let id = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: .confirm, message: "Now?"))
+    scene.little.onOpenIn = { _, _, _ in false }
+
+    scene.little.openIn()
+    assertLittleHasNothing(scene, "the fade has begun")
+    scene.little.finishMotion()                             // the fade ends, the move is refused
+
+    XCTAssertEqual(scene.engine.snapshot(of: scene.tab)?.window, scene.littleWindow, "the page stayed")
+    let panel = try XCTUnwrap(scene.little.javaScriptDialogs.panel(for: scene.tab), "the dialog came back")
+    XCTAssertTrue(panel.panel.parent === scene.little.window)
+    XCTAssertEqual(scene.little.javaScriptDialogs.pending[scene.tab]?.id, id)
+    assertNoPanel(in: scene.main, scene, "nothing in the main window")
+    XCTAssertTrue(scene.engine.dialogAnswers.isEmpty)
+
+    panel.view.primaryButton.performClick(nil)
+
+    XCTAssertEqual(scene.engine.dialogAnswers.map(\.id), [id], "answered once")
+  }
+
+  func testARefusedMoveKeepsADialogRaisedDuringTheFade() throws {
+    let scene = try makeScene(reduceMotion: true)
+    scene.little.onOpenIn = { _, _, _ in false }
+    scene.little.openIn()
+
+    let id = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: .alert, message: "Late"))
+    assertLittleHasNothing(scene, "no panel while the window fades")
+    scene.little.finishMotion()
+
+    let panel = try XCTUnwrap(scene.little.javaScriptDialogs.panel(for: scene.tab))
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(scene.engine.dialogAnswers.map(\.id), [id])
+  }
+
+  /// A dialog raised after the hand-off began is not lost: it goes with the page, in either path.
+  func testADialogRaisedDuringTheFadeIsCarried() throws {
+    let scene = try makeScene(reduceMotion: true)
+    scene.little.openIn()
+
+    let id = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: .prompt, message: "Late"))
+    scene.little.finishMotion()
+
+    let panel = try XCTUnwrap(scene.main.javaScriptDialogs.panel(for: scene.tab))
+    assertLittleHasNothing(scene, "handed off")
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(scene.engine.dialogAnswers.map(\.id), [id])
+  }
+
+  func testADialogRaisedInTheAirIsCarried() throws {
+    let scene = try makeScene()
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.tick(at: 0)
+    flight.tick(at: 0.1)
+
+    let id = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: .confirm, message: "Late"))
+    assertLittleHasNothing(scene, "no panel over the flying window")
+    land(flight)
+
+    let panel = try XCTUnwrap(scene.main.javaScriptDialogs.panel(for: scene.tab))
+    assertLittleHasNothing(scene, "landed")
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(scene.engine.dialogAnswers.map(\.id), [id])
   }
 
   // MARK: The flight's abort path keeps the dialog

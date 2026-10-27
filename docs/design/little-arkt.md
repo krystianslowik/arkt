@@ -284,6 +284,18 @@ as usual (Personal sample theme in light, Dev in dark).
   120 Hz frames under load: no frame cost beyond noise. Reduce Motion takes no flight, so no shadow; an aborted
   flight removes it with the overlay. The layer shadow above stays the window's own appear and close. The popup
   request does not carry the opener window yet.
+- JavaScript dialogs (#471): a Little Arkt window has its own `JavaScriptDialogPresenter` (the main window's type),
+  anchored to the shown page while the window is open, so `alert()`, `confirm()` and `prompt()` show as the panel of
+  docs/design/alerts-sheets-toasts.md, section 3.3. Open in releases the pending dialog when the fade or flight starts
+  and the main window adopts it before `moveTab` (the #467 pair); a flight or move that keeps the page gives it back.
+  Closing the window, or the page closing its popup, ends the dialog without an answer, as Chromium does when a tab
+  closes. How an unseen dialog is recovered: it is not, because none can exist. The engine has no query for pending
+  dialogs and replays nothing; the shell relies on event order instead. (1) A popup's window observer starts when the
+  window is announced (`adopt(engineWindow:)`), and the engine queues the popup's events in one FIFO, so a dialog
+  raised after the announcement is delivered to it; the in-memory engine and the scripted facade tests pin a dialog
+  raised right after `openEngineWindow`. (2) The shell has no path that moves a tab into a Little Arkt window; tabs
+  only leave it (Open in), and the pair above hands the dialog over. (3) A dialog the engine reports for a tab it no
+  longer lists is answered false by the engine itself, so a page's call never hangs.
 - Missing shell pieces: open-URL events and default-browser registration (#135); link routing (#113) for the
   destination; a global hotkey (`RegisterEventHotKey`, no Accessibility permission needed); the Archive's Little Arkt
   source and its threshold in auto-archive.

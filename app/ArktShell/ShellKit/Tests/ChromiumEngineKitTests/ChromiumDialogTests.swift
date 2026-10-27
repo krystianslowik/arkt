@@ -116,4 +116,22 @@ struct ChromiumDialogTests {
     }
     #expect(kinds == ["requested One", "ended", "requested Two"])
   }
+
+  /// A dialog of a tab the engine no longer lists has nobody to show it; answering it false keeps the page's call from
+  /// hanging (#471).
+  @Test func aDialogOfATabTheEngineDoesNotListIsAnsweredFalseAndNotReported() throws {
+    let (engine, tab, handle) = try makeTab()
+    let recorder = EventRecorder(engine)
+    handle.owner?.remove(handle, reason: .page)
+    facade.flush()
+    let before = recorder.events(for: tab)
+
+    let dialog = handle.raiseDialog(.prompt, message: "Late", defaultText: "x")
+    facade.flush()
+
+    #expect(dialog.answer?.accepted == false && dialog.answer?.userInput == nil, "the page's call returned")
+    #expect(dialog.isEnded)
+    #expect(recorder.events(for: tab) == before, "nothing reported")
+    #expect(engine.pendingDialogs.isEmpty)
+  }
 }
