@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-20), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-21), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -23,8 +23,10 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   // Rule 20
   case permissionIsReportedAnsweredAndEndedOnce, pendingPermissionEndsBeforeItsTabCloses, navigationEndsItsPermission
   case hiddenTabEndsItsPermissionAndAsksAgain
+  // Rule 21
+  case infobarIsReportedActedOnAndRemoved, infobarsStayWithTheirTabWhileHidden, pendingInfobarsEndBeforeTheirTabCloses
 
-  /// The contract rule (1-20) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The contract rule (1-21) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -51,6 +53,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
          .hiddenTabEndsItsConfirmAndPrompt: 19
     case .permissionIsReportedAnsweredAndEndedOnce, .pendingPermissionEndsBeforeItsTabCloses,
          .navigationEndsItsPermission, .hiddenTabEndsItsPermissionAndAsksAgain: 20
+    case .infobarIsReportedActedOnAndRemoved, .infobarsStayWithTheirTabWhileHidden,
+         .pendingInfobarsEndBeforeTheirTabCloses: 21
     }
   }
 
@@ -97,6 +101,9 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .pendingPermissionEndsBeforeItsTabCloses: try await EngineContract.pendingPermissionEndsBeforeItsTabCloses(h)
     case .navigationEndsItsPermission: try await EngineContract.navigationEndsItsPermission(h)
     case .hiddenTabEndsItsPermissionAndAsksAgain: try await EngineContract.hiddenTabEndsItsPermissionAndAsksAgain(h)
+    case .infobarIsReportedActedOnAndRemoved: try await EngineContract.infobarIsReportedActedOnAndRemoved(h)
+    case .infobarsStayWithTheirTabWhileHidden: try await EngineContract.infobarsStayWithTheirTabWhileHidden(h)
+    case .pendingInfobarsEndBeforeTheirTabCloses: try await EngineContract.pendingInfobarsEndBeforeTheirTabCloses(h)
     }
   }
 }

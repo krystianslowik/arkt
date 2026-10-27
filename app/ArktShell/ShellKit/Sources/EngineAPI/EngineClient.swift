@@ -136,13 +136,17 @@ public enum EngineEvent: Equatable, Sendable {
   /// the tab hidden or closing, the site withdrawing it). Exactly one per request, and before the `.tabClosed` of its
   /// tab (contract rule 20).
   case permissionEnded(TabID, PermissionRequestID)
+  /// The tab's infobars changed (contract rule 21, #400): the whole list in the engine's order, empty when the last
+  /// one went. A tab keeps its infobars while it is hidden or moved to another window (the new list follows the move).
+  /// The list is empty before the tab's `.tabClosed`.
+  case infobarsChanged(TabID, [Infobar])
 
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id, _), .urlChanged(let id, _), .titleChanged(let id, _),
          .faviconChanged(let id, _), .loadingChanged(let id, _), .historyChanged(let id, _, _),
          .activeTabChanged(let id), .closeCancelled(let id), .audibleChanged(let id, _), .mutedChanged(let id, _),
-         .dialogEnded(let id, _), .permissionEnded(let id, _):
+         .dialogEnded(let id, _), .permissionEnded(let id, _), .infobarsChanged(let id, _):
       return id
     case .dialogRequested(let dialog):
       return dialog.tab
@@ -224,6 +228,11 @@ public protocol EngineClient: AnyObject {
   /// request that already ended or was answered, so a click that races the engine's own end does nothing. Default: a
   /// no-op, for an engine that raises none.
   func respond(toPermission request: PermissionRequestID, choice: PermissionChoice)
+  /// Acts on an infobar of a tab: a button, its link or its close button (#400, contract rule 21). The engine's
+  /// delegate decides whether the infobar goes; the shell sees the next `.infobarsChanged`. A no-op for an infobar
+  /// that is gone, so a click that races the engine's own removal does nothing. Default: a no-op, for an engine that
+  /// shows none.
+  func act(on infobar: InfobarID, action: InfobarAction)
   /// An image of the tab's current frame within `request`'s caps (#370 thumbnails, #352 Little Arkt's flight; contract
   /// rule 18). The copy, scale and encode run off the main thread; the caller only awaits. Nil for an unknown or closed
   /// tab and for a tab with no frame to copy (not drawn yet, hidden long enough to be evicted, discarded); the tab is
@@ -273,6 +282,8 @@ extension EngineClient {
   public func respond(to dialog: DialogID, accepted: Bool, userInput: String?) {}
 
   public func respond(toPermission request: PermissionRequestID, choice: PermissionChoice) {}
+
+  public func act(on infobar: InfobarID, action: InfobarAction) {}
 
   public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? { nil }
 

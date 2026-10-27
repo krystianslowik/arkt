@@ -89,6 +89,11 @@ enum ScriptedHarness {
           $0 != .notifications && $0 != .other
         })
         try await delivered(chromium)
+      },
+      raiseInfobar: { engine, id, message in
+        let (chromium, tab) = try parts(engine, id)
+        tab.addInfobar(message)
+        try await delivered(chromium)
       }
     )
   }

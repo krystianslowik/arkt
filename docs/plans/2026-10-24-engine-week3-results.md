@@ -3618,3 +3618,127 @@ shell side (panel creation or the window layout of a new tab). Worth a look when
 - Cleanup: the test copy, throwaway data, the 518 cloned dylibs, `embed-400p` and the app's derived data on the Chromium
   disk are removed. Launching by path had registered the two app copies with LaunchServices under
   `dev.arkt.Arkt.try400p` (8 records); `lsregister -u` on both paths left none (`lsregister -dump` counts 0).
+
+## #400: slice 3, infobars as shell rows
+
+Date 2026-10-27. Branch `engine/400-infobars` off `main` at `fb1738c` (with #476's anchoring helper and #475). Plan: the
+engine plan comment on #400. Third and last slice; the pull request is `Closes #400`.
+
+### What landed
+
+- **Hook, no patch.** `arkt_infobars.mm` already observes each tab's `InfoBarManager` and draws one `ArktInfobarView` per
+  `ConfirmInfoBarDelegate`. After every change of the list the presenter now calls a sink (`SetInfobarSink`, as the
+  permission and dialog seams) with plain values: an id, a kind (debugger, automation, reload, other, from
+  `GetIdentifier()`), the message and its inline link ranges, the trailing link, the OK and Cancel titles, tooltips and
+  enabled state, the close label and the icon as a 2x PNG. When the facade takes the list (the tab has a handle and a sink
+  listens) the engine's rows stay in the presenter but are hidden: the stack keeps its height, so `ArktTabContainerView`
+  still lays the page out below the strip and the page moves down once, in the card, a split pane, the Peek and Little
+  Arkt alike. Without a sink (placeholder host, self-test) the engine row is drawn as before. Actions come back through
+  `Perform(id, action, index)`, which runs the delegate exactly as the row's click does; the delegate decides whether the
+  infobar leaves, and the next list says so. `.patches` stays 9 = `git rev-list --count 156.0.8078.48..arkt` 9. No
+  `BUILD.gn` change.
+- **Facade header (both copies, additive; `cmp` identical).** Event kind `InfobarsChanged` (20), `infobars` on
+  `ArktEngineEvent`, `ArktInfobarKind`, `ArktInfobarAction` and the `ArktInfobar` protocol, whose `-act:linkIndex:` is the
+  action entry (the object is the handle, as for dialogs and permission requests; it refuses every action once the
+  infobar is gone). One event per tab per batch (a later change replaces the list of the pending one); the same infobar
+  keeps its object across lists; a tab moved to another window comes back with a new list of new objects.
+- **EngineAPI.** `Infobar`, `InfobarID`, `InfobarKind`, `InfobarButton`, `InfobarLink`, `InfobarAction`,
+  `EngineEvent.infobarsChanged(TabID, [Infobar])`, `EngineClient.act(on:action:)` (default no-op). Contract rule 21 (three
+  checks): a list carries the engine's values and `act` removes the infobar through a shorter list, once; a tab keeps its
+  list while hidden and the other tab's list is independent; a tab's list is reported empty before its `.tabClosed`.
+  `ChromiumEngine` keeps ids stable per facade object and empties the list in `removeTab` before the close, even though
+  the real facade reports nothing for a closing tab. `InMemoryEngine` gains `raiseInfobar`, `removeInfobar` and
+  `infobarActions`; `ScriptedFacade` models the list, the objects and the move. FakeEngine reports rule 21 as not
+  applicable (WKWebView has no infobars).
+- **ShellUI.** `InfobarPresenter` shows each tab's list as `InfobarPanel`: one full-width, non-activating child panel flush
+  with the top of the page view, 40 pt per infobar on the brand surface (no hairline), the page card's top corners, no key
+  focus. A row is the design's: 20 pt icon (the engine's, else a glyph for the debugger, automation and reload kinds), one
+  line of message in `primaryText` with quiet inline links, the trailing link, the engine's OK and Cancel as 24 pt neutral
+  pills, a 22 pt round close button; mirrored for right-to-left. It uses `AnchoredPanelHost` from #476, generalised
+  to any panel (`AnchoredPanel`) and given a `fullWidth` placement and a `topInset`, so dialogs and permission prompts
+  anchor below the strip. Windows: `ShellWindowController` and `LittleArktWindowController` own a presenter and route
+  `.infobarsChanged`; a presenter shows only the pages in its own window. A list change updates the same panel and keeps
+  its top edge; a new row fades in over 0.14 s, none fades out, Reduce Motion shows both at once. VoiceOver: the row is an
+  `AXGroup` labelled with the message, its children the link, OK, Cancel and close, in that order; a new infobar is
+  announced.
+
+### Infobars covered
+
+Every `ConfirmInfoBarDelegate` of Chromium 156 on macOS desktop takes the one row shape, so the list below is what the code
+can show, by `InfoBarIdentifier`, minus the delegates with views of their own:
+
+- Common: extension debugger (`chrome.debugger`), DevTools, DevTools remote debugging, process sharing, automation
+  ("controlled by automated test software"), Page Info reload ("To apply your updated settings, reload"), session
+  restore, default browser and pin, the missing Google API keys, bad command-line flags, theme installed, extension
+  install error, web auth flow, incognito connectability, link capturing, PDF.
+- Also by the same path: collected cookies, known interception disclosure, JS optimizations, web app blocked migration,
+  startup launch, oscrypt availability, obsolete system, keystone, simple alert.
+- Deferred, not drawn and logged as today (`not a confirm infobar`): tab sharing, and any infobar whose delegate is not a
+  confirm delegate. The mobile and iOS delegates do not exist on desktop.
+
+### Checks (Engine app on `out/Spike`, bundle id `dev.arkt.Arkt.try400i` (own id), copy on the internal disk in a scratch
+folder, throwaway shell data folder, profile and defaults suite `arkt-test-400i`, `--use-mock-keychain`, two throwaway
+extensions that call `chrome.debugger.attach` on a loopback page, loopback pages on `127.0.0.1:18402`, keys and clicks only
+while the test app was the frontmost process, pointer moved before each press)
+
+| Check | Result | Evidence |
+|---|---|---|
+| A local page triggers an infobar | PASS | opening `attach-a.html` made the extension attach; the shell drew one row "Inspector a started debugging this browser" with a bug glyph, Cancel and close; the page sat 40 pt lower; log `facade infobars changed count=1` |
+| No second row | PASS | System Events: one window "system dialog" (the strip) and the main window; the main window has no group labelled with the message; the engine row is hidden (`stack_.hidden`) |
+| Cancel acts | PASS | a click: `ARKT: infobar 13 ok`, the extension detached, the list went to 0 and the strip window left |
+| Two infobars stack | PASS | a second extension: two 40 pt rows, the page 80 pt lower |
+| Close acts | PASS | the AX press on the first row's close button: `infobar 13 close`, one row left, the page moved up 40 pt |
+| Stays with the tab across switches | PASS | switching to another tab and back kept a strip over each tab (the debugger infobar is global, so every tab has one) |
+| Light and dark | PASS | system dark: graphite strip, light text; `-NSRequiresAquaSystemAppearance YES`: porcelain strip |
+| VoiceOver tree | PASS | after the fix below: the group's children are Cancel and Close; before it the bug glyph was a child ("Ladybug") |
+| Stderr | PASS | no `FATAL`, no `NOTREACHED` in the three runs |
+| Not checked | | a tab moved between windows with an infobar (covered by `ChromiumInfobarTests` only), Reduce Motion in the real app (tests), the close button under a system notification banner (it was pressed through accessibility), inline message links (no 156 delegate used here has them) |
+
+### Verification
+
+- Red first: the new tests did not compile before the types existed. Then broken on purpose and restored: taking
+  `endInfobars(of:)` out of `ChromiumEngine.removeTab` failed
+  `closingTheTabEmptiesItsListBeforeTabClosedEvenWhenTheFacadeReportsNothing` and the contract check
+  `pendingInfobarsEndBeforeTheirTabCloses` (both scripted orders); taking the list update out of
+  `InfobarPresenter.present` failed `testEveryInfobarIsA40PointRowAndTheStripKeepsItsTopEdge` and
+  `testNonLatinTextAndEmojiAndASingleLetterLayOut`.
+- ShellKit `swift test --skip ShellKitGUITests`: 1467 passed (9 test runs: 814, 38, 43, 4, 145, 49, 256, 99, 19), 0 failed;
+  32 of them are new (10 `InfobarTests`, 12 `ChromiumInfobarTests`, 1 `InfobarABITests`, 3 in-memory and 6 scripted contract
+  checks); the baseline is the total minus the new tests, not a run on `main`. ArktCore `swift test`: 429 passed (144, 117,
+  70, 98), unchanged.
+- GUI tests run: `InfobarPresenterTests` (27), `InfobarWindowTests` (4), `PermissionPresenterTests`,
+  `PermissionWindowTests`, `JavaScriptDialog*`, `LittleArktDialogTests`, `DialogTests`, `DeleteSpaceTests`,
+  `AccessibilityIdentifierTests`, `FakeEngineContractTests` (rules 19 to 21 not applicable: skipped): 186 run, 17 skipped, 0
+  failures. The rest of the GUI suite was not run.
+- `nice -n 15 autoninja -C out/Spike chrome -j 4`: `The build has finished successfully.` Engine app: `xcodegen generate`,
+  then `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try400i`: `BUILD
+  SUCCEEDED`.
+- `cmp` of the two header copies: identical. `.patches` 9 = `rev-list` 9.
+
+### Deviations
+
+- The design and the plan say "above the page like the engine row". The row is a child panel over a band the engine
+  reserves, not a view in the page card: the shell cannot reach the engine's container layout, and a view added to the
+  container is dropped when the contents view is swapped. The band is the engine's, so every place that mounts a tab
+  container (card, panes, Peek, Little Arkt) gets the page placement for free; the cost is a child window that has to
+  follow the page (the anchoring helper does that), and a blank band in any window that mounts a tab but runs no
+  presenter.
+- Inline message links are drawn as text with attributes in a one-line `NSTextView`; no delegate used in the real-app
+  check has them.
+- The strip's surface follows the system appearance, as the dialogs do, not the Space theme: a light Space under a dark
+  system shows a graphite strip over a light page.
+- Keyboard focus into the strip (F6, Tab from the page) is not added; VoiceOver and the mouse reach every control.
+
+### Found while checking, not part of this change
+
+- The first launches were blocked by an old "ArktShell quit unexpectedly" system dialog on the screen (not from this
+  run), which kept a window sheet from taking clicks; `ARKT_SKIP_ONBOARDING` only works in Debug builds, so the first run
+  was skipped through its Skip setup sheet once the sheet could be clicked.
+- `xcodebuild` registers the product in its `CONFIGURATION_BUILD_DIR` with LaunchServices, as launching by path does.
+
+### Left open
+
+- Tab sharing and other non-confirm infobars (see above), keyboard focus into the strip.
+- Cleanup: the test copy, the throwaway data and extensions, `embed-400i` and the derived data on the Chromium disk are
+  removed. `lsregister -u` on the three paths (the copy, its Aperitif alerts helper, and the `embed-400i` product) left
+  `lsregister -dump` with 0 records for `dev.arkt.Arkt.try400i`.

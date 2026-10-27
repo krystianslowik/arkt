@@ -35,6 +35,10 @@ public struct EngineHarness {
   public typealias RaisePermission = @MainActor (_ engine: any EngineClient, _ id: TabID, _ kinds: [PermissionKind])
     async throws -> Void
 
+  /// Makes the engine add an infobar with `message` to `id` (OK and Cancel buttons, closeable).
+  public typealias RaiseInfobar = @MainActor (_ engine: any EngineClient, _ id: TabID, _ message: String) async throws
+    -> Void
+
   public let makeEngine: @MainActor () -> any EngineClient
   /// A URL whose page has `<title>title</title>` and needs no network.
   public let pageURL: @MainActor (_ title: String) throws -> URL
@@ -68,6 +72,9 @@ public struct EngineHarness {
   /// Makes the page ask for a permission (rule 20). Nil for an engine that cannot (a real engine needs its tab
   /// foremost and a user gesture).
   public let raisePermission: RaisePermission?
+  /// Makes the engine show an infobar on a tab (rule 21). Nil for an engine that cannot (a real engine shows them for
+  /// its own reasons: a debugging extension, a flag, a changed setting).
+  public let raiseInfobar: RaiseInfobar?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -84,7 +91,8 @@ public struct EngineHarness {
               engineCloseWindow: EngineWindowAction? = nil,
               showPage: EngineTabAction? = nil,
               raiseDialog: RaiseDialog? = nil,
-              raisePermission: RaisePermission? = nil) {
+              raisePermission: RaisePermission? = nil,
+              raiseInfobar: RaiseInfobar? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
@@ -93,6 +101,7 @@ public struct EngineHarness {
     self.showPage = showPage
     self.raiseDialog = raiseDialog
     self.raisePermission = raisePermission
+    self.raiseInfobar = raiseInfobar
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -131,6 +140,11 @@ public struct EngineHarness {
       raisePermission: { engine, id, kinds in
         guard try inMemory(engine).askPermission(in: id, kinds: kinds) != nil else {
           throw ContractViolation(description: "no permission asked in \(id)")
+        }
+      },
+      raiseInfobar: { engine, id, message in
+        guard try inMemory(engine).raiseInfobar(in: id, message: message) != nil else {
+          throw ContractViolation(description: "no infobar raised in \(id)")
         }
       }
     )
@@ -200,6 +214,11 @@ public struct EngineHarness {
 ///     a request still pending when its tab closes ends before the tab's `.tabClosed`; a navigation ends it; a tab
 ///     that stops being its window's active tab ends it unanswered, and asks again with a new request when it is
 ///     active again (#400). Needs `raisePermission`.
+/// 21. An infobar is reported with `.infobarsChanged` carrying the tab's whole list and the engine's strings;
+///     `act(on:action:)` runs the engine's delegate, which removes the infobar with a new, shorter list, and an action
+///     on an infobar that is gone does nothing; infobars stay with their tab while it is hidden and the list is
+///     independent of the other tabs'; a tab's infobars are reported empty before its `.tabClosed` (#400). Needs
+///     `raiseInfobar`.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
@@ -697,6 +716,79 @@ public enum EngineContract {
                 "a shown tab asks again with a new request: \(recorder.events(for: shown))")
     try require(endedPermissions(recorder, shown) == [first.id], "the first request ended once: \(recorder.events(for: shown))")
     engine.respond(toPermission: again.id, choice: .block)
+  }
+
+  // MARK: Rule 21 (#400)
+
+  static func infobarLists(_ recorder: EventRecorder, _ id: TabID) -> [[Infobar]] {
+    recorder.events(for: id).compactMap { if case .infobarsChanged(_, let list) = $0 { list } else { nil } }
+  }
+
+  public static func infobarIsReportedActedOnAndRemoved(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raiseInfobar, "raiseInfobar")
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Infobar"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try await raise(engine, id, "Hello")
+    try await waitUntil(timeout: .seconds(10)) { !infobarLists(recorder, id).isEmpty }
+    let infobar = try requireValue(infobarLists(recorder, id).last?.first, "infobar")
+    try require(infobar.tab == id && infobar.message.contains("Hello") && infobar.ok != nil && infobar.isCloseable,
+                "the infobar must carry the engine's values: \(infobar)")
+    engine.act(on: infobar.id, action: .ok)
+    try await waitUntil(timeout: .seconds(10)) { infobarLists(recorder, id).last?.isEmpty == true }
+    engine.act(on: infobar.id, action: .close)                 // gone: nothing happens
+
+    // Events arrive in order: had the second action reported again, it would come before this second infobar.
+    try await raise(engine, id, "Again")
+    try await waitUntil(timeout: .seconds(10)) { infobarLists(recorder, id).count == 3 }
+    try require(infobarLists(recorder, id).map(\.count) == [1, 0, 1],
+                "an acted-on infobar must leave once: \(recorder.events(for: id))")
+    let second = try requireValue(infobarLists(recorder, id).last?.first, "second infobar")
+    try require(second.id != infobar.id, "a new infobar has a new id")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+  }
+
+  public static func infobarsStayWithTheirTabWhileHidden(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raiseInfobar, "raiseInfobar")
+    let engine = h.makeEngine()
+    let window = engine.createWindow(host: h.makeWindowHost())
+    let first = engine.createTab(url: try h.pageURL("First"), in: window)
+    let second = engine.createTab(url: try h.pageURL("Second"), in: window)
+    try await h.settle(engine, first)
+    try await h.settle(engine, second)
+    try await wait("the first tab to be active") { engine.activeTab(in: window) == first }
+    let recorder = EventRecorder(engine)
+    try await raise(engine, first, "Mine")
+    try await waitUntil(timeout: .seconds(10)) { !infobarLists(recorder, first).isEmpty }
+    let infobar = try requireValue(infobarLists(recorder, first).last?.first, "infobar")
+    engine.activateTab(second)
+    try await wait("the second tab to be active") { engine.activeTab(in: window) == second }
+    engine.activateTab(first)
+    try await wait("the first tab to be active again") { engine.activeTab(in: window) == first }
+    try require(infobarLists(recorder, first).count == 1 && infobarLists(recorder, second).isEmpty,
+                "switching tabs must not change either list: \(recorder.events)")
+    engine.act(on: infobar.id, action: .ok)
+    try await waitUntil(timeout: .seconds(10)) { infobarLists(recorder, first).last?.isEmpty == true }
+    engine.closeTab(first, mode: .skipUnloadHandlers)
+    engine.closeTab(second, mode: .skipUnloadHandlers)
+  }
+
+  public static func pendingInfobarsEndBeforeTheirTabCloses(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raiseInfobar, "raiseInfobar")
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Infobar"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try await raise(engine, id, "Hello")
+    try await waitUntil(timeout: .seconds(10)) { !infobarLists(recorder, id).isEmpty }
+    let infobar = try requireValue(infobarLists(recorder, id).last?.first, "infobar")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+    try await waitUntil(timeout: .seconds(10)) { recorder.events(for: id).contains { if case .tabClosed = $0 { true } else { false } } }
+    let tail = Array(recorder.events(for: id).suffix(2))
+    try require(tail == [.infobarsChanged(id, []), .tabClosed(id, reason: .client)],
+                "the list must empty before the tab closes: \(tail)")
+    engine.act(on: infobar.id, action: .ok)                    // gone: nothing happens
   }
 
   /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.

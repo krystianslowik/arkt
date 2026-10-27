@@ -40,12 +40,18 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   public private(set) var shownTab: TabID?
   private(set) var lastTransition: LittleArktTransition?
   private var phase = Phase.pending {
-    didSet { if phase != oldValue { javaScriptDialogs.refresh() } }     // a panel goes while the window is not open
+    didSet {
+      guard phase != oldValue else { return }
+      javaScriptDialogs.refresh()                                       // a panel goes while the window is not open
+      infobarStrips.refresh()
+    }
   }
   /// A page's `alert()`, `confirm()` and `prompt()` as panels over its page (#471). The same presenter the main window
   /// uses: it shows the panel while the page is on screen here, and hands the dialog over (`release` / `adopt`, #467)
   /// when Open in moves the page.
   private(set) lazy var javaScriptDialogs = makeJavaScriptDialogPresenter()
+  /// The page's infobars as a strip at the top of its page (#400); the engine reserves the strip's height there.
+  private(set) lazy var infobarStrips = makeInfobarPresenter()
   /// The pending dialog of the page on its way to the main window (Open in), from the start of the fade or flight
   /// until the page lands (it goes with it) or stays (it comes back to this window's presenter).
   private var carriedDialog: JavaScriptDialog?
@@ -114,7 +120,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     window.commandHost = engineHost
     window.onKeyEquivalent = { [weak self] event in self?.handleKeyEquivalent(event) ?? false }
     engineHost.controller = self
-    rootView.onLayout = { [weak self] in self?.javaScriptDialogs.layoutDidFinish() }
+    rootView.onLayout = { [weak self] in
+      self?.javaScriptDialogs.layoutDidFinish()
+      self?.infobarStrips.layoutDidFinish()
+    }
     topBar.openButton.target = self
     topBar.openButton.action = #selector(openInAction(_:))
     topBar.chooserButton.target = self
@@ -163,6 +172,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       carriedDialog = nil
     case .dialogRequested, .dialogEnded:
       javaScriptDialogs.handle(event)                         // #471
+    case .infobarsChanged:
+      infobarStrips.handle(event)                             // #400
     case .tabClosed(let tab, _) where tab == shownTab:
       shownTab = nil
       if card.contentView?.isDescendant(of: rootView) == true { card.setContent(nil) }
@@ -176,11 +187,20 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   /// The anchor of a dialog's panel: the page of the tab this window shows, while the window is open.
   private func makeJavaScriptDialogPresenter() -> JavaScriptDialogPresenter {
-    JavaScriptDialogPresenter(engine: engine) { [weak self] tab in
-      guard let self, self.phase == .open, tab == self.shownTab, let view = self.engine.contentView(for: tab),
-            view.window === self.window, !view.isHiddenOrHasHiddenAncestor else { return nil }
-      return view
-    }
+    let presenter = JavaScriptDialogPresenter(engine: engine, anchor: pageAnchor)
+    presenter.host.topInset = { [weak self] tab in self?.infobarStrips.height(of: tab) ?? 0 }
+    return presenter
+  }
+
+  /// The infobars of the page this window shows, while the window is open.
+  private func makeInfobarPresenter() -> InfobarPresenter {
+    InfobarPresenter(engine: engine, anchor: pageAnchor)
+  }
+
+  private func pageAnchor(_ tab: TabID) -> NSView? {
+    guard phase == .open, tab == shownTab, let view = engine.contentView(for: tab), view.window === window,
+          !view.isHiddenOrHasHiddenAncestor else { return nil }
+    return view
   }
 
   /// The page stays here, so its dialog comes back to this window's presenter.
@@ -247,6 +267,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     rootView.removeToolTipsInSubtree()
     flight?.abort(.smallWindowClosing)                        // the page lands in the main window first
     javaScriptDialogs.closeAll()                              // the engine ends the dialog; nothing answers it
+    infobarStrips.closeAll()
     guard phase != .closed else { return }
     phase = .closed
     onClosed(self)

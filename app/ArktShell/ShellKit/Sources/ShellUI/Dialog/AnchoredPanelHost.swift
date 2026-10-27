@@ -1,13 +1,34 @@
 import AppKit
 import EngineAPI
 
+/// A panel the host can place: a dialog's, or the infobar row's. The host moves and sizes it; the presenter owns what
+/// it shows.
+@MainActor
+protocol AnchoredPanel: AnyObject {
+  var panel: NSPanel { get }
+  /// Gives the panel `width`; its height follows from its content.
+  func resize(width: CGFloat)
+  /// Moves the panel to `anchor` (screen coordinates) again.
+  func reposition(anchoredTo anchor: NSRect)
+  /// Lets go of the callbacks, so a panel going down without an answer reports nothing.
+  func detach()
+  func close(keyboard: Bool)
+}
+
+extension DialogPanel: AnchoredPanel {
+  func detach() {
+    onAnswer = nil
+    onDismiss = nil
+  }
+}
+
 /// What the dialog presenters share: one panel per tab anchored to the tab's page view, shown only while the window
 /// can show it, sized to the page, kept in place as the page or window changes, and retried when the page view is
 /// missing or not laid out yet. The presenters own what is pending and how it is answered.
 @MainActor
 final class AnchoredPanelHost {
   private struct Entry {
-    let panel: DialogPanel
+    let panel: any AnchoredPanel
     let observers: [NSObjectProtocol]
     /// The page view the panel points at, and whose frame the observers watch.
     weak var anchorView: NSView?
@@ -27,6 +48,9 @@ final class AnchoredPanelHost {
   private(set) var retryOnLayout = false
   /// Called before a panel goes down without an answer, so a presenter can keep what the panel holds.
   var willDismiss: (@MainActor (TabID, DialogPanel) -> Void)?
+  /// How much of the top of a tab's page view a strip of the shell's own (the infobar row) covers; panels point at the
+  /// page below it, not at the strip. Zero without one.
+  var topInset: @MainActor (TabID) -> CGFloat = { _ in 0 }
 
   /// Places every pending dialog again; the host calls it when a window comes back or the page moves. The presenter
   /// sets it right after creating the host.
@@ -60,7 +84,10 @@ final class AnchoredPanelHost {
     min(maxWidth, max(260, anchorWidth - 2 * DialogPanel.anchorInset))
   }
 
-  func panel(for tab: TabID) -> DialogPanel? { entries[tab]?.panel }
+  func panel(for tab: TabID) -> DialogPanel? { entries[tab]?.panel as? DialogPanel }
+
+  /// The panel of `tab` whatever its kind, nil when none is up.
+  func anyPanel(for tab: TabID) -> (any AnchoredPanel)? { entries[tab]?.panel }
 
   /// Call before placing every pending dialog again.
   func beginRefresh() {
@@ -79,8 +106,8 @@ final class AnchoredPanelHost {
   /// cannot show it, or when the tab moved to another window or page view; a panel already up follows its page's
   /// frame and width. Otherwise `makePanel` builds a new one for the page's width (at most `maxWidth`) and `show`
   /// presents it. A page not laid out yet waits for its first frame change.
-  func place(_ tab: TabID, maxWidth: CGFloat, makePanel: (CGFloat) -> DialogPanel,
-             show: (DialogPanel, NSWindow, NSRect) -> Void) {
+  func place<Panel: AnchoredPanel>(_ tab: TabID, maxWidth: CGFloat, fullWidth: Bool = false,
+                                   makePanel: (CGFloat) -> Panel, show: (Panel, NSWindow, NSRect) -> Void) {
     guard let view = anchor(tab) else {
       retryOnLayout = true
       dismiss(tab)
@@ -95,9 +122,17 @@ final class AnchoredPanelHost {
     if let entry = entries[tab], entry.panel.panel.parent !== window || entry.anchorView !== view {
       dismiss(tab)
     }
-    let frame = window.convertToScreen(view.convert(view.bounds, to: nil))
+    var frame = window.convertToScreen(view.convert(view.bounds, to: nil))
+    if !frame.isEmpty, !fullWidth {
+      // Below the shell's own strip at the top of the page, if there is one (screen coordinates grow upward).
+      let inset = min(topInset(tab), frame.height)
+      frame.size.height -= inset
+    }
+    func width(for frame: NSRect) -> CGFloat {
+      fullWidth ? frame.width : Self.panelWidth(forAnchorWidth: frame.width, maxWidth: maxWidth)
+    }
     if let entry = entries[tab] {
-      if !frame.isEmpty { entry.panel.resize(width: Self.panelWidth(forAnchorWidth: frame.width, maxWidth: maxWidth)) }
+      if !frame.isEmpty { entry.panel.resize(width: width(for: frame)) }
       entry.panel.reposition(anchoredTo: frame)                  // an empty frame holds its input protection
       return
     }
@@ -111,7 +146,7 @@ final class AnchoredPanelHost {
         })
       return
     }
-    let panel = makePanel(Self.panelWidth(forAnchorWidth: frame.width, maxWidth: maxWidth))
+    let panel = makePanel(width(for: frame))
     let reposition: @Sendable (Notification) -> Void = { [weak self] _ in
       MainActor.assumeIsolated { self?.refresh?() }
     }
@@ -129,10 +164,9 @@ final class AnchoredPanelHost {
   /// Takes the tab's panel down at once, with no answer to the engine.
   func dismiss(_ tab: TabID) {
     guard let entry = entries.removeValue(forKey: tab) else { return }
-    willDismiss?(tab, entry.panel)
+    if let dialog = entry.panel as? DialogPanel { willDismiss?(tab, dialog) }
     for observer in entry.observers { NotificationCenter.default.removeObserver(observer) }
-    entry.panel.onAnswer = nil
-    entry.panel.onDismiss = nil
+    entry.panel.detach()
     entry.panel.close(keyboard: true)
   }
 

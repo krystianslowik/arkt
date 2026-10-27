@@ -93,6 +93,7 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var isMuted = false
   var dialog: (any ArktJavaScriptDialog)?
   var permission: (any ArktPermissionRequest)?
+  var infobars: [any ArktInfobar]?
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -570,8 +571,10 @@ struct ConformanceTests {
     #expect([ArktEngineEventKind.tabCreated, .tabClosed, .activeTabChanged, .closeCancelled, .urlChanged,
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
              .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged,
-             .dialogRequested, .dialogEnded, .permissionRequested, .permissionEnded].map(\.rawValue)
-      == Array(0...19))
+             .dialogRequested, .dialogEnded, .permissionRequested, .permissionEnded, .infobarsChanged].map(\.rawValue)
+      == Array(0...20))
+    #expect([ArktInfobarKind.other, .debugger, .automation, .reload].map(\.rawValue) == Array(0...3))
+    #expect([ArktInfobarAction.ok, .cancel, .link, .messageLink, .close].map(\.rawValue) == Array(0...4))
     #expect([ArktPermissionKind.other, .geolocation, .notifications, .camera, .microphone].map(\.rawValue)
       == Array(0...4))
     #expect([ArktPermissionChoice.allow, .allowThisTime, .block, .dismiss].map(\.rawValue) == Array(0...3))
@@ -726,5 +729,57 @@ struct PermissionRequestABITests {
     #expect(carried.respond(choice: .allowThisTime))
     #expect(!carried.respond(choice: .block), "the answer after the end is refused")
     #expect(carried.isEnded && request.choices == [.allowThisTime])
+  }
+}
+
+/// Infobars (#400): the event carries the tab's list, an infobar carries the engine's strings and takes actions until it
+/// is gone, and a gone infobar refuses them.
+@MainActor
+struct InfobarABITests {
+  final class Infobar: NSObject, ArktInfobar {
+    let infobarId: UInt = 7
+    let tab: any ArktTabHandle
+    let kind = ArktInfobarKind.debugger
+    let message = "\"Page Inspector\" started debugging this browser"
+    let messageLinkRanges: [NSValue] = [NSValue(range: NSRange(location: 1, length: 14))]
+    let linkTitle: String? = nil
+    let linkAccessibilityLabel: String? = nil
+    let linkBeforeButtons = false
+    let okTitle: String? = "Cancel"
+    let okTooltip: String? = nil
+    let okEnabled = true
+    let cancelTitle: String? = nil
+    let cancelTooltip: String? = nil
+    let cancelEnabled = true
+    let closeAccessibilityLabel: String? = "Close"
+    let iconPNG: Data? = nil
+    private(set) var isEnded = false
+    private(set) var actions: [(ArktInfobarAction, UInt)] = []
+    init(tab: any ArktTabHandle) { self.tab = tab }
+    func act(_ action: ArktInfobarAction, linkIndex: UInt) -> Bool {
+      guard !isEnded else { return false }
+      actions.append((action, linkIndex))
+      isEnded = action == .ok
+      return true
+    }
+  }
+
+  @Test func theEventCarriesTheListAndAnInfobarTakesActionsUntilItIsGone() throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+    let infobar = Infobar(tab: tab)
+    let event = TestEvent(.infobarsChanged, tab: tab, browser: browser)
+    event.infobars = [infobar]
+
+    let carried = try #require(event.infobars?.first)
+    #expect(event.infobars?.count == 1 && carried.infobarId == 7 && carried.tab === tab)
+    #expect(carried.kind == .debugger && carried.okTitle == "Cancel" && carried.cancelTitle == nil)
+    #expect(carried.messageLinkRanges.map(\.rangeValue) == [NSRange(location: 1, length: 14)])
+    #expect(carried.closeAccessibilityLabel == "Close")
+    #expect(carried.act(.messageLink, linkIndex: 0))
+    #expect(carried.act(.ok, linkIndex: 0))
+    #expect(!carried.act(.close, linkIndex: 0), "an action after the end is refused")
+    #expect(infobar.actions.map(\.0) == [.messageLink, .ok])
   }
 }

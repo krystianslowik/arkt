@@ -47,6 +47,16 @@ public enum AXID {
     public static let input = "dialog.input"
   }
 
+  /// The infobar row over the top of a tab's page (`InfobarRowView`); one per infobar, in order.
+  public enum Infobar {
+    /// Label: the message; role: group.
+    public static let root = "infobar"
+    public static let ok = "infobar.ok"
+    public static let cancel = "infobar.cancel"
+    public static let link = "infobar.link"
+    public static let close = "infobar.close"
+  }
+
   /// The toast over the bottom of the content card (`ToastView`); absent while no toast shows.
   public enum Toast {
     /// Label: the toast text. Value: `persistent` or `timed`.
