@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-23), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-24), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -29,8 +29,13 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case findCountsMatchesAndMovesTheOrdinal, stopFindingKeepsClearsOrActivatesTheMatch
   // Rule 23
   case hoveredLinkReportsItsTargetURL
+  // Rule 24
+  case downloadIsReportedProgressesAndCompletes, cancelEndsAnActiveDownloadOnce
+  case removeForgetsADownloadAndKeepsItsFile, pauseHoldsTheBytesUntilResume
+  case interruptedDownloadRetriesAndReplacesItsRow, dangerousDownloadIsHeldUntilDecided
+  case savePreferenceDecidesTheFolder
 
-  /// The contract rule (1-23) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The contract rule (1-24) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -61,6 +66,10 @@ public enum ContractCheck: String, CaseIterable, Sendable {
          .pendingInfobarsEndBeforeTheirTabCloses: 21
     case .findCountsMatchesAndMovesTheOrdinal, .stopFindingKeepsClearsOrActivatesTheMatch: 22
     case .hoveredLinkReportsItsTargetURL: 23
+    case .downloadIsReportedProgressesAndCompletes, .cancelEndsAnActiveDownloadOnce,
+         .removeForgetsADownloadAndKeepsItsFile, .pauseHoldsTheBytesUntilResume,
+         .interruptedDownloadRetriesAndReplacesItsRow, .dangerousDownloadIsHeldUntilDecided,
+         .savePreferenceDecidesTheFolder: 24
     }
   }
 
@@ -114,6 +123,15 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .stopFindingKeepsClearsOrActivatesTheMatch:
       try await EngineContract.stopFindingKeepsClearsOrActivatesTheMatch(h)
     case .hoveredLinkReportsItsTargetURL: try await EngineContract.hoveredLinkReportsItsTargetURL(h)
+    case .downloadIsReportedProgressesAndCompletes:
+      try await EngineContract.downloadIsReportedProgressesAndCompletes(h)
+    case .cancelEndsAnActiveDownloadOnce: try await EngineContract.cancelEndsAnActiveDownloadOnce(h)
+    case .removeForgetsADownloadAndKeepsItsFile: try await EngineContract.removeForgetsADownloadAndKeepsItsFile(h)
+    case .pauseHoldsTheBytesUntilResume: try await EngineContract.pauseHoldsTheBytesUntilResume(h)
+    case .interruptedDownloadRetriesAndReplacesItsRow:
+      try await EngineContract.interruptedDownloadRetriesAndReplacesItsRow(h)
+    case .dangerousDownloadIsHeldUntilDecided: try await EngineContract.dangerousDownloadIsHeldUntilDecided(h)
+    case .savePreferenceDecidesTheFolder: try await EngineContract.savePreferenceDecidesTheFolder(h)
     }
   }
 }

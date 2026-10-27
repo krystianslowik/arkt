@@ -24,7 +24,7 @@ import EngineAPI
 /// returns a handle that is inserted later). Nothing here runs a modal or a nested loop, and batch handling makes no
 /// assumption that the shell is idle (Decision 3).
 @MainActor
-public final class ChromiumEngine: EngineClient, EngineExtensions {
+public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloads {
   struct TabRecord {
     let handle: any ArktTabHandle
     /// Fields from events. `isClosing` and `wouldHoldClose` are overlaid from the handle in `snapshot(of:)`.
@@ -62,6 +62,10 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
 
   let facade: any ArktEngine
   let hub = EngineEventHub()
+  /// Downloads (#132): the shell's save-location choice, kept until the engine-lane task wires it to the profile's
+  /// download prefs (`ChromiumEngine+Downloads.swift`).
+  public var downloadSavePreference: DownloadSavePreference = .folder(ChromiumEngine.systemDownloadsFolder)
+  public var downloadDestinationChooser: DownloadDestinationChooser?
   private var sinkToken: (any NSObjectProtocol)?
 
   public internal(set) var tabIDs: [TabID] = []

@@ -21,6 +21,11 @@ public final class AppSettings {
     public static let sendsCrashReports = "crashReportsEnabled"
     /// The launch's one-time "Send a report?" was answered (Send, Don't Send or Always Send): never asked again.
     public static let crashReportAskAnswered = "crashReportAskAnswered"
+    /// Settings > General > Downloads (#132, BH-182): "Ask Where to Save", and the folder for "Save to Folder" as a path.
+    public static let downloadsAskWhereToSave = "downloadsAskWhereToSave"
+    public static let downloadsFolder = "downloadsFolder"
+    /// The Library section last shown (BH-181).
+    public static let libraryLastSection = "libraryLastSection"
   }
 
   /// Show Toolbar and Show the full URL: the instance every window observes.
@@ -117,6 +122,27 @@ public final class AppSettings {
     guard taken != littleArktHotKeyTaken else { return }
     littleArktHotKeyTaken = taken
     notifyObservers()
+  }
+
+  /// Settings > General > Downloads (#132, BH-182): ask for each file, or save to a folder. Applied to the engine by
+  /// `DownloadsModel`.
+  public var downloadLocation: DownloadLocationSetting {
+    get {
+      DownloadLocationSetting(asksWhereToSave: bool(Key.downloadsAskWhereToSave, default: false),
+                              folder: string(Key.downloadsFolder).flatMap { $0.isEmpty ? nil : URL(filePath: $0, directoryHint: .isDirectory) })
+    }
+    set {
+      guard newValue != downloadLocation else { return }
+      set(newValue.asksWhereToSave, Key.downloadsAskWhereToSave)
+      set(newValue.folder?.path(percentEncoded: false) ?? "", Key.downloadsFolder)
+      notifyObservers()
+    }
+  }
+
+  /// The Library section that was open last, so it reopens there (BH-181). Window state: observers are not told.
+  public var libraryLastSection: LibrarySection {
+    get { string(Key.libraryLastSection).flatMap(LibrarySection.init(rawValue:)) ?? .downloads }
+    set { set(newValue.rawValue, Key.libraryLastSection) }
   }
 
   /// The pane Settings shows when it opens. Window state, so observers are not told.

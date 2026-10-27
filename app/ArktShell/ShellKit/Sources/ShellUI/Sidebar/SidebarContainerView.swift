@@ -443,6 +443,15 @@ public final class SidebarContainerView: NSView {
       needsLayout = true
     }
   }
+  /// The Library button, right of Archive; nil for an engine with no downloads (#132, design/downloads, direction B).
+  public var libraryButton: LibraryButton? {
+    didSet {
+      guard libraryButton !== oldValue else { return }
+      oldValue?.removeFromSuperview()
+      if let libraryButton { bottomBar.addSubview(libraryButton) }
+      needsLayout = true
+    }
+  }
   public let topBarHeight: CGFloat
 
   public private(set) var currentPage: SpacePageView?
@@ -601,7 +610,11 @@ public final class SidebarContainerView: NSView {
       extensionsButton.frame = NSRect(x: trailing - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
       trailing = extensionsButton.frame.minX
     }
-    let dotsX = archiveButton.frame.maxX
+    var dotsX = archiveButton.frame.maxX
+    if let libraryButton {
+      libraryButton.frame = NSRect(x: dotsX, y: buttonY, width: buttonSize, height: buttonSize)
+      dotsX = libraryButton.frame.maxX
+    }
     spaceDots.frame = NSRect(x: dotsX, y: 0, width: max(0, trailing - dotsX), height: bottomHeight)
   }
 

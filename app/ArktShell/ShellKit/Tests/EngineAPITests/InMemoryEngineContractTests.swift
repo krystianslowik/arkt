@@ -88,6 +88,22 @@ struct InMemoryEngineContractTests {
   }
   // Rule 23
   @Test func hoveredLinkReportsItsTargetURL() async throws { try await EngineContract.hoveredLinkReportsItsTargetURL(harness) }
+  // Rule 24
+  @Test func downloadIsReportedProgressesAndCompletes() async throws {
+    try await EngineContract.downloadIsReportedProgressesAndCompletes(harness)
+  }
+  @Test func cancelEndsAnActiveDownloadOnce() async throws { try await EngineContract.cancelEndsAnActiveDownloadOnce(harness) }
+  @Test func removeForgetsADownloadAndKeepsItsFile() async throws {
+    try await EngineContract.removeForgetsADownloadAndKeepsItsFile(harness)
+  }
+  @Test func pauseHoldsTheBytesUntilResume() async throws { try await EngineContract.pauseHoldsTheBytesUntilResume(harness) }
+  @Test func interruptedDownloadRetriesAndReplacesItsRow() async throws {
+    try await EngineContract.interruptedDownloadRetriesAndReplacesItsRow(harness)
+  }
+  @Test func dangerousDownloadIsHeldUntilDecided() async throws {
+    try await EngineContract.dangerousDownloadIsHeldUntilDecided(harness)
+  }
+  @Test func savePreferenceDecidesTheFolder() async throws { try await EngineContract.savePreferenceDecidesTheFolder(harness) }
 
   /// A harness without engine drivers reports rules 13, 14, 16 and 17's audible check as not applicable, never as passed.
   @Test func missingDriversAreNotApplicable() async throws {
@@ -108,6 +124,10 @@ struct InMemoryEngineContractTests {
     await #expect(throws: ContractNotApplicable.self) {
       try await EngineContract.extensionWindowCloseReportsExtension(bare)
     }
+    await #expect(throws: ContractNotApplicable.self) {
+      try await EngineContract.downloadIsReportedProgressesAndCompletes(bare)
+    }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.dangerousDownloadIsHeldUntilDecided(bare) }
   }
 }
 

@@ -115,6 +115,9 @@ final class AppSession {
       changedSinceBackup = true
     }
     windows.configure = { [weak self] controller in self?.wire(controller) }
+    // Downloads (#132): the Library button, popover and window, for an engine that has downloads.
+    windows.downloads = DownloadsCenter(engine: engine, settings: settings)
+    windows.downloads?.onChangeLocation = { [weak self] in self?.showSettings(pane: .general) }
     archiveSearch.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
@@ -425,6 +428,11 @@ final class AppSession {
     settings.setLittleArktHotKeyTaken(state == .taken)
   }
 
+  // MARK: - Library window (#132)
+
+  /// Window > Show Library (Cmd-Shift-L): the Library on the section used last. Nothing for an engine with no downloads.
+  func showLibrary() { windows.downloads?.showLibrary() }
+
   // MARK: - Settings window (#307)
 
   private var settingsWindow: SettingsWindowController?
@@ -440,6 +448,7 @@ final class AppSession {
   /// import (File > Import Browser Data...), the data folder and the Spaces.
   private func settingsServices() -> SettingsServices {
     var services = SettingsServices()
+    services.openLibrary = { [weak self] in self?.showLibrary() }                     // #132
     services.isDefaultBrowser = { DefaultBrowser.isDefault() }
     services.makeDefaultBrowser = { await DefaultBrowser.makeDefault() }
     services.canImportBrowserData = { [weak self] in

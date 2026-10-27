@@ -305,8 +305,11 @@ final class SettingsSegmentedControl: NSControl {
   private let plate = CALayer()
   private let labels: [CATextLayer]
   static let segmentSize = NSSize(width: 80, height: 24)
+  /// A segment's width: 80 pt, or wider for longer titles (Downloads' "Ask Where to Save").
+  let segmentWidth: CGFloat
 
-  init(segments: [String], selected: Int) {
+  init(segments: [String], selected: Int, segmentWidth: CGFloat = SettingsSegmentedControl.segmentSize.width) {
+    self.segmentWidth = segmentWidth
     self.segments = segments
     selectedIndex = selected
     labels = segments.map { _ in CATextLayer() }
@@ -333,17 +336,24 @@ final class SettingsSegmentedControl: NSControl {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var intrinsicContentSize: NSSize {
-    NSSize(width: Self.segmentSize.width * CGFloat(segments.count) + 4, height: Self.segmentSize.height + 4)
+    NSSize(width: segmentWidth * CGFloat(segments.count) + 4, height: Self.segmentSize.height + 4)
   }
 
   override var isFlipped: Bool { true }
   override var mouseDownCanMoveWindow: Bool { false }
   override func accessibilityValue() -> Any? { segments[selectedIndex] }
 
+  /// Selects `index` as a click does (tests and the pane's own updates); no `onChange` call.
+  func select(_ index: Int) {
+    guard segments.indices.contains(index), index != selectedIndex else { return }
+    selectedIndex = index
+    restyle()
+  }
+
   override func mouseDown(with event: NSEvent) {
     guard isEnabled else { return }
     let x = convert(event.locationInWindow, from: nil).x - 2
-    let index = min(max(Int(x / Self.segmentSize.width), 0), segments.count - 1)
+    let index = min(max(Int(x / segmentWidth), 0), segments.count - 1)
     guard index != selectedIndex else { return }
     selectedIndex = index
     restyle()
@@ -355,7 +365,7 @@ final class SettingsSegmentedControl: NSControl {
     let scale = window?.backingScaleFactor ?? 2
     ArchiveMotion.set {
       layer?.backgroundColor = ShellTokens.sidebarItemHovered.resolve(flavor).cgColor
-      plate.bounds = CGRect(origin: .zero, size: Self.segmentSize)
+      plate.bounds = CGRect(origin: .zero, size: NSSize(width: segmentWidth, height: Self.segmentSize.height))
       plate.position.y = 2
       plate.backgroundColor = (flavor == .dark ? RGBA.white(0.18) : ShellTokens.tabCurrent.light).cgColor
       plate.shadowOpacity = flavor == .dark ? 0 : 0.10
@@ -366,11 +376,11 @@ final class SettingsSegmentedControl: NSControl {
           .foregroundColor: (selected ? ShellTokens.primaryText : ShellTokens.secondaryText).resolve(flavor).nsColor(),
         ])
         label.contentsScale = scale
-        label.frame = CGRect(x: 2 + CGFloat(index) * Self.segmentSize.width, y: 2 + 4, width: Self.segmentSize.width,
+        label.frame = CGRect(x: 2 + CGFloat(index) * segmentWidth, y: 2 + 4, width: segmentWidth,
                              height: 16)
       }
     }
-    SettingsMotion.spring(plate, "position.x", to: Double(2 + CGFloat(selectedIndex) * Self.segmentSize.width),
+    SettingsMotion.spring(plate, "position.x", to: Double(2 + CGFloat(selectedIndex) * segmentWidth),
                           preset: .firm, reduceMotion: SettingsMotion.reduceMotion() || window == nil)
   }
 

@@ -25,10 +25,12 @@ public final class EngineEventHub {
   private enum Pending {
     case tab(EngineEvent, window: EngineWindowID?)
     case window(EngineWindowEvent)
+    case download(DownloadEvent)
   }
 
   private var handlers: [Handler] = []
   private var windowHandlers: [(key: UUID, deliver: @MainActor (EngineWindowEvent) -> Void)] = []
+  private var downloadHandlers: [(key: UUID, deliver: @MainActor (DownloadEvent) -> Void)] = []
   private var live: Set<UUID> = []
   private var closed: Set<TabID> = []
   private var closedWindows: Set<EngineWindowID> = []
@@ -60,6 +62,17 @@ public final class EngineEventHub {
     }
   }
 
+  /// Every download event (contract rule 24), in the same FIFO as tab and window events.
+  public func addDownloadObserver(_ handler: @escaping @MainActor (DownloadEvent) -> Void) -> EngineObservation {
+    let key = UUID()
+    downloadHandlers.append((key, handler))
+    live.insert(key)
+    return EngineObservation { [weak self] in
+      self?.live.remove(key)
+      self?.downloadHandlers.removeAll { $0.key == key }
+    }
+  }
+
   /// Records the window `tab` is in (nil: none). Call before emitting the tab's `.tabCreated`, and on a move.
   public func assign(_ tab: TabID, to window: EngineWindowID?) {
     windowOfTab[tab] = window
@@ -73,6 +86,10 @@ public final class EngineEventHub {
 
   public func emit(_ event: EngineWindowEvent) {
     enqueue(.window(event))
+  }
+
+  public func emit(_ event: DownloadEvent) {
+    enqueue(.download(event))
   }
 
   // MARK: - Delivery
@@ -99,6 +116,7 @@ public final class EngineEventHub {
       switch item {
       case .tab(let event, let window): deliver(event, window: window)
       case .window(let event): deliver(event)
+      case .download(let event): deliver(event)
       }
     }
     pending.removeAll()
@@ -117,5 +135,9 @@ public final class EngineEventHub {
     guard !closedWindows.contains(event.windowID) else { return }
     if case .windowClosed(let id, _) = event { closedWindows.insert(id) }
     for entry in windowHandlers where live.contains(entry.key) { entry.deliver(event) }
+  }
+
+  private func deliver(_ event: DownloadEvent) {
+    for entry in downloadHandlers where live.contains(entry.key) { entry.deliver(event) }
   }
 }

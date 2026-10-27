@@ -276,6 +276,8 @@ extension ShellWindowController {
     case PendingEngineCommands.newWindow: CommandClaim(isEnabled: onNewWindow != nil)
     case .closeWindow: CommandClaim(isEnabled: window != nil)
     case .find, .findNext, .findPrevious: claimFind(command)         // #134
+    case .downloads, .history:                                         // #132: the native Library
+      onShowLibrary.map { _ in CommandClaim(isEnabled: true) }
     default: nil
     }
   }
@@ -298,6 +300,10 @@ extension ShellWindowController {
       return true
     case .find, .findNext, .findPrevious:
       return performFind(command)
+    case .downloads, .history:
+      guard let onShowLibrary else { return false }
+      onShowLibrary(command == .downloads ? .downloads : .history)
+      return true
     default:
       return false
     }

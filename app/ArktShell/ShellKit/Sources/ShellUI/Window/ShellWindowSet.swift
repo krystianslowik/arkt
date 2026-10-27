@@ -30,6 +30,11 @@ public final class ShellWindowSet {
   public let commandBarSettings: CommandBarSettings
   /// The app's hooks on a new window (archive, stamps, favicons, import); runs before the window is shown.
   public var configure: (@MainActor (ShellWindowController) -> Void)?
+  /// The app's Downloads (#132): every window this set builds gets its Library button and popover. Nil for an engine
+  /// with no downloads.
+  public var downloads: DownloadsCenter? {
+    didSet { downloads?.primaryWindow = { [weak self] in self?.primary } }
+  }
 
   private let hostLookup: HostLookup?
   private var windows: [ShellWindowController] = []
@@ -310,6 +315,7 @@ public final class ShellWindowSet {
     windows.append(controller)
     trackMain(controller)
     configure?(controller)
+    downloads?.attach(to: controller)
     // #331: the session's first window is the one a relaunch restores; it opens on the saved sidebar state. Later
     // windows (New Window, a Dock reopen) keep the defaults.
     if !adoptedSavedSidebarState {

@@ -81,6 +81,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public private(set) var isClosed = false
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
+  /// Window > Downloads (Cmd-Shift-J) and Show All History (Cmd-Y) open the Library on a section (#132); set by
+  /// `DownloadsCenter.attach(to:)`. While nil the engine's own commands run.
+  public var onShowLibrary: (@MainActor (LibrarySection) -> Void)?
   /// The engine reported a favicon for a sidebar node (nil: cleared); the app persists it. Called for favicons
   /// caught up from the snapshot when a tab is created and for later `.faviconChanged` events.
   public var onFaviconChanged: (@MainActor (NodeID, Data?) -> Void)?

@@ -29,6 +29,9 @@ final class AppCommands: NSObject {
   /// Window > Show Archive (E5c, unbound by default, KB-043).
   @objc func showArchive(_ sender: Any?) { session?.showArchive() }
 
+  /// Window > Show Library (Cmd-Shift-L, KB-065, #132): the Library on the section used last.
+  @objc func showLibrary(_ sender: Any?) { session?.showLibrary() }
+
   /// Window > Clear Archive... (BH-087, unbound, KB-043): fronts the Archive window and asks there.
   @objc func clearArchive(_ sender: Any?) { session?.clearArchive() }
 

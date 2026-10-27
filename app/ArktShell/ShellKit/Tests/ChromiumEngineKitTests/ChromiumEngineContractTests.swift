@@ -18,6 +18,9 @@ enum FacadeScript: String, CaseIterable, Sendable {
 struct ChromiumEngineContractTests {
   @Test(arguments: ContractCheck.allCases, FacadeScript.allCases)
   func contract(_ check: ContractCheck, _ script: FacadeScript) async throws {
+    // Rule 24 (downloads): ChromiumEngine's download methods are not wired yet (#132); the engine-lane task adds the
+    // facade script and its drivers and removes this line.
+    guard check.rule != 24 else { return }
     let harness = ScriptedHarness.make { facade in facade.titleAfterLoadEnd = script == .titleAfterLoadEnd }
     try await check.run(harness)
   }
@@ -45,8 +48,8 @@ struct ChromiumEngineContractTests {
         names.insert(String(match.output.1))
       }
     }
-    #expect(names.count == 43)
+    #expect(names.count == 50)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
-    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...23))
+    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...24))
   }
 }

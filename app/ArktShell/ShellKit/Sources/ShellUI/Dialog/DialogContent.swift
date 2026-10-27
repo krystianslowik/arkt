@@ -16,6 +16,8 @@ public struct DialogContent: Equatable, Sendable {
     case appIcon
     /// A Space's theme swatch (its gradient stops) with its mark: the Space Delete Space removes.
     case spaceSwatch(colors: [RGBA], isDark: Bool, mark: SpaceIconInfo?)
+    /// A neutral tile with an SF Symbol: the dangerous-file sheet's warning.
+    case symbol(String)
   }
 
   /// Where the icon sits: beside the title (32 pt, body indented under the title) or stacked above it (the app-modal
@@ -60,6 +62,8 @@ public struct DialogContent: Equatable, Sendable {
   public var listItems: [String]
   /// A quiet text link at the footer's leading edge (Show Data Folder); it does not answer the dialog.
   public var footerLink: String?
+  /// The footer link is a quiet red text link (Keep Anyway), not the neutral one.
+  public var footerLinkIsDestructive: Bool
   /// The answer that continues, on the trailing edge: mustard, or a quiet red title when `isDestructive`.
   public var primaryTitle: String
   /// A third answer between cancel and primary.
@@ -87,7 +91,7 @@ public struct DialogContent: Equatable, Sendable {
 
   public init(title: String, icon: Icon = .none, iconPlacement: IconPlacement = .beside, subtitle: String? = nil,
               paragraphs: [Paragraph] = [], listHeading: String? = nil, listItems: [String] = [],
-              footerLink: String? = nil, primaryTitle: String, secondaryTitle: String? = nil,
+              footerLink: String? = nil, footerLinkIsDestructive: Bool = false, primaryTitle: String, secondaryTitle: String? = nil,
               cancelTitle: String? = nil, defaultButton: DefaultButton = .primary, isDestructive: Bool = false,
               escapeAnswersCancel: Bool = true, primaryHelp: String? = nil, width: CGFloat = 420,
               input: Input? = nil, bodyMaxHeight: CGFloat? = nil, stackedButtons: Bool = false,
@@ -100,6 +104,7 @@ public struct DialogContent: Equatable, Sendable {
     self.listHeading = listHeading
     self.listItems = listItems
     self.footerLink = footerLink
+    self.footerLinkIsDestructive = footerLinkIsDestructive
     self.primaryTitle = primaryTitle
     self.secondaryTitle = secondaryTitle
     self.cancelTitle = cancelTitle
