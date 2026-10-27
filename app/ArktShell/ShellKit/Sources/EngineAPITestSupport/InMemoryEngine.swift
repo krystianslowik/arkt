@@ -208,6 +208,70 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     hub.emit(.dialogEnded(tab, dialog.id))
   }
 
+  // MARK: - Permission requests (#400, contract rule 20)
+
+  /// What a site asked for and has not had answered; the prompt for it shows while the tab is shown.
+  private var permissionAsks: [TabID: [PermissionKind]] = [:]
+  private var pendingPermissions: [TabID: PermissionRequest] = [:]
+  /// Answers the shell gave, in order: what the site's call would have been told.
+  public private(set) var permissionAnswers: [(id: PermissionRequestID, choice: PermissionChoice)] = []
+
+  /// Test driver: the page asks for `kinds`. Replaces the tab's earlier ask. The prompt shows at once when the tab is
+  /// shown (active in its window, or in none); otherwise it shows when the tab becomes active. Nil for an unknown or
+  /// closed tab; else the request's id when shown, and a fresh id's request later.
+  @discardableResult
+  public func askPermission(in tab: TabID, kinds: [PermissionKind]) -> PermissionRequestID? {
+    guard let current = snapshots[tab], !current.isClosing else { return nil }
+    withdrawPermission(in: tab)
+    permissionAsks[tab] = kinds
+    return showPermission(of: tab)
+  }
+
+  /// The site withdraws its ask (or a navigation or the tab closing drops it): the prompt ends and the ask is gone.
+  public func withdrawPermission(in tab: TabID) {
+    permissionAsks[tab] = nil
+    endPermissionPrompt(of: tab)
+  }
+
+  public func respond(toPermission request: PermissionRequestID, choice: PermissionChoice) {
+    guard let tab = pendingPermissions.first(where: { $0.value.id == request })?.key else { return }
+    permissionAnswers.append((request, choice))
+    permissionAsks[tab] = nil
+    endPermissionPrompt(of: tab)
+  }
+
+  /// The strings Chromium's bubble uses for a kind; the one-visit answers exist when every kind can be granted for a
+  /// visit (location, camera, microphone).
+  private static func permissionPhrase(_ kind: PermissionKind) -> String {
+    switch kind {
+    case .geolocation: "Know your location"
+    case .notifications: "Show notifications"
+    case .camera: "Use your camera"
+    case .microphone: "Use your microphone"
+    case .other: "Use a permission"
+    }
+  }
+
+  private func showPermission(of tab: TabID) -> PermissionRequestID? {
+    guard let kinds = permissionAsks[tab], pendingPermissions[tab] == nil, let current = snapshots[tab],
+          current.window == nil || current.isActive else { return nil }
+    let host = current.url?.host() ?? "This page"
+    let oneTime = !kinds.contains { $0 == .notifications || $0 == .other }
+    let request = PermissionRequest(
+      id: PermissionRequestID(), tab: tab, origin: host, kinds: kinds, title: "\(host) wants to",
+      items: kinds.map(Self.permissionPhrase), allowTitle: oneTime ? "Allow while visiting the site" : "Allow",
+      allowThisTimeTitle: oneTime ? "Allow this time" : nil, blockTitle: oneTime ? "Never allow" : "Block")
+    pendingPermissions[tab] = request
+    hub.emit(.permissionRequested(request))
+    return request.id
+  }
+
+  /// Reports the end of the tab's prompt, if any. The ask itself stays unless the caller dropped it.
+  private func endPermissionPrompt(of tab: TabID) {
+    guard let request = pendingPermissions.removeValue(forKey: tab) else { return }
+    hub.emit(.permissionEnded(tab, request.id))
+  }
+
   // MARK: - Page images (#370, #352, contract rule 18)
 
   /// The size of an in-memory page's frame: a 600 x 360 pt page at 2x.
@@ -472,6 +536,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
 
   private func load(_ id: TabID, _ url: URL, title: String?, previous: TabSnapshot) {
     endDialog(of: id)       // Chromium closes the dialog when a navigation starts
+    withdrawPermission(in: id)      // and drops the site's ask
     snapshots[id]?.url = url
     if let title, !title.isEmpty { snapshots[id]?.title = title }
     snapshots[id]?.isLoading = true
@@ -503,10 +568,12 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     if let previous {
       snapshots[previous]?.isActive = false
       endHiddenDialog(of: previous)
+      endPermissionPrompt(of: previous)         // the ask stays pending; the tab asks again when shown
     }
     snapshots[id]?.isActive = true
     activeTabs[window] = id
     hub.emit(.activeTabChanged(id))
+    _ = showPermission(of: id)
   }
 
   private func hold(_ id: TabID, _ close: HeldClose) {
@@ -520,6 +587,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     framesUnavailable.remove(id)
     guard let removed = snapshots[id] else { return }
     endDialog(of: id)
+    withdrawPermission(in: id)
     var successor: TabID?
     if let window = removed.window, activeTabs[window] == id {
       activeTabs[window] = nil

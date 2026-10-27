@@ -59,6 +59,8 @@ extension ChromiumEngine {
     case .tabClosed: tabClosed(event)
     case .dialogRequested: dialogRequested(event)
     case .dialogEnded: dialogEnded(event)
+    case .permissionRequested: permissionRequested(event)
+    case .permissionEnded: permissionEnded(event)
     default: tabChanged(event)
     }
   }

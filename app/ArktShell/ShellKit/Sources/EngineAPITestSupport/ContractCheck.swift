@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-19), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-20), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -20,8 +20,11 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case pageImageFitsTheCaps, pageImageOfAClosedTabIsNil
   // Rule 19
   case dialogIsReportedAnsweredAndEndedOnce, pendingDialogEndsBeforeItsTabCloses, hiddenTabEndsItsConfirmAndPrompt
+  // Rule 20
+  case permissionIsReportedAnsweredAndEndedOnce, pendingPermissionEndsBeforeItsTabCloses, navigationEndsItsPermission
+  case hiddenTabEndsItsPermissionAndAsksAgain
 
-  /// The contract rule (1-19) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The contract rule (1-20) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -46,6 +49,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .pageImageFitsTheCaps, .pageImageOfAClosedTabIsNil: 18
     case .dialogIsReportedAnsweredAndEndedOnce, .pendingDialogEndsBeforeItsTabCloses,
          .hiddenTabEndsItsConfirmAndPrompt: 19
+    case .permissionIsReportedAnsweredAndEndedOnce, .pendingPermissionEndsBeforeItsTabCloses,
+         .navigationEndsItsPermission, .hiddenTabEndsItsPermissionAndAsksAgain: 20
     }
   }
 
@@ -87,6 +92,11 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .dialogIsReportedAnsweredAndEndedOnce: try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(h)
     case .pendingDialogEndsBeforeItsTabCloses: try await EngineContract.pendingDialogEndsBeforeItsTabCloses(h)
     case .hiddenTabEndsItsConfirmAndPrompt: try await EngineContract.hiddenTabEndsItsConfirmAndPrompt(h)
+    case .permissionIsReportedAnsweredAndEndedOnce:
+      try await EngineContract.permissionIsReportedAnsweredAndEndedOnce(h)
+    case .pendingPermissionEndsBeforeItsTabCloses: try await EngineContract.pendingPermissionEndsBeforeItsTabCloses(h)
+    case .navigationEndsItsPermission: try await EngineContract.navigationEndsItsPermission(h)
+    case .hiddenTabEndsItsPermissionAndAsksAgain: try await EngineContract.hiddenTabEndsItsPermissionAndAsksAgain(h)
     }
   }
 }

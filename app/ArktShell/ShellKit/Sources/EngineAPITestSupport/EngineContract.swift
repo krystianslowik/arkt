@@ -31,6 +31,10 @@ public struct EngineHarness {
   public typealias RaiseDialog = @MainActor (_ engine: any EngineClient, _ id: TabID, _ kind: JavaScriptDialog.Kind,
                                              _ message: String, _ defaultText: String?) async throws -> Void
 
+  /// Makes the page of `id` ask for `kinds`.
+  public typealias RaisePermission = @MainActor (_ engine: any EngineClient, _ id: TabID, _ kinds: [PermissionKind])
+    async throws -> Void
+
   public let makeEngine: @MainActor () -> any EngineClient
   /// A URL whose page has `<title>title</title>` and needs no network.
   public let pageURL: @MainActor (_ title: String) throws -> URL
@@ -61,6 +65,9 @@ public struct EngineHarness {
   /// Makes the page raise a JavaScript dialog (rule 19). An engine that cannot (a real engine needs its tab
   /// foremost) leaves it nil.
   public let raiseDialog: RaiseDialog?
+  /// Makes the page ask for a permission (rule 20). Nil for an engine that cannot (a real engine needs its tab
+  /// foremost and a user gesture).
+  public let raisePermission: RaisePermission?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -76,7 +83,8 @@ public struct EngineHarness {
               makeAudible: EngineTabAction? = nil,
               engineCloseWindow: EngineWindowAction? = nil,
               showPage: EngineTabAction? = nil,
-              raiseDialog: RaiseDialog? = nil) {
+              raiseDialog: RaiseDialog? = nil,
+              raisePermission: RaisePermission? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
@@ -84,6 +92,7 @@ public struct EngineHarness {
     self.makeAudible = makeAudible; self.engineCloseWindow = engineCloseWindow
     self.showPage = showPage
     self.raiseDialog = raiseDialog
+    self.raisePermission = raisePermission
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -118,6 +127,11 @@ public struct EngineHarness {
       raiseDialog: { engine, id, kind, message, defaultText in
         guard try inMemory(engine).raiseDialog(in: id, kind: kind, message: message, defaultPromptText: defaultText)
           != nil else { throw ContractViolation(description: "no dialog raised in \(id)") }
+      },
+      raisePermission: { engine, id, kinds in
+        guard try inMemory(engine).askPermission(in: id, kinds: kinds) != nil else {
+          throw ContractViolation(description: "no permission asked in \(id)")
+        }
       }
     )
   }
@@ -181,6 +195,11 @@ public struct EngineHarness {
 ///     tab's `.tabClosed` (#400); a `confirm()` or `prompt()` still pending when its tab stops being the window's
 ///     active tab ends with `.dialogEnded`, as Chromium answers it false or null when the tab is hidden (an `alert()`
 ///     stays). Needs `raiseDialog`.
+/// 20. A site's permission request is reported with `.permissionRequested` carrying the engine's strings and the kinds
+///     asked for; `respond(toPermission:choice:)` ends it with one `.permissionEnded` and a second answer does nothing;
+///     a request still pending when its tab closes ends before the tab's `.tabClosed`; a navigation ends it; a tab
+///     that stops being its window's active tab ends it unanswered, and asks again with a new request when it is
+///     active again (#400). Needs `raisePermission`.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
@@ -584,6 +603,100 @@ public enum EngineContract {
       engine.activateTab(shown)
       try await wait("the tab to be active again") { engine.activeTab(in: window) == shown }
     }
+  }
+
+  // MARK: Rule 20 (#400)
+
+  static func requestedPermissions(_ recorder: EventRecorder, _ id: TabID) -> [PermissionRequest] {
+    recorder.events(for: id).compactMap { if case .permissionRequested(let request) = $0 { request } else { nil } }
+  }
+
+  static func endedPermissions(_ recorder: EventRecorder, _ id: TabID) -> [PermissionRequestID] {
+    recorder.events(for: id).compactMap { if case .permissionEnded(_, let request) = $0 { request } else { nil } }
+  }
+
+  public static func permissionIsReportedAnsweredAndEndedOnce(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raisePermission, "raisePermission")
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Permission"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try await raise(engine, id, [.geolocation, .microphone])
+    try await waitUntil(timeout: .seconds(10)) { !requestedPermissions(recorder, id).isEmpty }
+    let request = try requireValue(requestedPermissions(recorder, id).first, "permission request")
+    try require(request.tab == id && request.kinds == [.geolocation, .microphone] && request.items.count == 2
+                  && !request.title.isEmpty && !request.origin.isEmpty && !request.allowTitle.isEmpty
+                  && !request.blockTitle.isEmpty, "the request must carry the engine's values: \(request)")
+    engine.respond(toPermission: request.id, choice: .allow)
+    engine.respond(toPermission: request.id, choice: .block)
+    try await waitUntil(timeout: .seconds(10)) { !endedPermissions(recorder, id).isEmpty }
+
+    // Events arrive in order: if the second answer had ended it again, that end would come before this request.
+    try await raise(engine, id, [.notifications])
+    try await waitUntil(timeout: .seconds(10)) { requestedPermissions(recorder, id).count == 2 }
+    try require(endedPermissions(recorder, id) == [request.id],
+                "an answered request must end once: \(recorder.events(for: id))")
+    let second = try requireValue(requestedPermissions(recorder, id).last, "second request")
+    try require(second.kinds == [.notifications], "the second ask is notifications: \(second)")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+  }
+
+  public static func pendingPermissionEndsBeforeItsTabCloses(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raisePermission, "raisePermission")
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Permission"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try await raise(engine, id, [.camera])
+    try await waitUntil(timeout: .seconds(10)) { !requestedPermissions(recorder, id).isEmpty }
+    let request = try requireValue(requestedPermissions(recorder, id).first, "permission request")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+    try await waitUntil(timeout: .seconds(10)) { recorder.events(for: id).contains { if case .tabClosed = $0 { true } else { false } } }
+    let tail = Array(recorder.events(for: id).suffix(2))
+    try require(tail == [.permissionEnded(id, request.id), .tabClosed(id, reason: .client)],
+                "the request must end before the tab closes: \(tail)")
+    engine.respond(toPermission: request.id, choice: .allow)        // ended: nothing happens
+  }
+
+  public static func navigationEndsItsPermission(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raisePermission, "raisePermission")
+    let engine = h.makeEngine()
+    let id = engine.createTab(url: try h.pageURL("Permission"))
+    try await h.settle(engine, id)
+    let recorder = EventRecorder(engine)
+    try await raise(engine, id, [.geolocation])
+    try await waitUntil(timeout: .seconds(10)) { !requestedPermissions(recorder, id).isEmpty }
+    let request = try requireValue(requestedPermissions(recorder, id).first, "permission request")
+    engine.navigate(id, to: try h.pageURL("Elsewhere"))
+    try await waitUntil(timeout: .seconds(10)) { endedPermissions(recorder, id).contains(request.id) }
+    engine.respond(toPermission: request.id, choice: .allow)        // ended: nothing happens
+    try require(endedPermissions(recorder, id) == [request.id], "a navigation ends it once: \(recorder.events(for: id))")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+  }
+
+  public static func hiddenTabEndsItsPermissionAndAsksAgain(_ h: EngineHarness) async throws {
+    let raise = try driver(h.raisePermission, "raisePermission")
+    let engine = h.makeEngine()
+    let window = engine.createWindow(host: h.makeWindowHost())
+    let shown = engine.createTab(url: try h.pageURL("Permission"), in: window)
+    let other = engine.createTab(url: try h.pageURL("Other"), in: window)
+    try await h.settle(engine, shown)
+    try await h.settle(engine, other)
+    try await wait("the first tab to be active") { engine.activeTab(in: window) == shown }
+    let recorder = EventRecorder(engine)
+    try await raise(engine, shown, [.geolocation])
+    try await waitUntil(timeout: .seconds(10)) { requestedPermissions(recorder, shown).count == 1 }
+    let first = try requireValue(requestedPermissions(recorder, shown).first, "permission request")
+    engine.activateTab(other)
+    try await waitUntil(timeout: .seconds(10)) { endedPermissions(recorder, shown).contains(first.id) }
+    engine.respond(toPermission: first.id, choice: .allow)                  // ended: nothing happens
+    engine.activateTab(shown)
+    try await waitUntil(timeout: .seconds(10)) { requestedPermissions(recorder, shown).count == 2 }
+    let again = try requireValue(requestedPermissions(recorder, shown).last, "second request")
+    try require(again.id != first.id && again.items == first.items && again.kinds == first.kinds,
+                "a shown tab asks again with a new request: \(recorder.events(for: shown))")
+    try require(endedPermissions(recorder, shown) == [first.id], "the first request ended once: \(recorder.events(for: shown))")
+    engine.respond(toPermission: again.id, choice: .block)
   }
 
   /// Waits for the snapshot to show the expected availability, then checks the last event agrees with it.

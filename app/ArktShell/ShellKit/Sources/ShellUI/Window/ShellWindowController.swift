@@ -147,6 +147,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public private(set) lazy var peek = PeekController(shell: self)
   /// A page's `alert()`, `confirm()` and `prompt()` as panels over the page (#400); see `+JavaScriptDialogs`.
   private(set) lazy var javaScriptDialogs = makeJavaScriptDialogPresenter()
+  /// A site's camera, microphone, location or notifications request as a panel over the page (#400); see
+  /// `+Permissions`.
+  private(set) lazy var permissionPrompts = makePermissionPresenter()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
@@ -185,7 +188,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
     root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
-    root.onLayout = { [weak self] in self?.javaScriptDialogs.layoutDidFinish() }      // #400
+    root.onLayout = { [weak self] in
+      self?.javaScriptDialogs.layoutDidFinish()                                      // #400
+      self?.permissionPrompts.layoutDidFinish()
+    }
     engineHost.controller = self
     window.commandHost = engineHost
     let toastView = ToastView(frame: .zero)
@@ -640,6 +646,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     for node in hidden { onTabHidden?(node) }
     peek.shownTabsDidChange()
     javaScriptDialogs.refresh()
+    permissionPrompts.refresh()
   }
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -663,6 +670,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     switch event {
     case .dialogRequested, .dialogEnded:
       javaScriptDialogs.handle(event)                               // #400
+      return
+    case .permissionRequested, .permissionEnded:
+      permissionPrompts.handle(event)
       return
     default:
       break
@@ -700,8 +710,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       closeWasCancelled(tab, node: node)
     case .audibleChanged(let tab, _), .mutedChanged(let tab, _):
       audioChanged(tab, node: node)                                 // #364
-    case .tabCreated, .titleChanged, .loadingChanged, .dialogRequested, .dialogEnded:
-      break                                                         // dialogs: `handle` routed them above
+    case .tabCreated, .titleChanged, .loadingChanged, .dialogRequested, .dialogEnded, .permissionRequested,
+         .permissionEnded:
+      break                                                         // dialogs and prompts: `handle` routed them above
     }
   }
 
@@ -806,6 +817,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
     javaScriptDialogs.closeAll()
+    permissionPrompts.closeAll()
     peek.invalidate()
     commandBar.invalidate()
     rootView.sidebarOverlay.invalidate()

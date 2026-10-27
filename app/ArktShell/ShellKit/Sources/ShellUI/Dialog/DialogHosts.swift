@@ -181,7 +181,14 @@ public final class DialogPanel {
   let view: DialogSheetView
   let container: NSView
   public var onAnswer: (@MainActor (DialogContent.Answer) -> Void)?
+  /// Escape closed a dialog whose content `escapeDismisses`: no answer, the panel leaves at once.
+  public var onDismiss: (@MainActor () -> Void)?
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// The time the input protection reads (seconds); tests inject it.
+  var clock: @MainActor () -> TimeInterval {
+    get { view.clock }
+    set { view.clock = newValue }
+  }
   /// The last answer came from a key (Return, Escape): the panel leaves at once.
   private var keyboardAnswer = false
 
@@ -213,6 +220,7 @@ public final class DialogPanel {
       return self?.view.escape() ?? false
     }
     view.onAnswer = { [weak self] answer in self?.finish(answer) }
+    view.onDismiss = { [weak self] in self?.finishDismissed() }
     container.layer?.borderColor = AlertTokens.overlayEdge.resolve(view.archiveFlavor).cgColor
   }
 
@@ -239,6 +247,7 @@ public final class DialogPanel {
     panel.setFrame(frame(anchoredTo: anchor), display: false)
     parent.addChildWindow(panel, ordered: .above)
     panel.orderFront(nil)
+    view.beginInputProtection()
     if takesFocus {
       panel.makeKey()
       panel.makeFirstResponder(view.initialFocus)            // a field starts editing with its text selected
@@ -296,7 +305,17 @@ public final class DialogPanel {
     keyboardAnswer = false
     let callback = onAnswer
     onAnswer = nil
+    onDismiss = nil
     close(keyboard: keyboard)
     callback?(answer)
+  }
+
+  private func finishDismissed() {
+    keyboardAnswer = false
+    let callback = onDismiss
+    onAnswer = nil
+    onDismiss = nil
+    close(keyboard: true)
+    callback?()
   }
 }

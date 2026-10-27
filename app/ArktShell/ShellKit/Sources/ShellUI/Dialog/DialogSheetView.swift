@@ -22,6 +22,7 @@ final class DialogSheetView: NSView {
   static let iconGap: CGFloat = 12
   static let paragraphGap: CGFloat = 12
   static let footerGap: CGFloat = 20
+  static let stackedGap: CGFloat = 16
   static let buttonGap: CGFloat = 8
   static let bodyLineHeight: CGFloat = 19      // 13 pt at 1.45
   static let listMaxHeight: CGFloat = 260
@@ -46,6 +47,11 @@ final class DialogSheetView: NSView {
   var onAnswer: (@MainActor (DialogContent.Answer) -> Void)?
   /// Called when the footer link is pressed (the dialog stays).
   var onFooterLink: (@MainActor () -> Void)?
+  /// Called when Escape closes a dialog whose content `escapeDismisses`.
+  var onDismiss: (@MainActor () -> Void)?
+  /// The time the input protection reads (seconds); tests inject it.
+  var clock: @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+  private var protectedUntil: TimeInterval?
 
   init(content: DialogContent, insets: Insets = .sheet) {
     self.content = content
@@ -58,7 +64,8 @@ final class DialogSheetView: NSView {
     inputView = content.input.map { DialogInputView(input: $0) }
     listField = content.listItems.isEmpty ? nil : DialogListView(heading: content.listHeading, items: content.listItems)
     footerLinkButton = content.footerLink.map { ArchiveLinkButton(style: .secondary, title: $0, fontSize: 13) }
-    primaryButton = ArchivePillButton(style: content.isDestructive ? .destructive : .primary,
+    primaryButton = ArchivePillButton(style: content.isDestructive ? .destructive
+                                        : content.neutralPrimary ? .neutral : .primary,
                                       title: content.primaryTitle, metrics: .dialog)
     secondaryButton = content.secondaryTitle.map { ArchivePillButton(style: .neutral, title: $0, metrics: .dialog) }
     cancelButton = content.cancelTitle.map { ArchivePillButton(style: .neutral, title: $0, metrics: .dialog) }
@@ -226,13 +233,23 @@ final class DialogSheetView: NSView {
       y = listField.frame.maxY
     }
     if besideIcon, let iconView { y = max(y, iconView.frame.maxY) }
-    y += Self.footerGap
     let height = DialogMetrics.buttonHeight
-    var right = width - side
-    for button in [primaryButton, secondaryButton, cancelButton].compactMap({ $0 }) {
-      let buttonWidth = ceil(button.intrinsicContentSize.width)
-      button.frame = NSRect(x: right - buttonWidth, y: y, width: buttonWidth, height: height)
-      right = button.frame.minX - Self.buttonGap
+    if content.stackedButtons {
+      // Full-width pills, primary first, 8 apart and 16 above (section 3.2).
+      y += Self.stackedGap
+      for button in [primaryButton, secondaryButton, cancelButton].compactMap({ $0 }) {
+        button.frame = NSRect(x: side, y: y, width: max(0, width - 2 * side), height: height)
+        y += height + Self.buttonGap
+      }
+      y -= Self.buttonGap + height
+    } else {
+      y += Self.footerGap
+      var right = width - side
+      for button in [primaryButton, secondaryButton, cancelButton].compactMap({ $0 }) {
+        let buttonWidth = ceil(button.intrinsicContentSize.width)
+        button.frame = NSRect(x: right - buttonWidth, y: y, width: buttonWidth, height: height)
+        right = button.frame.minX - Self.buttonGap
+      }
     }
     if let footerLinkButton {
       footerLinkButton.sizeToFit()
@@ -259,13 +276,30 @@ final class DialogSheetView: NSView {
 
   // MARK: - Answers
 
-  @objc func primaryPressed(_ sender: Any?) { onAnswer?(.primary) }
-  @objc func secondaryPressed(_ sender: Any?) { onAnswer?(.secondary) }
-  @objc func cancelPressed(_ sender: Any?) { onAnswer?(.cancel) }
+  /// Starts the input protection (`content.inputProtection`): until it has run out, button presses and Return answer
+  /// nothing. Called when the dialog appears.
+  func beginInputProtection() {
+    protectedUntil = content.inputProtection > 0 ? clock() + content.inputProtection : nil
+  }
+
+  /// Whether presses are ignored now.
+  var isInputProtected: Bool {
+    guard let protectedUntil else { return false }
+    return clock() < protectedUntil
+  }
+
+  @objc func primaryPressed(_ sender: Any?) { if !isInputProtected { onAnswer?(.primary) } }
+  @objc func secondaryPressed(_ sender: Any?) { if !isInputProtected { onAnswer?(.secondary) } }
+  @objc func cancelPressed(_ sender: Any?) { if !isInputProtected { onAnswer?(.cancel) } }
   @objc func footerLinkPressed(_ sender: Any?) { onFooterLink?() }
 
-  /// Escape: Cancel when the dialog has one and Escape answers it. True when handled.
+  /// Escape: closes a dialog that `escapeDismisses` without an answer; else Cancel when the dialog has one and Escape
+  /// answers it. True when handled.
   func escape() -> Bool {
+    if content.escapeDismisses {
+      onDismiss?()
+      return true
+    }
     guard content.escapeAnswersCancel else { return false }
     onAnswer?(.cancel)
     return true

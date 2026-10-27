@@ -91,6 +91,20 @@ final class FakeEngineContractTests: XCTestCase {
   func testHiddenTabEndsItsConfirmAndPrompt() async throws {
     try await notApplicable { try await EngineContract.hiddenTabEndsItsConfirmAndPrompt(harness) }
   }
+  // Rule 20 (#400): WKWebView asks for camera, microphone and location through its own delegates; the FakeEngine raises
+  // none.
+  func testPermissionIsReportedAnsweredAndEndedOnce() async throws {
+    try await notApplicable { try await EngineContract.permissionIsReportedAnsweredAndEndedOnce(harness) }
+  }
+  func testPendingPermissionEndsBeforeItsTabCloses() async throws {
+    try await notApplicable { try await EngineContract.pendingPermissionEndsBeforeItsTabCloses(harness) }
+  }
+  func testNavigationEndsItsPermission() async throws {
+    try await notApplicable { try await EngineContract.navigationEndsItsPermission(harness) }
+  }
+  func testHiddenTabEndsItsPermissionAndAsksAgain() async throws {
+    try await notApplicable { try await EngineContract.hiddenTabEndsItsPermissionAndAsksAgain(harness) }
+  }
 
   /// FakeEngine only: a tab that is not in a window has nothing to snapshot.
   func testPageImageOfAnUnshownTabIsNil() async throws {

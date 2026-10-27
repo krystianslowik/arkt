@@ -129,16 +129,25 @@ public enum EngineEvent: Equatable, Sendable {
   /// dialog, the tab closing, a confirm or prompt in a tab that was hidden). Exactly one per request, and before the
   /// `.tabClosed` of its tab (contract rule 19).
   case dialogEnded(TabID, DialogID)
+  /// A site asks for a permission (contract rule 20). At most one is pending per tab. A tab that stops being shown ends
+  /// its request unanswered and gets a new request, with a new id, when it is shown again.
+  case permissionRequested(PermissionRequest)
+  /// The permission request is over, however it ended: the shell answered it, or the engine ended it (a navigation,
+  /// the tab hidden or closing, the site withdrawing it). Exactly one per request, and before the `.tabClosed` of its
+  /// tab (contract rule 20).
+  case permissionEnded(TabID, PermissionRequestID)
 
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id, _), .urlChanged(let id, _), .titleChanged(let id, _),
          .faviconChanged(let id, _), .loadingChanged(let id, _), .historyChanged(let id, _, _),
          .activeTabChanged(let id), .closeCancelled(let id), .audibleChanged(let id, _), .mutedChanged(let id, _),
-         .dialogEnded(let id, _):
+         .dialogEnded(let id, _), .permissionEnded(let id, _):
       return id
     case .dialogRequested(let dialog):
       return dialog.tab
+    case .permissionRequested(let request):
+      return request.tab
     }
   }
 }
@@ -211,6 +220,10 @@ public protocol EngineClient: AnyObject {
   /// is a prompt's text. Reported with one `.dialogEnded`. A no-op for a dialog that already ended, so a click that
   /// races the engine's own end does nothing. Default: a no-op, for an engine that raises no dialogs.
   func respond(to dialog: DialogID, accepted: Bool, userInput: String?)
+  /// Answers a pending permission request (#400, contract rule 20). Reported with one `.permissionEnded`. A no-op for a
+  /// request that already ended or was answered, so a click that races the engine's own end does nothing. Default: a
+  /// no-op, for an engine that raises none.
+  func respond(toPermission request: PermissionRequestID, choice: PermissionChoice)
   /// An image of the tab's current frame within `request`'s caps (#370 thumbnails, #352 Little Arkt's flight; contract
   /// rule 18). The copy, scale and encode run off the main thread; the caller only awaits. Nil for an unknown or closed
   /// tab and for a tab with no frame to copy (not drawn yet, hidden long enough to be evicted, discarded); the tab is
@@ -258,6 +271,8 @@ extension EngineClient {
   public func moveTab(_ id: TabID, to window: EngineWindowID) {}
 
   public func respond(to dialog: DialogID, accepted: Bool, userInput: String?) {}
+
+  public func respond(toPermission request: PermissionRequestID, choice: PermissionChoice) {}
 
   public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? { nil }
 

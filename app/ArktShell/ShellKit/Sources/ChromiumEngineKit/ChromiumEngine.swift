@@ -94,6 +94,15 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   var pendingDialogs: [DialogID: PendingDialog] = [:]
   var dialogByHandle: [ObjectIdentifier: DialogID] = [:]
 
+  /// A permission request the shell has been told about and nothing has ended yet (#400, contract rule 20).
+  struct PendingPermission {
+    let id: PermissionRequestID
+    let tab: TabID
+    let handle: any ArktPermissionRequest
+  }
+  var pendingPermissions: [PermissionRequestID: PendingPermission] = [:]
+  var permissionByHandle: [ObjectIdentifier: PermissionRequestID] = [:]
+
   /// Builds the shell window for a window the engine creates on its own (Decision 2). Must not call the engine; the
   /// window is usable after its `.windowOpened`.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -333,6 +342,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   func removeTab(_ id: TabID) {
     guard tabs[id] != nil else { return }
     endDialogs(of: id)             // contract rule 19: before the tab's `.tabClosed`
+    endPermissions(of: id)         // contract rule 20: likewise
     guard let record = tabs.removeValue(forKey: id) else { return }
     tabIDs.removeAll { $0 == id }
     tabByHandle[ObjectIdentifier(record.handle)] = nil

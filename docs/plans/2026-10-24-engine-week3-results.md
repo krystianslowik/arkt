@@ -3447,3 +3447,113 @@ Chromium patch, no facade change.
   one is not drawn (#455).
 - No card shadow during the flight (a shadow path per frame would be extra per-frame work; #456).
 - If the main window goes away mid-flight, the page stays in the Little Arkt window.
+
+## #400: slice 2, permission prompts in the shell's dialog panel
+
+Date 2026-10-27. Branch `engine/400-permission-prompts` off `main` at `b56a582`. Plan: the engine plan comment on #400.
+Second of three slices (JavaScript dialogs, permission prompts, infobars); the pull request is `Refs #400`.
+
+### What landed
+
+- **Hook, no patch.** `arkt_permission_prompt.mm` already owns the `PermissionPrompt` factory. Its prompt now builds the
+  request's values once (origin, title, one phrase and kind per request, the allow, allow-this-time and block titles; all
+  Chromium's strings) and, when the tab's window has an embedder host and the facade has a sink, hands them to a new
+  presenter seam (`SetPermissionPresenter`, as the JavaScript dialogs do). The presented prompt draws nothing; the
+  engine-drawn `ArktDialogSheet` stays the fallback (placeholder host, self-test host without a sink). The prompt owns an
+  `ArktPermissionAsk`; the manager deletes the prompt on a tab switch (request stays pending), a navigation, a withdrawn
+  request, an answer or the tab closing, and the prompt's destructor ends the ask, so exactly one `PermissionEnded`
+  follows every `PermissionRequested`, and the delegate is called only from the shell's one answer (a second answer or an
+  answer after the end returns NO). `.patches` stays 9 = `git rev-list --count 156.0.8078.48..arkt` 9. No `BUILD.gn` change.
+- **Facade header (both copies, additive; `cmp` identical).** Event kinds `PermissionRequested` (18) and
+  `PermissionEnded` (19), `permission` on `ArktEngineEvent`, `ArktPermissionKind` (other, geolocation, notifications,
+  camera, microphone), `ArktPermissionChoice` (allow, allow this time, block, dismiss) and the `ArktPermissionRequest`
+  protocol (tab, origin, kinds, title, items, the three titles, `isEnded`, `-respondWithChoice:`).
+- **EngineAPI.** `PermissionRequest`, `PermissionRequestID`, `PermissionKind`, `PermissionChoice`,
+  `EngineEvent.permissionRequested` / `.permissionEnded`, `EngineClient.respond(toPermission:choice:)` (default no-op).
+  Contract rule 20 (four checks): a request carries the engine's values and ends once when answered; it ends before its
+  tab's `.tabClosed`; a navigation ends it; a hidden tab ends it unanswered and asks again with a new request when shown.
+  `ChromiumEngine` ends a tab's pending requests before it reports the tab closed even when the facade reports the end
+  after `TabClosed`. `InMemoryEngine` gains the `askPermission` / `withdrawPermission` drivers and `permissionAnswers`;
+  `ScriptedFacade` models the manager (hide keeps the ask, show asks again). FakeEngine reports rule 20 as not applicable
+  (WKWebView asks through its own delegates), as for rule 19.
+- **ShellUI.** `PermissionPresenter` shows each pending request of a shown tab as the slice 1 `DialogPanel`
+  (top-leading corner 12 pt inside the page, 320 pt wide, no key focus: the page keeps its field until the panel is
+  clicked), stacked full-width neutral pills (Allow while visiting the site, Allow this time, Never allow; notifications:
+  Allow, Block), the origin in the title, what it wants as the recessed list, no Return default. `DialogContent` gains
+  `stackedButtons`, `neutralPrimary`, `escapeDismisses` and `inputProtection`; `DialogPanel` gains `onDismiss` and an
+  injected `clock`. Input protection: for 0.5 s after the panel is shown, presses on any answer button (and so Return,
+  though nothing is the default) answer nothing; Escape still dismisses. The panel's own clock is injected, so the tests
+  step it by hand.
+
+### Checks (Engine app on `out/Spike`, bundle id `dev.arkt.Arkt.try400p` (own id), copy on the internal disk in a throwaway folder, throwaway shell data folder and profile, defaults suite `arkt-test-400p`, `--use-mock-keychain`, a loopback page on `127.0.0.1:18401` and `localhost:18401`, keys and clicks only while the test app was the frontmost process, pointer moved before each press)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Notifications request | PASS | Arkt panel "http://127.0.0.1:18401 wants to", "Show notifications", Allow and Block; `permission prompt presented to the shell requests=1 one_time=0 quiet=0` |
+| Allow reaches the page | PASS | Allow: page title `notif-granted`; engine log `answer 0` then one `PermissionEnded` |
+| Block reaches the page | PASS | camera Never allow: page `cam-NotAllowedError`; notifications Block on `localhost`; `answer 2` |
+| Quiet request | PASS | the geolocation ask after a camera answer logged `quiet=1` and showed the full panel (#265 decision) |
+| Tab switched away | PASS | new tab: panel gone, `PermissionEnded` in the same batch as `TabCreated`; the page still waiting (`cam-asking`) |
+| Tab switched back | PASS | the panel came back at once (a second `PermissionRequested`), as Chromium re-shows a pending ask |
+| Input protection | PASS (second run; see the note below the table) | a button placed under the panel's Never allow spot: click 1 (page asks), click 2 about 0.1 s later hits the panel: page title stays `mic-asking-1` (the click did not reach the page), no answer logged; a click 2 s after the request answers (`answer 2`, page `mic-NotAllowedError`) |
+| No Chromium bubble | PASS | System Events window list of the browser process with the panel up: the main window and one 320 x 179 panel; no other window; one window after the answer |
+| Stderr | PASS | no `FATAL`, no `NOTREACHED` in the permission runs |
+
+The first input-protection attempt was not clean: a tab opened by Cmd-T a few seconds earlier showed no panel in a
+screenshot 0.4 s after `presented`, and a click about 1.6 s after the request reached the page, not the panel; the panel
+was up by the next screenshot. It did not repeat after a reload of the page (the run in the table). Cause not found; the
+engine log shows the request, the facade event and the batch within a millisecond of each other, so the delay is on the
+shell side (panel creation or the window layout of a new tab). Worth a look when the real-app check is repeated.
+
+### Verification
+
+- Red first: the new tests did not compile before the types existed (`ScriptedEvent` and `TestEvent` had no `permission`,
+  `EngineEvent` switches were not exhaustive). Then broken on purpose and restored: taking the press guard out of
+  `DialogSheetView.primaryPressed` failed `testPressesAreIgnoredForHalfASecondAndWorkAfter` and
+  `testEachNewPanelStartsItsOwnProtection`; taking `endPermissions(of:)` out of `ChromiumEngine.removeTab` failed
+  `closingTheTabEndsTheRequestBeforeTabClosedEvenWhenTheFacadeReportsItAfter` and the contract check
+  `pendingPermissionEndsBeforeItsTabCloses` (both scripted orders).
+- ShellKit `swift test --skip ShellKitGUITests`: 1436 passed (9 test runs: 812, 38, 43, 4, 134, 49, 256, 82, 18), 0
+  failed: baseline 1399 + 37 (6 `PermissionContentTests`, 11 `PermissionRequestTests`, 7 `ChromiumPermissionTests`, 1
+  `PermissionRequestABITests`, 4 in-memory contract checks, 8 scripted contract checks: 4 over the two scripted orders;
+  the baseline is the total minus the new tests, not a run on `main`). ArktCore `swift test`: 429 passed (144, 117, 70, 98), unchanged.
+- GUI tests run: `PermissionPresenterTests` (15), `PermissionWindowTests` (3), `DialogTests`, `DeleteSpaceTests`,
+  `JavaScriptDialog*`, `AccessibilityIdentifierTests`, `FakeEngineContractTests` (rule 20 not applicable: skipped);
+  112 run, 14 skipped, 0 failures. The rest of the GUI suite was not run.
+- `nice -n 15 autoninja -C out/Spike chrome -j 4`: `The build has finished successfully.` Engine app: `xcodegen generate`, then
+  `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try400p`: `BUILD SUCCEEDED`.
+  `out/Arkt` was not rebuilt for this slice (nothing in the release build differs from `out/Spike`'s sources).
+- `cmp` of the two header copies: identical. `.patches` 9 = `rev-list` 9.
+
+### Deviations
+
+- The 0.5 s protection ignores all three answers and Return, not only the allow ones as the engine panel does, and it
+  does not dim the buttons (no timer: the clock is read on each press, which keeps it testable by hand). Escape is not
+  held back.
+- Escape dismisses without choosing (Chromium counts it as ignored), as the engine's panel and the plan comment; the
+  design doc's section 3.3 line "Escape answers Never Allow" is the older wording.
+- Copy is Chromium's, not shell-authored ("wants to", "Know your location", the allow and block titles); the origin is
+  Chromium's own formatting, scheme and port included for a loopback page.
+- The in-app contract runner has no `raisePermission` driver (Chromium needs a foremost tab and a user gesture), so rule
+  20 is not applicable there; real Chromium is covered by the checks above.
+- `PermissionPresenter` repeats the anchor, visibility and layout-retry handling of `JavaScriptDialogPresenter`; a shared
+  anchored-panel helper is a clean-up for slice 3 once infobars show whether a third user exists.
+
+### Found while checking, not part of this change
+
+- On the very first launch with empty data, `Skip setup` on the first-run flow crashed the app (`NOTREACHED`, "Attempted
+  to access a context that was ShutDown()", from `CreateBrowserWindow` through `OnboardingController.finish` and
+  `ShellWindowController.openEngineTab`): the engine's startup window had been closed before any shell window existed.
+  Relaunching with the same data folder resumed the flow and everything worked. It happens before any permission code
+  runs; not filed from this branch, described in the pull request for the maintainer to file.
+- Grant of location, camera or microphone for real still goes through macOS's own prompts (TCC); this slice answers
+  Chromium's ask only. That is #133.
+
+### Left open
+
+- Slice 3: infobars (`InfobarsChanged`, a shell row from the design's `infobar` state).
+- Per-site remembered settings and the Site Control Center are #133; Chromium's own content settings keep the answer.
+- The `<permission>` element and pointer and keyboard lock prompts keep Chromium's prompt (#265).
+- Cleanup: the test copy, throwaway data, the 518 cloned dylibs, `embed-400p` and the app's derived data on the Chromium
+  disk are removed. Launching by path had registered the two app copies with LaunchServices under
+  `dev.arkt.Arkt.try400p` (8 records); `lsregister -u` on both paths left none (`lsregister -dump` counts 0).

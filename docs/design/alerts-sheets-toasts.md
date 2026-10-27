@@ -44,7 +44,7 @@ engine as the existing comments already do.
 | Archive of several tabs (Clear, Archive Below, multi-selection) | no toast today | toast / undo (new) | `toast-undo` |
 | Recovery | persistent toast with Show Files, one line, truncates at 480 pt | toast / persistent, multi-line | `toast-recovery` |
 | Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn) | `ext-install`, `ext-remove` |
-| Permission prompts | engine `ArktDialogSheet` as an anchored panel, fade-in 0.14 s | dialog / anchored panel (engine-drawn) | `permission` |
+| Permission prompts | shell `DialogPanel` as an anchored panel (#400); the engine's `ArktDialogSheet` stays the fallback while no embedder presents it | dialog / anchored panel | `permission` |
 | Infobars | engine `ArktInfobarView` rows, 40 pt, fade-in 0.14 s | infobar (engine-drawn) | `infobar` |
 
 Found while inventorying: the recovery texts are about 100 characters and `ToastView` is one truncating line at most
