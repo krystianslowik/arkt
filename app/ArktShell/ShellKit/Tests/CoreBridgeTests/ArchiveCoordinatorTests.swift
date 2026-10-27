@@ -12,9 +12,6 @@ struct ArchiveCoordinatorTests {
   private static let url = URL(string: "https://a.example")!
   /// Distinct from the first backoff (1 s), so the tests can tell the two sleeps apart.
   private static let flushTimeout: Duration = .milliseconds(700)
-  /// For blocking-flush tests that expect the write to land: a wall-clock bound, so it must stay far above how long a
-  /// busy test run can keep the global executor from starting the store call.
-  private static let blockingFlushTimeout: Duration = .seconds(10)
 
   /// A source with one Space ("Work") holding a pinned tab and Today tabs `today` (top first), a store, a sleeper
   /// and the coordinator over them, plus every change and `onDidChange` the source reports.
@@ -32,7 +29,10 @@ struct ArchiveCoordinatorTests {
     var didChangeCount = 0
     private var observation: SidebarObservation?
 
-    init(todayTabs: Int = 2, withSpace: Bool = true, flushTimeout: Duration = ArchiveCoordinatorTests.flushTimeout) throws {
+    init(
+      todayTabs: Int = 2, withSpace: Bool = true, flushTimeout: Duration = ArchiveCoordinatorTests.flushTimeout,
+      blockingFlushIsBounded: Bool = true
+    ) throws {
       let source = ModelSidebarSource(now: { ArchiveCoordinatorTests.now })
       self.source = source
       let clock = TestClock(ArchiveCoordinatorTests.now)
@@ -49,7 +49,7 @@ struct ArchiveCoordinatorTests {
       }
       coordinator = ArchiveCoordinator(
         source: source, store: store, now: { clock.now },
-        flushTimeout: flushTimeout, sleep: sleeper.sleep)
+        flushTimeout: flushTimeout, blockingFlushIsBounded: blockingFlushIsBounded, sleep: sleeper.sleep)
       observation = source.observe { [unowned self] in self.changes.append($0) }
       source.onDidChange = { [unowned self] _ in self.didChangeCount += 1 }
     }
@@ -276,7 +276,7 @@ struct ArchiveCoordinatorTests {
   // MARK: - Blocking flush (#298: SIGTERM quit start, the main thread blocks right after)
 
   @Test func flushBlockingWritesTheOutboxWhileTheMainActorWaits() async throws {
-    let harness = try Harness(todayTabs: 2, flushTimeout: Self.blockingFlushTimeout)
+    let harness = try Harness(todayTabs: 2, blockingFlushIsBounded: false)
     let items = harness.coordinator.archive([harness.today[0], harness.today[1]], reason: .manual)
 
     #expect(harness.coordinator.flushBlocking())  // synchronous: the writer task never got the main actor
@@ -289,6 +289,15 @@ struct ArchiveCoordinatorTests {
 
     await harness.drain()  // the writer sends the same add again: a harmless `.replace`
     #expect(Set(await harness.store.stored.values) == Set(items))
+  }
+
+  @Test func unboundedFlushBlockingWaitsForTheWriteEvenWhenItOutlastsFlushTimeout() async throws {
+    // A 1 ns flushTimeout would expire before any store call could land; the unbounded wait ignores it.
+    let harness = try Harness(flushTimeout: .nanoseconds(1), blockingFlushIsBounded: false)
+    let items = harness.coordinator.archive([harness.today[0]], reason: .manual)
+
+    #expect(harness.coordinator.flushBlocking())
+    #expect(await harness.store.stored[items[0].id] == items[0])
   }
 
   @Test func flushBlockingWithNothingPendingReturnsTrue() throws {
@@ -322,7 +331,7 @@ struct ArchiveCoordinatorTests {
   }
 
   @Test func flushBlockingSendsAfterTheAddInFlight() async throws {
-    let harness = try Harness(todayTabs: 2, flushTimeout: Self.blockingFlushTimeout)
+    let harness = try Harness(todayTabs: 2, blockingFlushIsBounded: false)
     await harness.store.holdAdds()
     let first = harness.coordinator.archive([harness.today[0]], reason: .manual)
     await eventually { await harness.store.addCalls.count == 1 }  // in flight, held by the store
@@ -343,7 +352,7 @@ struct ArchiveCoordinatorTests {
   }
 
   @Test func flushBlockingDropsAFailingRemoveSoItCannotHoldBackAnAdd() async throws {
-    let harness = try Harness(flushTimeout: Self.blockingFlushTimeout)
+    let harness = try Harness(blockingFlushIsBounded: false)
     let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
     await harness.drain()
     await harness.store.setFailsRemoves(true)
