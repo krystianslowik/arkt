@@ -95,7 +95,7 @@ and [implementation plans](docs/plans) track the work.
 
 ### Bring your structure across
 
-The importer is designed to carry your Spaces, pinned tabs, folders and Favorites from Arc into Arkt.
+The importer is designed to carry your Spaces, pinned tabs, folders and Favorites from Arc into Arkt. To see the shape of an Arc profile before importing, run the counts-only probe: see [docs/arc-import-probe.md](docs/arc-import-probe.md).
 
 <p align="center">
   <a href="design/readme/screens/advanced-light.png">
