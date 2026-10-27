@@ -46,6 +46,10 @@ final class ShellWindowKeyTests: XCTestCase {
       item.target = probe
       file.addItem(item)
     }
+    let space = NSMenuItem(title: "Space 1", action: #selector(MenuProbe.hit(_:)), keyEquivalent: "1")
+    space.keyEquivalentModifierMask = .control
+    space.target = probe
+    file.addItem(space)
     holder.submenu = file
     menu.addItem(holder)
     NSApp.mainMenu = menu
@@ -59,6 +63,27 @@ final class ShellWindowKeyTests: XCTestCase {
 
     XCTAssertEqual(probe.hits, ["Archive Tab"])
     XCTAssertEqual(view.keyEquivalents, 0, "the focused view never saw Cmd-W")
+  }
+
+  /// #489: Ctrl-1 has no Cmd, so the engine never hands it back from a page that declined it; it must reach the menu
+  /// before the focused page view, as after a reload, when the page holds the keyboard.
+  func testCtrlDigitReachesTheMenuBeforeAFocusedViewThatSwallowsKeyEquivalents() throws {
+    let (window, view, probe) = try makeWindow()
+
+    XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_1, .maskControl)))
+
+    XCTAssertEqual(probe.hits, ["Space 1"])
+    XCTAssertEqual(view.keyEquivalents, 0, "the focused view never saw Ctrl-1")
+  }
+
+  /// The page keeps the Ctrl keys the menu has no item for (a terminal in the page uses Ctrl-A, Ctrl-C).
+  func testACtrlKeyWithoutAMenuItemGoesToTheFocusedView() throws {
+    let (window, view, probe) = try makeWindow()
+
+    XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_A, .maskControl)))
+
+    XCTAssertEqual(view.keyEquivalents, 1)
+    XCTAssertTrue(probe.hits.isEmpty)
   }
 
   func testAnUnreservedKeyGoesToTheFocusedViewFirst() throws {

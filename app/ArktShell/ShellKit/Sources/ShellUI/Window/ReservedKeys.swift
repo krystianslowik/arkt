@@ -35,6 +35,11 @@ public struct ReservedKeys: Sendable {
   /// Ctrl-Tab and Ctrl-Shift-Tab (#103; `ShellWindow.sendEvent` already hands those to the switcher before any view).
   /// The copy-link keys (KB-013 to KB-016, #118) are here too: a page must not swallow them. Incognito
   /// (Shift-Cmd-N) joins when Arkt has it. Cmd-Z stays the page's first (`ReopenUndoRouter`).
+  ///
+  /// #489: every main-menu key equivalent without Cmd is reserved too: Space 1 to 9 (Ctrl-1 ... Ctrl-9) and the Split
+  /// View items (Ctrl-Shift-=, -, ], [, 1 ... 4). A focused page takes any key equivalent first, and the engine hands
+  /// only the Cmd keys it did not use back to the menu (`ArktBrowserWindow::HandleKeyboardEvent`), so without this a
+  /// page that has focus (after every reload) drops them.
   public static let arkt = ReservedKeys([
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: .command),
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: [.command, .shift]),
@@ -53,7 +58,23 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_LeftArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_Tab, character: "", modifiers: .control),
     Key(keyCode: kVK_Tab, character: "", modifiers: [.control, .shift]),
-  ])
+  ] + spaceKeys + splitKeys)
+
+  /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041: `SpacesMenu`).
+  private static let spaceKeys: [Key] = digits.map {
+    Key(keyCode: $0.code, character: $0.character, modifiers: .control)
+  }
+
+  /// Ctrl-Shift-=, -, ], [ and Ctrl-Shift-1 ... 4 (KB-070 to KB-072: `SplitMenu`), the unshifted US characters.
+  private static let splitKeys: [Key] = (
+    [(kVK_ANSI_Equal, "="), (kVK_ANSI_Minus, "-"), (kVK_ANSI_RightBracket, "]"), (kVK_ANSI_LeftBracket, "[")]
+      + digits.prefix(4).map { ($0.code, $0.character) }
+  ).map { Key(keyCode: $0.0, character: $0.1, modifiers: [.control, .shift]) }
+
+  private static let digits: [(code: Int, character: String)] = [
+    (kVK_ANSI_1, "1"), (kVK_ANSI_2, "2"), (kVK_ANSI_3, "3"), (kVK_ANSI_4, "4"), (kVK_ANSI_5, "5"),
+    (kVK_ANSI_6, "6"), (kVK_ANSI_7, "7"), (kVK_ANSI_8, "8"), (kVK_ANSI_9, "9"),
+  ]
 
   /// The modifiers a key equivalent is compared on: Cmd, Shift, Option and Control. Arrow keys also carry
   /// `.function` and `.numericPad`, and Caps Lock changes nothing.
