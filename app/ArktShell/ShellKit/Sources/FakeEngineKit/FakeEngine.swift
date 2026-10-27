@@ -5,7 +5,9 @@ import EngineAPI
 /// Development stand-in for the Chromium engine. Renders with WKWebView.
 /// Windows and activation follow contract rules 11, 12 and 15. Every tab has `origin == .client` (WKWebView opens no
 /// tabs of its own here) and closes never hold (`wouldHoldClose` is always false, so both close modes close at once);
-/// rules 13, 14 and 16 are not applicable, and so is rule 17's audible state (no public WebKit signal).
+/// rules 13, 14 and 16 are not applicable, and so is rule 17's audible state (no public WebKit signal). Find in page
+/// (rule 22) selects with `window.find` and counts in page script; the hovered link (rule 23) comes from a script
+/// that posts `mouseover` and `mouseout` of links.
 /// Nothing outside this file may import WebKit, and the import is `internal`, so the compiler
 /// rejects any WebKit type in the public surface (EngineAPI types and NSView only).
 @MainActor
@@ -22,6 +24,13 @@ public final class FakeEngine: EngineClient {
     var finishCounter = 0
     /// Cloned history stacks (nearest last) when this tab was created by `duplicateTab(_:)` (#81, BH-027).
     var clonedHistory: (back: [HistoryEntry], forward: [HistoryEntry])?
+    /// The text and case of the running find, nil when none runs; replies of an ended find are dropped by `findEpoch`.
+    var findText: String?
+    var findMatchCase = false
+    var findEpoch = 0
+    var findRequests = 0
+    /// The link the pointer is over, as the hover script last reported it.
+    var hoveredLink: URL?
     init(webView: WKWebView, navigation: NavigationObserver, snapshot: TabSnapshot) {
       self.webView = webView; self.navigation = navigation; self.snapshot = snapshot
     }
@@ -48,7 +57,18 @@ public final class FakeEngine: EngineClient {
   /// How long the end of a load waits for `document.title` before using what WebKit already knows.
   static let titleTimeout: Duration = .milliseconds(500)
 
+  /// Receives the hover script's messages (#114). The user content controller holds it, so it holds the engine weakly.
+  private final class LinkHoverBridge: NSObject, WKScriptMessageHandler {
+    weak var engine: FakeEngine?
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+      MainActor.assumeIsolated {
+        engine?.targetURLReported(by: message.webView, body: message.body)
+      }
+    }
+  }
+
   private var entries: [TabID: Entry] = [:]
+  private let hoverBridge = LinkHoverBridge()
   private let hub = EngineEventHub()
   public private(set) var windowIDs: [EngineWindowID] = []
   private var hosts: [EngineWindowID: any EngineWindowHosting] = [:]
@@ -66,6 +86,10 @@ public final class FakeEngine: EngineClient {
     configuration.websiteDataStore = .nonPersistent()
     // Appended to WebKit's own platform and engine tokens, so only the Safari part is ours to set.
     configuration.applicationNameForUserAgent = SafariUserAgent.applicationName()
+    hoverBridge.engine = self
+    configuration.userContentController.add(hoverBridge, name: FakeEngineScripts.targetURLHandler)
+    configuration.userContentController.addUserScript(
+      WKUserScript(source: FakeEngineScripts.hover, injectionTime: .atDocumentStart, forMainFrameOnly: false))
   }
 
   @discardableResult
@@ -180,6 +204,65 @@ public final class FakeEngine: EngineClient {
     entry.webView.setAllMediaPlaybackSuspended(muted, completionHandler: nil)
     update(id) { $0.isMuted = muted } event: { .mutedChanged(id, isMuted: muted) }
   }
+
+  // MARK: - Find in page and link hover (#134, #114)
+
+  /// `window.find` selects the match and the page text is counted for the reply; WKWebView's own find reports no
+  /// count. A reply for a find that ended meanwhile is dropped.
+  public func findInPage(_ id: TabID, text: String, forward: Bool, matchCase: Bool) {
+    guard let entry = entries[id] else { return }
+    guard !text.isEmpty else {
+      endFind(entry, action: .clear)
+      hub.emit(.findResult(id, requestID: 0, ordinal: 0, count: 0, isFinal: true))
+      return
+    }
+    let isNew = entry.findText != text || entry.findMatchCase != matchCase
+    entry.findText = text
+    entry.findMatchCase = matchCase
+    entry.findRequests += 1
+    let request = entry.findRequests
+    let epoch = entry.findEpoch
+    let script = FakeEngineScripts.find(text: text, forward: forward, matchCase: matchCase, isNew: isNew)
+    entry.webView.evaluateJavaScript(script) { [weak self, weak entry] result, _ in
+      MainActor.assumeIsolated {
+        guard let self, let entry, entry.findEpoch == epoch, self.entries[id] === entry else { return }
+        let numbers = (result as? [NSNumber])?.map(\.intValue) ?? []
+        let count = numbers.first ?? 0
+        let ordinal = numbers.count > 1 ? numbers[1] : 0
+        self.hub.emit(.findResult(id, requestID: request, ordinal: ordinal, count: count, isFinal: true))
+      }
+    }
+  }
+
+  public func stopFinding(_ id: TabID, action: FindStopAction) {
+    guard let entry = entries[id] else { return }
+    endFind(entry, action: action)
+  }
+
+  private func endFind(_ entry: Entry, action: FindStopAction) {
+    entry.findText = nil
+    entry.findEpoch += 1
+    entry.webView.evaluateJavaScript(FakeEngineScripts.stopFind(action), completionHandler: nil)
+  }
+
+  private func targetURLReported(by web: WKWebView?, body: Any) {
+    guard let (id, entry) = entries.first(where: { $0.value.webView === web }) else { return }
+    let link = (body as? String).flatMap(URL.init(string:))
+    guard entry.hoveredLink != link else { return }
+    entry.hoveredLink = link
+    hub.emit(.targetURLChanged(id, link))
+  }
+
+  /// A new document ends the page's find and its hovered link.
+  private func endFindAndHover(_ id: TabID, _ entry: Entry) {
+    entry.findText = nil
+    entry.findEpoch += 1
+    if entry.hoveredLink != nil {
+      entry.hoveredLink = nil
+      hub.emit(.targetURLChanged(id, nil))
+    }
+  }
+
   public func goBack(_ id: TabID) { goToHistory(id, offset: -1) }
   public func goForward(_ id: TabID) { goToHistory(id, offset: 1) }
 
@@ -407,6 +490,14 @@ public final class FakeEngine: EngineClient {
     hub.emit(.activeTabChanged(id))
   }
 
+  /// Test hook (reachable through `@testable import`): runs page script and answers its string result.
+  func scriptString(_ script: String, in id: TabID) async -> String? {
+    guard let web = entries[id]?.webView else { return nil }
+    return await withCheckedContinuation { (done: CheckedContinuation<String?, Never>) in
+      web.evaluateJavaScript(script) { result, _ in done.resume(returning: result as? String) }
+    }
+  }
+
   /// Test hook (reachable through `@testable import`): runs page script, ignoring its result.
   func runScript(_ script: String, in id: TabID) async {
     guard let web = entries[id]?.webView else { return }
@@ -422,6 +513,7 @@ public final class FakeEngine: EngineClient {
   private func startLoad(_ id: TabID) {
     guard let entry = entries[id] else { return }
     entry.pendingFinish = nil
+    endFindAndHover(id, entry)
     let url = entry.webView.url
     update(id) { $0.url = url } event: { .urlChanged(id, url) }
     update(id) { $0.isLoading = true } event: { .loadingChanged(id, isLoading: true) }

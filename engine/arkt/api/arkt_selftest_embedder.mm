@@ -607,6 +607,19 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
         LOG(WARNING) << "ARKT selftest infobarsChanged tab=" << tab
                      << " count=" << event.infobars.count;
         break;
+      case ArktEngineEventKindFindResult:
+        LOG(WARNING) << "ARKT selftest findResult tab=" << tab
+                     << " request=" << event.findRequestId
+                     << " ordinal=" << event.findOrdinal
+                     << " count=" << event.findCount
+                     << " final=" << (event.findIsFinal ? "yes" : "no");
+        break;
+      case ArktEngineEventKindTargetURLChanged:
+        LOG(WARNING) << "ARKT selftest targetURLChanged tab=" << tab
+                     << " url="
+                     << (event.url ? event.url.absoluteString.UTF8String
+                                   : "nil");
+        break;
       case ArktEngineEventKindExtensionActionsChanged:
         LOG(WARNING) << "ARKT selftest extensionActionsChanged window="
                      << window;

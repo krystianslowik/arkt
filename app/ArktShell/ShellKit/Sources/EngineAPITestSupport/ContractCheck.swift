@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-21), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-23), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -25,8 +25,12 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case hiddenTabEndsItsPermissionAndAsksAgain
   // Rule 21
   case infobarIsReportedActedOnAndRemoved, infobarsStayWithTheirTabWhileHidden, pendingInfobarsEndBeforeTheirTabCloses
+  // Rule 22
+  case findCountsMatchesAndMovesTheOrdinal, stopFindingKeepsClearsOrActivatesTheMatch
+  // Rule 23
+  case hoveredLinkReportsItsTargetURL
 
-  /// The contract rule (1-21) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The contract rule (1-23) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -55,6 +59,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
          .navigationEndsItsPermission, .hiddenTabEndsItsPermissionAndAsksAgain: 20
     case .infobarIsReportedActedOnAndRemoved, .infobarsStayWithTheirTabWhileHidden,
          .pendingInfobarsEndBeforeTheirTabCloses: 21
+    case .findCountsMatchesAndMovesTheOrdinal, .stopFindingKeepsClearsOrActivatesTheMatch: 22
+    case .hoveredLinkReportsItsTargetURL: 23
     }
   }
 
@@ -104,6 +110,10 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .infobarIsReportedActedOnAndRemoved: try await EngineContract.infobarIsReportedActedOnAndRemoved(h)
     case .infobarsStayWithTheirTabWhileHidden: try await EngineContract.infobarsStayWithTheirTabWhileHidden(h)
     case .pendingInfobarsEndBeforeTheirTabCloses: try await EngineContract.pendingInfobarsEndBeforeTheirTabCloses(h)
+    case .findCountsMatchesAndMovesTheOrdinal: try await EngineContract.findCountsMatchesAndMovesTheOrdinal(h)
+    case .stopFindingKeepsClearsOrActivatesTheMatch:
+      try await EngineContract.stopFindingKeepsClearsOrActivatesTheMatch(h)
+    case .hoveredLinkReportsItsTargetURL: try await EngineContract.hoveredLinkReportsItsTargetURL(h)
     }
   }
 }

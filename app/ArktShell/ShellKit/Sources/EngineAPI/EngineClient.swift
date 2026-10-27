@@ -140,13 +140,22 @@ public enum EngineEvent: Equatable, Sendable {
   /// one went. A tab keeps its infobars while it is hidden or moved to another window (the new list follows the move).
   /// The list is empty before the tab's `.tabClosed`.
   case infobarsChanged(TabID, [Infobar])
+  /// A find-in-page reply (contract rule 22, #134): the search `requestID` it answers, the 1-based `ordinal` of the active
+  /// match (0 when there is none), the number of matches `count` so far, and whether the reply `isFinal` for that
+  /// request. Replies arrive for `findInPage` only, never for `stopFinding`; a reply for a search the engine already
+  /// replaced is dropped. Empty text clears the search and reports `ordinal` 0, `count` 0 and `isFinal` once.
+  case findResult(TabID, requestID: Int, ordinal: Int, count: Int, isFinal: Bool)
+  /// The link under the pointer changed (contract rule 23, #114): its URL, or nil when the pointer left it. Reported
+  /// for each change as the page sees it, with no delay or smoothing; the shell decides when to show it.
+  case targetURLChanged(TabID, URL?)
 
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id, _), .urlChanged(let id, _), .titleChanged(let id, _),
          .faviconChanged(let id, _), .loadingChanged(let id, _), .historyChanged(let id, _, _),
          .activeTabChanged(let id), .closeCancelled(let id), .audibleChanged(let id, _), .mutedChanged(let id, _),
-         .dialogEnded(let id, _), .permissionEnded(let id, _), .infobarsChanged(let id, _):
+         .dialogEnded(let id, _), .permissionEnded(let id, _), .infobarsChanged(let id, _),
+         .findResult(let id, _, _, _, _), .targetURLChanged(let id, _):
       return id
     case .dialogRequested(let dialog):
       return dialog.tab
@@ -220,6 +229,16 @@ public protocol EngineClient: AnyObject {
   /// `.mutedChanged` per change; setting the state the tab already has reports nothing. The page keeps playing and
   /// keeps its `isAudible`. A no-op for an unknown or closed tab.
   func setMuted(_ id: TabID, muted: Bool)
+  /// Starts or continues a find in the tab's page (#134, contract rule 22). The first call, a changed `text` or a
+  /// changed `matchCase` starts a new search from the top of the page; the same `text` and `matchCase` again moves to
+  /// the next match (`forward` true, Cmd-G) or the previous one (`forward` false, Shift-Cmd-G), wrapping at either end.
+  /// Replies come as `.findResult`. Empty `text` ends the search like `stopFinding(_:action: .clear)` and is reported
+  /// once. A no-op for an unknown or closed tab. Default: a no-op, for an engine that cannot search.
+  func findInPage(_ id: TabID, text: String, forward: Bool, matchCase: Bool)
+  /// Ends the tab's find (Esc, #134, contract rule 22): `.clear` removes the highlight and the selection, `.keep` turns
+  /// the active match into the page's selection, `.activate` also clicks it when it is a link. The next `findInPage`
+  /// starts a new search. Reports nothing. A no-op for an unknown or closed tab. Default: a no-op.
+  func stopFinding(_ id: TabID, action: FindStopAction)
   /// Answers a pending JavaScript dialog (#400, contract rule 19): `accepted` is OK (true) or Cancel (false); `userInput`
   /// is a prompt's text. Reported with one `.dialogEnded`. A no-op for a dialog that already ended, so a click that
   /// races the engine's own end does nothing. Default: a no-op, for an engine that raises no dialogs.
@@ -278,6 +297,10 @@ extension EngineClient {
   }
 
   public func moveTab(_ id: TabID, to window: EngineWindowID) {}
+
+  public func findInPage(_ id: TabID, text: String, forward: Bool, matchCase: Bool) {}
+
+  public func stopFinding(_ id: TabID, action: FindStopAction) {}
 
   public func respond(to dialog: DialogID, accepted: Bool, userInput: String?) {}
 

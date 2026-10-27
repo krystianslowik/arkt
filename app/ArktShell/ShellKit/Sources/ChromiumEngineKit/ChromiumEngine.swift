@@ -227,6 +227,15 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   /// The facade mutes the contents (`WebContents::SetAudioMuted`); its `MutedChanged` updates the snapshot.
   public func setMuted(_ id: TabID, muted: Bool) { tabs[id]?.handle.setMuted(muted) }
 
+  /// The facade runs `FindTabHelper::StartFinding`; its replies arrive as `FindResult` events (#134).
+  public func findInPage(_ id: TabID, text: String, forward: Bool, matchCase: Bool) {
+    tabs[id]?.handle.findInPage(text: text, forward: forward, matchCase: matchCase)
+  }
+
+  public func stopFinding(_ id: TabID, action: FindStopAction) {
+    tabs[id]?.handle.stopFinding(action: action.facade)
+  }
+
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
     hub.add(handler)
   }

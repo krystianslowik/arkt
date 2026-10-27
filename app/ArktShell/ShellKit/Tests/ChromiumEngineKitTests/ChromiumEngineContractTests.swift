@@ -28,6 +28,8 @@ struct ChromiumEngineContractTests {
     #expect(harness.engineCreateTab != nil && harness.engineCloseTab != nil && harness.engineActivate != nil)
     #expect(harness.holdClose != nil && harness.answerDialog != nil)
     #expect(harness.makeAudible != nil && harness.engineCloseWindow != nil && harness.showPage != nil)
+    #expect(harness.findPage != nil && harness.selectedText != nil)
+    #expect(harness.hoverLink != nil && harness.leaveLink != nil)
   }
 
   /// The list names every public check of `EngineContract` (read from its sources), so a new rule cannot be left out.
@@ -43,8 +45,8 @@ struct ChromiumEngineContractTests {
         names.insert(String(match.output.1))
       }
     }
-    #expect(names.count == 40)
+    #expect(names.count == 43)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
-    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...21))
+    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...23))
   }
 }

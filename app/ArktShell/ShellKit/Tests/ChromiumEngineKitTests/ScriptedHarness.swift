@@ -94,6 +94,23 @@ enum ScriptedHarness {
         let (chromium, tab) = try parts(engine, id)
         tab.addInfobar(message)
         try await delivered(chromium)
+      },
+      findPage: { occurrences, link in InMemoryEngine.findPageURL(occurrences: occurrences, link: link) },
+      selectedText: { engine, id in
+        let value = try await chromium(engine).evaluateScript("window.getSelection().toString()", in: id,
+                                                              userGesture: false)
+        guard case .string(let text)? = value else { throw HarnessError("selection answered \(String(describing: value))") }
+        return text
+      },
+      hoverLink: { engine, id in
+        let (chromium, tab) = try parts(engine, id)
+        tab.hover(tab.linkOfPage)
+        try await delivered(chromium)
+      },
+      leaveLink: { engine, id in
+        let (chromium, tab) = try parts(engine, id)
+        tab.hover(nil)
+        try await delivered(chromium)
       }
     )
   }

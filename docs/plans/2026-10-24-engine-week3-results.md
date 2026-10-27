@@ -3817,3 +3817,98 @@ is the scripted case. Real-app check repeated (close: `tabs.query` 1, `onCreated
   cannot. Not changed here.
 - Peek (a closed Peek reopens over its source) was not driven in the real app; it takes the same `containerView` then `activate` path.
 - The extension sees a reopened page as a new tab (`onCreated`, a new id), not as the tab it saw close.
+
+## #134 and #114: engine halves of find in page and the link hover target URL
+
+Date 2026-10-27. Branch `engine/134-114-find-and-target-url` off `main` at `b6ce219`. Engine only, no shell UI (tracking issue
+#481); the UI follows after the maintainer picks a design. `/Volumes/SSD_2` had 1.9 TiB free, `/` 61 GiB, swap 13 GB used of 14 GB
+(builds ran at `nice -n 15`, `-j 4`; no other Chromium build was running).
+
+### Gate
+
+1. Task: report find replies and the hovered link's URL to the shell through the facade. Find needs no patch:
+   `find_in_page::FindTabHelper` is attached to Arkt tabs, `StartFinding` and `StopFinding` are public, and its
+   `FindResultObserver` receives only replies the helper accepted (stopped and replaced searches are dropped, `-1` values are
+   filled from the last result). The target URL has no seam: `WebContentsObserver` has no target URL callback (`grep -i
+   target_url content/public/browser/*.h` finds only navigation parameters), the only receiver is
+   `WebContentsDelegate::UpdateTargetURL`, the delegate is `BrowserWebContentsDelegate`, and its override casts every status
+   bubble to `StatusBubbleViews` and `ContentsWebView`, so a non-Views bubble from `ArktBrowserWindow::GetStatusBubbles` (empty,
+   see the comment in `arkt_browser_window.mm`) would be undefined behaviour. With no bubbles the override does nothing, so
+   the report is lost. Patch 0010 is therefore necessary.
+2. Facade header: additive (event kinds 21 and 22, `ArktFindAction`, four `ArktEngineEvent` properties, two `ArktTabHandle`
+   methods). Both copies identical.
+3. `.patches`: 9 to 10, patch 0010; no open engine pull request touches patches.
+4. Build and smoke: `autoninja -C out/Spike chrome -j 4`, Engine app, the in-app contract runner.
+
+### What landed
+
+- **Facade (`arkt_engine_facade.mm`).** `TabObserver` is also a `FindResultObserver` of the contents' `FindTabHelper` (created on
+  the first find if the tab has none; observed from `SetContents` when it exists). `-findInPageWithText:forward:matchCase:` calls
+  `StartFinding(text, forward, matchCase, find_match=true)`: the helper starts a new search for a new text or case, or after a
+  stop, and moves to the next or previous match for the same text and case, so Cmd-G and Shift-Cmd-G are the same text with
+  `forward` flipped. `-stopFindingWithAction:` maps Clear, Keep, Activate to `SelectionAction`. Replies become
+  `FindResult` events (request id, 1-based ordinal, count, final); empty text arrives from `OnFindEmptyText` as one 0-of-0
+  final reply with request id 0. Stopping reports nothing. `ReportTargetURL` records `TargetURLChanged` for changes only,
+  and clears when a new document commits.
+- **Patch 0010** `Arkt: report the link under the pointer from UpdateTargetURL`: `browser_web_contents_delegate.cc`, one hunk, five
+  lines under `BUILDFLAG(IS_MAC)`, calling `arkt::NotifyTargetURLChanged` before the bubble loop. The hook lives in the existing
+  `arkt/browser:link_activation` target (`arkt_link_activation.{h,cc}`, `SetTargetURLObserver`, `NotifyTargetURLChanged`); the
+  dependency and include of patch 0009 are reused, so no `BUILD.gn` change. Export touched no earlier patch file.
+- **EngineAPI.** `EngineClient.findInPage(_:text:forward:matchCase:)`, `stopFinding(_:action:)` (`FindStopAction`: `clear`, `keep`,
+  `activate`), both with no-op defaults; events `.findResult(TabID, requestID:, ordinal:, count:, isFinal:)` and
+  `.targetURLChanged(TabID, URL?)`. The engine delays and merges nothing. The only shell change is the two cases in
+  `ShellWindowController.handle(_:)`, which ignore them.
+- **Engines.** `ChromiumEngine` forwards the calls and the two events. `FakeEngine` (WKWebView): `window.find` selects the match
+  and page script counts the matches (WKWebView's own find reports no count); the hovered link comes from a user script that
+  posts `mouseover` and `mouseout` of links from every frame. `InMemoryEngine`: scripted pages (`findPageURL`), ordinal with
+  wrap, selection model, `hoverLink` and `leaveLink` drivers. The scripted facade (test double) models the interim reply of a new
+  search.
+- **Contract rules 22 and 23** (`EngineContract+Find.swift`): `findCountsMatchesAndMovesTheOrdinal` (needle x3: 1 of 3, next 2,
+  stop then the search starts again at 1, previous wraps to 3, previous 2, match case finds no capitals, ignoring case finds 3,
+  request ids never go back, empty text reported once as 0 of 0), `stopFindingKeepsClearsOrActivatesTheMatch` (Keep leaves the
+  match selected, Clear leaves nothing, Activate follows the matched link), `hoveredLinkReportsItsTargetURL` (URL once, nil
+  once, again once, nothing in between). New harness drivers `findPage`, `selectedText`, `hoverLink`, `leaveLink` (nil: not
+  applicable).
+
+### Tests first
+
+The contract checks and harness drivers were written before the engines: `swift build --build-tests` failed on the missing
+`InMemoryEngine.findPageURL`, `selectedText`, `hoverLink`, `leaveLink` (red), then green. Breaking InMemoryEngine's backward wrap
+(`max(ordinal - 1, 1)`) fails `findCountsMatchesAndMovesTheOrdinal` with `find previous from the first match wraps to the last:
+expected match 3 of 3, got 1 of 3`; restored.
+
+### Real app (Engine app on `out/Spike`, bundle id `dev.arkt.Arkt.try134` (own id), throwaway profile, shell data folder and defaults suite on the Chromium disk, `--use-mock-keychain`, the tabs probe extension, loopback pages)
+
+In-app contract runner (`--arkt-engine-contract --arkt-engine-test-api`): `20/23`, the same as before this change plus the
+three new checks; rules 19 to 21 are NOT-APPLICABLE for lack of runner drivers, as before. Rule 22 `findCountsMatchesAndMovesTheOrdinal` PASS
+(273 ms), `stopFindingKeepsClearsOrActivatesTheMatch` PASS (150 ms), rule 23 `hoveredLinkReportsItsTargetURL` PASS (217 ms). No
+`Check failed` or `FATAL` in the log. The runner is the existing test hook, so no debug menu was added.
+
+Limits: the runner's hover driver focuses and blurs the link, which makes Blink send the same `UpdateTargetURL` a hover does
+(Chromium's `WebContentsImplBrowserTest.UpdateTargetURL` drives it that way). A synthetic `mouseMoved` sent to the page view
+reached it (hit view `RenderWidgetHostViewCocoa`) but produced no report: Blink ignores mouse moves for a window that is not
+key, and making the window key means activating the app while another lane's test app was frontmost, which the local-app rules
+forbid. A real pointer over a link is therefore not verified here; it needs the shell window (UI step). One more shell-side
+point: `Browser::OnTabStripModelChanged` creates the Views find bar for a tab inserted into a window while its find session is
+active, so the shell should `stopFinding` before it moves a tab.
+
+LaunchServices: the build registered the test bundle; every `try134` path was removed with `lsregister -u`, the count of
+`try134` entries is 0. The embed folder, profile and derived data were deleted; no process was left.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 10 |
+| `arkt` commits above `156.0.8078.48` | 10 |
+
+Equal (`in sync`). Ten patch files, 17 upstream files (0010 edits a file 0009 already touches), 0 hot-file hunks; the facade headers are `cmp` identical.
+
+### Verification
+
+- `swift test --skip ShellKitGUITests` in ShellKit: 1474 passed (814, 38, 43, 4, 148, 49, 256, 101, 21), 0 failed: the 1469 recorded
+  at #380 plus 5 tests (3 InMemory contract, 2 ABI), and 6 new parameterized cases of `ChromiumEngineContractTests` (3 checks x 2
+  scripts) inside existing tests. ArktCore `swift test`: 429 passed (144, 117, 70, 98), 0 failed.
+- `FakeEngineContractTests` rules 22 and 23 (`swift test --filter`, run on its own): 3 passed. The rest of `ShellKitGUITests` was not run.
+- `nice -n 15 autoninja -C out/Spike chrome -j 4`: `The build has finished successfully.` Engine app: `xcodegen generate`, then
+  `xcodebuild -scheme ArktShell -configuration Engine`: `BUILD SUCCEEDED`.

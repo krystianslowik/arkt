@@ -17,11 +17,11 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     case window(EngineWindowID, WindowCloseReason)
   }
 
-  private var snapshots: [TabID: TabSnapshot] = [:]
+  var snapshots: [TabID: TabSnapshot] = [:]
   private var views: [TabID: NSView] = [:]
   /// Per-tab history: entries behind and ahead of the current one (nearest last on each stack).
   private var history: [TabID: (back: [HistoryEntry], forward: [HistoryEntry])] = [:]
-  private let hub = EngineEventHub()
+  let hub = EngineEventHub()
   public private(set) var tabIDs: [TabID] = []
 
   public private(set) var windowIDs: [EngineWindowID] = []
@@ -30,6 +30,11 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   private var lastActiveWindow: EngineWindowID?
   private var heldCloses: [TabID: HeldClose] = [:]
   private var actions: [EngineWindowID: [ExtensionAction]] = [:]
+  /// Find sessions, the page selection and the hovered link of the tabs that have them (rules 22, 23).
+  var finds: [TabID: FindSession] = [:]
+  var pageSelections: [TabID: String] = [:]
+  var hoveredLinks: [TabID: URL] = [:]
+  var findRequestCounter = 0
 
   /// Builds hosts for `openEngineWindow(_:)`, as the app's provider does for a real engine.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -583,6 +588,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   private func load(_ id: TabID, _ url: URL, title: String?, previous: TabSnapshot) {
     endDialog(of: id)       // Chromium closes the dialog when a navigation starts
     withdrawPermission(in: id)      // and drops the site's ask
+    endFindAndHover(of: id)         // and the page's find and hover go with the old document
     snapshots[id]?.url = url
     if let title, !title.isEmpty { snapshots[id]?.title = title }
     snapshots[id]?.isLoading = true
@@ -635,6 +641,9 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     endDialog(of: id)
     withdrawPermission(in: id)
     dropInfobars(of: id)
+    finds[id] = nil
+    pageSelections[id] = nil
+    hoveredLinks[id] = nil
     var successor: TabID?
     if let window = removed.window, activeTabs[window] == id {
       activeTabs[window] = nil

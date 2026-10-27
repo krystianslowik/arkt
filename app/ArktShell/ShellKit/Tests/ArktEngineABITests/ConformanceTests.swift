@@ -94,6 +94,10 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var dialog: (any ArktJavaScriptDialog)?
   var permission: (any ArktPermissionRequest)?
   var infobars: [any ArktInfobar]?
+  var findRequestId = 0
+  var findOrdinal = 0
+  var findCount = 0
+  var findIsFinal = false
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -165,6 +169,25 @@ final class TestTab: NSObject, ArktTabHandle {
     isMuted = muted
     let event = TestEvent(.mutedChanged, tab: self, browser: owner)
     event.isMuted = muted
+    owner?.engine.record(event)
+  }
+  /// The find (#134): the calls as received, and one final reply of 1 of 1 per non-empty text.
+  private(set) var finds: [(text: String, forward: Bool, matchCase: Bool)] = []
+  private(set) var stops: [ArktFindAction] = []
+  func findInPage(text: String, forward: Bool, matchCase: Bool) {
+    finds.append((text, forward, matchCase))
+    let event = TestEvent(.findResult, tab: self, browser: owner)
+    event.findRequestId = text.isEmpty ? 0 : finds.count
+    event.findOrdinal = text.isEmpty ? 0 : 1
+    event.findCount = text.isEmpty ? 0 : 1
+    event.findIsFinal = true
+    owner?.engine.record(event)
+  }
+  func stopFinding(action: ArktFindAction) { stops.append(action) }
+  /// Reports the link under the pointer (#114).
+  func hover(_ url: URL?) {
+    let event = TestEvent(.targetURLChanged, tab: self, browser: owner)
+    event.url = url
     owner?.engine.record(event)
   }
   /// A copy of the current frame (#370, #352): a 2 x 1 pixel PNG stand-in at scale 1, or nil with no URL.
@@ -571,8 +594,10 @@ struct ConformanceTests {
     #expect([ArktEngineEventKind.tabCreated, .tabClosed, .activeTabChanged, .closeCancelled, .urlChanged,
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
              .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged,
-             .dialogRequested, .dialogEnded, .permissionRequested, .permissionEnded, .infobarsChanged].map(\.rawValue)
-      == Array(0...20))
+             .dialogRequested, .dialogEnded, .permissionRequested, .permissionEnded, .infobarsChanged,
+             .findResult, .targetURLChanged].map(\.rawValue)
+      == Array(0...22))
+    #expect([ArktFindAction.clear, .keep, .activate].map(\.rawValue) == [0, 1, 2])
     #expect([ArktInfobarKind.other, .debugger, .automation, .reload].map(\.rawValue) == Array(0...3))
     #expect([ArktInfobarAction.ok, .cancel, .link, .messageLink, .close].map(\.rawValue) == Array(0...4))
     #expect([ArktPermissionKind.other, .geolocation, .notifications, .camera, .microphone].map(\.rawValue)
@@ -622,6 +647,50 @@ struct MuteABITests {
     let events = try #require(batches.last)
     #expect(events.map(\.kind) == [.mutedChanged])
     #expect(events.first?.isMuted == true && events.first?.tab === tab)
+  }
+}
+
+/// Find in page and link hover (#134, #114): the calls and the plain values of the two events are part of the ABI.
+@MainActor
+struct FindABITests {
+  @Test func findAndStopReachTheHandleAndRepliesCarryPlainValues() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = try #require(browser.createTab(url: nil, active: true) as? TestTab)
+    engine.flush()
+
+    tab.findInPage(text: "needle", forward: false, matchCase: true)
+    tab.stopFinding(action: .keep)
+    engine.flush()
+
+    #expect(tab.finds.count == 1 && tab.finds[0].text == "needle" && !tab.finds[0].forward && tab.finds[0].matchCase)
+    #expect(tab.stops == [.keep])
+    let reply = try #require(batches.last?.first)
+    #expect(reply.kind == .findResult && reply.tab === tab)
+    #expect(reply.findRequestId == 1 && reply.findOrdinal == 1 && reply.findCount == 1 && reply.findIsFinal)
+  }
+
+  @Test func targetURLEventCarriesTheURLOrNilOnLeave() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = try #require(browser.createTab(url: nil, active: true) as? TestTab)
+    engine.flush()
+
+    let link = URL(string: "https://example.com/next")!
+    tab.hover(link)
+    engine.flush()
+    tab.hover(nil)
+    engine.flush()
+
+    let events = batches.suffix(2).compactMap(\.first)
+    #expect(events.map(\.kind) == [.targetURLChanged, .targetURLChanged])
+    #expect(events.map(\.url) == [link, nil])
   }
 }
 
