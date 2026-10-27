@@ -31,7 +31,8 @@ struct EngineDownloadsTests {
       .uncommonContent: 5, .userValidated: 6, .dangerousHost: 7, .potentiallyUnwanted: 8, .allowlistedByPolicy: 9,
       .asyncScanning: 10, .blockedPasswordProtected: 11, .blockedTooLarge: 12, .sensitiveContentWarning: 13,
       .sensitiveContentBlock: 14, .deepScannedSafe: 15, .deepScannedOpenedDangerous: 16, .promptForScanning: 17,
-      .dangerousAccountCompromise: 19, .deepScannedFailed: 20, .blockedScanFailed: 23,
+      .dangerousAccountCompromise: 19, .deepScannedFailed: 20, .promptForLocalPasswordScanning: 21,
+      .asyncLocalPasswordScanning: 22, .blockedScanFailed: 23, .forceSaveToGDrive: 24, .forceSaveToOneDrive: 25,
     ]
     #expect(Set(DownloadDangerType.all) == Set(expected.keys))
     for (type, value) in expected { #expect(type.rawValue == value, "\(type)") }
@@ -43,12 +44,66 @@ struct EngineDownloadsTests {
     (.dangerousFile, true, true, true),
     (.dangerousContent, true, true, true),
     (.uncommonContent, true, false, true),
-    (.blockedTooLarge, false, true, false),
+    (.blockedTooLarge, true, true, false),
   ])
   func dangerClassification(_ type: DownloadDangerType, _ held: Bool, _ sheet: Bool, _ keep: Bool) {
     #expect(type.isHeldForDecision == held)
     #expect(type.needsSheet == sheet)
     #expect(type.canKeep == keep)
+  }
+
+  /// Only these four may be opened; every other named type, and a value nobody named, is held or pending.
+  private static let openable: Set<DownloadDangerType> = [.notDangerous, .userValidated, .allowlistedByPolicy, .deepScannedSafe]
+
+  @Test(arguments: DownloadDangerType.all + [DownloadDangerType(rawValue: 18), DownloadDangerType(rawValue: 999)])
+  func `every danger type fails closed unless it is on the allow-list`(_ type: DownloadDangerType) {
+    let safe = Self.openable.contains(type)
+    #expect(type.canOpen == safe, "\(type)")
+    #expect(type.isHeldForDecision == (!safe && !type.isScanning), "\(type)")
+    #expect(!(type.canOpen && type.isHeldForDecision))
+    if type.isBlocked { #expect(type.isHeldForDecision && !type.canKeep && type.needsSheet) }
+    var item = DownloadItem(url: URL(string: "https://files.example/a.bin")!, filename: "a.bin", state: .complete,
+                            dangerType: type)
+    #expect(item.canBeOpened == safe, "\(type)")
+    item.state = .inProgress
+    #expect(!item.canBeOpened, "an unfinished file never opens")
+  }
+
+  @Test func `the types Chromium holds that were missing are held now`() {
+    for type in [DownloadDangerType.promptForScanning, .promptForLocalPasswordScanning, .forceSaveToGDrive,
+                 .forceSaveToOneDrive] {
+      #expect(type.isHeldForDecision && !type.canOpen, "\(type)")
+    }
+    #expect(DownloadDangerType.forceSaveToGDrive.isBlocked && DownloadDangerType.forceSaveToOneDrive.isBlocked)
+    #expect(DownloadDangerType.promptForLocalPasswordScanning.canKeep)
+    #expect(DownloadDangerType.asyncScanning.isScanning && !DownloadDangerType.asyncScanning.isHeldForDecision)
+  }
+
+  @Test(arguments: DownloadDangerType.all)
+  func `the in-memory engine opens a file only when its type is openable`(_ type: DownloadDangerType) {
+    let engine = InMemoryEngine()
+    let id = engine.beginDownload(url: URL(string: "https://files.example/a.bin")!, filename: "a.bin", totalBytes: 10)
+    engine.deliverDownloadBytes(id, 10)
+    engine.markDownloadDangerous(id, type)
+    engine.perform(.open, on: id)
+    #expect(engine.openedDownloads == (Self.openable.contains(type) ? [id] : []), "\(type)")
+  }
+
+  @Test(arguments: [
+    ("report.pdf", "report.pdf"), ("../../etc/passwd", "passwd"), ("a/b/c.txt", "c.txt"), ("..\\..\\win.ini", "win.ini"),
+    ("..", "download"), (".", "download"), ("", "download"), ("/", "download"), (".hidden", "hidden"),
+    ("...dots.zip", "dots.zip"), ("trailing/", "trailing"), ("nul\u{0}byte.txt", "nulbyte.txt"), ("  spaced  .txt", "spaced  .txt"),
+  ])
+  func `a suggested name is reduced to one safe file name`(_ raw: String, _ expected: String) {
+    #expect(DownloadFilename.sanitized(raw) == expected)
+  }
+
+  @Test func `a sanitized name always stays inside the folder`() {
+    let folder = URL(filePath: "/tmp/arkt-downloads", directoryHint: .isDirectory)
+    for raw in ["../escape", "/abs/path", "a/../../b", "..", "x/..", "~/home"] {
+      let target = folder.appending(path: DownloadFilename.sanitized(raw))
+      #expect(target.standardizedFileURL.deletingLastPathComponent() == folder.standardizedFileURL, "\(raw)")
+    }
   }
 
   @Test func fractionAndTimeLeft() {
@@ -145,6 +200,14 @@ struct EngineDownloadsTests {
     let id = engine.beginDownload(url: URL(string: "https://files.test/A.bin")!, filename: "A.bin", totalBytes: 10)
     #expect(engine.download(id)?.targetPath?.deletingLastPathComponent().standardizedFileURL
               == engine.downloadDefaultFolder.standardizedFileURL)
+  }
+
+  @Test func `a suggested name cannot leave the folder in the in-memory engine either`() {
+    let engine = InMemoryEngine()
+    let id = engine.beginDownload(url: URL(string: "https://files.example/x")!, filename: "../../escape.bin", totalBytes: 1)
+    let target = engine.download(id)?.targetPath
+    #expect(target?.deletingLastPathComponent().standardizedFileURL == engine.downloadDefaultFolder.standardizedFileURL)
+    #expect(engine.download(id)?.filename == "escape.bin")
   }
 
   @Test func existingNamesGetANumber() {

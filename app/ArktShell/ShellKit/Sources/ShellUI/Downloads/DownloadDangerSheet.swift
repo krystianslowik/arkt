@@ -44,6 +44,12 @@ final class DownloadDangerSheet {
     sheet = DialogSheet(content: Self.content(for: item, folderName: folderName))
     sheet.view.setAccessibilityIdentifier(AXID.Downloads.dangerSheet)
     sheet.onFooterLink = { [weak self] in self?.keepAnywayPressed() }
+    // Escape steps back from an armed Keep Anyway before it dismisses the sheet.
+    (sheet.window as? DialogWindow)?.onEscape = { [weak self] in
+      guard let self else { return false }
+      if self.isArmed { self.disarm(); return true }
+      return self.sheet.view.escape()
+    }
     sheet.onAnswer = { [weak self] answer in
       switch answer {
       case .primary: self?.finish(.delete)
@@ -72,6 +78,15 @@ final class DownloadDangerSheet {
       return
     }
     finish(.keep)
+  }
+
+  /// Steps back from the armed state: the link says Keep Anyway again and Return belongs to Delete Download.
+  func disarm() {
+    guard isArmed, let link = keepLink else { return }
+    isArmed = false
+    link.title = "Keep Anyway"
+    link.keyEquivalent = ""
+    deleteButton.keyEquivalent = "\r"
   }
 
   private func finish(_ answer: DownloadDangerAnswer) {

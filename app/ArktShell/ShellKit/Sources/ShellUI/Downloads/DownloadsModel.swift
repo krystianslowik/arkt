@@ -1,5 +1,6 @@
 import EngineAPI
 import Foundation
+import QuartzCore
 
 /// What a change to the list was, for a view that retargets its own piece.
 public enum DownloadsChange: Equatable, Sendable {
@@ -41,6 +42,22 @@ public final class DownloadsModel: AppSettingsObserver {
   private var unseen: Set<DownloadID> = []
   private var announcedBucket: [DownloadID: Int] = [:]
   private var announcedEnd: Set<DownloadID> = []
+
+  // Progress coalescing: Chromium reports every chunk. `items` always holds the latest values, but observers (the ring,
+  // the popover and the Library list) hear a moving download at most once per `progressInterval`. A change of state,
+  // target, name or danger is never delayed.
+  /// The least time between two deliveries of progress-only updates (about 10 Hz).
+  public var progressInterval: TimeInterval = 0.1
+  /// The clock the interval is measured on; tests step it.
+  var clock: @MainActor () -> CFTimeInterval = { CACurrentMediaTime() }
+  /// Runs `action` after `delay`; tests run it by hand.
+  var scheduler: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, action in
+    Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in MainActor.assumeIsolated { action() } }
+  }
+  private var lastProgressDelivery: CFTimeInterval = -.infinity
+  private var pendingProgress: [DownloadID: DownloadItem] = [:]
+  private var pendingOrder: [DownloadID] = []
+  private var flushScheduled = false
 
   public init(engine: any EngineDownloads, settings: AppSettings? = nil) {
     self.engine = engine
@@ -118,7 +135,11 @@ public final class DownloadsModel: AppSettingsObserver {
 
   public func pause(_ id: DownloadID) { engine.perform(.pause, on: id) }
   public func resume(_ id: DownloadID) { engine.perform(.resume, on: id) }
-  public func open(_ id: DownloadID) { engine.perform(.open, on: id) }
+  /// Open, only for a complete file whose danger type is safe or answered (defense in depth: the engine gates too).
+  public func open(_ id: DownloadID) {
+    guard item(id)?.canBeOpened == true else { return }
+    engine.perform(.open, on: id)
+  }
   public func showInFinder(_ id: DownloadID) { engine.perform(.showInFinder, on: id) }
   public func retry(_ id: DownloadID) { engine.perform(.retry, on: id) }
   public func keep(_ id: DownloadID) { engine.perform(.keepDangerous, on: id) }
@@ -145,14 +166,58 @@ public final class DownloadsModel: AppSettingsObserver {
       let previous = items[index]
       items[index] = item
       noteState(item, previous: previous)
-      emit(.updated(item))
+      if Self.isProgressOnly(previous, item) {
+        deferProgress(item)
+      } else {
+        dropPending(item.id)                       // this update carries the latest values
+        emit(.updated(item))
+      }
     case .downloadRemoved(let id):
+      dropPending(id)
       items.removeAll { $0.id == id }
       unseen.remove(id)
       announcedBucket[id] = nil
       announcedEnd.remove(id)
       emit(.removed(id))
     }
+  }
+
+  /// Only bytes, speed or the size changed on a download that stays in progress.
+  private static func isProgressOnly(_ a: DownloadItem, _ b: DownloadItem) -> Bool {
+    a.state == .inProgress && b.state == .inProgress && a.dangerType == b.dangerType && a.filename == b.filename
+      && a.targetPath == b.targetPath && a.canResume == b.canResume && a.mimeType == b.mimeType
+  }
+
+  private func deferProgress(_ item: DownloadItem) {
+    let now = clock()
+    let elapsed = now - lastProgressDelivery
+    if elapsed >= progressInterval, pendingProgress.isEmpty {
+      lastProgressDelivery = now
+      emit(.updated(item))
+      return
+    }
+    if pendingProgress[item.id] == nil { pendingOrder.append(item.id) }
+    pendingProgress[item.id] = item
+    guard !flushScheduled else { return }
+    flushScheduled = true
+    scheduler(max(0, progressInterval - elapsed)) { [weak self] in self?.flushProgress() }
+  }
+
+  /// Delivers the latest value of each coalesced download, once.
+  func flushProgress() {
+    flushScheduled = false
+    guard !pendingProgress.isEmpty else { return }
+    lastProgressDelivery = clock()
+    let order = pendingOrder
+    let pending = pendingProgress
+    pendingOrder = []
+    pendingProgress = [:]
+    for id in order { if let item = pending[id] { emit(.updated(item)) } }
+  }
+
+  private func dropPending(_ id: DownloadID) {
+    guard pendingProgress.removeValue(forKey: id) != nil else { return }
+    pendingOrder.removeAll { $0 == id }
   }
 
   /// Unseen bookkeeping and the announcements for one change.

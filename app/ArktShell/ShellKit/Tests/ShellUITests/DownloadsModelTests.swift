@@ -119,6 +119,17 @@ struct DownloadsModelTests {
     #expect(engine.download(id) == nil)
   }
 
+  @Test(arguments: DownloadDangerType.all)
+  func `the model opens a file only when its danger type is openable`(_ type: DownloadDangerType) {
+    let (engine, model) = make()
+    let id = start(engine, "a.bin", total: 10)
+    engine.deliverDownloadBytes(id, 10)
+    engine.markDownloadDangerous(id, type)
+    model.open(id)
+    let openable: Set<DownloadDangerType> = [.notDangerous, .userValidated, .allowlistedByPolicy, .deepScannedSafe]
+    #expect(engine.openedDownloads == (openable.contains(type) ? [id] : []), "\(type)")
+  }
+
   @Test func `retry of a failed row replaces it`() {
     let (engine, model) = make()
     let id = start(engine, "a.bin")
@@ -163,6 +174,84 @@ struct DownloadsModelTests {
     model.markSeen()
     model.markSeen()
     #expect(seen == 1)
+    _ = observation
+  }
+
+  // MARK: Throttling
+
+  /// A model with a clock and a scheduler the test steps by hand.
+  @MainActor private final class Stepper {
+    var now: CFTimeInterval = 0
+    var scheduled: [(due: CFTimeInterval, action: @MainActor () -> Void)] = []
+    /// Runs everything that is due at `now`; `run()` runs everything.
+    func runDue() {
+      let due = scheduled.filter { $0.due <= now }
+      scheduled.removeAll { $0.due <= now }
+      for item in due { item.action() }
+    }
+    func run() { let all = scheduled; scheduled = []; for item in all { item.action() } }
+  }
+
+  private func throttled() -> (InMemoryEngine, DownloadsModel, Stepper) {
+    let (engine, model) = make()
+    let stepper = Stepper()
+    model.clock = { stepper.now }
+    model.scheduler = { delay, action in stepper.scheduled.append((stepper.now + delay, action)) }
+    return (engine, model, stepper)
+  }
+
+  @Test func `a thousand progress updates reach observers at most about ten times a second`() {
+    let (engine, model, stepper) = throttled()
+    let id = engine.beginDownload(url: url("a.bin"), filename: "a.bin", totalBytes: 1_000_000)
+    var heard: [DownloadItem] = []
+    let observation = model.addObserver { if case .updated(let item) = $0 { heard.append(item) } }
+    for _ in 0..<1_000 {
+      stepper.now += 0.001                                    // 1 ms per update: a second of traffic
+      stepper.runDue()
+      engine.deliverDownloadBytes(id, 100)
+    }
+    stepper.now += 0.2
+    stepper.runDue()                                          // the last coalesced value lands
+    #expect(heard.count <= 12, "\(heard.count) deliveries for 1000 updates")
+    #expect(heard.count >= 2)
+    #expect(heard.last?.receivedBytes == 100_000, "the latest value is what lands")
+    #expect(model.item(id)?.receivedBytes == 100_000, "the model itself is never behind")
+    let bytes = heard.map(\.receivedBytes)
+    #expect(bytes == bytes.sorted(), "never backwards")
+    _ = observation
+  }
+
+  @Test func `a state change is never delayed and carries the latest bytes`() {
+    let (engine, model, stepper) = throttled()
+    let id = engine.beginDownload(url: url("a.bin"), filename: "a.bin", totalBytes: 100)
+    var heard: [DownloadItem] = []
+    let observation = model.addObserver { if case .updated(let item) = $0 { heard.append(item) } }
+    engine.deliverDownloadBytes(id, 10)                       // delivered at once
+    stepper.now += 0.01
+    engine.deliverDownloadBytes(id, 10)                       // coalesced
+    #expect(heard.count == 1)
+    engine.perform(.pause, on: id)
+    #expect(heard.last?.state == .paused && heard.last?.receivedBytes == 20, "pause is immediate and current")
+    engine.interruptDownload(id, reason: .networkFailed)
+    #expect(heard.last?.state == .interrupted(.networkFailed))
+    stepper.run()
+    #expect(heard.last?.state == .interrupted(.networkFailed), "a stale coalesced value never lands after it")
+    _ = observation
+  }
+
+  @Test func `a removed download leaves nothing pending`() {
+    let (engine, model, stepper) = throttled()
+    let id = engine.beginDownload(url: url("a.bin"), filename: "a.bin", totalBytes: 100)
+    var updates = 0
+    let observation = model.addObserver { if case .updated = $0 { updates += 1 } }
+    engine.deliverDownloadBytes(id, 10)
+    stepper.now += 0.01
+    engine.deliverDownloadBytes(id, 10)
+    let before = updates
+    model.remove(id)
+    stepper.run()
+    #expect(model.items.isEmpty)
+    #expect(updates <= before + 1, "only the cancel from remove, never the stale progress")
     _ = observation
   }
 

@@ -42,7 +42,7 @@ extension InMemoryEngine {
       default: return
       }
     case .open:
-      guard item.state == .complete, !item.isHeldForDecision else { return }
+      guard item.canBeOpened else { return }
       openedDownloads.append(id)
     case .showInFinder:
       guard item.targetPath != nil else { return }
@@ -146,7 +146,8 @@ extension InMemoryEngine {
     return usable ? folder : downloadDefaultFolder
   }
 
-  private func uniqueTarget(_ filename: String, in folder: URL) -> URL {
+  private func uniqueTarget(_ suggested: String, in folder: URL) -> URL {
+    let filename = DownloadFilename.sanitized(suggested)
     let base = (filename as NSString).deletingPathExtension
     let ext = (filename as NSString).pathExtension
     var candidate = folder.appending(path: filename)
@@ -154,6 +155,10 @@ extension InMemoryEngine {
     while FileManager.default.fileExists(atPath: candidate.path()) {
       number += 1
       candidate = folder.appending(path: ext.isEmpty ? "\(base) (\(number))" : "\(base) (\(number)).\(ext)")
+    }
+    // Belt and braces: the target is a direct child of the folder, whatever the name did.
+    guard DownloadFilename.isDirectChild(candidate, of: folder) else {
+      return folder.appending(path: "download")
     }
     return candidate
   }

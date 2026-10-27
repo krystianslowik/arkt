@@ -43,6 +43,17 @@ final class FakeEngineDownloadContractTests: XCTestCase {
   }
   func testSavePreferenceDecidesTheFolder() async throws { try await EngineContract.savePreferenceDecidesTheFolder(harness) }
 
+  /// A suggested name never leaves the download folder, whatever it holds.
+  func testASuggestedNameStaysInsideTheFolder() {
+    let engine = FakeEngine(downloadFolder: folder)
+    for raw in ["../../escape.bin", "/etc/passwd", "a/../../b.bin", "..", ".hidden", ""] {
+      let target = engine.uniqueTarget(raw, in: folder)
+      XCTAssertEqual(target.standardizedFileURL.deletingLastPathComponent(), folder.standardizedFileURL, raw)
+      XCTAssertFalse(target.lastPathComponent.hasPrefix("."), raw)
+    }
+    XCTAssertEqual(engine.uniqueTarget("../x.bin", in: folder).lastPathComponent, "x.bin")
+  }
+
   /// A rule that needs a driver this engine lacks is skipped, never passed.
   private func notApplicable(_ check: () async throws -> Void) async throws {
     do { try await check() } catch let skip as ContractNotApplicable { throw XCTSkip("\(skip)") }

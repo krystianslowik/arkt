@@ -90,7 +90,8 @@ final class DownloadIconButton: NSButton {
 
   override var mouseDownCanMoveWindow: Bool { false }
   override var wantsUpdateLayer: Bool { true }
-  override func updateLayer() { restyle() }
+  /// Layer properties only: setting `image` here would invalidate the button and run `updateLayer` again.
+  override func updateLayer() { restyleLayer() }
   override var intrinsicContentSize: NSSize {
     NSSize(width: DownloadsMetrics.iconButton, height: DownloadsMetrics.iconButton)
   }
@@ -101,8 +102,13 @@ final class DownloadIconButton: NSButton {
   private func restyle() {
     let flavor = archiveFlavor
     let color = (hovering ? ShellTokens.primaryText : ShellTokens.sidebarForeground).resolve(flavor)
-    image = SymbolImageCache.shared.symbol(symbolName, box: 12, weight: .semibold, color: color,
-                                           scale: window?.backingScaleFactor ?? 2)
+    let next = SymbolImageCache.shared.symbol(symbolName, box: 12, weight: .semibold, color: color,
+                                              scale: window?.backingScaleFactor ?? 2)
+    if image !== next { image = next }
+    restyleLayer()
+  }
+
+  private func restyleLayer() {
     ArchiveMotion.set { body.backgroundColor = displayedFill?.cgColor }
   }
 

@@ -156,37 +156,53 @@ public struct DownloadDangerType: RawRepresentable, Hashable, Sendable, CustomSt
   public static let promptForScanning = DownloadDangerType(rawValue: 17)
   /// `DOWNLOAD_DANGER_TYPE_DANGEROUS_ACCOUNT_COMPROMISE`
   public static let dangerousAccountCompromise = DownloadDangerType(rawValue: 19)
+  /// `DOWNLOAD_DANGER_TYPE_PROMPT_FOR_LOCAL_PASSWORD_SCANNING`
+  public static let promptForLocalPasswordScanning = DownloadDangerType(rawValue: 21)
+  /// `DOWNLOAD_DANGER_TYPE_ASYNC_LOCAL_PASSWORD_SCANNING`
+  public static let asyncLocalPasswordScanning = DownloadDangerType(rawValue: 22)
   /// `DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_FAILED`
   public static let deepScannedFailed = DownloadDangerType(rawValue: 20)
   /// `DOWNLOAD_DANGER_TYPE_BLOCKED_SCAN_FAILED`
   public static let blockedScanFailed = DownloadDangerType(rawValue: 23)
+  /// `DOWNLOAD_DANGER_TYPE_FORCE_SAVE_TO_GDRIVE`
+  public static let forceSaveToGDrive = DownloadDangerType(rawValue: 24)
+  /// `DOWNLOAD_DANGER_TYPE_FORCE_SAVE_TO_ONEDRIVE`
+  public static let forceSaveToOneDrive = DownloadDangerType(rawValue: 25)
 
   /// Every named constant, for the id check.
   public static let all: [DownloadDangerType] = [
     .notDangerous, .dangerousFile, .dangerousURL, .dangerousContent, .maybeDangerousContent, .uncommonContent,
     .userValidated, .dangerousHost, .potentiallyUnwanted, .allowlistedByPolicy, .asyncScanning,
     .blockedPasswordProtected, .blockedTooLarge, .sensitiveContentWarning, .sensitiveContentBlock, .deepScannedSafe,
-    .deepScannedOpenedDangerous, .promptForScanning, .dangerousAccountCompromise, .deepScannedFailed,
-    .blockedScanFailed,
+    .deepScannedOpenedDangerous, .promptForScanning, .dangerousAccountCompromise, .promptForLocalPasswordScanning,
+    .asyncLocalPasswordScanning, .deepScannedFailed, .blockedScanFailed, .forceSaveToGDrive, .forceSaveToOneDrive,
   ]
 
-  /// The file is held and never opened until the user answers (`DownloadItem::IsDangerous()`): Keep or Delete.
-  public var isHeldForDecision: Bool {
+  /// The file may be opened: only the types Chromium treats as safe or answered. Everything else, including a value
+  /// this list does not name and a scan still running, is NOT openable (fail closed); an engine's Open gate is this
+  /// allow-list, never "not held".
+  public var canOpen: Bool {
     switch self {
-    case .dangerousFile, .dangerousURL, .dangerousContent, .maybeDangerousContent, .uncommonContent,
-         .dangerousHost, .potentiallyUnwanted, .dangerousAccountCompromise, .sensitiveContentWarning,
-         .deepScannedOpenedDangerous, .deepScannedFailed:
-      true
-    default:
-      false
+    case .notDangerous, .userValidated, .allowlistedByPolicy, .deepScannedSafe: true
+    default: false
     }
   }
 
-  /// The engine refuses the file: the only answer is Delete (a policy or a failed scan), never Keep.
+  /// A verdict is still pending (an async scan): not safe, not yet a decision for the user.
+  public var isScanning: Bool { self == .asyncScanning || self == .asyncLocalPasswordScanning }
+
+  /// The file is held and never opened until the user answers (`DownloadItem::IsDangerous()`): Keep or Delete. Every
+  /// type that is neither openable nor a pending scan, including a value this list does not name.
+  public var isHeldForDecision: Bool { !canOpen && !isScanning }
+
+  /// The engine refuses the file: the only answer is Delete (a policy, a failed scan or a forced upload), never Keep.
   public var isBlocked: Bool {
     switch self {
-    case .blockedPasswordProtected, .blockedTooLarge, .sensitiveContentBlock, .blockedScanFailed: true
-    default: false
+    case .blockedPasswordProtected, .blockedTooLarge, .sensitiveContentBlock, .blockedScanFailed,
+         .forceSaveToGDrive, .forceSaveToOneDrive:
+      true
+    default:
+      false
     }
   }
 
@@ -277,6 +293,9 @@ public struct DownloadItem: Equatable, Sendable, Identifiable {
 
   /// The file is held for the user's decision.
   public var isHeldForDecision: Bool { dangerType.isHeldForDecision || dangerType.isBlocked }
+
+  /// Open is allowed: complete, and a danger type that is safe or answered. The one gate every engine and the model use.
+  public var canBeOpened: Bool { state == .complete && dangerType.canOpen }
 }
 
 // MARK: - Events and commands
@@ -381,4 +400,31 @@ public protocol EngineDownloads: AnyObject {
 
 extension EngineDownloads {
   public func download(_ id: DownloadID) -> DownloadItem? { downloads.first { $0.id == id } }
+}
+
+// MARK: - File names
+
+/// A server-suggested file name reduced to one safe name for the download folder. Engines that choose the target
+/// themselves (not from a save panel) run every suggestion through this.
+public enum DownloadFilename {
+  /// The last path component (either separator), without NULs or leading dots, never empty, ".", or "..": "download"
+  /// stands in. The result never contains a separator, so `folder.appending(path:)` stays inside `folder`.
+  public static func sanitized(_ suggested: String) -> String {
+    let cleaned = suggested.replacingOccurrences(of: "\u{0}", with: "")
+    let last = cleaned.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? ""
+    var name = last.trimmingCharacters(in: .whitespaces)
+    while name.hasPrefix(".") { name.removeFirst() }
+    name = name.trimmingCharacters(in: .whitespaces)
+    return name.isEmpty ? "download" : name
+  }
+
+  /// `file` is a direct child of `folder` (paths compared without trailing slashes).
+  public static func isDirectChild(_ file: URL, of folder: URL) -> Bool {
+    func normalized(_ url: URL) -> String {
+      var path = url.standardizedFileURL.path(percentEncoded: false)
+      while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+      return path
+    }
+    return normalized(file.deletingLastPathComponent()) == normalized(folder)
+  }
 }

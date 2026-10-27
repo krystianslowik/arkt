@@ -107,7 +107,7 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
   private var faviconFetches: [TabID: Int] = [:]
   private var faviconFetchWaiters: [TabID: [FaviconFetchWaiter]] = [:]
   public private(set) var tabIDs: [TabID] = []
-  // Downloads (rule 24); the behavior is in FakeEngine+Downloads.swift.
+  // Downloads (rule 24); the behavior is in the extension at the end of this file.
   var downloadItems: [DownloadItem] = []
   var downloadRecords: [DownloadID: DownloadRecord] = [:]
   /// A Retry's new download and the item it replaces, removed when the new one is listed.
@@ -780,7 +780,7 @@ extension FakeEngine {
       guard case .interrupted = item.state, item.canResume else { return }
       resumeDownload(id)
     case .open:
-      guard item.state == .complete, let target = item.targetPath else { return }
+      guard item.canBeOpened, let target = item.targetPath else { return }
       downloadOpener(target)
     case .showInFinder:
       guard let target = item.targetPath else { return }
@@ -997,7 +997,8 @@ extension FakeEngine {
     return usable ? folder : downloadDefaultFolder
   }
 
-  private func uniqueTarget(_ filename: String, in folder: URL) -> URL {
+  func uniqueTarget(_ suggested: String, in folder: URL) -> URL {
+    let filename = DownloadFilename.sanitized(suggested)
     let base = (filename as NSString).deletingPathExtension
     let ext = (filename as NSString).pathExtension
     var candidate = folder.appending(path: filename)
@@ -1005,6 +1006,10 @@ extension FakeEngine {
     while FileManager.default.fileExists(atPath: candidate.path()) {
       number += 1
       candidate = folder.appending(path: ext.isEmpty ? "\(base) (\(number))" : "\(base) (\(number)).\(ext)")
+    }
+    // Belt and braces: the target is a direct child of the folder, whatever the name did.
+    guard DownloadFilename.isDirectChild(candidate, of: folder) else {
+      return folder.appending(path: "download")
     }
     return candidate
   }

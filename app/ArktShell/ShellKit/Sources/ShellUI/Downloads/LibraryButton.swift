@@ -47,7 +47,8 @@ public final class LibraryButton: NSButton {
 
   override public var mouseDownCanMoveWindow: Bool { false }
   override public var wantsUpdateLayer: Bool { true }
-  override public func updateLayer() { restyle() }
+  /// Layer properties only: setting `image` here would invalidate the button and run `updateLayer` again.
+  override public func updateLayer() { restyleLayer() }
 
   /// The ring's arc position, for tests.
   var ringStrokeEnd: Double { ring.arcStrokeEnd }
@@ -79,16 +80,34 @@ public final class LibraryButton: NSButton {
     CATransaction.setDisableActions(true)
     dot.isHidden = !(next == .done || next == .attention)
     CATransaction.commit()
-    setAccessibilityLabel(DownloadsFormat.libraryButtonLabel(next))
-    toolTip = next == .idle ? "Library" : DownloadsFormat.libraryButtonLabel(next)
-    restyle()
+    let label = DownloadsFormat.libraryButtonLabel(next)
+    if accessibilityLabel() != label {
+      setAccessibilityLabel(label)
+      toolTip = next == .idle ? "Library" : label
+    }
+    // A moving ring changes no glyph or colour: only the arc above and the label change, not the image.
+    if styleKey != shownKey || shownFlavor != archiveFlavor { restyle() }
   }
+
+  private var shownKey = ""
+  /// The glyph and whether it is the quiet idle colour: what the image depends on.
+  private var styleKey: String { glyphName + (ringState == .idle ? "/idle" : "/live") }
+  private var shownFlavor = ThemeFlavor.light
 
   private func restyle() {
     let flavor = archiveFlavor
     let color = (ringState == .idle ? ShellTokens.sidebarForeground : ShellTokens.primaryText).resolve(flavor)
-    image = SymbolImageCache.shared.symbol(glyphName, box: DownloadsMetrics.glyphSize, weight: .regular, color: color,
-                                           scale: shellBackingScale)
+    let next = SymbolImageCache.shared.symbol(glyphName, box: DownloadsMetrics.glyphSize, weight: .regular, color: color,
+                                              scale: shellBackingScale)
+    if image !== next { image = next }
+    shownKey = styleKey
+    shownFlavor = flavor
+    restyleLayer()
+  }
+
+  /// The ring's and the dot's colours: layer properties, safe inside `updateLayer`.
+  private func restyleLayer() {
+    let flavor = archiveFlavor
     ring.restyle(flavor: flavor)
     CATransaction.begin()
     CATransaction.setDisableActions(true)

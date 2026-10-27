@@ -498,6 +498,28 @@ final class DownloadsWindowTests: XCTestCase {
     XCTAssertNil(center.sheet)
   }
 
+  func testEscapeDisarmsKeepAnywayBeforeItDismissesTheSheet() throws {
+    let controller = makeWindow()
+    let id = scripted("tool.dmg", total: 100, received: 100, state: .complete, danger: .dangerousFile)
+    center.review(id, on: controller.window)
+    let sheet = try XCTUnwrap(center.sheet)
+    sheet.keepLink?.performClick(nil)
+    XCTAssertTrue(sheet.isArmed)
+    let escape = try XCTUnwrap((sheet.window as? DialogWindow)?.onEscape)
+    XCTAssertTrue(escape())
+    XCTAssertFalse(sheet.isArmed)
+    XCTAssertEqual(sheet.keepLink?.title, "Keep Anyway")
+    XCTAssertEqual(sheet.deleteButton.keyEquivalent, "\r")
+    XCTAssertEqual(sheet.keepLink?.keyEquivalent, "")
+    XCTAssertNotNil(center.sheet, "the first Escape only disarms")
+    XCTAssertEqual(engine.download(id)?.dangerType, .dangerousFile)
+    sheet.keepLink?.performClick(nil)
+    XCTAssertTrue(sheet.isArmed, "it can be armed again")
+    _ = escape()
+    _ = escape()
+    XCTAssertNil(center.sheet, "Escape on a disarmed sheet dismisses it")
+  }
+
   func testShowInFinderRevealsAndEscapeLeavesTheFileHeld() throws {
     let controller = makeWindow()
     let id = scripted("tool.dmg", total: 100, received: 100, state: .complete, danger: .dangerousFile)
