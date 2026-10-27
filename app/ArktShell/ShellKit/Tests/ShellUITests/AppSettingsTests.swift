@@ -170,3 +170,55 @@ struct SettingsPaneTests {
     #expect(SettingsPane(commandNumber: 0) == nil)
   }
 }
+
+/// The download location and the Library's last section (#132, BH-181, BH-182).
+@MainActor
+struct DownloadSettingsTests {
+  private final class Suite {
+    let name = "dev.arkt.tests.settings.\(UUID().uuidString)"
+    let defaults: UserDefaults
+    init() throws { defaults = try #require(UserDefaults(suiteName: name)) }
+    deinit { UserDefaults().removePersistentDomain(forName: name) }
+  }
+
+  private final class Recorder: AppSettingsObserver {
+    var count = 0
+    func appSettingsDidChange(_ settings: AppSettings) { count += 1 }
+  }
+
+  @Test func `the location defaults to saving in the default folder`() throws {
+    let settings = AppSettings(defaults: try Suite().defaults)
+    #expect(settings.downloadLocation == DownloadLocationSetting())
+    let downloads = URL(filePath: "/Users/test/Downloads", directoryHint: .isDirectory)
+    #expect(settings.downloadLocation.preference(defaultFolder: downloads) == .folder(downloads))
+    #expect(settings.libraryLastSection == .downloads)
+  }
+
+  @Test func `the location persists, tells observers and maps to a preference`() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    let recorder = Recorder()
+    settings.addObserver(recorder)
+    let folder = URL(filePath: "/Users/test/Desktop", directoryHint: .isDirectory)
+    settings.downloadLocation = DownloadLocationSetting(asksWhereToSave: false, folder: folder)
+    settings.downloadLocation = DownloadLocationSetting(asksWhereToSave: false, folder: folder)   // unchanged
+    #expect(recorder.count == 1)
+    let reread = AppSettings(defaults: suite.defaults)
+    #expect(reread.downloadLocation.folder?.standardizedFileURL == folder.standardizedFileURL)
+    #expect(reread.downloadLocation.placeName(defaultFolder: folder) == "Desktop")
+    settings.downloadLocation.asksWhereToSave = true
+    let downloads = URL(filePath: "/Users/test/Downloads", directoryHint: .isDirectory)
+    #expect(settings.downloadLocation.preference(defaultFolder: downloads) == .ask)
+    #expect(settings.downloadLocation.placeName(defaultFolder: downloads) == "Ask Where to Save")
+  }
+
+  @Test func `the last Library section persists without telling observers`() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    let recorder = Recorder()
+    settings.addObserver(recorder)
+    settings.libraryLastSection = .history
+    #expect(recorder.count == 0)
+    #expect(AppSettings(defaults: suite.defaults).libraryLastSection == .history)
+  }
+}

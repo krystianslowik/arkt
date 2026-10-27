@@ -12,7 +12,7 @@ import EngineAPI
 // 24 skip in `ChromiumEngineContractTests`.
 //
 // To wire: a facade event for `DownloadManager::Observer` (created, updated, removed) mapped to `DownloadItem` values
-// with `DownloadItem.init(facade:)` (states per `DownloadState`'s documentation), `hub.emit(DownloadEvent...)`, the
+// by a new `DownloadItem` initializer over the facade value (states per `DownloadState`), `hub.emit(DownloadEvent...)`, the
 // commands below, and the profile prefs `download.prompt_for_download` and `download.default_directory` for
 // `downloadSavePreference`, with the target determiner's prompt answered by `downloadDestinationChooser`.
 
