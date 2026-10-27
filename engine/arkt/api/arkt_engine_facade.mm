@@ -1650,6 +1650,20 @@ class TabObserver : public content::WebContentsObserver,
                                 /*find_match=*/true);
   }
 
+  // Ends a running find (Clear) so the tab can leave its window: Browser's
+  // OnTabStripModelChanged builds the Views find bar for an inserted tab whose
+  // find session is active. Reports nothing, as every stop.
+  void StopActiveFind() {
+    if (!web_contents()) {
+      return;
+    }
+    find_in_page::FindTabHelper* helper =
+        find_in_page::FindTabHelper::FromWebContents(web_contents());
+    if (helper && helper->is_find_session_active()) {
+      helper->StopFinding(find_in_page::SelectionAction::kClear);
+    }
+  }
+
   void StopFind(find_in_page::SelectionAction action) {
     if (!web_contents()) {
       return;
@@ -2832,6 +2846,12 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                          int index = from->GetIndexOfTab(tab.tabInterface);
                          if (index == TabStripModel::kNoTab) {
                            return;
+                         }
+                         // A running find ends before the insert: the
+                         // other Browser would build Chromium's Views find
+                         // bar for it (#134). Nothing is reported.
+                         if (tab->_observer) {
+                           tab->_observer->StopActiveFind();
                          }
                          LOG(WARNING) << "ARKT: facade moving session id "
                                       << tab.sessionId << " to window "

@@ -222,7 +222,8 @@ public protocol EngineClient: AnyObject {
   /// Moves the tab, with its page, history and content view, to the end of `window`'s tabs and makes it active there,
   /// without a reload (#314, Little Arkt's Open in). The tab keeps its id; the move itself has no event, the tab's
   /// later events go to `window`, starting with its `.activeTabChanged`. A window left without tabs closes
-  /// (`.windowClosed` with `.lastTabClosed`, no `.tabClosed`). A no-op for an unknown or closing tab, an unknown window, or the tab's own
+  /// (`.windowClosed` with `.lastTabClosed`, no `.tabClosed`). A running find ends as `stopFinding(_:action: .clear)` does, with no event
+  /// (a find session cannot cross windows, #134). A no-op for an unknown or closing tab, an unknown window, or the tab's own
   /// window. Default: a no-op, for an engine that cannot move tabs.
   func moveTab(_ id: TabID, to window: EngineWindowID)
   /// Mutes or unmutes the tab's sound (#364, BH-126, contract rule 17): `isMuted` in the snapshot and one
@@ -237,7 +238,8 @@ public protocol EngineClient: AnyObject {
   func findInPage(_ id: TabID, text: String, forward: Bool, matchCase: Bool)
   /// Ends the tab's find (Esc, #134, contract rule 22): `.clear` removes the highlight and the selection, `.keep` turns
   /// the active match into the page's selection, `.activate` also clicks it when it is a link. The next `findInPage`
-  /// starts a new search. Reports nothing. A no-op for an unknown or closed tab. Default: a no-op.
+  /// starts a new search. Reports nothing. A no-op for an unknown or closed tab. Default: a no-op. `moveTab(_:to:)` ends a
+  /// running find the same way (`.clear`, nothing reported), so the shell closes its find bar when it moves a tab.
   func stopFinding(_ id: TabID, action: FindStopAction)
   /// Answers a pending JavaScript dialog (#400, contract rule 19): `accepted` is OK (true) or Cancel (false); `userInput`
   /// is a prompt's text. Reported with one `.dialogEnded`. A no-op for a dialog that already ended, so a click that

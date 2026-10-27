@@ -561,7 +561,9 @@ NS_SWIFT_UI_ACTOR
                  matchCase:(BOOL)matchCase
     NS_SWIFT_NAME(findInPage(text:forward:matchCase:));
 // Ends the tab's find (FindTabHelper::StopFinding). Reports nothing; the next
-// find starts a new search. A no-op for a closed tab.
+// find starts a new search. A no-op for a closed tab. -moveToBrowser: ends a
+// running find the same way (Clear, no report): the shell closes its find bar
+// when it moves a tab.
 - (void)stopFindingWithAction:(ArktFindAction)action
     NS_SWIFT_NAME(stopFinding(action:));
 // A copy of the tab's current frame as PNG (#370, #352), from the

@@ -49,13 +49,13 @@ extension InMemoryEngine {
 
   public func findInPage(_ id: TabID, text: String, forward: Bool, matchCase: Bool) {
     guard snapshots[id] != nil else { return }
-    findRequestCounter += 1
     guard !text.isEmpty else {
       finds[id] = nil
       pageSelections[id] = ""
       hub.emit(.findResult(id, requestID: 0, ordinal: 0, count: 0, isFinal: true))
       return
     }
+    findRequestCounter += 1
     let found = page(of: id).map { matches(text, in: $0.text, matchCase: matchCase) } ?? []
     var session: FindSession
     if let current = finds[id], current.text == text, current.matchCase == matchCase {
@@ -111,6 +111,12 @@ extension InMemoryEngine {
     guard snapshots[id] != nil else { throw FindDriverError(description: "no tab \(id)") }
     guard hoveredLinks.removeValue(forKey: id) != nil else { return }
     hub.emit(.targetURLChanged(id, nil))
+  }
+
+  /// A moved tab leaves its find behind (rule 22): the session ends as `stopFinding(.clear)`, with no event.
+  func endFindForMove(of id: TabID) {
+    finds[id] = nil
+    pageSelections[id] = ""
   }
 
   func endFindAndHover(of id: TabID) {

@@ -3912,3 +3912,16 @@ Equal (`in sync`). Ten patch files, 17 upstream files (0010 edits a file 0009 al
 - `FakeEngineContractTests` rules 22 and 23 (`swift test --filter`, run on its own): 3 passed. The rest of `ShellKitGUITests` was not run.
 - `nice -n 15 autoninja -C out/Spike chrome -j 4`: `The build has finished successfully.` Engine app: `xcodegen generate`, then
   `xcodebuild -scheme ArktShell -configuration Engine`: `BUILD SUCCEEDED`.
+
+### #134 and #114: review follow-up
+
+- `moveToBrowser` ends a running find (`StopFinding(kClear)`, only when a session is active, nothing reported) before the detach, so
+  `Browser::OnTabStripModelChanged` never builds the Views find bar for the moved tab. Documented on `findInPage`/`stopFinding` in
+  the facade header (both copies identical) and on `EngineClient.findInPage` and `moveTab`. Tests: `ChromiumMoveTabTests.moveEndsARunningFind`
+  (scripted facade) and `MoveTabTests.moveEndsARunningFind` (InMemory): no reply after the move, the next search starts at match 1.
+- InMemoryEngine no longer spends a request id on empty text (`emptyFindTextUsesNoRequestID`).
+- `engine/REBASE.md`: rebase-risk note for patch 0010.
+- Verification: ShellKit `swift test --skip ShellKitGUITests` 1477 passed (814, 38, 43, 4, 150, 49, 256, 102, 21), 0 failed. `out/Spike`
+  incremental build and Engine app build succeeded. Real app (`dev.arkt.Arkt.try134`, throwaway profile, mock keychain): rules 22 and
+  23 PASS (2/2). Bundle unregistered (0 `try134` entries), folders removed, no process left. The move path itself was not driven in
+  the real app (the contract runner has no moveTab driver).

@@ -142,6 +142,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     guard let moved = snapshots[id], !moved.isClosing, let source = moved.window, source != window,
           windowIDs.contains(window) else { return }
     if activeTabs[source] == id { activeTabs[source] = nil }
+    endFindForMove(of: id)
     snapshots[id]?.window = window
     snapshots[id]?.isActive = false
     tabIDs.removeAll { $0 == id }

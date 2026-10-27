@@ -589,6 +589,8 @@ final class ScriptedTab: NSObject, ArktTabHandle {
       guard let source = owner, let target = browser as? ScriptedBrowser, target !== source, !target.isClosed else {
         return
       }
+      findSession = nil
+      pageSelection = ""
       source.move(self, to: target)
       target.activate(self)
       if source.tabList.isEmpty { source.finishClose(reason: .windowClosing, window: .lastTabClosed) }

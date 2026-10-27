@@ -10,6 +10,32 @@ struct MoveTabTests {
   private let page = URL(string: "arkt-test://page/Moved")!
   private let earlier = URL(string: "arkt-test://page/Earlier")!
 
+  @Test func moveEndsARunningFind() async throws {
+    let engine = InMemoryEngine()
+    let main = engine.createWindow(host: StubWindowHost())
+    let little = engine.createWindow(host: StubWindowHost())
+    let tab = engine.createTab(url: InMemoryEngine.findPageURL(occurrences: 3, link: page), in: little)
+    let recorder = EventRecorder(engine)
+    engine.findInPage(tab, text: "needle", forward: true, matchCase: false)
+    engine.findInPage(tab, text: "needle", forward: true, matchCase: false)
+    let replies = EngineContract.findReplies(recorder, tab)
+    #expect(replies.last?.ordinal == 2)
+
+    engine.moveTab(tab, to: main)
+    #expect(EngineContract.findReplies(recorder, tab) == replies)
+    engine.findInPage(tab, text: "needle", forward: true, matchCase: false)
+    #expect(EngineContract.findReplies(recorder, tab).last?.ordinal == 1)
+  }
+
+  @Test func emptyFindTextUsesNoRequestID() {
+    let engine = InMemoryEngine()
+    let tab = engine.createTab(url: InMemoryEngine.findPageURL(occurrences: 1, link: page))
+    let recorder = EventRecorder(engine)
+    engine.findInPage(tab, text: "", forward: true, matchCase: false)
+    engine.findInPage(tab, text: "needle", forward: true, matchCase: false)
+    #expect(EngineContract.findReplies(recorder, tab).map(\.requestID) == [0, 1])
+  }
+
   @Test func movedTabKeepsItsIdentityHistoryAndView() throws {
     let engine = InMemoryEngine()
     let main = engine.createWindow(host: StubWindowHost())

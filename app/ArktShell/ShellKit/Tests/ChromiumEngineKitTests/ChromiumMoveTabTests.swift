@@ -1,6 +1,6 @@
 import AppKit
 import EngineAPI
-import EngineAPITestSupport
+@testable import EngineAPITestSupport
 import Testing
 @testable import ChromiumEngineKit
 
@@ -43,6 +43,37 @@ struct ChromiumMoveTabTests {
     #expect(inMain == [.activeTabChanged(tab)])
     #expect(recorder.windowEvents == [.windowClosed(little, reason: .lastTabClosed)])
     #expect(!recorder.events.contains { if case .tabClosed = $0 { true } else { false } })
+  }
+
+  /// A running find ends with the move (the other Browser would build Chromium's Views find bar for it, #134): no event,
+  /// and the next search starts at the first match.
+  @Test func moveEndsARunningFind() throws {
+    let engine = ChromiumEngine(facade: facade)
+    let main = engine.createWindow(host: StubWindowHost())
+    let little = engine.createWindow(host: StubWindowHost())
+    let tab = engine.createTab(url: InMemoryEngine.findPageURL(occurrences: 3, link: URL(string: "arkt-test://page/T")!),
+                               in: little)
+    engine.createTab(url: nil, in: little)
+    facade.flush()
+    let recorder = EventRecorder(engine)
+    func lastReply() throws -> (ordinal: Int, count: Int) {
+      let reply = try #require(EngineContract.findReplies(recorder, tab).last)
+      return (reply.ordinal, reply.count)
+    }
+
+    engine.findInPage(tab, text: "needle", forward: true, matchCase: false)
+    facade.flush()
+    engine.findInPage(tab, text: "needle", forward: true, matchCase: false)
+    facade.flush()
+    #expect(try lastReply() == (2, 3))
+    let replies = EngineContract.findReplies(recorder, tab).count
+
+    engine.moveTab(tab, to: main)
+    facade.flush()
+    #expect(EngineContract.findReplies(recorder, tab).count == replies)
+    engine.findInPage(tab, text: "needle", forward: true, matchCase: false)
+    facade.flush()
+    #expect(try lastReply() == (1, 3))
   }
 
   /// Chromium orders its host window out when it tears down a closed window (`ArktBrowserWindow::UnbindHost`), after
