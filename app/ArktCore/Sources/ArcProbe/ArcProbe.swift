@@ -44,13 +44,8 @@ public enum ArcProbe {
 
   // MARK: - Profiles
 
-  /// A directory is a profile when it holds a `Preferences` or `History` file.
   static func profileDirectories(in root: URL) -> [URL] {
-    let children = (try? FileManager.default.contentsOfDirectory(
-      at: root, includingPropertiesForKeys: nil)) ?? []
-    return children.filter { child in
-      ["Preferences", "History"].contains { FileManager.default.fileExists(atPath: child.appendingPathComponent($0).path) }
-    }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    ArcProfileSnapshot.profileDirectories(in: root)
   }
 
   /// Chromium names profile folders `Default` and `Profile N`. Any other folder name is not printed.
