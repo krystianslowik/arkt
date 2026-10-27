@@ -48,6 +48,7 @@ extension ShellWindowController {
     tabsByNode[node] = nil
     nodeByTab[tab] = nil
     peek.sourceWillLeave(tab)                      // its hidden Peek closes here (#348)
+    findBar.forget(tab)                            // the engine ends its find with the move, no stop call (#134)
     let dialog = javaScriptDialogs.release(tab)    // its panel goes with it; the new window shows it (#464)
     let wasCurrent = currentTab == tab
     let wasShown = visibleNodes.contains(node)

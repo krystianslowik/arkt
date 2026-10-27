@@ -28,6 +28,15 @@ public final class ContentCardView: NSView {
       needsLayout = true
     }
   }
+  /// The find bar (#134), above the page at the top trailing corner of the page area; one per card, set once.
+  var findBarView: FindBarView? {
+    didSet {
+      guard findBarView !== oldValue else { return }
+      oldValue?.removeFromSuperview()
+      if let findBarView { addSubview(findBarView, positioned: .above, relativeTo: clipView) }
+      needsLayout = true
+    }
+  }
   /// The link status pill (#114), above the page at a bottom corner; created on first use.
   private(set) var statusPillView: StatusPillView?
   /// The pointer moved over the card, in the card's coordinates; set with the pill, which it keeps out of the way.
@@ -163,6 +172,7 @@ public final class ContentCardView: NSView {
     toolbar.frame = split.toolbarFrame
     contentView?.frame = split.contentFrame
     emptyStateView?.frame = clipView.bounds
+    layoutFindBar()
     layoutStatusPill()
     layoutToast()
     // An explicit shadow path avoids an offscreen pass to derive the shadow shape from content alpha.
@@ -246,6 +256,13 @@ public final class ContentCardView: NSView {
     let trailing = showsToolbar ? ContentToolbarView.horizontalPadding : SplitPaneCloseButton.inset
     let frame = CGRect(x: bounds.maxX - trailing - size, y: bounds.maxY - top - size, width: size, height: size)
     if closeButton.frame != frame { closeButton.frame = frame }
+  }
+
+  /// 12 points from the top and trailing edges of the page area, below the Toolbar when it shows.
+  func layoutFindBar() {
+    guard let findBarView, !findBarView.isHidden else { return }
+    let frame = FindBarLayout.frame(in: split.contentFrame)
+    if findBarView.frame != frame { findBarView.frame = frame }
   }
 
   /// Centered, `ToastView.bottomInset` above the bottom edge, at most `ToastView.maxWidth` wide.
