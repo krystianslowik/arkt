@@ -30,6 +30,8 @@ final class AppSession {
   private(set) lazy var settings = AppSettings(defaults: AppEnvironment.userDefaults, toolbar: toolbarSetting)
   /// Crash reporting (#129): capture behind the Settings > Privacy switch, local reports, the one-time ask.
   private(set) lazy var crashCapture = CrashCapture(directory: location.directory, settings: settings)
+  /// Search suggestions and the BH-113 notice dismissal, shared by every window's command bar (#112).
+  let commandBarSettings = CommandBarSettings(defaults: AppEnvironment.userDefaults)
   let archiveStore: ArchiveStore
   let settingsStore: SettingsStore
   let importer: ArcImportCoordinator
@@ -86,7 +88,7 @@ final class AppSession {
     self.windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
                                   sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
                                   sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
-                                  hostLookup: hostLookup)
+                                  commandBarSettings: commandBarSettings, hostLookup: hostLookup)
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
     self.archiveStore = archiveStore
