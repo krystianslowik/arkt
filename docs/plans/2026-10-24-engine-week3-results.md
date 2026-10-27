@@ -3925,3 +3925,53 @@ Equal (`in sync`). Ten patch files, 17 upstream files (0010 edits a file 0009 al
   incremental build and Engine app build succeeded. Real app (`dev.arkt.Arkt.try134`, throwaway profile, mock keychain): rules 22 and
   23 PASS (2/2). Bundle unregistered (0 `try134` entries), folders removed, no process left. The move path itself was not driven in
   the real app (the contract runner has no moveTab driver).
+
+## #502: location allowed in the panel now asks macOS
+
+Date 2026-10-27. Branch `engine/502-location-system-prompt` off `main` at `2e2cf7e`. Overlay only: no Chromium patch, `.patches`
+unchanged, facade header untouched.
+
+Cause (from the issue): Chromium starts the macOS location request only from `system_permission_settings::Request(GEOLOCATION)`,
+called by `content_setting_image_model.cc:907` and `embedded_permission_prompt.cc:276`. The panel only called `Accept` or
+`AcceptThisTime`, so the system status stayed not determined and the page waited until its own timeout.
+
+Change: `ArktPermissionPrompt::Answer` (`arkt_permission_prompt.mm`) records whether the answered requests include
+`ContentSettingsType::GEOLOCATION` before the delegate call (which may delete the prompt and the requests). After `Accept` or
+`AcceptThisTime`, when it did and `system_permission_settings::CanPrompt(GEOLOCATION)` is true (status not determined), it calls
+`system_permission_settings::Request(GEOLOCATION, base::DoNothing())`, as the location bar chip does. The call is a static member, so
+it is safe after the prompt is gone. `BUILD.gn` gains `//chrome/browser/permissions/system` in `window` deps. Block and dismiss do not call it.
+
+Denied path, read in Chromium and not patched: `GeolocationPermissionContextSystem::GetPermissionStatusInternal` maps a denied
+system status to block, so with the system already denied no prompt shows and the page gets its error at once. After the system
+prompt, `GeolocationProviderImpl::OnSystemPermissionUpdated` delivers the position, or the error on Don't Allow. Nothing else was needed.
+
+### Real app (`dev.arkt.Arkt.try502`, Engine app on `out/Spike`, throwaway profile, shell data folder and defaults suite under `profiles/502-20261027`, `--use-mock-keychain`, loopback page on `127.0.0.1:8692`)
+
+Launched by `posix_spawn` with `responsibility_spawnattrs_setdisclaim` (rc 0), so Arkt is the responsible process. Quiet location
+prompt (no gesture) shown in the shell, `Allow while visiting the site` clicked: `permission prompt answer 0`, then
+`ARKT: asking the system for location access`, and the macOS prompt "Arkt would like to use your current location." appeared.
+`Don't Allow` clicked: the page got `ERROR 1:User denied Geolocation` within the 4 s check, not `3:Timeout expired`. Before the change
+the page got `3:Timeout expired`. Location was never granted. The Allow branch of the system prompt was not run (never grant real
+location); Chromium's own flow delivers the position there.
+
+Limits: no scripted or contract test, the in-app contract runner has no location driver and a fake `GeolocationSystemPermissionManager`
+is not reachable from the overlay. Cleanup: processes stopped by PID, `tccutil reset All dev.arkt.Arkt.try502` succeeded;
+`tccutil reset Location` prints `Failed to reset Location approval status` (location is kept by locationd, which tccutil does not
+reset here), so the Don't Allow answer for the throwaway id stays in locationd. Bundle unregistered (0 `try502` entries), embed folder,
+profile, derived data and logs deleted.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 10 |
+| `arkt` commits above `156.0.8078.48` | 10 |
+
+Equal (in sync). Facade header copies `cmp` identical.
+
+### Verification
+
+- `nice -n 15 autoninja -C out/Spike chrome -j 4`: `The build has finished successfully.` Engine app: `xcodebuild -scheme ArktShell
+  -configuration Engine`: `BUILD SUCCEEDED`.
+- ShellKit `swift test --skip ShellKitGUITests`: 1587 passed (905, 38, 60, 4, 150, 49, 257, 103, 21), 0 failed. No Swift source changed;
+  the count differs from the #134 run only by tests other lanes merged since.
