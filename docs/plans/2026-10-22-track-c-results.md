@@ -2563,7 +2563,7 @@ Cmd-Shift-V) stacks on this branch.
   `LittleArktLookupRows`.
 - Tokens: `ShellTokens.commandBar*` are light and dark pairs (glass, opaque surface, text, secondary, tertiary,
   divider, edges, selected row, key cap, scrim, pill well, pill on, pill on text, tick). `ShellTokensContrastTests`
-  gained seven tests: text on the opaque surface and on every fill a row puts under it (selected row, key cap, pill
+  gained six tests: text on the opaque surface and on every fill a row puts under it (selected row, key cap, pill
   well) at 4.5:1 in both appearances, the selected pill and its count, graphite on mustard above 7:1, and mustard
   only as a fill.
 - View: glass surface (`NSVisualEffectView`, opaque under Reduce Transparency), magnifier, 22 pt field, filter pills
@@ -2594,8 +2594,8 @@ tests referenced values that did not exist), then the implementation.
 
 - `app/ArktCore`: `swift test` - 556 passed (145 + 117 + 70 + 8 + 216), untouched by this branch.
 - `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` - 1643 passed in nine runs (origin/main at the same
-  point: 1587; +56: `CommandBarRowContentTests` 14, `CommandBarFilterTests` 5, `CommandBarGeometryTests` +3,
-  `ShellTokensContrastTests` +7, the rest in `CommandBarResultsScopeTests`).
+  point: 1587; +56: 27 are #322's carried tests, 29 are new here: `CommandBarRowContentTests` 13, `CommandBarFilterTests` 5,
+  `CommandBarGeometryTests` +4, `ShellTokensContrastTests` +6, `CommandBarResultsScopeTests` +1).
 - `swift test --filter ShellKitGUITests` - 1398 cases, 30 skipped, 4 failures in 3 tests, none in the command bar:
   `SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU` (22.9 s; a frame-pacing gate under
   load), `SplitDragTests.testDropFavoriteOnPlainTabMovesItIntoSplitAndClickVsDrag` (an event-queue test; passes
