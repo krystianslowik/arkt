@@ -9,17 +9,21 @@ public enum EngineImportContract {
 
   public static func cookie(
     _ name: String, value: String = "v", host: String = ".example.com", path: String = "/", lastAccess: TimeInterval = 100,
-    expires: Date = future
+    expires: Date = future, partitionKey: String = ""
   ) -> ArcCookie {
     ArcCookie(
       hostKey: host, name: name, value: SecretBytes(taking: Array(value.utf8)), path: path, expires: expires,
-      creation: Date(timeIntervalSince1970: 50), lastAccess: Date(timeIntervalSince1970: lastAccess))
+      creation: Date(timeIntervalSince1970: 50), lastAccess: Date(timeIntervalSince1970: lastAccess),
+      partitionKey: partitionKey)
   }
 
-  public static func login(_ realm: String, user: String, password: String, action: String? = nil) -> ArcLogin {
+  public static func login(
+    _ realm: String, user: String, password: String, action: String? = nil, lastUsed: TimeInterval = 100
+  ) -> ArcLogin {
     ArcLogin(
       originURL: realm + "login", actionURL: action, signonRealm: realm, username: user,
-      password: SecretBytes(taking: Array(password.utf8)))
+      password: SecretBytes(taking: Array(password.utf8)), dateCreated: Date(timeIntervalSince1970: 50),
+      dateLastUsed: Date(timeIntervalSince1970: lastUsed))
   }
 
   public static func isZeroed(_ secret: SecretBytes) -> Bool { secret.withBytes { $0.allSatisfy { $0 == 0 } } }
@@ -54,8 +58,19 @@ public enum EngineImportContract {
     ])
     try EngineContract.require(result == ImportWriteResult(written: 1, skipped: 1), "newer and expired: \(result)")
 
+    // A partitioned cookie is skipped, even when it is newer than an ordinary one with the same key (which still
+    // lands), and an ordinary cookie next to it is written.
+    let partitioned = [
+      cookie("p", value: "top-level-only", host: ".tracker.example", lastAccess: 900, partitionKey: "https://news.example"),
+      cookie("p", value: "plain", host: ".tracker.example", lastAccess: 100),
+      cookie("q", value: "only-partitioned", host: ".tracker.example", partitionKey: "https://news.example"),
+    ]
+    result = await engine.importCookies(partitioned)
+    try EngineContract.require(result == ImportWriteResult(written: 1, skipped: 2), "partitioned cookies: \(result)")
+    try EngineContract.require(partitioned.allSatisfy { isZeroed($0.value) }, "partitioned secrets are zeroed too")
+
     // Logins: duplicates by (signon realm, username, action) keep the later entry; another action or user is not a
-    // duplicate; a login the store holds is updated and counts as written.
+    // duplicate; a login the store holds is replaced only by a newer one.
     let logins = [
       login("https://example.com/", user: "u", password: "first"),
       login("https://example.com/", user: "u", password: "second"),
@@ -65,9 +80,13 @@ public enum EngineImportContract {
     result = await engine.importPasswords(logins)
     try EngineContract.require(result == ImportWriteResult(written: 3, skipped: 1), "login batch: \(result)")
     try EngineContract.require(logins.allSatisfy { isZeroed($0.password) }, "login secrets are zeroed after the call")
-    let again = [login("https://example.com/", user: "u", password: "third")]
-    result = await engine.importPasswords(again)
-    try EngineContract.require(result == ImportWriteResult(written: 1), "login the store holds: \(result)")
-    try EngineContract.require(isZeroed(again[0].password), "the secret of a stored login is zeroed")
+    let older = [login("https://example.com/", user: "u", password: "third", lastUsed: 100)]
+    result = await engine.importPasswords(older)
+    try EngineContract.require(result == ImportWriteResult(skipped: 1), "login the store holds: \(result)")
+    try EngineContract.require(isZeroed(older[0].password), "the secret of a skipped login is zeroed")
+    let newer = [login("https://example.com/", user: "u", password: "fourth", lastUsed: 200)]
+    result = await engine.importPasswords(newer)
+    try EngineContract.require(result == ImportWriteResult(written: 1), "newer login: \(result)")
+    try EngineContract.require(isZeroed(newer[0].password), "the secret of a stored login is zeroed")
   }
 }

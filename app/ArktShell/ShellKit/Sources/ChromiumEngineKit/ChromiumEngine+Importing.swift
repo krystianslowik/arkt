@@ -21,6 +21,7 @@ private final class FacadeImportCookie: NSObject, ArktImportCookie {
   var priority: Int { cookie.priority }
   var sourceScheme: Int { cookie.sourceScheme }
   var sourcePort: Int { cookie.sourcePort }
+  var partitionKey: String { cookie.partitionKey }
 
   func withValueBytes(_ body: (UnsafeRawPointer, UInt) -> Void) {
     lend(cookie.value, to: body)

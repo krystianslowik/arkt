@@ -60,6 +60,23 @@ struct CookieReaderTests {
     }
   }
 
+  @Test func partitionedCookiesAreSkippedAndCounted() throws {
+    let future = ChromiumTime.webKit(fromUnixSeconds: 4_102_444_800)
+    let partitioned = FixtureManifest.Cookie(
+      hostKey: ".tracker.example", name: "partitioned", value: "p", path: "/", isSecure: true, isHTTPOnly: false,
+      expiresWebKitTime: future, topFrameSiteKey: "https://news.example")
+    let plain = FixtureManifest.Cookie(
+      hostKey: ".tracker.example", name: "plain", value: "q", path: "/", isSecure: true, isHTTPOnly: false,
+      expiresWebKitTime: future)
+    try Support.withProfile(.init(extraCookies: [partitioned, plain])) { manifest in
+      let (cookies, summary) = try readAll(manifest)
+      #expect(summary.skippedPartitioned == 1)
+      #expect(!cookies.contains { $0.name == "partitioned" })
+      #expect(cookies.contains { $0.name == "plain" && $0.partitionKey.isEmpty })
+      #expect(summary.description.contains("partitioned 1"))
+    }
+  }
+
   @Test func countsMatchTheManifest() throws {
     try Support.withProfile { manifest in
       let (cookies, summary) = try readAll(manifest)

@@ -993,6 +993,7 @@ final class ScriptedFacade: NSObject, ArktEngine {
     var hostKey: String, name: String, path: String, value: String
     var expires: Date, creation: Date?, lastAccess: Date?
     var isSecure: Bool, isHTTPOnly: Bool, sameSite: Int, priority: Int, sourceScheme: Int, sourcePort: Int
+    var partitionKey: String
   }
   struct ScriptedImportedLogin: Equatable {
     var originURL: String, actionURL: String?, signonRealm: String, username: String, password: String
@@ -1027,7 +1028,7 @@ final class ScriptedFacade: NSObject, ArktEngine {
         hostKey: cookie.hostKey, name: cookie.name, path: cookie.path, value: value, expires: cookie.expires,
         creation: cookie.creation, lastAccess: cookie.lastAccess, isSecure: cookie.isSecure,
         isHTTPOnly: cookie.isHTTPOnly, sameSite: cookie.sameSite, priority: cookie.priority,
-        sourceScheme: cookie.sourceScheme, sourcePort: cookie.sourcePort)
+        sourceScheme: cookie.sourceScheme, sourcePort: cookie.sourcePort, partitionKey: cookie.partitionKey)
     })
     let result = importResult(count: cookies.count)
     // The real facade answers from a posted task.

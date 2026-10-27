@@ -65,7 +65,7 @@ extension FakeChromiumProfile {
       if hostPrefixed { plaintext = Array(SHA256.hash(data: Data(cookie.hostKey.utf8))) + plaintext }
       let created = FixtureData.webKit(afterSeconds: Int64(index) * 10)
       try db.insert(into: "cookies", columns: columns, row: [
-        "creation_utc": .int(created), "host_key": .text(cookie.hostKey), "top_frame_site_key": .text(""),
+        "creation_utc": .int(created), "host_key": .text(cookie.hostKey), "top_frame_site_key": .text(cookie.topFrameSiteKey),
         "name": .text(cookie.name), "value": .text(""), "encrypted_value": .blob(try ChromiumV10.encrypt(plaintext, key: key)),
         "path": .text(cookie.path), "expires_utc": .int(cookie.expiresWebKitTime),
         "is_secure": .int(cookie.isSecure ? 1 : 0), "is_httponly": .int(cookie.isHTTPOnly ? 1 : 0),

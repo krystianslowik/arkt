@@ -456,6 +456,10 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) NSInteger sourceScheme;
 // -1 when unspecified.
 @property(nonatomic, readonly) NSInteger sourcePort;
+// Chromium's top_frame_site_key: empty for an ordinary cookie. The engine
+// skips a partitioned cookie (non-empty): written without its partition key it
+// would be readable in every top-level context.
+@property(nonatomic, readonly, copy) NSString* partitionKey;
 @end
 
 // One saved login to write into the profile's password store (#512). Same
@@ -478,8 +482,8 @@ NS_SWIFT_UI_ACTOR
 @protocol ArktImportResult <NSObject>
 // Stored.
 @property(nonatomic, readonly) NSInteger written;
-// Not stored on purpose: a duplicate in the batch, an expired cookie, or a
-// cookie the profile already holds that is as new or newer.
+// Not stored on purpose: a duplicate in the batch, an expired or partitioned
+// cookie, or a cookie the profile already holds that is as new or newer.
 @property(nonatomic, readonly) NSInteger skipped;
 // Refused by the cookie store or the password store.
 @property(nonatomic, readonly) NSInteger failed;
@@ -707,7 +711,9 @@ NS_SWIFT_UI_ACTOR
 
 // Import writes (#512), into the profile the engine started with. Plaintext
 // crosses in-process only; the engine builds its own copies inside the
-// lending blocks and the shell zeroes its buffers after `completion`.
+// lending blocks and zeroes them once it has handed them on, and the shell
+// zeroes its buffers after `completion`. Copies Chromium makes itself (the
+// cookie and its mojo message, the password store's) are not zeroed.
 // `completion` runs on the main thread after the writes reached the store (a
 // cookie batch is flushed to disk first), never inside the call, and also for
 // an empty batch.
@@ -715,8 +721,8 @@ NS_SWIFT_UI_ACTOR
 // Cookies: written through the profile's CookieManager
 // (SetCanonicalCookie) with HttpOnly and an inclusive SameSite context.
 // Duplicates in the batch by (name, domain, path) keep the newest by last
-// access, then creation, then the later entry; a cookie that already expired,
-// and one the profile holds that was last used at or after the imported one's
+// access, then creation, then the later entry; a cookie that already expired
+// or is partitioned, and one the profile holds that was last used at or after the imported one's
 // last access, are skipped. The network service caps an expiry at 400 days
 // after the creation date, so a cookie created longer ago keeps its expiry by
 // moving its creation date forward to expiry - 400 days (never past now).
@@ -725,8 +731,9 @@ NS_SWIFT_UI_ACTOR
     NS_SWIFT_NAME(importCookies(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
 // Passwords: written through the profile's password store (AddLogin).
 // Duplicates in the batch by (signon_realm, username, action) keep the later
-// entry; the store updates a login whose primary key it already holds, and
-// that counts as written.
+// entry. A login the store already holds under that key is skipped unless the
+// imported one is newer (the later of date_last_used and date_created, against
+// the stored one's). `written` counts logins after the store answered.
 - (void)importPasswords:(NSArray<id<ArktImportLogin>>*)logins
              completion:(void (^)(id<ArktImportResult> result))completion
     NS_SWIFT_NAME(importPasswords(_:completion:)) NS_SWIFT_DISABLE_ASYNC;

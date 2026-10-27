@@ -71,10 +71,20 @@ final class ImportCheckRunner {
     ) { logins += $0 }
     print("ARKT_IMPORT read \(loginSummary)")
 
+    // A partitioned cookie the reader would never deliver, to reach the engine's own refusal: it must be skipped.
+    cookies.append(ArcCookie(
+      hostKey: "127.0.0.1", name: "partitioned", value: SecretBytes(taking: Array("must-not-land".utf8)), path: "/",
+      expires: Date(timeIntervalSince1970: 4_102_444_800), creation: clock, lastAccess: clock, partitionKey: "https://top.example"))
     let cookieResult = await engine.importCookies(cookies)
     print("ARKT_IMPORT cookies \(describe(cookieResult))")
     let loginResult = await engine.importPasswords(logins)
     print("ARKT_IMPORT passwords \(describe(loginResult))")
+    // The same logins again, with the dates they carry: none is newer than what the store holds, so all are skipped.
+    var loginsAgain: [ArcLogin] = []
+    _ = try LoginReader().read(
+      loginDatabase: directory.appendingPathComponent("Login Data"), keyProvider: FixtureKey()
+    ) { loginsAgain += $0 }
+    print("ARKT_IMPORT passwords again \(describe(await engine.importPasswords(loginsAgain)))")
     // Importing the same batch again is all skipped for the cookies that were written (no newer cookie), and the
     // store updates the logins it holds.
     var again: [ArcCookie] = []

@@ -29,6 +29,7 @@
 #include "components/password_manager/core/browser/password_store/stored_credential.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_constants.h"
@@ -142,11 +143,25 @@ void FinishCookies(scoped_refptr<CookieBatch> batch) {
   // The store writes in batches of its own; flush so the cookies are on disk
   // when the shell hears back.
   network::mojom::CookieManager* manager = batch->manager;
-  manager->FlushCookieStore(base::BindOnce(
-      [](scoped_refptr<CookieBatch> batch) {
-        std::move(batch->done).Run(std::move(batch->counts));
-      },
-      batch));
+  auto finish = [](scoped_refptr<CookieBatch> batch) {
+    std::move(batch->done).Run(std::move(batch->counts));
+  };
+  manager->FlushCookieStore(mojo::WrapCallbackWithDropHandler(
+      base::BindOnce(finish, batch), base::BindOnce(finish, batch)));
+}
+
+// The cookie manager dropped a callback unanswered: `pending` cookies are
+// counted failed and the batch ends.
+void AbandonBatch(scoped_refptr<CookieBatch> batch, size_t pending) {
+  batch->counts.failed += static_cast<int>(pending);
+  batch->counts.reasons["no answer from the cookie store"] +=
+      static_cast<int>(pending);
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(
+                     [](scoped_refptr<CookieBatch> batch) {
+                       std::move(batch->done).Run(std::move(batch->counts));
+                     },
+                     batch));
 }
 
 void WriteCookies(scoped_refptr<CookieBatch> batch,
@@ -223,17 +238,24 @@ void WriteCookies(scoped_refptr<CookieBatch> batch,
         net::CookieOptions::SameSiteCookieContext::MakeInclusiveForSet());
     batch->manager->SetCanonicalCookie(
         *canonical, url, options,
-        base::BindOnce(
-            [](scoped_refptr<CookieBatch> batch, base::OnceClosure done,
-               net::CookieAccessResult result) {
-              if (result.status.IsInclude()) {
-                batch->counts.written++;
-              } else {
-                Fail(*batch, "refused: " + result.status.GetDebugString());
-              }
-              std::move(done).Run();
-            },
-            batch, barrier));
+        mojo::WrapCallbackWithDropHandler(
+            base::BindOnce(
+                [](scoped_refptr<CookieBatch> batch, base::OnceClosure done,
+                   net::CookieAccessResult result) {
+                  if (result.status.IsInclude()) {
+                    batch->counts.written++;
+                  } else {
+                    Fail(*batch, "refused: " + result.status.GetDebugString());
+                  }
+                  std::move(done).Run();
+                },
+                batch, barrier),
+            base::BindOnce(
+                [](scoped_refptr<CookieBatch> batch, base::OnceClosure done) {
+                  Fail(*batch, "no answer from the cookie store");
+                  std::move(done).Run();
+                },
+                batch, barrier)));
   }
 }
 
@@ -244,6 +266,22 @@ void ImportCookies(Profile* profile,
                    ImportDone done) {
   auto batch = base::MakeRefCounted<CookieBatch>();
   batch->done = std::move(done);
+
+  // A partitioned cookie written without its partition key would be readable
+  // in every top-level context: skipped, whole.
+  {
+    std::vector<ImportCookie> unpartitioned;
+    unpartitioned.reserve(cookies.size());
+    for (ImportCookie& cookie : cookies) {
+      if (cookie.partition_key.empty()) {
+        unpartitioned.push_back(std::move(cookie));
+      } else {
+        batch->counts.skipped++;
+        Zero(cookie.value);
+      }
+    }
+    cookies = std::move(unpartitioned);
+  }
 
   // Duplicates in the batch by (name, domain, path): the newest stamp wins,
   // the later entry on a tie.
@@ -278,14 +316,19 @@ void ImportCookies(Profile* profile,
     return;
   }
 
+  const size_t unique_size = unique.size();
   batch->manager =
       profile->GetDefaultStoragePartition()->GetCookieManagerForBrowserProcess();
-  batch->manager->GetAllCookies(base::BindOnce(
-      [](scoped_refptr<CookieBatch> batch, std::vector<ImportCookie> cookies,
-         const std::vector<net::CanonicalCookie>& existing) {
-        WriteCookies(std::move(batch), std::move(cookies), existing);
-      },
-      batch, std::move(unique)));
+  // Each answer is wrapped: if the cookie manager goes away without
+  // answering (profile teardown), the batch fails instead of hanging.
+  batch->manager->GetAllCookies(mojo::WrapCallbackWithDropHandler(
+      base::BindOnce(
+          [](scoped_refptr<CookieBatch> batch, std::vector<ImportCookie> cookies,
+             const std::vector<net::CanonicalCookie>& existing) {
+            WriteCookies(std::move(batch), std::move(cookies), existing);
+          },
+          batch, std::move(unique)),
+      base::BindOnce(&AbandonBatch, batch, unique_size)));
 }
 
 namespace {
@@ -317,6 +360,88 @@ class StoreCounter : public password_manager::PasswordStoreConsumer {
   ~StoreCounter() override = default;
   scoped_refptr<password_manager::PasswordStoreInterface> store_;
   base::WeakPtrFactory<StoreCounter> weak_factory_{this};
+};
+
+// Writes imported logins after reading what the store holds: a login the
+// store already has under the same (signon realm, username, action) is skipped
+// unless the imported one is newer, and `written` counts what the store
+// accepted, after it answered. Owns itself until it is done.
+class LoginImport : public password_manager::PasswordStoreConsumer {
+ public:
+  LoginImport(scoped_refptr<password_manager::PasswordStoreInterface> store,
+              std::vector<password_manager::StoredCredential> credentials,
+              ImportCounts counts,
+              ImportDone done)
+      : store_(std::move(store)),
+        credentials_(std::move(credentials)),
+        counts_(std::move(counts)),
+        done_(std::move(done)) {}
+
+  void Start() { store_->GetAllLogins(weak_factory_.GetWeakPtr()); }
+
+  void OnGetPasswordStoreResultsOrErrorFrom(
+      password_manager::PasswordStoreInterface* store,
+      base::expected<std::vector<password_manager::StoredCredential>,
+                     password_manager::PasswordStoreBackendError> results)
+      override {
+    if (!results.has_value()) {
+      counts_.failed += static_cast<int>(credentials_.size());
+      counts_.reasons["password store unreadable"] +=
+          static_cast<int>(credentials_.size());
+      Finish();
+      return;
+    }
+    std::map<std::tuple<std::string, std::u16string, std::string>, base::Time>
+        held;
+    for (const auto& login : *results) {
+      held[{login.signon_realm, login.username_value, login.action.spec()}] =
+          Stamp(login);
+    }
+    std::vector<password_manager::StoredCredential> to_write;
+    for (auto& credential : credentials_) {
+      auto it = held.find({credential.signon_realm, credential.username_value,
+                           credential.action.spec()});
+      if (it != held.end() && it->second >= Stamp(credential)) {
+        counts_.skipped++;
+        continue;
+      }
+      to_write.push_back(std::move(credential));
+    }
+    credentials_.clear();
+    if (to_write.empty()) {
+      Finish();
+      return;
+    }
+    const int count = static_cast<int>(to_write.size());
+    store_->AddLogins(std::move(to_write),
+                      base::BindOnce(&LoginImport::OnAdded,
+                                     weak_factory_.GetWeakPtr(), count));
+  }
+
+ private:
+  ~LoginImport() override = default;
+
+  // The later of last use and creation.
+  static base::Time Stamp(const password_manager::StoredCredential& login) {
+    return std::max(login.date_last_used, login.date_created);
+  }
+
+  void OnAdded(int count) {
+    counts_.written += count;
+    Finish();
+  }
+
+  void Finish() {
+    (new StoreCounter(store_))->Start();
+    std::move(done_).Run(std::move(counts_));
+    delete this;
+  }
+
+  scoped_refptr<password_manager::PasswordStoreInterface> store_;
+  std::vector<password_manager::StoredCredential> credentials_;
+  ImportCounts counts_;
+  ImportDone done_;
+  base::WeakPtrFactory<LoginImport> weak_factory_{this};
 };
 
 }  // namespace
@@ -362,35 +487,27 @@ void ImportLogins(Profile* profile,
     credential.in_store = password_manager::PasswordForm::Store::kProfileStore;
     credentials.push_back(std::move(credential));
   }
-  counts.written = static_cast<int>(credentials.size());
-
   scoped_refptr<password_manager::PasswordStoreInterface> store =
       profile ? ProfilePasswordStoreFactory::GetForProfile(
                     profile, ServiceAccessType::EXPLICIT_ACCESS)
               : nullptr;
-  if (!store || credentials.empty()) {
-    if (store) {
-      // Nothing to write: log what the store holds, for a check after a
-      // relaunch.
-      (new StoreCounter(store))->Start();
-    }
-    if (!store && !credentials.empty()) {
-      counts.failed += counts.written;
-      counts.reasons["no password store"] += counts.written;
-      counts.written = 0;
-    }
+  if (!store) {
+    counts.failed += static_cast<int>(credentials.size());
+    counts.reasons["no password store"] +=
+        static_cast<int>(credentials.size());
     PostDone(std::move(done), std::move(counts));
     return;
   }
-  store->AddLogins(
-      std::move(credentials),
-      base::BindOnce(
-          [](scoped_refptr<password_manager::PasswordStoreInterface> store,
-             ImportDone done, ImportCounts counts) {
-            (new StoreCounter(store))->Start();
-            std::move(done).Run(std::move(counts));
-          },
-          store, std::move(done), std::move(counts)));
+  if (credentials.empty()) {
+    // Nothing to write: log what the store holds, for a check after a
+    // relaunch.
+    (new StoreCounter(store))->Start();
+    PostDone(std::move(done), std::move(counts));
+    return;
+  }
+  (new LoginImport(std::move(store), std::move(credentials), std::move(counts),
+                   std::move(done)))
+      ->Start();
 }
 
 }  // namespace arkt

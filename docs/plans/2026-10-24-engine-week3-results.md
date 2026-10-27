@@ -3994,15 +3994,18 @@ Date 2026-10-27. Branch `engine/512-import-cookies-passwords` off `main` at `324
     `CanonicalCookie::FromStorage` (kCookieManager) from the record's host key (a leading dot is a domain cookie), path, expiry,
     secure, httponly, samesite, priority, source scheme and source port; the source URL is built from the host (https for a secure
     cookie or source scheme 2) and the recorded port. Dedupe by (name, domain, path): the newest last access wins, then creation,
-    then the later entry. Skipped: an expired cookie, and one the profile holds that was last used at or after the imported one's
+    then the later entry. Skipped: a partitioned cookie (non-empty `top_frame_site_key`; written without its partition key it
+    would be readable in every top-level context), an expired cookie, and one the profile holds that was last used at or after the imported one's
     last access (so a second import of the same batch writes nothing). Failures are counted by reason (the cookie inclusion status).
   - Passwords: `ProfilePasswordStoreFactory` store, `AddLogins` of `StoredCredential`s (Chromium 156 replaced `PasswordForm` in this
-    API). Dedupe by (signon realm, username, action), later entry wins; the store updates a login whose primary key it holds, which
-    counts as written. An invalid origin URL or empty signon realm fails with a reason. The engine logs how many logins its store
+    API). Dedupe by (signon realm, username, action), later entry wins. The store is read first (`GetAllLogins`): a login it already
+    holds under that key is skipped unless the imported one is newer (the later of last use and creation). `written` counts after
+    `AddLogins` answered. An invalid origin URL or empty signon realm fails with a reason. The engine logs how many logins its store
     holds (counts only), also for an empty batch.
 - **Swift.** `EngineImporting` in `EngineAPI` (`importCookies([ArcCookie]) async` and `importPasswords([ArcLogin]) async`, result
   `ImportWriteResult`), a separate protocol like `EngineExtensions`. `ChromiumEngine` implements it over the facade and zeroes every
-  `SecretBytes` of the batch after the call. `InMemoryEngine` and `FakeEngine` record what they were given (`ImportRecording`, the
+  `SecretBytes` of the batch after the call. Zeroing covers the batch buffers (ours and the engine's copies of them); the
+  `CanonicalCookie` Chromium builds, its mojo message and the password store's copies are Chromium's and are not zeroed. `InMemoryEngine` and `FakeEngine` record what they were given (`ImportRecording`, the
   same dedupe rules) and zero the secrets. `EngineAPI` now depends on `ArcImport` for the reader records (deliberate: ShellUI
   still imports no core module; `IsolationTests` pass).
 - **Two Chromium facts found by the real run.**
@@ -4024,8 +4027,9 @@ from a real profile. Run 1 `import`, then run 2 `verify` on the same profile fol
 
 | Check | Result | Evidence |
 |---|---|---|
-| Cookies written | PASS | `written=2 skipped=2 failed=0`: the two fixed cookies (2024, 2025) skipped as expired; the session cookie of the fixture was not delivered by the reader (counted there) |
-| Same batch again | PASS | `written=0 skipped=4`: nothing newer than what the profile holds |
+| Cookies written | PASS | `written=2 skipped=3 failed=0`: the two fixed cookies (2024, 2025) skipped as expired, and a partitioned cookie handed to the engine by hand skipped; the session cookie and the fixture's own partitioned row were not delivered by the reader (`session 1`, `partitioned 1` in its counts) |
+| Same batch again | PASS | cookies `written=0 skipped=4`, logins `written=0 skipped=4`: nothing newer than what the profile holds |
+| Encrypted at rest | PASS | after run 1, read-only `sqlite3` on the profile's Cookies: for `imported`, `imported-httponly` and `control` the `value` column is empty and `encrypted_value` is non-empty with the `v10` prefix (hex `763130`, 51 and 67 bytes); Login Data `password_value` is 19 bytes with the same prefix for all 4 logins; neither file contains the plaintext (`from-fixture`, `local-pass-512`: 0 hits) |
 | Page sees an imported cookie | PASS | page on `http://127.0.0.1:<port>`: `document.cookie` is `imported=from-fixture`; the HttpOnly one is not in it |
 | HttpOnly kept | PASS | Cookies table: `imported-httponly` has `is_httponly=1`, `imported` 0 |
 | Persists on disk | PASS | after run 1 quit (before the relaunch) the Cookies table holds `imported`, `imported-httponly` and the page's `control` cookie |
@@ -4035,9 +4039,9 @@ from a real profile. Run 1 `import`, then run 2 `verify` on the same profile fol
 | Stderr | PASS | no `FATAL`, no `NOTREACHED`, no `Check failed` |
 
 Not run: the `chrome://password-manager` page (the store count above is the evidence), and a cookie from a secure origin or with
-`SameSite` set (the fixture writer fixes `samesite` at -1; the `SameSite` context is the inclusive one, as written). README says
-encrypted data does not survive a relaunch under the mock keychain; here both the cookies and the logins did (the cause was not
-investigated). A real-keychain relaunch stays a maintainer check.
+`SameSite` set (the fixture writer fixes `samesite` at -1; the `SameSite` context is the inclusive one, as written). The README claimed that encrypted data does not survive a relaunch under the mock keychain; the README was wrong, not the code:
+`FakeKeychainV2::FindGenericPassword` returns the fixed password `mock_password`, so the key is the same on every launch (the
+README is corrected). A real-keychain relaunch stays a maintainer check.
 
 LaunchServices: the build and the launch registered the test bundle under `dev.arkt.Arkt.try512`; every path was removed with
 `lsregister -u` and the count of `try512` entries is 0. No process of this run was left; the embed folder, derived data, throwaway
@@ -4065,7 +4069,18 @@ factory is included with `// nogncheck`, as `browser_tabstrip.h` is.
 - `nice -n 15 autoninja -C out/Spike chrome -j 4`: `The build has finished successfully.` Engine app: `xcodegen generate`, then
   `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try512`: `BUILD SUCCEEDED`.
 
+### Review follow-up (PR #528)
+
+- Partitioned cookies skipped (reader: `top_frame_site_key` column-probed, `partitioned` count; `ArcCookie.partitionKey`; facade
+  `partitionKey`; engine and both stubs refuse them; fixture row `topFrameSiteKey`; tests in `CookieReaderTests` and the shared
+  `EngineImportContract`, which fails on both stubs when the refusal is removed).
+- Logins: store read first, skip unless newer, `written` after the store answered. Cookies: drop handlers on `GetAllCookies`,
+  `SetCanonicalCookie` and `FlushCookieStore`, so a dropped answer fails the batch.
+- Encryption at rest proven (table above); README corrected.
+
 ### Left open
 
 - The coordinator (#515) calls these methods and decides what the user is told for skipped and failed counts.
-- Partitioned cookies: the reader does not carry the partition key, so a partitioned Arc cookie is imported as an unpartitioned one.
+- Partitioned cookies are skipped, not imported (the reader reads `top_frame_site_key` and counts them; the engine and both stubs
+  refuse one they are handed). Importing them with their partition key is a later decision.
+- A missing answer from the cookie manager (profile teardown) fails the batch with a reason instead of hanging.

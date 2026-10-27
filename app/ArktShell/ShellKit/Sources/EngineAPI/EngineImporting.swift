@@ -31,7 +31,8 @@ public protocol EngineImporting: AnyObject {
   /// profile already holds that was last used at or after the imported one's last access, are skipped.
   func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult
   /// Writes logins through the profile's password store. Duplicates inside the batch by (signon realm, username,
-  /// action) keep the later entry.
+  /// action) keep the later entry; a login the store already holds under that key is skipped unless the imported one is
+  /// newer (the later of its last use and creation).
   func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult
 }
 
@@ -66,6 +67,7 @@ public struct ImportRecording: Sendable {
   public private(set) var logins: [ImportedLoginRecord] = []
   /// Last-access stamps of the cookies kept, parallel to `cookies`.
   private var stamps: [Date] = []
+  private var loginStamps: [Date] = []
 
   public init() {}
 
@@ -74,13 +76,13 @@ public struct ImportRecording: Sendable {
     var winners: [String: Int] = [:]
     func key(_ cookie: ArcCookie) -> String { "\(cookie.name)\u{0}\(cookie.hostKey)\u{0}\(cookie.path)" }
     func stamp(_ cookie: ArcCookie) -> Date { cookie.lastAccess ?? cookie.creation ?? .distantPast }
-    for (index, cookie) in batch.enumerated() {
+    for (index, cookie) in batch.enumerated() where cookie.partitionKey.isEmpty {
       if let held = winners[key(cookie)], stamp(cookie) < stamp(batch[held]) { continue }
       winners[key(cookie)] = index
     }
     var result = ImportWriteResult()
     for (index, cookie) in batch.enumerated() {
-      guard winners[key(cookie)] == index, cookie.expires > Date() else { result.skipped += 1; continue }
+      guard winners[key(cookie)] == index, cookie.expires > Date(), cookie.partitionKey.isEmpty else { result.skipped += 1; continue }
       let record = ImportedCookieRecord(
         hostKey: cookie.hostKey, name: cookie.name, value: cookie.value.utf8String(), path: cookie.path)
       let existing = cookies.firstIndex { ($0.name, $0.hostKey, $0.path) == (record.name, record.hostKey, record.path) }
@@ -100,6 +102,7 @@ public struct ImportRecording: Sendable {
   public mutating func record(_ batch: [ArcLogin]) -> ImportWriteResult {
     defer { for login in batch { login.password.wipe() } }
     func key(_ login: ArcLogin) -> String { "\(login.signonRealm)\u{0}\(login.username)\u{0}\(login.actionURL ?? "")" }
+    func stamp(_ login: ArcLogin) -> Date { max(login.dateLastUsed ?? .distantPast, login.dateCreated ?? .distantPast) }
     var last: [String: Int] = [:]
     for (index, login) in batch.enumerated() { last[key(login)] = index }
     var result = ImportWriteResult()
@@ -108,13 +111,16 @@ public struct ImportRecording: Sendable {
       let record = ImportedLoginRecord(
         signonRealm: login.signonRealm, username: login.username, actionURL: login.actionURL,
         password: login.password.utf8String())
-      // The store updates a login whose primary key it holds; that counts as written.
+      // A login the store holds is replaced only by a newer one.
       if let existing = logins.firstIndex(where: {
         ($0.signonRealm, $0.username, $0.actionURL ?? "") == (record.signonRealm, record.username, record.actionURL ?? "")
       }) {
+        guard loginStamps[existing] < stamp(login) else { result.skipped += 1; continue }
         logins[existing] = record
+        loginStamps[existing] = stamp(login)
       } else {
         logins.append(record)
+        loginStamps.append(stamp(login))
       }
       result.written += 1
     }

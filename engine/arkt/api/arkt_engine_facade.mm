@@ -3320,6 +3320,7 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
     out.priority = static_cast<int>(cookie.priority);
     out.source_scheme = static_cast<int>(cookie.sourceScheme);
     out.source_port = static_cast<int>(cookie.sourcePort);
+    out.partition_key = base::SysNSStringToUTF8(cookie.partitionKey);
     // The engine's own copy is built inside the lending block.
     std::string* value = &out.value;
     [cookie withValueBytes:^(const void* bytes, NSUInteger length) {

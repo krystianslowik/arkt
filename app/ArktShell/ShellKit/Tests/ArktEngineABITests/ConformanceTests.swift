@@ -274,6 +274,7 @@ final class TestImportCookie: NSObject, ArktImportCookie {
   let priority = 2
   let sourceScheme = 2
   let sourcePort = -1
+  let partitionKey = ""
   let value: [UInt8]
   init(value: String) { self.value = Array(value.utf8) }
   func withValueBytes(_ body: (UnsafeRawPointer, UInt) -> Void) {

@@ -30,6 +30,8 @@ struct ImportCookie {
   int priority = 1;
   int source_scheme = 0;
   int source_port = -1;
+  // The top_frame_site_key; non-empty means partitioned, which is skipped.
+  std::string partition_key;
 };
 
 struct ImportLogin {

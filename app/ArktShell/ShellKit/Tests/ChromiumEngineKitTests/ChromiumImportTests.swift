@@ -16,7 +16,7 @@ struct ChromiumImportTests {
       hostKey: ".example.com", name: "session", value: SecretBytes(taking: Array("cookie-secret".utf8)), path: "/docs",
       expires: Date(timeIntervalSince1970: 2_000_000_000), creation: Date(timeIntervalSince1970: 100),
       lastAccess: Date(timeIntervalSince1970: 200), isSecure: true, isHTTPOnly: true, sameSite: 1, priority: 2,
-      sourceScheme: 2, sourcePort: 443)
+      sourceScheme: 2, sourcePort: 443, partitionKey: "https://top.example")
   }
 
   @Test func cookieFieldsAndValueReachTheFacade() async {
@@ -29,7 +29,7 @@ struct ChromiumImportTests {
       hostKey: ".example.com", name: "session", path: "/docs", value: "cookie-secret",
       expires: Date(timeIntervalSince1970: 2_000_000_000), creation: Date(timeIntervalSince1970: 100),
       lastAccess: Date(timeIntervalSince1970: 200), isSecure: true, isHTTPOnly: true, sameSite: 1, priority: 2,
-      sourceScheme: 2, sourcePort: 443)]])
+      sourceScheme: 2, sourcePort: 443, partitionKey: "https://top.example")]])
   }
 
   @Test func theFacadeCountsComeBackAsTheResult() async {

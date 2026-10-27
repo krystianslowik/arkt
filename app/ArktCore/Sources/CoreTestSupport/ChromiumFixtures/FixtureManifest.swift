@@ -40,11 +40,14 @@ public struct FixtureManifest: Sendable, Equatable {
     public let isSecure: Bool
     public let isHTTPOnly: Bool
     public let expiresWebKitTime: Int64
+    /// The `top_frame_site_key`: empty for an ordinary cookie, a site for a partitioned one.
+    public let topFrameSiteKey: String
 
     public init(
       hostKey: String, name: String, value: String, path: String, isSecure: Bool, isHTTPOnly: Bool,
-      expiresWebKitTime: Int64
+      expiresWebKitTime: Int64, topFrameSiteKey: String = ""
     ) {
+      self.topFrameSiteKey = topFrameSiteKey
       self.hostKey = hostKey; self.name = name; self.value = value; self.path = path; self.isSecure = isSecure
       self.isHTTPOnly = isHTTPOnly; self.expiresWebKitTime = expiresWebKitTime
     }
