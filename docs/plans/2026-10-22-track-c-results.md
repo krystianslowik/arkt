@@ -2662,3 +2662,36 @@ Part 2 of two (part 1, the restyle and layout, is #527). It stacks on part 1's b
 TDD: the new unit tests (tab rule, filter state, empty state, relative time, selection motion, fade data) and
 `CommandBarBehaviourTests` were written before the code (compile errors counted).
 
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` - 1691 passed (part 1 on main: 1643; +48: tab rule, filter
+  state, empty state, relative time, selection motion, fade data, row content additions).
+- GUI, this part's suites only (the full ShellKitGUITests run was dropped to keep the machine free; it was run on the
+  branch before the last review fixes: 1451 cases, failures only in `SpaceSwipeHitchTests`, `SpacePagerTests`,
+  `SplitDragTests`, `OnboardingTests` and, once under load, the latency gate - all also failing or flaky on main):
+  `CommandBarBehaviourTests` 52 (1 skipped: the screenshot render), `CommandBarHybridTests` 28, `CommandBarTests` 67,
+  all passing. Before the last two small commits the two new suites also passed 20 of 20 runs in a row under load
+  (load1 8.5 to 44.9); they were not re-run 20 times after.
+- Latency gate: part 1 had made the first frame about one frame later in over half the samples (p95 17.6 ms against
+  a bound of 17.6, 10 to 13 ms before). A show now skips every update that changes nothing (placeholder, scope chip,
+  pills, hint strip); `testAppearsUnder16ms` p95 is 10.6 to 13.3 ms again over 8 runs (load 20 to 30, so the gate
+  itself reported NOT-MEASURABLE).
+- App build and `build-for-testing` for the UI tests: BUILD SUCCEEDED and TEST BUILD SUCCEEDED before the review fixes.
+  The two new UI tests (`test_371_commandDigitsPickTheFilterPills`, `test_371_escClearsTheQueryThenCloses`) are only
+  compiled, not run: the harness drives the real app.
+
+### Review notes folded in
+
+Pill counts cover every match (not the capped rows); the pasteboard is read once per show; the query field keeps 160 pt
+and the pills hide below that; the pills are wired (click and VoiceOver press); the new-tab Cmd monitor in
+`SidebarController` is removed on teardown; a pill change in the middle of a fade-out starts from where the layer is;
+entering a scope resets the filter; the empty "No <filter> match" row is not selected; the caret is mustard.
+
+### Deviations and leftovers
+
+- The light scrim is graphite 10 %, as in the prototype's light screen (`body.light .scrim`), not the 28 % black of the
+  dark screen: 28 % black over a light page reads as a heavy grey.
+- Hover still selects the row (from #322), so the tick follows the pointer; the README's "hover without the tick" is not
+  built.
+- The History pill counts 0 until there is a history store.
+- Recent tabs are per window and in memory: a tab not shown since the app started has no time.
+- The window shadow during the fades is the window server's (`hasShadow`) and does not follow the layer opacity; check it
+  on screen.
