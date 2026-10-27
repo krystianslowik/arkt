@@ -140,6 +140,41 @@ struct LittleArktFlightMotionTests {
     #expect(open.allSatisfy { $0 == .rest })
   }
 
+  /// The old selection's fill fades on the room spring: fully drawn while the rows hold still, gone as the room
+  /// opens. The arriving row's own selection is not faded here: its whole-row alpha already fades it (#455).
+  @Test func theOldSelectionFadesOutAsTheRowsMakeRoom() {
+    let heights: [CGFloat] = [28, 34, 34, 34]
+    let held = SidebarArrivalLayout.styles(rowHeights: heights, arrivalRow: 1, oldSelectionRow: 2,
+                                           room: 0, appear: 0)
+    #expect(held[2].selectionAlpha == 1)
+    let half = SidebarArrivalLayout.styles(rowHeights: heights, arrivalRow: 1, oldSelectionRow: 2,
+                                           room: 0.5, appear: 0.5)
+    #expect(abs(half[2].selectionAlpha - 0.5) < 1e-9)
+    #expect(half[0].selectionAlpha == 1, "a row above the old selection is untouched")
+    #expect(half[1].selectionAlpha == 1, "the arriving row's fill fades with its whole-row alpha, not twice")
+    let open = SidebarArrivalLayout.styles(rowHeights: heights, arrivalRow: 1, oldSelectionRow: 2,
+                                           room: 1, appear: 1)
+    #expect(open[2].selectionAlpha == 0)
+    #expect(open[1].selectionAlpha == 1)
+    let same = SidebarArrivalLayout.styles(rowHeights: heights, arrivalRow: 1, oldSelectionRow: 1,
+                                           room: 1, appear: 1)
+    #expect(same[1].selectionAlpha == 1, "the arriving row is skipped even when named as the old selection")
+    let outside = SidebarArrivalLayout.styles(rowHeights: heights, arrivalRow: 1, oldSelectionRow: 99,
+                                              room: 1, appear: 1)
+    #expect(outside.allSatisfy { $0.selectionAlpha == 1 }, "an out-of-range old row is skipped")
+  }
+
+  /// A spring may overshoot: the fade clamps to the drawn range.
+  @Test func theOldSelectionFadeClampsAnOvershoot() {
+    let heights: [CGFloat] = [28, 34, 34, 34]
+    let over = SidebarArrivalLayout.styles(rowHeights: heights, arrivalRow: 1, oldSelectionRow: 2,
+                                           room: 1.04, appear: 1)
+    #expect(over[2].selectionAlpha == 0)
+    let under = SidebarArrivalLayout.styles(rowHeights: heights, arrivalRow: 1, oldSelectionRow: 2,
+                                            room: -0.04, appear: 0)
+    #expect(under[2].selectionAlpha == 1)
+  }
+
   /// Per frame the outline reads one row height, the arriving row's: the other rows' heights never matter.
   @Test func onlyTheArrivingRowsHeightMakesRoom() {
     var frame = Array(repeating: FolderMotionLayout.RowStyle.rest, count: 500)

@@ -67,6 +67,49 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertEqual(outline.rowConfigureCount, settled, "an unchanged resolver touches no row")
   }
 
+  /// #455: the flight's old selection is captured on the first arrival frame. A first frame with no selection (no
+  /// current row) must not start fading a row that becomes current later in the flight.
+  func testTheArrivalCapturesTheOldSelectionOnItsFirstFrame() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let space = try XCTUnwrap(controller.currentSpace)
+    let today = sidebar.children(of: .today(space)).filter { isTab(sidebar, $0) }
+    XCTAssertGreaterThanOrEqual(today.count, 2)
+    let arrival = today[0], later = today[1]
+    let outline = try XCTUnwrap(controller.currentPage?.outlineController)
+    outline.setRowStates(.empty)
+    outline.presentArrival(of: arrival, room: 0, appear: 0)
+    XCTAssertEqual(outline.rowStyle(for: later).selectionAlpha, 1)
+
+    outline.setRowStates(TabRowState.Resolver(current: later, visible: [later], previous: nil))
+    outline.presentArrival(of: arrival, room: 0.5, appear: 0.5)
+    XCTAssertEqual(outline.rowStyle(for: later).selectionAlpha, 1,
+                   "the old selection was captured as none; a row that becomes current mid-flight does not fade")
+    outline.endArrival()
+  }
+
+  /// #455: when the old current is a pane, the split row is the selection that fades; the pane row does not.
+  func testTheSplitRowFadesWhenTheOldSelectionIsAPane() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let work = sidebar.spaceOrder[1]
+    controller.showSpace(work)
+    controller.view.layoutSubtreeIfNeeded()
+    let split = try XCTUnwrap(sidebar.children(of: .today(work)).first { !isTab(sidebar, $0) })
+    let pane = try XCTUnwrap(sidebar.children(of: .split(split)).first)
+    controller.activate(node: pane)
+    let outline = try XCTUnwrap(controller.currentPage?.outlineController)
+    XCTAssertEqual(outline.state(for: split), .current, "the split row draws the pane's selection")
+    let arrival = try XCTUnwrap(sidebar.children(of: .today(work)).first { isTab(sidebar, $0) })
+
+    outline.presentArrival(of: arrival, room: 0.5, appear: 0.5)
+    XCTAssertEqual(outline.rowStyle(for: split).selectionAlpha, 0.5, accuracy: 1e-6)
+    if outline.row(for: pane) >= 0 {
+      XCTAssertEqual(outline.rowStyle(for: pane).selectionAlpha, 1, "the pane row itself is not faded")
+    }
+    outline.endArrival()
+  }
+
   // C7: symbol and letter glyphs are cached bitmaps, never template symbols drawn per display.
   func testRowGlyphsAreCachedBitmaps() throws {
     let sidebar = StubSidebar.sample()

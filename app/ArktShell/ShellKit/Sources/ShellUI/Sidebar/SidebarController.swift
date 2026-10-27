@@ -207,6 +207,13 @@ public final class SidebarController {
 
   public var currentPage: SpacePageView? { currentSpace.flatMap { pages[$0] } }
 
+  /// The outline of the Space that holds `node`, shown or not: Little Arkt's arrival belongs to the row's Space even
+  /// when the window shows another one mid-flight (#455). Nil when no page has the node.
+  func outline(containing node: NodeID) -> SidebarOutlineController? {
+    guard let space = source.spaceID(containing: node) else { return nil }
+    return pages[space]?.outlineController
+  }
+
   public var resolver: TabRowState.Resolver {
     TabRowState.Resolver(current: current, visible: visible.union(current.map { [$0] } ?? []), previous: previous)
   }
@@ -485,6 +492,14 @@ public final class SidebarController {
     }
     onActivate?(tab)
     if isFavorite { unloadOverflowFavorites() }
+  }
+
+  /// Clears the previous role without changing the current one: Little Arkt's arrival already faded the old
+  /// selection out, so the old row must not pop back to the 32% previous fill when the page lands (#455).
+  public func clearPrevious() {
+    guard previous != nil else { return }
+    previous = nil
+    applyRowStates()
   }
 
   /// The window created `node`'s page without activating it (a background pane of a shown split, #156 review).

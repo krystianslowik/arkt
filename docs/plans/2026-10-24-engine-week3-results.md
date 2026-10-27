@@ -3448,6 +3448,67 @@ Chromium patch, no facade change.
 - No card shadow during the flight (a shadow path per frame would be extra per-frame work; #456).
 - If the main window goes away mid-flight, the page stays in the Little Arkt window.
 
+## #455: Little Arkt's Open in selection fades
+
+Branch `feat/455-little-arkt-selection-fades`. Design: `docs/design/little-arkt.md`, Motion (Open in Space).
+
+### What changed
+
+- The old selection's fill fades out on the arrival's `room` spring (0 to 1): `FolderMotionLayout.RowStyle` gains
+  `selectionAlpha`, and `SidebarArrivalLayout` multiplies it by `1 - clamp(room)`. Only the row view's
+  `backgroundLayer` opacity changes, so the text, favicon and hover X stay drawn; the current fill's shadow fades with
+  it.
+- The arriving row draws `.current` while it is arriving; its whole-row alpha already fades the row in on the `row`
+  spring, so its selection fades in without a second channel or a second fade. The outline's accessibility selection
+  is unchanged.
+- The old row is the `selectionSeed` captured on the first `presentArrival` (a pane's split; nil for a Favorite with
+  no row). It is captured once: a first frame with no old selection does not start fading a row that becomes current
+  later. Arrival frames are routed to the outline of the row's Space, so a Space switch mid-flight keeps drawing the
+  arrival on its own outline instead of freezing it there and leaving its row drawn as the selection.
+- `endArrival` reports whether it ended an arrival. On the flight's landing,
+  `finishReceiving(clearingPrevious: true)` clears the previous role after `activate` only when it did, so the old row
+  does not pop back to the 32% previous fill. A landing before the first arrival frame (an abort such as frames
+  stopping) keeps the previous fill, like the no-flight path (Reduce Motion, no visible main window), which keeps the
+  instant change.
+- No new timers, wall-clock waits, per-frame layout or reloads: arrival frames set layer transform, opacity and
+  selection opacity only.
+- Known gap: a current Favorite draws its selection in the Favorites grid, which has no outline row, so its tile's
+  fill does not fade yet. Follow-up #465.
+
+### Verification
+
+- Red first: the two pure fade tests failed to compile (`oldSelectionRow` missing), then the two GUI fade tests failed
+  to compile (`selectionAlpha` missing). The capture-once, abort and Space-switch tests were added after the mechanism
+  existed; their deliberate breaks are below.
+- Focused non-GUI: `LittleArktFlightMotionTests` + `FolderMotionLayoutTests`: 21 passed (19 before), after the
+  rebase.
+- Full non-GUI suite on the rebased branch: 1409 tests in 177 suites passed (1407 before).
+- Focused GUI `LittleArktFlightTests`: 37 run, 2 skipped, 0 failures (32 before on the rebased base, which includes
+  #463's shadow tests); `SidebarViewTests`: 21 run, 0 failures (19 before).
+- Full GUI suite on the rebased branch: 1158 run, 25 skipped, 5 failing test cases (2740 assertion failures): the
+  same four known ones in `PeekWindowTests` and `SpaceSwitchTextTests`, plus
+  `SplitDragTests.testDropFavoriteOnPlainTabMovesItIntoSplitAndClickVsDrag`, which passed 5/5 alone (a click that
+  missed under load, not the change); not green.
+- 20 runs each under four load generators, after the rebase: the six GUI tests 20/20 each and the two pure fade tests
+  20/20 (load average 4.75 before, 10.46 after); the page-closed test 20/20 on its own (load average 3.12).
+- Deliberate break: removing the old-selection fade made the pure test fail (`selectionAlpha` 1.0 instead of 0.5) and
+  the GUI test fail (`1.0` not less than `1.0`). Putting the capture back to `arrival?.fadingOut ?? selectionSeed`
+  made `testTheArrivalCapturesTheOldSelectionOnItsFirstFrame` fail (`selectionAlpha` 0.5 instead of 1.0). Clearing the
+  previous role unconditionally made `testAFlightAbortedBeforeItsFirstFrameKeepsThePreviousFill` fail (`normal`
+  instead of `previous`). Routing the arrival through `currentPage` made
+  `testASpaceSwitchMidFlightKeepsTheArrivalOnItsOwnOutline` fail (arriving row alpha 0.0, old fill 1.0). Removing
+  `endArrival` from `cancelReceiving` made `testAPageClosedMidFlightLeavesTheOldSelectionAtFullOpacity` fail (fill
+  0.295 instead of 1.0, style not rest). Restored, all pass.
+- Coverage: the pane-to-split mapping now has a GUI test (`testTheSplitRowFadesWhenTheOldSelectionIsAPane`), the
+  200 ms edge and the landed fill at rest are asserted, and a page that closes itself mid-flight is tested to leave the
+  old row current at full opacity. Not covered: an old row above the arrival (Pinned), a scrolled-out row, a
+  closed-folder peek row and the Favorite tile (#465). A selection change mid-flight (another row becoming current)
+  would draw the arriving row as current next to it; no user path does that within the 0.5 s flight and it is not
+  tested. The no-per-frame-reconfigure assertion checks `rowConfigureCount`, not layout.
+- These are local runs with a downloaded toolchain and a local XCTest runner, not CI. CI on the branch: Swift
+  tests, ShellKit tests, App build and lint pass; the informative GUI job ran 1162 tests with 27 skipped and one
+  failure, the `SplitDragTests` Favorite-tile click that also fails on #460 and #467 and is filed as #473.
+
 ## #400: slice 2, permission prompts in the shell's dialog panel
 
 Date 2026-10-27. Branch `engine/400-permission-prompts` off `main` at `b56a582`. Plan: the engine plan comment on #400.

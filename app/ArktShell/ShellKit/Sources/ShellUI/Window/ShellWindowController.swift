@@ -620,7 +620,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     if let existing = tabsByNode[node] { return existing }
     guard case .tab(_, let url, _)? = sidebar.node(node) else { return nil }
     switch onTakeOverLiveTab?(node) ?? .notLive {                  // one loaded copy (BH-066)
-    case .released(let tab): return adoptHandedOffTab(tab, for: node)
+    case .released(let tab, let dialog): return adoptHandedOffTab(tab, for: node, dialog: dialog)
     case .held: return nil
     case .notLive: break
     }
