@@ -57,6 +57,23 @@ struct ChromiumEngineScriptTests {
     #expect(engine.snapshot(of: copy)?.isLoading == true, "shown, the copy loads")
   }
 
+  /// A parked copy ends with its window and is never shown into a closing one (#380).
+  @Test func parkedCopyEndsWithItsWindowAndIsNotShownAfterwards() async throws {
+    let (engine, window, _) = makeEngine()
+    let recorder = EventRecorder(engine)
+    let id = engine.createTab(url: URL(string: "arkt-test://alpha.test/First")!, in: window)
+    try scriptedTab(engine, id).finishLoad()
+    let copy = try #require(engine.duplicateTab(id))
+    try await delivered()
+    engine.closeWindow(window)
+    try await delivered()
+    #expect(engine.snapshot(of: copy) == nil)
+    #expect(recorder.events(for: copy).last == .tabClosed(copy, reason: .windowClosing))
+    engine.activateTab(copy)
+    try await delivered()
+    #expect(engine.snapshot(of: copy) == nil && engine.activeTab(in: window) == nil)
+  }
+
   // MARK: Batches
 
   @Test func titleRecordedAfterLoadEndIsDeliveredBeforeIt() async throws {

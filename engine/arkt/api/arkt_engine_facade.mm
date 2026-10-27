@@ -1038,6 +1038,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
 
   // Facade calls from the embedder must never arrive while the facade is
   // inside a Chromium notification (Decision 3).
+  bool InNotification() const { return in_notification_ > 0; }
+
   void CheckNotInNotification(const char* call) {
     CHECK_EQ(in_notification_, 0)
         << "ARKT: facade " << call << " called inside a Chromium notification";
@@ -2228,13 +2230,34 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   return _unparking;
 }
 
+// Shows a parked copy: now, or from a posted task when this runs inside a
+// Chromium notification or a nested run loop (Decision 3: the strip insert
+// never runs there). The callers that are mutators already run deferred.
 - (BOOL)unpark {
   if (!_parked) {
     return _tab != nullptr;
   }
+  if (arkt::g_facade->InNotification() || arkt::IsInNestedLoop()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         if (!arkt::g_facade->InNotification()) {
+                           [that unpark];
+                         }
+                       },
+                       self));
+    return NO;
+  }
   ArktFacadeBrowser* home = _browser;
   BrowserWindowInterface* interface = home ? home.browserInterface : nullptr;
   if (!interface) {
+    return NO;
+  }
+  // A window that is closing keeps the copy parked: it ends with the window.
+  arkt::ArktBrowserWindow* window =
+      arkt::ArktBrowserWindow::FromBrowser(interface);
+  if ((window && window->IsAttemptingToClose()) ||
+      interface->GetTabStripModel()->closing_all()) {
     return NO;
   }
   arkt::g_facade->RemoveParked(self);

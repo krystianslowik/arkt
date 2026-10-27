@@ -3796,11 +3796,17 @@ report NOT-APPLICABLE), unrelated to this change.
 
 ### Verification
 
-- `swift test --skip ShellKitGUITests` in ShellKit: 1468 passed (814, 38, 43, 4, 145, 49, 256, 100, 19), 0 failed: the previous total
-  plus 1 new test. ArktCore `swift test`: 429 passed (144, 117, 70, 98), unchanged.
+- `swift test --skip ShellKitGUITests` in ShellKit: 1469 passed (814, 38, 43, 4, 145, 49, 256, 101, 19), 0 failed: the previous total
+  plus 2 new tests. ArktCore `swift test`: 429 passed (144, 117, 70, 98), unchanged.
 - `nice -n 15 autoninja -C out/Spike chrome -j 4`: `The build has finished successfully.` Engine app: `xcodegen generate`, then `xcodebuild
   -scheme ArktShell -configuration Engine`: `BUILD SUCCEEDED`.
 - GUI tests (`ShellKitGUITests`) were not run: the FakeEngine and InMemoryEngine they use are unchanged.
+
+### Review follow-up
+
+Showing a parked copy (`-unpark`) now runs from a posted task when it is reached inside a Chromium notification or a nested run loop
+(Decision 3), and keeps the copy parked while its window is closing (it ends with the window). `parkedCopyEndsWithItsWindowAndIsNotShownAfterwards`
+is the scripted case. Real-app check repeated (close: `tabs.query` 1, `onCreated` 0; reopen: 2 tabs, `onCreated` 1, history length 2, Back works).
 
 ### Deviations and limits
 
