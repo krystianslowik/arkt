@@ -10,12 +10,14 @@
 #include "arkt/browser/arkt_browser_window.h"
 #import "arkt/browser/arkt_dialog_sheet.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/permissions/system/system_permission_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/url_identity.h"
 #include "chrome/grit/generated_resources.h"
@@ -347,6 +349,16 @@ class ArktPermissionPrompt : public PermissionPrompt {
   }
 
  private:
+  // Static: runs after the delegate call that may have deleted the prompt.
+  static void RequestSystemLocation(bool allows_location) {
+    if (allows_location && system_permission_settings::CanPrompt(
+                               ContentSettingsType::GEOLOCATION)) {
+      LOG(WARNING) << "ARKT: asking the system for location access";
+      system_permission_settings::Request(ContentSettingsType::GEOLOCATION,
+                                          base::DoNothing());
+    }
+  }
+
   // As PermissionPromptBubbleBaseView::RunButtonCallback and
   // ClosingPermission.
   void Answer(Choice choice) {
@@ -356,13 +368,28 @@ class ArktPermissionPrompt : public PermissionPrompt {
     if (!delegate_) {
       return;
     }
+    // Chrome starts the system location request only from its own bubble
+    // and location bar chip (EmbeddedPermissionPrompt::PromptForOsPermission,
+    // ContentSettingImageModel), so the panel does it: after an allow that
+    // includes location, while the system has not been asked yet. Chromium
+    // then delivers the position, or the error if the user declines; with the
+    // system already denied the site setting resolves to block and the page
+    // gets its error without a prompt. Read before the delegate call, which
+    // may delete `this` and the requests.
+    bool allows_location = false;
+    for (const auto& request : delegate_->Requests()) {
+      allows_location |= request->GetContentSettingsType() ==
+                         ContentSettingsType::GEOLOCATION;
+    }
     // `this` may be gone after any of these.
     switch (choice) {
       case Choice::kAllow:
         delegate_->Accept(std::monostate());
+        RequestSystemLocation(allows_location);
         return;
       case Choice::kAllowThisTime:
         delegate_->AcceptThisTime(std::monostate());
+        RequestSystemLocation(allows_location);
         return;
       case Choice::kBlock:
         delegate_->Deny(std::monostate());
