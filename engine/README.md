@@ -304,6 +304,130 @@ otherwise), and use `/usr/bin/log`, not zsh's `log` builtin:
 
 Ids in this bundle: see "Product identity" below.
 
+## Preview release
+
+How a maintainer cuts a preview build (v0.1.0-preview.1, tracking issue #481). The preview is an unsigned,
+ad-hoc signed zip on a GitHub pre-release. There is no DMG, no Developer ID signing, no notarization and no update
+feed; those follow in #125. Nothing here is scripted: run the steps in order, in zsh, with the variables from the top
+of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the maintainer's to publish; do not run steps
+5 and 6 without that go-ahead.
+
+    export REL=$CR/out/Arkt
+    export VERSION=0.1.0-preview.1
+    export OUT=$CHROMIUM_ROOT/preview-$VERSION     # build and staging folder, outside the repo
+
+### 1. Freeze the overlay and build the engine
+
+Check out the commit to release in `$REPO` and leave it there until the build ends: the build compiles whatever
+overlay and patches are in `$CR`. Do not edit `engine/` or run Apply, Export or a rebase meanwhile. Then run the
+release build (disk and swap checks as in "Release build (out/Arkt)"):
+
+    cd $CR && gn gen out/Arkt
+    cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1
+
+Check the result:
+
+    tail -3 $CHROMIUM_ROOT/build-arkt.log                       # The build has finished successfully.
+    grep -c FAILED: $CHROMIUM_ROOT/build-arkt.log               # 0
+    wc -l < $REPO/engine/patches/chromium/.patches              # N
+    git -C $CR rev-list --count $PIN..arkt                      # N again: every exported patch is in the build
+
+The two counts must match, and the build must report 0 `FAILED:` lines. If they differ, the checkout is not the
+overlay in the repo: run Export (or Apply) and rebuild.
+
+### 2. Build the Distribution app
+
+Generate the Xcode project (it is not committed), then build the `Distribution` configuration against the engine
+app, into a folder outside the repo (see "Embedding in the app" for what the configuration contains):
+
+    mkdir -p $OUT
+    cd $REPO/app/ArktShell && xcodegen generate
+    cd $REPO && xcodebuild -project app/ArktShell/ArktShell.xcodeproj -scheme ArktShell -configuration Distribution \
+      ARKT_ENGINE_APP=$REL/Arkt.app CONFIGURATION_BUILD_DIR=$OUT/build build
+
+Expect `BUILD SUCCEEDED` and `Engine framework copied: Arkt Framework.framework <version>` in the log. The product
+is `$OUT/build/Arkt.app` (executable `Arkt`, bundle id `dev.arkt.Arkt`). Xcode signs only the app, ad hoc.
+
+### 3. Ad-hoc sign a copy
+
+Sign a copy, inside-out, in the order of "Embedding in the app": libraries, tools, helpers, framework, app. The
+identity is `-` (ad hoc). Pass no `--options runtime` and no entitlements: an ad-hoc bundle has no team id, so the
+hardened runtime's library validation would refuse to load the framework, and the entitlements only mean something
+under a real identity.
+
+    rm -rf $OUT/stage && mkdir -p $OUT/stage && ditto $OUT/build/Arkt.app $OUT/stage/Arkt.app && cd $OUT/stage
+    S=(codesign --force --timestamp=none --sign -)
+    FW="Arkt.app/Contents/Frameworks/Arkt Framework.framework"; F="$FW/Versions/Current"
+    for l in "$F"/Libraries/*.dylib; do $S "$l"; done
+    for t in chrome_crashpad_handler app_mode_loader web_app_shortcut_copier; do $S "$F/Helpers/$t"; done
+    for h in "$F"/Helpers/*.app; do $S "$h"; done
+    $S "$FW"
+    $S Arkt.app
+    codesign --verify --deep --strict --verbose=2 Arkt.app      # valid on disk, satisfies its Designated Requirement
+    codesign -dv Arkt.app 2>&1 | grep -E '^(Identifier|Signature|CodeDirectory)'   # dev.arkt.Arkt, Signature=adhoc
+
+List `"$F"/Helpers` first: every executable there must be covered (11 entries on 156). Expect `Signature=adhoc` and
+no `runtime` in the flags. `spctl --assess` reports `rejected`; that is expected for this build.
+
+### 4. Package
+
+Zip with `ditto`, which keeps the bundle's symlinks and metadata (`zip` does not), then record the checksum:
+
+    cd $OUT/stage && ditto -c -k --keepParent Arkt.app $OUT/Arkt-$VERSION-arm64.zip
+    cd $OUT && shasum -a 256 Arkt-$VERSION-arm64.zip | tee Arkt-$VERSION-arm64.zip.sha256
+
+### 5. Draft the release and smoke test the asset
+
+Write the notes from `docs/release/0.1.0-preview.1.md` (copy it to a file outside the repo, and put the checksum in
+it). Create a draft pre-release; a draft is not visible to the public:
+
+    gh release create v$VERSION --draft --prerelease --target main \
+      --title "Arkt $VERSION" --notes-file <notes file> \
+      $OUT/Arkt-$VERSION-arm64.zip $OUT/Arkt-$VERSION-arm64.zip.sha256
+
+Smoke test the downloaded asset, not the local build, on a fresh macOS user account (System Settings > Users &
+Groups, a standard user with no Arkt data). Download the zip from the draft release in Safari, so the file carries the
+quarantine flag a user's download carries. Then, as that user:
+
+    cd ~/Downloads && shasum -a 256 Arkt-$VERSION-arm64.zip        # equals the .sha256 file
+    ditto -x -k Arkt-$VERSION-arm64.zip /Applications              # or drag Arkt.app to /Applications
+
+Open it as described in the README ("Download the preview"). Run the checklist below. If any item fails, delete the
+draft (`gh release delete v$VERSION --yes --cleanup-tag`), fix the cause and start again from step 1 or 2.
+
+### 6. Publish
+
+Only after the whole checklist passes and the maintainer agrees:
+
+    gh release edit v$VERSION --draft=false
+
+Then check the Releases page shows the asset, the checksum and the pre-release label, and download the published
+asset once more to confirm the checksum.
+
+### Smoke checklist
+
+Run it on the fresh user, from `/Applications/Arkt.app`, on Apple silicon with macOS 15 or later.
+
+- [ ] Onboarding completes and lands in a window with a sidebar.
+- [ ] Browsing works; a YouTube video plays with sound.
+- [ ] Google sign-in completes.
+- [ ] A Chrome Web Store extension installs and runs.
+- [ ] Cmd-T, Cmd-L, Cmd-N and Cmd-F each do their job.
+- [ ] Three Spaces exist and a trackpad swipe moves between them.
+- [ ] Quit and relaunch restores the Spaces and tabs.
+- [ ] Cmd-W closes a tab and reopening it brings it back.
+- [ ] Camera, microphone and location each show their permission prompt (try a page that requests them).
+- [ ] After Make Default, a link opened from another app opens in Arkt.
+- [ ] Peek opens and dismisses.
+- [ ] Little Arkt opens and dismisses.
+- [ ] Full screen enters and leaves cleanly.
+- [ ] The window moves between a 1x and a 2x display without a blurry or blank frame.
+- [ ] `chrome://credits` loads.
+- [ ] No seatbelt denials for Arkt in the log. Launch once from Terminal with `--enable-sandbox-logging` (see
+      "Embedding in the app"):
+      `/Applications/Arkt.app/Contents/MacOS/Arkt --enable-sandbox-logging`, run the items above, then
+      `/usr/bin/log show --last 30m --style compact --predicate 'sender == "Sandbox"' | grep -i arkt` prints nothing.
+
 ## Product identity (#128)
 
 One prefix, `dev.arkt.*` (#73), for everything a user's machine binds to: app `dev.arkt.Arkt` (`PRODUCT_BUNDLE_IDENTIFIER`,

@@ -244,6 +244,17 @@ public final class SidebarController {
   /// KB-034, GS-002: Cmd-Opt-Left and mouse button 3. Stops at the first Space [I], PARITY(NEEDS-RUNTIME-CHECK #78).
   public func previousSpace() { goToSpace(at: max(view.pager.targetIndex - 1, 0)) }
 
+  /// Each Space's selected tab (its last active tab), saved with the window's session (#116).
+  public var selectedTabs: [SpaceID: NodeID] { lastActive }
+
+  /// Seeds the last active tabs from a saved session, keeping the pairs whose Space exists and still holds a tab with
+  /// that id (a deleted or moved tab falls back to the Space's first tab).
+  public func restoreSelections(_ saved: [SpaceID: NodeID]) {
+    for (space, tab) in saved where source.space(space) != nil && source.spaceID(containing: tab) == space {
+      if case .tab? = source.node(tab) { lastActive[space] = tab }
+    }
+  }
+
   /// The tab to show when `space` becomes current: its last active tab (BH-036), else its first tab,
   /// Pinned before Today. PARITY(NEEDS-RUNTIME-CHECK): what Arc shows in a never-visited Space.
   public func tabToRestore(in space: SpaceID) -> NodeID? {

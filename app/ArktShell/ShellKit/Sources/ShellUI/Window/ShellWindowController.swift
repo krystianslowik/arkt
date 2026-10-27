@@ -42,6 +42,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       guard let tab = currentTab, tab != oldValue else { return }
       activateEngineTab(tab)
       if let node = nodeByTab[tab] { tabSwitcher.noteViewed(node) }      // the recent-tab list (#103)
+      saveSession()                                                      // #116
     }
   }
   /// What the engine sees of this window: the window, the card, the command and close seams.
@@ -160,6 +161,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   let sidebarStateStore: SidebarWindowStateStore
   /// False for a window that is not the one a relaunch restores: its changes must not overwrite the saved state.
   var savesSidebarState = true
+  /// Where the window's session (frame, Space, tabs) is saved on change (#116).
+  let sessionStore: WindowSessionStore
+  /// False for a window that is not the one a relaunch restores, and while a quit has written the final state.
+  var savesSession = false
+  /// The window's frame when it last entered full screen, saved in place of the screen-sized frame (#116).
+  var frameBeforeFullScreen: CGRect?
   /// Scrolls the sidebar to a row a keyboard command landed on, with the overflow pill (BH-018).
   public let sidebarReveal = SidebarRevealer()
   /// How Cmd-1 ... Cmd-9 count (BH-014, BH-015). Defaults until the Settings window exists.
@@ -171,7 +178,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// gets its window through `adopt(engineWindow:)`.
   public init(engine: any EngineClient, sidebar: any SidebarSource,
               metrics: ShellMetrics = .standard, toolbarSetting: ToolbarSetting = .ephemeral(),
-              sidebarStateStore: SidebarWindowStateStore = .ephemeral(), opensFirstTab: Bool = true) {
+              sidebarStateStore: SidebarWindowStateStore = .ephemeral(), sessionStore: WindowSessionStore = .ephemeral(),
+              restoring session: WindowSessionState? = nil, savesSession: Bool = true,
+              opensFirstTab: Bool = true) {
     let window = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800))
     // Symbol bitmaps at the shell window's scale, before the first row or button draws. A later scale change
     // re-renders the views' glyphs (viewDidChangeBackingProperties) and prewarms again below.
@@ -187,6 +196,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.toasts = ToastPresenter()
     self.toolbarSetting = toolbarSetting
     self.sidebarStateStore = sidebarStateStore
+    self.sessionStore = sessionStore
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
     root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
@@ -259,11 +269,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     refreshThemes()
     updateEmptyState()
     root.themeBackground.setPosition(sidebarController.view.pager.position)
-    // Open with the first tab of the first Space so the card shows a real page.
-    if opensFirstTab, let space = sidebarController.currentSpace,
-       let first = sidebarController.tabToRestore(in: space) {
+    // Open with the saved tab (#116), else the first tab of the first Space, so the card shows a real page.
+    let restored = session.flatMap { restoreSession($0) }
+    if opensFirstTab,
+       let first = restored ?? sidebarController.currentSpace.flatMap({ sidebarController.tabToRestore(in: $0) }) {
       sidebarController.activate(node: first)
     }
+    self.savesSession = savesSession        // after the opening tab: the set applies the saved frame next
     reapplyTrafficLights()
     _ = peek                                          // its click monitor records where links are clicked
   }
@@ -786,6 +798,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   // AppKit resets the standard buttons on each of these.
   public func windowDidResize(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidEndLiveResize(_ notification: Notification) { reapplyTrafficLights() }
+  public func windowWillEnterFullScreen(_ notification: Notification) { frameBeforeFullScreen = window?.frame }
   public func windowWillExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidBecomeKey(_ notification: Notification) {
@@ -796,6 +809,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public func windowDidResignKey(_ notification: Notification) {
     reapplyTrafficLights()
     windowKeyStateChanged(isKey: false)              // BH-025
+    saveSession()                                    // #116: the frame
     tabSwitcher.windowDidResignKey()
   }
   public func windowDidChangeBackingProperties(_ notification: Notification) {
@@ -810,6 +824,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public func windowShouldClose(_ sender: NSWindow) -> Bool {
     guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
     let open = Array(tabsByNode.values)
+    saveSession()                                    // #116: before the tabs close
     isWindowCloseRequested = true
     stampsShownTabsOnWindowClose = true
     request()
