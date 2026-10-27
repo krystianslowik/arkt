@@ -113,6 +113,15 @@ extension InMemoryEngine {
     hub.emit(.targetURLChanged(id, nil))
   }
 
+  /// Test driver: the pointer moves onto `url` (a link of any page), or off every link when nil. Reports a change
+  /// once, as `hoverLink` and `leaveLink` do; a page with several links can be walked without building each page.
+  public func hoverTarget(_ id: TabID, url: URL?) throws {
+    guard snapshots[id] != nil else { throw FindDriverError(description: "no tab \(id)") }
+    guard hoveredLinks[id] != url else { return }
+    hoveredLinks[id] = url
+    hub.emit(.targetURLChanged(id, url))
+  }
+
   /// A moved tab leaves its find behind (rule 22): the session ends as `stopFinding(.clear)`, with no event.
   func endFindForMove(of id: TabID) {
     finds[id] = nil

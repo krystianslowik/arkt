@@ -40,6 +40,13 @@ struct PeekRoutingTests {
     #expect(PeekRouting.route(command, section: .pinned) == .navigate)
   }
 
+  /// A middle-click reaches the host with no modifier flags and Chromium's background-tab disposition (BH-163).
+  @Test(arguments: [PeekSourceSection.pinned, .favorites, .today, .peek, .other])
+  func aMiddleClickIsLeftToTheEngine(section: PeekSourceSection) {
+    let middle = Self.link(Self.atlas, modifiers: [], disposition: .newBackgroundTab)
+    #expect(PeekRouting.route(middle, section: section) == .navigate)
+  }
+
   @Test(arguments: [
     "https://meet.google.com/abc-defg-hij",
     "https://us02web.zoom.us/j/123456789",
