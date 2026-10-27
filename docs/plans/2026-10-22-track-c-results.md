@@ -2626,3 +2626,72 @@ tests referenced values that did not exist), then the implementation.
 Filter state and Cmd-1 to Cmd-4, Tab and Shift-Tab (the smart rule), Esc clearing first, the empty state's groups and
 Recent tabs with times, the selection slide, the fades and Cmd-Shift-V. The preview column and Cmd-Return stay in
 #372. History rows need a history store; the pill is there and counts 0.
+
+## Command bar, hybrid design, part 2: behaviour (#371, closes it; supersedes draft #322)
+
+Part 2 of two (part 1, the restyle and layout, is #527). It stacks on part 1's branch.
+
+### What changed
+
+- Filters: `CommandBarFilter` state on the controller (All on every open), Cmd-1 to Cmd-4 pick a pill, Tab and
+  Shift-Tab cycle. The query stays; the pills count the unfiltered rows; a filter that matches nothing shows one
+  non-actionable row, "No <filter> match <query>". Archived results belong to All and Tabs. VoiceOver hears "Tabs, 3
+  results" on a change. A typed query now also lists up to three matching actions, so the Actions pill counts them.
+- The smart Tab rule (`CommandBarTabAction`, the maintainer's decision on #371, which resolves the README's open
+  question 1): Tab scopes the search when something on screen shows a Tab key cap, and cycles the filters otherwise.
+  A Tab key cap shows on a site-search row (a typed alias or the start of a site name, "Search GitHub for git") and in
+  the hint strip of a bar just opened for a new tab with an empty field (action search, #322, KB-081). The hint strip
+  mirrors it: its Tab item is whatever Tab will do. A whole alias typed puts its row first, so Tab scopes at once
+  (#322's behaviour) and Return, with nothing yet to search for, scopes too. Inside a scope Tab is consumed.
+- Esc clears the query first and closes the bar when it is already empty (a Cmd-L prefill clears too).
+- Cmd-Shift-V is Paste and Go from any state of a new-tab bar; with nothing on the clipboard it beeps and the bar stays.
+- Empty state: Clipboard (Paste and Go, only for a URL), Recent tabs (up to four, "12 min", "1 h", "Yesterday") and two
+  Actions, each under a 26 pt header on the group's first row. Recent tabs are per Space, the current Space first like
+  the suggestions (BH-111), the tabs shown in this window by most recent view, then the rest in sidebar order. The
+  plain `make(query:openTabs:)` convenience (Little Arkt's lookup) keeps listing up to six open tabs.
+- Hint strip: Move, Open (empty state), "Cmd 1-4 Filter", the Tab item, and on the right the empty state's line or
+  "Paste and Go" with its shortcut. A row shows a URL without its scheme.
+- Motion (`CommandBarMotion`, `CommandBarSelectionMotion`): the selection fill and tick slide to the new row on
+  `SpringPreset.firmFast`, retargeted from where they are when a key repeats (a `SpringField` run, applied as a layer
+  transform; the indicator's frame is always the target row). New results do not slide; Reduce Motion moves it
+  instantly. The bar and the scrim fade in (0.1 s, no scale) and out (0.1 s); the panel goes to alpha 0 when the fade
+  ends, inert at once. Reduce Motion keeps both fades. Opacity and transform only.
+
+### Tests
+
+TDD: the new unit tests (tab rule, filter state, empty state, relative time, selection motion, fade data) and
+`CommandBarBehaviourTests` were written before the code (compile errors counted).
+
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` - 1691 passed (part 1 on main: 1643; +48: tab rule, filter
+  state, empty state, relative time, selection motion, fade data, row content additions).
+- GUI, this part's suites only (the full ShellKitGUITests run was dropped to keep the machine free; it was run on the
+  branch before the last review fixes: 1451 cases, failures only in `SpaceSwipeHitchTests`, `SpacePagerTests`,
+  `SplitDragTests`, `OnboardingTests` and, once under load, the latency gate - all also failing or flaky on main):
+  `CommandBarBehaviourTests` 52 (1 skipped: the screenshot render), `CommandBarHybridTests` 28, `CommandBarTests` 67,
+  all passing. Before the last two small commits the two new suites also passed 20 of 20 runs in a row under load
+  (load1 8.5 to 44.9); they were not re-run 20 times after.
+- Latency gate: part 1 had made the first frame about one frame later in over half the samples (p95 17.6 ms against
+  a bound of 17.6, 10 to 13 ms before). A show now skips every update that changes nothing (placeholder, scope chip,
+  pills, hint strip); `testAppearsUnder16ms` p95 is 10.6 to 13.3 ms again over 8 runs (load 20 to 30, so the gate
+  itself reported NOT-MEASURABLE).
+- App build and `build-for-testing` for the UI tests: BUILD SUCCEEDED and TEST BUILD SUCCEEDED before the review fixes.
+  The two new UI tests (`test_371_commandDigitsPickTheFilterPills`, `test_371_escClearsTheQueryThenCloses`) are only
+  compiled, not run: the harness drives the real app.
+
+### Review notes folded in
+
+Pill counts cover every match (not the capped rows); the pasteboard is read once per show; the query field keeps 160 pt
+and the pills hide below that; the pills are wired (click and VoiceOver press); the new-tab Cmd monitor in
+`SidebarController` is removed on teardown; a pill change in the middle of a fade-out starts from where the layer is;
+entering a scope resets the filter; the empty "No <filter> match" row is not selected; the caret is mustard.
+
+### Deviations and leftovers
+
+- The light scrim is graphite 10 %, as in the prototype's light screen (`body.light .scrim`), not the 28 % black of the
+  dark screen: 28 % black over a light page reads as a heavy grey.
+- Hover still selects the row (from #322), so the tick follows the pointer; the README's "hover without the tick" is not
+  built.
+- The History pill counts 0 until there is a history store.
+- Recent tabs are per window and in memory: a tab not shown since the app started has no time.
+- The window shadow during the fades is the window server's (`hasShadow`) and does not follow the layer opacity; check it
+  on screen.

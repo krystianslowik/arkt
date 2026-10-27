@@ -44,4 +44,12 @@ public enum SiteSearchEngines {
   public static func engine(aliased text: String, in engines: [SiteSearchEngine]) -> SiteSearchEngine? {
     engines.first { $0.alias.caseInsensitiveCompare(text) == .orderedSame }
   }
+
+  /// The engine a typed alias or site name offers a Tab-scoped row for: the alias exactly, or a name that starts with
+  /// the text (two letters at least, so "g" does not offer GitHub). Case-insensitive; the first match in list order.
+  public static func engine(matching text: String, in engines: [SiteSearchEngine]) -> SiteSearchEngine? {
+    if let exact = engine(aliased: text, in: engines) { return exact }
+    guard text.count >= 2 else { return nil }
+    return engines.first { $0.name.range(of: text, options: [.anchored, .caseInsensitive, .diacriticInsensitive]) != nil }
+  }
 }

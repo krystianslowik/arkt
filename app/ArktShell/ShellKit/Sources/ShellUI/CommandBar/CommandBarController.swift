@@ -29,6 +29,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Cmd-L then Enter without editing (KB-004).
   public var onReload: (() -> Void)?
   public var openTabsProvider: () -> [CommandBarResults.OpenTab] = { [] }
+  /// The empty state's Recent tabs, most recently viewed first, with when. Empty: the open tabs stand in.
+  public var recentTabsProvider: () -> [CommandBarResults.OpenTab] = { [] }
   /// Archived matches for a query (#111): the store search runs off the main actor; the bar lists the matches when
   /// they land, if the query is still the same.
   public var archivedProvider: (@MainActor (String) async -> [CommandBarResults.ArchivedMatch])?
@@ -78,7 +80,33 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   let scrim = CommandBarScrim()
   /// The appearance the bar and its cells were last drawn in (the parent window's); a show in another one re-renders.
   private var cellFlavor: ThemeFlavor?
+  /// The rows on screen: `unfilteredResults` through the selected filter pill.
   private(set) var results: [CommandBarResults.Result] = []
+  /// Every row for the query, before the filter; the pills count these.
+  private(set) var unfilteredResults: [CommandBarResults.Result] = []
+  /// The selected filter pill; All on every open.
+  public private(set) var filter: CommandBarFilter = .all
+  /// Group headers by row (empty state), for the rows on screen.
+  private var groupHeaders: [Int: String] = [:]
+  /// Says a filter change aloud ("Tabs, 3 results"); replaced in tests.
+  var announce: @MainActor (String) -> Void = { text in
+    NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                         userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+  }
+  /// Test seam for the dismiss fade: when set, it is handed the step that ends the fade (panel and scrim to alpha 0)
+  /// instead of the layer animation's completion, so a test ends the fade by hand, with no clock.
+  var dismissFinisher: (@MainActor (@escaping @MainActor () -> Void) -> Void)?
+  private var dismissGeneration = 0
+  /// The input of the latest reload, for the pill counts.
+  private var lastInput = CommandBarResults.Input()
+  /// The clipboard URL read for this show: the pasteboard is read once per show, not on every reload (Esc, a filter).
+  private var clipboardSnapshot: (url: URL?, isRead: Bool) = (nil, false)
+
+  private func clipboardURLForThisShow() -> URL? {
+    if !clipboardSnapshot.isRead { clipboardSnapshot = (clipboardURLProvider(), true) }
+    return clipboardSnapshot.url
+  }
+  private static let fadeKey = "commandBar.fade"
   /// The archived matches of `archivedQuery`, shown while the field still holds that query.
   private var archived: [CommandBarResults.ArchivedMatch] = []
   private var archivedQuery = ""
@@ -126,6 +154,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
     barView.onDismissNotice = { [weak self] in self?.dismissNotice() }
     barView.onEscapeKey = { [weak self] in self?.hide() }
+    barView.pills.onSelect = { [weak self] in self?.setFilter($0) }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
     for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification,
                  NSWindow.didChangeBackingPropertiesNotification] {
@@ -199,6 +228,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     }
     let targetText = prefill ?? ""
     if barView.field.stringValue != targetText { barView.field.stringValue = targetText }
+    filter = .all                                     // All is the default on every open
+    clipboardSnapshot = (nil, false)
     applyAppearance()
     reloadResults()
     setPanelFrame(frame(in: parent), display: false)
@@ -213,10 +244,13 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     }
     isVisible = true                                // before makeKey: windowDidBecomeKey reads it
     scrim.attach(to: parent)
+    dismissGeneration += 1                          // a fade-out still running is over: the bar is back
     scrim.isPresented = true
     panel.isPresented = true
+    fadeLayers(CommandBarMotion.entrance(reduceMotion: false), toModel: 1)
     panel.makeKey()
     if barView.field.currentEditor() == nil { panel.makeFirstResponder(barView.field) }   // kept across hides
+    applyCaretColor()
     if !targetText.isEmpty { barView.field.currentEditor()?.selectAll(nil) }
     showGeneration += 1
     let generation = showGeneration
@@ -259,9 +293,50 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     firstFrameLink?.isPaused = true
     showCommitTime = nil
     endSignpost()
-    panel.isPresented = false                       // stays ordered in; alpha 0, inert (CommandBarPanel)
-    scrim.isPresented = false
+    panel.isPresented = false                       // stays ordered in, inert at once; alpha 0 after the fade
+    barView.selectionMotion.settleNow()
+    fadeOut()
     if restoreFocus { parent?.makeKey() }
+  }
+
+  // MARK: Fades (design/command-bar/README.md, Motion)
+
+  private var fadingLayers: [CALayer] { [barView.layer, scrim.layer].compactMap { $0 } }
+
+  /// Runs `fade` on the bar and the scrim and leaves `toModel` as their opacity. Reduce Motion keeps fades.
+  private func fadeLayers(_ fade: CommandBarMotion.Fade, toModel: Float) {
+    for layer in fadingLayers {
+      // A fade interrupting another starts where the layer is drawn now, so a show in the middle of a fade-out does not
+      // jump to 0 first.
+      let isInterrupting = layer.animation(forKey: Self.fadeKey) != nil
+      let from = isInterrupting ? (layer.presentation()?.opacity ?? fade.fromOpacity) : fade.fromOpacity
+      layer.removeAnimation(forKey: Self.fadeKey)
+      layer.opacity = toModel
+      var run = fade
+      run.fromOpacity = from
+      layer.add(CommandBarMotion.animation(run), forKey: Self.fadeKey)
+    }
+  }
+
+  /// The dismiss fade: opacity to 0 in 0.1 s; the panel stays ordered in and goes to alpha 0 when it ends (unless the
+  /// bar was shown again meanwhile).
+  private func fadeOut() {
+    dismissGeneration += 1
+    let generation = dismissGeneration
+    let finish: @MainActor () -> Void = { [weak self] in
+      guard let self, generation == dismissGeneration, !isVisible else { return }
+      panel.alphaValue = 0
+    }
+    let fade = CommandBarMotion.exit(reduceMotion: false)
+    if let dismissFinisher {
+      fadeLayers(fade, toModel: 0)
+      dismissFinisher(finish)
+    } else {
+      CATransaction.begin()
+      CATransaction.setCompletionBlock { MainActor.assumeIsolated { finish() } }
+      fadeLayers(fade, toModel: 0)
+      CATransaction.commit()
+    }
   }
 
   private func endSignpost() {
@@ -288,6 +363,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.apply(flavor: flavor)
     scrim.apply(flavor: flavor)
     if flavorChanged, !results.isEmpty { reapplyCells() }
+    applyCaretColor()
+  }
+
+  /// The caret is a mustard fill (README, Brand rules).
+  private func applyCaretColor() {
+    (barView.field.currentEditor() as? NSTextView)?.insertionPointColor = ShellTokens.commandBarTick.resolve(flavor).nsColor()
   }
 
   /// The flavor the bar draws in (tests).
@@ -351,9 +432,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
     switch selector {
-    case #selector(NSResponder.cancelOperation(_:)): hide(); return true          // Esc, KB-084
+    case #selector(NSResponder.cancelOperation(_:)): escape(); return true        // Esc, KB-084
     case #selector(NSResponder.insertNewline(_:)): commit(); return true
     case #selector(NSResponder.insertTab(_:)): return insertTabCommand()
+    case #selector(NSResponder.insertBacktab(_:)): return insertBacktabCommand()
     case #selector(NSResponder.deleteBackward(_:)):
       // [I] Backspace on the empty scoped field leaves the scope (Chromium omnibox convention; Arc unverified).
       if scope != .normal, barView.field.stringValue.isEmpty { exitScope(); return true }
@@ -381,6 +463,16 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       removeSelectedSuggestion()
       return true
     }
+    let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+    if modifiers == [.command], let digit = Self.filterDigit(forKeyCode: event.keyCode),
+       let picked = CommandBarFilter(commandDigit: digit) {
+      setFilter(picked)                                // Cmd-1 to Cmd-4
+      return true
+    }
+    if modifiers == [.command, .shift], event.charactersIgnoringModifiers?.lowercased() == "v" {      // Cmd-Shift-V: Paste and Go from any state
+      pasteAndGo()
+      return true
+    }
     guard Self.isReturn(event, withExactly: [.command, .option]) else { return false }
     if let editor = barView.field.currentEditor() as? NSTextView, editor.hasMarkedText() { return false }
     commit(forcing: .newTab)
@@ -389,29 +481,75 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   // MARK: Scopes (BH-106 action search, BH-107 site search)
 
-  /// Tab: on the empty bar just opened with Cmd-T, enters action search (KB-081); on a typed alias, scopes the
-  /// query to that engine (KB-082). Already scoped: consumed, stays [I]. Otherwise not ours.
+  /// Tab is smart (`CommandBarTabAction`): it scopes the search when the selected row shows a Tab key cap or the bar is
+  /// empty and just opened for a new tab (the hint strip shows Tab for action search), and otherwise cycles the filters.
+  /// Already scoped: consumed, changes nothing [I].
   private func insertTabCommand() -> Bool {
-    switch scope {
-    case .normal:
-      let text = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-      if text.isEmpty {
-        guard mode == .newTab else { return false }   // KB-081: Tab immediately after Cmd-T
-        enterScope(.actions)
-        return true
-      }
-      if let engine = SiteSearchEngines.engine(aliased: text, in: siteSearchProvider()) {
-        enterScope(.siteSearch(engine))
-        return true
-      }
-      return false
-    case .actions, .siteSearch:
-      return true
+    switch tabAction {
+    case .scopeSite(let engine): enterScope(.siteSearch(engine))
+    case .scopeActions: enterScope(.actions)
+    case .cycleFilter: setFilter(filter.next)
+    case .consume: break
     }
+    return true
+  }
+
+  /// Shift-Tab goes back through the filters; inside a scope it does nothing.
+  private func insertBacktabCommand() -> Bool {
+    if scope == .normal { setFilter(filter.previous) }
+    return true
+  }
+
+  private var tabAction: CommandBarTabAction {
+    let row = barView.table.selectedRow
+    return CommandBarTabAction.decide(scope: scope, queryIsEmpty: queryIsEmpty, isNewTab: mode == .newTab,
+                                      selected: results.indices.contains(row) ? results[row] : nil)
+  }
+
+  private var queryIsEmpty: Bool {
+    barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  /// Esc clears the query if there is one, and closes the bar when it is already empty (KB-084; README, Keyboard).
+  private func escape() {
+    if barView.field.stringValue.isEmpty { hide(); return }
+    barView.field.stringValue = ""
+    barView.field.currentEditor()?.string = ""
+    controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: barView.field))
+  }
+
+  /// Cmd-1 to Cmd-4: the digit on a key code, so any keyboard layout's number row works.
+  private static func filterDigit(forKeyCode code: UInt16) -> Int? {
+    switch code {
+    case 18: 1
+    case 19: 2
+    case 20: 3
+    case 21: 4
+    default: nil
+    }
+  }
+
+  /// Picks `newFilter`: the pills, the rows and the hint strip follow, and VoiceOver hears "Tabs, 3 results".
+  public func setFilter(_ newFilter: CommandBarFilter) {
+    guard scope == .normal else { return }
+    filter = newFilter
+    reloadResults()
+    relayout()
+    let count = CommandBarResults.counts(query: barView.field.stringValue, input: lastInput)[newFilter] ?? 0
+    announce("\(newFilter.title), \(count == 1 ? "1 result" : "\(count) results")")
+  }
+
+  /// Cmd-Shift-V: opens the clipboard URL, from any state (a new-tab surface: Cmd-L and the split pane bar never).
+  private func pasteAndGo() {
+    guard mode == .newTab, let url = clipboardURLProvider() else { NSSound.beep(); return }
+    let target = openTarget
+    hide()
+    onOpen?(url, target)
   }
 
   private func enterScope(_ newScope: CommandBarResults.Scope) {
     scope = newScope
+    filter = .all                                      // the pills do not apply inside a scope
     barView.field.stringValue = ""
     updateScopeChrome()
     reloadResults()
@@ -464,6 +602,14 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   private func commit(row: Int, forcing forced: OpenTarget? = nil) {
     guard row < results.count else { hide(); return }
+    guard results[row].isActionable else { return }     // the empty row of a filter that matches nothing
+    // A whole alias with nothing after it has nothing to search for: Return scopes, like Tab (the row's Tab key cap).
+    if scope == .normal, let engine = results[row].siteSearchEngine,
+       engine.alias.caseInsensitiveCompare(barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+         == .orderedSame {
+      enterScope(.siteSearch(engine))
+      return
+    }
     let kind = results[row].kind
     let target = forced ?? openTarget
     hide()
@@ -474,6 +620,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     case .restore(let id): onRestoreArchived?(id)
     case .action(let id): onAction?(id)
     case .switchSpace(let space): onSwitchSpace?(space)
+    case .noMatch: break
     }
   }
 
@@ -515,9 +662,14 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   }
 
   private func frame(in parent: NSWindow) -> NSRect {
-    CommandBarGeometry.frame(parentFrame: parent.frame,
-                             contentHeight: CommandBarGeometry.contentHeight(rowCount: results.count,
-                                                                             showsNotice: isNoticeVisible))
+    let isEmptyState = scope == .normal && queryIsEmpty
+    let maxRows = isEmptyState ? CommandBarGeometry.maxEmptyStateRows : CommandBarGeometry.maxVisibleRows
+    let shown = min(results.count, maxRows)
+    let headers = groupHeaders.keys.filter { $0 < shown }.count
+    return CommandBarGeometry.frame(parentFrame: parent.frame,
+                                    contentHeight: CommandBarGeometry.contentHeight(
+                                      rowCount: results.count, headerCount: headers, showsNotice: isNoticeVisible,
+                                      maxRows: maxRows))
   }
 
   /// Sets the panel's frame for the current results and notice, when it changed.
@@ -567,27 +719,52 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     // BH-108: Paste and Go is a new-tab surface; Cmd-L's prefill and the split pane bar never offer it. The row
     // shows only on an empty query, so a typed keystroke never pays for a pasteboard read.
     let queryIsEmpty = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    input.clipboardURL = scope == .normal && mode == .newTab && queryIsEmpty ? clipboardURLProvider() : nil
+    input.clipboardURL = scope == .normal && mode == .newTab && queryIsEmpty ? clipboardURLForThisShow() : nil
     input.excluded = removedSuggestionIDs
     input.searchSuggestionsEnabled = settings.searchSuggestionsEnabled
     input.scope = scope
     input.archived = current
-    let fresh = CommandBarResults.make(query: text, input: input)
+    input.recentTabs = scope == .normal && trimmed.isEmpty ? recentTabsProvider() : []
+    input.siteSearchEngines = scope == .normal ? siteSearchProvider() : []
+    lastInput = input
+    unfilteredResults = CommandBarResults.make(query: text, input: input)
+    let fresh = scope == .normal ? filter.apply(to: unfilteredResults, query: text) : unfilteredResults
+    let headers = CommandBarResults.groupHeaders(of: fresh)
     let scale = backingScale
-    if fresh != results || scale != cellScale || text != cellQuery {
+    barView.selectionAnimates = false                 // new rows do not slide the fill
+    if fresh != results || scale != cellScale || text != cellQuery || headers != groupHeaders {
       results = fresh
+      groupHeaders = headers
+      barView.groupHeaders = headers
       cellScale = scale
       cellQuery = text
       barView.setHoveredRow(nil)                      // the rows shifted; no honest hover target anymore
       barView.table.reloadData()
     }
-    barView.pills.update(selected: .all, counts: CommandBarFilter.counts(of: results),
-                         showsCounts: CommandBarFilter.showsCounts(forQuery: text), flavor: flavor)
-    barView.hintStrip.update(CommandBarHints.content(isEmptyQuery: trimmed.isEmpty), flavor: flavor)
-    if !results.isEmpty, barView.table.selectedRow != 0 {
+    if results.first?.isActionable == true, barView.table.selectedRow != 0 {
       barView.table.selectRowIndexes([0], byExtendingSelection: false)
+    } else if results.first?.isActionable == false {
+      barView.table.deselectAll(nil)                   // the empty row of a filter is not selectable
     }
+    barView.selectionAnimates = true
+    updatePillsAndHints(query: text, trimmed: trimmed)
     updateNotice()
+  }
+
+  /// The pills (selection and counts of the unfiltered rows) and the hint strip, for the rows on screen.
+  private func updatePillsAndHints(query: String, trimmed: String) {
+    barView.pills.update(selected: filter, counts: CommandBarResults.counts(query: query, input: lastInput),
+                         showsCounts: CommandBarFilter.showsCounts(forQuery: query), flavor: flavor)
+    refreshHints()
+  }
+
+  /// The strip follows the selected row: its Tab item is what Tab will do.
+  private func refreshHints() {
+    let row = barView.table.selectedRow
+    let tab = CommandBarTabAction.hint(scope: scope, queryIsEmpty: queryIsEmpty, isNewTab: mode == .newTab,
+                                       selected: results.indices.contains(row) ? results[row] : nil)
+    barView.hintStrip.update(CommandBarHints.content(isEmptyQuery: queryIsEmpty, tab: tab,
+                                                     offersPasteAndGo: mode == .newTab), flavor: flavor)
   }
 
   // MARK: Notice (BH-113) and refresh (BH-111)
@@ -596,7 +773,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   private func updateNotice() {
     let hasEngineRow = results.contains {
       if case .search = $0.kind { return true }
-      if case .siteSearch = $0.kind { return true }
+      if case .siteSearch = $0.kind { return $0.siteSearchEngine == nil }   // an alias row sends nothing yet
       return false
     }
     let shows = settings.searchSuggestionsEnabled && !settings.searchSuggestionNoticeDismissed && hasEngineRow
@@ -659,7 +836,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// `scroll` is false for hover: the row under the pointer is already visible.
   private func select(_ row: Int, scroll: Bool) {
     guard row >= 0, row < results.count else { return }
-    if barView.table.selectedRow != row { barView.table.selectRowIndexes([row], byExtendingSelection: false) }
+    if barView.table.selectedRow != row {
+      barView.table.selectRowIndexes([row], byExtendingSelection: false)
+      refreshHints()
+    }
     if scroll { barView.table.scrollRowToVisible(row) }
   }
 
@@ -671,10 +851,15 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     let cell = tableView.makeView(withIdentifier: CommandBarCellView.identifier, owner: nil) as? CommandBarCellView
       ?? CommandBarCellView(frame: .zero)
     cell.configure(results[row], query: cellQuery, position: row + 1, count: results.count, flavor: flavor,
-                   scale: cellScale)
+                   scale: cellScale, groupHeader: groupHeaders[row])
     cell.onRemove = results[row].removalID != nil ? { [weak self] in self?.removeSuggestion(at: row) } : nil
     cell.setCloseHovered(barView.hoveredRow == row)
     return cell
+  }
+
+  /// A row that starts a group is taller by its header.
+  public func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+    CommandBarGeometry.rowHeight + (groupHeaders[row] != nil ? CommandBarGeometry.groupHeaderHeight : 0)
   }
 
   public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {

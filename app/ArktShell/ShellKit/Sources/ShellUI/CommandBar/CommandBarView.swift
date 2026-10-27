@@ -52,6 +52,11 @@ final class CommandBarView: NSView {
   let table = CommandBarTableView(frame: .zero)
   let hintStrip = CommandBarHintStrip(frame: .zero)
   let selectionIndicator = CommandBarSelectionIndicator(frame: .zero)
+  let selectionMotion = CommandBarSelectionMotion()
+  /// The header text over the rows that start a group, by row (empty state); those rows are taller by the header.
+  var groupHeaders: [Int: String] = [:]
+  /// Whether a selection change slides the indicator. Off while results reload, so new results do not slide.
+  var selectionAnimates = true
   private let effectView = NSVisualEffectView()
   private let surfaceTint = NSView()
   private let innerEdge = CALayer()
@@ -157,7 +162,11 @@ final class CommandBarView: NSView {
     table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
     table.axProxyRows.setParent(self)        // the results reach accessibility as `commandBar.results` (proxy)
     table.addSubview(selectionIndicator, positioned: .below, relativeTo: nil)
-    table.onSelectionOrDataChange = { [weak self] in self?.syncSelectionIndicator() }
+    table.onSelectionOrDataChange = { [weak self] in
+      guard let self else { return }
+      syncSelectionIndicator(animated: selectionAnimates)
+    }
+    selectionMotion.onFrame = { [weak self] in self?.applySelectionOffset() }
 
     // One tracking area for the life of the view (never per show): pointer moves select the row under them
     // and show its remove button (BH-109); leaving the list hides it again.
@@ -182,6 +191,9 @@ final class CommandBarView: NSView {
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  /// The least the query field is given before the filter pills are hidden.
+  static let minimumFieldWidth: CGFloat = 160
 
   /// BH-113, [S] string.
   static let noticeText = "We talk to your search engine to help us suggest results."
@@ -223,7 +235,12 @@ final class CommandBarView: NSView {
 
   private var scopePlaceholder: String?
 
+  private var shownPlaceholder: (text: String, flavor: ThemeFlavor)?
+
   func refreshPlaceholder(_ text: String) {
+    // A show repeats the previous placeholder: setting it again would redraw the field in the first frame's commit.
+    if let shown = shownPlaceholder, shown.text == text, shown.flavor == flavor { return }
+    shownPlaceholder = (text, flavor)
     scopePlaceholder = text == Self.placeholder ? nil : text
     field.placeholderAttributedString = NSAttributedString(string: text, attributes: [
       .font: NSFont.systemFont(ofSize: 22),
@@ -238,6 +255,7 @@ final class CommandBarView: NSView {
   }
 
   func setScope(title: String?) {
+    guard (title ?? "") != scopeChip.stringValue || (title == nil) != scopeChip.isHidden else { return }
     scopeChip.stringValue = title ?? ""
     scopeChip.isHidden = title == nil
     needsLayout = true
@@ -277,10 +295,42 @@ final class CommandBarView: NSView {
     }
   }
 
-  /// Puts the fill and tick on the selected row (instantly), or hides them when no row is selected.
-  func syncSelectionIndicator() {
+  /// The selected row's fill, in table coordinates: the row without its group header.
+  func selectionRect(ofRow row: Int) -> NSRect {
+    var rect = table.rect(ofRow: row)
+    if groupHeaders[row] != nil {
+      rect.origin.y += CommandBarGeometry.groupHeaderHeight
+      rect.size.height -= CommandBarGeometry.groupHeaderHeight
+    }
+    return rect
+  }
+
+  /// Puts the fill and tick on the selected row, or hides them when no row is selected. The frame is always the target
+  /// row; `animated` slides the fill there from the row it was on, by a transform (`CommandBarSelectionMotion`).
+  func syncSelectionIndicator(animated: Bool) {
     let row = table.selectedRow
-    selectionIndicator.place(on: row >= 0 && row < table.numberOfRows ? table.rect(ofRow: row) : nil)
+    guard row >= 0, row < table.numberOfRows else {
+      selectionMotion.settleNow()
+      selectionIndicator.place(on: nil)
+      return
+    }
+    let target = selectionRect(ofRow: row)
+    let wasHidden = selectionIndicator.isHidden
+    let oldY = selectionIndicator.frame.minY
+    selectionIndicator.place(on: target)
+    if wasHidden || target.minY != oldY {
+      if animated, !wasHidden {
+        selectionMotion.move(from: Double(oldY), to: Double(target.minY), in: self)
+      } else {
+        selectionMotion.settleNow()
+      }
+    }
+    applySelectionOffset()
+  }
+
+  /// The indicator's distance behind its row, from the spring (zero at rest).
+  private func applySelectionOffset() {
+    selectionIndicator.setOffset(CGFloat(selectionMotion.offset(toward: Double(selectionIndicator.frame.minY)) ?? 0))
   }
 
   /// The input field and, while results show, the proxy results table in place of the scroll view that holds the
@@ -333,9 +383,13 @@ final class CommandBarView: NSView {
     let pillsSize = pills.size
     pills.frame = NSRect(x: escapeKey.frame.minX - 8 - pillsSize.width, y: (g.inputHeight - pillsSize.height) / 2,
                          width: pillsSize.width, height: pillsSize.height)
+    // The query field keeps a minimum width: in a narrow window the pills give way (the keys still filter).
+    let fieldRight = pills.frame.minX - 12
+    pills.isHidden = fieldRight - fieldX < Self.minimumFieldWidth
     let fieldHeight = ceil(field.intrinsicContentSize.height)
+    let available = (pills.isHidden ? escapeKey.frame.minX - 12 : fieldRight) - fieldX
     field.frame = NSRect(x: fieldX, y: (g.inputHeight - fieldHeight) / 2,
-                         width: max(0, pills.frame.minX - 12 - fieldX), height: fieldHeight)
+                         width: max(0, available), height: fieldHeight)
 
     let dividerY = noticeView.isHidden ? g.inputHeight : g.inputHeight + g.noticeHeight
     if !noticeView.isHidden {
@@ -361,6 +415,6 @@ final class CommandBarView: NSView {
     scrollView.frame = NSRect(x: g.listPadding, y: listTop, width: bounds.width - 2 * g.listPadding,
                               height: max(0, stripTop - 1 - g.listPadding - listTop))
     table.tableColumns.first?.width = scrollView.contentSize.width
-    syncSelectionIndicator()
+    syncSelectionIndicator(animated: false)
   }
 }

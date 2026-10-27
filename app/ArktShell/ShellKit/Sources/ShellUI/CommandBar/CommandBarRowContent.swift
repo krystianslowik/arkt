@@ -21,7 +21,7 @@ public enum CommandBarTrailing: Equatable, Sendable {
 
 /// The kinds of row the bar shows (design/command-bar/README.md, Row anatomy).
 public enum CommandBarRowKind: Equatable, Sendable {
-  case openTab, searchSuggestion, history, siteSearch, action, pasteAndGo, archived, address, space
+  case openTab, searchSuggestion, history, siteSearch, action, pasteAndGo, archived, address, space, noMatch
 }
 
 extension CommandBarResults.Result {
@@ -35,6 +35,7 @@ extension CommandBarResults.Result {
     case .restore: .archived
     case .open: .address
     case .switchSpace: .space
+    case .noMatch: .noMatch
     }
   }
 
@@ -49,6 +50,7 @@ extension CommandBarResults.Result {
     case .archived: "archivebox"
     case .address: "globe"
     case .space: "square.grid.2x2"
+    case .noMatch: ""
     }
   }
 
@@ -56,8 +58,9 @@ extension CommandBarResults.Result {
   /// is said by the trailing caption and the symbol.
   public var secondaryText: String {
     switch rowKind {
-    case .openTab, .history, .archived, .pasteAndGo, .address: subtitle
-    case .searchSuggestion, .siteSearch, .action, .space: ""
+    case .openTab, .history, .archived: subtitle
+    case .pasteAndGo, .address: CommandBarTitleMatch.displayURL(subtitle)
+    case .searchSuggestion, .siteSearch, .action, .space, .noMatch: ""
     }
   }
 
@@ -66,21 +69,33 @@ extension CommandBarResults.Result {
     let returnCap = CommandBarTrailing.keyCap(CommandBarKeyCaps.return)
     switch rowKind {
     case .openTab, .address, .archived, .space, .history:
-      let caption = trailingHint ?? accessibilityCaption
+      let caption = timeText ?? trailingHint ?? accessibilityCaption
       return isSelected && rowKind != .archived && rowKind != .space ? [.text(caption), returnCap] : [.text(caption)]
     case .searchSuggestion:
       return isSelected ? [.text("Search"), returnCap] : [.text("Search")]
-    case .siteSearch, .pasteAndGo:
+    case .siteSearch:
+      // The Tab key cap says Tab scopes to the site (the smart Tab rule); Return runs the search.
+      let tabCap = CommandBarTrailing.keyCap(CommandBarKeyCaps.tab)
+      if showsTabKeyCap { return isSelected ? [tabCap, returnCap] : [tabCap] }
       return isSelected ? [returnCap] : []
+    case .pasteAndGo:
+      return isSelected ? [returnCap] : []
+    case .noMatch:
+      return []
     case .action:
       if !keyCaps.isEmpty { return keyCaps.map { .keyCap($0) } }
       return isSelected ? [returnCap] : []
     }
   }
 
-  /// What a screen reader says for the row: "<title>, <host>, <kind>, <k> of <n>" (k from 1).
+  /// Whether the row shows a Tab key cap: a normal-scope site-search row, where Tab scopes to its site.
+  public var showsTabKeyCap: Bool { rowKind == .siteSearch && siteSearchEngine != nil }
+
+  /// What a screen reader says for the row: "<title>, <host>, <kind>, <k> of <n>" (k from 1). The empty row is its
+  /// title alone.
   public func accessibilityLabel(position: Int, of count: Int) -> String {
-    [title, secondaryText, accessibilityKind, "\(position) of \(count)"].filter { !$0.isEmpty }.joined(separator: ", ")
+    if rowKind == .noMatch { return title }
+    return [title, secondaryText, accessibilityKind, "\(position) of \(count)"].filter { !$0.isEmpty }.joined(separator: ", ")
   }
 
   private var accessibilityKind: String {
@@ -94,6 +109,7 @@ extension CommandBarResults.Result {
     case .archived: "archived"
     case .address: "address"
     case .space: "space"
+    case .noMatch: ""
     }
   }
 }
@@ -104,5 +120,18 @@ public enum CommandBarTitleMatch {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
     return title.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive])
+  }
+}
+
+extension CommandBarTitleMatch {
+  /// A URL as a row shows it: without the scheme and a trailing slash ("arkt.dev/changelog").
+  public static func displayURL(_ text: String) -> String {
+    var shown = text
+    for scheme in ["https://", "http://"] where shown.lowercased().hasPrefix(scheme) {
+      shown.removeFirst(scheme.count)
+      break
+    }
+    if shown.hasSuffix("/") { shown.removeLast() }
+    return shown
   }
 }
