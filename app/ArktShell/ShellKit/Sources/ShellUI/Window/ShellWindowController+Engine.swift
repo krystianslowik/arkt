@@ -275,6 +275,7 @@ extension ShellWindowController {
     case .closeTab: CommandClaim(isEnabled: currentNode != nil)
     case PendingEngineCommands.newWindow: CommandClaim(isEnabled: onNewWindow != nil)
     case .closeWindow: CommandClaim(isEnabled: window != nil)
+    case .find, .findNext, .findPrevious: claimFind(command)         // #134
     default: nil
     }
   }
@@ -295,6 +296,8 @@ extension ShellWindowController {
       guard let window else { return false }
       window.performClose(nil)                            // windowShouldClose: the engine decides
       return true
+    case .find, .findNext, .findPrevious:
+      return performFind(command)
     default:
       return false
     }

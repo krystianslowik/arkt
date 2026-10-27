@@ -153,6 +153,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private(set) lazy var permissionPrompts = makePermissionPresenter()
   /// A tab's infobars as a strip at the top of its page (#400); see `+Infobars`.
   private(set) lazy var infobarStrips = makeInfobarPresenter()
+  /// The find bar's state and engine calls, and its view over the card (#134); see `+Find`.
+  private(set) lazy var findBar = makeFindBar()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
@@ -663,6 +665,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     javaScriptDialogs.refresh()
     permissionPrompts.refresh()
     infobarStrips.refresh()
+    refreshFindBar()
   }
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -732,8 +735,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .tabCreated, .titleChanged, .loadingChanged, .dialogRequested, .dialogEnded, .permissionRequested,
          .permissionEnded, .infobarsChanged:
       break                                                         // dialogs, prompts, infobars: routed above
-    case .findResult, .targetURLChanged:
-      break                                                         // find and link hover: the shell UI follows (#134, #114)
+    case .findResult:
+      findBar.handle(event)                                         // #134
+    case .targetURLChanged:
+      break                                                         // link hover: the shell UI follows (#114)
     }
   }
 
@@ -746,6 +751,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// - `.page`, `.extension`: the page or an extension closed it; a Today row is archived, a Pinned or Favorite row
   ///   stays unloaded as after Cmd-W.
   private func tabDidClose(_ tab: TabID, node: NodeID, reason: CloseReason) {
+    findBar.forget(tab)                                     // #134
     tabsByNode[node] = nil
     nodeByTab[tab] = nil
     let wasCurrent = currentTab == tab
