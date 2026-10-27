@@ -23,6 +23,10 @@ public final class ShellWindowSet {
   /// The saved sidebar width and hidden state (#331); `make` hands it to every window, and the first window adopts
   /// the stored state.
   public let sidebarStateStore: SidebarWindowStateStore
+  /// Where the main window's frame, Space and tabs are saved (#116); the session's first window restores them.
+  public let sessionStore: WindowSessionStore
+  /// The connected screens a saved frame is placed on; tests replace it.
+  public var screens: @MainActor () -> [ScreenGeometry] = { ScreenGeometry.current() }
   /// The app's hooks on a new window (archive, stamps, favicons, import); runs before the window is shown.
   public var configure: (@MainActor (ShellWindowController) -> Void)?
 
@@ -30,6 +34,10 @@ public final class ShellWindowSet {
   private var windows: [ShellWindowController] = []
   /// True once the session's first window adopted the saved sidebar state (#331); later windows keep the defaults.
   private var adoptedSavedSidebarState = false
+  /// The window that restores and saves the session: the first one built.
+  private weak var sessionWindow: ShellWindowController?
+  /// The session window when a saved frame was applied to it: `place` leaves it where it is.
+  private weak var restoredFrameWindow: ShellWindowController?
   /// Built for an engine request, waiting for their window's `.windowOpened`.
   private var awaitingAdoption: [ShellWindowController] = []
   /// Most recently main last.
@@ -48,11 +56,13 @@ public final class ShellWindowSet {
   /// `hostLookup` is needed only for an engine that asks for windows of its own (a host provider); FakeEngine never
   /// does.
   public init(engine: any EngineClient, sidebar: any SidebarSource, toolbarSetting: ToolbarSetting = .ephemeral(),
-              sidebarStateStore: SidebarWindowStateStore = .ephemeral(), hostLookup: HostLookup? = nil) {
+              sidebarStateStore: SidebarWindowStateStore = .ephemeral(),
+              sessionStore: WindowSessionStore = .ephemeral(), hostLookup: HostLookup? = nil) {
     self.engine = engine
     self.sidebar = sidebar
     self.toolbarSetting = toolbarSetting
     self.sidebarStateStore = sidebarStateStore
+    self.sessionStore = sessionStore
     self.hostLookup = hostLookup
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
@@ -164,6 +174,22 @@ public final class ShellWindowSet {
     controller.showWindow(nil)
   }
 
+  // MARK: Session (#116)
+
+  /// A quit started: writes every restored window's final state, then freezes saving, so the tabs the engine closes
+  /// while shutting down cannot overwrite it.
+  public func saveSessionsForTermination() {
+    for controller in controllers {
+      controller.saveSession()
+      controller.savesSession = false
+    }
+  }
+
+  /// The quit was cancelled: saving continues.
+  public func resumeSessions() {
+    sessionWindow?.savesSession = true
+  }
+
   // MARK: Little Arkt (#314)
 
   /// The open Little Arkt windows, the frontmost last.
@@ -253,8 +279,14 @@ public final class ShellWindowSet {
   // MARK: Building
 
   private func make(opensFirstTab: Bool) -> ShellWindowController {
+    // #116: the session's first window restores the saved frame, Space and tabs and keeps them saved.
+    let isRestored = !adoptedSavedSidebarState
+    let session = isRestored ? sessionStore.load() : nil
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
-                                           sidebarStateStore: sidebarStateStore, opensFirstTab: opensFirstTab)
+                                           sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
+                                           restoring: session, savesSession: isRestored, opensFirstTab: opensFirstTab)
+    if isRestored { sessionWindow = controller }
+    if let session, controller.applySavedFrame(session, screens: screens()) { restoredFrameWindow = controller }
     controller.onNewWindow = { [weak self] in self?.openWindow(opensFirstTab: false) }
     controller.onTakeOverLiveTab = { [weak self, weak controller] node in
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
@@ -279,7 +311,7 @@ public final class ShellWindowSet {
 
   /// Centred when it is the first window, else cascaded from `anchor`.
   private func place(_ controller: ShellWindowController, near anchor: NSWindow?) {
-    guard let window = controller.window else { return }
+    guard let window = controller.window, controller !== restoredFrameWindow else { return }
     guard let anchor, anchor.isVisible else {
       window.center()
       return
