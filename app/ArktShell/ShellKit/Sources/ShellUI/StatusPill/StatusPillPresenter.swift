@@ -25,6 +25,9 @@ public final class StatusPillPresenter {
 
   private let cardFor: @MainActor (TabID) -> ContentCardView?
   private var entries: [TabID: Entry] = [:]
+  /// The pointer is sampled this often while a pill is up; the card's tracking area may not see it over a page view.
+  static let sampleInterval: TimeInterval = 1.0 / 30
+  private var cancelSampler: (@MainActor () -> Void)?
 
   /// Seconds on any monotonic clock; the model's deadlines are read against it.
   var now: @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
@@ -61,6 +64,7 @@ public final class StatusPillPresenter {
     guard let card = cardFor(tab) else {
       // Not on screen: nothing to draw, and nothing to remember.
       if let entry = entries.removeValue(forKey: tab) { discard(entry) }
+      updateSampler()
       return
     }
     let entry = entry(for: tab, card: card)
@@ -72,6 +76,7 @@ public final class StatusPillPresenter {
   /// The window changed what it shows (or finished a layout): a tab that left the screen loses its pill at once, and
   /// a tab whose page moved to another card (a split pane) takes it along.
   func refresh() {
+    defer { updateSampler() }
     for (tab, entry) in entries {
       guard let card = cardFor(tab) else {
         entries[tab] = nil
@@ -88,6 +93,8 @@ public final class StatusPillPresenter {
 
   /// Takes every pill down and stops every timer, as the window goes away.
   func closeAll() {
+    cancelSampler?()
+    cancelSampler = nil
     for entry in entries.values { discard(entry) }
     entries = [:]
   }
@@ -106,6 +113,33 @@ public final class StatusPillPresenter {
   func pointerMoved(to point: CGPoint, in card: ContentCardView) {
     for entry in entries.values where entry.card === card && entry.model.displayed != nil {
       updateCorner(of: entry, pointer: point, animated: true)
+    }
+  }
+
+  // MARK: Sampling
+
+  private var hasVisiblePill: Bool { entries.values.contains { $0.model.displayed != nil } }
+
+  /// Runs while some pill is up and not otherwise: no work when everything is hidden.
+  private func updateSampler() {
+    guard hasVisiblePill else {
+      cancelSampler?()
+      cancelSampler = nil
+      return
+    }
+    guard cancelSampler == nil else { return }
+    armSampler()
+  }
+
+  private func armSampler() {
+    cancelSampler = schedule(Self.sampleInterval) { [weak self] in
+      guard let self else { return }
+      cancelSampler = nil
+      guard hasVisiblePill else { return }
+      for entry in entries.values where entry.model.displayed != nil {
+        if let card = entry.card { updateCorner(of: entry, pointer: pointer(card), animated: true) }
+      }
+      armSampler()
     }
   }
 
@@ -152,6 +186,7 @@ public final class StatusPillPresenter {
     } else {
       card.statusPillView?.hide(animated: animates(card))
     }
+    updateSampler()
     guard let deadline = entry.model.deadline else { return }
     entry.cancelTimer = schedule(max(0, deadline - now())) { [weak self, weak entry] in
       guard let self, let entry else { return }

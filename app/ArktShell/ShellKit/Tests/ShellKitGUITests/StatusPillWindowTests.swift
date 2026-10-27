@@ -226,6 +226,27 @@ final class StatusPillWindowTests: XCTestCase {
     XCTAssertEqual(try XCTUnwrap(pill).corner, .trailing)
   }
 
+  /// The card's tracking area may not reach the pointer over the page view: while the pill is up, the presenter samples
+  /// the pointer on its own tick, and only then.
+  func testASamplerFollowsThePointerWhileThePillIsUpAndStopsWhenItIsGone() throws {
+    XCTAssertEqual(clock.pendingCount, 0)
+    try engine.hoverTarget(tab, url: Self.linkA)
+    XCTAssertEqual(clock.pendingCount, 1, "only the show timer: no sampling before the pill is up")
+    clock.advance(by: 0.4)
+    let shown = try XCTUnwrap(pill)
+    XCTAssertEqual(clock.pendingCount, 1, "the sampler is armed")
+    card.layoutSubtreeIfNeeded()
+
+    pointer = CGPoint(x: shown.frame.midX, y: shown.frame.midY)
+    clock.advance(by: 0.1)                              // no mouse-moved event at all
+    XCTAssertEqual(shown.corner, .trailing)
+
+    try engine.hoverTarget(tab, url: nil)
+    clock.advance(by: 0.2)
+    XCTAssertNil(pill)
+    XCTAssertEqual(clock.pendingCount, 0, "no work at all once it is hidden")
+  }
+
   func testTheCardFollowsThePointerWithAMouseMovedTrackingArea() throws {
     try engine.hoverTarget(tab, url: Self.linkA)
     clock.advance(by: 0.4)

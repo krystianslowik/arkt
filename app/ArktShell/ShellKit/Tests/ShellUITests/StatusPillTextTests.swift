@@ -79,6 +79,16 @@ struct StatusPillTextTests {
     #expect(pill.host.count <= StatusPillText.maxCharacters)
   }
 
+  /// The scheme and user info are clipped like the host and the rest: a megabyte of user info must not reach text
+  /// measurement.
+  @Test func anOverlongUserInfoIsClippedToo() throws {
+    let huge = "https://" + String(repeating: "u", count: 1_000_000) + "@evil.example/x"
+    let pill = try text(huge)
+    #expect(pill.prefix.count <= StatusPillText.maxCharacters)
+    #expect(pill.host == "evil.example")
+    #expect(pill.fullText.count <= 3 * StatusPillText.maxCharacters)
+  }
+
   @Test func contrastOfTheTextTokensOnThePillSurface() {
     for flavor in [ThemeFlavor.light, .dark] {
       let surface = BrandTokens.surfaceBrand.resolve(flavor)

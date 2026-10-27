@@ -31,7 +31,7 @@ struct StatusPillText: Equatable, Sendable {
     guard let separator = text.range(of: "://"), Self.isScheme(text[..<separator.lowerBound]) else {
       // No authority: `scheme:rest`. The scheme is always shown, the remainder takes the emphasis.
       if let colon = text.firstIndex(of: ":"), Self.isScheme(text[..<colon]) {
-        self.init(prefix: Self.safe(String(text[...colon])),
+        self.init(prefix: Self.safe(Self.clipped(String(text[...colon]))),
                   host: Self.safe(Self.clipped(String(text[text.index(after: colon)...]))), rest: "")
       } else {
         self.init(prefix: "", host: Self.safe(Self.clipped(text)), rest: "")
@@ -50,7 +50,7 @@ struct StatusPillText: Equatable, Sendable {
       authority = authority[authority.index(after: at)...]
     }
     let (host, port) = Self.split(hostAndPort: authority)
-    self.init(prefix: Self.safe(prefix), host: Self.safe(Self.clipped(String(host))),
+    self.init(prefix: Self.safe(Self.clipped(prefix)), host: Self.safe(Self.clipped(String(host))),
               rest: Self.safe(Self.clipped(String(port) + String(tail))))
   }
 
