@@ -79,6 +79,15 @@ struct InMemoryEngineContractTests {
   @Test func pendingInfobarsEndBeforeTheirTabCloses() async throws {
     try await EngineContract.pendingInfobarsEndBeforeTheirTabCloses(harness)
   }
+  // Rule 22
+  @Test func findCountsMatchesAndMovesTheOrdinal() async throws {
+    try await EngineContract.findCountsMatchesAndMovesTheOrdinal(harness)
+  }
+  @Test func stopFindingKeepsClearsOrActivatesTheMatch() async throws {
+    try await EngineContract.stopFindingKeepsClearsOrActivatesTheMatch(harness)
+  }
+  // Rule 23
+  @Test func hoveredLinkReportsItsTargetURL() async throws { try await EngineContract.hoveredLinkReportsItsTargetURL(harness) }
 
   /// A harness without engine drivers reports rules 13, 14, 16 and 17's audible check as not applicable, never as passed.
   @Test func missingDriversAreNotApplicable() async throws {

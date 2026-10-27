@@ -29,6 +29,10 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var dialog: (any ArktJavaScriptDialog)?
   var permission: (any ArktPermissionRequest)?
   var infobars: [any ArktInfobar]?
+  var findRequestId = 0
+  var findOrdinal = 0
+  var findCount = 0
+  var findIsFinal = false
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -230,6 +234,11 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   var queued: [() -> Void] = []
   /// Showing the initial about:blank, which is replaced by the first navigation and never kept in the history.
   var isInitialBlank = false
+  /// Find in page and link hover (ScriptedFind.swift).
+  var findSession: FindSession?
+  var findRequests = 0
+  var pageSelection = ""
+  var hoveredLink: URL?
   /// The title the current load will report.
   private var loadingTitle: String?
   private var committedHost: String?
@@ -360,7 +369,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     record(.infobarsChanged) { $0.infobars = list }
   }
 
-  private func record(_ kind: ArktEngineEventKind, _ fill: (ScriptedEvent) -> Void = { _ in }) {
+  func record(_ kind: ArktEngineEventKind, _ fill: (ScriptedEvent) -> Void = { _ in }) {
     let event = ScriptedEvent(kind, tab: self, browser: owner)
     fill(event)
     facade.record(event)
@@ -375,6 +384,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   func startLoad(_ target: URL, title: String?) {
     isInitialBlank = false
+    endFindAndHover()
     url = target
     loadingTitle = title
     record(.urlChanged) { $0.url = target }
@@ -579,6 +589,8 @@ final class ScriptedTab: NSObject, ArktTabHandle {
       guard let source = owner, let target = browser as? ScriptedBrowser, target !== source, !target.isClosed else {
         return
       }
+      findSession = nil
+      pageSelection = ""
       source.move(self, to: target)
       target.activate(self)
       if source.tabList.isEmpty { source.finishClose(reason: .windowClosing, window: .lastTabClosed) }
@@ -963,6 +975,7 @@ final class ScriptedFacade: NSObject, ArktEngine {
       tab.setAudible(true)
       return "running"
     }
+    if script == "window.getSelection().toString()" { return tab.pageSelection }
     if script == "window.close()" {
       engineCloseTab(tab, reason: .page)
       return NSNull()

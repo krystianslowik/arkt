@@ -217,6 +217,11 @@ extension ChromiumEngine {
       guard tabs[id]?.snapshot.isMuted != event.isMuted else { break }
       tabs[id]?.snapshot.isMuted = event.isMuted
       hub.emit(.mutedChanged(id, isMuted: event.isMuted))
+    case .findResult:
+      hub.emit(.findResult(id, requestID: event.findRequestId, ordinal: event.findOrdinal, count: event.findCount,
+                           isFinal: event.findIsFinal))
+    case .targetURLChanged:
+      hub.emit(.targetURLChanged(id, event.url))
     default:
       // TabReplaced: the handle and its container stay (Decision 5, 6); nothing changes for the shell.
       break

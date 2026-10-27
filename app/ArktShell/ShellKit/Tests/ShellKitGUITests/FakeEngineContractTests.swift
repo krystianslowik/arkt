@@ -116,6 +116,18 @@ final class FakeEngineContractTests: XCTestCase {
     try await notApplicable { try await EngineContract.pendingInfobarsEndBeforeTheirTabCloses(harness) }
   }
 
+  // Rules 22 and 23 (#134, #114): WKWebView find is driven by `window.find` and counted in page script; the hovered link
+  // comes from a script on `mouseover` and `mouseout`, which the harness dispatches (no synthetic pointer input).
+  func testFindCountsMatchesAndMovesTheOrdinal() async throws {
+    try await notApplicable { try await EngineContract.findCountsMatchesAndMovesTheOrdinal(harness) }
+  }
+  func testStopFindingKeepsClearsOrActivatesTheMatch() async throws {
+    try await notApplicable { try await EngineContract.stopFindingKeepsClearsOrActivatesTheMatch(harness) }
+  }
+  func testHoveredLinkReportsItsTargetURL() async throws {
+    try await notApplicable { try await EngineContract.hoveredLinkReportsItsTargetURL(harness) }
+  }
+
   /// FakeEngine only: a tab that is not in a window has nothing to snapshot.
   func testPageImageOfAnUnshownTabIsNil() async throws {
     let engine = FakeEngine()
@@ -226,6 +238,29 @@ extension EngineHarness {
           return !snapshot.isLoading && snapshot.url != nil && view.window === window
             && view.bounds.width > 0 && view.bounds.height > 0
         }
+      },
+      findPage: { occurrences, link in
+        let url = pages.appending(path: "Find\(occurrences).html")
+        let words = Array(repeating: EngineContract.findWord, count: occurrences).joined(separator: " filler ")
+        try ("<!doctype html><title>Find</title><body><p>\(words)</p>"
+          + "<p><a id=link href=\"\(link.absoluteString)\">\(EngineContract.findLinkText)</a></p></body>")
+          .write(to: url, atomically: true, encoding: .utf8)
+        return url
+      },
+      selectedText: { engine, id in
+        let fake = try XCTUnwrap(engine as? FakeEngine)
+        return await fake.scriptString("window.getSelection().toString()", in: id) ?? ""
+      },
+      hoverLink: { engine, id in
+        let fake = try XCTUnwrap(engine as? FakeEngine)
+        await fake.runScript(
+          "document.getElementById('link').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))", in: id)
+      },
+      leaveLink: { engine, id in
+        let fake = try XCTUnwrap(engine as? FakeEngine)
+        await fake.runScript(
+          "document.getElementById('link').dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }))",
+          in: id)
       }
     )
   }

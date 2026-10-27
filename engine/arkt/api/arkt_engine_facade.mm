@@ -54,6 +54,10 @@
 #include "components/javascript_dialogs/tab_modal_dialog_manager.h"
 #include "components/favicon/core/favicon_driver.h"
 #include "components/favicon/core/favicon_driver_observer.h"
+#include "components/find_in_page/find_notification_details.h"
+#include "components/find_in_page/find_result_observer.h"
+#include "components/find_in_page/find_tab_helper.h"
+#include "components/find_in_page/find_types.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
@@ -318,6 +322,10 @@ const char* KindName(ArktEngineEventKind kind) {
       return "PermissionEnded";
     case ArktEngineEventKindInfobarsChanged:
       return "InfobarsChanged";
+    case ArktEngineEventKindFindResult:
+      return "FindResult";
+    case ArktEngineEventKindTargetURLChanged:
+      return "TargetURLChanged";
   }
   return "unknown";
 }
@@ -348,6 +356,10 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic, nullable) id<ArktJavaScriptDialog> dialog;
 @property(nonatomic, nullable) id<ArktPermissionRequest> permission;
 @property(nonatomic, nullable, copy) NSArray<id<ArktInfobar>>* infobars;
+@property(nonatomic) NSInteger findRequestId;
+@property(nonatomic) NSInteger findOrdinal;
+@property(nonatomic) NSInteger findCount;
+@property(nonatomic) BOOL findIsFinal;
 @end
 
 @implementation ArktFacadeEvent
@@ -370,6 +382,10 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize dialog = _dialog;
 @synthesize permission = _permission;
 @synthesize infobars = _infobars;
+@synthesize findRequestId = _findRequestId;
+@synthesize findOrdinal = _findOrdinal;
+@synthesize findCount = _findCount;
+@synthesize findIsFinal = _findIsFinal;
 @end
 
 // A page's alert, confirm or prompt (#400): plain values read once when the
@@ -785,6 +801,8 @@ NSData* PNGForInfobarIcon(NSImage* image) {
 - (void)insertFinished:(BOOL)inserted;
 // The contents' beforeunload outcome (WebContentsObserver::BeforeUnloadFired).
 - (void)beforeUnloadFired:(BOOL)proceed;
+// WebContentsDelegate::UpdateTargetURL for the tab's contents (#114).
+- (void)reportTargetURL:(const GURL&)url;
 // A duplicate the shell parks (#380) lives as bare contents outside every tab
 // strip, so chrome.tabs and chrome.windows neither list it nor fire events
 // for it and no extension can reach it by id. `contents` is the clone;
@@ -835,6 +853,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   void Start() {
     SetLinkActivationDecider(base::BindRepeating(
         &Facade::DecideLinkActivation, base::Unretained(this)));
+    SetTargetURLObserver(base::BindRepeating(&Facade::TargetURLChanged,
+                                             base::Unretained(this)));
     SetJavaScriptDialogPresenter(base::BindRepeating(
         &Facade::PresentJavaScriptDialog, base::Unretained(this)));
     SetPermissionPresenter(base::BindRepeating(
@@ -881,6 +901,18 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
               << static_cast<int>(link.disposition) << ") answered "
               << (decision == ArktLinkDecisionCancel ? "cancel" : "navigate");
     return decision == ArktLinkDecisionCancel;
+  }
+
+  // WebContentsDelegate::UpdateTargetURL reached the hook of patch 0010
+  // (#114): the link under the pointer changed. A tab without a handle (a
+  // parked copy) reports nothing.
+  void TargetURLChanged(content::WebContents* contents, const GURL& url) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    if (ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil) {
+      [handle reportTargetURL:url];
+    }
   }
 
   // A page's alert, confirm or prompt in an Arkt window with an embedder host
@@ -1571,7 +1603,8 @@ bool RunOrDefer(const char* call, base::OnceClosure work) {
 // (Task W3-5 step 2). Each kind is recorded only when its value changed
 // since the last report. Every callback is a Chromium notification.
 class TabObserver : public content::WebContentsObserver,
-                    public favicon::FaviconDriverObserver {
+                    public favicon::FaviconDriverObserver,
+                    public find_in_page::FindResultObserver {
  public:
   explicit TabObserver(ArktFacadeTab* handle) : handle_(handle) {}
   TabObserver(const TabObserver&) = delete;
@@ -1591,6 +1624,63 @@ class TabObserver : public content::WebContentsObserver,
             favicon::ContentFaviconDriver::FromWebContents(contents)) {
       favicon_observation_.Observe(driver);
     }
+    find_observation_.Reset();
+    target_url_ = GURL();
+    if (contents) {
+      // Not created here: the tab helpers may attach it after the tab is
+      // bound, and creating it twice is a CHECK. Find() creates a missing one
+      // when it is first needed.
+      if (auto* helper =
+              find_in_page::FindTabHelper::FromWebContents(contents)) {
+        find_observation_.Observe(helper);
+      }
+    }
+  }
+
+  // Find in page (#134). FindTabHelper owns the session: a text or case that
+  // differs from the last search, or a stopped search, starts a new one at the
+  // first match; the same text again moves to the next or previous match.
+  // Its replies reach OnFindResultAvailable already filtered for stopped and
+  // replaced searches.
+  void Find(const std::u16string& text, bool forward, bool match_case) {
+    if (!web_contents()) {
+      return;
+    }
+    ObserveFind()->StartFinding(text, forward, match_case,
+                                /*find_match=*/true);
+  }
+
+  // Ends a running find (Clear) so the tab can leave its window: Browser's
+  // OnTabStripModelChanged builds the Views find bar for an inserted tab whose
+  // find session is active. Reports nothing, as every stop.
+  void StopActiveFind() {
+    if (!web_contents()) {
+      return;
+    }
+    find_in_page::FindTabHelper* helper =
+        find_in_page::FindTabHelper::FromWebContents(web_contents());
+    if (helper && helper->is_find_session_active()) {
+      helper->StopFinding(find_in_page::SelectionAction::kClear);
+    }
+  }
+
+  void StopFind(find_in_page::SelectionAction action) {
+    if (!web_contents()) {
+      return;
+    }
+    ObserveFind()->StopFinding(action);
+  }
+
+  // The link under the pointer changed (#114). Only changes are reported, and
+  // a new document or new contents start with no link.
+  void ReportTargetURL(const GURL& url) {
+    if (!web_contents() || url == target_url_) {
+      return;
+    }
+    target_url_ = url;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindTargetURLChanged);
+    event.url = ToNSURL(url);
+    Emit(event);
   }
 
   // The values TabCreated carries, taken without recording events. Loading,
@@ -1609,6 +1699,7 @@ class TabObserver : public content::WebContentsObserver,
     can_go_forward_ = false;
     audible_ = false;
     muted_ = false;
+    target_url_ = GURL();
     host_ = std::string(contents->GetLastCommittedURL().host());
     favicon_ = nil;
   }
@@ -1645,6 +1736,11 @@ class TabObserver : public content::WebContentsObserver,
   void DidFinishNavigation(content::NavigationHandle* navigation) override {
     if (!navigation->IsInPrimaryMainFrame()) {
       return;
+    }
+    if (navigation->HasCommitted() && !navigation->IsSameDocument()) {
+      // The old document's link is gone with it; Chromium's own clear may not
+      // come for a pointer that never moved.
+      ReportTargetURL(GURL());
     }
     if (navigation->HasCommitted() && !navigation->IsSameDocument()) {
       std::string host(navigation->GetURL().host());
@@ -1696,6 +1792,34 @@ class TabObserver : public content::WebContentsObserver,
 
   void DidUpdateAudioMutingState(bool muted) override { ReportMuted(muted); }
 
+  // find_in_page::FindResultObserver:
+  void OnFindResultAvailable(content::WebContents* contents) override {
+    find_in_page::FindTabHelper* helper =
+        find_in_page::FindTabHelper::FromWebContents(contents);
+    if (!helper) {
+      return;
+    }
+    const find_in_page::FindNotificationDetails& result = helper->find_result();
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindFindResult);
+    event.findRequestId = result.request_id();
+    event.findOrdinal = std::max(result.active_match_ordinal(), 0);
+    event.findCount = std::max(result.number_of_matches(), 0);
+    event.findIsFinal = result.final_update();
+    Emit(event);
+  }
+
+  void OnFindEmptyText(content::WebContents* contents) override {
+    // Empty text stops the find (FindTabHelper::StartFinding); reported once
+    // as 0 of 0 with request id 0.
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindFindResult);
+    event.findIsFinal = YES;
+    Emit(event);
+  }
+
+  void OnFindTabHelperDestroyed(find_in_page::FindTabHelper* helper) override {
+    find_observation_.Reset();
+  }
+
   // favicon::FaviconDriverObserver:
   void OnFaviconUpdated(favicon::FaviconDriver* driver,
                         NotificationIconType type,
@@ -1710,6 +1834,22 @@ class TabObserver : public content::WebContentsObserver,
   }
 
  private:
+  // The contents' FindTabHelper, created when the tab has none, with this
+  // observer added.
+  find_in_page::FindTabHelper* ObserveFind() {
+    content::WebContents* contents = web_contents();
+    find_in_page::FindTabHelper* helper =
+        find_in_page::FindTabHelper::FromWebContents(contents);
+    if (!helper) {
+      find_in_page::FindTabHelper::CreateForWebContents(contents);
+      helper = find_in_page::FindTabHelper::FromWebContents(contents);
+    }
+    if (!find_observation_.IsObserving()) {
+      find_observation_.Observe(helper);
+    }
+    return helper;
+  }
+
   ArktFacadeEvent* NewEvent(ArktEngineEventKind kind) {
     ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
     event.kind = kind;
@@ -1812,10 +1952,14 @@ class TabObserver : public content::WebContentsObserver,
   bool audible_ = false;
   bool muted_ = false;
   std::string host_;
+  GURL target_url_;
   NSData* __strong favicon_ = nil;
   base::ScopedObservation<favicon::FaviconDriver,
                           favicon::FaviconDriverObserver>
       favicon_observation_{this};
+  base::ScopedObservation<find_in_page::FindTabHelper,
+                          find_in_page::FindResultObserver>
+      find_observation_{this};
 };
 
 }  // namespace
@@ -2467,6 +2611,53 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                        self, static_cast<bool>(muted))];
 }
 
+- (void)findInPageWithText:(NSString*)text
+                   forward:(BOOL)forward
+                 matchCase:(BOOL)matchCase {
+  [self runOrQueue:"findInPage"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, std::u16string text,
+                          bool forward, bool match_case) {
+                         if (that.contents && that->_observer) {
+                           that->_observer->Find(text, forward, match_case);
+                         }
+                       },
+                       self, base::SysNSStringToUTF16(text),
+                       static_cast<bool>(forward),
+                       static_cast<bool>(matchCase))];
+}
+
+- (void)stopFindingWithAction:(ArktFindAction)action {
+  find_in_page::SelectionAction selection_action;
+  switch (action) {
+    case ArktFindActionKeep:
+      selection_action = find_in_page::SelectionAction::kKeep;
+      break;
+    case ArktFindActionActivate:
+      selection_action = find_in_page::SelectionAction::kActivate;
+      break;
+    case ArktFindActionClear:
+    default:
+      selection_action = find_in_page::SelectionAction::kClear;
+      break;
+  }
+  [self runOrQueue:"stopFinding"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that,
+                          find_in_page::SelectionAction action) {
+                         if (that.contents && that->_observer) {
+                           that->_observer->StopFind(action);
+                         }
+                       },
+                       self, selection_action)];
+}
+
+- (void)reportTargetURL:(const GURL&)url {
+  if (_observer) {
+    _observer->ReportTargetURL(url);
+  }
+}
+
 - (void)copyFrameWithMaxPixelSize:(NSSize)maxPixelSize
                        completion:(void (^)(NSData* _Nullable png,
                                             NSSize pixelSize,
@@ -2655,6 +2846,12 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                          int index = from->GetIndexOfTab(tab.tabInterface);
                          if (index == TabStripModel::kNoTab) {
                            return;
+                         }
+                         // A running find ends before the insert: the
+                         // other Browser would build Chromium's Views find
+                         // bar for it (#134). Nothing is reported.
+                         if (tab->_observer) {
+                           tab->_observer->StopActiveFind();
                          }
                          LOG(WARNING) << "ARKT: facade moving session id "
                                       << tab.sessionId << " to window "

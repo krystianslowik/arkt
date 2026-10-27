@@ -226,8 +226,32 @@ final class EngineContractRunner {
       showPage: { [unowned self] engine, id in
         // The window's active tab is mounted already (`LoadLog`); mounting again makes sure the page is on screen.
         mount(id, of: try chromium(engine))
-      }
+      },
+      findPage: { [unowned self] occurrences, link in
+        serial += 1
+        return server.findPage(occurrences: occurrences, link: link, serial: serial)
+      },
+      selectedText: { [unowned self] engine, id in
+        let value = try await chromium(engine).evaluateScript("window.getSelection().toString()", in: id,
+                                                              userGesture: false)
+        guard case .string(let text)? = value else { throw RunnerError("selection answered \(String(describing: value))") }
+        return text
+      },
+      hoverLink: { [unowned self] engine, id in try await movePointer(engine, id, overLink: true) },
+      leaveLink: { [unowned self] engine, id in try await movePointer(engine, id, overLink: false) }
     )
+  }
+
+  /// Puts the pointer over the page's `#link`, or takes it away, as the renderer reports it: focusing a link makes Blink
+  /// send the same `UpdateTargetURL` a hover does (Chromium's own `WebContentsImplBrowserTest.UpdateTargetURL` drives it
+  /// this way), and blurring it clears the URL. Blink ignores mouse events for a window that is not key, and the runner
+  /// never activates its app (it would take the keyboard from whatever the developer is using), so a synthetic pointer
+  /// cannot reach the page here.
+  private func movePointer(_ engine: any EngineClient, _ id: TabID, overLink: Bool) async throws {
+    let call = overLink ? "focus" : "blur"
+    let answer = try await chromium(engine).evaluateScript("document.getElementById('link').\(call)(); true", in: id,
+                                                           userGesture: false)
+    guard answer == .bool(true) else { throw RunnerError("link \(call) answered \(String(describing: answer))") }
   }
 
   private func makeHost() -> RunnerWindowHost {

@@ -160,6 +160,16 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // while it is hidden or moved to another window (the new list follows the
   // move). The list is empty before the tab's TabClosed.
   ArktEngineEventKindInfobarsChanged = 20,
+  // A find-in-page reply (#134). Values: findRequestId, findOrdinal,
+  // findCount, findIsFinal. One per reply of WebContents::Find that
+  // FindTabHelper accepts (replies for a replaced or stopped search are
+  // dropped), and one 0-of-0 final reply, request id 0, for empty text.
+  // Nothing is reported for -stopFindingWithAction:.
+  ArktEngineEventKindFindResult = 21,
+  // The link under the pointer changed (#114), from
+  // WebContentsDelegate::UpdateTargetURL. Values: url (nil when the pointer
+  // left the link). Only changes are reported; nothing is delayed or merged.
+  ArktEngineEventKindTargetURLChanged = 22,
 };
 
 // Why the engine asks the embedder for a window host.
@@ -235,6 +245,17 @@ typedef NS_ENUM(NSInteger, ArktInfobarAction) {
   ArktInfobarActionClose = 4,
 };
 
+// What stopping a find leaves behind (#134), as FindTabHelper's
+// SelectionAction.
+typedef NS_ENUM(NSInteger, ArktFindAction) {
+  // Removes the highlight and the selection of the active match.
+  ArktFindActionClear = 0,
+  // The active match becomes the page's selection.
+  ArktFindActionKeep = 1,
+  // As Keep, and a matched link is clicked.
+  ArktFindActionActivate = 2,
+};
+
 // One recorded engine change, as plain values. Fields that do not apply to
 // the kind are nil, NO, ArktCloseReasonNone or ArktWindowCloseReasonNone.
 NS_SWIFT_UI_ACTOR
@@ -261,6 +282,12 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable) id<ArktPermissionRequest> permission;
 // InfobarsChanged; nil on every other kind.
 @property(nonatomic, readonly, nullable, copy) NSArray<id<ArktInfobar>>* infobars;
+// FindResult; 0 on every other kind. The ordinal is 1-based, 0 without a
+// match; the count is the matches found so far.
+@property(nonatomic, readonly) NSInteger findRequestId;
+@property(nonatomic, readonly) NSInteger findOrdinal;
+@property(nonatomic, readonly) NSInteger findCount;
+@property(nonatomic, readonly) BOOL findIsFinal;
 @end
 
 // A page's alert, confirm or prompt, held until the shell answers it or the
@@ -523,6 +550,22 @@ NS_SWIFT_UI_ACTOR
 // Mutes or unmutes the tab's sound (WebContents::SetAudioMuted), reported
 // with MutedChanged when the state changes (#364).
 - (void)setMuted:(BOOL)muted NS_SWIFT_NAME(setMuted(_:));
+// Starts or continues a find in the tab's page (#134), as
+// FindTabHelper::StartFinding with find_match set: a new text or case starts
+// a new search at the first match; the same text and case again moves to the
+// next match (`forward`) or the previous one, wrapping. Replies are reported
+// with FindResult. Empty text stops the find like ArktFindActionClear and is
+// reported once as 0 of 0. A no-op for a closed tab.
+- (void)findInPageWithText:(NSString*)text
+                   forward:(BOOL)forward
+                 matchCase:(BOOL)matchCase
+    NS_SWIFT_NAME(findInPage(text:forward:matchCase:));
+// Ends the tab's find (FindTabHelper::StopFinding). Reports nothing; the next
+// find starts a new search. A no-op for a closed tab. -moveToBrowser: ends a
+// running find the same way (Clear, no report): the shell closes its find bar
+// when it moves a tab.
+- (void)stopFindingWithAction:(ArktFindAction)action
+    NS_SWIFT_NAME(stopFinding(action:));
 // A copy of the tab's current frame as PNG (#370, #352), from the
 // compositor surface (RenderWidgetHostView::CopyFromSurface), scaled down on
 // the GPU to fit `maxPixelSize`; NSZeroSize copies the full frame at the

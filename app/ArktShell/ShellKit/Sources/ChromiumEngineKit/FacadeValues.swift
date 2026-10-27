@@ -13,6 +13,16 @@ extension CloseMode {
   }
 }
 
+extension FindStopAction {
+  var facade: ArktFindAction {
+    switch self {
+    case .clear: .clear
+    case .keep: .keep
+    case .activate: .activate
+    }
+  }
+}
+
 extension CloseReason {
   /// `ArktCloseReasonNone` never arrives on a `TabClosed` from the real facade; a close nobody claimed is the
   /// page's own (Decision 12's default).

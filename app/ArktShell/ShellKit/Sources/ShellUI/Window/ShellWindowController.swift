@@ -732,6 +732,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .tabCreated, .titleChanged, .loadingChanged, .dialogRequested, .dialogEnded, .permissionRequested,
          .permissionEnded, .infobarsChanged:
       break                                                         // dialogs, prompts, infobars: routed above
+    case .findResult, .targetURLChanged:
+      break                                                         // find and link hover: the shell UI follows (#134, #114)
     }
   }
 

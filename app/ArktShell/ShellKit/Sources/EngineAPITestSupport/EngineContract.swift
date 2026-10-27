@@ -39,6 +39,12 @@ public struct EngineHarness {
   public typealias RaiseInfobar = @MainActor (_ engine: any EngineClient, _ id: TabID, _ message: String) async throws
     -> Void
 
+  /// A page with `occurrences` copies of `EngineContract.findWord` in its text and one link, with the text
+  /// `EngineContract.findLinkText`, to `link` (rules 22, 23).
+  public typealias FindPage = @MainActor (_ occurrences: Int, _ link: URL) throws -> URL
+  /// The text selected in the page of `id` (`window.getSelection().toString()`).
+  public typealias SelectedText = @MainActor (_ engine: any EngineClient, _ id: TabID) async throws -> String
+
   public let makeEngine: @MainActor () -> any EngineClient
   /// A URL whose page has `<title>title</title>` and needs no network.
   public let pageURL: @MainActor (_ title: String) throws -> URL
@@ -75,6 +81,14 @@ public struct EngineHarness {
   /// Makes the engine show an infobar on a tab (rule 21). Nil for an engine that cannot (a real engine shows them for
   /// its own reasons: a debugging extension, a flag, a changed setting).
   public let raiseInfobar: RaiseInfobar?
+  /// A page to search and to hover a link on (rules 22, 23). Nil: not applicable.
+  public let findPage: FindPage?
+  /// Reads the page's selection (rule 22). Nil: not applicable.
+  public let selectedText: SelectedText?
+  /// Puts the pointer over the link of a `findPage` page, and takes it away again (rule 23). A real engine that cannot take
+  /// pointer input may focus and blur the link, which reaches the same renderer report. Nil: not applicable.
+  public let hoverLink: EngineTabAction?
+  public let leaveLink: EngineTabAction?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -92,7 +106,11 @@ public struct EngineHarness {
               showPage: EngineTabAction? = nil,
               raiseDialog: RaiseDialog? = nil,
               raisePermission: RaisePermission? = nil,
-              raiseInfobar: RaiseInfobar? = nil) {
+              raiseInfobar: RaiseInfobar? = nil,
+              findPage: FindPage? = nil,
+              selectedText: SelectedText? = nil,
+              hoverLink: EngineTabAction? = nil,
+              leaveLink: EngineTabAction? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
@@ -102,6 +120,8 @@ public struct EngineHarness {
     self.raiseDialog = raiseDialog
     self.raisePermission = raisePermission
     self.raiseInfobar = raiseInfobar
+    self.findPage = findPage; self.selectedText = selectedText
+    self.hoverLink = hoverLink; self.leaveLink = leaveLink
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -146,7 +166,11 @@ public struct EngineHarness {
         guard try inMemory(engine).raiseInfobar(in: id, message: message) != nil else {
           throw ContractViolation(description: "no infobar raised in \(id)")
         }
-      }
+      },
+      findPage: { occurrences, link in InMemoryEngine.findPageURL(occurrences: occurrences, link: link) },
+      selectedText: { engine, id in try inMemory(engine).selectedText(id) },
+      hoverLink: { engine, id in try inMemory(engine).hoverLink(id) },
+      leaveLink: { engine, id in try inMemory(engine).leaveLink(id) }
     )
   }
 
@@ -220,6 +244,16 @@ public struct EngineHarness {
 ///     on an infobar that is gone does nothing; infobars stay with their tab while it is hidden and the list is
 ///     independent of the other tabs'; a tab's infobars are reported empty before its `.tabClosed` (#400). Needs
 ///     `raiseInfobar`.
+///
+/// 22. `findInPage(_:text:forward:matchCase:)` reports `.findResult` with the match count and the active match's
+///     ordinal: a new search starts at match 1, the same search forward and backward moves the ordinal and wraps at the
+///     ends, a changed text or case starts over, `stopFinding` ends the session so the next search starts at match 1,
+///     empty text clears and is reported once as 0 of 0, request ids never go back. `stopFinding(.keep)` leaves the
+///     active match selected, `.clear` leaves nothing selected, `.activate` follows a matched link (#134). Needs
+///     `findPage`; the second check also `selectedText`.
+/// 23. A link under the pointer is reported with `.targetURLChanged(url)` once, and leaving it with
+///     `.targetURLChanged(nil)` once; nothing is reported while it does not change, and the engine delays and
+///     merges nothing (#114). Needs `findPage`, `hoverLink` and `leaveLink`.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
