@@ -601,6 +601,12 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       case ArktEngineEventKindPermissionEnded:
         LOG(WARNING) << "ARKT selftest permissionEnded tab=" << tab;
         break;
+      case ArktEngineEventKindInfobarsChanged:
+        // Nobody draws it here: the engine-drawn rows stay while this host has
+        // no sink that presents them.
+        LOG(WARNING) << "ARKT selftest infobarsChanged tab=" << tab
+                     << " count=" << event.infobars.count;
+        break;
       case ArktEngineEventKindExtensionActionsChanged:
         LOG(WARNING) << "ARKT selftest extensionActionsChanged window="
                      << window;

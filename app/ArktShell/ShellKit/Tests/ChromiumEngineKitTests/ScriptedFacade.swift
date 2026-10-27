@@ -28,6 +28,7 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var isMuted = false
   var dialog: (any ArktJavaScriptDialog)?
   var permission: (any ArktPermissionRequest)?
+  var infobars: [any ArktInfobar]?
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -104,6 +105,56 @@ final class ScriptedPermission: NSObject, ArktPermissionRequest {
     guard !isEnded else { return }
     isEnded = true
     onEnd?()
+  }
+}
+
+/// An infobar (#400): plain values and the shell's actions. `actions` records what reached the delegate; Ok, Cancel and
+/// Close remove the infobar (the delegate returned true), a link keeps it.
+final class ScriptedInfobar: NSObject, ArktInfobar {
+  private static var counter: UInt = 0
+  let infobarId: UInt
+  let tab: any ArktTabHandle
+  var kind: ArktInfobarKind = .other
+  var message: String
+  var messageLinkRanges: [NSValue] = []
+  var linkTitle: String?
+  var linkAccessibilityLabel: String?
+  var linkBeforeButtons = false
+  var okTitle: String? = "OK"
+  var okTooltip: String?
+  var okEnabled = true
+  var cancelTitle: String? = "Cancel"
+  var cancelTooltip: String?
+  var cancelEnabled = true
+  var closeAccessibilityLabel: String? = "Close"
+  var iconPNG: Data?
+  private(set) var isEnded = false
+  private(set) var actions: [(action: ArktInfobarAction, linkIndex: UInt)] = []
+  /// The tab removes the infobar from its list and reports the new one.
+  var onRemoved: ((ScriptedInfobar) -> Void)?
+
+  init(tab: any ArktTabHandle, message: String) {
+    Self.counter += 1
+    infobarId = Self.counter
+    self.tab = tab; self.message = message
+  }
+
+  func act(_ action: ArktInfobarAction, linkIndex: UInt) -> Bool {
+    guard !isEnded else { return false }
+    actions.append((action, linkIndex))
+    switch action {
+    case .link, .messageLink: break
+    case .ok, .cancel, .close: remove()
+    @unknown default: break
+    }
+    return true
+  }
+
+  /// The infobar is gone, whoever removed it.
+  func remove() {
+    guard !isEnded else { return }
+    isEnded = true
+    onRemoved?(self)
   }
 }
 
@@ -269,6 +320,45 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   }
 
   private func endPermissionView() { permission?.end() }
+
+  // MARK: Infobars (#400)
+
+  /// The tab's infobars in the engine's order; they stay while the tab is hidden.
+  private(set) var infobars: [ScriptedInfobar] = []
+
+  private func makeInfobar(_ message: String, _ configure: (ScriptedInfobar) -> Void) -> ScriptedInfobar {
+    let infobar = ScriptedInfobar(tab: self, message: message)
+    configure(infobar)
+    infobar.onRemoved = { [weak self] removed in
+      guard let self else { return }
+      infobars.removeAll { $0 === removed }
+      reportInfobars()
+    }
+    return infobar
+  }
+
+  /// The engine adds an infobar and reports the tab's whole list.
+  @discardableResult
+  func addInfobar(_ message: String, configure: (ScriptedInfobar) -> Void = { _ in }) -> ScriptedInfobar {
+    let infobar = makeInfobar(message, configure)
+    infobars.append(infobar)
+    reportInfobars()
+    return infobar
+  }
+
+  /// The tab moved to another window: its infobars come back as one list of new infobars; the old objects are gone and
+  /// refuse every action.
+  func moveInfobarsToNewPresenter() {
+    let old = infobars
+    for previous in old { previous.onRemoved = nil; previous.remove() }
+    infobars = old.map { previous in makeInfobar(previous.message) { _ in } }
+    reportInfobars()
+  }
+
+  private func reportInfobars() {
+    let list = infobars
+    record(.infobarsChanged) { $0.infobars = list }
+  }
 
   private func record(_ kind: ArktEngineEventKind, _ fill: (ScriptedEvent) -> Void = { _ in }) {
     let event = ScriptedEvent(kind, tab: self, browser: owner)

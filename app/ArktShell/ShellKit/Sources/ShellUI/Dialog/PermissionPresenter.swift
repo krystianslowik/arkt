@@ -39,7 +39,7 @@ extension PermissionChoice {
 @MainActor
 public final class PermissionPresenter {
   private let engine: any EngineClient
-  private let host: AnchoredPanelHost
+  let host: AnchoredPanelHost
   private var retryScheduled = false
   /// The unanswered request of each tab.
   public private(set) var pending: [TabID: PermissionRequest] = [:]

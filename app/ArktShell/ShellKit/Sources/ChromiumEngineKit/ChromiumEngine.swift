@@ -103,6 +103,17 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   var pendingPermissions: [PermissionRequestID: PendingPermission] = [:]
   var permissionByHandle: [ObjectIdentifier: PermissionRequestID] = [:]
 
+  /// An infobar the shell has been told about and the facade has not dropped from its tab's list (#400, contract rule
+  /// 21). The list per tab is in the engine's order.
+  struct PendingInfobar {
+    let id: InfobarID
+    let tab: TabID
+    let handle: any ArktInfobar
+  }
+  var infobarHandles: [InfobarID: PendingInfobar] = [:]
+  var infobarIDByHandle: [ObjectIdentifier: InfobarID] = [:]
+  var infobarsByTab: [TabID: [InfobarID]] = [:]
+
   /// Builds the shell window for a window the engine creates on its own (Decision 2). Must not call the engine; the
   /// window is usable after its `.windowOpened`.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -343,6 +354,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
     guard tabs[id] != nil else { return }
     endDialogs(of: id)             // contract rule 19: before the tab's `.tabClosed`
     endPermissions(of: id)         // contract rule 20: likewise
+    endInfobars(of: id)            // contract rule 21: the list empties before the tab closes
     guard let record = tabs.removeValue(forKey: id) else { return }
     tabIDs.removeAll { $0 == id }
     tabByHandle[ObjectIdentifier(record.handle)] = nil

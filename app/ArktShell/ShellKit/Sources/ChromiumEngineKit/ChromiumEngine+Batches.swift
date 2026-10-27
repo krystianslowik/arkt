@@ -61,6 +61,7 @@ extension ChromiumEngine {
     case .dialogEnded: dialogEnded(event)
     case .permissionRequested: permissionRequested(event)
     case .permissionEnded: permissionEnded(event)
+    case .infobarsChanged: infobarsChanged(event)
     default: tabChanged(event)
     }
   }

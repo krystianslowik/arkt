@@ -105,6 +105,16 @@ final class FakeEngineContractTests: XCTestCase {
   func testHiddenTabEndsItsPermissionAndAsksAgain() async throws {
     try await notApplicable { try await EngineContract.hiddenTabEndsItsPermissionAndAsksAgain(harness) }
   }
+  // Rule 21 (#400): WKWebView has no infobars; the FakeEngine shows none.
+  func testInfobarIsReportedActedOnAndRemoved() async throws {
+    try await notApplicable { try await EngineContract.infobarIsReportedActedOnAndRemoved(harness) }
+  }
+  func testInfobarsStayWithTheirTabWhileHidden() async throws {
+    try await notApplicable { try await EngineContract.infobarsStayWithTheirTabWhileHidden(harness) }
+  }
+  func testPendingInfobarsEndBeforeTheirTabCloses() async throws {
+    try await notApplicable { try await EngineContract.pendingInfobarsEndBeforeTheirTabCloses(harness) }
+  }
 
   /// FakeEngine only: a tab that is not in a window has nothing to snapshot.
   func testPageImageOfAnUnshownTabIsNil() async throws {

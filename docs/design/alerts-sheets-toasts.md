@@ -45,7 +45,7 @@ engine as the existing comments already do.
 | Recovery | persistent toast with Show Files, one line, truncates at 480 pt | toast / persistent, multi-line | `toast-recovery` |
 | Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn) | `ext-install`, `ext-remove` |
 | Permission prompts | shell `DialogPanel` as an anchored panel (#400); the engine's `ArktDialogSheet` stays the fallback while no embedder presents it | dialog / anchored panel | `permission` |
-| Infobars | engine `ArktInfobarView` rows, 40 pt, fade-in 0.14 s | infobar (engine-drawn) | `infobar` |
+| Infobars | shell `InfobarPanel` strip, 40 pt per infobar, fade-in 0.14 s (#400); the engine's `ArktInfobarView` rows stay the fallback while no embedder presents them | infobar | `infobar` |
 
 Found while inventorying: the recovery texts are about 100 characters and `ToastView` is one truncating line at most
 480 pt wide, so the most important notice Arkt shows is cut off. The multi-line toast below fixes it.
@@ -174,12 +174,21 @@ clickable as a whole and says "Click to view."; Arkt keeps a real button for key
 
 ## 5. Infobars
 
-Kept as the engine draws them, values aligned: 40 pt rows stacked at the top of the tab's container, `surfaceBrand`
+Drawn by the shell since #400 (the engine draws the same rows only where no embedder presents them), values aligned:
+40 pt rows stacked at the top of the tab's container, `surfaceBrand`
 fill with no hairline below (the surface against the page is the edge), 12 inset, 20 pt icon in `secondaryText`, 13
 regular message in `primaryText`, links in `secondaryText` without underline, buttons the small neutral pill (24 high,
 radius 12), close 22 x 22 round. The page moves
 down once by the row height (no height animation, which would resize the page every frame), and the row fades in
 over 0.14 s; no exit animation. Both rules stay: they are right.
+
+How the shell draws them: the engine reports each tab's whole list (message, inline and trailing links, OK and Cancel
+titles, close label, icon) and reserves the strip's height at the top of the tab's container, so the page lies below it
+on the card, in a split pane, in the Peek and in Little Arkt alike. The shell draws one full-width, non-activating
+child panel over that band (the dialogs' anchoring helper, full width instead of the 12 pt inset), with the page
+card's top corners, and no key focus. A tab keeps its list while it is hidden or moved; the strip follows the page.
+Dialogs and permission prompts anchor below the strip. Buttons, links and the close button go to the engine, whose
+delegate decides whether the infobar leaves (a delegate may keep it), so nothing is removed optimistically.
 
 ## 6. Engine restyle (values to copy)
 

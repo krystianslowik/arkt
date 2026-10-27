@@ -43,8 +43,8 @@ struct ChromiumEngineContractTests {
         names.insert(String(match.output.1))
       }
     }
-    #expect(names.count == 37)
+    #expect(names.count == 40)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
-    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...20))
+    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...21))
   }
 }

@@ -83,6 +83,8 @@ final class ArchivePillButton: NSButton {
     }
 
     static let dialog = Metrics(height: 28, fontSize: 13, weight: .semibold, padding: 16, minWidth: 76, pressScale: 0.97)
+    /// An infobar's buttons: 24 high, 12 semibold, padding 12 (design: the small neutral pill).
+    static let infobar = Metrics(height: 24, fontSize: 12, weight: .semibold, padding: 12, minWidth: 0, pressScale: 0.97)
     static let toastAction = Metrics(height: 24, fontSize: 12, weight: .semibold, padding: 12, minWidth: 0,
                                      pressScale: 0.96)
   }

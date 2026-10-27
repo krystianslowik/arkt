@@ -272,6 +272,52 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     hub.emit(.permissionEnded(tab, request.id))
   }
 
+  // MARK: - Infobars (#400, contract rule 21)
+
+  /// The infobars of each tab in the order the engine shows them. Infobars belong to the tab: they stay while it is
+  /// hidden or moved to another window.
+  private var infobars: [TabID: [Infobar]] = [:]
+  /// What the shell did on infobars, in order: what the engine's delegates would have been told. A link keeps the
+  /// infobar (a delegate whose `LinkClicked` returns false); the other actions remove it.
+  public private(set) var infobarActions: [(id: InfobarID, action: InfobarAction)] = []
+
+  /// Test driver: the engine adds an infobar to `tab` with OK and Cancel buttons (nil titles: none) and a close
+  /// button. Reports the tab's new list. Nil for an unknown or closed tab.
+  @discardableResult
+  public func raiseInfobar(in tab: TabID, message: String, kind: InfobarKind = .other, okTitle: String? = "OK",
+                           cancelTitle: String? = "Cancel", isCloseable: Bool = true) -> InfobarID? {
+    guard let current = snapshots[tab], !current.isClosing else { return nil }
+    let infobar = Infobar(
+      id: InfobarID(), tab: tab, kind: kind, message: message, ok: okTitle.map { InfobarButton(title: $0) },
+      cancel: cancelTitle.map { InfobarButton(title: $0) }, closeLabel: isCloseable ? "Close" : nil)
+    infobars[tab, default: []].append(infobar)
+    hub.emit(.infobarsChanged(tab, infobars[tab] ?? []))
+    return infobar.id
+  }
+
+  /// The engine drops the infobar (a navigation expired it, the page's extension detached). Nothing is reported for an
+  /// infobar that is already gone.
+  public func removeInfobar(_ id: InfobarID) {
+    guard let tab = infobars.first(where: { $0.value.contains { $0.id == id } })?.key else { return }
+    infobars[tab]?.removeAll { $0.id == id }
+    hub.emit(.infobarsChanged(tab, infobars[tab] ?? []))
+  }
+
+  public func act(on infobar: InfobarID, action: InfobarAction) {
+    guard infobars.values.contains(where: { $0.contains { $0.id == infobar } }) else { return }
+    infobarActions.append((infobar, action))
+    switch action {
+    case .link, .messageLink: break
+    case .ok, .cancel, .close: removeInfobar(infobar)
+    }
+  }
+
+  /// The tab's infobars go with it, reported before its `.tabClosed`.
+  private func dropInfobars(of tab: TabID) {
+    guard let list = infobars.removeValue(forKey: tab), !list.isEmpty else { return }
+    hub.emit(.infobarsChanged(tab, []))
+  }
+
   // MARK: - Page images (#370, #352, contract rule 18)
 
   /// The size of an in-memory page's frame: a 600 x 360 pt page at 2x.
@@ -588,6 +634,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     guard let removed = snapshots[id] else { return }
     endDialog(of: id)
     withdrawPermission(in: id)
+    dropInfobars(of: id)
     var successor: TabID?
     if let window = removed.window, activeTabs[window] == id {
       activeTabs[window] = nil

@@ -38,7 +38,7 @@ public final class JavaScriptDialogPresenter {
   public typealias Anchor = NSView
 
   private let engine: any EngineClient
-  private let host: AnchoredPanelHost
+  let host: AnchoredPanelHost
   /// The unanswered dialog of each tab.
   public private(set) var pending: [TabID: JavaScriptDialog] = [:]
   /// Reduce Motion, handed to each panel at its entrance. Tests set it.

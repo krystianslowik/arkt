@@ -31,6 +31,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
 @protocol ArktHistoryEntry;
+@protocol ArktInfobar;
 @protocol ArktJavaScriptDialog;
 @protocol ArktLinkActivation;
 @protocol ArktPermissionRequest;
@@ -151,6 +152,14 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // it (a navigation, the tab hidden or closing, the site withdrawing it).
   // Values: permission. Exactly one per request.
   ArktEngineEventKindPermissionEnded = 19,
+  // The infobars of a tab changed (#400): one is added, removed or replaced.
+  // Values: tab, infobars (the tab's whole list, in Chromium's order, empty
+  // when the last one went). Sent only for a tab in a window whose host
+  // presents them; the engine then draws no row itself and only reserves the
+  // rows' height at the top of the tab's container. A tab keeps its infobars
+  // while it is hidden or moved to another window (the new list follows the
+  // move). The list is empty before the tab's TabClosed.
+  ArktEngineEventKindInfobarsChanged = 20,
 };
 
 // Why the engine asks the embedder for a window host.
@@ -201,6 +210,31 @@ typedef NS_ENUM(NSInteger, ArktPermissionChoice) {
   ArktPermissionChoiceDismiss = 3,
 };
 
+// What an infobar is about, for the few the shell tells apart (#400). Other
+// covers the rest; its words are in the infobar's message.
+typedef NS_ENUM(NSInteger, ArktInfobarKind) {
+  ArktInfobarKindOther = 0,
+  // An extension or DevTools session started debugging the browser.
+  ArktInfobarKindDebugger = 1,
+  // The browser is controlled by automated test software.
+  ArktInfobarKindAutomation = 2,
+  // Settings changed in Page Info and the page needs a reload to apply them.
+  ArktInfobarKindReload = 3,
+};
+
+// What the shell does on an infobar (#400).
+typedef NS_ENUM(NSInteger, ArktInfobarAction) {
+  // The OK (or only) button.
+  ArktInfobarActionOk = 0,
+  ArktInfobarActionCancel = 1,
+  // The link after the message.
+  ArktInfobarActionLink = 2,
+  // An inline link inside the message; linkIndex says which.
+  ArktInfobarActionMessageLink = 3,
+  // The close button.
+  ArktInfobarActionClose = 4,
+};
+
 // One recorded engine change, as plain values. Fields that do not apply to
 // the kind are nil, NO, ArktCloseReasonNone or ArktWindowCloseReasonNone.
 NS_SWIFT_UI_ACTOR
@@ -225,6 +259,8 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable) id<ArktJavaScriptDialog> dialog;
 // PermissionRequested and PermissionEnded; nil on every other kind.
 @property(nonatomic, readonly, nullable) id<ArktPermissionRequest> permission;
+// InfobarsChanged; nil on every other kind.
+@property(nonatomic, readonly, nullable, copy) NSArray<id<ArktInfobar>>* infobars;
 @end
 
 // A page's alert, confirm or prompt, held until the shell answers it or the
@@ -283,6 +319,50 @@ NS_SWIFT_UI_ACTOR
 // without that answer counts as Allow.
 - (BOOL)respondWithChoice:(ArktPermissionChoice)choice
     NS_SWIFT_NAME(respond(choice:));
+@end
+
+// One infobar of a tab (#400): plain values read when it is added, and the
+// shell's actions on it. Every string is Chromium's. The object is the handle:
+// the same infobar keeps its object across the lists the engine sends, and
+// after it is gone (acted on, removed by the page, the tab closing) an action
+// returns NO and does nothing.
+NS_SWIFT_UI_ACTOR
+@protocol ArktInfobar <NSObject>
+// Unique among the infobars of the run; a replaced infobar is a new one.
+@property(nonatomic, readonly) NSUInteger infobarId;
+// The tab the infobar belongs to; stays valid after the tab has closed.
+@property(nonatomic, readonly) id<ArktTabHandle> tab;
+@property(nonatomic, readonly) ArktInfobarKind kind;
+@property(nonatomic, readonly, copy) NSString* message;
+// One entry per substitution of the message's format string, in order: an
+// NSValue holding an NSRange (UTF-16, into message) for a link, an NSRange with
+// location NSNotFound for plain text. Empty when the message is plain.
+@property(nonatomic, readonly, copy) NSArray<NSValue*>* messageLinkRanges;
+// The link after the message (or before the buttons); nil: none.
+@property(nonatomic, readonly, nullable, copy) NSString* linkTitle;
+@property(nonatomic, readonly, nullable, copy) NSString* linkAccessibilityLabel;
+@property(nonatomic, readonly) BOOL linkBeforeButtons;
+// nil: no such button.
+@property(nonatomic, readonly, nullable, copy) NSString* okTitle;
+@property(nonatomic, readonly, nullable, copy) NSString* okTooltip;
+@property(nonatomic, readonly) BOOL okEnabled;
+@property(nonatomic, readonly, nullable, copy) NSString* cancelTitle;
+@property(nonatomic, readonly, nullable, copy) NSString* cancelTooltip;
+@property(nonatomic, readonly) BOOL cancelEnabled;
+// The close button's accessibility label; nil: the infobar cannot be closed.
+@property(nonatomic, readonly, nullable, copy) NSString* closeAccessibilityLabel;
+// The infobar's icon as a PNG at 2x of 20 points, in the window's colors; nil:
+// none.
+@property(nonatomic, readonly, nullable, copy) NSData* iconPNG;
+// The infobar is gone, however it went.
+@property(nonatomic, readonly) BOOL isEnded;
+// Runs the delegate as the click would. Returns NO, and does nothing, when
+// the infobar is already gone. The delegate decides whether the infobar goes
+// (Accept returning false keeps it); the shell sees the next list. linkIndex
+// is the substitution index for MessageLink and ignored otherwise.
+- (BOOL)actWithAction:(ArktInfobarAction)action
+            linkIndex:(NSUInteger)linkIndex
+    NS_SWIFT_NAME(act(_:linkIndex:));
 @end
 
 // A request for a window the engine creates on its own, after

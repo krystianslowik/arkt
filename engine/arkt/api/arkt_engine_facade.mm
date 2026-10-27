@@ -16,6 +16,8 @@
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
 #include "arkt/browser/arkt_javascript_dialog.h"
+#import "arkt/browser/arkt_infobar_view.h"
+#include "arkt/browser/arkt_infobars.h"
 #include "arkt/browser/arkt_link_activation.h"
 #include "arkt/browser/arkt_permission_prompt.h"
 #import "arkt/browser/arkt_tab_container_view.h"
@@ -314,6 +316,8 @@ const char* KindName(ArktEngineEventKind kind) {
       return "PermissionRequested";
     case ArktEngineEventKindPermissionEnded:
       return "PermissionEnded";
+    case ArktEngineEventKindInfobarsChanged:
+      return "InfobarsChanged";
   }
   return "unknown";
 }
@@ -343,6 +347,7 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic) ArktWindowCloseReason windowCloseReason;
 @property(nonatomic, nullable) id<ArktJavaScriptDialog> dialog;
 @property(nonatomic, nullable) id<ArktPermissionRequest> permission;
+@property(nonatomic, nullable, copy) NSArray<id<ArktInfobar>>* infobars;
 @end
 
 @implementation ArktFacadeEvent
@@ -364,6 +369,7 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize windowCloseReason = _windowCloseReason;
 @synthesize dialog = _dialog;
 @synthesize permission = _permission;
+@synthesize infobars = _infobars;
 @end
 
 // A page's alert, confirm or prompt (#400): plain values read once when the
@@ -551,6 +557,157 @@ const char* KindName(ArktEngineEventKind kind) {
 
 @end
 
+// An infobar of a tab (#400): plain values read when it joined the list, and
+// the shell's actions on it. It reaches the infobar through the tab's presenter
+// by id and a weak pointer, so an infobar that is gone (the delegate removed
+// it, the tab closed, the presenter went with a move to another window)
+// refuses every action.
+@interface ArktFacadeInfobar : NSObject <ArktInfobar>
+- (instancetype)initWithValues:(const arkt::PresentedInfobar&)values
+                     presenter:
+                         (base::WeakPtr<arkt::ArktInfobarPresenter>)presenter
+                           tab:(id<ArktTabHandle>)tab;
+// The infobar left the tab's list.
+- (void)markEnded;
+@end
+
+namespace {
+
+// The icon as a PNG at 2x of 20 points (the engine rasterized it in the
+// window's colors); nil when the infobar has none.
+NSData* PNGForInfobarIcon(NSImage* image) {
+  if (!image) {
+    return nil;
+  }
+  NSBitmapImageRep* rep = [[NSBitmapImageRep alloc]
+      initWithBitmapDataPlanes:NULL
+                    pixelsWide:40
+                    pixelsHigh:40
+                 bitsPerSample:8
+               samplesPerPixel:4
+                      hasAlpha:YES
+                      isPlanar:NO
+                colorSpaceName:NSCalibratedRGBColorSpace
+                   bytesPerRow:0
+                  bitsPerPixel:0];
+  [NSGraphicsContext saveGraphicsState];
+  NSGraphicsContext.currentContext =
+      [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
+  [image drawInRect:NSMakeRect(0, 0, 40, 40)
+           fromRect:NSZeroRect
+          operation:NSCompositingOperationSourceOver
+           fraction:1.0];
+  [NSGraphicsContext restoreGraphicsState];
+  return [rep representationUsingType:NSBitmapImageFileTypePNG
+                           properties:@{}];
+}
+
+}  // namespace
+
+@implementation ArktFacadeInfobar {
+  base::WeakPtr<arkt::ArktInfobarPresenter> _presenter;
+  uint64_t _id;
+  BOOL _ended;
+}
+
+@synthesize tab = _tab;
+@synthesize kind = _kind;
+@synthesize message = _message;
+@synthesize messageLinkRanges = _messageLinkRanges;
+@synthesize linkTitle = _linkTitle;
+@synthesize linkAccessibilityLabel = _linkAccessibilityLabel;
+@synthesize linkBeforeButtons = _linkBeforeButtons;
+@synthesize okTitle = _okTitle;
+@synthesize okTooltip = _okTooltip;
+@synthesize okEnabled = _okEnabled;
+@synthesize cancelTitle = _cancelTitle;
+@synthesize cancelTooltip = _cancelTooltip;
+@synthesize cancelEnabled = _cancelEnabled;
+@synthesize closeAccessibilityLabel = _closeAccessibilityLabel;
+@synthesize iconPNG = _iconPNG;
+
+- (instancetype)initWithValues:(const arkt::PresentedInfobar&)values
+                     presenter:
+                         (base::WeakPtr<arkt::ArktInfobarPresenter>)presenter
+                           tab:(id<ArktTabHandle>)tab {
+  if ((self = [super init])) {
+    _presenter = presenter;
+    _id = values.id;
+    _tab = tab;
+    switch (values.kind) {
+      case arkt::InfobarKind::kOther:
+        _kind = ArktInfobarKindOther;
+        break;
+      case arkt::InfobarKind::kDebugger:
+        _kind = ArktInfobarKindDebugger;
+        break;
+      case arkt::InfobarKind::kAutomation:
+        _kind = ArktInfobarKindAutomation;
+        break;
+      case arkt::InfobarKind::kReload:
+        _kind = ArktInfobarKindReload;
+        break;
+    }
+    ArktInfobarContent* content = values.content;
+    _message = [content.message copy] ?: @"";
+    _messageLinkRanges = [content.messageLinkRanges copy] ?: @[];
+    _linkTitle = [content.linkTitle copy];
+    _linkAccessibilityLabel = [content.linkAccessibilityLabel copy];
+    _linkBeforeButtons = content.linkBeforeButtons;
+    _okTitle = [content.okButton.title copy];
+    _okTooltip = [content.okButton.tooltip copy];
+    _okEnabled = content.okButton.enabled;
+    _cancelTitle = [content.cancelButton.title copy];
+    _cancelTooltip = [content.cancelButton.tooltip copy];
+    _cancelEnabled = content.cancelButton.enabled;
+    _closeAccessibilityLabel = [content.closeAccessibilityLabel copy];
+    _iconPNG = PNGForInfobarIcon(content.icon);
+  }
+  return self;
+}
+
+- (NSUInteger)infobarId {
+  return static_cast<NSUInteger>(_id);
+}
+
+- (BOOL)isEnded {
+  return _ended || !_presenter;
+}
+
+- (void)markEnded {
+  _ended = YES;
+}
+
+- (BOOL)actWithAction:(ArktInfobarAction)action linkIndex:(NSUInteger)linkIndex {
+  arkt::CheckFacadeEntry();
+  if (self.isEnded) {
+    return NO;
+  }
+  arkt::InfobarAction mapped = arkt::InfobarAction::kOk;
+  switch (action) {
+    case ArktInfobarActionOk:
+      mapped = arkt::InfobarAction::kOk;
+      break;
+    case ArktInfobarActionCancel:
+      mapped = arkt::InfobarAction::kCancel;
+      break;
+    case ArktInfobarActionLink:
+      mapped = arkt::InfobarAction::kLink;
+      break;
+    case ArktInfobarActionMessageLink:
+      mapped = arkt::InfobarAction::kMessageLink;
+      break;
+    case ArktInfobarActionClose:
+      mapped = arkt::InfobarAction::kClose;
+      break;
+  }
+  // The delegate runs, and decides whether the infobar goes; the presenter
+  // then reports the tab's new list.
+  return _presenter->Perform(_id, mapped, linkIndex);
+}
+
+@end
+
 // A link activation as plain values (#313).
 @interface ArktFacadeLinkActivation : NSObject <ArktLinkActivation>
 @property(nonatomic, copy) NSURL* url;
@@ -654,6 +811,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     pending_ = [[NSMutableArray alloc] init];
     sinks_ = [[NSMutableArray alloc] init];
     browsers_ = [[NSMutableArray alloc] init];
+    infobar_objects_ = [[NSMutableDictionary alloc] init];
   }
 
   void Start() {
@@ -663,6 +821,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
         &Facade::PresentJavaScriptDialog, base::Unretained(this)));
     SetPermissionPresenter(base::BindRepeating(
         &Facade::PresentPermission, base::Unretained(this)));
+    SetInfobarSink(base::BindRepeating(&Facade::PresentInfobars,
+                                       base::Unretained(this)));
     observation_.Observe(GlobalBrowserCollection::GetInstance());
     GlobalBrowserCollection::GetInstance()->ForEach(
         [this](BrowserWindowInterface* browser) {
@@ -769,6 +929,74 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
                  << request.items.count;
     RecordFromNotification(event);
     return true;
+  }
+
+  // A tab's infobars in an Arkt window with an embedder host (#400), called by
+  // the tab's infobar presenter after every change of its list. True takes the
+  // list: InfobarsChanged goes to the shell with the tab's whole list, and the
+  // presenter keeps its rows hidden (only their height stays, so the page sits
+  // below the strip the shell draws). False leaves the rows engine-drawn: the
+  // tab has no handle, or nobody listens. One event per tab per batch: a later
+  // change replaces the list of the pending one.
+  bool PresentInfobars(content::WebContents* contents,
+                       base::WeakPtr<ArktInfobarPresenter> presenter) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil;
+    ArktFacadeBrowser* browser = handle.browser;
+    if (!presenter || !handle || !browser || sinks_.count == 0) {
+      return false;
+    }
+    NSMutableArray<id<ArktInfobar>>* list = [NSMutableArray array];
+    NSMutableSet<NSNumber*>* keep = [NSMutableSet set];
+    for (const PresentedInfobar& presented : presenter->Presented()) {
+      NSNumber* key = @(presented.id);
+      ArktFacadeInfobar* object = infobar_objects_[key];
+      if (!object) {
+        object = [[ArktFacadeInfobar alloc] initWithValues:presented
+                                                 presenter:presenter
+                                                       tab:handle];
+        infobar_objects_[key] = object;
+      }
+      [list addObject:object];
+      [keep addObject:key];
+    }
+    // Infobars of this tab that are not in the list any more are gone (acted
+    // on, removed by the page, or left behind by a move to another window).
+    for (NSNumber* key in [infobar_objects_ allKeys]) {
+      ArktFacadeInfobar* object = infobar_objects_[key];
+      if (object.tab == handle && ![keep containsObject:key]) {
+        [object markEnded];
+        [infobar_objects_ removeObjectForKey:key];
+      }
+    }
+    LOG(WARNING) << "ARKT: facade infobars changed count=" << list.count;
+    for (ArktFacadeEvent* pending in pending_) {
+      if (pending.kind == ArktEngineEventKindInfobarsChanged &&
+          pending.tab == handle) {
+        pending.infobars = list;
+        return true;
+      }
+    }
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindInfobarsChanged;
+    event.tab = handle;
+    event.browser = browser;
+    event.infobars = list;
+    RecordFromNotification(event);
+    return true;
+  }
+
+  // The tab is gone: its infobar objects refuse actions and are let go.
+  void DropInfobars(ArktFacadeTab* handle) {
+    for (NSNumber* key in [infobar_objects_ allKeys]) {
+      ArktFacadeInfobar* object = infobar_objects_[key];
+      if (object.tab == handle) {
+        [object markEnded];
+        [infobar_objects_ removeObjectForKey:key];
+      }
+    }
   }
 
   // The modifiers Blink derived a link's disposition from
@@ -1161,6 +1389,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     LOG(WARNING) << "ARKT: facade tab closed session id " << handle.sessionId
                  << " reason " << ReasonName(event.closeReason);
     Record(event);
+    DropInfobars(handle);
     [handle unbind];
     tab_handles_.erase(tab);
   }
@@ -1246,6 +1475,9 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   NSMutableArray<ArktFacadeEvent*>* __strong pending_;
   NSMutableArray<ArktFacadeSink*>* __strong sinks_;
   NSMutableArray<ArktFacadeBrowser*>* __strong browsers_;
+  // The infobar objects the shell holds, by infobar id (unique per run).
+  NSMutableDictionary<NSNumber*, ArktFacadeInfobar*>* __strong
+      infobar_objects_;
   std::map<BrowserWindowInterface*, ArktFacadeBrowser* __strong>
       browser_handles_;
   std::map<tabs::TabInterface*, ArktFacadeTab* __strong> tab_handles_;

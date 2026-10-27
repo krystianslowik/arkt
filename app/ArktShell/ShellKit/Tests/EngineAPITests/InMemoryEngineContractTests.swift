@@ -69,6 +69,16 @@ struct InMemoryEngineContractTests {
   @Test func hiddenTabEndsItsPermissionAndAsksAgain() async throws {
     try await EngineContract.hiddenTabEndsItsPermissionAndAsksAgain(harness)
   }
+  // Rule 21
+  @Test func infobarIsReportedActedOnAndRemoved() async throws {
+    try await EngineContract.infobarIsReportedActedOnAndRemoved(harness)
+  }
+  @Test func infobarsStayWithTheirTabWhileHidden() async throws {
+    try await EngineContract.infobarsStayWithTheirTabWhileHidden(harness)
+  }
+  @Test func pendingInfobarsEndBeforeTheirTabCloses() async throws {
+    try await EngineContract.pendingInfobarsEndBeforeTheirTabCloses(harness)
+  }
 
   /// A harness without engine drivers reports rules 13, 14, 16 and 17's audible check as not applicable, never as passed.
   @Test func missingDriversAreNotApplicable() async throws {
@@ -85,6 +95,7 @@ struct InMemoryEngineContractTests {
     await #expect(throws: ContractNotApplicable.self) {
       try await EngineContract.permissionIsReportedAnsweredAndEndedOnce(bare)
     }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.infobarIsReportedActedOnAndRemoved(bare) }
     await #expect(throws: ContractNotApplicable.self) {
       try await EngineContract.extensionWindowCloseReportsExtension(bare)
     }
