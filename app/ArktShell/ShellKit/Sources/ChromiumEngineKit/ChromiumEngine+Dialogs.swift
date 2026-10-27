@@ -6,11 +6,15 @@ import EngineAPI
 
 extension ChromiumEngine {
   /// Chromium's `TabModalDialogManager` decides when a dialog shows and when it ends; the facade reports each request
-  /// with the page's values and each end with one `DialogEnded`. A dialog of a tab this instance does not list (another
-  /// instance's window) is not reported.
+  /// with the page's values and each end with one `DialogEnded`. A dialog of a tab this instance does not list (it
+  /// closed, or no window of this instance holds it) has nobody to show it: it is answered `accepted: false` at once,
+  /// so the page's call returns and never hangs, and it is not reported.
   func dialogRequested(_ event: any ArktEngineEvent) {
-    guard let dialog = event.dialog, let tab = tabByHandle[ObjectIdentifier(dialog.tab)], tabs[tab] != nil,
-          dialogByHandle[ObjectIdentifier(dialog)] == nil else { return }
+    guard let dialog = event.dialog, dialogByHandle[ObjectIdentifier(dialog)] == nil else { return }
+    guard let tab = tabByHandle[ObjectIdentifier(dialog.tab)], tabs[tab] != nil else {
+      _ = dialog.respond(accepted: false, userInput: nil)
+      return
+    }
     endDialogs(of: tab)             // Chromium ends the earlier one first; this only guards the order
     let value = JavaScriptDialog(
       id: DialogID(), tab: tab, kind: JavaScriptDialog.Kind(facade: dialog.kind), title: dialog.title,

@@ -39,7 +39,16 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// The tab whose page the card shows.
   public private(set) var shownTab: TabID?
   private(set) var lastTransition: LittleArktTransition?
-  private var phase = Phase.pending
+  private var phase = Phase.pending {
+    didSet { if phase != oldValue { javaScriptDialogs.refresh() } }     // a panel goes while the window is not open
+  }
+  /// A page's `alert()`, `confirm()` and `prompt()` as panels over its page (#471). The same presenter the main window
+  /// uses: it shows the panel while the page is on screen here, and hands the dialog over (`release` / `adopt`, #467)
+  /// when Open in moves the page.
+  private(set) lazy var javaScriptDialogs = makeJavaScriptDialogPresenter()
+  /// The pending dialog of the page on its way to the main window (Open in), from the start of the fade or flight
+  /// until the page lands (it goes with it) or stays (it comes back to this window's presenter).
+  private var carriedDialog: JavaScriptDialog?
   private let animator = LittleArktAnimator(scene: .rest)
   private var tabObservation: EngineObservation?
   private var windowObservation: EngineObservation?
@@ -57,8 +66,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// The Spaces the chooser lists, in sidebar order.
   var spaces: @MainActor () -> [SidebarSpaceInfo] = { [] }
   /// Moves `tab` into the main window as the first Today tab of `space` (nil: the target Space); false when it could
-  /// not, and the page stays here.
-  var onOpenIn: @MainActor (TabID, SpaceID?) -> Bool = { _, _ in false }
+  /// not, and the page stays here. The page's pending dialog goes with it.
+  var onOpenIn: @MainActor (TabID, SpaceID?, JavaScriptDialog?) -> Bool = { _, _, _ in false }
   /// The user resized the window: new windows use the size (BH-142).
   var onResize: @MainActor (CGSize) -> Void = { _ in }
   /// The window closed; the set forgets it.
@@ -105,6 +114,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     window.commandHost = engineHost
     window.onKeyEquivalent = { [weak self] event in self?.handleKeyEquivalent(event) ?? false }
     engineHost.controller = self
+    rootView.onLayout = { [weak self] in self?.javaScriptDialogs.layoutDidFinish() }
     topBar.openButton.target = self
     topBar.openButton.action = #selector(openInAction(_:))
     topBar.chooserButton.target = self
@@ -147,6 +157,12 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       refreshTopBar()
     case .titleChanged(let tab, let title) where tab == shownTab:
       window.title = title
+    case .dialogRequested(let dialog) where isCarrying && dialog.tab == shownTab:
+      carriedDialog = dialog                                  // raised in the air: it goes with the page
+    case .dialogEnded(_, let id) where isCarrying && carriedDialog?.id == id:
+      carriedDialog = nil
+    case .dialogRequested, .dialogEnded:
+      javaScriptDialogs.handle(event)                         // #471
     case .tabClosed(let tab, _) where tab == shownTab:
       shownTab = nil
       if card.contentView?.isDescendant(of: rootView) == true { card.setContent(nil) }
@@ -154,6 +170,24 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     default:
       break
     }
+  }
+
+  private var isCarrying: Bool { phase == .handingOff || phase == .flying }
+
+  /// The anchor of a dialog's panel: the page of the tab this window shows, while the window is open.
+  private func makeJavaScriptDialogPresenter() -> JavaScriptDialogPresenter {
+    JavaScriptDialogPresenter(engine: engine) { [weak self] tab in
+      guard let self, self.phase == .open, tab == self.shownTab, let view = self.engine.contentView(for: tab),
+            view.window === self.window, !view.isHiddenOrHasHiddenAncestor else { return nil }
+      return view
+    }
+  }
+
+  /// The page stays here, so its dialog comes back to this window's presenter.
+  private func takeBackCarriedDialog() {
+    guard let dialog = carriedDialog else { return }
+    carriedDialog = nil
+    javaScriptDialogs.adopt(dialog)
   }
 
   private func mount(_ tab: TabID) {
@@ -212,6 +246,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   public func windowWillClose(_ notification: Notification) {
     rootView.removeToolTipsInSubtree()
     flight?.abort(.smallWindowClosing)                        // the page lands in the main window first
+    javaScriptDialogs.closeAll()                              // the engine ends the dialog; nothing answers it
     guard phase != .closed else { return }
     phase = .closed
     onClosed(self)
@@ -253,6 +288,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   func openIn(space: SpaceID? = nil) {
     guard phase == .open, let tab = shownTab else { return }
     if beginFlight(tab, space: space) { return }
+    carriedDialog = javaScriptDialogs.release(tab)          // the panel goes at once; the main window shows it
     phase = .handingOff
     run(.fadeOut) { [weak self] completed in
       guard completed else { return }
@@ -264,12 +300,14 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     guard phase == .handingOff else { return }
     let spaceName = self.spaceName(space)
     card.releaseContent()                                   // the main window's card takes the page's view
-    guard onOpenIn(tab, space) else {
+    guard onOpenIn(tab, space, carriedDialog) else {
       phase = .open
       if let view = engine.contentView(for: tab) { card.setContent(view) }
+      takeBackCarriedDialog()
       run(.appear) { _ in }
       return
     }
+    carriedDialog = nil                                     // adopted by the main window
     handedOff(spaceName: spaceName)
   }
 
@@ -325,6 +363,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     flight.onFinish = { [weak self] in self?.flightFinished() }
     flight.watchdog = flightWatchdog
     self.flight = flight
+    carriedDialog = javaScriptDialogs.release(tab)          // the panel goes at once; the main window shows it
     phase = .flying
     snapshotTask = Task { [weak self] in
       guard let self else { return }
@@ -354,7 +393,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     snapshotTask?.cancel()
     snapshotTask = nil
     card.releaseContent()                                   // the main window's card takes the page's view
-    if destination?.finishReceiving(tab, node: node, clearingPrevious: true) == true {
+    if destination?.finishReceiving(tab, node: node, clearingPrevious: true, dialog: carriedDialog) == true {
+      carriedDialog = nil                                   // adopted by the main window
       handedOff(spaceName: spaceName)
       return
     }
@@ -376,6 +416,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       snapshotTask?.cancel()
       snapshotTask = nil
       destination?.cancelReceiving(tab, node: node)
+      carriedDialog = nil                                     // the page and its dialog are gone
       phase = .handedOff                                      // the engine closes this window; no appear on it
       if engineClosed || engineWindow == nil { finishClose() }
     case .mainWindowMiniaturized, .framesStopped, .appTerminating, .smallWindowClosing, .closeRequested:
@@ -389,6 +430,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     phase = .open
     window.ignoresMouseEvents = false
     if let view = engine.contentView(for: tab) { card.setContent(view) }
+    takeBackCarriedDialog()
     run(.appear) { _ in }
   }
 
