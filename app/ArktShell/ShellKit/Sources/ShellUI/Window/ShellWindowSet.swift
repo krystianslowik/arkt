@@ -97,11 +97,15 @@ public final class ShellWindowSet {
 
   /// Builds, wires and shows a window. `opensFirstTab` shows the current Space's tab at once (launch); New Window
   /// passes false, so the new window gets its engine window with the first tab the user picks (decision 4) and no
-  /// row is shown in two windows.
+  /// row is shown in two windows. A window without a first tab opens on the Space of the most recently main window.
   @discardableResult
   public func openWindow(opensFirstTab: Bool = true) -> ShellWindowController {
-    let anchor = primary?.window
+    let opener = primary
+    let anchor = opener?.window
     let controller = make(opensFirstTab: opensFirstTab, origin: .shell)
+    // New Window opens on the Space the window it was pressed in shows (BH-170); a launch window opens a tab of the
+    // first Space instead.
+    if !opensFirstTab, let space = opener?.currentSpace { controller.sidebarController.showSpace(space) }
     place(controller, near: anchor)
     controller.showWindow(nil)
     return controller
