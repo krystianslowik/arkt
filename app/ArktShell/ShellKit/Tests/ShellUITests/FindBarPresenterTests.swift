@@ -270,7 +270,7 @@ struct FindBarPresenterTests {
     #expect(rig.focusRequests == 2, "Cmd-F with the bar open focuses and selects again")
   }
 
-  @Test func `close ends the find with clear, hides the bar and gives the page its focus back`() async throws {
+  @Test func `close ends the find with activate, hides the bar and gives the page its focus back`() async throws {
     let rig = Rig(occurrences: 3)
     let selectedText: (TabID) throws -> String = { try rig.engine.selectedText($0) }
     rig.presenter.open()
@@ -281,8 +281,28 @@ struct FindBarPresenterTests {
 
     #expect(rig.presenter.display == nil)
     #expect(rig.closes == 1)
-    #expect(try selectedText(rig.tab) == "", "clear, not keep: the match is not left selected")
+    #expect(try selectedText(rig.tab) == "nee", "activate: the current match becomes the page's selection")
     #expect(rig.presenter.pendingSearches == 0)
+  }
+
+  @Test func `request ids never go back for a tab, through a clear and a close`() {
+    let rig = Rig()
+    rig.presenter.open()
+    rig.presenter.setText("nee")
+    rig.presenter.step(forward: true)
+    rig.presenter.handle(.findResult(rig.tab, requestID: 10, ordinal: 2, count: 7, isFinal: true))
+    #expect(rig.countText == "2 of 7")
+
+    rig.presenter.setText("")
+    rig.presenter.setText("nee")
+    rig.presenter.step(forward: true)
+    #expect(rig.countText == "", "the engine's reply (id 2) is older than id 10 and is dropped, as after a close")
+    rig.presenter.close()
+    rig.presenter.open()
+    rig.presenter.handle(.findResult(rig.tab, requestID: 9, ordinal: 5, count: 5, isFinal: true))
+    #expect(rig.countText != "5 of 5", "an older reply after a close and a reopen is dropped")
+    rig.presenter.handle(.findResult(rig.tab, requestID: 11, ordinal: 3, count: 7, isFinal: true))
+    #expect(rig.countText == "3 of 7", "a newer one is taken")
   }
 
   @Test func `closing cancels a search that is still waiting for its timer`() async {

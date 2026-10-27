@@ -20,8 +20,9 @@ public struct FindBarDisplay: Equatable, Sendable {
 ///
 /// Typing searches as you type, `debounce` after the last keystroke, on an injected sleeper. Return and Cmd-G go to
 /// the next match, Shift-Return and Shift-Cmd-G to the previous one; both run a search that is still waiting for its
-/// timer at once. Esc and the close button end the find with `.clear`. A tab that left the window (the engine ends
-/// its find on a move, contract rule 22) is `forget`-ed without a stop call.
+/// timer at once. Esc and the close button end the find with `.activate` (the current match becomes the page's
+/// selection). A tab that left the window (the engine ends its find on a move, contract rule 22) is `forget`-ed
+/// without a stop call.
 @MainActor
 public final class FindBarPresenter {
   /// How long after the last keystroke the search runs (design: 250 ms).
@@ -37,6 +38,7 @@ public final class FindBarPresenter {
     var ordinal = 0
     var count = 0
     var hasResult = false
+    /// The newest reply taken for this tab; request ids never go back, so it never resets.
     var lastRequestID = 0
   }
 
@@ -138,7 +140,6 @@ public final class FindBarPresenter {
       entry.ordinal = 0
       entry.count = 0
       entry.hasResult = false
-      entry.lastRequestID = 0
       entries[tab] = entry
       engine.findInPage(tab, text: "", forward: true, matchCase: false)
     } else {
@@ -158,7 +159,7 @@ public final class FindBarPresenter {
     runSearch(tab, forward: forward)
   }
 
-  /// Esc and the close button: ends the find with `.clear`, hides the bar, keeps the text for the next Cmd-F.
+  /// Esc and the close button: ends the find with `.activate`, which leaves the current match as the page's selection (Cmd-C copies it, the next Cmd-F starts there), hides the bar, and keeps the text for the next Cmd-F.
   public func close() {
     guard let tab = visibleTab, var entry = entries[tab], entry.isOpen else { return }
     cancelPending(tab)
@@ -167,9 +168,8 @@ public final class FindBarPresenter {
     entry.ordinal = 0
     entry.count = 0
     entry.hasResult = false
-    entry.lastRequestID = 0
     entries[tab] = entry
-    engine.stopFinding(tab, action: .clear)
+    engine.stopFinding(tab, action: .activate)
     onChange?()
     onClosed?()
   }

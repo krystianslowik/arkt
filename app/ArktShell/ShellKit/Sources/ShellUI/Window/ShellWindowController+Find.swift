@@ -33,7 +33,8 @@ extension ShellWindowController {
   }
 
   func performFind(_ command: EngineCommand) -> Bool {
-    guard claimFind(command).isEnabled else { return false }
+    // Claimed but disabled (a split, the first run): handled, so nothing falls through to the engine's own find.
+    guard claimFind(command).isEnabled else { return true }
     switch command {
     case .find: findBar.open()
     case .findNext: findBar.step(forward: true)

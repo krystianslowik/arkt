@@ -302,7 +302,7 @@ final class FindBarWindowTests: XCTestCase {
 
   // MARK: Closing
 
-  func testEscClosesTheBarEndsTheFindWithClearAndFocusesThePage() async throws {
+  func testEscClosesTheBarEndsTheFindWithActivateAndFocusesThePage() async throws {
     let rig = try makeRig(occurrences: 3)
     open(rig)
     try await search("nee", in: rig)
@@ -311,7 +311,7 @@ final class FindBarWindowTests: XCTestCase {
     try rig.window.sendEvent(key(kVK_Escape, in: rig.window, "\u{1B}"))
 
     XCTAssertTrue(rig.bar.isHidden)
-    XCTAssertEqual(try rig.engine.selectedText(tab), "", "clear: the match is not kept as the selection")
+    XCTAssertEqual(try rig.engine.selectedText(tab), "nee", "activate: the match becomes the page's selection")
     XCTAssertTrue(rig.window.firstResponder === rig.engine.contentView(for: tab), "the page has the keyboard again")
   }
 
@@ -338,7 +338,7 @@ final class FindBarWindowTests: XCTestCase {
     rig.bar.closeButton.performClick(nil)
 
     XCTAssertTrue(rig.bar.isHidden)
-    XCTAssertEqual(try rig.engine.selectedText(tab), "")
+    XCTAssertEqual(try rig.engine.selectedText(tab), "nee")
     XCTAssertTrue(rig.window.firstResponder === rig.engine.contentView(for: tab))
   }
 
@@ -592,6 +592,77 @@ final class FindBarWindowTests: XCTestCase {
     rig.window.contentView?.layoutSubtreeIfNeeded()
     XCTAssertEqual(rig.bar.frame.width, 372)
     XCTAssertLessThanOrEqual(rig.bar.field.frame.maxX, rig.bar.countLabel.frame.minX)
+  }
+
+  func testCmdFInASplitDoesNothingAndTheBarHidesAndComesBack() async throws {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let page = try sidebar.addTab(url: InMemoryEngine.findPageURL(occurrences: 3, link: Self.link), title: "P",
+                                  in: .today(space))
+    let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(space))
+    let panes = try (0..<2).map { try sidebar.addTab(url: Self.link, title: "L\($0)", in: .split(split)) }
+    let harness = EngineHarnessWindow(sidebar)
+    harnesses.append(harness)
+    let sleeper = Sleeper()
+    harness.controller.findBar.sleep = { try await sleeper.sleep($0) }
+    harness.controller.activate(node: page)
+    let rig = Rig(harness: harness, sleeper: sleeper, nodes: [page])
+    open(rig)
+    try await search("nee", in: rig)
+    XCTAssertFalse(rig.bar.isHidden)
+
+    harness.controller.activate(node: panes[0])
+    XCTAssertTrue(rig.bar.isHidden, "no bar over a split")
+    XCTAssertTrue(harness.controller.engineHost.perform(.find, disposition: .currentTab),
+                  "claimed: nothing falls through to the engine's own find")
+    XCTAssertTrue(rig.bar.isHidden, "and nothing opens")
+    XCTAssertTrue(harness.engine.executedCommands.isEmpty)
+
+    harness.controller.activate(node: page)
+    XCTAssertFalse(rig.bar.isHidden, "the bar comes back when the split ends")
+    XCTAssertEqual(rig.bar.field.stringValue, "nee")
+  }
+
+  /// Keys the shell owns still reach it while the find field has the keyboard: the window offers a key to its views
+  /// (the field editor takes text only), then to the main menu, as AppKit does.
+  func testShellKeysStillWorkWhileTheFindFieldHasFocus() throws {
+    let rig = try makeRig()
+    open(rig)
+    XCTAssertTrue(rig.window.firstResponder is NSTextView)
+    let saved = NSApp.mainMenu
+    defer { NSApp.mainMenu = saved }
+    final class Probe: NSObject {
+      var hits: [String] = []
+      @objc func hit(_ item: NSMenuItem) { hits.append(item.title) }
+    }
+    let probe = Probe()
+    let menu = NSMenu()
+    let holder = NSMenuItem(title: "Test", action: nil, keyEquivalent: "")
+    let sub = NSMenu(title: "Test")
+    let items: [(String, String, NSEvent.ModifierFlags)] = [
+      ("New Tab", "t", .command), ("Open Location", "l", .command),
+      ("Space 1", "1", .control), ("Space 2", "2", .control), ("Space 3", "3", .control),
+    ]
+    for (title, key, mask) in items {
+      let item = NSMenuItem(title: title, action: #selector(Probe.hit(_:)), keyEquivalent: key)
+      item.keyEquivalentModifierMask = mask
+      item.target = probe
+      sub.addItem(item)
+    }
+    holder.submenu = sub
+    menu.addItem(holder)
+    NSApp.mainMenu = menu
+    let keys: [(Int, CGEventFlags)] = [(kVK_ANSI_T, .maskCommand), (kVK_ANSI_L, .maskCommand),
+                                       (kVK_ANSI_1, .maskControl), (kVK_ANSI_2, .maskControl),
+                                       (kVK_ANSI_3, .maskControl)]
+    for (code, flags) in keys {
+      let source = CGEventSource(stateID: .privateState)
+      let cg = try XCTUnwrap(CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: true))
+      cg.flags = flags
+      let event = try XCTUnwrap(NSEvent(cgEvent: cg))
+      _ = rig.window.performKeyEquivalent(with: event) || menu.performKeyEquivalent(with: event)
+    }
+    XCTAssertEqual(probe.hits, ["New Tab", "Open Location", "Space 1", "Space 2", "Space 3"])
   }
 
   func testFindIsDisabledWhileASplitShows() throws {
