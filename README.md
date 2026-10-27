@@ -22,6 +22,25 @@
 
 **Pre-alpha. Not ready for daily use.** [Join the waitlist](https://arkt.dev/#get) to hear when Arkt is ready for you.
 
+## Download the preview
+
+The first preview build is on the [Releases page](https://github.com/krystianslowik/arkt/releases). It is early
+software and not signed or notarized, so macOS blocks it on first open.
+
+Requirements: a Mac with Apple silicon and macOS 15 or later.
+
+1. Download `Arkt-<version>-arm64.zip` from the latest release and unzip it.
+2. Move `Arkt.app` to `/Applications`.
+3. Open it. macOS shows a warning and does not open it. On macOS 15, Control-click > Open no longer bypasses
+   Gatekeeper. Either:
+   - Open **System Settings > Privacy & Security**, scroll to the message about Arkt and click **Open Anyway**; or
+   - Remove the quarantine flag in Terminal, then open the app:
+
+         xattr -dr com.apple.quarantine /Applications/Arkt.app
+
+The first launch can take up to 2 minutes while macOS scans the app. See the release notes for what the preview
+includes and how to report problems.
+
 ## Interface previews
 
 Captures of Arkt’s interactive design prototypes. Features and details may change during implementation.
