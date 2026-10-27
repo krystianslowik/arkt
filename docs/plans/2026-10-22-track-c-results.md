@@ -2563,7 +2563,7 @@ Cmd-Shift-V) stacks on this branch.
   `LittleArktLookupRows`.
 - Tokens: `ShellTokens.commandBar*` are light and dark pairs (glass, opaque surface, text, secondary, tertiary,
   divider, edges, selected row, key cap, scrim, pill well, pill on, pill on text, tick). `ShellTokensContrastTests`
-  gained seven tests: text on the opaque surface and on every fill a row puts under it (selected row, key cap, pill
+  gained six tests: text on the opaque surface and on every fill a row puts under it (selected row, key cap, pill
   well) at 4.5:1 in both appearances, the selected pill and its count, graphite on mustard above 7:1, and mustard
   only as a fill.
 - View: glass surface (`NSVisualEffectView`, opaque under Reduce Transparency), magnifier, 22 pt field, filter pills
@@ -2586,3 +2586,43 @@ Cmd-Shift-V) stacks on this branch.
 - Favicons are not in the bar yet (the symbol slot carries a generic symbol); history rows have no source (no
   history store), so the History pill counts 0. Recent tabs with relative times and the preview column are #372 and
   part 2.
+
+### Tests
+
+TDD: the failing tests came first (compile errors counted: the new geometry, row content, filter count and token
+tests referenced values that did not exist), then the implementation.
+
+- `app/ArktCore`: `swift test` - 556 passed (145 + 117 + 70 + 8 + 216), untouched by this branch.
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` - 1643 passed in nine runs (origin/main at the same
+  point: 1587; +56: 27 are #322's carried tests, 29 are new here: `CommandBarRowContentTests` 13, `CommandBarFilterTests` 5,
+  `CommandBarGeometryTests` +4, `ShellTokensContrastTests` +6, `CommandBarResultsScopeTests` +1).
+- `swift test --filter ShellKitGUITests` - 1398 cases, 30 skipped, 4 failures in 3 tests, none in the command bar:
+  `SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU` (22.9 s; a frame-pacing gate under
+  load), `SplitDragTests.testDropFavoriteOnPlainTabMovesItIntoSplitAndClickVsDrag` (an event-queue test; passes
+  14 of 14 standalone), `OnboardingTests.testFooterFadesOutAsTheFoldBegins` (0.9999998 against 1.0). A baseline run
+  of origin/main (1352 cases, 28 skipped) fails the first two as well plus `SpacePagerTests`'
+  `testFramePacingDuringSwipeAndKeyboardSwitch`; the onboarding one is a float comparison and is not near this code.
+- New GUI tests: `CommandBarHybridTests` 27. Existing command bar GUI tests: `CommandBarTests` 67,
+  `CommandBarArchivedTests` 2, `AXProxyRowsTests`, `AccessibilityIdentifierTests`, `LittleArkt*` and
+  `JavaScriptDialog*` all pass after the changes below.
+- `CommandBarHybridTests` 20 times in a row on the final commit under load (load1 9.2 to 22.4): 20 of 20 passed, 27
+  tests each. The existing latency gate `CommandBarTests.testAppearsUnder16ms` passes.
+- App build (App target touched): `xcodegen generate` + Debug `xcodebuild build` - BUILD SUCCEEDED; UI tests
+  `xcodebuild build-for-testing` (scheme `ArktShellUITests`) - TEST BUILD SUCCEEDED. UI tests were not run (the
+  harness drives the real app; this run was told not to launch it). `Shell.selectCommandBarRow` now matches a row by
+  its title, since a row's label is the whole sentence.
+
+### Existing tests changed
+
+- `CommandBarTests.testGeometryAndDarkSurface` is now `testGeometryAndFollowsTheWindowAppearance` (680 wide, top at
+  22 %, appearance follows the window).
+- `testShowWithUnchangedResultsKeepsTheCells`: the marker moved to the cell's tooltip, because the selected row's
+  title is redrawn when it loses selection.
+- `CommandBarArchivedTests`: the caption reads "Restore from Archive" without the arrow.
+- `AXProxyRowsTests` and `AccessibilityIdentifierTests`: row labels are "<title>, <host>, <kind>, <k> of <n>".
+
+### Deferred to part 2
+
+Filter state and Cmd-1 to Cmd-4, Tab and Shift-Tab (the smart rule), Esc clearing first, the empty state's groups and
+Recent tabs with times, the selection slide, the fades and Cmd-Shift-V. The preview column and Cmd-Return stay in
+#372. History rows need a history store; the pill is there and counts 0.
