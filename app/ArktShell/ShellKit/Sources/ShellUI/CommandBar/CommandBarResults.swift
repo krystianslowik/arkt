@@ -182,7 +182,7 @@ public enum CommandBarResults {
     if !query.isEmpty {
       for match in input.archived.prefix(maxArchivedResults) {
         results.append(Result(kind: .restore(match.id), title: match.title, subtitle: match.subtitle,
-                              trailingHint: restoreHint))
+                              trailingHint: restoreHint, removalID: nil))
       }
     }
 
@@ -203,10 +203,11 @@ public enum CommandBarResults {
 
   private static func openTabsAll(_ input: Input) -> [OpenTab] { input.openTabs }
 
-  /// The pre-#112 convenience: a plain query over open tabs (no clipboard, Spaces, actions or exclusions).
-  public static func make(query raw: String, openTabs: [OpenTab]) -> [Result] {
+  /// The pre-#112 convenience: a plain query over open tabs (no clipboard, Spaces, actions or exclusions) with optional archived matches (#111).
+  public static func make(query raw: String, openTabs: [OpenTab], archived: [ArchivedMatch] = []) -> [Result] {
     var input = Input()
     input.openTabs = openTabs
+    input.archived = archived
     return make(query: raw, input: input)
   }
 }
