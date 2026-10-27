@@ -423,7 +423,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     record(.titleChanged) { $0.title = newTitle }
   }
 
-  private func reportHistory() {
+  func reportHistory() {
     let now = (canGoBack, canGoForward)
     guard now != lastHistory else { return }
     lastHistory = now
@@ -477,7 +477,10 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   }
 
   func activate() {
-    whenInserted { [self] in owner?.activate(self) }
+    whenInserted { [self] in
+      owner?.activate(self)
+      unpark()
+    }
   }
 
   func close(mode: ArktCloseMode) -> ArktCloseResult {
@@ -582,13 +585,20 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     }
   }
 
+  /// A parked copy (#380): the page's URL, title and history, not active, and no load until it is shown (activated,
+  /// navigated or moved), as the real facade holds the clone outside the tab strip.
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }
-    let copy = owner.insertTab(opener: owner.active, origin: .client, active: true)
-    copy.back = back
-    copy.forward = forward
-    if let url { copy.startLoad(url, title: title) }
-    return copy
+    return owner.insertParkedCopy(of: self)
+  }
+
+  /// The load a parked copy still owes; it starts when the copy is shown.
+  var parkedLoad: (url: URL, title: String?)?
+
+  private func unpark() {
+    guard let pending = parkedLoad else { return }
+    parkedLoad = nil
+    startLoad(pending.url, title: pending.title)
   }
 
   // MARK: Engine side
@@ -668,6 +678,20 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
   }
 
   @discardableResult
+  /// A duplicate parked for this window: reported with `TabCreated`, never active, loading only when shown.
+  func insertParkedCopy(of source: ScriptedTab) -> ScriptedTab {
+    let tab = ScriptedTab(facade: facade, owner: self, opener: source, origin: .client)
+    tab.url = source.url
+    tab.title = source.title
+    tab.isInitialBlank = source.isInitialBlank
+    tab.back = source.back
+    tab.forward = source.forward
+    if let url = source.url, !source.isInitialBlank { tab.parkedLoad = (url, source.title) }
+    insert(tab, active: false, url: nil)
+    tab.reportHistory()
+    return tab
+  }
+
   func insertTab(opener: (any ArktTabHandle)?, origin: ArktTabOrigin, active: Bool) -> ScriptedTab {
     let tab = ScriptedTab(facade: facade, owner: self, opener: opener, origin: origin)
     insert(tab, active: active, url: nil)

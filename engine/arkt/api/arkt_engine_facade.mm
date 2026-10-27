@@ -785,6 +785,23 @@ NSData* PNGForInfobarIcon(NSImage* image) {
 - (void)insertFinished:(BOOL)inserted;
 // The contents' beforeunload outcome (WebContentsObserver::BeforeUnloadFired).
 - (void)beforeUnloadFired:(BOOL)proceed;
+// A duplicate the shell parks (#380) lives as bare contents outside every tab
+// strip, so chrome.tabs and chrome.windows neither list it nor fire events
+// for it and no extension can reach it by id. `contents` is the clone;
+// `browser` is the window it was parked for (the handle's window until it is
+// shown).
+- (void)parkContents:(content::WebContents*)contents
+                  in:(ArktFacadeBrowser*)browser
+              opener:(ArktFacadeTab*)opener;
+- (BOOL)isParked;
+// True while -unpark is inserting the contents into its window (Inserted
+// binds the handle without announcing it a second time).
+- (BOOL)isUnparking;
+// Inserts a parked copy at the end of its window's tabs, not active, and binds
+// the handle to the new tab. YES when the handle has a tab afterwards.
+- (BOOL)unpark;
+// Drops a parked copy's contents and reports its TabClosed.
+- (void)closeParkedWithReason:(ArktCloseReason)reason;
 @property(nonatomic) BOOL closingByClient;
 @property(nonatomic) BOOL closing;
 @end
@@ -811,6 +828,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     pending_ = [[NSMutableArray alloc] init];
     sinks_ = [[NSMutableArray alloc] init];
     browsers_ = [[NSMutableArray alloc] init];
+    parked_ = [NSHashTable weakObjectsHashTable];
     infobar_objects_ = [[NSMutableDictionary alloc] init];
   }
 
@@ -1020,6 +1038,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
 
   // Facade calls from the embedder must never arrive while the facade is
   // inside a Chromium notification (Decision 3).
+  bool InNotification() const { return in_notification_ > 0; }
+
   void CheckNotInNotification(const char* call) {
     CHECK_EQ(in_notification_, 0)
         << "ARKT: facade " << call << " called inside a Chromium notification";
@@ -1159,6 +1179,38 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     Record(event);
   }
 
+  // Parked duplicates (#380): copies held outside every tab strip, closed
+  // with the window they were parked for.
+  void AddParked(ArktFacadeTab* tab) { [parked_ addObject:tab]; }
+  void RemoveParked(ArktFacadeTab* tab) { [parked_ removeObject:tab]; }
+
+  // The copy exists: TabCreated, origin client, not active, as for any
+  // duplicate; ChromiumEngine drops it when it announced the copy already.
+  void RecordParkedCreated(ArktFacadeTab* tab, ArktFacadeBrowser* browser) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindTabCreated;
+    event.tab = tab;
+    event.browser = browser;
+    event.url = tab.url;
+    event.title = tab.title;
+    event.opener = tab.opener;
+    event.origin = tab.origin;
+    event.isActive = NO;
+    Record(event);
+    [tab reportState];
+  }
+
+  // The window closes: its parked copies end first, each with its TabClosed.
+  void CloseParkedOf(ArktFacadeBrowser* browser) {
+    for (ArktFacadeTab* tab in [parked_ allObjects]) {
+      if (tab.browser == browser) {
+        [tab closeParkedWithReason:terminating_
+                                       ? ArktCloseReasonAppTerminating
+                                       : ArktCloseReasonWindowClosing];
+      }
+    }
+  }
+
   // The window's extension action list changed (ToolbarActionsModel, a
   // Chromium notification). One event per window per batch.
   void RecordActionsChanged(ArktFacadeBrowser* browser) {
@@ -1185,6 +1237,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     ++in_notification_;
     ArktFacadeBrowser* handle = HandleForBrowser(browser);
     if (handle) {
+      CloseParkedOf(handle);
       TabStripModel* model = browser->GetTabStripModel();
       if (model) {
         model->RemoveObserver(this);
@@ -1311,6 +1364,16 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
       // handle, same container (Decision 5).
       [handle bindTab:tab browser:browser];
       RecordTabMoved(handle, browser);
+      return;
+    }
+    if (binding_ && binding_.isUnparking) {
+      // A parked copy shown (#380): the shell knows the tab already.
+      handle = binding_;
+      binding_ = nil;
+      tab_handles_[tab] = handle;
+      [handle bindTab:tab browser:browser];
+      [handle seedState];
+      [handle reportState];
       return;
     }
     if (binding_) {
@@ -1475,6 +1538,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   NSMutableArray<ArktFacadeEvent*>* __strong pending_;
   NSMutableArray<ArktFacadeSink*>* __strong sinks_;
   NSMutableArray<ArktFacadeBrowser*>* __strong browsers_;
+  // Parked duplicates still holding contents (weak: the shell owns them).
+  NSHashTable<ArktFacadeTab*>* __strong parked_;
   // The infobar objects the shell holds, by infobar id (unique per run).
   NSMutableDictionary<NSNumber*, ArktFacadeInfobar*>* __strong
       infobar_objects_;
@@ -1890,6 +1955,37 @@ void InsertClientTab(
   [handle insertFinished:YES];
 }
 
+// Clones `source` (its navigation entries) into a parked copy for `handle`
+// (#380): contents outside every tab strip, so extensions neither see nor
+// reach it. A handle whose copy was not made gets its terminal TabClosed.
+void ParkDuplicate(ArktFacadeBrowser* browser_handle,
+                   ArktFacadeTab* source,
+                   ArktFacadeTab* handle) {
+  BrowserWindowInterface* browser = browser_handle.browserInterface;
+  if (!browser) {
+    g_facade->RecordDroppedInsert(handle, browser_handle,
+                                  /*window_gone=*/true);
+    [handle insertFinished:NO];
+    return;
+  }
+  TabStripModel* model = browser->GetTabStripModel();
+  int index = source.tabInterface ? model->GetIndexOfTab(source.tabInterface)
+                                  : TabStripModel::kNoTab;
+  if (index == TabStripModel::kNoTab ||
+      !chrome::CanDuplicateTabAt(browser, index)) {
+    g_facade->RecordDroppedInsert(handle, browser_handle,
+                                  /*window_gone=*/false);
+    [handle insertFinished:NO];
+    return;
+  }
+  std::unique_ptr<content::WebContents> copy =
+      model->GetWebContentsAt(index)->Clone();
+  [handle parkContents:copy.release() in:browser_handle opener:source];
+  LOG(WARNING) << "ARKT: facade duplicate parked outside the tab strip";
+  g_facade->RecordParkedCreated(handle, browser_handle);
+  [handle insertFinished:YES];
+}
+
 // The actions menu of an embedder host's window (Decision 10): it holds the
 // view models of the profile's toolbar actions, runs them and anchors their
 // popups, and is the window's ExtensionsContainer menu, so
@@ -1959,6 +2055,9 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   ArktFacadeBrowser* __weak _pendingBrowser;
   // Calls made while the insert is pending, run in order after it.
   std::vector<base::OnceClosure> _queued;
+  // A parked duplicate's contents, outside every tab strip (#380).
+  std::unique_ptr<content::WebContents> _parked;
+  BOOL _unparking;
 }
 
 @synthesize closingByClient = _closingByClient;
@@ -2041,7 +2140,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   _pending = NO;
   std::vector<base::OnceClosure> queued;
   queued.swap(_queued);
-  if (!inserted || !_tab) {
+  if (!inserted || (!_tab && !_parked)) {
     LOG(WARNING) << "ARKT: facade "
                  << (inserted ? "tab closed at its insert"
                               : "deferred insert dropped")
@@ -2106,11 +2205,100 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 }
 
 - (content::WebContents*)contents {
-  return _tab ? _tab->GetContents() : nullptr;
+  return _tab ? _tab->GetContents() : _parked.get();
+}
+
+- (void)parkContents:(content::WebContents*)contents
+                  in:(ArktFacadeBrowser*)browser
+              opener:(ArktFacadeTab*)opener {
+  _parked.reset(contents);
+  _browser = browser;
+  _opener = opener;
+  if (!_observer) {
+    _observer = std::make_unique<arkt::TabObserver>(self);
+  }
+  _observer->SetContents(contents);
+  [self seedState];
+  arkt::g_facade->AddParked(self);
+}
+
+- (BOOL)isParked {
+  return _parked != nullptr;
+}
+
+- (BOOL)isUnparking {
+  return _unparking;
+}
+
+// Shows a parked copy: now, or from a posted task when this runs inside a
+// Chromium notification or a nested run loop (Decision 3: the strip insert
+// never runs there). The callers that are mutators already run deferred.
+- (BOOL)unpark {
+  if (!_parked) {
+    return _tab != nullptr;
+  }
+  if (arkt::g_facade->InNotification() || arkt::IsInNestedLoop()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         if (!arkt::g_facade->InNotification()) {
+                           [that unpark];
+                         }
+                       },
+                       self));
+    return NO;
+  }
+  ArktFacadeBrowser* home = _browser;
+  BrowserWindowInterface* interface = home ? home.browserInterface : nullptr;
+  if (!interface) {
+    return NO;
+  }
+  // A window that is closing keeps the copy parked: it ends with the window.
+  arkt::ArktBrowserWindow* window =
+      arkt::ArktBrowserWindow::FromBrowser(interface);
+  if ((window && window->IsAttemptingToClose()) ||
+      interface->GetTabStripModel()->closing_all()) {
+    return NO;
+  }
+  arkt::g_facade->RemoveParked(self);
+  // The new tab brings its helpers (favicon driver, session id): observe it
+  // afresh when the insert binds the handle.
+  _observer.reset();
+  _unparking = YES;
+  arkt::g_facade->SetBinding(self);
+  TabStripModel* model = interface->GetTabStripModel();
+  model->InsertWebContentsAt(model->count(), std::move(_parked),
+                             AddTabTypes::ADD_NONE);
+  arkt::g_facade->EndBinding();
+  _unparking = NO;
+  LOG(WARNING) << "ARKT: facade parked copy shown, session id " << _sessionId;
+  return _tab != nullptr;
+}
+
+- (void)closeParkedWithReason:(ArktCloseReason)reason {
+  if (!_parked) {
+    return;
+  }
+  arkt::g_facade->RemoveParked(self);
+  ArktFacadeBrowser* home = _browser;
+  ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+  event.kind = ArktEngineEventKindTabClosed;
+  event.tab = self;
+  event.browser = home;
+  event.closeReason = reason;
+  arkt::g_facade->Record(event);
+  _observer.reset();
+  _parked.reset();
+  _browser = nil;
+  _closing = NO;
+  [_container showContentsView:nil];
 }
 
 - (NSView*)containerView {
   arkt::CheckFacadeEntry();
+  // The copy is about to be shown (a reopened row, a Peek): it joins its
+  // window now, so it loads only from here.
+  [self unpark];
   [self adoptContentsView];
   return _container;
 }
@@ -2238,7 +2426,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 - (BOOL)wouldHoldClose {
   arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
-  if (!contents) {
+  if (!contents || _parked) {
     return NO;
   }
   // TabStripModel::ShouldRunUnloadListenerBeforeClosing: unload-time
@@ -2287,7 +2475,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   // like the mutators; a pending or closed tab has no contents and answers
   // nil.
   arkt::CheckFacadeEntry();
-  arkt::CopyFrame(_pending ? nullptr : self.contents, maxPixelSize,
+  arkt::CopyFrame(_pending || _parked ? nullptr : self.contents, maxPixelSize,
                   completion);
 }
 
@@ -2296,6 +2484,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"navigate"
               work:base::BindOnce(
                        [](ArktFacadeTab* that, GURL target) {
+                         [that unpark];
                          content::WebContents* contents = that.contents;
                          if (!contents) {
                            return;
@@ -2312,6 +2501,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"reload"
               work:base::BindOnce(
                        [](ArktFacadeTab* that) {
+                         [that unpark];
                          if (content::WebContents* contents = that.contents) {
                            contents->GetController().Reload(
                                content::ReloadType::NORMAL, true);
@@ -2324,6 +2514,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"goBack"
               work:base::BindOnce(
                        [](ArktFacadeTab* that) {
+                         [that unpark];
                          content::WebContents* contents = that.contents;
                          if (contents &&
                              contents->GetController().CanGoBack()) {
@@ -2337,6 +2528,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"goForward"
               work:base::BindOnce(
                        [](ArktFacadeTab* that) {
+                         [that unpark];
                          content::WebContents* contents = that.contents;
                          if (contents &&
                              contents->GetController().CanGoForward()) {
@@ -2350,6 +2542,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"goToHistoryOffset"
               work:base::BindOnce(
                        [](ArktFacadeTab* that, int offset) {
+                         [that unpark];
                          content::WebContents* contents = that.contents;
                          if (offset != 0 && contents &&
                              contents->GetController().CanGoToOffset(offset)) {
@@ -2364,6 +2557,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
               work:base::BindOnce(
                        [](ArktFacadeTab* that) {
                          ArktFacadeTab* tab = that;
+                         [tab unpark];
                          if (!tab.tabInterface || !tab.browser) {
                            return;
                          }
@@ -2380,6 +2574,11 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 
 - (ArktCloseResult)closeWithMode:(ArktCloseMode)mode {
   self.closingByClient = YES;
+  if (_parked) {
+    // Never shown, so nothing to unload: the copy just ends.
+    [self closeParkedWithReason:ArktCloseReasonClient];
+    return ArktCloseResultClosed;
+  }
   BOOL not_now = [self
       runOrQueue:"close"
             work:base::BindOnce(
@@ -2418,6 +2617,9 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 
 - (void)focus {
   arkt::CheckFacadeEntry();
+  if (_parked) {
+    return;
+  }
   if (content::WebContents* contents = self.contents) {
     contents->Focus();
   }
@@ -2437,6 +2639,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                        [](ArktFacadeTab* that,
                           ArktFacadeBrowser* destination) {
                          ArktFacadeTab* tab = that;
+                         [tab unpark];
                          ArktFacadeBrowser* source =
                              static_cast<ArktFacadeBrowser*>(tab.browser);
                          if (!tab.tabInterface || !source || !destination ||
@@ -2481,10 +2684,10 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
       return nil;
     }
   }
-  // The copy (navigation entries, the current one loading) is inserted next
-  // to this tab and reported with TabCreated, origin client, like createTab:
-  // now, from a posted task inside a nested run loop, or right after this
-  // tab's own pending insert.
+  // The copy (navigation entries, never loaded until shown) is parked outside
+  // every tab strip (#380) and reported with TabCreated, origin client, like
+  // createTab: now, from a posted task inside a nested run loop, or right
+  // after this tab's own pending insert. It joins its window when shown.
   ArktFacadeTab* handle =
       [[ArktFacadeTab alloc] initWithOrigin:ArktTabOriginClient];
   base::OnceClosure work = base::BindOnce(
@@ -2494,20 +2697,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
         // moved since the call (#258).
         ArktFacadeBrowser* target =
             static_cast<ArktFacadeBrowser*>(source.browser) ?: original;
-        arkt::InsertClientTab(
-            target, handle,
-            base::BindOnce(
-                [](ArktFacadeTab* source, BrowserWindowInterface* browser) {
-                  int index = source.tabInterface
-                                  ? browser->GetTabStripModel()->GetIndexOfTab(
-                                        source.tabInterface)
-                                  : TabStripModel::kNoTab;
-                  if (index != TabStripModel::kNoTab &&
-                      chrome::CanDuplicateTabAt(browser, index)) {
-                    chrome::DuplicateTabAt(browser, index);
-                  }
-                },
-                source));
+        arkt::ParkDuplicate(target, source, handle);
       },
       browser, self, handle);
   if (_pending) {

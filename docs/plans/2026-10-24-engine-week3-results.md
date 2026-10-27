@@ -3742,3 +3742,78 @@ while the test app was the frontmost process, pointer moved before each press)
 - Cleanup: the test copy, the throwaway data and extensions, `embed-400i` and the derived data on the Chromium disk are
   removed. `lsregister -u` on the three paths (the copy, its Aperitif alerts helper, and the `embed-400i` product) left
   `lsregister -dump` with 0 records for `dev.arkt.Arkt.try400i`.
+
+## #380: parked closed-tab copies hidden from chrome.tabs
+
+Date 2026-10-27. Branch `engine/380-hide-parked-tabs` off `main` at `5c4d696`. Plan: the issue body. The pull request is `Closes #380`.
+
+### Seam chosen: no patch, no window
+
+A parked copy (`EngineClient.duplicateTab`, #378) is now a bare `WebContents` clone held by its `ArktFacadeTab` handle **outside every tab
+strip**. Extensions reach tabs only through tab strips (`WindowControllerList`, `TabsEventRouter`, `ExtensionTabUtil::GetTabById`), so
+the copy is not listed by `tabs.query` or `windows.get(populate)`, fires no `chrome.tabs` event, and has no tab id to guess. It joins its
+window (`TabStripModel::InsertWebContentsAt`, not active) the first time the shell shows it: `containerView`, `activate`, `navigate`,
+`reload`, back, forward, history jump or `moveToBrowser` on the handle. Until then it never loads. Closing a parked copy, or its window
+closing, destroys the clone and reports `TabClosed` (`client`, `windowClosing`, `appTerminating`); a window's copies end before its
+`WindowClosed`.
+
+Why not the hidden holder window the issue names first. A devtools-type Browser is the only type `ExtensionTabUtil::BrowserSupportsTabs`
+and `TabsEventRouter::ShouldTrackBrowser` leave out, and it is not enough alone: `ExtensionTabUtil::GetTabById` walks every
+`WindowControllerList` entry with no type filter, and `TabsReloadFunction` and `TabsGetFunction` do not check
+`BrowserSupportsTabs` (only `tabs.update` does), so an extension that guesses the id still reloads a tab in the holder. Closing that gap
+needs `WindowControllerList::RemoveExtensionWindow` on the holder, a hidden `ArktBrowserWindow` host for a devtools Browser (the
+factory returns a Views window for that type), an unannounced window in the facade and per-window cleanup, which is more surface than
+leaving the copy out of any strip. No Chromium patch: `.patches` 9 = `git rev-list --count 156.0.8078.48..arkt` 9. Facade header
+unchanged, `cmp` of both copies identical. `ArktFacadeTab` gains private methods only.
+
+### Tests first
+
+- `engine/test-extensions/parked-probe` (load-unpacked fixture, `tabs` permission): records `onCreated`, `onRemoved`, `onAttached`,
+  `onDetached`, `onActivated`; `report()` counts `tabs.query`, `windows.getAll({populate: true})` and the ids `tabs.get`, `tabs.update` and
+  `tabs.reload` reach when it guesses ids near the listed ones (it skips listed tabs for update and reload).
+- `ChromiumEngineScriptTests.duplicateIsParkedUntilItIsShown` (scripted facade now models the parked copy): red against the old
+  duplicate (active, loading at once: `engine.activeTab(in:)` was the copy), green after. Contract rule 10 gains: the copy is not active,
+  and the contract shows (activates) it before it waits for the copy's load.
+
+### Real app (Engine app on `out/Spike`, bundle id `dev.arkt.Arkt.try380` (own id), scratch folder on the internal disk, throwaway shell data folder, profile and defaults suite, `--use-mock-keychain`, the probe extension, loopback pages on `127.0.0.1:18380`, keys and clicks only while the test app was the frontmost process)
+
+Two tabs (`b` with a history of `a`, then `b`; `c`), Cmd-W on `c`:
+
+| | before (old build) | after |
+|---|---|---|
+| `tabs.query` count, user has 1 tab | 2 (`[b, copy of c]`, ids 800669760, 800669762) | 1 (`[b]`) |
+| `windows.getAll(populate)` ids | same as query | same as query |
+| events since the close | `onCreated` 1, `onRemoved` 1, `onActivated` 2 | `onCreated` 0, `onRemoved` 1, `onActivated` 1 |
+| ids reached by guessing (`get`, `update`, `reload`) outside the listed ones | none | none (the copy has no tab id until shown) |
+
+Reopen (File > Reopen Closed Tab): the copy joined the window, `tabs.query` listed 2 tabs, `onCreated` 1 (the page appears as a new
+tab), the page was `c.html`. History: `c` navigated to `a` (history length 2), closed and reopened: `history.length` 2 and `history.back()`
+returned to `c.html`. Log: `facade duplicate parked outside the tab strip` at the close, `facade parked copy shown` at the reopen. A
+Close Window with parked copies, and a SIGTERM (by PID) with one parked copy: no `Check failed`, no `FATAL`, process ended, no new
+crash report. In-app contract runner (`--arkt-engine-contract --arkt-engine-test-api`, tabs probe): rule 10 PASS, `18/21` before and
+after; rules 19 to 21 fail on both builds because the runner has no `raiseDialog`, `raisePermission` or `raiseInfobar` driver (they
+report NOT-APPLICABLE), unrelated to this change.
+
+### Verification
+
+- `swift test --skip ShellKitGUITests` in ShellKit: 1469 passed (814, 38, 43, 4, 145, 49, 256, 101, 19), 0 failed: the previous total
+  plus 2 new tests. ArktCore `swift test`: 429 passed (144, 117, 70, 98), unchanged.
+- `nice -n 15 autoninja -C out/Spike chrome -j 4`: `The build has finished successfully.` Engine app: `xcodegen generate`, then `xcodebuild
+  -scheme ArktShell -configuration Engine`: `BUILD SUCCEEDED`.
+- GUI tests (`ShellKitGUITests`) were not run: the FakeEngine and InMemoryEngine they use are unchanged.
+
+### Review follow-up
+
+Showing a parked copy (`-unpark`) now runs from a posted task when it is reached inside a Chromium notification or a nested run loop
+(Decision 3), and keeps the copy parked while its window is closing (it ends with the window). `parkedCopyEndsWithItsWindowAndIsNotShownAfterwards`
+is the scripted case. Real-app check repeated (close: `tabs.query` 1, `onCreated` 0; reopen: 2 tabs, `onCreated` 1, history length 2, Back works).
+
+### Deviations and limits
+
+- A duplicate is no longer "next to this one" in the window's tab order and not active until shown; the header comment on
+  `-duplicate` was left as is (both header copies must stay identical) and rule 10 in `EngineContract` says so.
+- A parked copy is still a DevTools target (`type: other` in the remote-debugging target list), so an extension with the `debugger`
+  permission can list and attach to it through `chrome.debugger.getTargets`; `chrome.tabs`, `chrome.windows` and `chrome.webNavigation`
+  cannot. Not changed here.
+- Peek (a closed Peek reopens over its source) was not driven in the real app; it takes the same `containerView` then `activate` path.
+- The extension sees a reopened page as a new tab (`onCreated`, a new id), not as the tab it saw close.

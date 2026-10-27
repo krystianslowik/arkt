@@ -178,7 +178,8 @@ public struct EngineHarness {
 ///    jumps across multiple entries (`-2` = two steps back, `+2` = two steps forward); `0` or out-of-range offsets do
 ///    nothing (#81, GS-024).
 /// 10. `duplicateTab(_:)` creates a new tab with the source tab's URL, title and back/forward history (#81, BH-027,
-///     GS-026); nil for an unknown or closed tab.
+///     GS-026); nil for an unknown or closed tab. The copy is parked until it is shown (#380): it is not active, it
+///     loads only once activated (or navigated, or moved), and an extension never sees it in the meantime.
 /// 11. A window from `createWindow(host:)` is listed in `windowIDs` and announced with `.windowOpened`; every tab's
 ///     snapshot names its window; `closeWindow` (or the host's `onCloseRequested`) closes its tabs
 ///     (`.tabClosed(reason: .windowClosing)` each) and then reports `.windowClosed` with reason `.userClose`. A window
@@ -490,6 +491,13 @@ public enum EngineContract {
     let copy = try requireValue(engine.duplicateTab(id), "duplicateTab of a live tab")
     try require(copy != id && engine.tabIDs == [id, copy], "duplicate must be listed after original: \(engine.tabIDs)")
     try require(recorder.events(for: copy).first == .tabCreated(copy), "first event for duplicate must be tabCreated")
+    // #380: a duplicate is a parked copy. It never takes the window's active tab and loads only once shown, so
+    // the contract shows it (activates it) before it waits for the load.
+    try require(engine.snapshot(of: copy)?.isActive != true, "a duplicate must not take the active tab")
+    engine.activateTab(copy)
+    if engine.snapshot(of: copy)?.window != nil {
+      try await waitUntil(timeout: .seconds(10)) { engine.snapshot(of: copy)?.isActive == true }
+    }
     try await h.settle(engine, copy)
     let copySnap = try requireValue(engine.snapshot(of: copy), "duplicate snapshot")
     try require(copySnap.url == second && copySnap.canGoBack && copySnap.canGoForward,
