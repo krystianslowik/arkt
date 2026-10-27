@@ -74,7 +74,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   let panel = CommandBarPanel()
   let barView = CommandBarView()
-  /// The light dim over the parent window while the bar is open.
+  /// The light dim over the parent window's content while the bar is open.
   let scrim = CommandBarScrim()
   /// The appearance the bar and its cells were last drawn in (the parent window's); a show in another one re-renders.
   private var cellFlavor: ThemeFlavor?
@@ -140,10 +140,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public func prewarm() {
     cellScale = backingScale
     applyAppearance(force: true)
-    if let parent {
-      scrim.cover(parent)
-      parent.addChildWindow(scrim, ordered: .above)   // ordered in for good, at alpha 0, like the panel
-    }
+    if let parent { scrim.attach(to: parent) }        // in for good, at opacity 0, like the panel
     results = CommandBarResults.make(query: "warm.example", openTabs: [
       .init(node: UUID(), title: "warm", url: URL(string: "https://warm.example")!),
     ])
@@ -175,8 +172,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     firstFrameLink?.invalidate()
     firstFrameLink = nil
     hide(restoreFocus: false)
-    parent?.removeChildWindow(scrim)
-    scrim.orderOut(nil)
+    scrim.removeFromSuperview()
     panel.orderOut(nil)
   }
 
@@ -216,7 +212,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       panel.orderFrontRegardless()
     }
     isVisible = true                                // before makeKey: windowDidBecomeKey reads it
-    scrim.cover(parent)
+    scrim.attach(to: parent)
     scrim.isPresented = true
     panel.isPresented = true
     panel.makeKey()
@@ -326,7 +322,6 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// ordinary moves and resizes while closed do nothing.
   @objc private func parentFrameDidChange(_ notification: Notification) {
     guard let parent else { return }
-    scrim.cover(parent)
     if isVisible {
       setPanelFrame(frame(in: parent), display: false)
       refreshCellScaleIfNeeded()

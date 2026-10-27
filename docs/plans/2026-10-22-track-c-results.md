@@ -2547,3 +2547,42 @@ TDD: failing tests first (compile errors counted), then implementation.
   it behind `siteSearchProvider`.
 - `CommandBarGeometry.noticeHeight` (32) is TODO(measure), like the other unmeasured chrome constants
   (open question 2).
+
+## Command bar, hybrid design, part 1: restyle and layout (#371, supersedes draft #322)
+
+Part 1 of two pull requests for #371 (`Refs #371`). It carries #322's eight commits (authorship kept) onto current
+`main`, then restyles the bar to `design/command-bar/`. Part 2 (filters, Tab rule, Esc, empty-state groups, motion,
+Cmd-Shift-V) stacks on this branch.
+
+### What changed
+
+- `CommandBarGeometry` is the README's table: 680 wide, 16 corners, 58 field, 40 rows, 9 selected radius, 6 list
+  padding, 34 hint strip, top edge at 22 % of the window (176 of 800) so results grow downward, at most five rows
+  without scrolling (seven in the empty state, group headers 26 each, used by part 2). Little Arkt keeps the old
+  look: its metrics, tokens and row views moved to `LittleArktGeometry`, `ShellTokens.lookup*` and
+  `LittleArktLookupRows`.
+- Tokens: `ShellTokens.commandBar*` are light and dark pairs (glass, opaque surface, text, secondary, tertiary,
+  divider, edges, selected row, key cap, scrim, pill well, pill on, pill on text, tick). `ShellTokensContrastTests`
+  gained seven tests: text on the opaque surface and on every fill a row puts under it (selected row, key cap, pill
+  well) at 4.5:1 in both appearances, the selected pill and its count, graphite on mustard above 7:1, and mustard
+  only as a fill.
+- View: glass surface (`NSVisualEffectView`, opaque under Reduce Transparency), magnifier, 22 pt field, filter pills
+  with per-filter counts (hidden for an empty query), Esc key cap (closes the bar), hint strip, scope chip and notice
+  kept. The panel no longer forces dark: the bar, its cells and the scrim take the window behind it, light or dark.
+- Scrim: a click-through child window of the parent, black 28 % in dark and graphite 10 % in light, ordered in
+  once at alpha 0 like the panel, so a show orders no window.
+- Rows by the README's anatomy: 20 pt slot with a 16 pt symbol, title with the query match in semibold, secondary
+  URL, right-aligned trailing caption and key caps (Return on the selected row, action shortcuts). The selected row's
+  fill and its 3 pt mustard tick are one view behind the rows (`CommandBarSelectionIndicator`), instant here.
+- Accessibility: dialog group "Command bar"; rows read "<title>, <host>, <kind>, <k> of <n>"; pills are a tab group
+  announcing "<name>, <count> results, selected"; new `AXID`s `commandBar.filters`, `commandBar.filter.<name>`,
+  `commandBar.hints`, `commandBar.escape`. The UI test harness matches a row by title prefix.
+- Site-search rows read "Search <site> for <query>"; placeholder "Search or enter address".
+
+### Deviations from the design
+
+- The design's `--ink-3` (.36 / .44) and the selected pill's count at 55 % fail the README's own 4.5:1 rule on the
+  surfaces; the tokens are raised (tertiary .62 dark, .68 light; count 75 %), found by the new contrast tests.
+- Favicons are not in the bar yet (the symbol slot carries a generic symbol); history rows have no source (no
+  history store), so the History pill counts 0. Recent tabs with relative times and the preview column are #372 and
+  part 2.

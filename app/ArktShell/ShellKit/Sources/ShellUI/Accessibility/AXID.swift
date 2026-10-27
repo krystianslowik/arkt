@@ -135,9 +135,10 @@ public enum AXID {
     /// The search-suggestion notice (BH-113); present until dismissed.
     public static let notice = "commandBar.notice"
     public static let noticeDismiss = "commandBar.notice.dismiss"
-    /// The filter pills' tab group (#371); each pill is `filter(_:)`.
+    /// The filter pills' tab group (#371); each pill is `filter(_:)` with the pill's name ("All", "Tabs", "History",
+    /// "Actions"): `commandBar.filter.all`.
     public static let filters = "commandBar.filters"
-    public static func filter(_ filter: CommandBarFilter) -> String { "commandBar.filter.\(filter.title.lowercased())" }
+    public static func filter(_ name: String) -> String { "commandBar.filter.\(name.lowercased())" }
     /// The hint strip along the bottom (#371).
     public static let hints = "commandBar.hints"
     /// The Esc key cap at the right end of the field row; it closes the bar.

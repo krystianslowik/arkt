@@ -117,13 +117,13 @@ final class CommandBarHintStrip: NSView {
         x = cap.frame.maxX + 4
       }
       let label = labels[range.label]
-      let size = label.intrinsicContentSize
+      let size = label.fittingSize
       label.frame = NSRect(x: x + 2, y: ((bounds.height - ceil(size.height)) / 2).rounded(),
                            width: ceil(size.width), height: ceil(size.height))
       x = label.frame.maxX + 16
     }
     let trailingWidth = max(0, bounds.width - 16 - x)
-    let th = ceil(trailingLabel.intrinsicContentSize.height)
+    let th = ceil(trailingLabel.fittingSize.height)
     trailingLabel.frame = NSRect(x: bounds.width - 16 - trailingWidth, y: ((bounds.height - th) / 2).rounded(),
                                  width: trailingWidth, height: th)
   }

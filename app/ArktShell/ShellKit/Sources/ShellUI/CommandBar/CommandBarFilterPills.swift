@@ -44,7 +44,7 @@ final class CommandBarFilterPills: NSView {
       }
       setAccessibilityElement(true)
       setAccessibilityRole(.radioButton)
-      setAccessibilityIdentifier(AXID.CommandBar.filter(filter))
+      setAccessibilityIdentifier(AXID.CommandBar.filter(filter.title))
     }
 
     @available(*, unavailable)
@@ -53,8 +53,8 @@ final class CommandBarFilterPills: NSView {
     override var isFlipped: Bool { true }
 
     var fittingWidth: CGFloat {
-      let countWidth = count.isHidden ? 0 : CommandBarFilterPills.titleCountGap + ceil(count.intrinsicContentSize.width)
-      return 2 * CommandBarFilterPills.pillPadding + ceil(title.intrinsicContentSize.width) + countWidth
+      let countWidth = count.isHidden ? 0 : CommandBarFilterPills.titleCountGap + ceil(count.fittingSize.width)
+      return 2 * CommandBarFilterPills.pillPadding + ceil(title.fittingSize.width) + countWidth
     }
 
     func applyColors() {
@@ -69,11 +69,11 @@ final class CommandBarFilterPills: NSView {
     override func layout() {
       super.layout()
       var x = CommandBarFilterPills.pillPadding
-      let th = ceil(title.intrinsicContentSize.height)
-      title.frame = NSRect(x: x, y: (bounds.height - th) / 2, width: ceil(title.intrinsicContentSize.width), height: th)
+      let th = ceil(title.fittingSize.height)
+      title.frame = NSRect(x: x, y: (bounds.height - th) / 2, width: ceil(title.fittingSize.width), height: th)
       x = title.frame.maxX + CommandBarFilterPills.titleCountGap
-      let ch = ceil(count.intrinsicContentSize.height)
-      count.frame = NSRect(x: x, y: (bounds.height - ch) / 2, width: ceil(count.intrinsicContentSize.width), height: ch)
+      let ch = ceil(count.fittingSize.height)
+      count.frame = NSRect(x: x, y: (bounds.height - ch) / 2, width: ceil(count.fittingSize.width), height: ch)
     }
   }
 

@@ -57,13 +57,13 @@ final class CommandBarKeyCapView: NSView {
 
   /// The key cap's size: at least square, wider for a word.
   var size: NSSize {
-    let width = ceil(label.intrinsicContentSize.width) + 2 * Self.horizontalPadding
+    let width = ceil(label.fittingSize.width) + 2 * Self.horizontalPadding
     return NSSize(width: max(Self.minWidth, width), height: Self.height)
   }
 
   override func layout() {
     super.layout()
-    let h = ceil(label.intrinsicContentSize.height)
+    let h = ceil(label.fittingSize.height)
     label.frame = NSRect(x: 0, y: (bounds.height - h) / 2, width: bounds.width, height: h)
   }
 

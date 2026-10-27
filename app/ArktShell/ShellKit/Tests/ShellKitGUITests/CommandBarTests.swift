@@ -98,7 +98,7 @@ final class CommandBarTests: XCTestCase {
     }
   }
 
-  func testGeometryAndDarkSurface() async throws {
+  func testGeometryAndFollowsTheWindowAppearance() async throws {
     let window = try XCTUnwrap(shell.window)
     window.setFrame(NSRect(x: 100, y: 100, width: 1800, height: 1072), display: true)
     bar.toggle(.newTab)
@@ -108,11 +108,13 @@ final class CommandBarTests: XCTestCase {
     // The window server may clamp the 1800 x 1072 request to the screen, so expect from the actual frame.
     // Tolerance 1 pt: panel origins snap to backing pixels.
     let parent = window.frame
-    XCTAssertEqual(panel.frame.width, min(766, parent.width - 48), accuracy: 1)
+    XCTAssertEqual(panel.frame.width, min(680, parent.width - 48), accuracy: 1)
     XCTAssertEqual(panel.frame.midX, parent.midX, accuracy: 1)
-    XCTAssertEqual(panel.frame.maxY, parent.maxY - 0.34 * parent.height, accuracy: 1)
+    XCTAssertEqual(panel.frame.maxY, parent.maxY - 0.22 * parent.height, accuracy: 1)
     XCTAssertEqual(panel.frame.height, CommandBarGeometry.inputHeight)          // empty Cmd-T: input row only
-    XCTAssertEqual(panel.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+    // The surface follows the window behind it, light or dark (the panel no longer forces dark).
+    let expected: NSAppearance.Name = ThemeFlavor(appearance: window.effectiveAppearance) == .dark ? .darkAqua : .aqua
+    XCTAssertEqual(panel.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]), expected)
     if NSApp.isActive { XCTAssertTrue(panel.isKeyWindow) }   // a test runner process may not activate
     XCTAssertTrue(panel.firstResponder === bar.barView.field.currentEditor())
   }
@@ -337,13 +339,13 @@ final class CommandBarTests: XCTestCase {
     let table = bar.barView.table
     XCTAssertGreaterThan(table.numberOfRows, 1)
     let cell = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CommandBarCellView)
-    cell.title.stringValue = "marker"                              // a reload would reconfigure the cell
+    cell.toolTip = "marker"                                        // a reload would make a new cell view
     table.selectRowIndexes([1], byExtendingSelection: false)
     bar.toggle(.newTab)
     bar.toggle(.newTab)
     let again = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CommandBarCellView)
     XCTAssertTrue(again === cell, "no reload: the same cell view")
-    XCTAssertEqual(again.title.stringValue, "marker")
+    XCTAssertEqual(again.toolTip, "marker")
     XCTAssertEqual(table.selectedRow, 0, "selection still resets to the first result")
     bar.toggle(.newTab)
   }

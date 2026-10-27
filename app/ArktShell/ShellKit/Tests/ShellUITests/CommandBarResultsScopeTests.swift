@@ -57,6 +57,15 @@ struct CommandBarResultsScopeTests {
     #expect(results.first?.accessibilityCaption == "Action")
   }
 
+  @Test func actionRowsCarryTheirShortcutKeyCaps() {
+    let results = CommandBarResults.make(query: "", input: input {
+      $0.scope = .actions
+      $0.actions = [CommandBarAction(id: "newSpace", title: "New Space", keyCaps: ["\u{2318}", "\u{21E7}", "N"]),
+                    CommandBarAction(id: "nextSpace", title: "Next Space")]
+    })
+    #expect(results.map(\.keyCaps) == [["\u{2318}", "\u{21E7}", "N"], []])
+  }
+
   @Test func actionScopeFiltersByQuery() {
     let results = CommandBarResults.make(query: "tool", input: input {
       $0.scope = .actions
@@ -80,6 +89,7 @@ struct CommandBarResultsScopeTests {
     guard case .siteSearch(let url) = results.first?.kind else { Issue.record("no siteSearch row"); return }
     #expect(url.absoluteString == "https://www.youtube.com/results?search_query=lofi")
     #expect(results.first?.subtitle == "Search YouTube")
+    #expect(results.first?.title == "Search YouTube for lofi", "the design's wording: Search <site> for <query>")
     #expect(results.first?.accessibilityCaption == "Search")
   }
 
