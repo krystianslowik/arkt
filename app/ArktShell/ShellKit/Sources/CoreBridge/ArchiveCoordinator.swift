@@ -75,6 +75,8 @@ public final class ArchiveCoordinator {
   private let store: any ArchiveStoring
   private let now: @MainActor () -> Date
   private let flushTimeout: Duration
+  /// False only in tests: `flushBlocking` then waits for the write instead of racing `flushTimeout`.
+  private let blockingFlushIsBounded: Bool
   private let sleep: Sleep
 
   /// Store operations in the order they must reach the store; only the writer sends them.
@@ -104,12 +106,14 @@ public final class ArchiveCoordinator {
     store: any ArchiveStoring,
     now: @escaping @MainActor () -> Date = { Date() },
     flushTimeout: Duration = ArchiveCoordinator.defaultFlushTimeout,
+    blockingFlushIsBounded: Bool = true,
     sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
   ) {
     self.source = source
     self.store = store
     self.now = now
     self.flushTimeout = flushTimeout
+    self.blockingFlushIsBounded = blockingFlushIsBounded
     self.sleep = sleep
   }
 
@@ -256,7 +260,7 @@ public final class ArchiveCoordinator {
       }
     }
     let call = submit { store in await Self.send(operations, to: store) }
-    let sent = BlockingFlush.run(timeout: flushTimeout) { await call.value } ?? false
+    let sent = BlockingFlush.run(timeout: blockingFlushIsBounded ? flushTimeout : nil) { await call.value } ?? false
     if sent, writer == nil {
       outbox.removeAll()
       onPendingItemsChange?()
