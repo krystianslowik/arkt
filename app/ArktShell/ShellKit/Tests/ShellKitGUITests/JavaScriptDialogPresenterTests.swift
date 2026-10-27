@@ -387,4 +387,24 @@ final class JavaScriptDialogPresenterTests: XCTestCase {
     XCTAssertEqual(panel.panel.frame.width, expectedWidth(300))
     XCTAssertTrue(engine.dialogAnswers.isEmpty)
   }
+
+  func testAPromptKeepsItsTypedTextWhenHiddenAndShownAgain() throws {
+    let id = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .prompt, message: "Name?", defaultPromptText: "Ada"))
+    let hiddenPanel = try XCTUnwrap(presenter.panel(for: tab))
+    hiddenPanel.view.inputView?.field.stringValue = "Grace"
+
+    shown = false
+    presenter.refresh()
+    XCTAssertNil(presenter.panel(for: tab), "the page is off screen: no panel")
+    XCTAssertEqual(presenter.pending[tab]?.id, id, "still pending")
+    XCTAssertTrue(engine.dialogAnswers.isEmpty)
+
+    shown = true
+    presenter.refresh()
+    let panel = try XCTUnwrap(presenter.panel(for: tab))
+    XCTAssertEqual(panel.inputText, "Grace", "the text typed before the hide is still there")
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(engine.dialogAnswers.map(\.id), [id], "exactly one answer")
+    XCTAssertEqual(engine.dialogAnswers.first?.userInput, "Grace")
+  }
 }

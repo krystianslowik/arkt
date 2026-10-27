@@ -185,6 +185,8 @@ final class JavaScriptDialogHandoffTests: XCTestCase {
 
       XCTAssertNil(panel.panel.parent, "\(kind)")
       XCTAssertNil(panel.onAnswer, "\(kind)")
+      // `closeAll` takes panels down and leaves `pending` set (the engine ends the dialog when the window's tabs close;
+      // this test leaves the tab open), so only the panels are checked on the closed window.
       assertNoPanelAnywhere(scene, "\(kind)", dialogEnded: false)
     }
   }
