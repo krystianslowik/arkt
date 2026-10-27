@@ -7,10 +7,10 @@ extension ShellWindowController {
   /// The state to save now; nil without a window.
   func currentSessionState() -> WindowSessionState? {
     guard let window else { return nil }
-    let tab = currentNode
-    return WindowSessionState(frame: window.frame, screenFrame: window.screen?.frame,
-                              space: sidebarController.currentSpace, currentTab: tab,
-                              selectedTabs: sidebarController.selectedTabs)
+    return .capturing(frame: window.frame, windowedFrame: frameBeforeFullScreen,
+                      isFullScreen: window.styleMask.contains(.fullScreen), screenFrame: window.screen?.frame,
+                      space: sidebarController.currentSpace, currentTab: currentNode,
+                      selectedTabs: sidebarController.selectedTabs)
   }
 
   /// Saves the window's state, unless this is not the restored window, a quit froze saving, or the window is going

@@ -165,6 +165,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   let sessionStore: WindowSessionStore
   /// False for a window that is not the one a relaunch restores, and while a quit has written the final state.
   var savesSession = false
+  /// The window's frame when it last entered full screen, saved in place of the screen-sized frame (#116).
+  var frameBeforeFullScreen: CGRect?
   /// Scrolls the sidebar to a row a keyboard command landed on, with the overflow pill (BH-018).
   public let sidebarReveal = SidebarRevealer()
   /// How Cmd-1 ... Cmd-9 count (BH-014, BH-015). Defaults until the Settings window exists.
@@ -796,6 +798,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   // AppKit resets the standard buttons on each of these.
   public func windowDidResize(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidEndLiveResize(_ notification: Notification) { reapplyTrafficLights() }
+  public func windowWillEnterFullScreen(_ notification: Notification) { frameBeforeFullScreen = window?.frame }
   public func windowWillExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidBecomeKey(_ notification: Notification) {

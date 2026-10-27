@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 
 /// What a relaunch restores of the main window (#116): its frame and screen, the Space it showed, the tab that was
 /// current and each Space's selected tab. Ids that no longer exist are ignored when it is applied, so a deleted Space
@@ -11,14 +12,62 @@ public struct WindowSessionState: Codable, Equatable, Sendable {
   /// The shown tab; a Favorite when no Space tab was current.
   public var currentTab: NodeID?
   public var selectedTabs: [SpaceID: NodeID]
+  /// The window was in full screen; `frame` is then the windowed frame from before. Not re-entered at launch.
+  public var isFullScreen: Bool
 
   public init(frame: CGRect, screenFrame: CGRect? = nil, space: SpaceID? = nil, currentTab: NodeID? = nil,
-              selectedTabs: [SpaceID: NodeID] = [:]) {
+              selectedTabs: [SpaceID: NodeID] = [:], isFullScreen: Bool = false) {
+    self.isFullScreen = isFullScreen
     self.frame = frame
     self.screenFrame = screenFrame
     self.space = space
     self.currentTab = currentTab
     self.selectedTabs = selectedTabs
+  }
+}
+
+extension WindowSessionState {
+  /// A state saved before `isFullScreen` existed still loads.
+  public init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    frame = try values.decode(CGRect.self, forKey: .frame)
+    screenFrame = try values.decodeIfPresent(CGRect.self, forKey: .screenFrame)
+    space = try values.decodeIfPresent(SpaceID.self, forKey: .space)
+    currentTab = try values.decodeIfPresent(NodeID.self, forKey: .currentTab)
+    selectedTabs = try values.decodeIfPresent([SpaceID: NodeID].self, forKey: .selectedTabs) ?? [:]
+    isFullScreen = try values.decodeIfPresent(Bool.self, forKey: .isFullScreen) ?? false
+  }
+
+  /// The state of a window now. In full screen the window's own frame is the whole screen, so the frame from before
+  /// entering full screen is saved instead (the screen frame when none was seen).
+  static func capturing(frame: CGRect, windowedFrame: CGRect?, isFullScreen: Bool, screenFrame: CGRect?,
+                        space: SpaceID?, currentTab: NodeID?, selectedTabs: [SpaceID: NodeID]) -> WindowSessionState {
+    WindowSessionState(frame: isFullScreen ? (windowedFrame ?? frame) : frame, screenFrame: screenFrame,
+                       space: space, currentTab: currentTab, selectedTabs: selectedTabs, isFullScreen: isFullScreen)
+  }
+}
+
+/// Which kind of window is being built, for deciding which one owns the session.
+public enum SessionWindowOrigin: Equatable, Sendable {
+  /// The shell opened it (launch, New Window).
+  case shell
+  /// The engine asked for it on a Dock click or a menu command, with no opener.
+  case dockReopen
+  /// Any other engine request: a startup URL, an extension's window, a page's popup or new window.
+  case engineRequested
+  /// Dragged out of a window's sidebar.
+  case dragOut
+}
+
+/// The session (frame, Space, tabs) belongs to the main window the shell opens: the first one, and the next one when
+/// that window has closed. A window the engine builds for its own request never owns it.
+enum SessionWindowPolicy {
+  static func origin(for request: EngineWindowRequest) -> SessionWindowOrigin {
+    request.kind == .reopen && request.openerWindow == nil ? .dockReopen : .engineRequested
+  }
+
+  static func takesSession(_ origin: SessionWindowOrigin, ownerIsAlive: Bool) -> Bool {
+    !ownerIsAlive && (origin == .shell || origin == .dockReopen)
   }
 }
 

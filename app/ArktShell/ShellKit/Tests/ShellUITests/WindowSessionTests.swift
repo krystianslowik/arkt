@@ -1,4 +1,5 @@
 import CoreGraphics
+import EngineAPI
 import Foundation
 import Testing
 @testable import ShellUI
@@ -170,5 +171,52 @@ struct WindowSessionTests {
     #expect(place(CGRect(x: 0, y: 0, width: 900, height: 600), in: []) == nil)
     #expect(place(.zero, in: [Self.main]) == nil)
     #expect(place(CGRect(x: CGFloat.infinity, y: 0, width: 900, height: 600), in: [Self.main]) == nil)
+  }
+
+  // MARK: Which window owns the session
+
+  private func request(_ kind: EngineWindowRequestKind, opener: EngineWindowID? = nil,
+                       bounds: CGRect? = nil) -> EngineWindowRequest {
+    EngineWindowRequest(kind: kind, openerWindow: opener, bounds: bounds, profile: EngineProfileID("default"))
+  }
+
+  @Test func engineRequestedWindowsNeverOwnTheSession() {
+    for kind in [EngineWindowRequestKind.extension, .page, .startupURL] {
+      let origin = SessionWindowPolicy.origin(for: request(kind, bounds: CGRect(x: 0, y: 0, width: 400, height: 300)))
+      #expect(origin == .engineRequested)
+      #expect(!SessionWindowPolicy.takesSession(origin, ownerIsAlive: false))
+    }
+    // A page's new window without features is a reopen request with an opener.
+    #expect(SessionWindowPolicy.origin(for: request(.reopen, opener: EngineWindowID())) == .engineRequested)
+  }
+
+  @Test func theShellsOwnWindowsAndADockReopenCanOwnItWhenNoneDoes() {
+    #expect(SessionWindowPolicy.origin(for: request(.reopen)) == .dockReopen)
+    for origin in [SessionWindowOrigin.shell, .dockReopen] {
+      #expect(SessionWindowPolicy.takesSession(origin, ownerIsAlive: false))
+      #expect(!SessionWindowPolicy.takesSession(origin, ownerIsAlive: true), "a live owner keeps it")
+    }
+    #expect(!SessionWindowPolicy.takesSession(.dragOut, ownerIsAlive: false))
+  }
+
+  // MARK: Full screen
+
+  @Test func aFullScreenWindowSavesItsWindowedFrame() {
+    let windowed = CGRect(x: 100, y: 100, width: 900, height: 600)
+    let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    let state = WindowSessionState.capturing(frame: screen, windowedFrame: windowed, isFullScreen: true,
+                                             screenFrame: screen, space: nil, currentTab: nil, selectedTabs: [:])
+    #expect(state.frame == windowed)
+    #expect(state.isFullScreen)
+    let plain = WindowSessionState.capturing(frame: windowed, windowedFrame: nil, isFullScreen: false,
+                                             screenFrame: screen, space: nil, currentTab: nil, selectedTabs: [:])
+    #expect(plain.frame == windowed)
+    #expect(!plain.isFullScreen)
+  }
+
+  @Test func aStateSavedBeforeTheFullScreenFlagStillLoads() throws {
+    let old = #"{"frame":[[10,20],[800,600]],"selectedTabs":[]}"#
+    let state = try JSONDecoder().decode(WindowSessionState.self, from: Data(old.utf8))
+    #expect(!state.isFullScreen)
   }
 }
