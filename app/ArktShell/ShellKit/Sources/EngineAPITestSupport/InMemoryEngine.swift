@@ -1,5 +1,6 @@
 import AppKit
 import struct ArcImport.ArcCookie
+import struct ArcImport.BookmarkRecord
 import struct ArcImport.ArcLogin
 import EngineAPI
 
@@ -16,6 +17,10 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
 
   public func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult { imports.record(batch) }
   public func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult { imports.record(batch) }
+  public func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
+    imports.record(batch, after: watermark)
+  }
+  public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { imports.record(batch) }
 
   /// A close waiting on a leave-site dialog.
   private enum HeldClose {

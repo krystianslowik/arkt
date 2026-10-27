@@ -31,7 +31,9 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
 @protocol ArktHistoryEntry;
+@protocol ArktImportBookmark;
 @protocol ArktImportCookie;
+@protocol ArktImportHistoryEntry;
 @protocol ArktImportLogin;
 @protocol ArktImportResult;
 @protocol ArktInfobar;
@@ -476,6 +478,32 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSDate* dateLastUsed;
 @end
 
+// One imported history entry (#511): a URL with its title and every visit,
+// as two parallel arrays of equal length. Implemented by the shell; the engine
+// reads it during the call and never keeps it.
+NS_SWIFT_UI_ACTOR
+@protocol ArktImportHistoryEntry <NSObject>
+@property(nonatomic, readonly, copy) NSString* url;
+@property(nonatomic, readonly, copy) NSString* title;
+@property(nonatomic, readonly, copy) NSArray<NSDate*>* visitTimes;
+// Chromium's core page transition per visit (the low 8 bits of
+// ui::PageTransition): 0 link, 1 typed, 2 auto bookmark, ... 10 keyword
+// generated. Anything else is written as a link.
+@property(nonatomic, readonly, copy) NSArray<NSNumber*>* visitTransitions;
+@end
+
+// One imported bookmark (#511).
+NS_SWIFT_UI_ACTOR
+@protocol ArktImportBookmark <NSObject>
+@property(nonatomic, readonly, copy) NSString* url;
+@property(nonatomic, readonly, copy) NSString* title;
+// The source's guid; nil when it had none.
+@property(nonatomic, readonly, nullable, copy) NSString* guid;
+@property(nonatomic, readonly, nullable, copy) NSDate* dateAdded;
+// Folder titles below the Imported folder, outermost first.
+@property(nonatomic, readonly, copy) NSArray<NSString*>* folderPath;
+@end
+
 // The counts of one import call. written + skipped + failed equals the
 // batch size. Never carries a host, a name or a value.
 NS_SWIFT_UI_ACTOR
@@ -490,6 +518,9 @@ NS_SWIFT_UI_ACTOR
 // Failure reasons with their counts, as "reason: count" lines; nil when
 // nothing failed.
 @property(nonatomic, readonly, nullable, copy) NSString* failureReason;
+// History only (#511): the newest visit time that was written; nil when none
+// was, and for every other kind of batch.
+@property(nonatomic, readonly, nullable, copy) NSDate* lastVisitTime;
 @end
 
 // A user link activation in a tab's main frame (a click or key press on a
@@ -737,6 +768,26 @@ NS_SWIFT_UI_ACTOR
 - (void)importPasswords:(NSArray<id<ArktImportLogin>>*)logins
              completion:(void (^)(id<ArktImportResult> result))completion
     NS_SWIFT_NAME(importPasswords(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
+// History (#511): every visit is written through the profile's history
+// service with its time and core transition; a URL's visit count and typed
+// count follow from the visits written. A visit at or before `after` (the
+// watermark of the last import, nil for none), one older than the 90 days the
+// history keeps, and one of a URL the history refuses (not http, https, ftp
+// or file) is skipped; a URL that is not valid fails its visits. The result's
+// lastVisitTime is the newest visit written. Counts are in visits.
+// `completion` runs once the history thread has processed the writes.
+- (void)importHistory:(NSArray<id<ArktImportHistoryEntry>>*)entries
+                after:(nullable NSDate*)after
+           completion:(void (^)(id<ArktImportResult> result))completion
+    NS_SWIFT_NAME(importHistory(_:after:completion:)) NS_SWIFT_DISABLE_ASYNC;
+// Bookmarks (#511): written under "Other bookmarks" in a folder named
+// "Imported", with their folders. A bookmark whose guid the model holds, or
+// whose url and title the target folder holds, is skipped; an invalid url
+// fails. `completion` runs after the write (the engine waits for the bookmark
+// model to load).
+- (void)importBookmarks:(NSArray<id<ArktImportBookmark>>*)bookmarks
+             completion:(void (^)(id<ArktImportResult> result))completion
+    NS_SWIFT_NAME(importBookmarks(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
 @end
 
 // Implemented by the Swift app: @objc(ArktShellEmbedder), in the main

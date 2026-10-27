@@ -301,9 +301,26 @@ final class TestImportResult: NSObject, ArktImportResult {
   let skipped: Int
   let failed: Int
   let failureReason: String?
-  init(written: Int, skipped: Int, failed: Int, failureReason: String?) {
+  let lastVisitTime: Date?
+  init(written: Int, skipped: Int, failed: Int, failureReason: String?, lastVisitTime: Date? = nil) {
     self.written = written; self.skipped = skipped; self.failed = failed; self.failureReason = failureReason
+    self.lastVisitTime = lastVisitTime
   }
+}
+
+final class TestImportHistoryEntry: NSObject, ArktImportHistoryEntry {
+  let url = "https://example.com/"
+  let title = "Example"
+  let visitTimes = [Date(timeIntervalSince1970: 10), Date(timeIntervalSince1970: 20)]
+  let visitTransitions: [NSNumber] = [1, 0]
+}
+
+final class TestImportBookmark: NSObject, ArktImportBookmark {
+  let url = "https://example.com/"
+  let title = "Example"
+  let guid: String? = "00000000-0000-4000-8000-000000000001"
+  let dateAdded: Date? = nil
+  let folderPath = ["Reading", "Later"]
 }
 
 /// A facade that records events and delivers them as one batch on `flush()`, as the real facade does from a posted
@@ -375,6 +392,21 @@ final class TestEngine: NSObject, ArktEngine {
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool { false }
 
   private(set) var importedValues: [String] = []
+  private(set) var importedHistoryVisits = 0
+  private(set) var importedBookmarkPaths: [[String]] = []
+
+  func importHistory(
+    _ entries: [any ArktImportHistoryEntry], after: Date?, completion: @escaping (any ArktImportResult) -> Void
+  ) {
+    importedHistoryVisits += entries.reduce(0) { $0 + $1.visitTimes.count }
+    completion(TestImportResult(
+      written: 1, skipped: 1, failed: 0, failureReason: nil, lastVisitTime: entries.first?.visitTimes.last))
+  }
+
+  func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {
+    importedBookmarkPaths += bookmarks.map(\.folderPath)
+    completion(TestImportResult(written: bookmarks.count, skipped: 0, failed: 0, failureReason: nil))
+  }
 
   func importCookies(_ cookies: [any ArktImportCookie], completion: @escaping (any ArktImportResult) -> Void) {
     for cookie in cookies {
@@ -927,5 +959,17 @@ struct InfobarABITests {
     #expect(engine.importedValues == ["cookie-secret", "login-secret"])
     #expect(cookieResult.map { ($0.written, $0.skipped, $0.failed, $0.failureReason) }.map { $0 == (1, 0, 0, nil) } ?? false)
     #expect(loginResult?.failed == 1 && loginResult?.failureReason == "refused: 1\n")
+  }
+
+  @Test func historyAndBookmarkRecordsReachTheFacadeAndTheAnswerCarriesTheNewestVisit() {
+    let engine = TestEngine()
+    var historyResult: (any ArktImportResult)?
+    engine.importHistory([TestImportHistoryEntry()], after: nil) { historyResult = $0 }
+    var bookmarkResult: (any ArktImportResult)?
+    engine.importBookmarks([TestImportBookmark()]) { bookmarkResult = $0 }
+    #expect(engine.importedHistoryVisits == 2)
+    #expect(engine.importedBookmarkPaths == [["Reading", "Later"]])
+    #expect(historyResult?.lastVisitTime == Date(timeIntervalSince1970: 20))
+    #expect(bookmarkResult?.lastVisitTime == nil && bookmarkResult?.written == 1)
   }
 }

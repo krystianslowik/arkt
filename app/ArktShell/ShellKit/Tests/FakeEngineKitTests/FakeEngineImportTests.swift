@@ -10,6 +10,11 @@ struct FakeEngineImportTests {
     try await EngineImportContract.run(FakeEngine())
   }
 
+  @Test func keepsTheHistoryAndBookmarkContract() async throws {
+    try await EngineImportContract.runHistory(FakeEngine())
+    try await EngineImportContract.runBookmarks(FakeEngine())
+  }
+
   @Test func recordsWhatItWroteBeforeZeroingIt() async {
     let engine = FakeEngine()
     _ = await engine.importCookies([EngineImportContract.cookie("a", value: "plain")])

@@ -7,6 +7,9 @@
 #include <utility>
 
 #include "base/barrier_closure.h"
+#include "base/scoped_observation.h"
+#include "base/task/cancelable_task_tracker.h"
+#include "base/uuid.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
@@ -18,10 +21,21 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/types/expected.h"
 #include "chrome/browser/profiles/profile.h"
+// Same as the password store factory below: these sit behind
+// //chrome/browser, and the symbols are in the same framework.
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"  // nogncheck
+#include "chrome/browser/history/history_service_factory.h"  // nogncheck
 // The factory sits behind //chrome/browser, which reaches //arkt through
 // patch 0001, so this target cannot depend on it; the symbol is in the same
 // framework.
 #include "chrome/browser/password_manager/factories/profile_password_store_factory.h"  // nogncheck
+#include "components/bookmarks/browser/base_bookmark_model_observer.h"
+#include "components/bookmarks/browser/bookmark_model.h"
+#include "components/bookmarks/browser/bookmark_node.h"
+#include "components/history/core/browser/history_backend.h"
+#include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_store/password_store_consumer.h"
@@ -36,6 +50,7 @@
 #include "net/cookies/cookie_inclusion_status.h"
 #include "net/cookies/cookie_options.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
+#include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 #include "url/third_party/mozilla/url_parse.h"
 
@@ -508,6 +523,287 @@ void ImportLogins(Profile* profile,
   (new LoginImport(std::move(store), std::move(credentials), std::move(counts),
                    std::move(done)))
       ->Start();
+}
+
+namespace {
+
+// Runs on the history thread after every write queued before it, then calls
+// back on the main thread.
+class HistoryBarrier : public history::HistoryDBTask {
+ public:
+  explicit HistoryBarrier(base::OnceClosure reached)
+      : reached_(std::move(reached)) {}
+
+  bool RunOnDBThread(history::HistoryBackend*,
+                     history::HistoryDatabase*) override {
+    return true;
+  }
+  void DoneRunOnMainThread() override { std::move(reached_).Run(); }
+
+ private:
+  base::OnceClosure reached_;
+};
+
+// Owns one history batch until the history thread has caught up.
+class HistoryImport {
+ public:
+  HistoryImport(ImportCounts counts, ImportDone done)
+      : counts_(std::move(counts)), done_(std::move(done)) {}
+
+  void Start(history::HistoryService* service) {
+    service->ScheduleDBTask(
+        FROM_HERE,
+        std::make_unique<HistoryBarrier>(
+            base::BindOnce(&HistoryImport::Finish, base::Unretained(this))),
+        &tracker_);
+  }
+
+ private:
+  void Finish() {
+    std::move(done_).Run(std::move(counts_));
+    base::SequencedTaskRunner::GetCurrentDefault()->DeleteSoon(FROM_HERE, this);
+  }
+
+  ImportCounts counts_;
+  ImportDone done_;
+  base::CancelableTaskTracker tracker_;
+};
+
+bool HistoryAccepts(const GURL& url) {
+  return url.is_valid() &&
+         (url.SchemeIsHTTPOrHTTPS() || url.SchemeIs(url::kFtpScheme) ||
+          url.SchemeIsFile());
+}
+
+}  // namespace
+
+void ImportHistory(Profile* profile,
+                   std::vector<ImportHistoryEntry> entries,
+                   base::Time after,
+                   ImportDone done) {
+  ImportCounts counts;
+  history::HistoryService* service =
+      profile ? HistoryServiceFactory::GetForProfile(
+                    profile, ServiceAccessType::EXPLICIT_ACCESS)
+              : nullptr;
+  const base::Time oldest =
+      base::Time::Now() -
+      base::Days(history::HistoryBackend::kExpireDaysThreshold);
+  int submitted = 0;
+  for (const ImportHistoryEntry& entry : entries) {
+    const int visits = static_cast<int>(entry.visits.size());
+    if (!service) {
+      counts.failed += visits;
+      counts.reasons["no history service"] += visits;
+      continue;
+    }
+    const GURL url(entry.url);
+    if (!url.is_valid()) {
+      counts.failed += visits;
+      counts.reasons["invalid url"] += visits;
+      continue;
+    }
+    if (!HistoryAccepts(url)) {
+      counts.skipped += visits;
+      continue;
+    }
+    for (const ImportVisit& visit : entry.visits) {
+      // Older than the watermark: imported before. Older than the retention
+      // window: Chromium's expirer would delete it again.
+      if ((!after.is_null() && visit.time <= after) || visit.time < oldest) {
+        counts.skipped++;
+        continue;
+      }
+      const int core =
+          visit.transition >= 0 && visit.transition <= ui::PAGE_TRANSITION_LAST_CORE
+              ? visit.transition
+              : static_cast<int>(ui::PAGE_TRANSITION_LINK);
+      const ui::PageTransition transition = ui::PageTransitionFromInt(core);
+      history::HistoryAddPageArgs args(
+          url, visit.time, /*context_id=*/0, /*nav_entry_id=*/0,
+          /*local_navigation_id=*/std::nullopt, /*referrer=*/GURL(),
+          history::RedirectList(), transition,
+          /*hidden=*/!ui::PageTransitionIsMainFrame(transition),
+          history::SOURCE_OS_MIGRATION_IMPORTED,
+          history::VisitResponseCodeCategory::kNot404,
+          /*did_replace_entry=*/false,
+          /*consider_for_ntp_most_visited=*/false,
+          history::VisitContextEphemerality::kNotEphemeral,
+          entry.title.empty() ? std::nullopt
+                              : std::optional<std::u16string>(entry.title));
+      service->AddPage(std::move(args));
+      counts.written++;
+      submitted++;
+      if (visit.time > counts.latest_visit) {
+        counts.latest_visit = visit.time;
+      }
+    }
+  }
+  if (submitted == 0) {
+    PostDone(std::move(done), std::move(counts));
+    return;
+  }
+  (new HistoryImport(std::move(counts), std::move(done)))->Start(service);
+}
+
+namespace {
+
+const bookmarks::BookmarkNode* FindFolder(const bookmarks::BookmarkNode* parent,
+                                          const std::u16string& title) {
+  for (const auto& child : parent->children()) {
+    if (child->is_folder() && child->GetTitle() == title) {
+      return child.get();
+    }
+  }
+  return nullptr;
+}
+
+const bookmarks::BookmarkNode* FindOrAddFolder(
+    bookmarks::BookmarkModel* model,
+    const bookmarks::BookmarkNode* parent,
+    const std::u16string& title) {
+  if (const bookmarks::BookmarkNode* found = FindFolder(parent, title)) {
+    return found;
+  }
+  return model->AddFolder(parent, parent->children().size(), title);
+}
+
+bool HoldsBookmark(const bookmarks::BookmarkNode* folder,
+                   const GURL& url,
+                   const std::u16string& title) {
+  for (const auto& child : folder->children()) {
+    if (child->is_url() && child->url() == url && child->GetTitle() == title) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void WriteBookmarks(bookmarks::BookmarkModel* model,
+                    const std::vector<ImportBookmark>& batch,
+                    ImportCounts& counts) {
+  const bookmarks::BookmarkNode* imported =
+      FindOrAddFolder(model, model->other_node(), u"Imported");
+  for (const ImportBookmark& bookmark : batch) {
+    const GURL url(bookmark.url);
+    if (!url.is_valid()) {
+      counts.failed++;
+      counts.reasons["invalid url"]++;
+      continue;
+    }
+    std::optional<base::Uuid> uuid;
+    if (!bookmark.guid.empty()) {
+      base::Uuid parsed = base::Uuid::ParseCaseInsensitive(bookmark.guid);
+      if (parsed.is_valid()) {
+        uuid = parsed;
+      }
+    }
+    if (uuid &&
+        model->GetNodeByUuid(
+            *uuid, bookmarks::BookmarkModel::NodeTypeForUuidLookup::
+                       kLocalOrSyncableNodes)) {
+      counts.skipped++;
+      continue;
+    }
+    // The folder is looked up without creating it: a path that does not exist
+    // holds no duplicate.
+    const bookmarks::BookmarkNode* folder = imported;
+    for (const std::u16string& name : bookmark.folder_path) {
+      folder = folder ? FindFolder(folder, name) : nullptr;
+    }
+    if (folder && HoldsBookmark(folder, url, bookmark.title)) {
+      counts.skipped++;
+      continue;
+    }
+    folder = imported;
+    for (const std::u16string& name : bookmark.folder_path) {
+      folder = FindOrAddFolder(model, folder, name);
+    }
+    model->AddURL(folder, folder->children().size(), bookmark.title, url,
+                  /*meta_info=*/nullptr,
+                  bookmark.date_added.is_null()
+                      ? std::nullopt
+                      : std::optional<base::Time>(bookmark.date_added),
+                  uuid);
+    counts.written++;
+  }
+}
+
+// Waits for the bookmark model to load, writes, answers and deletes itself.
+class BookmarkImport : public bookmarks::BaseBookmarkModelObserver {
+ public:
+  BookmarkImport(bookmarks::BookmarkModel* model,
+                 std::vector<ImportBookmark> batch,
+                 ImportDone done)
+      : model_(model), batch_(std::move(batch)), done_(std::move(done)) {
+    observation_.Observe(model_);
+  }
+
+  void BookmarkModelChanged() override {
+    if (model_ && model_->loaded() && !finished_) {
+      // Not from inside the observer notification.
+      finished_ = true;
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE,
+          base::BindOnce(&BookmarkImport::Write, base::Unretained(this)));
+    }
+  }
+
+  void BookmarkModelBeingDeleted() override {
+    observation_.Reset();
+    model_ = nullptr;
+    if (!finished_) {
+      finished_ = true;
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE,
+          base::BindOnce(&BookmarkImport::Write, base::Unretained(this)));
+    }
+  }
+
+  void Start() {
+    if (model_->loaded()) {
+      BookmarkModelChanged();
+    }
+  }
+
+ private:
+  void Write() {
+    ImportCounts counts;
+    if (model_) {
+      WriteBookmarks(model_, batch_, counts);
+    } else {
+      counts.failed = static_cast<int>(batch_.size());
+      counts.reasons["bookmark model went away"] = counts.failed;
+    }
+    observation_.Reset();
+    std::move(done_).Run(std::move(counts));
+    delete this;
+  }
+
+  raw_ptr<bookmarks::BookmarkModel> model_;
+  std::vector<ImportBookmark> batch_;
+  ImportDone done_;
+  bool finished_ = false;
+  base::ScopedObservation<bookmarks::BookmarkModel,
+                          bookmarks::BookmarkModelObserver>
+      observation_{this};
+};
+
+}  // namespace
+
+void ImportBookmarks(Profile* profile,
+                     std::vector<ImportBookmark> bookmarks,
+                     ImportDone done) {
+  bookmarks::BookmarkModel* model =
+      profile ? BookmarkModelFactory::GetForBrowserContext(profile) : nullptr;
+  if (!model) {
+    ImportCounts counts;
+    counts.failed = static_cast<int>(bookmarks.size());
+    counts.reasons["no bookmark model"] = counts.failed;
+    PostDone(std::move(done), std::move(counts));
+    return;
+  }
+  (new BookmarkImport(model, std::move(bookmarks), std::move(done)))->Start();
 }
 
 }  // namespace arkt
