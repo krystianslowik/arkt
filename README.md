@@ -38,7 +38,9 @@ Requirements: a Mac with Apple silicon and macOS 15 or later.
 
          xattr -dr com.apple.quarantine /Applications/Arkt.app
 
-The first launch can take up to 2 minutes while macOS scans the app. See the release notes for what the preview
+   If the warning is still on screen, click **Done** on it before you run the command (never Move to Trash).
+
+The first launch is slower than later ones while macOS checks the app. See the release notes for what the preview
 includes and how to report problems.
 
 ## Interface previews

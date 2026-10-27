@@ -426,6 +426,33 @@ Only after the whole checklist passes and the maintainer agrees:
 Then check the Releases page shows the asset, the checksum and the pre-release label, and download the published
 asset once more to confirm the checksum.
 
+### A launch that waits at `_dyld_start` (#481)
+
+Direct launch of a quarantined copy parks the process behind Gatekeeper's "Arkt Not Opened" prompt. It is not the
+signing, the framework, the Keychain or the first-launch scan. Seen on the dry run (macOS 27, ad-hoc build, scratch
+`CFFIXED_USER_HOME`):
+
+- `sample <pid>` shows the main thread in `_dyld_start`, a 96 KB footprint, 0 % CPU, no window and no helper
+  processes. CoreServicesUIAgent logs `present code-evaluation prompt` about 10 s after the launch. After 5 minutes
+  the process was still waiting.
+- Killing the process does not clear the prompt, and neither does `xattr -dr com.apple.quarantine`: a second launch
+  of the same bundle, flag removed, waited the same way (0 CPU, no window, `_dyld_start`) for as long as it was
+  watched. A fresh `ditto` copy at another path launched in 8 s while the first prompt was still on screen.
+- Signing is not involved. Step 3 (inside-out, ad hoc) and a one-shot `codesign --deep --sign -` both launch to a
+  window in 8 s, as does a copy with a signature macOS has never seen (no 110 s scan). `--options runtime` on an
+  ad-hoc app fails at once with `dlopen failed` (library validation), and an unsigned app is killed at launch, so
+  neither looks like a hang.
+
+To get out, answer the prompt (Done) or make a fresh copy. To test an app after Open Anyway without that prompt,
+set and clear the flag on a fresh copy before its first launch, then launch the executable by path:
+
+    ditto Arkt.app copy/Arkt.app
+    xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" copy/Arkt.app
+    xattr -dr com.apple.quarantine copy/Arkt.app
+    CFFIXED_USER_HOME=$(mktemp -d) copy/Arkt.app/Contents/MacOS/Arkt --use-mock-keychain & echo $!
+
+The window comes up in about 8 s. Kill that PID and delete the copy and the scratch home afterwards.
+
 ### Smoke checklist
 
 Run it on the fresh user, from `/Applications/Arkt.app`, on Apple silicon with macOS 15 or later.
