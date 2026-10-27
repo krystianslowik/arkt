@@ -330,6 +330,48 @@ final class OnboardingTests: XCTestCase {
     window.close()
   }
 
+  /// #469: the window has no engine window while the first run covers it (the engine window is made on the first
+  /// tab), so ending the first run is what opens the first one. Skip setup and Finish both must, exactly once.
+  func testSkipSetupOpensTheFirstEngineWindowOnce() throws {
+    let stub = StubSidebar()
+    let engine = InMemoryEngine()
+    let window = ShellWindowController(engine: engine, sidebar: stub)
+    window.window?.setFrame(NSRect(x: 0, y: 0, width: 1120, height: 720), display: false)
+    window.rootView.layoutSubtreeIfNeeded()
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: false)
+    let onboarding = present(window, services)
+    XCTAssertTrue(engine.windowIDs.isEmpty, "the first run is shown before any engine window exists")
+    onboarding.confirmSkip = { answer in answer(true) }
+    onboarding.view.onSkipSetup?()
+    XCTAssertTrue(spin { !window.isShowingOnboarding })
+    XCTAssertEqual(engine.windowIDs.count, 1, "Skip setup opens the first engine window")
+    XCTAssertEqual(engine.tabIDs.count, 1)
+    window.commandBar.hide()
+    window.close()
+  }
+
+  func testFinishOpensTheFirstEngineWindowOnce() throws {
+    let stub = StubSidebar()
+    let engine = InMemoryEngine()
+    let window = ShellWindowController(engine: engine, sidebar: stub)
+    window.window?.setFrame(NSRect(x: 0, y: 0, width: 1120, height: 720), display: false)
+    window.rootView.layoutSubtreeIfNeeded()
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: false)
+    let onboarding = present(window, services)
+    XCTAssertTrue(engine.windowIDs.isEmpty, "the first run is shown before any engine window exists")
+    var presses = 0
+    while !onboarding.isFinished, presses < 12 {
+      pressPrimaryAndWait(onboarding)
+      presses += 1
+    }
+    XCTAssertTrue(onboarding.isFinished, "the primary button walks the flow to its end")
+    XCTAssertTrue(spin { !window.isShowingOnboarding })
+    XCTAssertEqual(engine.windowIDs.count, 1, "Finish opens the first engine window")
+    XCTAssertEqual(engine.tabIDs.count, 1)
+    window.commandBar.hide()
+    window.close()
+  }
+
   func testSkipSetupDuringAnImportWaitsAndAddsNoSpace() throws {
     let stub = StubSidebar()
     let window = makeWindow(stub)
