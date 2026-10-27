@@ -1,8 +1,11 @@
 import ArcImport
 import Foundation
 
-/// The counts of one import call (#512): `written + skipped + failed` is the batch size. Never holds a host, a name or
-/// a value.
+/// Arc's history record under a name that does not clash with `EngineAPI.HistoryEntry`, a tab's back-forward entry.
+public typealias ImportedHistoryEntry = ArcImport.HistoryEntry
+
+/// The counts of one import call (#512): `written + skipped + failed` is the batch size (visits, for a history batch).
+/// Never holds a host, a name or a value.
 public struct ImportWriteResult: Equatable, Sendable {
   /// Stored.
   public var written: Int
@@ -13,9 +16,15 @@ public struct ImportWriteResult: Equatable, Sendable {
   public var failed: Int
   /// The failure reasons with their counts, one `reason: count` line each; nil when nothing failed.
   public var failureReason: String?
+  /// History only: the newest visit time written, the next call's watermark; nil when no visit was written, and for every
+  /// other kind of batch.
+  public var latestVisit: Date?
 
-  public init(written: Int = 0, skipped: Int = 0, failed: Int = 0, failureReason: String? = nil) {
+  public init(
+    written: Int = 0, skipped: Int = 0, failed: Int = 0, failureReason: String? = nil, latestVisit: Date? = nil
+  ) {
     self.written = written; self.skipped = skipped; self.failed = failed; self.failureReason = failureReason
+    self.latestVisit = latestVisit
   }
 }
 
@@ -34,6 +43,17 @@ public protocol EngineImporting: AnyObject {
   /// action) keep the later entry; a login the store already holds under that key is skipped unless the imported one is
   /// newer (the later of its last use and creation).
   func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult
+  /// Writes every visit of the entries through the profile's history service, with its time and core transition (#511);
+  /// the visit and typed counts of a URL follow from the visits written. Counts are in visits. A visit at or before
+  /// `watermark` (the newest visit the coordinator imported before; nil for none), one older than the 90 days Chromium's
+  /// history keeps, and one of a URL the history refuses (not http, https, ftp or file) is skipped; a URL that is not
+  /// valid fails its visits. `latestVisit` of the result is the newest visit written: the coordinator keeps the larger of
+  /// it and its watermark, and a second call with that watermark writes nothing.
+  func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult
+  /// Writes bookmarks under "Other bookmarks" in a folder named "Imported", their folders kept (#511). The record's root
+  /// (bar, other, synced) is not kept: everything lands under the one folder. A bookmark whose guid the profile holds,
+  /// or whose url and title its target folder holds, is skipped; an invalid url fails.
+  func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult
 }
 
 /// What a recording engine received: the plain values of the records, taken before their secrets were zeroed.
@@ -45,6 +65,28 @@ public struct ImportedCookieRecord: Equatable, Sendable {
 
   public init(hostKey: String, name: String, value: String, path: String) {
     self.hostKey = hostKey; self.name = name; self.value = value; self.path = path
+  }
+}
+
+public struct ImportedVisitRecord: Equatable, Sendable {
+  public var url: String
+  public var title: String
+  public var time: Date
+  public var transition: Int
+
+  public init(url: String, title: String, time: Date, transition: Int) {
+    self.url = url; self.title = title; self.time = time; self.transition = transition
+  }
+}
+
+public struct ImportedBookmarkRecord: Equatable, Sendable {
+  public var folderPath: [String]
+  public var title: String
+  public var url: String
+  public var guid: String?
+
+  public init(folderPath: [String], title: String, url: String, guid: String?) {
+    self.folderPath = folderPath; self.title = title; self.url = url; self.guid = guid
   }
 }
 
@@ -65,6 +107,8 @@ public struct ImportedLoginRecord: Equatable, Sendable {
 public struct ImportRecording: Sendable {
   public private(set) var cookies: [ImportedCookieRecord] = []
   public private(set) var logins: [ImportedLoginRecord] = []
+  public private(set) var visits: [ImportedVisitRecord] = []
+  public private(set) var bookmarks: [ImportedBookmarkRecord] = []
   /// Last-access stamps of the cookies kept, parallel to `cookies`.
   private var stamps: [Date] = []
   private var loginStamps: [Date] = []
@@ -122,6 +166,59 @@ public struct ImportRecording: Sendable {
         logins.append(record)
         loginStamps.append(stamp(login))
       }
+      result.written += 1
+    }
+    return result
+  }
+
+  /// Chromium's history keeps 90 days; older visits are skipped.
+  public static let historyRetention: TimeInterval = 90 * 86_400
+
+  public mutating func record(_ batch: [ImportedHistoryEntry], after watermark: Date?) -> ImportWriteResult {
+    var result = ImportWriteResult()
+    let oldest = Date().addingTimeInterval(-Self.historyRetention)
+    for entry in batch {
+      guard let url = URL(string: entry.url), let scheme = url.scheme?.lowercased(), url.host != nil || scheme == "file"
+      else {
+        result.failed += entry.visits.count
+        result.failureReason = "invalid url: \(result.failed)\n"
+        continue
+      }
+      for visit in entry.visits {
+        guard ["http", "https", "ftp", "file"].contains(scheme), visit.time >= oldest,
+          watermark.map({ visit.time > $0 }) ?? true
+        else {
+          result.skipped += 1
+          continue
+        }
+        visits.append(ImportedVisitRecord(
+          url: entry.url, title: entry.title, time: visit.time, transition: visit.transition.coreValue))
+        result.written += 1
+        result.latestVisit = max(result.latestVisit ?? visit.time, visit.time)
+      }
+    }
+    return result
+  }
+
+  public mutating func record(_ batch: [BookmarkRecord]) -> ImportWriteResult {
+    var result = ImportWriteResult()
+    for bookmark in batch {
+      guard let url = URL(string: bookmark.url), url.scheme != nil else {
+        result.failed += 1
+        result.failureReason = "invalid url: \(result.failed)\n"
+        continue
+      }
+      let guid = bookmark.guid?.lowercased()
+      let held = bookmarks.contains {
+        (guid != nil && $0.guid == guid)
+          || ($0.folderPath == bookmark.folderPath && $0.url == bookmark.url && $0.title == bookmark.title)
+      }
+      guard !held else {
+        result.skipped += 1
+        continue
+      }
+      bookmarks.append(ImportedBookmarkRecord(
+        folderPath: bookmark.folderPath, title: bookmark.title, url: bookmark.url, guid: guid))
       result.written += 1
     }
     return result

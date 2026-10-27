@@ -26,6 +26,23 @@ public enum EngineImportContract {
       dateLastUsed: Date(timeIntervalSince1970: lastUsed))
   }
 
+  /// A history entry whose visits are `days` days old, one hour apart, with the given core transitions.
+  public static func historyEntry(
+    _ url: String, title: String = "Title", days: Double = 2, transitions: [HistoryTransition] = [.link]
+  ) -> ImportedHistoryEntry {
+    let base = Date().addingTimeInterval(-days * 86_400)
+    let visits = transitions.enumerated().map { HistoryVisit(time: base.addingTimeInterval(Double($0.offset) * 3_600), transition: $0.element) }
+    return ImportedHistoryEntry(
+      url: url, title: title, visitCount: visits.count, typedCount: transitions.filter { $0 == .typed }.count,
+      lastVisit: visits.last?.time, visits: visits)
+  }
+
+  public static func bookmark(
+    _ title: String, url: String, path: [String] = [], guid: String? = nil, root: String = "bookmark_bar"
+  ) -> BookmarkRecord {
+    BookmarkRecord(root: root, folderPath: path, title: title, url: url, guid: guid, dateAdded: nil)
+  }
+
   public static func isZeroed(_ secret: SecretBytes) -> Bool { secret.withBytes { $0.allSatisfy { $0 == 0 } } }
 
   @MainActor
@@ -88,5 +105,68 @@ public enum EngineImportContract {
     result = await engine.importPasswords(newer)
     try EngineContract.require(result == ImportWriteResult(written: 1), "newer login: \(result)")
     try EngineContract.require(isZeroed(newer[0].password), "the secret of a stored login is zeroed")
+  }
+
+  /// History (#511): counts are in visits; the watermark skips what was imported before; the result carries the newest
+  /// visit written; old visits and URLs the history refuses are skipped; an invalid URL fails its visits.
+  @MainActor
+  public static func runHistory(_ engine: some EngineImporting) async throws {
+    var result = await engine.importHistory([], after: nil)
+    try EngineContract.require(result == ImportWriteResult(), "empty history batch: \(result)")
+
+    let first = historyEntry("https://example.com/", title: "One", days: 3, transitions: [.typed, .link, .reload])
+    let second = historyEntry("https://example.org/a", days: 2, transitions: [.link])
+    result = await engine.importHistory([first, second], after: nil)
+    try EngineContract.require(
+      result == ImportWriteResult(written: 4, latestVisit: second.visits.last?.time), "first history batch: \(result)")
+
+    // The same batch with the watermark the first call returned writes nothing.
+    result = await engine.importHistory([first, second], after: second.visits.last?.time)
+    try EngineContract.require(result == ImportWriteResult(skipped: 4), "same batch at the watermark: \(result)")
+
+    // A watermark inside the batch keeps the visits after it only; a visit exactly at it is skipped.
+    let third = historyEntry("https://example.net/", days: 1, transitions: [.link, .link, .link])
+    result = await engine.importHistory([third], after: third.visits[1].time)
+    try EngineContract.require(
+      result == ImportWriteResult(written: 1, skipped: 2, latestVisit: third.visits[2].time), "watermark inside: \(result)")
+
+    // Older than the 90 days Chromium keeps, an address the history refuses, and an address that is not one.
+    let old = historyEntry("https://old.example/", days: 120)
+    let internalPage = historyEntry("chrome://settings/", transitions: [.link, .link])
+    let broken = historyEntry("not a url", transitions: [.link, .link, .link])
+    result = await engine.importHistory([old, internalPage, broken], after: nil)
+    try EngineContract.require(
+      result.written == 0 && result.skipped == 3 && result.failed == 3 && result.latestVisit == nil,
+      "old, refused and invalid: \(result)")
+  }
+
+  /// Bookmarks (#511): a guid the profile holds, or a url and title the target folder holds, is skipped; folders are
+  /// kept; an invalid url fails.
+  @MainActor
+  public static func runBookmarks(_ engine: some EngineImporting) async throws {
+    var result = await engine.importBookmarks([])
+    try EngineContract.require(result == ImportWriteResult(), "empty bookmark batch: \(result)")
+
+    let guid = "00000000-0000-4000-8000-0000000000AA"
+    let batch = [
+      bookmark("Top", url: "https://example.com/", guid: guid),
+      bookmark("Nested", url: "https://example.com/n", path: ["Reading", "Later"], guid: "00000000-0000-4000-8000-0000000000AB"),
+      bookmark("Same guid", url: "https://example.com/elsewhere", path: ["Other"], guid: guid.lowercased()),
+      bookmark("Top", url: "https://example.com/", root: "other"),
+      bookmark("Bad", url: ""),
+    ]
+    result = await engine.importBookmarks(batch)
+    try EngineContract.require(
+      result.written == 2 && result.skipped == 2 && result.failed == 1, "first bookmark batch: \(result)")
+
+    result = await engine.importBookmarks(batch)
+    try EngineContract.require(result.written == 0 && result.skipped == 4 && result.failed == 1, "re-import: \(result)")
+
+    // No guid: the same url and title in the same folder is a duplicate, in another folder it is not.
+    result = await engine.importBookmarks([
+      bookmark("Nested", url: "https://example.com/n", path: ["Reading", "Later"]),
+      bookmark("Nested", url: "https://example.com/n", path: ["Reading"]),
+    ])
+    try EngineContract.require(result == ImportWriteResult(written: 1, skipped: 1), "url and title by folder: \(result)")
   }
 }

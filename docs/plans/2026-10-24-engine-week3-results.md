@@ -4084,3 +4084,72 @@ factory is included with `// nogncheck`, as `browser_tabstrip.h` is.
 - Partitioned cookies are skipped, not imported (the reader reads `top_frame_site_key` and counts them; the engine and both stubs
   refuse one they are handed). Importing them with their partition key is a later decision.
 - A missing answer from the cookie manager (profile teardown) fails the batch with a reason instead of hanging.
+
+## #511: write imported history and bookmarks (engine seam for #131)
+
+Date 2026-10-27. Branch `engine/511-import-history` off `main` at `00cfdae` (after #528). Overlay and Swift only: no Chromium patch,
+`.patches` unchanged.
+
+### What landed
+
+- **Facade header (both copies, additive; `cmp` identical).** Protocols `ArktImportHistoryEntry` (url, title, `visitTimes` and
+  `visitTransitions` as parallel arrays) and `ArktImportBookmark` (url, title, guid, dateAdded, folderPath); `ArktImportResult`
+  gains `lastVisitTime`; `ArktEngine` gains `importHistory:after:completion:` and `importBookmarks:completion:`.
+- **History (`ImportHistory`).** `HistoryService::AddPage(HistoryAddPageArgs)` per visit, not `AddPagesWithDetails`: that call fakes one
+  LINK visit at `last_visit` and ignores a URL that exists. Each visit keeps its time and core transition; the title goes in with
+  the visit; source `SOURCE_OS_MIGRATION_IMPORTED`; `hidden` for subframe transitions; not counted for Most Visited. `visit_count`
+  and `typed_count` follow from the visits written (Chromium's own rule: typed visits count, reloads do not add to `visit_count`),
+  so Arc's stored `typed_count` is not copied separately. Completion is a `HistoryDBTask` barrier on the history thread, so `done`
+  runs after the queued writes. Counts are in visits.
+  - Dedupe: the watermark is an input (`after`): a visit at or before it is skipped; the result's `latestVisit` is the newest visit
+    written (nil when none). The coordinator (#515) keeps the larger of it and its watermark.
+  - Skipped as well: a visit older than 90 days (`HistoryBackend::kExpireDaysThreshold`; the expirer would delete it again) and a
+    URL the history refuses (not http, https, ftp, file). An invalid URL fails its visits.
+- **Bookmarks (`ImportBookmarks`).** `BookmarkModel` (waits for load), folder "Imported" under Other bookmarks (reused when present),
+  nested folders created below it. The record's root (bar, other, synced) is not kept: a decision, everything lands under
+  Imported. Dedupe by guid (any node of the profile; case-insensitive), else by url and title inside the target folder; the
+  guid and date added are kept. Invalid URL fails.
+- **Swift.** `EngineImporting` gains `importHistory(_:after:)` and `importBookmarks(_:)`, result `ImportWriteResult` with a new
+  `latestVisit`. `ImportedHistoryEntry` aliases Arc's `HistoryEntry` (EngineAPI already has a back-forward `HistoryEntry`).
+  `HistoryTransition.coreValue` is the inverse of `init(webKitValue:)`. `ChromiumEngine`, `InMemoryEngine` and `FakeEngine`
+  implement it; the stubs apply the same rules (`ImportRecording`); the shared `EngineImportContract.runHistory` and
+  `runBookmarks` run on both stubs.
+
+### Product fact for #131
+
+Chromium keeps 90 days of history. The maintainer's 1016 visits are mostly older: those are skipped (counted), not written.
+
+### Real engine (`dev.arkt.Arkt.try511`, Engine app on `out/Spike`, throwaway profile, `--use-mock-keychain`, `FakeChromiumProfile` fixture)
+
+The fixture's visits are from 2024, so the runner moves them to the last day (gaps kept) and adds one 2024 visit that must be
+skipped as stale.
+
+| Check | Result | Evidence |
+|---|---|---|
+| History written | PASS | `written=5 skipped=1 failed=0` (3 URLs, 5 visits; the stale visit skipped) |
+| Re-import with the watermark | PASS | `written=0 skipped=5`, `latest=none` |
+| Counts in the profile | PASS | read-only `sqlite3` on `History`: `urls` 4, `visits` 6 (the fixture's 3 and 5, plus the runner's loopback page) |
+| Counts per URL | PASS | `example.com`: visit_count 2, typed_count 1 (typed, link, reload); the other two 1 and typed 0 and 1, as Chromium counts |
+| Bookmarks written | PASS | `written=5`; `Bookmarks` file: `other` holds `Imported` with Example, Docs, Reading/Article, Other item, Synced item |
+| Bookmarks again | PASS | `written=0 skipped=5` |
+| Stderr | PASS | no `FATAL`, `NOTREACHED`, `Check failed` |
+
+Not run: `chrome://history` (the `sqlite3` counts are the evidence). LaunchServices: the helpers registered under the `try511` build were
+unregistered (`lsregister -u`, count 0); embed folder, derived data, profile and fixture deleted.
+
+### Patch budget
+
+`.patches` lines 10, `arkt` commits above `156.0.8078.48` 10: in sync. Header copies `cmp` identical. `//arkt/api:embedder` gains
+deps on `//components/history/core/browser` and `//components/bookmarks/browser`; the two factories are included with `// nogncheck`.
+
+### Verification
+
+- ShellKit `swift test --skip ShellKitGUITests`: 961, 38, 60, 7, 155, 49, 257, 111, 23 passed (1661), 0 failed. ArktCore
+  `swift test --filter ArcImportTests`: 218 passed.
+- `nice autoninja -C out/Spike chrome -j 4`: finished successfully. Engine app: `xcodebuild -scheme ArktShell -configuration Engine`:
+  `BUILD SUCCEEDED`.
+
+### Left open
+
+- The coordinator (#515) stores the watermark and the "Imported" folder is not user-configurable.
+- Arc's own `typed_count` is not forced; it is derived from the typed visits.

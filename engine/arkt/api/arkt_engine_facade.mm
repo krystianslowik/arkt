@@ -750,6 +750,7 @@ NSData* PNGForInfobarIcon(NSImage* image) {
 @property(nonatomic, assign) NSInteger skipped;
 @property(nonatomic, assign) NSInteger failed;
 @property(nonatomic, copy, nullable) NSString* failureReason;
+@property(nonatomic, copy, nullable) NSDate* lastVisitTime;
 @end
 
 @implementation ArktFacadeImportResult
@@ -757,6 +758,7 @@ NSData* PNGForInfobarIcon(NSImage* image) {
 @synthesize skipped = _skipped;
 @synthesize failed = _failed;
 @synthesize failureReason = _failureReason;
+@synthesize lastVisitTime = _lastVisitTime;
 @end
 
 // One registered event sink.
@@ -3068,6 +3070,9 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
   result.written = counts.written;
   result.skipped = counts.skipped;
   result.failed = counts.failed;
+  if (!counts.latest_visit.is_null()) {
+    result.lastVisitTime = counts.latest_visit.ToNSDate();
+  }
   if (!counts.reasons.empty()) {
     std::string lines;
     for (const auto& [reason, count] : counts.reasons) {
@@ -3361,6 +3366,61 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
   }
   LOG(WARNING) << "ARKT: facade importPasswords " << batch.size();
   arkt::ImportLogins(
+      arkt::EmbedderProfile(), std::move(batch),
+      base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
+- (void)importHistory:(NSArray<id<ArktImportHistoryEntry>>*)entries
+                after:(NSDate*)after
+           completion:(void (^)(id<ArktImportResult> result))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<arkt::ImportHistoryEntry> batch;
+  batch.reserve(entries.count);
+  size_t visits = 0;
+  for (id<ArktImportHistoryEntry> entry in entries) {
+    arkt::ImportHistoryEntry out;
+    out.url = base::SysNSStringToUTF8(entry.url);
+    out.title = base::SysNSStringToUTF16(entry.title);
+    NSArray<NSDate*>* times = entry.visitTimes;
+    NSArray<NSNumber*>* transitions = entry.visitTransitions;
+    out.visits.reserve(times.count);
+    for (NSUInteger i = 0; i < times.count; ++i) {
+      arkt::ImportVisit visit;
+      visit.time = base::Time::FromNSDate(times[i]);
+      visit.transition = i < transitions.count ? transitions[i].intValue : 0;
+      out.visits.push_back(visit);
+    }
+    visits += out.visits.size();
+    batch.push_back(std::move(out));
+  }
+  LOG(WARNING) << "ARKT: facade importHistory " << batch.size() << " urls "
+               << visits << " visits";
+  arkt::ImportHistory(
+      arkt::EmbedderProfile(), std::move(batch),
+      after ? base::Time::FromNSDate(after) : base::Time(),
+      base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
+- (void)importBookmarks:(NSArray<id<ArktImportBookmark>>*)bookmarks
+             completion:(void (^)(id<ArktImportResult> result))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<arkt::ImportBookmark> batch;
+  batch.reserve(bookmarks.count);
+  for (id<ArktImportBookmark> bookmark in bookmarks) {
+    arkt::ImportBookmark out;
+    out.url = base::SysNSStringToUTF8(bookmark.url);
+    out.title = base::SysNSStringToUTF16(bookmark.title);
+    out.guid = bookmark.guid ? base::SysNSStringToUTF8(bookmark.guid) : "";
+    out.date_added = bookmark.dateAdded
+                         ? base::Time::FromNSDate(bookmark.dateAdded)
+                         : base::Time();
+    for (NSString* name in bookmark.folderPath) {
+      out.folder_path.push_back(base::SysNSStringToUTF16(name));
+    }
+    batch.push_back(std::move(out));
+  }
+  LOG(WARNING) << "ARKT: facade importBookmarks " << batch.size();
+  arkt::ImportBookmarks(
       arkt::EmbedderProfile(), std::move(batch),
       base::BindOnce(&arkt::DeliverImportResult, completion));
 }

@@ -1,5 +1,6 @@
 import AppKit
 import struct ArcImport.ArcCookie
+import struct ArcImport.BookmarkRecord
 import struct ArcImport.ArcLogin
 internal import WebKit
 import EngineAPI
@@ -19,6 +20,10 @@ public final class FakeEngine: EngineClient, EngineImporting {
 
   public func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult { imports.record(batch) }
   public func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult { imports.record(batch) }
+  public func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
+    imports.record(batch, after: watermark)
+  }
+  public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { imports.record(batch) }
 
   private final class Entry {
     let webView: WKWebView

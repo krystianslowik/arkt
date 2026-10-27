@@ -6,11 +6,14 @@ import EngineAPI
 import EngineAPITestSupport
 import Foundation
 
-/// The engine check for the import writes (#512), against the real engine. Runs with `--arkt-import-check=import` or
+/// The engine check for the import writes (#512, #511), against the real engine. Runs with `--arkt-import-check=import` or
 /// `=verify` and `--arkt-engine-test-api`; the shell's session is not started. `ARKT_IMPORT_FIXTURE_DIR` names a profile
 /// folder made by `FakeChromiumProfile` (invented values, a fake Safe Storage key): the runner reads its cookies and
 /// logins with the Arc readers, writes them through `ChromiumEngine.importCookies` and `importPasswords`, loads a page on
-/// 127.0.0.1 and prints what `document.cookie` shows. `verify` skips the import and only loads the page, for the run
+/// 127.0.0.1 and prints what `document.cookie` shows. It also reads the fixture's History and Bookmarks, moves the visits
+/// to the last days (the fixture's are from 2024, past the 90 days Chromium keeps), and writes them through
+/// `importHistory` and `importBookmarks`, twice: the second history call passes the first one's newest visit as the
+/// watermark and must write nothing. `verify` skips the import and only loads the page, for the run
 /// after a relaunch. Prints one `ARKT_IMPORT` line per step and quits through the application's own terminate.
 @MainActor
 final class ImportCheckRunner {
@@ -92,6 +95,35 @@ final class ImportCheckRunner {
       cookiesDatabase: directory.appendingPathComponent("Network/Cookies"), keyProvider: FixtureKey()
     ) { again += $0 }
     print("ARKT_IMPORT cookies again \(describe(await engine.importCookies(again)))")
+
+    try await importHistoryAndBookmarks(from: directory, into: engine)
+  }
+
+  private static func importHistoryAndBookmarks(from directory: URL, into engine: ChromiumEngine) async throws {
+    let read = try HistoryReader.readAll(from: directory.appendingPathComponent("History"))
+    print("ARKT_IMPORT read history \(read.summary)")
+    // Fixed gaps are kept; the newest visit moves to yesterday.
+    let newest = read.entries.flatMap(\.visits).map(\.time).max() ?? Date()
+    let shift = Date().addingTimeInterval(-86_400).timeIntervalSince(newest)
+    let entries = read.entries.map { entry in
+      ImportedHistoryEntry(
+        url: entry.url, title: entry.title, visitCount: entry.visitCount, typedCount: entry.typedCount,
+        lastVisit: entry.lastVisit?.addingTimeInterval(shift),
+        visits: entry.visits.map { HistoryVisit(time: $0.time.addingTimeInterval(shift), transition: $0.transition) })
+    }
+    // A visit from the fixture's own date, past the retention window: skipped and counted.
+    let stale = ImportedHistoryEntry(
+      url: "https://stale.example/", title: "Stale", visitCount: 1, typedCount: 0, lastVisit: nil,
+      visits: [HistoryVisit(time: newest, transition: .link)])
+    let first = await engine.importHistory(entries + [stale], after: nil)
+    print("ARKT_IMPORT history \(describe(first)) latest=\(first.latestVisit.map { String($0.timeIntervalSince1970) } ?? "none")")
+    let again = await engine.importHistory(entries, after: first.latestVisit)
+    print("ARKT_IMPORT history again \(describe(again)) latest=\(again.latestVisit.map { String($0.timeIntervalSince1970) } ?? "none")")
+
+    let bookmarks = try BookmarksReader.read(from: directory.appendingPathComponent("Bookmarks"))
+    print("ARKT_IMPORT read bookmarks \(bookmarks.bookmarks.count) skipped \(bookmarks.skippedNodes)")
+    print("ARKT_IMPORT bookmarks \(describe(await engine.importBookmarks(bookmarks.bookmarks)))")
+    print("ARKT_IMPORT bookmarks again \(describe(await engine.importBookmarks(bookmarks.bookmarks)))")
   }
 
   private static func showCookies(in engine: ChromiumEngine) async throws {

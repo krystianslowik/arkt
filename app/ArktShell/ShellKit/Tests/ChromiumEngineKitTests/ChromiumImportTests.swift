@@ -75,9 +75,59 @@ struct ChromiumImportTests {
     #expect(batch.allSatisfy { EngineImportContract.isZeroed($0.password) })
   }
 
+  @Test func historyEntriesReachTheFacadeWithTheirVisitsTransitionsAndWatermark() async {
+    let engine = ChromiumEngine(facade: facade)
+    let newest = Date(timeIntervalSince1970: 3_000)
+    facade.importLastVisitTime = newest
+    let watermark = Date(timeIntervalSince1970: 1_000)
+    let entry = ImportedHistoryEntry(
+      url: "https://example.com/", title: "Example", visitCount: 3, typedCount: 1, lastVisit: newest,
+      visits: [
+        HistoryVisit(time: Date(timeIntervalSince1970: 2_000), transition: .typed),
+        HistoryVisit(time: newest, transition: .keywordGenerated),
+        HistoryVisit(time: Date(timeIntervalSince1970: 2_500), transition: .unknown),
+      ])
+    let result = await engine.importHistory([entry], after: watermark)
+
+    #expect(result == ImportWriteResult(written: 3, latestVisit: newest))
+    #expect(facade.importedHistoryWatermarks == [watermark])
+    #expect(facade.importedHistoryBatches == [[ScriptedFacade.ScriptedImportedHistoryEntry(
+      url: "https://example.com/", title: "Example",
+      visitTimes: [Date(timeIntervalSince1970: 2_000), newest, Date(timeIntervalSince1970: 2_500)],
+      visitTransitions: [1, 10, 0])]])
+  }
+
+  @Test func noWatermarkReachesTheFacadeAsNil() async {
+    let engine = ChromiumEngine(facade: facade)
+    _ = await engine.importHistory([], after: nil)
+    #expect(facade.importedHistoryWatermarks.count == 1 && facade.importedHistoryWatermarks[0] == nil)
+  }
+
+  @Test func bookmarksReachTheFacadeWithTheirFoldersAndGuid() async {
+    let engine = ChromiumEngine(facade: facade)
+    facade.importAnswer = (written: 1, skipped: 1, failed: 0, failureReason: nil)
+    let added = Date(timeIntervalSince1970: 500)
+    let result = await engine.importBookmarks([
+      BookmarkRecord(
+        root: "bookmark_bar", folderPath: ["Reading", "Later"], title: "Article", url: "https://example.net/a",
+        guid: "00000000-0000-4000-8000-000000000003", dateAdded: added),
+      BookmarkRecord(root: "other", folderPath: [], title: "", url: "https://example.com/", guid: nil, dateAdded: nil),
+    ])
+
+    #expect(result == ImportWriteResult(written: 1, skipped: 1))
+    #expect(facade.importedBookmarkBatches == [[
+      ScriptedFacade.ScriptedImportedBookmark(
+        url: "https://example.net/a", title: "Article", guid: "00000000-0000-4000-8000-000000000003", dateAdded: added,
+        folderPath: ["Reading", "Later"]),
+      ScriptedFacade.ScriptedImportedBookmark(url: "https://example.com/", title: "", guid: nil, dateAdded: nil, folderPath: []),
+    ]])
+  }
+
   @Test func anEmptyBatchStillAnswers() async {
     let engine = ChromiumEngine(facade: facade)
     #expect(await engine.importCookies([]) == ImportWriteResult())
     #expect(await engine.importPasswords([]) == ImportWriteResult())
+    #expect(await engine.importHistory([], after: nil) == ImportWriteResult())
+    #expect(await engine.importBookmarks([]) == ImportWriteResult())
   }
 }

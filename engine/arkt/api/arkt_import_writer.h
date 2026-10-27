@@ -44,13 +44,39 @@ struct ImportLogin {
   base::Time date_last_used;
 };
 
-// written + skipped + failed is the batch size. `reasons` counts failures by
-// reason; it never holds a host, a name or a value.
+// One visit of an imported history entry; `transition` is Chromium's core
+// page transition type (0 link ... 10 keyword generated).
+struct ImportVisit {
+  base::Time time;
+  int transition = 0;
+};
+
+struct ImportHistoryEntry {
+  std::string url;
+  std::u16string title;
+  std::vector<ImportVisit> visits;
+};
+
+struct ImportBookmark {
+  std::string url;
+  std::u16string title;
+  // Empty when the source had none.
+  std::string guid;
+  base::Time date_added;
+  // Folder titles below the Imported folder, outermost first.
+  std::vector<std::u16string> folder_path;
+};
+
+// written + skipped + failed is the batch size (visits for a history batch).
+// `reasons` counts failures by reason; it never holds a host, a name or a
+// value.
 struct ImportCounts {
   int written = 0;
   int skipped = 0;
   int failed = 0;
   std::map<std::string, int> reasons;
+  // History only: the newest visit time written; null when none was.
+  base::Time latest_visit;
 };
 
 using ImportDone = base::OnceCallback<void(ImportCounts)>;
@@ -67,6 +93,24 @@ void ImportCookies(Profile* profile,
 void ImportLogins(Profile* profile,
                   std::vector<ImportLogin> logins,
                   ImportDone done);
+
+// Writes every visit through the profile's HistoryService (AddPage per
+// visit, source SOURCE_OS_MIGRATION_IMPORTED). A visit at or before `after`
+// (when it is not null), older than the history retention window, or of a
+// URL the history refuses (not http, https, ftp or file) is skipped. `done`
+// runs after the history thread processed the writes, never inside the call.
+void ImportHistory(Profile* profile,
+                   std::vector<ImportHistoryEntry> entries,
+                   base::Time after,
+                   ImportDone done);
+
+// Writes under "Other bookmarks" / "Imported" in the profile's BookmarkModel,
+// folders kept. A bookmark whose guid the model holds, or whose url and title
+// the target folder holds, is skipped. `done` runs after the write, never
+// inside the call, and waits for the model to load.
+void ImportBookmarks(Profile* profile,
+                     std::vector<ImportBookmark> bookmarks,
+                     ImportDone done);
 
 }  // namespace arkt
 

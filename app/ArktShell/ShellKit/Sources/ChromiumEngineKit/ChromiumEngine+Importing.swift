@@ -44,6 +44,31 @@ private final class FacadeImportLogin: NSObject, ArktImportLogin {
   }
 }
 
+/// A history entry as the facade reads it (`ArktImportHistoryEntry`): the visits as two parallel arrays.
+private final class FacadeImportHistoryEntry: NSObject, ArktImportHistoryEntry {
+  let url: String
+  let title: String
+  let visitTimes: [Date]
+  let visitTransitions: [NSNumber]
+  init(_ entry: ImportedHistoryEntry) {
+    url = entry.url
+    title = entry.title
+    visitTimes = entry.visits.map(\.time)
+    visitTransitions = entry.visits.map { NSNumber(value: $0.transition.coreValue) }
+  }
+}
+
+private final class FacadeImportBookmark: NSObject, ArktImportBookmark {
+  private let bookmark: BookmarkRecord
+  init(_ bookmark: BookmarkRecord) { self.bookmark = bookmark }
+
+  var url: String { bookmark.url }
+  var title: String { bookmark.title }
+  var guid: String? { bookmark.guid }
+  var dateAdded: Date? { bookmark.dateAdded }
+  var folderPath: [String] { bookmark.folderPath }
+}
+
 /// Lends `secret`'s bytes to `body`. An empty secret has no address, so `body` gets a valid pointer and a length of 0.
 private func lend(_ secret: SecretBytes, to body: (UnsafeRawPointer, UInt) -> Void) {
   secret.withBytes { buffer in
@@ -59,7 +84,8 @@ private func lend(_ secret: SecretBytes, to body: (UnsafeRawPointer, UInt) -> Vo
 extension ImportWriteResult {
   @MainActor fileprivate init(_ result: any ArktImportResult) {
     self.init(
-      written: result.written, skipped: result.skipped, failed: result.failed, failureReason: result.failureReason)
+      written: result.written, skipped: result.skipped, failed: result.failed, failureReason: result.failureReason,
+      latestVisit: result.lastVisitTime)
   }
 }
 
@@ -78,6 +104,20 @@ extension ChromiumEngine: EngineImporting {
     let records = batch.map(FacadeImportLogin.init)
     return await withCheckedContinuation { continuation in
       facade.importPasswords(records) { continuation.resume(returning: ImportWriteResult($0)) }
+    }
+  }
+
+  public func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
+    let records = batch.map(FacadeImportHistoryEntry.init)
+    return await withCheckedContinuation { continuation in
+      facade.importHistory(records, after: watermark) { continuation.resume(returning: ImportWriteResult($0)) }
+    }
+  }
+
+  public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult {
+    let records = batch.map(FacadeImportBookmark.init)
+    return await withCheckedContinuation { continuation in
+      facade.importBookmarks(records) { continuation.resume(returning: ImportWriteResult($0)) }
     }
   }
 }
