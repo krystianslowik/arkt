@@ -31,7 +31,7 @@ final class JavaScriptDialogHandoffTests: XCTestCase {
   }
 
   /// Two windows; the first shows Today row 0, whose page is `tab`, and has row 1's page too.
-  private func makeScene() throws -> Scene {
+  private func makeScene(reduceMotion: Bool = true) throws -> Scene {
     let world = try EngineWorld.make()
     let engine = InMemoryEngine()
     let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
@@ -42,7 +42,7 @@ final class JavaScriptDialogHandoffTests: XCTestCase {
     for controller in [first, second] {
       controller.window?.setFrame(NSRect(x: 100, y: 100, width: 1100, height: 800), display: false)
       controller.window?.orderFront(nil)
-      controller.javaScriptDialogs.reduceMotion = { true }
+      controller.javaScriptDialogs.reduceMotion = { reduceMotion }
     }
     first.activate(node: world.today[1])           // the window keeps a page when row 0 leaves
     first.activate(node: world.today[0])
@@ -125,5 +125,65 @@ final class JavaScriptDialogHandoffTests: XCTestCase {
     let panel = try XCTUnwrap(scene.first.javaScriptDialogs.panel(for: scene.tab))
     panel.view.primaryButton.performClick(nil)
     XCTAssertEqual(scene.engine.dialogAnswers.map(\.id), [id])
+  }
+
+  // MARK: Teardown on the other paths: nothing answers, nothing is left behind
+
+  private func assertNoPanelAnywhere(_ scene: Scene, _ message: String) {
+    XCTAssertNil(scene.first.javaScriptDialogs.panel(for: scene.tab), message)
+    XCTAssertNil(scene.second.javaScriptDialogs.panel(for: scene.tab), message)
+    XCTAssertTrue(scene.first.javaScriptDialogs.pending.isEmpty, message)
+    XCTAssertTrue(scene.second.javaScriptDialogs.pending.isEmpty, message)
+    XCTAssertEqual(scene.first.window?.childWindows?.count ?? 0, 0, message)
+    XCTAssertEqual(scene.second.window?.childWindows?.count ?? 0, 0, message)
+    XCTAssertTrue(scene.engine.dialogAnswers.isEmpty, message)
+  }
+
+  /// With motion on, the panel's entrance has started and not been stepped to its end when the tab moves.
+  func testAMoveDuringTheEntranceMovesThePanelAndAnswersOnce() throws {
+    for kind in [JavaScriptDialog.Kind.alert, .confirm, .prompt] {
+      let scene = try makeScene(reduceMotion: false)
+      let id = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: kind, message: "Now?"))
+      let oldPanel = try XCTUnwrap(scene.first.javaScriptDialogs.panel(for: scene.tab))
+      XCTAssertNotNil(oldPanel.container.layer?.animation(forKey: "dialogFade"), "\(kind): the entrance is running")
+
+      scene.second.activate(node: scene.world.today[0])
+
+      XCTAssertNil(oldPanel.onAnswer)
+      XCTAssertNil(scene.first.javaScriptDialogs.panel(for: scene.tab), "\(kind)")
+      XCTAssertEqual(scene.first.window?.childWindows?.count ?? 0, 0, "\(kind): nothing left in the old window")
+      XCTAssertTrue(scene.engine.dialogAnswers.isEmpty, "\(kind): the move answers nothing")
+      let panel = try XCTUnwrap(scene.second.javaScriptDialogs.panel(for: scene.tab))
+      panel.view.primaryButton.performClick(nil)
+      XCTAssertEqual(scene.engine.dialogAnswers.map(\.id), [id], "\(kind): answered once")
+    }
+  }
+
+  func testMovingThenClosingTheTabAnswersNothingAndLeavesNoPanel() throws {
+    for kind in [JavaScriptDialog.Kind.alert, .confirm, .prompt] {
+      let scene = try makeScene()
+      _ = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: kind, message: "Now?"))
+      scene.second.activate(node: scene.world.today[0])
+      XCTAssertNotNil(scene.second.javaScriptDialogs.panel(for: scene.tab))
+
+      scene.engine.closeTab(scene.tab)
+
+      assertNoPanelAnywhere(scene, "\(kind)")
+    }
+  }
+
+  func testMovingThenClosingTheWindowAnswersNothingAndLeavesNoPanel() throws {
+    for kind in [JavaScriptDialog.Kind.alert, .confirm, .prompt] {
+      let scene = try makeScene()
+      _ = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: kind, message: "Now?"))
+      scene.second.activate(node: scene.world.today[0])
+      let panel = try XCTUnwrap(scene.second.javaScriptDialogs.panel(for: scene.tab))
+
+      scene.second.window?.close()
+
+      XCTAssertNil(panel.panel.parent, "\(kind)")
+      XCTAssertNil(panel.onAnswer, "\(kind)")
+      assertNoPanelAnywhere(scene, "\(kind)")
+    }
   }
 }

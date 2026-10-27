@@ -40,6 +40,8 @@ public final class JavaScriptDialogPresenter {
   private struct Entry {
     let panel: DialogPanel
     var observers: [NSObjectProtocol]
+    /// The page view the panel points at, and whose frame the observers watch.
+    weak var anchorView: NSView?
   }
 
   private let engine: any EngineClient
@@ -133,7 +135,7 @@ public final class JavaScriptDialogPresenter {
   }
 
   private func present(_ tab: TabID) {
-    guard let dialog = pending[tab] else { return }
+    guard pending[tab] != nil else { return }
     guard let view = anchor(tab) else {
       retryOnLayout = true
       dismissPanel(of: tab)
@@ -143,6 +145,14 @@ public final class JavaScriptDialogPresenter {
       dismissPanel(of: tab)                  // a window coming back (deminiaturize, unhide, occlusion) refreshes
       return
     }
+    // The tab reached another window or page view without a hand-off (a pane or Peek move): the panel and its
+    // observers belong to the old ones, so it goes down unanswered and a new one is made for the new view. A prompt's
+    // typed text comes along.
+    if let entry = entries[tab], entry.panel.panel.parent !== window || entry.anchorView !== view {
+      if pending[tab]?.kind == .prompt, let typed = entry.panel.inputText { pending[tab]?.defaultPromptText = typed }
+      dismissPanel(of: tab)
+    }
+    guard let dialog = pending[tab] else { return }
     let frame = Self.screenFrame(of: view)
     let width = Self.panelWidth(forAnchorWidth: frame.width)
     if let entry = entries[tab] {
@@ -165,7 +175,7 @@ public final class JavaScriptDialogPresenter {
       NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main,
                                              using: reposition),
     ]
-    entries[tab] = Entry(panel: panel, observers: observers)
+    entries[tab] = Entry(panel: panel, observers: observers, anchorView: view)
     panel.show(over: window, anchoredTo: frame, takesFocus: true)
   }
 

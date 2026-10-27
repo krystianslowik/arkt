@@ -336,4 +336,55 @@ final class JavaScriptDialogPresenterTests: XCTestCase {
     XCTAssertNil(presenter.panel(for: tab))
     XCTAssertTrue(engine.dialogAnswers.isEmpty)
   }
+
+  // MARK: The page view reaches another window or view without a hand-off (#464 review)
+
+  func testAPageViewMovedToAnotherWindowTakesItsPanelAlongAndAnswersOnce() throws {
+    let other = NSWindow(contentRect: NSRect(x: 900, y: 200, width: 500, height: 400), styleMask: [.titled],
+                         backing: .buffered, defer: false)
+    other.orderFront(nil)
+    defer { other.orderOut(nil) }
+    let id = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .prompt, message: "Name?", defaultPromptText: "Ada"))
+    let oldPanel = try XCTUnwrap(presenter.panel(for: tab))
+    oldPanel.view.inputView?.field.stringValue = "Grace"
+
+    window.contentView = NSView()
+    other.contentView = page
+    presenter.refresh()
+
+    let panel = try XCTUnwrap(presenter.panel(for: tab))
+    XCTAssertFalse(panel === oldPanel)
+    XCTAssertNil(oldPanel.panel.parent)
+    XCTAssertNil(oldPanel.onAnswer, "the old panel can no longer answer")
+    XCTAssertEqual(window.childWindows?.count ?? 0, 0, "none in the old window")
+    XCTAssertEqual(other.childWindows?.filter { $0 === panel.panel }.count, 1)
+    XCTAssertEqual(panel.panel.frame.width, expectedWidth(anchorFrame().width))
+    XCTAssertEqual(panel.inputText, "Grace")
+    XCTAssertTrue(engine.dialogAnswers.isEmpty, "moving the view answers nothing")
+
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(engine.dialogAnswers.map(\.id), [id])
+    XCTAssertEqual(engine.dialogAnswers.first?.userInput, "Grace")
+  }
+
+  func testAPageViewReplacedInTheSameWindowWatchesTheNewViewOnly() throws {
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .confirm, message: "Sure?"))
+    let oldPanel = try XCTUnwrap(presenter.panel(for: tab))
+    let old = try XCTUnwrap(page)
+    let fresh = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 500))
+    old.addSubview(fresh)
+    page = fresh
+    presenter.refresh()
+
+    let panel = try XCTUnwrap(presenter.panel(for: tab))
+    XCTAssertFalse(panel === oldPanel)
+    XCTAssertNil(oldPanel.panel.parent)
+    XCTAssertEqual(window.childWindows?.count, 1)
+    let before = panel.panel.frame.width
+    old.setFrameSize(NSSize(width: 300, height: 500))              // the old view no longer drives the panel
+    XCTAssertEqual(panel.panel.frame.width, before)
+    fresh.setFrameSize(NSSize(width: 300, height: 500))
+    XCTAssertEqual(panel.panel.frame.width, expectedWidth(300))
+    XCTAssertTrue(engine.dialogAnswers.isEmpty)
+  }
 }
