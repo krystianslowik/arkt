@@ -40,12 +40,15 @@ extension ShellWindowController: LittleArktFlightDestination {
   }
 
   /// The page moves into this window's engine window and its row is selected, mounting the page in the content card
-  /// at its final size; the window becomes key with the page focused.
-  func finishReceiving(_ tab: TabID, node: NodeID) -> Bool {
+  /// at its final size; the window becomes key with the page focused. `clearingPrevious` is the flight's landing
+  /// (#455): the old selection already faded out, so it must not draw the previous fill now. A landing before the
+  /// first arrival frame cleared nothing, so the previous fill stays as the no-flight path draws it.
+  func finishReceiving(_ tab: TabID, node: NodeID, clearingPrevious: Bool = false) -> Bool {
     guard tabsByNode[node] == tab else { return false }
-    sidebarController.currentPage?.outlineController.endArrival()
+    let endedArrival = sidebarController.outline(containing: node)?.endArrival() ?? false
     engine.moveTab(tab, to: ensureEngineWindow())
     activate(node: node)
+    if clearingPrevious, endedArrival { sidebarController.clearPrevious() }
     window?.makeKeyAndOrderFront(nil)
     engine.focusPage(of: tab)
     return true
@@ -55,14 +58,14 @@ extension ShellWindowController: LittleArktFlightDestination {
   /// arrival stops and the row made for the page goes. The page is still in the Little Arkt window, so the row lets
   /// go of it first; a row the page's own close already archived is left alone.
   func cancelReceiving(_ tab: TabID, node: NodeID) {
-    sidebarController.currentPage?.outlineController.endArrival()
+    sidebarController.outline(containing: node)?.endArrival()
     guard tabsByNode[node] == tab else { return }
     _ = releaseLiveTab(of: node)
     archive(node, heldCurrent: false)
   }
 
   func presentArrival(of node: NodeID, room: Double, appear: Double) {
-    sidebarController.currentPage?.outlineController.presentArrival(of: node, room: room, appear: appear)
+    sidebarController.outline(containing: node)?.presentArrival(of: node, room: room, appear: appear)
   }
 
   var flightWindow: NSWindow? { window }

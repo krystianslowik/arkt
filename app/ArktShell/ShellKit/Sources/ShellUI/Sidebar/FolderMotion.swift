@@ -12,6 +12,9 @@ enum FolderMotionLayout {
     var alpha: CGFloat
     /// About the row's center: a row arriving from Little Arkt's Open in grows from 0.96 (#352).
     var scale: CGFloat = 1
+    /// The selection fill's layer opacity: 1 at rest, 0 when the old selection has faded for Little Arkt's arrival
+    /// (#455). The row's text, favicon and hover X are not faded.
+    var selectionAlpha: CGFloat = 1
 
     static let rest = RowStyle(offsetY: 0, alpha: 1)
   }

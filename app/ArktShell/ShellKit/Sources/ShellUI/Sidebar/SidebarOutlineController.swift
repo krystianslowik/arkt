@@ -767,8 +767,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   }
 
   /// The state a row draws: a selected row takes the `contentVisible` fill (design 6, OQ9) unless it is current,
-  /// which wins.
+  /// which wins. While Little Arkt's row arrives it draws the selection, so its fill fades in with it (#455); the
+  /// outline's accessibility selection (`state(for:)`) is unchanged.
   func displayedState(for id: NodeID) -> TabRowState {
+    if id == arrival?.node { return .current }
     let base = state(for: id)
     return selection.contains(id) && base != .current ? .contentVisible : base
   }
@@ -1193,20 +1195,45 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   // MARK: Arrival (#352)
 
   /// A row arriving from Little Arkt's Open in flight: the rows below make room (`room`, 0 to 1) and the row fades
-  /// in (`appear`, 0 to 1), on the flight's clock. Nil when no row is arriving.
-  private var arrival: (node: NodeID, room: Double, appear: Double)?
+  /// in (`appear`, 0 to 1), on the flight's clock. `fadingOut` is the selection shown before the flight (a pane's
+  /// split, nil when it has no outline row), captured on the first frame. Nil when no row is arriving.
+  private var arrival: (node: NodeID, room: Double, appear: Double, fadingOut: NodeID?)?
 
-  /// One frame of `node`'s arrival at the top of Today, applied with the folder motion frame.
+  /// One frame of `node`'s arrival at the top of Today, applied with the folder motion frame. The first frame also
+  /// redraws the arriving row's realized view as the selection; later frames only move layer properties.
   public func presentArrival(of node: NodeID, room: Double, appear: Double) {
-    arrival = (node, room, appear)
+    let firstFrame = arrival == nil
+    let fadingOut: NodeID?
+    if let arrival {
+      fadingOut = arrival.fadingOut
+    } else {
+      fadingOut = selectionSeed
+    }
+    arrival = (node, room, appear, fadingOut)
+    if firstFrame, let item = items[node] {
+      let row = outlineView.row(forItem: item)
+      if row >= 0, let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView {
+        configure(rowView, for: item)
+      }
+    }
     presentFolderMotion(folderMotion.progress())
   }
 
-  /// The arrival ended: every row draws at rest (with any folder motion still running).
-  public func endArrival() {
-    guard arrival != nil else { return }
-    arrival = nil
+  /// The arrival ended: the arriving row draws its model state again (when it still has a row) and every row draws
+  /// at rest (with any folder motion still running). True when an arrival was running, so a landing can tell whether
+  /// the old selection actually faded (#455).
+  @discardableResult
+  public func endArrival() -> Bool {
+    guard let arrival else { return false }
+    self.arrival = nil
+    if let item = items[arrival.node] {
+      let row = outlineView.row(forItem: item)
+      if row >= 0, let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView {
+        configure(rowView, for: item)
+      }
+    }
     presentFolderMotion(folderMotion.progress())
+    return true
   }
 
   /// One frame of the folder springs: each realized row gets its offset and opacity as layer properties (never a
@@ -1222,6 +1249,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
     var styles: [ObjectIdentifier: FolderMotionLayout.RowStyle] = [:]
     let arrivalRow = arrival.map { row(for: $0.node) } ?? -1
+    let fadingRow = arrival?.fadingOut.map { row(for: $0) } ?? -1
     if !transitions.isEmpty || arrivalRow >= 0 {
       // Every row's height only when a folder is in motion; an arrival needs its own row's alone (#352).
       var frame = transitions.isEmpty
@@ -1230,7 +1258,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
                                     transitions: transitions)
       if let arrival, arrivalRow >= 0 {
         SidebarArrivalLayout.apply(to: &frame, arrivalHeight: outlineView.rect(ofRow: arrivalRow).height,
-                                   arrivalRow: arrivalRow, room: arrival.room, appear: arrival.appear)
+                                   arrivalRow: arrivalRow, oldSelectionRow: fadingRow,
+                                   room: arrival.room, appear: arrival.appear)
       }
       for (row, style) in frame.enumerated() where style != .rest {
         if let key = styleKey(atRow: row) { styles[key] = style }
@@ -1261,6 +1290,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     layer.transform = transform
     layer.opacity = Float(style.alpha)
     layer.zPosition = raised ? 1 : 0
+    (rowView as? SidebarRowView)?.selectionAlpha = style.selectionAlpha
     CATransaction.commit()
   }
 

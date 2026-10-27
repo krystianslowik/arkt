@@ -36,6 +36,17 @@ public final class SidebarRowView: NSTableRowView {
       CATransaction.commit()
     }
   }
+  /// The selection fill's layer opacity (#455): Little Arkt's arrival fades the old row's fill out as the rows make
+  /// room. Only the fill fades; the cell's text, favicon and hover X stay.
+  public var selectionAlpha: CGFloat = 1 {
+    didSet {
+      guard selectionAlpha != oldValue else { return }
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      backgroundLayer.opacity = Float(selectionAlpha)
+      CATransaction.commit()
+    }
+  }
   /// Divider rows never draw a fill or react to the pointer.
   public var isInteractive = true {
     didSet { if isInteractive != oldValue { needsDisplay = true } }
@@ -156,6 +167,7 @@ public final class SidebarRowView: NSTableRowView {
     isHovered = false
     isPressed = false
     state = .normal
+    selectionAlpha = 1
     isInteractive = true
   }
 }
