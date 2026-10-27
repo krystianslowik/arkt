@@ -36,6 +36,8 @@ public final class ShellWindowSet {
   private var adoptedSavedSidebarState = false
   /// The window that restores and saves the session: the first one built.
   private weak var sessionWindow: ShellWindowController?
+  /// The saved session was applied (or looked for) once; a window that takes over later only saves.
+  private var restoredSession = false
   /// The session window when a saved frame was applied to it: `place` leaves it where it is.
   private weak var restoredFrameWindow: ShellWindowController?
   /// Built for an engine request, waiting for their window's `.windowOpened`.
@@ -99,7 +101,7 @@ public final class ShellWindowSet {
   @discardableResult
   public func openWindow(opensFirstTab: Bool = true) -> ShellWindowController {
     let anchor = primary?.window
-    let controller = make(opensFirstTab: opensFirstTab)
+    let controller = make(opensFirstTab: opensFirstTab, origin: .shell)
     place(controller, near: anchor)
     controller.showWindow(nil)
     return controller
@@ -120,7 +122,7 @@ public final class ShellWindowSet {
   /// over from the window that had it, without a reload (#300).
   @discardableResult
   public func openWindow(showing node: NodeID, at point: NSPoint) -> ShellWindowController {
-    let controller = make(opensFirstTab: false)
+    let controller = make(opensFirstTab: false, origin: .dragOut)
     controller.showWindow(nil)
     controller.window?.setFrameTopLeftPoint(point)   // after showing: the first show places a window itself
     controller.activate(node: node)
@@ -142,7 +144,7 @@ public final class ShellWindowSet {
     }
     let space = targetSpace(for: request)
     let anchor = primary?.window
-    let controller = make(opensFirstTab: false)
+    let controller = make(opensFirstTab: false, origin: SessionWindowPolicy.origin(for: request))
     if let space { controller.sidebarController.showSpace(space) }
     if let bounds = request.bounds {
       controller.window?.setFrame(bounds, display: false)
@@ -278,10 +280,12 @@ public final class ShellWindowSet {
 
   // MARK: Building
 
-  private func make(opensFirstTab: Bool) -> ShellWindowController {
-    // #116: the session's first window restores the saved frame, Space and tabs and keeps them saved.
-    let isRestored = !adoptedSavedSidebarState
-    let session = isRestored ? sessionStore.load() : nil
+  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin) -> ShellWindowController {
+    // #116: the first main window the shell opens restores the saved frame, Space and tabs and keeps them saved;
+    // when it closes, the next one takes over saving (without restoring again).
+    let isRestored = SessionWindowPolicy.takesSession(origin, ownerIsAlive: sessionWindow.map { !$0.isClosed } ?? false)
+    let session = isRestored && !restoredSession ? sessionStore.load() : nil
+    if isRestored { restoredSession = true }
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
                                            restoring: session, savesSession: isRestored, opensFirstTab: opensFirstTab)

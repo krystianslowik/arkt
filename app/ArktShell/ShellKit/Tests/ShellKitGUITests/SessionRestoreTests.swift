@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 import EngineAPITestSupport
 import XCTest
 @testable import ShellUI
@@ -233,6 +234,56 @@ final class SessionRestoreTests: XCTestCase {
     set.resumeSessions()                          // the quit was cancelled
     window.activate(node: world.designReview)
     XCTAssertEqual(store.load()?.currentTab, world.designReview)
+    window.close()
+  }
+
+  // MARK: Engine windows and the session window
+
+  func testAnEngineRequestedWindowBuiltBeforeLaunchDoesNotTakeTheSession() throws {
+    let world = World()
+    let store = try store()
+    store.save(world.savedState(frame: Self.savedFrame))
+    let set = makeSet(world, store: store)
+
+    let popup = set.host(for: EngineWindowRequest(kind: .startupURL, bounds: CGRect(x: 300, y: 200, width: 500, height: 400),
+                                                  profile: EngineProfileID("default")))
+    XCTAssertEqual(set.controllers.count, 1)
+    let window = set.openWindow()
+    XCTAssertEqual(window.window?.frame, Self.savedFrame, "the shell's launch window restores")
+    XCTAssertEqual(window.currentNode, world.teamDocs)
+    _ = popup
+    for other in set.controllers where other !== window { other.saveSession() }
+    XCTAssertEqual(store.load()?.frame, Self.savedFrame, "the engine's window never saved over the main window")
+    window.close()
+  }
+
+  func testTheNextShellWindowTakesTheSessionAfterTheOwnerCloses() throws {
+    let world = World()
+    let store = try store()
+    store.save(world.savedState(frame: Self.savedFrame))
+    let set = makeSet(world, store: store)
+    let first = set.openWindow()
+    first.close()
+
+    let next = set.openWindow(opensFirstTab: false)
+    XCTAssertNotEqual(next.window?.frame, Self.savedFrame, "only the first owner restores")
+    next.activate(node: world.designReview)
+    XCTAssertEqual(store.load()?.currentTab, world.designReview, "the new owner saves")
+    XCTAssertEqual(store.load()?.space, world.work)
+    next.close()
+  }
+
+  func testEnteringFullScreenRemembersTheWindowedFrame() throws {
+    let world = World()
+    let store = try store()
+    store.save(world.savedState(frame: Self.savedFrame))
+    let set = makeSet(world, store: store)
+    let window = set.openWindow()
+
+    window.windowWillEnterFullScreen(Notification(name: NSWindow.willEnterFullScreenNotification))
+    XCTAssertEqual(window.frameBeforeFullScreen, Self.savedFrame)
+    XCTAssertEqual(window.currentSessionState()?.frame, Self.savedFrame, "windowed: its own frame")
+    XCTAssertEqual(window.currentSessionState()?.isFullScreen, false)
     window.close()
   }
 }
