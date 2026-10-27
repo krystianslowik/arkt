@@ -8,7 +8,7 @@ import EngineAPI
 /// (`engineCreateTab`, `engineCloseTab`, `engineCloseWindow`, `engineActivate`, `holdClose`, `answerDialog`,
 /// `openEngineWindow`, `setExtensionActions`) stand in for what a page, an extension or the user does in a real engine.
 @MainActor
-public final class InMemoryEngine: EngineClient, EngineExtensions {
+public final class InMemoryEngine: EngineClient, EngineExtensions, EngineDownloads {
   /// A close waiting on a leave-site dialog.
   private enum HeldClose {
     /// One tab, closed by the client or the engine, with the reason it will report.
@@ -35,6 +35,17 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   var pageSelections: [TabID: String] = [:]
   var hoveredLinks: [TabID: URL] = [:]
   var findRequestCounter = 0
+  /// Downloads (rule 24): the list, what each started from (for Retry), the preference and the places files go. The
+  /// default folder is a fresh temporary folder, so a test never writes to the real Downloads folder.
+  var downloadItems: [DownloadItem] = []
+  var downloadSpecs: [DownloadID: DownloadSpec] = [:]
+  public var downloadSavePreference: DownloadSavePreference = .ask
+  public var downloadDestinationChooser: DownloadDestinationChooser?
+  public let downloadDefaultFolder: URL
+  /// The clock for a download's start and end time.
+  public var downloadClock: @MainActor () -> Date = { Date() }
+  public internal(set) var openedDownloads: [DownloadID] = []
+  public internal(set) var revealedDownloads: [DownloadID] = []
 
   /// Builds hosts for `openEngineWindow(_:)`, as the app's provider does for a real engine.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -44,7 +55,12 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   /// Actions run through `runExtensionAction`, in order.
   public private(set) var ranExtensionActions: [(id: String, window: EngineWindowID, anchor: NSView)] = []
 
-  public init() {}
+  /// `downloadFolder`: where downloads go by default; a new temporary folder when nil.
+  public init(downloadFolder: URL? = nil) {
+    downloadDefaultFolder = downloadFolder
+      ?? FileManager.default.temporaryDirectory.appending(path: "arkt-in-memory-downloads-\(UUID().uuidString)")
+    downloadSavePreference = .folder(downloadDefaultFolder)
+  }
 
   // MARK: - Tabs
 

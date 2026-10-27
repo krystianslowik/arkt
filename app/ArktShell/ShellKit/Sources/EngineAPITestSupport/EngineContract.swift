@@ -89,6 +89,9 @@ public struct EngineHarness {
   /// pointer input may focus and blur the link, which reaches the same renderer report. Nil: not applicable.
   public let hoverLink: EngineTabAction?
   public let leaveLink: EngineTabAction?
+  /// Makes the engine's downloads happen (rule 24). Nil: not applicable (an engine with no downloads, or one that is
+  /// not wired yet).
+  public let downloads: DownloadDrivers?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -110,7 +113,8 @@ public struct EngineHarness {
               findPage: FindPage? = nil,
               selectedText: SelectedText? = nil,
               hoverLink: EngineTabAction? = nil,
-              leaveLink: EngineTabAction? = nil) {
+              leaveLink: EngineTabAction? = nil,
+              downloads: DownloadDrivers? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
@@ -122,6 +126,7 @@ public struct EngineHarness {
     self.raiseInfobar = raiseInfobar
     self.findPage = findPage; self.selectedText = selectedText
     self.hoverLink = hoverLink; self.leaveLink = leaveLink
+    self.downloads = downloads
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -170,7 +175,8 @@ public struct EngineHarness {
       findPage: { occurrences, link in InMemoryEngine.findPageURL(occurrences: occurrences, link: link) },
       selectedText: { engine, id in try inMemory(engine).selectedText(id) },
       hoverLink: { engine, id in try inMemory(engine).hoverLink(id) },
-      leaveLink: { engine, id in try inMemory(engine).leaveLink(id) }
+      leaveLink: { engine, id in try inMemory(engine).leaveLink(id) },
+      downloads: .inMemory()
     )
   }
 
@@ -254,6 +260,16 @@ public struct EngineHarness {
 /// 23. A link under the pointer is reported with `.targetURLChanged(url)` once, and leaving it with
 ///     `.targetURLChanged(nil)` once; nothing is reported while it does not change, and the engine delays and
 ///     merges nothing (#114). Needs `findPage`, `hoverLink` and `leaveLink`.
+///
+/// 24. A download is reported with `.downloadCreated` carrying the engine's values, then `.downloadUpdated` as bytes
+///     arrive (the received count never goes backwards) and once more when it is complete, with its end time and
+///     target. `cancel` ends an active download as `.cancelled` once; `pause` holds the bytes until `resume`; an
+///     interrupted download carries its reason and `retry` starts it again (in place when it can resume, else as a
+///     new download that replaces it); `remove` reports `.downloadRemoved` once and keeps the file; a dangerous
+///     download is held until `keepDangerous` (its type becomes user validated) or `discardDangerous` (the file is
+///     deleted and the item removed), and a blocked one cannot be kept; the save preference decides the folder (or
+///     the chooser's answer in `.ask` mode, and the default folder when the chosen one is missing). A command on an
+///     unknown id or a state it does not apply to does nothing. Needs `downloads`.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
