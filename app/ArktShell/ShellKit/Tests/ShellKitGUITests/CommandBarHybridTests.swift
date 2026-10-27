@@ -332,6 +332,30 @@ final class CommandBarHybridTests: XCTestCase {
     }
   }
 
+  /// The pull request's screenshots: the bar rendered in both appearances with synthetic titles and URLs. Only with
+  /// `ARKT_COMMAND_BAR_SNAPSHOT_DIR` set; otherwise skipped.
+  func testRenderTheSearchStateForTheScreenshots() throws {
+    try XCTSkipUnless(ProcessInfo.processInfo.environment["ARKT_COMMAND_BAR_SNAPSHOT_DIR"] != nil)
+    let pages: [(String, String)] = [("krystianslowik/arkt - Pull requests", "https://github.com/krystianslowik/arkt/pulls"),
+                                     ("Git - Book", "https://git-scm.com/book/en/v2"),
+                                     ("Git branching notes", "https://docs.example.com/git-branching")]
+    bar.openTabsProvider = { pages.map { .init(node: UUID(), title: $0.0, url: URL(string: $0.1)!) } }
+    bar.archivedProvider = { _ in
+      [.init(id: UUID(), title: "Git cheat sheet", subtitle: "cheatsheets.example, Work, archived Sep 22")]
+    }
+    for (name, flavor) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
+      window.appearance = NSAppearance(named: name)
+      bar.toggle(.newTab)
+      bar.setQueryForTesting("git")
+      bar.barView.layoutSubtreeIfNeeded()
+      bar.barView.displayIfNeeded()
+      let rep = try XCTUnwrap(bar.barView.bitmapImageRepForCachingDisplay(in: bar.barView.bounds))
+      bar.barView.cacheDisplay(in: bar.barView.bounds, to: rep)
+      Self.writeSnapshot(rep, named: "search-\(flavor)")
+      bar.hide()
+    }
+  }
+
   /// With `ARKT_COMMAND_BAR_SNAPSHOT_DIR` set, writes the render there (for the pull request's screenshots).
   static func writeSnapshot(_ rep: NSBitmapImageRep, named name: String) {
     guard let dir = ProcessInfo.processInfo.environment["ARKT_COMMAND_BAR_SNAPSHOT_DIR"],
