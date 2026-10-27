@@ -232,8 +232,13 @@ public final class DialogPanel {
   /// puts the top-leading corner back). Instant, no animation. Nothing happens at the width it already has.
   public func resize(width: CGFloat) {
     guard width != panel.frame.width else { return }
-    let height = view.layoutContent(width: width)
-    panel.setContentSize(NSSize(width: width, height: height))
+    let size = NSSize(width: width, height: view.layoutContent(width: width))
+    panel.setContentSize(size)
+    // The window's own resize may lay the sheet out at the old bounds first; set it to the new size and lay it out
+    // again, so the content matches the frame whenever the next display pass comes.
+    container.frame = NSRect(origin: .zero, size: size)
+    view.frame = container.bounds
+    _ = view.layoutContent(width: width)
   }
 
   /// Moves the panel to `anchor` (screen coordinates) again, when the page it points at moved or resized.
