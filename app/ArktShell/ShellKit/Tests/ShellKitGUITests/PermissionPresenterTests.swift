@@ -65,6 +65,21 @@ final class PermissionPresenterTests: XCTestCase {
     XCTAssertEqual(panel.view.primaryButton.title, "Allow while visiting the site")
   }
 
+  /// The panel width the design gives a page `anchorWidth` wide: 320 pt, narrower in a narrow page, never under 260.
+  func testThePanelWidthFollowsTheWindowAcrossTheClamps() throws {
+    _ = try XCTUnwrap(engine.askPermission(in: tab, kinds: [.camera]))
+    let panel = try panel()
+    XCTAssertEqual(panel.panel.frame.width, 320)
+    for width: CGFloat in [900, 300, 150, 700, 450] {
+      window.setContentSize(NSSize(width: width, height: 500))
+      let anchor = window.convertToScreen(page.convert(page.bounds, to: nil))
+      let expected = min(320, max(260, anchor.width - 2 * DialogPanel.anchorInset))
+      XCTAssertEqual(panel.panel.frame.width, expected, "the panel follows the page at \(width)")
+      XCTAssertEqual(panel.panel.frame, panel.frame(anchoredTo: anchor), "and stays at the page's corner")
+      XCTAssertEqual(presenter.panel(for: tab) === panel, true, "resizing keeps the same panel and its protection")
+    }
+  }
+
   func testThePanelDoesNotTakeKeyFocusFromThePage() throws {
     _ = try XCTUnwrap(engine.askPermission(in: tab, kinds: [.camera]))
     XCTAssertFalse(try panel().panel.isKeyWindow)
