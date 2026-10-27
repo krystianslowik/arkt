@@ -308,6 +308,11 @@ public final class SidebarController {
     if view.newTabOffersPasteAndGo, let url = clipboardURLProvider?() { onPasteAndGo?(url) } else { onNewTab?() }
   }
 
+  /// The Cmd monitor goes with the controller, not only with the pointer leaving the button.
+  isolated deinit {
+    if let monitor = newTabFlagsMonitor { NSEvent.removeMonitor(monitor) }
+  }
+
   /// Cmd presses and releases while the pointer rests on the + button toggle its GS-035 state.
   private func newTabHoverChanged(_ hovered: Bool) {
     newTabHovered = hovered

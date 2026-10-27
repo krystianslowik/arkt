@@ -97,6 +97,15 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// instead of the layer animation's completion, so a test ends the fade by hand, with no clock.
   var dismissFinisher: (@MainActor (@escaping @MainActor () -> Void) -> Void)?
   private var dismissGeneration = 0
+  /// The input of the latest reload, for the pill counts.
+  private var lastInput = CommandBarResults.Input()
+  /// The clipboard URL read for this show: the pasteboard is read once per show, not on every reload (Esc, a filter).
+  private var clipboardSnapshot: (url: URL?, isRead: Bool) = (nil, false)
+
+  private func clipboardURLForThisShow() -> URL? {
+    if !clipboardSnapshot.isRead { clipboardSnapshot = (clipboardURLProvider(), true) }
+    return clipboardSnapshot.url
+  }
   private static let fadeKey = "commandBar.fade"
   /// The archived matches of `archivedQuery`, shown while the field still holds that query.
   private var archived: [CommandBarResults.ArchivedMatch] = []
@@ -220,6 +229,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     let targetText = prefill ?? ""
     if barView.field.stringValue != targetText { barView.field.stringValue = targetText }
     filter = .all                                     // All is the default on every open
+    clipboardSnapshot = (nil, false)
     applyAppearance()
     reloadResults()
     setPanelFrame(frame(in: parent), display: false)
@@ -525,7 +535,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     filter = newFilter
     reloadResults()
     relayout()
-    let count = CommandBarFilter.counts(of: unfilteredResults)[newFilter] ?? 0
+    let count = CommandBarResults.counts(query: barView.field.stringValue, input: lastInput)[newFilter] ?? 0
     announce("\(newFilter.title), \(count == 1 ? "1 result" : "\(count) results")")
   }
 
@@ -709,13 +719,14 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     // BH-108: Paste and Go is a new-tab surface; Cmd-L's prefill and the split pane bar never offer it. The row
     // shows only on an empty query, so a typed keystroke never pays for a pasteboard read.
     let queryIsEmpty = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    input.clipboardURL = scope == .normal && mode == .newTab && queryIsEmpty ? clipboardURLProvider() : nil
+    input.clipboardURL = scope == .normal && mode == .newTab && queryIsEmpty ? clipboardURLForThisShow() : nil
     input.excluded = removedSuggestionIDs
     input.searchSuggestionsEnabled = settings.searchSuggestionsEnabled
     input.scope = scope
     input.archived = current
     input.recentTabs = scope == .normal && trimmed.isEmpty ? recentTabsProvider() : []
     input.siteSearchEngines = scope == .normal ? siteSearchProvider() : []
+    lastInput = input
     unfilteredResults = CommandBarResults.make(query: text, input: input)
     let fresh = scope == .normal ? filter.apply(to: unfilteredResults, query: text) : unfilteredResults
     let headers = CommandBarResults.groupHeaders(of: fresh)
@@ -742,7 +753,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   /// The pills (selection and counts of the unfiltered rows) and the hint strip, for the rows on screen.
   private func updatePillsAndHints(query: String, trimmed: String) {
-    barView.pills.update(selected: filter, counts: CommandBarFilter.counts(of: unfilteredResults),
+    barView.pills.update(selected: filter, counts: CommandBarResults.counts(query: query, input: lastInput),
                          showsCounts: CommandBarFilter.showsCounts(forQuery: query), flavor: flavor)
     refreshHints()
   }

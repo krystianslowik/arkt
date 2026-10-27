@@ -192,6 +192,9 @@ final class CommandBarView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  /// The least the query field is given before the filter pills are hidden.
+  static let minimumFieldWidth: CGFloat = 160
+
   /// BH-113, [S] string.
   static let noticeText = "We talk to your search engine to help us suggest results."
   static let placeholder = "Search or enter address"
@@ -374,9 +377,13 @@ final class CommandBarView: NSView {
     let pillsSize = pills.size
     pills.frame = NSRect(x: escapeKey.frame.minX - 8 - pillsSize.width, y: (g.inputHeight - pillsSize.height) / 2,
                          width: pillsSize.width, height: pillsSize.height)
+    // The query field keeps a minimum width: in a narrow window the pills give way (the keys still filter).
+    let fieldRight = pills.frame.minX - 12
+    pills.isHidden = fieldRight - fieldX < Self.minimumFieldWidth
     let fieldHeight = ceil(field.intrinsicContentSize.height)
+    let available = (pills.isHidden ? escapeKey.frame.minX - 12 : fieldRight) - fieldX
     field.frame = NSRect(x: fieldX, y: (g.inputHeight - fieldHeight) / 2,
-                         width: max(0, pills.frame.minX - 12 - fieldX), height: fieldHeight)
+                         width: max(0, available), height: fieldHeight)
 
     let dividerY = noticeView.isHidden ? g.inputHeight : g.inputHeight + g.noticeHeight
     if !noticeView.isHidden {

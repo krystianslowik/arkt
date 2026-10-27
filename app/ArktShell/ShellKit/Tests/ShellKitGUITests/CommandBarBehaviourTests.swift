@@ -302,6 +302,45 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertTrue(bar.barView.hintStrip.trailingLineFits)
   }
 
+  func testTheClipboardIsReadOnceForAShowNotOnEveryReload() throws {
+    var reads = 0
+    bar.clipboardURLProvider = { reads += 1; return URL(string: "https://clip.example") }
+    showMixed(query: "")
+    try command(2)
+    try command(1)
+    XCTAssertTrue(escape())
+    bar.setQueryForTesting("x")
+    bar.setQueryForTesting("")
+    XCTAssertEqual(reads, 1, "one pasteboard read for the whole show")
+    bar.hide()
+    bar.toggle(.newTab)
+    XCTAssertEqual(reads, 2, "and a fresh one for the next show")
+  }
+
+  func testThePillCountsCoverEveryMatchNotJustTheRowsShown() throws {
+    bar.openTabsProvider = { [self] in tabs(9) }
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("Tab")
+    XCTAssertEqual(bar.results.filter { $0.rowKind == .openTab }.count, 6)
+    XCTAssertEqual(bar.barView.pills.counts[.tabs], 9)
+    XCTAssertEqual(bar.barView.pills.counts[.all], 10)
+  }
+
+  func testANarrowWindowKeepsTheQueryFieldWideAndHidesThePills() throws {
+    window.setFrame(NSRect(x: 100, y: 100, width: 420, height: 700), display: true)
+    showMixed()
+    bar.barView.layoutSubtreeIfNeeded()
+    XCTAssertGreaterThanOrEqual(bar.barView.field.frame.width, CommandBarView.minimumFieldWidth)
+    XCTAssertTrue(bar.barView.pills.isHidden, "the pills give way; Cmd-1 to Cmd-4 still filter")
+    try command(2)
+    XCTAssertEqual(bar.filter, .tabs)
+    window.setFrame(NSRect(x: 100, y: 100, width: 1280, height: 800), display: true)
+    bar.hide()
+    showMixed()
+    bar.barView.layoutSubtreeIfNeeded()
+    XCTAssertFalse(bar.barView.pills.isHidden)
+  }
+
   // MARK: Esc
 
   func testEscClearsTheQueryFirstAndClosesOnTheSecondPress() throws {

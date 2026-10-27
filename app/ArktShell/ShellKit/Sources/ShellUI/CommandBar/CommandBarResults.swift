@@ -88,6 +88,8 @@ public enum CommandBarResults {
     /// An empty query lists the open tabs plainly, without the empty state's groups (Little Arkt's lookup, which has
     /// no clipboard, recent tabs or actions).
     public var listsOpenTabsForAnEmptyQuery = false
+    /// Counting every match for the pills lifts the caps on the rows shown.
+    public var isCountingAllMatches = false
     public init() {}
   }
 
@@ -221,15 +223,18 @@ public enum CommandBarResults {
     let matching = openTabsAll(input).filter { tab in
       tab.title.localizedStandardContains(query) || (tab.url.host() ?? "").localizedStandardContains(query)
     }
-    for tab in matching.prefix(maxSwitchResults) { results.append(tabRow(tab, group: nil, now: input.now)) }
+    for tab in matching.prefix(input.isCountingAllMatches ? .max : maxSwitchResults) {
+      results.append(tabRow(tab, group: nil, now: input.now))
+    }
 
     // Spaces (BH-104): after the tabs, capped.
-    for space in input.spaces.filter({ $0.title.localizedStandardContains(query) }).prefix(maxSpaceResults) {
+    for space in input.spaces.filter({ $0.title.localizedStandardContains(query) })
+      .prefix(input.isCountingAllMatches ? .max : maxSpaceResults) {
       results.append(Result(kind: .switchSpace(space.id), title: space.title, subtitle: "Space",
                             trailingHint: switchToSpaceHint, removalID: nil))
     }
 
-    for match in input.archived.prefix(maxArchivedResults) {
+    for match in input.archived.prefix(input.isCountingAllMatches ? .max : maxArchivedResults) {
       results.append(Result(kind: .restore(match.id), title: match.title, subtitle: match.subtitle,
                             trailingHint: restoreHint, removalID: nil))
     }
@@ -258,12 +263,22 @@ public enum CommandBarResults {
     }
 
     // Actions whose title matches the query, so the Actions pill counts them.
-    for action in CommandBarActions.filter(input.actions, query: query).prefix(maxMatchingActions) {
+    for action in CommandBarActions.filter(input.actions, query: query)
+      .prefix(input.isCountingAllMatches ? .max : maxMatchingActions) {
       results.append(actionRow(action, group: nil))
     }
     return results.filter { result in
       result.removalID.map { !input.excluded.contains($0) } ?? true
     }
+  }
+
+  /// The pills' counts: every match for `query`, not just the rows the list shows (its caps lifted). Hidden for an
+  /// empty query, so zeros there.
+  public static func counts(query: String, input: Input) -> [CommandBarFilter: Int] {
+    guard CommandBarFilter.showsCounts(forQuery: query) else { return CommandBarFilter.counts(of: []) }
+    var all = input
+    all.isCountingAllMatches = true
+    return CommandBarFilter.counts(of: make(query: query, input: all))
   }
 
   private static func openTabsAll(_ input: Input) -> [OpenTab] { input.openTabs }

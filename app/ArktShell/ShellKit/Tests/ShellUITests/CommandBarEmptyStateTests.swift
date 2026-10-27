@@ -107,4 +107,17 @@ struct CommandBarEmptyStateTests {
     let row = CommandBarResults.make(query: "yt", input: input).first { $0.rowKind == .siteSearch }
     #expect(row?.title == "Search YouTube")
   }
+
+  @Test func `the pill counts cover every match, not just the rows shown`() {
+    var input = CommandBarResults.Input()
+    input.openTabs = (1...9).map { tab($0) }
+    input.actions = (1...5).map { CommandBarAction(id: "a\($0)", title: "Tab action \($0)") }
+    let shown = CommandBarResults.make(query: "Tab", input: input)
+    #expect(shown.filter { $0.rowKind == .openTab }.count == 6, "the list is capped")
+    let counts = CommandBarResults.counts(query: "Tab", input: input)
+    #expect(counts[.tabs] == 9)
+    #expect(counts[.actions] == 5)
+    #expect(counts[.all] == 9 + 5 + 1, "the tabs, the actions and the search row")
+    #expect(CommandBarResults.counts(query: "", input: input)[.all] == 0, "hidden for an empty query")
+  }
 }
