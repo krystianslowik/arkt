@@ -207,10 +207,10 @@ public final class ShellWindowSet {
       guard let self else { return [] }
       return self.sidebar.spaceOrder.compactMap { self.sidebar.space($0) }
     }
-    little.onOpenIn = { [weak self] tab, space in
+    little.onOpenIn = { [weak self] tab, space, dialog in
       guard let self else { return false }
       let target = self.primary ?? self.openWindow(opensFirstTab: false)
-      return target.receiveMovedTab(tab, in: space)
+      return target.receiveMovedTab(tab, in: space, dialog: dialog)
     }
     little.flightDestination = { [weak self] in self?.primary }        // #352: an open main window only
     little.onResize = { [weak self] size in self?.littleArktSize = size }
