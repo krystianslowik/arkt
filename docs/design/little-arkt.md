@@ -274,14 +274,16 @@ as usual (Personal sample theme in light, Dev in dark).
   off the main actor. The engine reports no "first frame" for a page in its new window, so the snapshot's 0.1 s
   crossfade starts on the next display frame after the page is mounted in the main card. Open in with no main window
   open takes the no-flight path (the window it opens has no laid-out card to fly to). The Today row is in the sidebar
-  from the start of the flight and drawn by its clock; the selection moves to it when the page lands (the table's
-  selection fades are #455) and the flying card carries the card shadow (#456, decided 2026-10-26: the prototype's
-  lifted plate has `--card-shadow`; light only, none in dark where the token is clear). It is a layer of its own under
-  the card (the card's mask would clip it) with the main card's values (`cardShadow`, blur 3, offset 1 pt down), the
-  card's position, scale and opacity, so it fades with the landing's crossfade, and an explicit `shadowPath` (no
-  offscreen pass) rebuilt only when the card's size changed, in the same tick. Measured at 120 Hz frames under load:
-  no frame cost beyond noise. Reduce Motion takes no flight, so no shadow; an aborted flight removes it with the
-  overlay. The layer shadow above stays the window's own appear and close. The popup request
+  from the start of the flight and drawn by its clock; the old selection fades out on the room spring and the new
+  row's selection fades in with the row, then the selection moves to it when the page lands (#455; a current
+  Favorite tile's fill is not covered yet, #465) and the flying card carries the card shadow (#456, decided
+  2026-10-26: the prototype's lifted plate has `--card-shadow`; light only, none in dark where the token is clear). It
+  is a layer of its own under the card (the card's mask would clip it) with the main card's values (`cardShadow`,
+  blur 3, offset 1 pt down), the card's position, scale and opacity, so it fades with the landing's crossfade, and an
+  explicit `shadowPath` (no offscreen pass) rebuilt only when the card's size changed, in the same tick. Measured at
+  120 Hz frames under load: no frame cost beyond noise. Reduce Motion takes no flight, so no shadow; an aborted
+  flight removes it with the overlay. The layer shadow above stays the window's own appear and close. The popup
+  request
   does not carry the opener window yet.
 - Missing shell pieces: open-URL events and default-browser registration (#135); link routing (#113) for the
   destination; a global hotkey (`RegisterEventHotKey`, no Accessibility permission needed); the Archive's Little Arkt

@@ -259,6 +259,100 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertEqual(scene.main.sidebarController.current, arrived, "selected once the page is there")
   }
 
+  /// #455: the old selection's fill fades out on the room spring while the new row and its selection fade in on the
+  /// row spring. Only layer properties move: the rows are not reconfigured per frame.
+  func testTheOldSelectionFadesOutAndTheNewSelectionFadesIn() throws {
+    let scene = try makeScene(todayTabs: 2)
+    let space = try XCTUnwrap(scene.main.currentSpace)
+    let old = try XCTUnwrap(scene.main.sidebarController.current)
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.tick(at: 0)
+
+    let arrived = try XCTUnwrap(scene.main.sidebar.children(of: .today(space)).first)
+    let outline = try XCTUnwrap(scene.main.sidebarController.currentPage?.outlineController)
+    XCTAssertEqual(outline.rowStyle(for: old).selectionAlpha, 1, accuracy: 1e-6)
+    XCTAssertEqual(outline.displayedState(for: arrived), .current,
+                   "the arriving row draws the selection while it fades in")
+    XCTAssertEqual(outline.rowStyle(for: arrived).alpha, 0, "the new row is not shown yet")
+    let oldRow = try XCTUnwrap(outline.outlineView.rowView(atRow: outline.row(for: old), makeIfNecessary: true)
+                                 as? SidebarRowView)
+    let arrivedRow = try XCTUnwrap(outline.outlineView.rowView(atRow: outline.row(for: arrived),
+                                                               makeIfNecessary: true) as? SidebarRowView)
+    XCTAssertEqual(arrivedRow.state, .current)
+    let configured = outline.rowConfigureCount
+    for t in stride(from: 0.01, to: 0.2, by: 0.02) { flight.tick(at: t) }
+    XCTAssertEqual(outline.rowConfigureCount, configured, "no per-frame reconfigure before the room opens")
+
+    flight.tick(at: 0.26)
+    let fading = outline.rowStyle(for: old).selectionAlpha
+    XCTAssertGreaterThan(fading, 0)
+    XCTAssertLessThan(fading, 1)
+    XCTAssertEqual(oldRow.backgroundLayer.opacity, Float(fading), accuracy: 1e-6)
+    XCTAssertEqual(oldRow.state, .current, "only the fill fades; the row keeps its state")
+    XCTAssertEqual(oldRow.layer?.opacity, 1, "only the fill layer fades, not the whole row")
+    XCTAssertEqual(outline.rowStyle(for: arrived).alpha, 0, "the new row follows 90 ms later")
+    flight.tick(at: 0.36)
+    XCTAssertGreaterThan(outline.rowStyle(for: arrived).alpha, 0)
+    XCTAssertLessThan(outline.rowStyle(for: old).selectionAlpha, fading)
+
+    XCTAssertNotNil(step(flight, from: 0.37) { flight.stage != .flying })
+    XCTAssertEqual(scene.main.sidebarController.current, arrived, "selected once the page is there")
+    XCTAssertEqual(oldRow.state, .normal, "the old row does not pop back to the previous fill")
+    XCTAssertNil(oldRow.displayedFill)
+    XCTAssertEqual(outline.rowStyle(for: old), .rest)
+    XCTAssertEqual(outline.rowStyle(for: arrived), .rest)
+    XCTAssertEqual(arrivedRow.state, .current)
+  }
+
+  /// #455: a landing before the first arrival frame never faded the old fill, so the old row keeps the previous fill
+  /// the no-flight path draws instead of losing it without a fade.
+  func testAFlightAbortedBeforeItsFirstFrameKeepsThePreviousFill() throws {
+    let scene = try makeScene(todayTabs: 2)
+    let old = try XCTUnwrap(scene.main.sidebarController.current)
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.abort(.framesStopped)                              // lands with no room frame presented
+
+    let space = try XCTUnwrap(scene.main.currentSpace)
+    let arrived = try XCTUnwrap(scene.main.sidebar.children(of: .today(space)).first)
+    let outline = try XCTUnwrap(scene.main.sidebarController.currentPage?.outlineController)
+    XCTAssertEqual(scene.main.sidebarController.current, arrived)
+    XCTAssertEqual(outline.state(for: old), .previous, "the fill never faded")
+    let oldRow = try XCTUnwrap(outline.outlineView.rowView(atRow: outline.row(for: old), makeIfNecessary: true)
+                                 as? SidebarRowView)
+    XCTAssertEqual(oldRow.state, .previous)
+    XCTAssertNotNil(oldRow.displayedFill)
+  }
+
+  /// #455: the arrival belongs to the outline of the Space that owns the row, so switching Space mid-flight keeps
+  /// drawing it there instead of freezing it and leaving its row stuck as the selection.
+  func testASpaceSwitchMidFlightKeepsTheArrivalOnItsOwnOutline() throws {
+    let scene = try makeScene(todayTabs: 2)
+    let space = try XCTUnwrap(scene.main.currentSpace)
+    let old = try XCTUnwrap(scene.main.sidebarController.current)
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.tick(at: 0)
+
+    let arrived = try XCTUnwrap(scene.main.sidebar.children(of: .today(space)).first)
+    let outline = try XCTUnwrap(scene.main.sidebarController.currentPage?.outlineController)
+    let other = try XCTUnwrap(scene.main.createSpace())
+    scene.main.sidebarController.showSpace(other)
+    XCTAssertEqual(scene.main.currentSpace, other, "the window shows another Space mid-flight")
+
+    for t in stride(from: 0.01, through: 0.36, by: 0.01) { flight.tick(at: t) }
+    XCTAssertGreaterThan(outline.rowStyle(for: arrived).alpha, 0,
+                         "the arrival keeps advancing on the outline that owns the row")
+    XCTAssertLessThan(outline.rowStyle(for: old).selectionAlpha, 1, "the old fill keeps fading there too")
+
+    XCTAssertNotNil(step(flight, from: 0.37) { flight.stage != .flying })
+    XCTAssertEqual(scene.main.currentSpace, space, "landing shows the row's Space")
+    XCTAssertEqual(scene.main.sidebarController.current, arrived)
+    XCTAssertEqual(outline.rowStyle(for: old), .rest)
+    XCTAssertEqual(outline.rowStyle(for: arrived), .rest, "nothing of the arrival is left running")
+  }
+
   /// The chooser (Cmd-Opt-O) names another Space, empty or not: that Space shows at the start, and the page still
   /// moves only at rest.
   func testOpenInAnotherSpaceMovesThePageOnlyAtRest() throws {
@@ -321,6 +415,23 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertEqual(scene.little.lastTransition, .fadeOut)
     scene.little.finishMotion()
     XCTAssertEqual(scene.main.currentTab, scene.tab)
+  }
+
+  /// #455: Reduce Motion has no flight and so no fades. The instant change stays, including the old row's previous
+  /// fill; nothing is cleared on this path.
+  func testReduceMotionKeepsTheInstantSelectionChange() throws {
+    let scene = try makeScene(reduceMotion: true, todayTabs: 2)
+    let space = try XCTUnwrap(scene.main.currentSpace)
+    let old = try XCTUnwrap(scene.main.sidebarController.current)
+    scene.little.openIn()
+    XCTAssertNil(scene.little.flight)
+    scene.little.finishMotion()
+    let arrived = try XCTUnwrap(scene.main.sidebar.children(of: .today(space)).first)
+    let outline = try XCTUnwrap(scene.main.sidebarController.currentPage?.outlineController)
+    XCTAssertEqual(scene.main.sidebarController.current, arrived)
+    XCTAssertEqual(outline.state(for: old), .previous, "today's instant path keeps the previous fill")
+    XCTAssertEqual(outline.rowStyle(for: old), .rest)
+    XCTAssertEqual(outline.rowStyle(for: arrived), .rest)
   }
 
   // MARK: Abort (a flight that cannot land by itself)

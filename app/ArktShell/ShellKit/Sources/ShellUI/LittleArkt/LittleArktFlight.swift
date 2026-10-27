@@ -19,7 +19,8 @@ protocol LittleArktFlightDestination: AnyObject {
   /// One frame of the row's arrival: the rows below making room, the row fading in.
   func presentArrival(of node: NodeID, room: Double, appear: Double)
   /// The flight is at rest: the page moves into this window, mounted at its final size, selected and focused.
-  func finishReceiving(_ tab: TabID, node: NodeID) -> Bool
+  /// `clearingPrevious` drops the old row's previous fill when the arrival already faded it out (#455).
+  func finishReceiving(_ tab: TabID, node: NodeID, clearingPrevious: Bool) -> Bool
   /// The flight ended without the page coming here: the row's arrival stops and the row goes (the page was never
   /// moved, so nothing here owns it).
   func cancelReceiving(_ tab: TabID, node: NodeID)

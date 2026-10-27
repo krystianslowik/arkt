@@ -354,7 +354,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     snapshotTask?.cancel()
     snapshotTask = nil
     card.releaseContent()                                   // the main window's card takes the page's view
-    if destination?.finishReceiving(tab, node: node) == true {
+    if destination?.finishReceiving(tab, node: node, clearingPrevious: true) == true {
       handedOff(spaceName: spaceName)
       return
     }
