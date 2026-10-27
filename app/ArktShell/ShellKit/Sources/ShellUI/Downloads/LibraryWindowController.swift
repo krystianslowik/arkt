@@ -7,8 +7,8 @@ import EngineAPI
 final class LibraryRailItem: NSButton {
   let section: LibrarySection
   private let countField = NSTextField(labelWithString: "")
-  var isCurrent = false { didSet { if isCurrent != oldValue { restyle() } } }
-  var count: Int? { didSet { restyle() } }
+  var isCurrent = false { didSet { if isCurrent != oldValue { restyle(); needsDisplay = true } } }
+  var count: Int? { didSet { if count != oldValue { restyle(); needsDisplay = true } } }
 
   init(section: LibrarySection) {
     self.section = section
@@ -49,7 +49,6 @@ final class LibraryRailItem: NSButton {
     let label = count.map { $0 > 0 ? "\(section.title), \($0)" : section.title } ?? section.title
     setArchiveAccessibilityLabel(label)
     setArchiveAccessibilityValue(isCurrent ? "selected" : nil)
-    needsDisplay = true
   }
 
   override func layout() {

@@ -239,6 +239,8 @@ final class DownloadsPopoverController: NSObject {
   /// Scale 0.97 to 1 from the corner nearest the button, with a 0.22 s fade (Reduce Motion: the fade, 0.15 s).
   private func playAppearance() {
     guard let layer = container.layer else { return }
+    layer.removeAnimation(forKey: "appear.opacity")
+    layer.removeAnimation(forKey: "appear.transform")
     let step = DownloadsMotion.popoverAppears(reduceMotion: reduceMotion())
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = 0
