@@ -284,6 +284,9 @@ final class LittleArktFlightTests: XCTestCase {
     for t in stride(from: 0.01, to: 0.2, by: 0.02) { flight.tick(at: t) }
     XCTAssertEqual(outline.rowConfigureCount, configured, "no per-frame reconfigure before the room opens")
 
+    flight.tick(at: LittleArktFlightMotion.roomDelay)
+    XCTAssertEqual(outline.rowStyle(for: old).selectionAlpha, 1, accuracy: 1e-6,
+                   "the room spring starts at 200 ms, so the fill is still full at the edge")
     flight.tick(at: 0.26)
     let fading = outline.rowStyle(for: old).selectionAlpha
     XCTAssertGreaterThan(fading, 0)
@@ -300,6 +303,7 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertEqual(scene.main.sidebarController.current, arrived, "selected once the page is there")
     XCTAssertEqual(oldRow.state, .normal, "the old row does not pop back to the previous fill")
     XCTAssertNil(oldRow.displayedFill)
+    XCTAssertEqual(oldRow.backgroundLayer.opacity, 1, "the old row draws its fill at rest after the landing")
     XCTAssertEqual(outline.rowStyle(for: old), .rest)
     XCTAssertEqual(outline.rowStyle(for: arrived), .rest)
     XCTAssertEqual(arrivedRow.state, .current)
@@ -323,6 +327,30 @@ final class LittleArktFlightTests: XCTestCase {
                                  as? SidebarRowView)
     XCTAssertEqual(oldRow.state, .previous)
     XCTAssertNotNil(oldRow.displayedFill)
+  }
+
+  /// #455: the page closing itself mid-flight takes the arrival back, so the old selection stays and its fill returns
+  /// to full: nothing of the fade is left behind.
+  func testAPageClosedMidFlightLeavesTheOldSelectionAtFullOpacity() throws {
+    let scene = try makeScene(todayTabs: 2)
+    let old = try XCTUnwrap(scene.main.sidebarController.current)
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.tick(at: 0)
+    flight.tick(at: 0.26)
+    let outline = try XCTUnwrap(scene.main.sidebarController.currentPage?.outlineController)
+    let fading = try XCTUnwrap(outline.outlineView.rowView(atRow: outline.row(for: old), makeIfNecessary: true)
+                                 as? SidebarRowView)
+    XCTAssertLessThan(fading.backgroundLayer.opacity, 1, "the fill was fading")
+
+    flight.abort(.pageClosed)
+
+    XCTAssertEqual(scene.main.sidebarController.current, old, "the page never came, so the selection stays")
+    let oldRow = try XCTUnwrap(outline.outlineView.rowView(atRow: outline.row(for: old), makeIfNecessary: true)
+                                 as? SidebarRowView)
+    XCTAssertEqual(oldRow.state, .current)
+    XCTAssertEqual(oldRow.backgroundLayer.opacity, 1, "the fill is back at rest")
+    XCTAssertEqual(outline.rowStyle(for: old), .rest)
   }
 
   /// #455: the arrival belongs to the outline of the Space that owns the row, so switching Space mid-flight keeps

@@ -3483,24 +3483,28 @@ Branch `feat/455-little-arkt-selection-fades`. Design: `docs/design/little-arkt.
 - Focused non-GUI: `LittleArktFlightMotionTests` + `FolderMotionLayoutTests`: 21 passed (19 before), after the
   rebase.
 - Full non-GUI suite on the rebased branch: 1409 tests in 177 suites passed (1407 before).
-- Focused GUI `LittleArktFlightTests`: 36 run, 2 skipped, 0 failures (32 before on the rebased base, which includes
+- Focused GUI `LittleArktFlightTests`: 37 run, 2 skipped, 0 failures (32 before on the rebased base, which includes
   #463's shadow tests); `SidebarViewTests`: 21 run, 0 failures (19 before).
-- Full GUI suite on the rebased branch: 1157 run, 25 skipped, 5 failing test cases (2740 assertion failures): the
+- Full GUI suite on the rebased branch: 1158 run, 25 skipped, 5 failing test cases (2740 assertion failures): the
   same four known ones in `PeekWindowTests` and `SpaceSwitchTextTests`, plus
   `SplitDragTests.testDropFavoriteOnPlainTabMovesItIntoSplitAndClickVsDrag`, which passed 5/5 alone (a click that
   missed under load, not the change); not green.
 - 20 runs each under four load generators, after the rebase: the six GUI tests 20/20 each and the two pure fade tests
-  20/20; load average 4.75 before, 10.46 after.
+  20/20 (load average 4.75 before, 10.46 after); the page-closed test 20/20 on its own (load average 3.12).
 - Deliberate break: removing the old-selection fade made the pure test fail (`selectionAlpha` 1.0 instead of 0.5) and
   the GUI test fail (`1.0` not less than `1.0`). Putting the capture back to `arrival?.fadingOut ?? selectionSeed`
   made `testTheArrivalCapturesTheOldSelectionOnItsFirstFrame` fail (`selectionAlpha` 0.5 instead of 1.0). Clearing the
   previous role unconditionally made `testAFlightAbortedBeforeItsFirstFrameKeepsThePreviousFill` fail (`normal`
   instead of `previous`). Routing the arrival through `currentPage` made
-  `testASpaceSwitchMidFlightKeepsTheArrivalOnItsOwnOutline` fail (arriving row alpha 0.0, old fill 1.0). Restored,
-  all pass.
-- Coverage: the pane-to-split mapping now has a GUI test (`testTheSplitRowFadesWhenTheOldSelectionIsAPane`). Not
-  covered: an old row above the arrival (Pinned), a scrolled-out row, a closed-folder peek row and the Favorite tile
-  (#465). The no-per-frame-reconfigure assertion checks `rowConfigureCount`, not layout.
+  `testASpaceSwitchMidFlightKeepsTheArrivalOnItsOwnOutline` fail (arriving row alpha 0.0, old fill 1.0). Removing
+  `endArrival` from `cancelReceiving` made `testAPageClosedMidFlightLeavesTheOldSelectionAtFullOpacity` fail (fill
+  0.295 instead of 1.0, style not rest). Restored, all pass.
+- Coverage: the pane-to-split mapping now has a GUI test (`testTheSplitRowFadesWhenTheOldSelectionIsAPane`), the
+  200 ms edge and the landed fill at rest are asserted, and a page that closes itself mid-flight is tested to leave the
+  old row current at full opacity. Not covered: an old row above the arrival (Pinned), a scrolled-out row, a
+  closed-folder peek row and the Favorite tile (#465). A selection change mid-flight (another row becoming current)
+  would draw the arriving row as current next to it; no user path does that within the 0.5 s flight and it is not
+  tested. The no-per-frame-reconfigure assertion checks `rowConfigureCount`, not layout.
 - These are local runs with a downloaded toolchain and a local XCTest runner, not CI. CI on the branch: Swift
   tests, ShellKit tests, App build and lint pass; the informative GUI job ran 1162 tests with 27 skipped and one
   failure, the `SplitDragTests` Favorite-tile click that also fails on #460 and #467 and is filed as #473.

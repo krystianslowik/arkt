@@ -283,8 +283,7 @@ as usual (Personal sample theme in light, Dev in dark).
   explicit `shadowPath` (no offscreen pass) rebuilt only when the card's size changed, in the same tick. Measured at
   120 Hz frames under load: no frame cost beyond noise. Reduce Motion takes no flight, so no shadow; an aborted
   flight removes it with the overlay. The layer shadow above stays the window's own appear and close. The popup
-  request
-  does not carry the opener window yet.
+  request does not carry the opener window yet.
 - Missing shell pieces: open-URL events and default-browser registration (#135); link routing (#113) for the
   destination; a global hotkey (`RegisterEventHotKey`, no Accessibility permission needed); the Archive's Little Arkt
   source and its threshold in auto-archive.
