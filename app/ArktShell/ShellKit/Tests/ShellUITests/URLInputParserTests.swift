@@ -40,6 +40,16 @@ struct URLInputParserTests {
     // #96: a single 0 octet has no leading zero.
     ("0.0.0.0", "http://0.0.0.0"),
     ("10.0.0.1", "http://10.0.0.1"),
+    // #499: engine-internal and local schemes always navigate; the engine decides whether it can open them.
+    ("chrome://settings/content", "chrome://settings/content"),
+    ("CHROME://Extensions", "CHROME://Extensions"),
+    ("chrome-extension://abcdefghijklmnop/popup.html", "chrome-extension://abcdefghijklmnop/popup.html"),
+    ("about:blank", "about:blank"),
+    ("about:version", "about:version"),
+    ("view-source:https://example.com", "view-source:https://example.com"),
+    ("file:///Users/me/a.html", "file:///Users/me/a.html"),
+    ("data:text/html,hello", "data:text/html,hello"),
+    ("arkt://settings", "arkt://settings"),
   ])
   func parsesURLs(input: String, expected: String) {
     #expect(URLInputParser.url(from: input)?.absoluteString == expected)
@@ -47,7 +57,9 @@ struct URLInputParserTests {
 
   @Test(arguments: [
     "hello world", "swift", "", "what is example.com", "1.5", "https://", "file.x",
-    "ftp://example.com", "javascript:alert(1)", "1.2.3", "256.1.1.1", "1.2.3.4.5", "[zz::g]", "[::1",
+    "ftp://example.com", "javascript:alert(1)",
+    // #499: javascript: typed in the bar never runs (Chromium searches for it); empty internal schemes search.
+    "JavaScript:alert(1)", "javascript://%0Aalert(1)", "chrome://", "about:", "view-source:", "data:", "file://", "1.2.3", "256.1.1.1", "1.2.3.4.5", "[zz::g]", "[::1",
     "example.com:abc", "-x.com.-", "a..b.com",
     // #96: only one trailing dot; a dot alone is not a host.
     "example.com..", ".", ".com",
@@ -60,6 +72,14 @@ struct URLInputParserTests {
   ])
   func rejectsQueries(input: String) {
     #expect(URLInputParser.url(from: input) == nil)
+  }
+
+  @Test func internalSchemesCountAsExplicit() {
+    #expect(URLInputParser.hasExplicitScheme("chrome://settings/content"))
+    #expect(URLInputParser.hasExplicitScheme("about:blank"))
+    #expect(URLInputParser.hasExplicitScheme("view-source:https://example.com"))
+    #expect(!URLInputParser.hasExplicitScheme("javascript:alert(1)"))
+    #expect(!URLInputParser.hasExplicitScheme("example.com"))
   }
 
   @Test func searchURLEncodesQuery() {
