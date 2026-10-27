@@ -109,8 +109,12 @@ final class LittleArktRootView: NSView {
 
   override var wantsUpdateLayer: Bool { true }
 
+  /// Called after each layout pass (the JavaScript dialog panel retries a page view that arrived with it).
+  var onLayout: (@MainActor () -> Void)?
+
   override func layout() {
     super.layout()
+    defer { onLayout?() }
     frameView.frame = bounds
     frameView.subviews.first { $0 is LittleArktFrameDragView }?.frame = bounds
     topBar.frame = LittleArktLayout.topBarFrame(in: bounds)

@@ -11,9 +11,9 @@ extension ShellWindowController: LittleArktFlightDestination {
   /// first Space on a first run), selected, and the window comes forward with the page focused. The row and its
   /// mapping exist before the engine moves the tab, so the tab's first event here already has its row. False when
   /// the sidebar refuses the row; the tab then stays where it is.
-  func receiveMovedTab(_ tab: TabID, in space: SpaceID?) -> Bool {
+  func receiveMovedTab(_ tab: TabID, in space: SpaceID?, dialog: JavaScriptDialog? = nil) -> Bool {
     guard let node = beginReceiving(tab, in: space) else { return false }
-    return finishReceiving(tab, node: node)
+    return finishReceiving(tab, node: node, dialog: dialog)
   }
 
   /// The row at the top of Today in `space`, mapped to `tab` (the page itself is still in the Little Arkt window),
@@ -42,9 +42,13 @@ extension ShellWindowController: LittleArktFlightDestination {
   /// The page moves into this window's engine window and its row is selected, mounting the page in the content card
   /// at its final size; the window becomes key with the page focused. `clearingPrevious` is the flight's landing
   /// (#455): the old selection already faded out, so it must not draw the previous fill now. A landing before the
-  /// first arrival frame cleared nothing, so the previous fill stays as the no-flight path draws it.
-  func finishReceiving(_ tab: TabID, node: NodeID, clearingPrevious: Bool = false) -> Bool {
+  /// first arrival frame cleared nothing, so the previous fill stays as the no-flight path draws it. A pending
+  /// JavaScript dialog of the page (`dialog`) is adopted before the move, as in Tab Handoff (#471): its panel shows
+  /// once the page is shown, and the answer reaches the page from this window only.
+  func finishReceiving(_ tab: TabID, node: NodeID, clearingPrevious: Bool = false,
+                       dialog: JavaScriptDialog? = nil) -> Bool {
     guard tabsByNode[node] == tab else { return false }
+    if let dialog { javaScriptDialogs.adopt(dialog) }
     let endedArrival = sidebarController.outline(containing: node)?.endArrival() ?? false
     engine.moveTab(tab, to: ensureEngineWindow())
     activate(node: node)
