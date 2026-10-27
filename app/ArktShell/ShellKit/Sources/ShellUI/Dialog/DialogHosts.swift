@@ -228,6 +228,19 @@ public final class DialogPanel {
   /// The text in the prompt's field; nil when the content has none.
   public var inputText: String? { view.inputText }
 
+  /// Gives the panel `width` and the height its content needs at that width, keeping the origin (`reposition` then
+  /// puts the top-leading corner back). Instant, no animation. Nothing happens at the width it already has.
+  public func resize(width: CGFloat) {
+    guard width != panel.frame.width else { return }
+    let size = NSSize(width: width, height: view.layoutContent(width: width))
+    panel.setContentSize(size)
+    // The window's own resize may lay the sheet out at the old bounds first; set it to the new size and lay it out
+    // again, so the content matches the frame whenever the next display pass comes.
+    container.frame = NSRect(origin: .zero, size: size)
+    view.frame = container.bounds
+    _ = view.layoutContent(width: width)
+  }
+
   /// Moves the panel to `anchor` (screen coordinates) again, when the page it points at moved or resized.
   public func reposition(anchoredTo anchor: NSRect) {
     panel.setFrame(frame(anchoredTo: anchor), display: true)

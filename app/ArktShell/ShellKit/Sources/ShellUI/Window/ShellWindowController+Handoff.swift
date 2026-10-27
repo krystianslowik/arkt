@@ -6,7 +6,8 @@ public enum LiveTabHandoff: Equatable, Sendable {
   /// No other window has a page for the row.
   case notLive
   /// Another window let go of the row's page; the caller moves it.
-  case released(TabID)
+  /// A pending JavaScript dialog of the page travels with it (`dialog`).
+  case released(TabID, dialog: JavaScriptDialog? = nil)
   /// Another window has the page and keeps it (its close is held behind a leave-site prompt).
   case held
 }
@@ -20,12 +21,15 @@ public enum LiveTabHandoff: Equatable, Sendable {
 extension ShellWindowController {
   /// Maps `tab`, which another window just let go of for `node`, and moves it into this window's engine window. The
   /// caller shows it.
-  func adoptHandedOffTab(_ tab: TabID, for node: NodeID) -> TabID {
+  func adoptHandedOffTab(_ tab: TabID, for node: NodeID, dialog: JavaScriptDialog? = nil) -> TabID {
     let target = ensureEngineWindow()
     keepsWindowWithoutEngine = false
     tabsByNode[node] = tab
     nodeByTab[tab] = node
     sidebarController.markLoaded(node: node)
+    // Before the move, so an end the engine reports for the move itself (a confirm or prompt of a tab that stops
+    // being active, as Chromium answers a hidden tab's) finds the dialog. Its panel shows once the page is shown.
+    if let dialog { javaScriptDialogs.adopt(dialog) }
     let shown = currentTab
     engineActiveTab = tab                          // the move's own activation is this window's request
     engine.moveTab(tab, to: target)
@@ -44,6 +48,7 @@ extension ShellWindowController {
     tabsByNode[node] = nil
     nodeByTab[tab] = nil
     peek.sourceWillLeave(tab)                      // its hidden Peek closes here (#348)
+    let dialog = javaScriptDialogs.release(tab)    // its panel goes with it; the new window shows it (#464)
     let wasCurrent = currentTab == tab
     let wasShown = visibleNodes.contains(node)
     if wasCurrent { currentTab = nil }
@@ -61,7 +66,7 @@ extension ShellWindowController {
       hiddenPaneDidClose(node)
     }
     if wasShown, currentTab == nil { showHandoffPlaceholder(for: node) }
-    return .released(tab)
+    return .released(tab, dialog: dialog)
   }
 
   /// The card shows the placeholder for `node` until another tab is shown.

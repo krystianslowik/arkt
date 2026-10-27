@@ -40,6 +40,8 @@ public final class JavaScriptDialogPresenter {
   private struct Entry {
     let panel: DialogPanel
     var observers: [NSObjectProtocol]
+    /// The page view the panel points at, and whose frame the observers watch.
+    weak var anchorView: NSView?
   }
 
   private let engine: any EngineClient
@@ -81,9 +83,7 @@ public final class JavaScriptDialogPresenter {
   public func handle(_ event: EngineEvent) {
     switch event {
     case .dialogRequested(let dialog):
-      if pending[dialog.tab] != nil { dismissPanel(of: dialog.tab) }
-      pending[dialog.tab] = dialog
-      present(dialog.tab)
+      adopt(dialog)
     case .dialogEnded(let tab, let id):
       guard pending[tab]?.id == id else { return }
       pending[tab] = nil
@@ -91,6 +91,30 @@ public final class JavaScriptDialogPresenter {
     default:
       break
     }
+  }
+
+  /// Takes `dialog` as this window's pending dialog of its tab and shows its panel if the tab is on screen. A dialog
+  /// the engine just raised, or one that came with a tab moved here (`release(_:)` of the window it left).
+  public func adopt(_ dialog: JavaScriptDialog) {
+    if pending[dialog.tab] != nil { dismissPanel(of: dialog.tab) }
+    pending[dialog.tab] = dialog
+    present(dialog.tab)
+  }
+
+  /// Lets go of the tab's pending dialog because the tab moves to another window, which adopts it. The panel goes at
+  /// once and nothing here can answer the dialog afterwards, so the answer reaches the page once, from the panel of
+  /// the window that adopts it. A prompt's text typed so far becomes the dialog's initial text there. Nil when the tab
+  /// has no pending dialog.
+  public func release(_ tab: TabID) -> JavaScriptDialog? {
+    guard var dialog = pending.removeValue(forKey: tab) else { return nil }
+    if dialog.kind == .prompt, let typed = entries[tab]?.panel.inputText { dialog.defaultPromptText = typed }
+    dismissPanel(of: tab)
+    return dialog
+  }
+
+  /// The panel width for a page `anchorWidth` wide: 420 pt, narrower in a narrow page, never under 260.
+  static func panelWidth(forAnchorWidth anchorWidth: CGFloat) -> CGFloat {
+    min(420, max(260, anchorWidth - 2 * DialogPanel.anchorInset))
   }
 
   /// Shows the panels of tabs that came on screen, moves those whose page moved, and takes down those whose tab left.
@@ -111,22 +135,30 @@ public final class JavaScriptDialogPresenter {
   }
 
   private func present(_ tab: TabID) {
-    guard let dialog = pending[tab] else { return }
+    guard pending[tab] != nil else { return }
     guard let view = anchor(tab) else {
       retryOnLayout = true
-      dismissPanel(of: tab)
+      hidePanel(of: tab)
       return
     }
     guard let window = view.window, windowIsVisible(window) else {
-      dismissPanel(of: tab)                  // a window coming back (deminiaturize, unhide, occlusion) refreshes
+      hidePanel(of: tab)                     // a window coming back (deminiaturize, unhide, occlusion) refreshes
       return
     }
+    // The tab reached another window or page view without a hand-off (a pane or Peek move): the panel and its
+    // observers belong to the old ones, so it goes down unanswered and a new one is made for the new view. A prompt's
+    // typed text comes along.
+    if let entry = entries[tab], entry.panel.panel.parent !== window || entry.anchorView !== view {
+      hidePanel(of: tab)
+    }
+    guard let dialog = pending[tab] else { return }
     let frame = Self.screenFrame(of: view)
+    let width = Self.panelWidth(forAnchorWidth: frame.width)
     if let entry = entries[tab] {
+      entry.panel.resize(width: width)         // follows the page or window; a no-op at the same width
       entry.panel.reposition(anchoredTo: frame)
       return
     }
-    let width = min(420, max(260, frame.width - 2 * DialogPanel.anchorInset))
     let panel = DialogPanel(content: .javaScriptDialog(dialog, width: width))
     if let reduceMotion { panel.reduceMotion = reduceMotion }
     panel.onAnswer = { [weak self, weak panel] answer in
@@ -142,12 +174,19 @@ public final class JavaScriptDialogPresenter {
       NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main,
                                              using: reposition),
     ]
-    entries[tab] = Entry(panel: panel, observers: observers)
+    entries[tab] = Entry(panel: panel, observers: observers, anchorView: view)
     panel.show(over: window, anchoredTo: frame, takesFocus: true)
   }
 
   private static func screenFrame(of view: NSView) -> NSRect {
     view.window?.convertToScreen(view.convert(view.bounds, to: nil)) ?? .zero
+  }
+
+  /// Takes the tab's panel down because its page is off screen or elsewhere, keeping what a prompt's field holds as
+  /// the dialog's text, so the panel that comes back shows it.
+  private func hidePanel(of tab: TabID) {
+    if pending[tab]?.kind == .prompt, let typed = entries[tab]?.panel.inputText { pending[tab]?.defaultPromptText = typed }
+    dismissPanel(of: tab)
   }
 
   /// Takes the tab's panel down at once, with no answer to the engine.
