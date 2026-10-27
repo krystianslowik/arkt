@@ -85,6 +85,7 @@ final class AppSession {
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
     self.windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
                                   sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
+                                  sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
                                   hostLookup: hostLookup)
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
@@ -543,12 +544,14 @@ final class AppSession {
     isTerminating = true
     autoArchive.stop()  // stop first: no auto-archive pass may run between the sidebar write and the outbox write
     source.markInactive(windows.visibleNodes, at: .now)
+    windows.saveSessionsForTermination()              // #116: before the engine closes the tabs
   }
 
   /// The quit was cancelled (Chromium: a held leave-site prompt, or the user): auto-archive runs again. The visible
   /// tabs keep the stamp `prepareForTermination` wrote; they are stamped again when they stop being visible.
   func terminationCancelled() {
     isTerminating = false
+    windows.resumeSessions()
     resumeAutoArchive()
   }
 
