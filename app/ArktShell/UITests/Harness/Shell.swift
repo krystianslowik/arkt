@@ -108,7 +108,13 @@ enum Shell {
     }.joined(separator: " | ")
   }
 
-  /// Moves Down until the selected row has this label and value. Does not press Enter.
+  /// Whether a command bar row's label is for the page titled `title`: a row reads "<title>, <host>, <kind>, <k> of
+  /// <n>" (#371), with the middle parts left out when a row has no host.
+  static func rowLabel(_ label: String, isFor title: String) -> Bool {
+    label == title || label.hasPrefix(title + ", ")
+  }
+
+  /// Moves Down until the selected row has this title and value. Does not press Enter.
   @discardableResult
   static func selectCommandBarRow(
     _ app: XCUIApplication, label: String, value: String,
@@ -117,13 +123,13 @@ enum Shell {
     let present = Waits.until(
       "command bar row \(label) value \(value); \(commandBarRowSummary(app))", file: file, line: line
     ) {
-      commandBarRowsInOrder(app).contains { $0.label == label && ($0.value as? String) == value }
+      commandBarRowsInOrder(app).contains { rowLabel($0.label, isFor: label) && ($0.value as? String) == value }
     }
     guard present else { return false }
     let count = max(commandBarRowsInOrder(app).count, 1)
     for _ in 0..<count {
       if let selected = selectedCommandBarRow(app),
-         selected.label == label, (selected.value as? String) == value {
+         rowLabel(selected.label, isFor: label), (selected.value as? String) == value {
         return true
       }
       let before = selectedCommandBarRow(app)?.label
@@ -132,7 +138,7 @@ enum Shell {
         "selection to leave \(before ?? "none"); \(commandBarRowSummary(app))", file: file, line: line
       ) {
         let now = selectedCommandBarRow(app)
-        if now?.label == label, (now?.value as? String) == value { return true }
+        if let nowLabel = now?.label, rowLabel(nowLabel, isFor: label), (now?.value as? String) == value { return true }
         return now?.label != before
       }
       if !moved { return false }

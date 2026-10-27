@@ -35,13 +35,18 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public static let newSpaceTitle = "Space"
   public var isShowingEmptyState: Bool { sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
+  /// When each tab was last shown in this window, for the command bar's "12 min" (not persisted).
+  private var viewedAt: [NodeID: Date] = [:]
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
   /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
   public internal(set) var currentTab: TabID? {
     didSet {
       guard let tab = currentTab, tab != oldValue else { return }
       activateEngineTab(tab)
-      if let node = nodeByTab[tab] { tabSwitcher.noteViewed(node) }      // the recent-tab list (#103)
+      if let node = nodeByTab[tab] {                                     // the recent-tab list (#103)
+        tabSwitcher.noteViewed(node)
+        viewedAt[node] = Date()                                          // the command bar's "12 min" (#371)
+      }
       saveSession()                                                      // #116
     }
   }
@@ -186,7 +191,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
               metrics: ShellMetrics = .standard, toolbarSetting: ToolbarSetting = .ephemeral(),
               sidebarStateStore: SidebarWindowStateStore = .ephemeral(), sessionStore: WindowSessionStore = .ephemeral(),
               restoring session: WindowSessionState? = nil, savesSession: Bool = true,
-              opensFirstTab: Bool = true) {
+              commandBarSettings: CommandBarSettings = .ephemeral(), opensFirstTab: Bool = true) {
     let window = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800))
     // Symbol bitmaps at the shell window's scale, before the first row or button draws. A later scale change
     // re-renders the views' glyphs (viewDidChangeBackingProperties) and prewarms again below.
@@ -247,6 +252,23 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
     commandBar.onSwitch = { [weak self] node in self?.activate(node: node) }
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
+    commandBar.recentTabsProvider = { [weak self] in self?.recentTabs() ?? [] }
+    // #112: settings, Paste and Go (BH-108, GS-035), Spaces as results (BH-104), action search (BH-106),
+    // site-search aliases (BH-107) and the Space-switch refresh (BH-111).
+    commandBar.settings = commandBarSettings
+    commandBar.clipboardURLProvider = { CommandBarController.pasteboardURL(NSPasteboard.general) }
+    commandBar.spacesProvider = { [weak self] in
+      guard let self else { return [] }
+      return self.sidebarController.spaces.compactMap { id in
+        self.sidebar.space(id).map { CommandBarResults.Space(id: id, title: $0.title) }
+      }
+    }
+    commandBar.onSwitchSpace = { [weak self] id in self?.sidebarController.showSpace(id) }
+    commandBar.actionsProvider = { [weak self] in self?.commandBarActions() ?? [] }
+    commandBar.onAction = { [weak self] id in self?.runCommandBarAction(id) }
+    sidebarController.onCurrentSpaceChanged = { [weak self] _ in self?.commandBar.refreshSuggestions() }
+    sidebarController.clipboardURLProvider = { CommandBarController.pasteboardURL(NSPasteboard.general) }
+    sidebarController.onPasteAndGo = { [weak self] url in self?.open(url, inNewTab: true) }
     wireAddressBars()
     wireSplit()
     wireExtensions()                        // tab and window events start with the engine window (attach)
@@ -611,9 +633,49 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
   }
 
+  /// The command bar's Recent tabs (#371): the tabs shown in this window most recently first, across Spaces, without the
+  /// tab on screen (Return on it would only close the bar), then the tabs not shown since the app started, current
+  /// Space first like the suggestions (BH-111). Forgets the time of a tab that is gone.
+  private func recentTabs() -> [CommandBarResults.OpenTab] {
+    let open = openTabs().map { tab in
+      CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
+                                lastViewed: viewedAt[tab.node])
+    }
+    viewedAt = viewedAt.filter { entry in open.contains { $0.node == entry.key } }
+    let candidates = open.filter { $0.node != currentNode }
+    let viewed = candidates.filter { $0.lastViewed != nil }
+      .sorted { ($0.lastViewed ?? .distantPast) > ($1.lastViewed ?? .distantPast) }
+    return viewed + candidates.filter { $0.lastViewed == nil }
+  }
+
+  /// BH-104: open tabs of every Space of this profile, the current Space first (so the BH-111 refresh reorders).
   private func openTabs() -> [CommandBarResults.OpenTab] {
-    guard let space = sidebarController.currentSpace else { return [] }
-    return CommandBarResults.openTabs(in: sidebar, space: space)
+    let spaces = sidebarController.spaces
+    guard let current = sidebarController.currentSpace else {
+      return CommandBarResults.openTabs(in: sidebar, spaces: spaces)
+    }
+    return CommandBarResults.openTabs(in: sidebar,
+                                      spaces: [current] + spaces.filter { space in space != current })
+  }
+
+  /// The action search's verbs (BH-106); ids are handled in `runCommandBarAction`.
+  private func commandBarActions() -> [CommandBarAction] {
+    [
+      CommandBarAction(id: "newSpace", title: "New Space"),
+      CommandBarAction(id: "nextSpace", title: "Next Space"),
+      CommandBarAction(id: "previousSpace", title: "Previous Space"),
+      CommandBarAction(id: "toggleToolbar", title: ToolbarSetting.menuTitle(isVisible: toolbarSetting.isVisible)),
+    ]
+  }
+
+  private func runCommandBarAction(_ id: String) {
+    switch id {
+    case "newSpace": newSpace(nil)
+    case "nextSpace": sidebarController.nextSpace()
+    case "previousSpace": sidebarController.previousSpace()
+    case "toggleToolbar": toggleToolbar(nil)
+    default: break
+    }
   }
 
   /// Shows `node` in the content area: a pane shows its whole split (`showSplit`), anything else the single card.

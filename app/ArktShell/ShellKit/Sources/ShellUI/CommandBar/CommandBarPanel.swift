@@ -14,7 +14,6 @@ final class CommandBarPanel: NSPanel {
     backgroundColor = .clear
     hasShadow = true
     animationBehavior = .none                     // no system fade: it would eat the 16 ms budget
-    appearance = NSAppearance(named: .darkAqua)   // dark surface even on light Spaces
     collectionBehavior = [.fullScreenAuxiliary, .transient, .ignoresCycle]
     alphaValue = 0
     ignoresMouseEvents = true
@@ -26,7 +25,7 @@ final class CommandBarPanel: NSPanel {
   var isPresented = false {
     didSet {
       guard isPresented != oldValue else { return }
-      alphaValue = isPresented ? 1 : 0
+      if isPresented { alphaValue = 1 }               // hiding fades out first; the controller then sets alpha 0
       ignoresMouseEvents = !isPresented
       contentView?.setAccessibilityValue(isPresented ? AXID.CommandBar.open : AXID.CommandBar.closed)
     }

@@ -986,6 +986,106 @@ final class ScriptedFacade: NSObject, ArktEngine {
     return nil
   }
 
+  // MARK: Import (#512)
+
+  /// What one import call carried, read through the lending blocks as the engine reads it.
+  struct ScriptedImportedCookie: Equatable {
+    var hostKey: String, name: String, path: String, value: String
+    var expires: Date, creation: Date?, lastAccess: Date?
+    var isSecure: Bool, isHTTPOnly: Bool, sameSite: Int, priority: Int, sourceScheme: Int, sourcePort: Int
+    var partitionKey: String
+  }
+  struct ScriptedImportedLogin: Equatable {
+    var originURL: String, actionURL: String?, signonRealm: String, username: String, password: String
+    var dateCreated: Date?, dateLastUsed: Date?
+  }
+  struct ScriptedImportedHistoryEntry: Equatable {
+    var url: String, title: String, visitTimes: [Date], visitTransitions: [Int]
+  }
+  struct ScriptedImportedBookmark: Equatable {
+    var url: String, title: String, guid: String?, dateAdded: Date?, folderPath: [String]
+  }
+  private final class ScriptedImportResult: NSObject, ArktImportResult {
+    let written: Int, skipped: Int, failed: Int
+    let failureReason: String?
+    let lastVisitTime: Date?
+    init(written: Int, skipped: Int, failed: Int, failureReason: String?, lastVisitTime: Date? = nil) {
+      self.written = written; self.skipped = skipped; self.failed = failed; self.failureReason = failureReason
+      self.lastVisitTime = lastVisitTime
+    }
+  }
+
+  private(set) var importedCookieBatches: [[ScriptedImportedCookie]] = []
+  private(set) var importedLoginBatches: [[ScriptedImportedLogin]] = []
+  private(set) var importedHistoryBatches: [[ScriptedImportedHistoryEntry]] = []
+  /// The watermark each history call carried.
+  private(set) var importedHistoryWatermarks: [Date?] = []
+  private(set) var importedBookmarkBatches: [[ScriptedImportedBookmark]] = []
+  /// The newest visit time the scripted history answer reports.
+  var importLastVisitTime: Date?
+  /// The answer to an import: every record written, unless a test sets this.
+  var importAnswer: (written: Int?, skipped: Int, failed: Int, failureReason: String?) = (nil, 0, 0, nil)
+
+  private func importResult(count: Int) -> any ArktImportResult {
+    let written = importAnswer.written ?? count - importAnswer.skipped - importAnswer.failed
+    return ScriptedImportResult(written: written, skipped: importAnswer.skipped, failed: importAnswer.failed,
+                                failureReason: importAnswer.failureReason, lastVisitTime: importLastVisitTime)
+  }
+
+  func importCookies(_ cookies: [any ArktImportCookie], completion: @escaping (any ArktImportResult) -> Void) {
+    importedCookieBatches.append(cookies.map { cookie in
+      var value = ""
+      cookie.withValueBytes { bytes, count in
+        value = String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self)
+      }
+      return ScriptedImportedCookie(
+        hostKey: cookie.hostKey, name: cookie.name, path: cookie.path, value: value, expires: cookie.expires,
+        creation: cookie.creation, lastAccess: cookie.lastAccess, isSecure: cookie.isSecure,
+        isHTTPOnly: cookie.isHTTPOnly, sameSite: cookie.sameSite, priority: cookie.priority,
+        sourceScheme: cookie.sourceScheme, sourcePort: cookie.sourcePort, partitionKey: cookie.partitionKey)
+    })
+    let result = importResult(count: cookies.count)
+    // The real facade answers from a posted task.
+    Task { @MainActor in completion(result) }
+  }
+
+  func importPasswords(_ logins: [any ArktImportLogin], completion: @escaping (any ArktImportResult) -> Void) {
+    importedLoginBatches.append(logins.map { login in
+      var password = ""
+      login.withPasswordBytes { bytes, count in
+        password = String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self)
+      }
+      return ScriptedImportedLogin(
+        originURL: login.originURL, actionURL: login.actionURL, signonRealm: login.signonRealm,
+        username: login.username, password: password, dateCreated: login.dateCreated,
+        dateLastUsed: login.dateLastUsed)
+    })
+    let result = importResult(count: logins.count)
+    Task { @MainActor in completion(result) }
+  }
+
+  func importHistory(
+    _ entries: [any ArktImportHistoryEntry], after: Date?, completion: @escaping (any ArktImportResult) -> Void
+  ) {
+    importedHistoryWatermarks.append(after)
+    importedHistoryBatches.append(entries.map { entry in
+      ScriptedImportedHistoryEntry(
+        url: entry.url, title: entry.title, visitTimes: entry.visitTimes, visitTransitions: entry.visitTransitions.map(\.intValue))
+    })
+    let result = importResult(count: entries.reduce(0) { $0 + $1.visitTimes.count })
+    Task { @MainActor in completion(result) }
+  }
+
+  func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {
+    importedBookmarkBatches.append(bookmarks.map { bookmark in
+      ScriptedImportedBookmark(
+        url: bookmark.url, title: bookmark.title, guid: bookmark.guid, dateAdded: bookmark.dateAdded,
+        folderPath: bookmark.folderPath)
+    })
+    let result = importResult(count: bookmarks.count)
+    Task { @MainActor in completion(result) }
+  }
+
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool {
     guard testAPIEnabled, let tab = tab as? ScriptedTab else { return false }
     return tab.answer(accept: accept)

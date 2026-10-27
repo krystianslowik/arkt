@@ -291,4 +291,65 @@ struct ShellTokensContrastTests {
     #expect(primary > secondary, "\(flavor): primary \(primary), secondary \(secondary)")
     #expect(secondary > foreground, "\(flavor): secondary \(secondary), sidebarForeground \(foreground)")
   }
+
+  // MARK: Command bar (#371, design/command-bar/README.md, Accessibility)
+
+  /// The fills a command bar text sits on, over the opaque surface: bare, the selected row, a key cap, the pill well.
+  private static func commandBarFills(_ flavor: ThemeFlavor) -> [RGBA] {
+    let surface = ShellTokens.commandBarSurfaceOpaque.resolve(flavor)
+    let layers = [ShellTokens.commandBarSelectedRow, ShellTokens.commandBarKeyCap, ShellTokens.commandBarPillWell]
+    return [surface] + layers.map { ShellContrastProbe.over($0.resolve(flavor), surface) }
+  }
+
+  @Test(arguments: flavors)
+  func commandBarTextReadsOnTheOpaqueSurfaceAndItsFills(flavor: ThemeFlavor) {
+    for fill in Self.commandBarFills(flavor) {
+      for (name, token) in [("text", ShellTokens.commandBarText), ("secondary", ShellTokens.commandBarSecondaryText),
+                            ("tertiary", ShellTokens.commandBarTertiaryText)] {
+        let ratio = ShellContrastProbe.ratio(token.resolve(flavor), onOpaque: fill)
+        #expect(ratio >= Contrast.minimumText, "commandBar \(name) \(flavor): \(ratio)")
+      }
+    }
+  }
+
+  @Test(arguments: flavors)
+  func theSelectedPillReadsInTheCapsule(flavor: ThemeFlavor) {
+    let surface = ShellTokens.commandBarSurfaceOpaque.resolve(flavor)
+    let well = ShellContrastProbe.over(ShellTokens.commandBarPillWell.resolve(flavor), surface)
+    let on = ShellContrastProbe.over(ShellTokens.commandBarPillOn.resolve(flavor), well)
+    let text = ShellContrastProbe.ratio(ShellTokens.commandBarPillOnText.resolve(flavor), onOpaque: on)
+    #expect(text >= Contrast.minimumText, "selected pill text \(flavor): \(text)")
+    let count = ShellContrastProbe.over(CommandBarFilterPills.selectedCountColor(flavor), on)
+    #expect(ShellContrastProbe.ratio(count, on) >= Contrast.minimumText, "selected pill count \(flavor)")
+  }
+
+  /// Text on a mustard fill is graphite (the brand pair), above 7:1.
+  @Test func graphiteOnMustardIsAbove7() {
+    let ratio = ShellContrastProbe.ratio(BrandTokens.onAccent.dark, onOpaque: ShellTokens.commandBarTick.dark)
+    #expect(ratio >= 7, "graphite on mustard: \(ratio)")
+  }
+
+  /// Mustard is a fill only: no command bar text token is the accent.
+  @Test func mustardIsOnlyAFillInTheCommandBar() {
+    #expect(ShellTokens.commandBarTick == BrandTokens.accent)
+    let text = [ShellTokens.commandBarText, ShellTokens.commandBarSecondaryText, ShellTokens.commandBarTertiaryText,
+                ShellTokens.commandBarPillOnText]
+    for token in text {
+      #expect(token.light != BrandTokens.Palette.mustard && token.dark != BrandTokens.Palette.mustard)
+    }
+  }
+
+  @Test func theTextLevelsKeepTheirOrderOnTheSurface() {
+    for flavor in Self.flavors {
+      let surface = ShellTokens.commandBarSurfaceOpaque.resolve(flavor)
+      func ratio(_ token: TokenPair) -> Double { ShellContrastProbe.ratio(token.resolve(flavor), onOpaque: surface) }
+      #expect(ratio(ShellTokens.commandBarText) > ratio(ShellTokens.commandBarSecondaryText))
+      #expect(ratio(ShellTokens.commandBarSecondaryText) > ratio(ShellTokens.commandBarTertiaryText))
+    }
+  }
+
+  @Test func theScrimIsLighterInLight() {
+    #expect(ShellTokens.commandBarScrim.dark.alpha == 0.28)
+    #expect(ShellTokens.commandBarScrim.light.alpha < ShellTokens.commandBarScrim.dark.alpha)
+  }
 }

@@ -1,4 +1,7 @@
 import AppKit
+import struct ArcImport.ArcCookie
+import struct ArcImport.BookmarkRecord
+import struct ArcImport.ArcLogin
 import EngineAPI
 
 /// Pure in-memory engine for tests and previews. Loads complete only when `finishLoad` is called,
@@ -8,7 +11,17 @@ import EngineAPI
 /// (`engineCreateTab`, `engineCloseTab`, `engineCloseWindow`, `engineActivate`, `holdClose`, `answerDialog`,
 /// `openEngineWindow`, `setExtensionActions`) stand in for what a page, an extension or the user does in a real engine.
 @MainActor
-public final class InMemoryEngine: EngineClient, EngineExtensions, EngineDownloads {
+public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporting, EngineDownloads {
+  /// What `importCookies` and `importPasswords` received, deduped as the engine does (#512). No profile is written.
+  public private(set) var imports = ImportRecording()
+
+  public func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult { imports.record(batch) }
+  public func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult { imports.record(batch) }
+  public func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
+    imports.record(batch, after: watermark)
+  }
+  public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { imports.record(batch) }
+
   /// A close waiting on a leave-site dialog.
   private enum HeldClose {
     /// One tab, closed by the client or the engine, with the reason it will report.

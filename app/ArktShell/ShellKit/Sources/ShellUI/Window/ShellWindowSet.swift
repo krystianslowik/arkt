@@ -27,6 +27,7 @@ public final class ShellWindowSet {
   public let sessionStore: WindowSessionStore
   /// The connected screens a saved frame is placed on; tests replace it.
   public var screens: @MainActor () -> [ScreenGeometry] = { ScreenGeometry.current() }
+  public let commandBarSettings: CommandBarSettings
   /// The app's hooks on a new window (archive, stamps, favicons, import); runs before the window is shown.
   public var configure: (@MainActor (ShellWindowController) -> Void)?
   /// The app's Downloads (#132): every window this set builds gets its Library button and popover. Nil for an engine
@@ -64,12 +65,14 @@ public final class ShellWindowSet {
   /// does.
   public init(engine: any EngineClient, sidebar: any SidebarSource, toolbarSetting: ToolbarSetting = .ephemeral(),
               sidebarStateStore: SidebarWindowStateStore = .ephemeral(),
-              sessionStore: WindowSessionStore = .ephemeral(), hostLookup: HostLookup? = nil) {
+              sessionStore: WindowSessionStore = .ephemeral(),
+              commandBarSettings: CommandBarSettings = .ephemeral(), hostLookup: HostLookup? = nil) {
     self.engine = engine
     self.sidebar = sidebar
     self.toolbarSetting = toolbarSetting
     self.sidebarStateStore = sidebarStateStore
     self.sessionStore = sessionStore
+    self.commandBarSettings = commandBarSettings
     self.hostLookup = hostLookup
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
@@ -297,7 +300,8 @@ public final class ShellWindowSet {
     if isRestored { restoredSession = true }
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
-                                           restoring: session, savesSession: isRestored, opensFirstTab: opensFirstTab)
+                                           restoring: session, savesSession: isRestored,
+                                           commandBarSettings: commandBarSettings, opensFirstTab: opensFirstTab)
     if isRestored { sessionWindow = controller }
     if let session, controller.applySavedFrame(session, screens: screens()) { restoredFrameWindow = controller }
     controller.onNewWindow = { [weak self] in self?.openWindow(opensFirstTab: false) }

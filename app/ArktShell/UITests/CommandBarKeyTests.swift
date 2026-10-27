@@ -42,6 +42,38 @@ final class CommandBarKeyTests: ArktUITestCase {
     XCTAssertTrue(Shell.isCommandBarOpen(app), "wrapping onto the search row does not commit it")
   }
 
+  /// #371: Cmd-2 selects the Tabs pill (the three open tabs, no Search row) and Cmd-1 goes back to All. The query stays.
+  /// Not run in CI on a pull request (section 12); the in-process twin is `CommandBarBehaviourTests`.
+  func test_371_commandDigitsPickTheFilterPills() async throws {
+    let (_, app) = try await launchWithThreeTabs()
+    showFixtureResults(in: app)
+
+    Shell.commandBarField(app).typeKey("2", modifierFlags: .command)
+    XCTAssertTrue(Waits.until("only Switch to Tab rows under Tabs; \(Shell.commandBarRowSummary(app))") {
+      let values = Shell.commandBarRowsInOrder(app).map { $0.value as? String }
+      return values.count == 3 && values.allSatisfy { $0 == "Switch to Tab" }
+    })
+    XCTAssertEqual(Shell.commandBarField(app).value as? String, Self.query, "a filter does not change the query")
+
+    Shell.commandBarField(app).typeKey("1", modifierFlags: .command)
+    XCTAssertTrue(Waits.until("All shows the Search row again; \(Shell.commandBarRowSummary(app))") {
+      Shell.commandBarRowsInOrder(app).count == 4
+    })
+  }
+
+  /// #371: Esc clears the query first and closes the bar on the second press.
+  func test_371_escClearsTheQueryThenCloses() async throws {
+    let (_, app) = try await launchWithThreeTabs()
+    showFixtureResults(in: app)
+
+    Shell.commandBarField(app).typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(Waits.until("the query is cleared and the bar is open") {
+      (Shell.commandBarField(app).value as? String)?.isEmpty == true && Shell.isCommandBarOpen(app)
+    })
+    Shell.commandBarField(app).typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
+  }
+
   /// BH-104 / BH-110: a "Switch to Tab" result shows the open tab instead of loading it again. Shown from gamma, the
   /// alpha row switches: the Toolbar's URL bar shows alpha's address and the fixture server sees no second request
   /// for it. The Toolbar is turned on because the sidebar URL bar shows the host only, the same for every fixture

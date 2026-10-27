@@ -1,4 +1,7 @@
 import AppKit
+import struct ArcImport.ArcCookie
+import struct ArcImport.BookmarkRecord
+import struct ArcImport.ArcLogin
 internal import WebKit
 import EngineAPI
 
@@ -11,7 +14,17 @@ import EngineAPI
 /// Nothing outside this file may import WebKit, and the import is `internal`, so the compiler
 /// rejects any WebKit type in the public surface (EngineAPI types and NSView only).
 @MainActor
-public final class FakeEngine: EngineClient, EngineDownloads {
+public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
+  /// What `importCookies` and `importPasswords` received, deduped as the engine does (#512). No profile is written.
+  public private(set) var imports = ImportRecording()
+
+  public func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult { imports.record(batch) }
+  public func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult { imports.record(batch) }
+  public func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
+    imports.record(batch, after: watermark)
+  }
+  public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { imports.record(batch) }
+
   private final class Entry {
     let webView: WKWebView
     let navigation: NavigationObserver

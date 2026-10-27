@@ -46,4 +46,19 @@ struct CommandBarOpenTabsTests {
     let space = sidebar.addSpace(title: "S", theme: SpaceThemeInfo(baseColors: [], isDark: false))
     #expect(CommandBarResults.openTabs(in: sidebar, space: space).isEmpty)
   }
+
+  /// BH-104: open tabs come from every Space, in the order the caller passes (the window puts the current
+  /// Space first, so a Space switch refresh reorders, BH-111).
+  @Test func collectsTabsAcrossSpacesInTheGivenOrder() throws {
+    let sidebar = StubSidebar()
+    func url(_ s: String) -> URL { URL(string: s)! }
+    let theme = SpaceThemeInfo(baseColors: [], isDark: false)
+    let work = sidebar.addSpace(title: "Work", theme: theme)
+    let home = sidebar.addSpace(title: "Home", theme: theme)
+    let a = sidebar.addTab(url: url("https://a.dev"), title: "A", in: .today(work))
+    let b = sidebar.addTab(url: url("https://b.dev"), title: "B", in: .today(home))
+
+    #expect(CommandBarResults.openTabs(in: sidebar, spaces: [home, work]).map(\.node) == [b, a])
+    #expect(CommandBarResults.openTabs(in: sidebar, spaces: [work, home]).map(\.node) == [a, b])
+  }
 }
