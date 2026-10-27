@@ -22,6 +22,11 @@ public struct SettingsServices {
   public var shortcutsMenu: @MainActor () -> NSMenu? = { NSApp.mainMenu }
   /// The Spaces, in sidebar order.
   public var spaces: @MainActor () -> [SettingsSpaceSummary] = { [] }
+  /// The system Downloads folder, what the Downloads pop-up calls "Downloads" (#132).
+  public var downloadsFolder: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+    ?? FileManager.default.temporaryDirectory
+  /// The same action as Window > Show Library; the row is disabled while nil (#132).
+  public var openLibrary: (@MainActor () -> Void)?
 
   public init() {}
 }

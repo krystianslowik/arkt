@@ -224,8 +224,10 @@ enum MainMenu {
       item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),                   // KB-069
       item("Zoom", #selector(NSWindow.performZoom(_:)), "", []),
       .separator(),
+      // KB-065, #132: the native Library; Downloads and Show All History claim their ids in the window host.
+      item("Show Library", #selector(AppCommands.showLibrary(_:)), "l", [.command, .shift], target: commands),
       page("Downloads", .downloads, "j", [.command, .shift]),                              // KB-065
-      // KB-043: Show Archive is unbound by default; Cmd-Shift-L stays reserved for the Library (KB-065).
+      // KB-043: Show Archive is unbound by default; Cmd-Shift-L is the Library's (KB-065).
       item("Show Archive", #selector(AppCommands.showArchive(_:)), "", [], target: commands),
       // BH-087, KB-043: unbound; opens the Archive window and asks there (#111).
       item("Clear Archive...", #selector(AppCommands.clearArchive(_:)), "", [], target: commands),

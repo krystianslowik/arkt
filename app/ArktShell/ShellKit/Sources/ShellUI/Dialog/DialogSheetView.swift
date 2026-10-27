@@ -63,7 +63,9 @@ final class DialogSheetView: NSView {
     bodyScroll = content.bodyMaxHeight == nil ? nil : NSScrollView()
     inputView = content.input.map { DialogInputView(input: $0) }
     listField = content.listItems.isEmpty ? nil : DialogListView(heading: content.listHeading, items: content.listItems)
-    footerLinkButton = content.footerLink.map { ArchiveLinkButton(style: .secondary, title: $0, fontSize: 13) }
+    footerLinkButton = content.footerLink.map {
+      ArchiveLinkButton(style: content.footerLinkIsDestructive ? .destructive : .secondary, title: $0, fontSize: 13)
+    }
     primaryButton = ArchivePillButton(style: content.isDestructive ? .destructive
                                         : content.neutralPrimary ? .neutral : .primary,
                                       title: content.primaryTitle, metrics: .dialog)
@@ -397,6 +399,15 @@ final class DialogIconView: NSView {
       return
     case .appIcon:
       NSApp.applicationIconImage?.draw(in: bounds)
+    case .symbol(let name):
+      let flavor = archiveFlavor
+      let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+      ShellTokens.sidebarItemHovered.resolve(flavor).nsColor().setFill()
+      path.fill()
+      let side = bounds.width * 0.56
+      SymbolImageCache.shared.symbol(name, box: side, weight: .medium, color: ShellTokens.primaryText.resolve(flavor),
+                                     scale: shellBackingScale)
+        .draw(in: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side))
     case .spaceSwatch(let colors, let isDark, let mark):
       let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
       let stops = colors.isEmpty ? [ShellTokens.sidebarItemHovered.resolve(isDark ? .dark : .light)] : colors

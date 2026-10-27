@@ -12,6 +12,7 @@ final class AppCommands: NSObject {
   @objc func showSettings(_ sender: Any?) {}
   @objc func importFromArc(_ sender: Any?) {}
   @objc func showArchive(_ sender: Any?) {}
+  @objc func showLibrary(_ sender: Any?) {}
   @objc func clearArchive(_ sender: Any?) {}
   @objc func showWelcome(_ sender: Any?) {}
   let undoRouter = ReopenUndoRouter()
@@ -249,6 +250,7 @@ final class MainMenuInventoryTests: XCTestCase {
       ("Settings...", #selector(AppCommands.showSettings(_:))),
       ("Import Browser Data...", #selector(AppCommands.importFromArc(_:))),
       ("Show Archive", #selector(AppCommands.showArchive(_:))),
+      ("Show Library", #selector(AppCommands.showLibrary(_:))),            // KB-065, #132
       ("Clear Archive...", #selector(AppCommands.clearArchive(_:))),   // KB-043, unbound
     ]
     for (title, action) in toCommands {
@@ -339,6 +341,7 @@ final class MainMenuInventoryTests: XCTestCase {
       ("Jump to Selection", #selector(NSResponder.centerSelectionInVisibleArea(_:)), "j", .command),
       ("Settings...", #selector(AppCommands.showSettings(_:)), ",", .command),
       ("Show Archive", #selector(AppCommands.showArchive(_:)), "", []),
+      ("Show Library", #selector(AppCommands.showLibrary(_:)), "l", [.command, .shift]),             // KB-065, #132
     ]
     for (title, action, key, modifiers) in expected {
       let item = try item(title)

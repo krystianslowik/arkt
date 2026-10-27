@@ -22,7 +22,7 @@ extension SettingsWindowController {
     SettingsSectionView(title: title, body: SettingsGroupView(rows), note: note)
   }
 
-  private func identify(_ view: NSView, _ pane: SettingsPane, _ setting: String) {
+  func identify(_ view: NSView, _ pane: SettingsPane, _ setting: String) {
     let identifier = AXID.Settings.control(pane.rawValue, setting)
     if let control = view as? NSControl {
       control.setAccessibilityIdentifierWithCell(identifier)
@@ -40,14 +40,14 @@ extension SettingsWindowController {
     return control
   }
 
-  private func popUp(_ pane: SettingsPane, _ setting: String, _ items: [String], _ selected: String)
+  func popUp(_ pane: SettingsPane, _ setting: String, _ items: [String], _ selected: String)
     -> SettingsPopUpButton {
     let control = SettingsPopUpButton(items: items, selected: selected)
     identify(control, pane, setting)
     return control
   }
 
-  private func pill(_ pane: SettingsPane, _ setting: String, _ title: String, primary: Bool = false,
+  func pill(_ pane: SettingsPane, _ setting: String, _ title: String, primary: Bool = false,
                     small: Bool = false, action: @escaping @MainActor () -> Void) -> ArchivePillButton {
     let button = ArchivePillButton(style: primary ? .primary : .neutral, title: title,
                                    metrics: .init(height: small ? 24 : 28, fontSize: small ? 12 : 13,
@@ -67,7 +67,7 @@ extension SettingsWindowController {
     return link
   }
 
-  private func row(_ label: String, _ caption: String? = nil, _ controls: [NSView] = [], planned: Bool = false)
+  func row(_ label: String, _ caption: String? = nil, _ controls: [NSView] = [], planned: Bool = false)
     -> SettingsRowView {
     SettingsRowView(label: label, caption: caption, trailing: controls, planned: planned)
   }
@@ -104,6 +104,7 @@ extension SettingsWindowController {
         row(PeekLinkCopy.shiftClick, nil, [shift]),
         littleArktLookupRow(),                     // #354
       ]),
+      section("Downloads", downloadRows(), note: Self.downloadsNote),        // #132
       section("Updates", [
         // Decision 6: shown disabled and off until the release work (#128).
         row("Update Arkt automatically", "Arkt checks for updates once a day and installs them when you quit.",
@@ -418,11 +419,6 @@ extension SettingsWindowController {
     let folderRow = row("Arkt\u{2019}s data folder", "The sidebar, the Archive and their backups.", [reveal])
     reveal.isEnabled = services.showDataFolder != nil
     return [
-      section("Downloads", [
-        row("Save downloads to", nil, [popUp(.advanced, "downloadsFolder", ["Downloads", "Other..."], "Downloads")],
-            planned: true),
-        row("Ask where to save each file", nil, [toggle(.advanced, "askWhereToSave", on: false)], planned: true),
-      ]),
       section("Pages", [
         row("Open Picture in Picture when you leave a video tab", nil,
             [toggle(.advanced, "autoPictureInPicture", on: true)], planned: true),

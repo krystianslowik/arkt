@@ -58,6 +58,24 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var sendCrashReportRow: SettingsRowView?
   let shortcutsSearch = ArchiveSearchField(frame: .zero)
   var shortcutSections: [ShortcutCatalog.Section] = []
+  /// Settings > General > Downloads (#132): the mode, the folder row and the Library row.
+  var downloadModeControl: SettingsSegmentedControl?
+  var downloadModeRow: SettingsRowView?
+  var downloadFolderRow: SettingsRowView?
+  /// Shows the folder panel and answers the chosen folder, nil when cancelled; tests replace it.
+  var downloadFolderPicker: @MainActor (NSWindow?, @escaping @MainActor (URL?) -> Void) -> Void = { window, done in
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = false
+    panel.canChooseDirectories = true
+    panel.canCreateDirectories = true
+    panel.allowsMultipleSelection = false
+    panel.prompt = "Choose"
+    let finish: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+      done(response == .OK ? panel.url : nil)
+    }
+    if let window { panel.beginSheetModal(for: window) { response in MainActor.assumeIsolated { finish(response) } } }
+    else { finish(panel.runModal()) }
+  }
   /// Closure targets of the pills (an action's target is weak).
   var actionTargets: [NSObject] = []
 
@@ -398,6 +416,7 @@ extension SettingsWindowController: AppSettingsObserver {
     ninthTabSwitch?.setOn(settings.tabNavigation.ninthOpensNinth, animated: true)
     crashReportsSwitch?.setOn(settings.sendsCrashReports, animated: true)
     applySendCrashReportState()                     // #129
+    applyDownloadLocation()                         // #132
   }
 }
 
