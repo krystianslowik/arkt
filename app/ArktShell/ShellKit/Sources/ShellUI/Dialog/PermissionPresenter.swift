@@ -48,8 +48,13 @@ public final class PermissionPresenter {
   /// Whether a window can show a panel now: false while it is minimized or its app is hidden. Tests inject it.
   private let windowIsVisible: @MainActor (NSWindow) -> Bool
   private var returnObservers: [NSObjectProtocol] = []
-  /// The last refresh found a pending request with no page view to point at; the next layout tries again.
+  /// The last refresh found a pending request with no page view to point at, or one with empty bounds; the next layout
+  /// or frame change of that view tries again.
   private var retryOnLayout = false
+  private var retryScheduled = false
+  /// Watches the frame of a page view that has no bounds yet, so its first layout shows the panel without waiting for
+  /// the window's root layout.
+  private var unlaidOutObservers: [NSObjectProtocol] = []
   /// The unanswered request of each tab.
   public private(set) var pending: [TabID: PermissionRequest] = [:]
   private var entries: [TabID: Entry] = [:]
@@ -57,6 +62,8 @@ public final class PermissionPresenter {
   var reduceMotion: (@MainActor () -> Bool)?
   /// The clock of the input protection, handed to each panel. Tests set it.
   var clock: (@MainActor () -> TimeInterval)?
+  /// Whether a panel's window is really visible (not occluded), handed to each panel. Tests set it.
+  var isOnScreen: (@MainActor () -> Bool)?
 
   /// `anchor` returns the view of a tab that is on screen in a window, nil for one that is not.
   public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> NSView?,
@@ -71,10 +78,18 @@ public final class PermissionPresenter {
         MainActor.assumeIsolated { self?.refresh() }
       }
     }
+    // A Space change moves windows off and on screen without any window notification of its own.
+    spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.refresh() }
+      }
   }
 
+  private var spaceObserver: NSObjectProtocol?
+
   isolated deinit {
-    for observer in returnObservers { NotificationCenter.default.removeObserver(observer) }
+    for observer in returnObservers + unlaidOutObservers { NotificationCenter.default.removeObserver(observer) }
+    if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
   }
 
   /// The tab whose panel is up, for tests and accessibility.
@@ -86,6 +101,7 @@ public final class PermissionPresenter {
       if pending[request.tab] != nil { dismissPanel(of: request.tab) }
       pending[request.tab] = request
       present(request.tab)
+      scheduleRetryIfNeeded()
     case .permissionEnded(let tab, let id):
       guard pending[tab]?.id == id else { return }
       pending[tab] = nil
@@ -98,12 +114,33 @@ public final class PermissionPresenter {
   /// Shows the panels of tabs that came on screen and moves those whose page moved.
   public func refresh() {
     retryOnLayout = false
+    stopWatchingUnlaidOutViews()
     for tab in pending.keys { present(tab) }
   }
 
   /// The window finished a layout pass: a request that found no page view to point at tries again.
   public func layoutDidFinish() {
     if retryOnLayout { refresh() }
+  }
+
+  /// A request that arrives before its tab has a page view does not wait for the window's next root layout: it tries
+  /// once more on the next turn of the run loop (a new tab's view is placed within the same turn), then falls back to
+  /// the layout and frame callbacks.
+  private func scheduleRetryIfNeeded() {
+    guard retryOnLayout, !retryScheduled else { return }
+    retryScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.retryScheduled = false
+        if self.retryOnLayout { self.refresh() }
+      }
+    }
+  }
+
+  private func stopWatchingUnlaidOutViews() {
+    for observer in unlaidOutObservers { NotificationCenter.default.removeObserver(observer) }
+    unlaidOutObservers = []
   }
 
   /// Takes every panel down without answering, as the window goes away.
@@ -122,15 +159,26 @@ public final class PermissionPresenter {
       dismissPanel(of: tab)                  // a window coming back (deminiaturize, unhide, occlusion) refreshes
       return
     }
-    let frame = view.window?.convertToScreen(view.convert(view.bounds, to: nil)) ?? .zero
+    let frame = window.convertToScreen(view.convert(view.bounds, to: nil))
     if let entry = entries[tab] {
-      entry.panel.reposition(anchoredTo: frame)
+      entry.panel.reposition(anchoredTo: frame)                  // an empty frame holds its input protection
+      return
+    }
+    guard !frame.isEmpty else {
+      // Not laid out yet: never place a panel at the screen origin. The view's own first frame change retries.
+      retryOnLayout = true
+      view.postsFrameChangedNotifications = true
+      unlaidOutObservers.append(NotificationCenter.default.addObserver(
+        forName: NSView.frameDidChangeNotification, object: view, queue: .main) { [weak self] _ in
+          MainActor.assumeIsolated { self?.refresh() }
+        })
       return
     }
     let width = min(320, max(260, frame.width - 2 * DialogPanel.anchorInset))
     let panel = DialogPanel(content: .permissionRequest(request, width: width))
     if let reduceMotion { panel.reduceMotion = reduceMotion }
     if let clock { panel.clock = clock }
+    if let isOnScreen { panel.isOnScreen = isOnScreen }
     panel.onAnswer = { [weak self] answer in self?.answered(tab, request, PermissionChoice(answer)) }
     panel.onDismiss = { [weak self] in self?.answered(tab, request, .dismiss) }
     let reposition: @Sendable (Notification) -> Void = { [weak self] _ in

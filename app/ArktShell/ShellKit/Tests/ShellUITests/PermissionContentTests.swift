@@ -17,7 +17,8 @@ struct PermissionContentTests {
     let content = DialogContent.permissionRequest(request(kinds: [.camera, .microphone]))
     #expect(content.title == "example.com wants to")
     #expect(content.listItems == ["Wants camera", "Wants microphone"])
-    #expect(content.accessibilityDescription == "Wants camera Wants microphone")
+    #expect(content.accessibilityDescription == "Wants camera, Wants microphone")
+    #expect(content.announcement == "example.com wants to: Wants camera, Wants microphone")
     #expect(content.width == 320)
   }
 

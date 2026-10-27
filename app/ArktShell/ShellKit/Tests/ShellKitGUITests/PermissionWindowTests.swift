@@ -32,6 +32,7 @@ final class PermissionWindowTests: XCTestCase {
     controller.showWindow(nil)
     controller.permissionPrompts.reduceMotion = { true }
     controller.permissionPrompts.clock = { [unowned self] in now }
+    controller.permissionPrompts.isOnScreen = { true }          // an unfocused test window reports no occlusion state
   }
 
   override func tearDown() async throws {

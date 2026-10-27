@@ -277,9 +277,15 @@ final class DialogSheetView: NSView {
   // MARK: - Answers
 
   /// Starts the input protection (`content.inputProtection`): until it has run out, button presses and Return answer
-  /// nothing. Called when the dialog appears.
-  func beginInputProtection() {
-    protectedUntil = content.inputProtection > 0 ? clock() + content.inputProtection : nil
+  /// nothing. Called when the dialog is really on screen; `delay` is the entrance still to run, which the 0.5 s follows.
+  func beginInputProtection(after delay: TimeInterval = 0) {
+    protectedUntil = content.inputProtection > 0 ? clock() + max(0, delay) + content.inputProtection : nil
+  }
+
+  /// Ignores presses until `beginInputProtection` runs again: the dialog is placed but not visible (no layout yet,
+  /// occluded, another Space, minimized). A dialog without input protection is never held.
+  func holdInputProtection() {
+    if content.inputProtection > 0 { protectedUntil = .infinity }
   }
 
   /// Whether presses are ignored now.

@@ -117,11 +117,18 @@ public struct DialogContent: Equatable, Sendable {
     self.inputProtection = inputProtection
   }
 
-  /// The body as VoiceOver describes the dialog: the paragraphs in order, then the list.
+  /// What VoiceOver speaks when the dialog appears: the title, then the list as items ("example.com wants to: Use your
+  /// camera, Use your microphone"); the title alone when there is no list.
+  public var announcement: String {
+    listItems.isEmpty ? title : "\(title): \(listItems.joined(separator: ", "))"
+  }
+
+  /// The body as VoiceOver describes the dialog: the paragraphs in order, then the list heading and its items, which
+  /// are separated by commas so they do not run into one sentence.
   public var accessibilityDescription: String {
     var parts = paragraphs.map(\.text)
     if let listHeading { parts.append(listHeading) }
-    parts += listItems
+    if !listItems.isEmpty { parts.append(listItems.joined(separator: ", ")) }
     return parts.joined(separator: " ")
   }
 }

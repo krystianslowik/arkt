@@ -189,6 +189,13 @@ public final class DialogPanel {
     get { view.clock }
     set { view.clock = newValue }
   }
+  /// Whether the panel is really visible: shown, not occluded, its parent visible. Tests inject it.
+  var isOnScreen: (@MainActor () -> Bool)?
+  /// The panel has been visible with a usable anchor since it last went invisible.
+  private var wasOnScreen = false
+  private var anchorIsUsable = false
+  /// When the entrance ends on `clock`; the input protection counts from the later of that and the panel appearing.
+  private var entranceEnds: TimeInterval = 0
   /// The last answer came from a key (Return, Escape): the panel leaves at once.
   private var keyboardAnswer = false
 
@@ -238,16 +245,40 @@ public final class DialogPanel {
 
   /// Moves the panel to `anchor` (screen coordinates) again, when the page it points at moved or resized.
   public func reposition(anchoredTo anchor: NSRect) {
-    panel.setFrame(frame(anchoredTo: anchor), display: true)
+    anchorIsUsable = !anchor.isEmpty
+    if anchorIsUsable { panel.setFrame(frame(anchoredTo: anchor), display: true) }
+    updateVisibility()
+  }
+
+  private var panelIsOnScreen: Bool {
+    panel.isVisible && panel.occlusionState.contains(.visible) && (panel.parent?.isVisible ?? true)
+  }
+
+  /// Re-reads whether the panel is on screen. The input protection (`content.inputProtection`) runs from the moment
+  /// it goes from not visible to visible, after the entrance, and holds while it is not: a click meant for the page
+  /// must not answer a prompt that has only just appeared, or one that appeared where the user could not see it.
+  func updateVisibility() {
+    let visible = anchorIsUsable && (isOnScreen?() ?? panelIsOnScreen)
+    if visible, !wasOnScreen {
+      view.beginInputProtection(after: entranceEnds - clock())
+    } else if !visible {
+      view.holdInputProtection()
+    }
+    wasOnScreen = visible
   }
 
   /// Shows the panel over `parent`, anchored to `anchor` (screen coordinates). It takes no focus unless
   /// `takesFocus` (a page's dialog, which blocks the page: the answer keys go to it). VoiceOver hears its title.
   public func show(over parent: NSWindow, anchoredTo anchor: NSRect, takesFocus: Bool = false) {
+    anchorIsUsable = !anchor.isEmpty
+    wasOnScreen = false
+    view.holdInputProtection()
     panel.setFrame(frame(anchoredTo: anchor), display: false)
     parent.addChildWindow(panel, ordered: .above)
     panel.orderFront(nil)
-    view.beginInputProtection()
+    let step = DialogMotion.panelIn(reduceMotion: reduceMotion())
+    entranceEnds = clock() + (reduceMotion() ? 0 : step.fadeDuration)
+    updateVisibility()
     if takesFocus {
       panel.makeKey()
       panel.makeFirstResponder(view.initialFocus)            // a field starts editing with its text selected

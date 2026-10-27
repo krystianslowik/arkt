@@ -18,6 +18,10 @@ final class PermissionPresenterTests: XCTestCase {
   private var observation: EngineObservation?
   private var shown = true
   private var windowVisible = true
+  /// A view the presenter points at instead of the page, for a page not yet laid out.
+  private var anchorOverride: NSView?
+  /// Whether the panel's window counts as on screen (not occluded, on this Space).
+  private var onScreen = true
   /// The input protection's clock, in seconds.
   private var now: TimeInterval = 100
 
@@ -33,10 +37,11 @@ final class PermissionPresenterTests: XCTestCase {
     engineWindow = engine.createWindow(host: StubWindowHost())
     tab = engine.createTab(url: URL(string: "arkt-test://example.com/Permission")!, in: engineWindow)
     engine.activateTab(tab)
-    presenter = PermissionPresenter(engine: engine, anchor: { [unowned self] _ in shown ? page : nil },
+    presenter = PermissionPresenter(engine: engine, anchor: { [unowned self] _ in anchorOverride ?? (shown ? page : nil) },
                                     windowIsVisible: { [unowned self] _ in windowVisible })
     presenter.reduceMotion = { true }
     presenter.clock = { [unowned self] in now }
+    presenter.isOnScreen = { [unowned self] in onScreen }
     observation = engine.observe { [unowned self] in presenter.handle($0) }
   }
 
@@ -136,6 +141,84 @@ final class PermissionPresenterTests: XCTestCase {
     now += 0.6
     try panel().view.primaryButton.performClick(nil)
     XCTAssertEqual(engine.permissionAnswers.count, 1)
+  }
+
+  func testAPanelForAPageNotLaidOutYetWaitsForItsBoundsAndProtectsFromWhenItShows() throws {
+    let fresh = NSView(frame: .zero)
+    page.addSubview(fresh)
+    anchorOverride = fresh
+    _ = try XCTUnwrap(engine.askPermission(in: tab, kinds: [.geolocation]))
+    XCTAssertNil(presenter.panel(for: tab), "never presented with empty bounds")
+    now += 5                                                              // the layout arrives late
+    fresh.frame = NSRect(x: 0, y: 0, width: 400, height: 300)            // the page view's own frame change
+    let panel = try panel()
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertTrue(engine.permissionAnswers.isEmpty, "a click at the moment it shows answers nothing")
+    now += 0.49
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertTrue(engine.permissionAnswers.isEmpty, "a click 0.49 s after it shows answers nothing")
+    now += 0.02
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(engine.permissionAnswers.count, 1)
+  }
+
+  func testAPanelPlacedWithEmptyBoundsHoldsItsProtectionUntilItIsLaidOut() throws {
+    let panel = DialogPanel(content: .permissionRequest(
+      PermissionRequest(id: PermissionRequestID(), tab: tab, origin: "example.com", kinds: [.camera],
+                        title: "example.com wants to", items: ["Use your camera"], allowTitle: "Allow",
+                        allowThisTimeTitle: nil, blockTitle: "Block")))
+    panel.reduceMotion = { true }
+    panel.clock = { [unowned self] in now }
+    panel.isOnScreen = { true }
+    var answers = 0
+    panel.onAnswer = { _ in answers += 1 }
+    panel.show(over: window, anchoredTo: .zero)
+    defer { panel.close(keyboard: true) }
+    now += 5
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(answers, 0, "empty bounds: not on screen, so protected however long it waits")
+    panel.reposition(anchoredTo: window.frame)
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(answers, 0, "just laid out")
+    now += 0.51
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(answers, 1)
+  }
+
+  func testTheProtectionIsCountedFromTheEndOfTheEntranceUnlessReduceMotion() throws {
+    presenter.reduceMotion = { false }
+    _ = try XCTUnwrap(engine.askPermission(in: tab, kinds: [.geolocation]))
+    let panel = try panel()
+    now += 0.6                                                            // past 0.5 s, inside 0.16 + 0.5 s
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertTrue(engine.permissionAnswers.isEmpty, "the 0.16 s entrance is not part of the 0.5 s")
+    now += 0.1
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(engine.permissionAnswers.count, 1)
+  }
+
+  func testAnOccludedPanelIsProtectedFromTheMomentItBecomesVisible() throws {
+    onScreen = false
+    let id = try XCTUnwrap(engine.askPermission(in: tab, kinds: [.geolocation]))
+    let panel = try panel()
+    now += 5                                                              // shown long after it was placed
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertTrue(engine.permissionAnswers.isEmpty, "occluded: nothing answers")
+    onScreen = true
+    presenter.refresh()
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertTrue(engine.permissionAnswers.isEmpty, "a click right after it becomes visible is ignored")
+    now += 0.2
+    onScreen = false                                                      // another Space, then back
+    presenter.refresh()
+    now += 5
+    onScreen = true
+    presenter.refresh()
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertTrue(engine.permissionAnswers.isEmpty, "every return to visible restarts the protection")
+    now += 0.51
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertEqual(engine.permissionAnswers.map(\.id), [id])
   }
 
   private func key(_ characters: String) -> NSEvent {
@@ -255,10 +338,11 @@ final class PermissionPresenterTests: XCTestCase {
   func testVoiceOverHearsTheTitleTheWantsAndEveryAnswer() throws {
     _ = try XCTUnwrap(engine.askPermission(in: tab, kinds: [.camera, .microphone]))
     let panel = try panel()
+    XCTAssertEqual(panel.content.announcement, "example.com wants to: Use your camera, Use your microphone")
     XCTAssertEqual(panel.panel.accessibilitySubrole(), .dialog)
     XCTAssertEqual(panel.panel.accessibilityLabel(), "example.com wants to")
     XCTAssertEqual(panel.view.accessibilityLabel(), "example.com wants to")
-    XCTAssertEqual(panel.view.accessibilityHelp(), "Use your camera Use your microphone")
+    XCTAssertEqual(panel.view.accessibilityHelp(), "Use your camera, Use your microphone")
     XCTAssertEqual(panel.view.primaryButton.accessibilityLabel(), "Allow while visiting the site")
     XCTAssertEqual(panel.view.secondaryButton?.accessibilityLabel(), "Allow this time")
     XCTAssertEqual(panel.view.cancelButton?.accessibilityLabel(), "Never allow")
