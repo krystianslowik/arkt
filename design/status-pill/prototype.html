@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt Link Status Pill</title>
+<!--
+  Arkt link hover status pill prototype (#114). Single file, no network.
+  Hash: #<direction>-<state>[&dark][&rm][&shot]
+    direction: a (floating capsule) | b (corner tab) | c (two-line card)
+    state: long | short | host (very long host name) | avoid (pointer near the pill, it has moved to the other corner)
+    dark: dark appearance   rm: Reduce Motion   shot: hide the prototype controls and draw the pointer
+  The page is live: hover the links (0.4 s delay, then the pill; link to link swaps with no delay), move the pointer
+  toward the pill and it crosses to the other bottom corner. Tab to a link shows it at once.
+  1 CSS px = 1 pt. Colors are the ShellTokens / BrandTokens values; see README.md.
+-->
+<style>
+:root {
+  /* BrandTokens */
+  --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
+  --surface: #FAF9F5;                 /* surfaceBrand */
+  --focus: rgba(0,103,244,0.50);      /* system focus ring; mustard is never a stroke */
+  /* ShellTokens */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
+  --text-2: rgba(0,0,0,0.64);                                    /* secondaryText */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --fg: rgba(0,0,0,0.48);                                        /* sidebarForeground (glyphs) */
+  --list-field: color(display-p3 0.0549 0.0588 0.0627 / 0.035);  /* ArchiveTokens.listField */
+  --card-border: rgba(0,0,0,0.10);                               /* cardBorder */
+  --theme-a: #DCE8F7; --theme-b: #BFD3EE;                        /* the Work Space's blue theme */
+  --toast: color-mix(in srgb, var(--theme-a) 22%, rgba(255,255,255,0.96));   /* AlertTokens.toastSurface(theme) */
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
+  --toast-shadow: 0 0 0 0.5px rgba(0,0,0,0.10), 0 8px 24px rgba(0,0,0,0.16), 0 1px 3px rgba(0,0,0,0.08);
+  /* Window context (prototype only) */
+  --page: #FFFFFF; --page-text: rgba(0,0,0,0.78); --page-link: #1A5FD0; --desktop: #C9CDD2;
+  --win-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
+  --row-cur: rgba(255,255,255,0.85); --sb-fg: rgba(0,0,0,0.48);
+  /* In-page match highlights: mustard is a fill, text on it is graphite */
+  --hit: rgba(233,181,32,0.34); --hit-cur: #E9B520; --hit-cur-text: #202321;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --spring-firm-fast: cubic-bezier(0.2, 1, 0.4, 1);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #202321; --focus: rgba(26,145,255,0.55); --fg: rgba(255,255,255,0.57);
+  --list-field: color(display-p3 0 0 0 / 0.14);
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
+  --toast: color-mix(in srgb, var(--theme-a) 30%, rgba(28,28,32,0.96));
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
+  --toast-shadow: 0 0 0 0.5px rgba(255,255,255,0.14), 0 8px 24px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.30);
+  --theme-a: #2E3A4C; --theme-b: #1F2734;
+  --page: #1E1F22; --page-text: rgba(255,255,255,0.80); --page-link: #7FB1FF; --desktop: #2C3036;
+  --win-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20); --sb-fg: rgba(255,255,255,0.57);
+  --hit: rgba(233,181,32,0.30);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--desktop); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color: var(--text); -webkit-font-smoothing: antialiased; display: grid; place-items: center; padding: 40px 16px; overflow: hidden; }
+button, input { font: inherit; color: inherit; }
+.win { width: 1000px; height: 640px; max-width: 100%; border-radius: 12px; position: relative; overflow: hidden;
+  background: linear-gradient(165deg, var(--theme-a), var(--theme-b)); box-shadow: var(--win-shadow); }
+.lights { position: absolute; left: 12px; top: 16px; display: flex; gap: 11px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.sidebar { position: absolute; left: 0; top: 0; bottom: 0; width: 190px; padding: 44px 10px 10px; }
+.urlpill { height: 34px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; padding: 0 10px; color: var(--text-2); margin-bottom: 12px; }
+.stitle { font-weight: 600; color: var(--text-2); padding: 0 8px 6px; }
+.srow { height: 34px; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 0 9px; white-space: nowrap; overflow: hidden; }
+.srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.srow b { width: 16px; height: 16px; border-radius: 4px; flex: none; display: block; }
+.card { position: absolute; left: 190px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; overflow: hidden; background: var(--page);
+  box-shadow: 0 0 0 1px var(--card-border), 0 1px 4px rgba(0,0,0,0.10); }
+.page { position: absolute; inset: 0; padding: 72px 0 0; overflow: hidden; color: var(--page-text); }
+.page .col { width: 560px; margin: 0 auto; }
+.page h1 { font-size: 26px; line-height: 1.15; letter-spacing: -0.01em; margin: 0 0 14px; font-weight: 650; color: var(--page-text); }
+.page p { font-size: 15px; line-height: 1.6; margin: 0 0 14px; }
+.page a { color: var(--page-link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+mark { background: var(--hit); color: inherit; border-radius: 3px; padding: 0 1px; margin: 0 -1px; }
+mark.cur { background: var(--hit-cur); color: var(--hit-cur-text); }
+.btn { all: unset; box-sizing: border-box; height: 28px; min-width: 76px; padding: 0 16px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; background: var(--fill-hover); color: var(--text); white-space: nowrap;
+  transition: transform 160ms var(--ease-out), background-color 120ms ease; cursor: default; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn:active { transform: scale(0.97); }
+@media (hover: hover) and (pointer: fine) { .btn:hover { background: var(--fill); } .btn.primary:hover { background: var(--accent-highlight); } }
+.btn.primary:active { background: var(--accent-pressed); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--focus); }
+.nav { position: fixed; left: 12px; top: 10px; z-index: 50; display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; max-width: 520px; }
+.nav a { color: var(--text); text-decoration: none; background: var(--surface); padding: 3px 9px; border-radius: 11px; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.15); }
+.nav a.on { background: var(--accent); color: var(--on-accent); }
+.shot .nav { display: none; }
+
+.page { padding-top: 56px; }
+.foot { position: absolute; left: 24px; bottom: 20px; display: flex; gap: 14px; font-size: 13px; }
+.foot a { color: var(--page-text); opacity: 0.7; text-decoration: none; }
+.foot a:hover { text-decoration: underline; }
+
+/* ---------- The pill ---------- */
+.pill { position: absolute; z-index: 6; display: none; pointer-events: none; white-space: nowrap; color: var(--text);
+  font-size: 12px; line-height: 1; opacity: 0; transform: translateY(4px); }
+.pill.live { display: block; }
+.pill.on { opacity: 1; transform: none; transition: opacity 140ms var(--ease-out), transform 140ms var(--ease-out); }
+.pill.live:not(.on) { transition: opacity 90ms ease-out, transform 90ms ease-out; }
+.pill.still, .pill.still.on { transition: none; }
+body.rm .pill, body.rm .pill.on { transform: none; }
+.pill .host { font-weight: 600; color: var(--text); }
+.pill .rest { color: var(--text-2); font-weight: 400; }
+.pill .scheme { color: var(--text-2); font-weight: 400; }
+.probe { position: absolute; visibility: hidden; white-space: nowrap; left: -9999px; top: 0; }
+
+/* A: floating capsule, 12 in from the card's corner */
+body[data-dir="a"] .pill { bottom: 12px; left: 12px; height: 26px; line-height: 26px; padding: 0 12px; border-radius: 13px;
+  background: var(--surface); box-shadow: var(--toast-shadow); max-width: 480px; }
+body[data-dir="a"] .pill.r { left: auto; right: 12px; }
+
+/* B: corner tab, flush with the card's edges, one rounded corner */
+body[data-dir="b"] .pill { bottom: 0; left: 0; height: 24px; line-height: 24px; padding: 0 11px 0 10px; font-size: 11.5px;
+  border-radius: 0 10px 0 0; background: var(--surface); box-shadow: 0 0 0 0.5px rgba(0,0,0,0.14); max-width: 560px; }
+:root[data-theme="dark"] body[data-dir="b"] .pill { box-shadow: 0 0 0 0.5px rgba(255,255,255,0.16); }
+body[data-dir="b"] .pill.r { left: auto; right: 0; border-radius: 10px 0 0 0; padding: 0 10px 0 11px; }
+
+/* C: two-line card in the Space's theme, same surface as toasts */
+body[data-dir="c"] .pill { bottom: 12px; left: 12px; padding: 9px 13px 9px; border-radius: 12px; background: var(--toast);
+  box-shadow: var(--toast-shadow); max-width: 372px; }
+body[data-dir="c"] .pill.r { left: auto; right: 12px; }
+body[data-dir="c"] .pill .host { display: block; font-size: 13px; line-height: 17px; }
+body[data-dir="c"] .pill .rest { display: block; font-size: 11.5px; line-height: 15px; margin-top: 2px; }
+
+/* Prototype pointer (drawn only in the still states) */
+.ptr { position: absolute; z-index: 9; display: none; width: 16px; height: 22px; pointer-events: none; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.35)); }
+.shot .ptr.on { display: block; }
+</style>
+</head>
+<body data-dir="a">
+<div class="nav" id="nav"></div>
+<div class="win">
+  <div class="lights"><i></i><i></i><i></i></div>
+  <div class="sidebar">
+    <div class="urlpill">harbor.example</div>
+    <div class="stitle">Work</div>
+    <div class="srow cur"><b style="background:#5B8DEF"></b>Harbor Authority notes</div>
+    <div class="srow"><b style="background:#8B7BE8"></b>Tide tables</div>
+    <div class="srow"><b style="background:#4DB38A"></b>Quarterly planning</div>
+    <div class="srow"><b style="background:#E58B5B"></b>Shipping schedule</div>
+  </div>
+  <div class="card" id="card">
+
+    <div class="page"><div class="col" id="col">
+      <h1>Notes from the quay</h1>
+      <p>The winter <a href="#" data-url="https://www.harbor-authority.example/notices/2026/winter-tide-tables/inner-harbor/revision-3?utm_source=newsletter&utm_medium=email&ref=quay-office#section-4">tide tables</a> are out, and the pilots' association has <a href="#" data-url="https://harbor.example/tides">a short summary</a> for crews who only need the dates.</p>
+      <p>If the entrance closes for swell, the <a href="#" data-url="http://shuttle.example/timetable">shuttle timetable</a> changes the same morning. The harbor office keeps a <a href="#" data-url="https://very-long-subdomain-name.another-long-label.regional-harbor-authority.example/archive/2019/dredging-report.pdf">dredging report</a> for anyone curious about the channel.</p>
+      <p>Berth holders can renew from the <a href="#" data-url="https://berths.harbor-authority.example/renew">renewal page</a> until the end of the month. Visitors should read the <a href="#" data-url="https://harbor.example/visitors/rules-of-the-quay-and-guidance-for-short-stay-vessels-over-twelve-meters-in-length">rules of the quay</a> before they arrive, and call ahead when the swell is forecast above two meters.</p>
+      <p>Fuel prices for the week are posted on the dock. Questions about tolls, lights or the ferry go to the desk; the duty officer answers every message before noon.</p>
+    </div></div>
+    <div class="foot"><a href="#" data-url="https://www.harbor-authority.example/contact/general-enquiries/winter-hours?utm_source=footer&ref=quay-office">Contact</a><a href="#" data-url="https://harbor.example/privacy">Privacy</a><a href="#" data-url="https://harbor.example/terms">Terms</a></div>
+    <div class="pill" id="pill" aria-hidden="true"><span class="host"></span><span class="rest"></span></div>
+    <svg class="ptr" id="ptr" viewBox="0 0 16 22"><path d="M1.5 1.2v16.3l4.1-3.9 2.6 6 2.6-1.1-2.6-5.9h5.7z" fill="#111" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/></svg>
+  </div>
+</div>
+<script>
+(function () {
+  var root = document.documentElement, body = document.body;
+  var card = document.getElementById('card'), pill = document.getElementById('pill'), hostEl = pill.children[0], restEl = pill.children[1];
+  var ptr = document.getElementById('ptr');
+  var DELAY = 400, HIDE = 100, GAP = 28;
+  var DIRS = [['a', 'Floating capsule'], ['b', 'Corner tab'], ['c', 'Two-line card']];
+  var STATES = [['long', 'Long URL'], ['short', 'Short URL'], ['host', 'Long host'], ['avoid', 'Pointer near']];
+  var showTimer = 0, hideTimer = 0, visible = false, side = 'l', rm = false, still = false, mouse = null;
+
+  function parse() {
+    var p = location.hash.replace(/^#/, '').split('&'), h = (p[0] || 'a-long').split('-');
+    return { dir: h[0] || 'a', state: h[1] || 'long', dark: p.indexOf('dark') >= 0, rm: p.indexOf('rm') >= 0, shot: p.indexOf('shot') >= 0 };
+  }
+  /* Split a URL: scheme shown only when it is not https; the host is emphasized; path, query and fragment are the rest. */
+  function split(url) {
+    var m = /^(\w+):\/\/([^\/?#]+)(.*)$/.exec(url);
+    return { scheme: m[1] === 'https' ? '' : m[1] + '://', host: m[2], rest: m[3] };
+  }
+  function ellipsizeMiddle(s, keep) { if (s.length <= keep) return s; var h = Math.ceil(keep / 2), t = keep - h; return s.slice(0, h) + '\u2026' + (t > 0 ? s.slice(-t) : ''); }
+  function measure(html) {
+    var pr = document.createElement('span'); pr.className = 'probe'; pr.style.fontSize = getComputedStyle(pill).fontSize;
+    pr.innerHTML = html; pill.parentNode.appendChild(pr); var w = pr.getBoundingClientRect().width; pr.remove(); return w;
+  }
+  function fitText(url) {
+    var u = split(url), dir = body.dataset.dir, cs = getComputedStyle(pill);
+    var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), max = parseFloat(cs.maxWidth) - padX;
+    var two = dir === 'c', hostFont = two ? '13px' : '';
+    function w(host, rest, scheme) { return measure('<b style="font-weight:600;' + (hostFont ? 'font-size:' + hostFont : '') + '">' + host + '</b><span>' + (scheme || '') + rest + '</span>'); }
+    var scheme = two ? '' : u.scheme, host = u.host, rest = u.rest;
+    if (two) { host = u.scheme + u.host; }
+    function width(h, r) { return two ? Math.max(w(h, '', ''), measure('<span style="font-size:11.5px">' + r + '</span>')) : w(h, r, scheme); }
+    if (width(host, rest) > max) {
+      var lo = 0, hi = rest.length;
+      while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (width(host, ellipsizeMiddle(rest, mid)) <= max) lo = mid; else hi = mid - 1; }
+      rest = ellipsizeMiddle(rest, lo);
+      if (lo === 0 && width(host, '\u2026') > max) { /* the host alone does not fit: shorten its middle, drop the rest */
+        var a = 0, b = host.length; while (a < b) { var m2 = (a + b + 1) >> 1; if (w(ellipsizeMiddle(host, m2), '', '') <= max) a = m2; else b = m2 - 1; }
+        host = ellipsizeMiddle(host, a); rest = '';
+      }
+    }
+    return { scheme: scheme, host: host, rest: rest };
+  }
+  function setText(url) {
+    var t = fitText(url);
+    hostEl.innerHTML = ''; restEl.innerHTML = '';
+    if (t.scheme) { var s = document.createElement('span'); s.className = 'scheme'; s.textContent = t.scheme; hostEl.appendChild(s); }
+    hostEl.appendChild(document.createTextNode(t.host)); restEl.textContent = t.rest;
+    restEl.style.display = t.rest ? '' : 'none';
+  }
+  function pillRect() { return pill.getBoundingClientRect(); }
+  function near(x, y, r) { return x >= r.left - GAP && x <= r.right + GAP && y >= r.top - GAP && y <= r.bottom + GAP; }
+
+  function flip(to) {
+    if (to === side) return; var from = pillRect().left;
+    function swap() { side = to; pill.classList.toggle('r', side === 'r'); }
+    if (rm) { pill.style.transition = 'opacity 90ms ease-out'; pill.style.opacity = '0'; setTimeout(function () { swap(); pill.style.opacity = ''; pill.style.transition = ''; }, 90); return; }
+    swap(); var d = from - pillRect().left;
+    pill.animate([{ transform: 'translateX(' + d + 'px)' }, { transform: 'none' }], { duration: 200, easing: 'cubic-bezier(0.2, 1, 0.4, 1)' });
+  }
+  /* The pill never sits under the pointer: when the pointer comes within 28 of it, it crosses to the other corner. */
+  function avoid(x, y) {
+    if (!visible && !pill.classList.contains('live')) return;
+    if (near(x, y, pillRect())) flip(side === 'l' ? 'r' : 'l');
+  }
+  function show(url, now) {
+    clearTimeout(hideTimer); clearTimeout(showTimer);
+    setText(url); pill.classList.add('live'); visible = true;
+    if (mouse) { var c = card.getBoundingClientRect(); /* decide the corner before it appears */
+      var save = side; var rl = pillRect(); if (near(mouse.x + c.left, mouse.y + c.top, rl)) flip(side === 'l' ? 'r' : 'l'); }
+    void pill.offsetWidth; pill.classList.add('on');
+  }
+  function hide() { visible = false; pill.classList.remove('on'); hideTimer = setTimeout(function () { if (!visible) pill.classList.remove('live'); }, 100); }
+
+  card.addEventListener('pointermove', function (e) { var c = card.getBoundingClientRect(); mouse = { x: e.clientX - c.left, y: e.clientY - c.top }; if (visible) avoid(e.clientX, e.clientY); });
+  card.addEventListener('pointerleave', function () { mouse = null; });
+  document.querySelectorAll('a[data-url]').forEach(function (a) {
+    a.addEventListener('click', function (e) { e.preventDefault(); });
+    a.addEventListener('pointerenter', function () {
+      clearTimeout(hideTimer); clearTimeout(showTimer);
+      if (visible) { setText(a.dataset.url); } /* already showing: swap the text, no delay, no animation */
+      else showTimer = setTimeout(function () { show(a.dataset.url); }, DELAY);
+    });
+    a.addEventListener('pointerleave', function () { clearTimeout(showTimer); if (visible) hideTimer = setTimeout(hide, HIDE); });
+    a.addEventListener('focus', function () { show(a.dataset.url); }); /* keyboard focus: at once */
+    a.addEventListener('blur', hide);
+  });
+
+  function placePointer(a, dx, dy) {
+    var c = card.getBoundingClientRect(), r = a.getBoundingClientRect();
+    ptr.style.left = (r.left - c.left + dx) + 'px'; ptr.style.top = (r.top - c.top + dy) + 'px'; ptr.classList.add('on');
+    return { x: r.left - c.left + dx, y: r.top - c.top + dy };
+  }
+  function apply() {
+    var s = parse(); rm = s.rm; body.dataset.dir = s.dir; root.dataset.theme = s.dark ? 'dark' : 'light';
+    body.classList.toggle('rm', s.rm); body.classList.toggle('shot', s.shot);
+    clearTimeout(showTimer); clearTimeout(hideTimer); visible = false; side = 'l'; pill.className = 'pill'; pill.style.cssText = ''; ptr.classList.remove('on');
+    var links = document.querySelectorAll('a[data-url]'), target = null;
+    if (s.state === 'long') target = links[0]; if (s.state === 'short') target = links[1];
+    if (s.state === 'host') target = links[3]; if (s.state === 'avoid') target = links[links.length - 3];
+    if (target) {
+      pill.classList.add('still');
+      if (s.state === 'avoid') { var p = placePointer(target, 18, 8); mouse = p; show(target.dataset.url); side = 'l'; pill.classList.remove('r'); flip('r'); pill.getAnimations().forEach(function (x) { x.finish(); }); }
+      else { var p2 = placePointer(target, 24, 9); mouse = p2; show(target.dataset.url); }
+    }
+    var nav = document.getElementById('nav'); nav.innerHTML = '';
+    function link(label, hash, on) { var a = document.createElement('a'); a.href = hash; a.textContent = label; if (on) a.className = 'on'; nav.appendChild(a); }
+    var suffix = (s.dark ? '&dark' : '') + (s.rm ? '&rm' : '');
+    DIRS.forEach(function (d) { link(d[1], '#' + d[0] + '-' + s.state + suffix, d[0] === s.dir); });
+    STATES.forEach(function (t) { link(t[1], '#' + s.dir + '-' + t[0] + suffix, t[0] === s.state); });
+    link(s.dark ? 'Light' : 'Dark', '#' + s.dir + '-' + s.state + (s.dark ? '' : '&dark') + (s.rm ? '&rm' : ''));
+    link(s.rm ? 'Motion' : 'Reduce Motion', '#' + s.dir + '-' + s.state + (s.dark ? '&dark' : '') + (s.rm ? '' : '&rm'));
+  }
+  window.addEventListener('hashchange', apply);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(apply); else apply();
+})();
+</script>
+</body>
+</html>
