@@ -4185,3 +4185,48 @@ Date 2026-10-28. Branch `feat/465-favorite-tile-fade` off `main` at `08db486`. D
 - A reload of the tile while it is fading (`configure` reapplies the stored alpha; no dedicated test).
 - A page closed mid-flight restoring this tile's fill (wired in `cancelReceiving`; the outline abort tests still pass; no favorite-specific abort assertion).
 - These are local runs, not CI.
+
+## #132: downloads wired to Chromium (engine half)
+
+Date 2026-10-28. Branch `engine/132-downloads-wiring` off `main` at `12c91f7`. The shell half (Library, ring, popover, location setting) is #532.
+
+### What landed
+
+- **Facade header (both copies, additive; `cmp` identical).** Event kinds `DownloadCreated` (23), `DownloadUpdated` (24), `DownloadRemoved` (25) with a `download` snapshot (`ArktDownloadItem`: guid, url, filename, target, total and received bytes, state, interrupt reason and danger type as raw Chromium integers, mime type, start and end time, speed, canResume). On `ArktEngine`: `downloads`, `perform(download:on:)` (cancel, pause, resume, open, show in Finder, retry, keep, discard, remove, by guid), `startDownload(from:)`, `downloadPromptsForLocation`, `downloadDirectory`, `defaultDownloadDirectory` and `downloadDestinationHandler`.
+- **Overlay, no Chromium patch.** `arkt/api/arkt_downloads.{h,cc}`: `DownloadWatcher` is a `DownloadManager::Observer` plus a `DownloadItem::Observer` on the embedder profile's manager. The facade turns its snapshots into events and merges the updates of one download in a batch into the last one. Commands call `Cancel(true)`, `Pause`, `Resume(true)`, `OpenDownload` (only complete and not dangerous), `ShowDownloadInShell`, `ValidateDangerousDownload` (only while `IsDangerous()` and not blocked), discard (cancel, or delete the finished target, then `Remove`) and `Remove`. Retry resumes in place when `CanResume()`, else `DownloadUrl` with `DownloadRequestUtils::CreateDownloadForWebContentsMainFrame` (an Arkt tab) and removes the old item. The save location is `DownloadPrefs::SetDownloadPath` and `download.prompt_for_download`. The `.ask` panel: `ui::SelectFileDialog::SetFactory` while a handler is set; `SELECT_SAVEAS_FILE` goes to the shell's chooser, every other dialog to the platform dialog (created by stepping the factory aside, because `ui::CreateSelectFileDialog` is not exported from the component).
+- **No Chromium download UI.** No change was needed: Arkt windows have no `BrowserView`, so `BrowserWindowFeatures` never creates `DownloadToolbarUIController` (guarded by `if (browser_view)`), `ArktBrowserWindow::GetDownloadBubbleUIController` is null, and 156 has no shelf. `ShowDownloads` (`IDC_SHOW_DOWNLOADS`) opens `chrome://downloads` as a tab; the shell does not call it.
+- **Swift.** `ChromiumEngine+Downloads.swift` keeps the list from the events (a repeated update with equal values is dropped, so completion is reported once; an update for an unlisted download lists it; downloads present at start are seeded from `facade.downloads`). Gates run here before the facade: open needs `canBeOpened`, keep needs `canKeep`, discard needs `isHeldForDecision`. A save folder that is missing or not writable is replaced by the default folder before it reaches the prefs (Chromium would create it). `.ask` without a chooser saves to the default folder under the suggested name.
+
+### Deviations and gaps
+
+- While a chooser is set (`.ask`), Save Page As and other `SELECT_SAVEAS_FILE` dialogs also go to the shell's chooser.
+- Closing the last window with an active download still waits: `ArktBrowserWindow::ConfirmBrowserCloseWithPendingDownloads` is the old stub. In the real-app check a SIGTERM with a download running ended the process in under 8 s, so it did not hang there; the in-app quit path is not exercised.
+- The in-app contract runner has no download driver (rule 24 is not applicable there, as rules 19 to 21); the scripted facade runs rule 24 in plain `swift test`.
+
+### Checks
+
+Red first: with the rule 24 skip removed and no driver, `ChromiumEngineContractTests` failed 14 issues (`the harness has no downloads driver`).
+
+| Check | Result | Evidence |
+|---|---|---|
+| Contract rule 24 on `ChromiumEngine` | PASS | `ScriptedHarness` `downloads: .scripted()`, both facade scripts: 100 cases, 0 failed; the skip is removed |
+| ShellKit `swift test --skip ShellKitGUITests` | PASS | 1100, 38, 60, 7, 181, 49, 257, 119, 25 = 1836 passed, 0 failed (`nice -n 20`, `-j 2`) |
+| New tests | PASS | `ChromiumDownloadTests` 8, `DownloadABITests` 2, plus the 14 rule-24 contract checks over two scripts |
+| `out/Spike` incremental | PASS | `nice -n 15 autoninja -C out/Spike chrome -j 4`: finished successfully |
+| Engine app | PASS | `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try132 -jobs 2`: `BUILD SUCCEEDED` |
+| `.patches` | in sync | 10 = `git rev-list --count 156.0.8078.48..arkt` 10 |
+| Header copies | identical | `cmp` |
+
+Real app (Engine app on `out/Spike`, bundle id `dev.arkt.Arkt.try132`, copy on the internal disk, throwaway shell data, profile and defaults suite `arkt-test-132`, `--use-mock-keychain`, loopback server on `127.0.0.1:18432`, save folder a temp folder set through the shell's location pref):
+
+| Check | Result | Evidence |
+|---|---|---|
+| Download is reported and completes | PASS | facade batches `DownloadCreated`, `DownloadUpdated` (log); `small.bin` 262144 bytes in the chosen temp folder, nothing in `~/Downloads` |
+| Ring | PASS | window screenshot: the Library button shows the download ring while a 16 MB download runs |
+| Slow download in progress | PASS | `Unconfirmed N.crdownload` grew to 14 MB in the chosen folder |
+| Held download | PARTIAL | a no-referrer, no-gesture `.dmg` from a host never visited created a download and wrote no `evil.dmg` (a download from a visited page or with a gesture is not held: `.dmg` is `ALLOW_ON_USER_GESTURE`); the held state was not read in the shell |
+| No Chromium bubble | PASS | the window list of the app process had one on-screen window |
+| Popover, Cancel, Open, Show in Finder | NOT RUN | the sandbox denies assistive access (`osascript is not allowed assistive access`), so no click or key could be sent to the app; Cancel, Open and Show in Finder are covered by the contract (scripted) and the gates, not by the real app |
+| Stderr | PASS | no `FATAL`, `NOTREACHED`, `Check failed` |
+
+Cleanup: the app (SIGTERM) and the loopback server were stopped by PID; `lsregister -u` on both app paths (0 records for `dev.arkt.Arkt.try132`); the copy, the 518 dylib copies, the embed folder, derived data, logs, the defaults suite and the saved files were deleted.

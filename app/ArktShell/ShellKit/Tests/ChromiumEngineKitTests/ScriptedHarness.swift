@@ -111,7 +111,8 @@ enum ScriptedHarness {
         let (chromium, tab) = try parts(engine, id)
         tab.hover(nil)
         try await delivered(chromium)
-      }
+      },
+      downloads: .scripted()
     )
   }
 
