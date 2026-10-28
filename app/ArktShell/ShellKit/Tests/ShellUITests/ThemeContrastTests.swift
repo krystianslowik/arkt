@@ -125,4 +125,76 @@ struct ThemeContrastTests {
     #expect(ThemeContrast.drawn(empty, in: Self.light) == empty)
     #expect(ThemeContrast.resolve(stops: [], opacity: 1, in: Self.light) == nil)
   }
+
+  // MARK: - Overlay colors (#381)
+
+  private static let pale = ThemePad.color(ThemePadPoint(hue: 200, tone: 0.1))
+
+  /// The overlay's strength is the theme's opacity: the drawn overlay carries its own alpha times that opacity, and
+  /// the drawn theme is opaque like its base colors. The stored theme is not touched.
+  @Test func theDrawnOverlayIsScaledByTheOpacity() {
+    let stored = SpaceThemeInfo(baseColors: [Self.pale, Self.pale], overlayColors: [.black(0.4), RGBA.white(0.2)],
+                                opacity: 0.5, isDark: false)
+    let drawn = ThemeContrast.drawn(stored, in: Self.light)
+    #expect(drawn.overlayColors.map(\.alpha) == [0.2, 0.1])
+    #expect(drawn.opacity == 1)
+    #expect(stored.overlayColors.map(\.alpha) == [0.4, 0.2])
+  }
+
+  @Test func aThemeAtZeroOpacityDrawsNoOverlay() {
+    let stored = SpaceThemeInfo(baseColors: [Self.blue], overlayColors: [.black(0.6)], opacity: 0, isDark: false)
+    #expect(ThemeContrast.drawn(stored, in: Self.dark).overlayColors.map(\.alpha) == [0])
+  }
+
+  /// Without overlay colors nothing about the result changes.
+  @Test func noOverlayResolvesAsBefore() throws {
+    for context in [Self.light, Self.dark] {
+      let plain = try #require(ThemeContrast.resolve(stops: [Self.blue, Self.copper], opacity: 0.8, in: context))
+      let empty = try #require(ThemeContrast.resolve(stops: [Self.blue, Self.copper], opacity: 0.8, overlay: [],
+                                                     in: context))
+      #expect(plain == empty)
+      #expect(plain.overlay.isEmpty)
+    }
+  }
+
+  /// A dark overlay over a pale base is what the text sits on: light text in light mode, where the base alone
+  /// would keep dark text.
+  @Test func theOverlayIsPartOfWhatTheTextSitsOn() throws {
+    let alone = try #require(ThemeContrast.resolve(stops: [Self.pale, Self.pale], opacity: 1, in: Self.light))
+    #expect(alone.tone == .light)
+    let covered = try #require(ThemeContrast.resolve(stops: [Self.pale, Self.pale], opacity: 1,
+                                                     overlay: [.black(0.9)], in: Self.light))
+    #expect(covered.tone == .dark)
+  }
+
+  /// Wherever a base stop is drawn, base plus overlay reaches the target, with the mix being the smallest step.
+  @Test(arguments: [ThemeFlavor.light, .dark])
+  func baseAndOverlayTogetherReachTheTarget(appearance: ThemeFlavor) throws {
+    let context = ThemeContext(appearance: appearance)
+    let overlay = [RGBA.white(0.5), RGBA.black(0.3)]
+    let stops = [Self.blue, Self.copper]
+    let resolution = try #require(ThemeContrast.resolve(stops: stops, opacity: 0.8, overlay: overlay, in: context))
+    #expect(abs(resolution.overlay[0].alpha - 0.4) < 1e-12 && abs(resolution.overlay[1].alpha - 0.24) < 1e-12)
+    for (index, color) in resolution.colors.enumerated() {
+      let top = ThemeGradient.sample(resolution.overlay, at: Double(index))
+      let alpha = top.alpha
+      let seen = RGBA(red: top.red * alpha + color.red * (1 - alpha), green: top.green * alpha + color.green * (1 - alpha),
+                      blue: top.blue * alpha + color.blue * (1 - alpha), alpha: 1, space: color.space)
+      #expect(Self.ratio(seen, tone: resolution.tone) >= ThemeContrast.target(increaseContrast: false) - 1e-9,
+              "stop \(index) in \(appearance)")
+    }
+  }
+
+  /// A sample of a gradient: the ends are exact, the middle is the perceptual mix, one color is flat.
+  @Test func aGradientIsSampledByPosition() {
+    let stops = [RGBA.white(1), RGBA.black(1), RGBA.srgb(hex: 0xFF0000)]
+    #expect(ThemeGradient.sample(stops, at: 0) == stops[0])
+    #expect(ThemeGradient.sample(stops, at: 1) == stops[2])
+    #expect(ThemeGradient.sample(stops, at: 0.5) == stops[1])
+    #expect(ThemeGradient.sample([stops[2]], at: 0.7) == stops[2])
+    let quarter = ThemeGradient.sample(stops, at: 0.25)
+    let expected = ThemeGradient.mix(stops[0], stops[1], 0.5)
+    #expect(abs(quarter.red - expected.red) < 1e-9)
+    #expect(ThemeGradient.sample([], at: 0.5) == RGBA(red: 0, green: 0, blue: 0, alpha: 0))
+  }
 }

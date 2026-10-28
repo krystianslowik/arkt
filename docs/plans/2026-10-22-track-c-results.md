@@ -2695,3 +2695,28 @@ entering a scope resets the filter; the empty "No <filter> match" row is not sel
 - Recent tabs are per window and in memory: a tab not shown since the app started has no time.
 - The window shadow during the fades is the window server's (`hasShadow`) and does not follow the layer opacity; check it
   on screen.
+
+## Space theme overlay colors and OKLab gradients (#381) (2026-10-28)
+
+- **OKLab.** `ThemeGradient.expand` turns each theme's stops into 32 OKLab steps per pair (33 stops for two colors)
+  once per theme; `ThemeBackgroundView` hands those to its `CAGradientLayer`s, so the layer's own blend runs between
+  points that are already perceptually spaced. The end stops and every original stop are kept exactly; the steps between
+  move by less than 0.05 per component for every shipped theme (pinned in `ThemeOverlayTests`).
+- **Overlay layer.** `SpaceThemeInfo.overlayColors` (already stored, imported and bridged) is drawn as a second gradient of
+  the same shape, source-over above the base gradients and below the texture multiplies. One layer for the lower Space and
+  one for the upper: the pager changes only their opacities (1 - t and t) and the colors are set only when the lower
+  index changes; a Space without overlay colors hides its layer, so existing themes pay nothing. A settled theme change
+  fades the old overlay out and the new one in on the gradient's own curve (or spring); Reduce Motion and the creator's
+  live preview snap.
+- **Strength (design call).** The "intensity knob" of the issue is the opacity slider of #410. `ThemeContrast.drawn`
+  multiplies each overlay color's alpha by the theme's opacity and keeps the result in the drawn theme (whose opacity is
+  1), so the renderer needs no extra input: 0 draws no overlay, 100 % draws the stored alpha. PARITY(NEEDS-RUNTIME-CHECK).
+- **Contrast.** The overlay is part of what the sidebar text sits on: `ThemeContrast.resolve(stops:opacity:overlay:in:)`
+  composites the overlay color at each stop's position over the stop before measuring, so the mix and tone rule hold with
+  an overlay. Without overlay colors the result is identical to before. The shipped-surface probe
+  (`ShellContrastProbe`) now samples in OKLab like the window and composites overlays; no token had to change, all
+  contrast tests pass as they were.
+- **Creator.** No new control (the design has none): the model keeps a theme's overlay colors while the colors, texture
+  or opacity are edited, and the live preview draws them through the same path.
+- Not measured: frame time (no per-frame work was added: layer opacities only) and before/after screenshots (the app was
+  not launched on the machine that finished this).

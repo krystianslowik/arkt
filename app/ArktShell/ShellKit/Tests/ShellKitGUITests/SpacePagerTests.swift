@@ -273,7 +273,7 @@ final class SpacePagerTests: XCTestCase {
     XCTAssertEqual(Double(theme.grainOpacityForTesting), 0.25 * ShellTokens.themeTextureMaxOpacity, accuracy: 0.001)
     controller.pager.setPositionForTesting(1.75)
     XCTAssertEqual(theme.overlayOpacityForTesting, 0.75, accuracy: 0.001)
-    XCTAssertEqual(theme.baseColorsForTesting.count, 2)
+    XCTAssertEqual(theme.baseColorsForTesting.count, ThemeGradient.segmentsPerPair + 1)
     XCTAssertEqual(controller.sidebarController.view.flavor, .dark, "chrome follows the nearest Space")
   }
 

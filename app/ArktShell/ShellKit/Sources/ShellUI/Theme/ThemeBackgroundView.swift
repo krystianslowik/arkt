@@ -5,6 +5,12 @@ import Motion
 /// (grain, sand, denim or tweed), crossfaded on the GPU as the pager moves (design section 2). Per frame
 /// `setPosition` changes only layer opacities; gradient colors change only when the pair of neighbouring Spaces does.
 ///
+/// Gradients (#381): stops are expanded in OKLab once per theme (`ThemeGradient.expand`), so the layer's own blend
+/// runs between points that are already perceptually spaced. A theme's overlay colors are a second gradient of the
+/// same shape, source-over above the base gradients and below the textures; one layer for the lower Space and one for
+/// the upper, with the pager and the crossfade changing only their opacities. Their strength is in the colors'
+/// alpha (`ThemeContrast.drawn` folds the theme's opacity into it). A Space without overlay colors hides its layer.
+///
 /// Textures (#120): one layer per texture in use, composited as a multiply at the theme's overlay alpha
 /// (`gradient * mix(1, texel, alpha)`). With Metal, `ThemeGrainRenderer` draws one 100 pt tile per
 /// texture into a `CAMetalLayer` once per backing scale (deferred while the view cannot be seen) and replicator
@@ -14,6 +20,9 @@ import Motion
 public final class ThemeBackgroundView: WindowDragView {
   private let base = CAGradientLayer()
   private let overlay = CAGradientLayer()
+  /// The overlay colors of the lower and the upper Space, above `base` and `overlay`.
+  private let tintLower = CAGradientLayer()
+  private let tintUpper = CAGradientLayer()
   private let grainRenderer: ThemeGrainRenderer?
   /// Texture layers, created when a theme first uses the texture; above the gradients, in creation order (a
   /// multiply commutes).
@@ -71,13 +80,17 @@ public final class ThemeBackgroundView: WindowDragView {
     wantsLayer = true
     layer?.masksToBounds = true                     // the last row and column of tiles overhang
     let none = Self.noActions
-    for g in [base, overlay] {
+    for g in [base, overlay, tintLower, tintUpper] {
       g.startPoint = CGPoint(x: 0, y: 1)          // top-left to bottom-right (layer y points up)
       g.endPoint = CGPoint(x: 1, y: 0)
       g.actions = none
       layer?.addSublayer(g)
     }
     overlay.opacity = 0
+    for tint in [tintLower, tintUpper] {
+      tint.opacity = 0
+      tint.isHidden = true
+    }
   }
 
   private static let noActions: [String: CAAction] = ["colors": NSNull(), "opacity": NSNull(), "bounds": NSNull(),
@@ -91,7 +104,7 @@ public final class ThemeBackgroundView: WindowDragView {
     super.layout()
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    for sublayer in [base, overlay] { sublayer.frame = bounds }
+    for sublayer in [base, overlay, tintLower, tintUpper] { sublayer.frame = bounds }
     for layer in grainLayers.values { layoutGrain(layer) }
     CATransaction.commit()
     drawGrainIfNeeded()
@@ -146,6 +159,9 @@ public final class ThemeBackgroundView: WindowDragView {
     base.colors = Self.gradientColors(old[index])
     overlay.colors = Self.gradientColors(newThemes[index])
     overlay.opacity = 1
+    let tintsOut = Self.setTint(tintLower, old[index]), tintsIn = Self.setTint(tintUpper, newThemes[index])
+    tintLower.opacity = 1
+    tintUpper.opacity = 1
     lowerIndex = index
     let grainFrom = Self.grainAlphas(old[index], old[index], t: 0)
     let grainTo = Self.grainAlphas(newThemes[index], newThemes[index], t: 0)
@@ -166,6 +182,8 @@ public final class ThemeBackgroundView: WindowDragView {
       }
     }
     fade(overlay, from: 0, to: 1, duration: duration)
+    if tintsOut { fade(tintLower, from: 1, to: 0, duration: duration) }
+    if tintsIn { fade(tintUpper, from: 0, to: 1, duration: duration) }
     for (texture, layer) in grainLayers {
       let from = grainFrom[texture] ?? 0, to = grainTo[texture] ?? 0
       if from != to { fade(layer, from: from, to: to, duration: duration) }
@@ -195,9 +213,13 @@ public final class ThemeBackgroundView: WindowDragView {
     if lower != lowerIndex {
       base.colors = Self.gradientColors(themes[lower])
       overlay.colors = Self.gradientColors(themes[upper])
+      Self.setTint(tintLower, themes[lower])
+      Self.setTint(tintUpper, themes[upper])
       lowerIndex = lower
     }
     overlay.opacity = Float(t)
+    tintLower.opacity = Float(1 - t)
+    tintUpper.opacity = Float(t)
     let alphas = Self.grainAlphas(themes[lower], themes[upper], t: Double(t))
     for (texture, layer) in grainLayers {
       let alpha = alphas[texture] ?? 0
@@ -219,7 +241,7 @@ public final class ThemeBackgroundView: WindowDragView {
     guard crossfadeActive else { return }
     crossfadeActive = false
     crossfadeToken &+= 1
-    overlay.removeAnimation(forKey: Self.crossfadeKey)
+    for layer in [overlay, tintLower, tintUpper] { layer.removeAnimation(forKey: Self.crossfadeKey) }
     for layer in grainLayers.values { layer.removeAnimation(forKey: Self.crossfadeKey) }
     lowerIndex = -1
   }
@@ -245,11 +267,20 @@ public final class ThemeBackgroundView: WindowDragView {
     overlay.animation(forKey: Self.crossfadeKey) as? CABasicAnimation
   }
 
-  /// A gradient needs two stops; a single color is drawn flat.
+  /// A gradient needs two stops; a single color is drawn flat. Several are expanded in OKLab (`ThemeGradient`).
   private static func gradientColors(_ theme: SpaceThemeInfo) -> [CGColor] {
-    let colors = theme.baseColors.map(\.cgColor)
+    let colors = ThemeGradient.expand(theme.baseColors).map(\.cgColor)
     if colors.count == 1 { return colors + colors }
     return colors.isEmpty ? [CGColor.white, CGColor.white] : colors
+  }
+
+  /// Sets `layer` to `theme`'s overlay colors and hides it when there are none; whether it shows anything.
+  @discardableResult
+  private static func setTint(_ layer: CAGradientLayer, _ theme: SpaceThemeInfo) -> Bool {
+    let colors = ThemeGradient.expand(theme.overlayColors).map(\.cgColor)
+    layer.isHidden = colors.isEmpty
+    layer.colors = colors.count == 1 ? colors + colors : colors
+    return !colors.isEmpty
   }
 
   // MARK: - Textures
@@ -320,6 +351,8 @@ public final class ThemeBackgroundView: WindowDragView {
   }
 
   var overlayOpacityForTesting: Float { overlay.opacity }
+  /// The overlay-color layers of the lower and the upper Space.
+  var overlayColorLayersForTesting: [CAGradientLayer] { [tintLower, tintUpper] }
   /// The texture layers' alphas, summed.
   var grainOpacityForTesting: Float { grainLayers.values.reduce(0) { $0 + $1.opacity } }
   func grainOpacityForTesting(_ texture: ThemeTexture) -> Float { grainLayers[texture]?.opacity ?? 0 }
