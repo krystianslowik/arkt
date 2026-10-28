@@ -69,10 +69,17 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_Tab, character: "", modifiers: [.control, .shift]),
   ] + spaceKeys + splitKeys)
 
-  /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041: `SpacesMenu`).
-  private static let spaceKeys: [Key] = digits.map {
-    Key(keyCode: $0.code, character: $0.character, modifiers: .control, matchesKeyCode: true)
+  /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041: `SpacesMenu`), on the digit row and on the numeric keypad: the menu takes
+  /// the keypad digits as the same key equivalents.
+  private static let spaceKeys: [Key] = (digits.map { ($0.code, $0.character) } + keypadDigits).map {
+    Key(keyCode: $0.0, character: $0.1, modifiers: .control, matchesKeyCode: true)
   }
+
+  private static let keypadDigits: [(code: Int, character: String)] = [
+    (kVK_ANSI_Keypad1, "1"), (kVK_ANSI_Keypad2, "2"), (kVK_ANSI_Keypad3, "3"), (kVK_ANSI_Keypad4, "4"),
+    (kVK_ANSI_Keypad5, "5"), (kVK_ANSI_Keypad6, "6"), (kVK_ANSI_Keypad7, "7"), (kVK_ANSI_Keypad8, "8"),
+    (kVK_ANSI_Keypad9, "9"),
+  ]
 
   /// Ctrl-Shift-=, -, ], [ and Ctrl-Shift-1 ... 4 (KB-070 to KB-072: `SplitMenu`): the unshifted US characters, and
   /// the US key codes on any layout (#497).
