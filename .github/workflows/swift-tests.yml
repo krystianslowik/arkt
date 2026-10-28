@@ -258,7 +258,7 @@ jobs:
           restore-keys: shellkit-build-${{ runner.os }}-${{ runner.arch }}-xcode${{ env.XCODE_VERSION }}-
       - name: GUI tests
         working-directory: app/ArktShell/ShellKit
-        run: swift test --filter 'ShellKitGUITests.(CommandBarTests|FakeEngineDownloadContractTests|SplitDragTests)/'
+        run: swift test --filter ShellKitGUITests
 
   app:
     name: App build (Debug)

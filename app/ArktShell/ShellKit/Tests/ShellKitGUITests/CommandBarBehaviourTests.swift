@@ -332,8 +332,7 @@ final class CommandBarBehaviourTests: XCTestCase {
     showMixed()
     bar.barView.layoutSubtreeIfNeeded()
     XCTAssertGreaterThanOrEqual(bar.barView.field.frame.width, CommandBarView.minimumFieldWidth)
-    XCTAssertTrue(bar.barView.pills.isHidden,
-                  "the pills give way; Cmd-1 to Cmd-4 still filter (window \(window.frame), bar \(bar.panel.frame), pills \(bar.barView.pills.frame), field \(bar.barView.field.frame))")
+    XCTAssertTrue(bar.barView.pills.isHidden, "the pills give way; Cmd-1 to Cmd-4 still filter")
     try command(2)
     XCTAssertEqual(bar.filter, .tabs)
     window.setFrame(NSRect(x: 100, y: 100, width: 1280, height: 800), display: true)

@@ -243,8 +243,11 @@ final class FavoritesCollectionView: NSCollectionView {
     let downIndexPath = indexPathForItem(at: convert(event.locationInWindow, from: nil))
     onMouseDownBegan?()
     super.mouseDown(with: event)
-    let endEvent = NSApp.currentEvent ?? event
-    print("DIAG grid mouseDown down=\(String(describing: downIndexPath)) endEvent=\(endEvent.type.rawValue) loc=\(endEvent.locationInWindow) win=\(endEvent.windowNumber) mine=\(window?.windowNumber ?? -9) isNilCurrent=\(NSApp.currentEvent == nil)")
+    // The tracking loop ends on this window's mouse-up. When no loop ran, the current event is an unrelated earlier
+    // one, so only a mouse-up of this window counts; otherwise the press itself decides.
+    let endEvent = NSApp.currentEvent.flatMap {
+      $0.type == .leftMouseUp && $0.windowNumber == event.windowNumber ? $0 : nil
+    } ?? event
     onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
   }
 
@@ -623,7 +626,6 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   }
 
   private func mouseDownEnded(downIndexPath: IndexPath?, at point: NSPoint) {
-    print("DIAG grid ended tracking=\(isTrackingMouse) drag=\(didDragInMouseDown) dragging=\(isDragging) down=\(String(describing: downIndexPath)) at=\(point) now=\(String(describing: collectionView.indexPathForItem(at: point))) id=\(String(describing: downIndexPath.flatMap { nodeID(at: $0) }))")
     isTrackingMouse = false
     collectionView.deselectItems(at: collectionView.selectionIndexPaths)
     guard !didDragInMouseDown, !isDragging,

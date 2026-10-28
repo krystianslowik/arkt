@@ -35,7 +35,6 @@ public struct DownloadDrivers {
 // MARK: - Rule 24
 
 extension EngineContract {
-  nonisolated(unsafe) public static var diagTrace: [String] = []
   /// The size every check's download has.
   static let downloadSize: Int64 = 4_000
 
@@ -98,23 +97,17 @@ extension EngineContract {
   }
 
   public static func cancelEndsAnActiveDownloadOnce(_ h: EngineHarness) async throws {
-    diagTrace = ["start"]
     let (client, engine, drivers) = try downloadEngine(h)
     let recorder = EventRecorder(client)
-    diagTrace.append("engine")
     let id = try await drivers.start(client, "Cancel.bin", downloadSize)
-    diagTrace.append("started")
     engine.perform(.cancel, on: id)
-    diagTrace.append("cancelled")
     try await waitUntil(timeout: .seconds(10)) { downloadState(engine, id) == .cancelled }
-    diagTrace.append("waited")
     try require(engine.download(id)?.endTime != nil, "a cancelled download has an end time")
     let count = recorder.downloadEvents(for: id).count
     engine.perform(.cancel, on: id)                                  // finished: nothing happens
     engine.perform(.pause, on: id)
     engine.perform(.resume, on: id)
     engine.perform(.cancel, on: DownloadID("unknown"))               // unknown: nothing happens
-    diagTrace.append("noops")
     try require(recorder.downloadEvents(for: id).count == count && downloadState(engine, id) == .cancelled,
                 "a command that does not apply must change nothing: \(recorder.downloadEvents(for: id))")
     if let target = engine.download(id)?.targetPath {

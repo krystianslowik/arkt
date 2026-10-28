@@ -167,15 +167,7 @@ final class SplitDragTests: XCTestCase {
       with: .leftMouseUp, location: inWindow, modifierFlags: [], timestamp: 0,
       windowNumber: windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
     NSApp.postEvent(up, atStart: false)
-    let grid = harness.favorites.collectionView
-    let previousActivate = harness.favorites.onActivate
-    harness.favorites.onActivate = { id in
-      print("DIAG split onActivate \(id) favorite \(world.favoriteTab) today1 \(world.today[1])")
-      previousActivate?(id)
-    }
-    print("DIAG split tile \(tile.frame) inWindow \(inWindow) window \(String(describing: harness.controller.window?.frame)) number \(windowNumber) visible \(harness.controller.window?.isVisible ?? false) idx \(String(describing: grid.indexPathForItem(at: grid.convert(inWindow, from: nil)))) currentEvent \(String(describing: NSApp.currentEvent))")
-    grid.mouseDown(with: down)
-    print("DIAG split after current \(String(describing: harness.current)) currentEvent \(String(describing: NSApp.currentEvent)) selection \(grid.selectionIndexPaths)")
+    harness.favorites.collectionView.mouseDown(with: down)
     XCTAssertEqual(harness.current, world.favoriteTab, "clicking a Favorite tile activates it")
 
     // Switch back to today[1]; starting a drag on the Favorite tile must not activate it.
