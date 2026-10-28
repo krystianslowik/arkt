@@ -4265,14 +4265,28 @@ is fetched. So `BatchInstaller` (`engine/arkt/browser/arkt_extension_batch_insta
 CRX download, unpack, `CrxInstaller`, blocklist and policy checks) and replaces only the prompt:
 
 1. Every id that the profile does not have starts its fetch in parallel and stops at `OnManifestParsed()`.
-2. When all fetches are done, one `ArktDialogSheet` on the key window (else the main, else the frontmost visible window) lists the names
-   found (at most 8, then "and N more") with Install and Not now (Not now is the default button, Escape cancels).
+2. When all fetches are done, one `ArktDialogSheet` on the key window (else the main, else the frontmost visible window) lists each
+   extension found with its permission warnings under its name, and Install and Not now (Not now is the default button, Escape
+   cancels). The warnings are Chrome's own: the install prompt's permission set (`GetInstallPromptPermissionSetForExtension`) goes
+   through `InstallPromptPermissions::LoadFromPermissionSet` (the `PermissionMessages`), so the strings are the ones Chrome shows
+   ("Read and change all your data on all websites"), sub-messages after their warning, "No special permissions" for none. The
+   list scrolls inside the sheet when it is long (the sheet's list area is 260 pt high, light and dark colors come from the sheet).
 3. Install: `ProceedWithInstallPrompt()` on each, no further prompt, no post-install tab. Not now, a dismissed sheet or no window:
    every waiting id fails with "not confirmed".
 
-Trade-off, stated in the sheet: the batch sheet does not show each extension's permission list (the Chromium prompt does). The sheet says an
-extension can read and change data on the sites the user visits and that each can be removed from Extensions afterwards. If a maintainer
-wants per-extension permission lists, the answer is a second sheet kind, not per-extension prompts. Not decided here.
+Maintainer decision (PR #548): the batch sheet must show each extension's permission warnings, like Chrome's own prompt; done as above.
+The first version only named the extensions.
+
+### Cancel and deadline (review of #548)
+
+- `ChromiumEngine.installExtensionResults` wraps the facade call in `withTaskCancellationHandler`. Cancelling the task calls the new
+  facade method `-cancelExtensionInstalls`: the sheet closes, listing fetches stop (`AbortInstall`), and every id that is not being
+  installed yet fails with "cancelled"; the batch completion still runs once, so the continuation resumes exactly once. An id already
+  confirmed finishes with its real result (its download is not stopped).
+- Each listing fetch has a 30 s deadline (a timer per id, stopped when the listing arrives): the id fails with "the Web Store did not
+  answer" and the others go on to the sheet.
+- `ProfileImportCoordinator` checks cancellation before the install and marks the type cancelled after it; a cancelled batch has failed
+  ids, so nothing is recorded as handled.
 
 ### Contract
 
@@ -4292,8 +4306,8 @@ batch timeout: a hung fetch holds its own result until the network layer gives u
 
 | Check | Result | Evidence |
 |---|---|---|
-| New tests | PASS | `FakeEngineImportTests` and `InMemoryEngineImportTests` +2 each (contract, unavailable id), `ChromiumImportTests` +4 (results per id, coordinator counts, failed without reason, empty batch) |
-| ShellKit `swift test --skip ShellKitGUITests` | PASS | 1100, 38, 60, 9, 183, 49, 286, 123, 25 = 1873 passed, 0 failed (`nice -n 20`, `-j 2`) |
+| New tests | PASS | `FakeEngineImportTests` and `InMemoryEngineImportTests` +2 each (contract, unavailable id), `ChromiumImportTests` +6 (results per id, coordinator counts, failed without reason, empty batch, cancelling the task cancels the facade batch and resolves the ids as "cancelled", no cancel without a cancellation), `ProfileImportCoordinatorTests` +1 (cancel during the install; fails without the coordinator change) |
+| ShellKit `swift test --skip ShellKitGUITests` | PASS | 1100, 38, 60, 9, 183, 49, 287, 125, 25 = 1876 passed, 0 failed (`nice -n 20`, `-j 2`) |
 | `out/Spike` incremental | PASS | `nice -n 20 autoninja -C out/Spike chrome -j 4`: finished successfully (twice: after the files, after the window fallback) |
 | Engine app | PASS | `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try513 -jobs 2`: `BUILD SUCCEEDED` |
 | `.patches` | in sync | 10 = `git rev-list --count 156.0.8078.48..arkt` 10 |
@@ -4306,6 +4320,9 @@ Install button inside the process, so no synthetic input reached any other app):
 | Check | Result | Evidence |
 |---|---|---|
 | Valid id installs after one confirmation | PASS | ids: uBlock Origin Lite, `not-an-id`, 32 `a`; log `extension install sheet shown count=1`; sheet text "Install 1 extension?" with the one name (the other two failed before the sheet); result `installed` |
+| Permission warnings in the sheet (after the maintainer decision) | PASS | sheet text read from the live window: "Install 1 extension? \| These extensions came with your browser data. ... \| Extensions and what they can do \| uBlock Origin Lite \| Read and change all your data on all websites"; result `installed`, 1 extension action |
+| Hung Web Store fetch | PASS | `--proxy-server` to a local socket that accepts and never answers: round 1 `failed("the Web Store did not answer")` after 30 s (`extension listing fetch timed out`), no sheet |
+| Cancel ends the step | PASS | same setup, the runner cancels the task 3 s in: `failed("cancelled")`, round took 3 s, no sheet, exit 0 |
 | Invalid id fails cleanly | PASS | `failed("not a Web Store id")` at once, no sheet row, the other ids unaffected |
 | Well-formed id the store lacks | PASS | `failed("not available from the Web Store")` (`result=6`) |
 | Installed for real | PASS | extension actions of the window: 1, "uBlock Origin Lite"; profile folder `Default/Extensions/<id>` exists after the run |
@@ -4313,9 +4330,8 @@ Install button inside the process, so no synthetic input reached any other app):
 | Store unreachable | PASS | second run with `--proxy-server=http://127.0.0.1:9`: `failed("not available from the Web Store")` in both rounds, no `Extensions` folder, exit 0, no `FATAL`, `NOTREACHED` or `Check failed` |
 | Stderr | PASS | 0 hits of `FATAL`, `NOTREACHED`, `Check failed` in the first run |
 
-Not run: the decline path in the real app (covered by the scripted facade answers and the `Decline()` branch is a one-line call); more than one
-extension in the sheet (the list is a loop); the sidebar import flow end to end (#514 and #545 are the shell side).
+Not taken: a window capture of the sheet (the text above was read from the window; no screen-recording permission was used). Not run: many extensions in the sheet (the 260 pt list scrolls; the ten-extension layout was not looked at), light and dark by eye (colors come from the shared sheet), the decline path in the real app (scripted facade only), the sidebar import flow end to end (#514 and #545 are the shell side).
 
-Cleanup: both processes exited by themselves (PIDs 87260 and 88803, confirmed with `ps -p`); `lsregister -u` on the embed copy (4 records for `dev.arkt.Arkt.try513`
+Cleanup (both rounds of checks): every app process exited by itself and the local hanging socket was stopped by its PID, confirmed with `ps -p`; `lsregister -u` on the embed copy (4 records for `dev.arkt.Arkt.try513`
 before, 0 after); the two profiles, the embed folder with its 518 dylib copies, derived data, build logs and the two defaults suites were
 deleted. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.

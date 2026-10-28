@@ -421,6 +421,8 @@ final class TestEngine: NSObject, ArktEngine {
     completion([])
   }
 
+  func cancelExtensionInstalls() {}
+
   func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {
     importedBookmarkPaths += bookmarks.map(\.folderPath)
     completion(TestImportResult(written: bookmarks.count, skipped: 0, failed: 0, failureReason: nil))

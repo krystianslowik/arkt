@@ -6,21 +6,29 @@
 #include <memory>
 #include <set>
 #include <utility>
+#include <vector>
 
 #import "arkt/browser/arkt_dialog_sheet.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/no_destructor.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/webstore_install_with_prompt.h"
 #include "chrome/browser/profiles/profile.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/install_prompt_data.h"
+#include "extensions/browser/install_prompt_permissions.h"
 #include "extensions/browser/webstore_install_result.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/permissions/permission_set.h"
 
 namespace arkt {
 
@@ -28,8 +36,17 @@ namespace {
 
 namespace wi = extensions::webstore_install;
 
-// At most this many names are listed in the sheet; the rest are counted.
-constexpr size_t kMaxListedNames = 8;
+// A listing the Web Store has not answered by then fails its own id, so one
+// dead fetch cannot hold the sheet (the fetcher sets no timeout of its own).
+constexpr base::TimeDelta kFetchDeadline = base::Seconds(30);
+
+// What the sheet shows for one extension: its name and the permission
+// warnings Chrome's own install prompt shows (the same PermissionMessages),
+// one line each, a warning's sub-messages after it.
+struct ExtensionSummary {
+  std::u16string name;
+  std::vector<std::u16string> lines;
+};
 
 // WebstoreInstallWithPrompt without its prompt: the listing is fetched and
 // parsed as usual, then the installer waits in OnManifestParsed for the batch
@@ -40,7 +57,7 @@ class BatchInstaller : public extensions::WebstoreInstallWithPrompt {
   BatchInstaller(const std::string& id,
                  Profile* profile,
                  Callback callback,
-                 base::OnceCallback<void(std::u16string)> on_ready)
+                 base::OnceCallback<void(ExtensionSummary)> on_ready)
       : WebstoreInstallWithPrompt(id,
                                   profile,
                                   gfx::NativeWindow(),
@@ -53,6 +70,8 @@ class BatchInstaller : public extensions::WebstoreInstallWithPrompt {
   void Decline() {
     CompleteInstall(wi::USER_CANCELLED, wi::kUserCancelledError);
   }
+  // Stops the fetch (or the wait) without running the callback.
+  void Abort() { AbortInstall(); }
 
  protected:
   ~BatchInstaller() override = default;
@@ -70,11 +89,29 @@ class BatchInstaller : public extensions::WebstoreInstallWithPrompt {
       CompleteInstall(wi::INVALID_MANIFEST, wi::kInvalidManifestError);
       return;
     }
-    std::move(on_ready_).Run(base::UTF8ToUTF16(extension->name()));
+    ExtensionSummary summary;
+    summary.name = base::UTF8ToUTF16(extension->name());
+    std::unique_ptr<const extensions::PermissionSet> permissions =
+        extensions::util::GetInstallPromptPermissionSetForExtension(
+            extension.get(), profile());
+    extensions::InstallPromptPermissions prompt_permissions;
+    prompt_permissions.LoadFromPermissionSet(permissions.get(),
+                                             extension->GetType());
+    for (size_t i = 0; i < prompt_permissions.permissions.size(); ++i) {
+      summary.lines.push_back(prompt_permissions.permissions[i]);
+      if (i < prompt_permissions.details.size()) {
+        for (const std::u16string& line : base::SplitString(
+                 prompt_permissions.details[i], u"\n", base::TRIM_WHITESPACE,
+                 base::SPLIT_WANT_NONEMPTY)) {
+          summary.lines.push_back(line);
+        }
+      }
+    }
+    std::move(on_ready_).Run(std::move(summary));
   }
 
  private:
-  base::OnceCallback<void(std::u16string)> on_ready_;
+  base::OnceCallback<void(ExtensionSummary)> on_ready_;
 };
 
 // The window the sheet attaches to: the key window, else the main one, else
@@ -103,8 +140,9 @@ const char* ReasonFor(wi::Result result) {
     case wi::ICON_ERROR:
       return "the Web Store listing could not be read";
     case wi::USER_CANCELLED:
-    case wi::ABORTED:
       return "not confirmed";
+    case wi::ABORTED:
+      return "cancelled";
     case wi::INSTALL_IN_PROGRESS:
       return "already being installed";
     case wi::NOT_PERMITTED:
@@ -128,6 +166,7 @@ class Batch {
 
   Batch(Profile* profile, std::vector<std::string> ids, Done done)
       : profile_(profile), done_(std::move(done)) {
+    LiveBatches().insert(this);
     std::set<std::string> seen;
     for (std::string& id : ids) {
       if (seen.insert(id).second) {
@@ -138,7 +177,34 @@ class Batch {
   }
   Batch(const Batch&) = delete;
   Batch& operator=(const Batch&) = delete;
-  ~Batch() { [sheet_ close]; }
+  ~Batch() {
+    LiveBatches().erase(this);
+    [sheet_ close];
+  }
+
+  static std::set<Batch*>& LiveBatches() {
+    static base::NoDestructor<std::set<Batch*>> batches;
+    return *batches;
+  }
+
+  // Ends the batch early (the import was cancelled): the sheet closes, the
+  // fetches stop, and every id that is not being installed fails with
+  // "cancelled". Ids already confirmed finish with their real result.
+  void Cancel() {
+    busy_ = true;
+    [sheet_ close];
+    sheet_ = nil;
+    for (Entry& entry : entries_) {
+      if (entry.phase != Phase::kFetching && entry.phase != Phase::kReady) {
+        continue;
+      }
+      entry.timer.reset();
+      entry.installer->Abort();
+      Fail(entry, "cancelled");
+    }
+    busy_ = false;
+    Settle();
+  }
 
   void Start() {
     busy_ = true;
@@ -160,8 +226,13 @@ class Batch {
     }
     // BeginInstall can complete at once (a bad id), so every installer exists
     // before the first one starts and Settle() waits for the loop.
-    for (Entry& entry : entries_) {
+    for (size_t i = 0; i < entries_.size(); ++i) {
+      Entry& entry = entries_[i];
       if (entry.installer) {
+        entry.timer = std::make_unique<base::OneShotTimer>();
+        entry.timer->Start(
+            FROM_HERE, kFetchDeadline,
+            base::BindOnce(&Batch::OnDeadline, weak_factory_.GetWeakPtr(), i));
         entry.installer->BeginInstall();
       }
     }
@@ -176,12 +247,31 @@ class Batch {
     ExtensionInstallOutcome outcome;
     Phase phase = Phase::kFetching;
     scoped_refptr<BatchInstaller> installer;
-    std::u16string name;
+    ExtensionSummary summary;
+    std::unique_ptr<base::OneShotTimer> timer;
   };
 
-  void OnReady(size_t index, std::u16string name) {
-    entries_[index].name = std::move(name);
+  static void Fail(Entry& entry, const char* reason) {
+    entry.outcome.status = ExtensionInstallOutcome::Status::kFailed;
+    entry.outcome.reason = reason;
+    entry.phase = Phase::kDone;
+  }
+
+  void OnReady(size_t index, ExtensionSummary summary) {
+    entries_[index].timer.reset();
+    entries_[index].summary = std::move(summary);
     entries_[index].phase = Phase::kReady;
+    Settle();
+  }
+
+  void OnDeadline(size_t index) {
+    Entry& entry = entries_[index];
+    if (entry.phase != Phase::kFetching) {
+      return;
+    }
+    LOG(WARNING) << "ARKT: extension listing fetch timed out";
+    entry.installer->Abort();
+    Fail(entry, "the Web Store did not answer");
     Settle();
   }
 
@@ -190,6 +280,7 @@ class Batch {
                        const std::string& error,
                        wi::Result result) {
     Entry& entry = entries_[index];
+    entry.timer.reset();
     entry.phase = Phase::kDone;
     if (success) {
       entry.outcome.status = ExtensionInstallOutcome::Status::kInstalled;
@@ -218,10 +309,10 @@ class Batch {
   }
 
   void Ask() {
-    std::vector<std::u16string> names;
+    std::vector<ExtensionSummary> names;
     for (const Entry& entry : entries_) {
       if (entry.phase == Phase::kReady) {
-        names.push_back(entry.name);
+        names.push_back(entry.summary);
       }
     }
     NSWindow* parent = ConfirmationWindow();
@@ -249,38 +340,37 @@ class Batch {
   }
 
   static ArktDialogSheetContent* BuildContent(
-      const std::vector<std::u16string>& names) {
+      const std::vector<ExtensionSummary>& extensions) {
     ArktDialogSheetContent* content = [[ArktDialogSheetContent alloc] init];
-    content.title = names.size() == 1
-                        ? @"Install 1 extension?"
-                        : [NSString stringWithFormat:@"Install %zu extensions?",
-                                                     names.size()];
+    content.title =
+        extensions.size() == 1
+            ? @"Install 1 extension?"
+            : [NSString stringWithFormat:@"Install %zu extensions?",
+                                         extensions.size()];
     ArktDialogSheetParagraph* intro = [[ArktDialogSheetParagraph alloc] init];
     intro.text = @"These extensions came with your browser data. Arkt adds "
-                 @"them from the Chrome Web Store.";
+                 @"them from the Chrome Web Store. You can remove any of them "
+                 @"later from Extensions.";
     intro.linkRange = NSMakeRange(NSNotFound, 0);
-    ArktDialogSheetParagraph* warning = [[ArktDialogSheetParagraph alloc] init];
-    warning.text = @"An extension can read and change data on the sites you "
-                   @"visit. You can remove any of them later from Extensions.";
-    warning.linkRange = NSMakeRange(NSNotFound, 0);
-    warning.secondary = YES;
-    content.paragraphs = @[ intro, warning ];
+    content.paragraphs = @[ intro ];
 
+    // Each extension's name, then what it can do, as Chrome words it. The
+    // sheet scrolls a long list inside itself.
     NSMutableArray<ArktDialogSheetItem*>* items = [NSMutableArray array];
-    for (size_t i = 0; i < names.size() && i < kMaxListedNames; ++i) {
+    for (const ExtensionSummary& extension : extensions) {
       ArktDialogSheetItem* item = [[ArktDialogSheetItem alloc] init];
-      item.text = base::SysUTF16ToNSString(names[i]);
-      item.details = @[];
+      item.text = base::SysUTF16ToNSString(extension.name);
+      NSMutableArray<NSString*>* details = [NSMutableArray array];
+      for (const std::u16string& line : extension.lines) {
+        [details addObject:base::SysUTF16ToNSString(line)];
+      }
+      if (details.count == 0) {
+        [details addObject:@"No special permissions"];
+      }
+      item.details = details;
       [items addObject:item];
     }
-    if (names.size() > kMaxListedNames) {
-      ArktDialogSheetItem* more = [[ArktDialogSheetItem alloc] init];
-      more.text = [NSString
-          stringWithFormat:@"and %zu more", names.size() - kMaxListedNames];
-      more.details = @[];
-      [items addObject:more];
-    }
-    content.listHeading = @"Extensions";
+    content.listHeading = @"Extensions and what they can do";
     content.listItems = items;
     content.primaryTitle = @"Install";
     content.cancelTitle = @"Not now";
@@ -328,6 +418,14 @@ class Batch {
 };
 
 }  // namespace
+
+void CancelWebstoreExtensionInstalls() {
+  // Cancel() can finish (and delete) its batch; take the set by value.
+  std::set<Batch*> batches = Batch::LiveBatches();
+  for (Batch* batch : batches) {
+    batch->Cancel();
+  }
+}
 
 void InstallWebstoreExtensions(
     Profile* profile,

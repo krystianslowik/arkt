@@ -909,10 +909,12 @@ NS_SWIFT_UI_ACTOR
 // empty array). An id the profile already has is reported as already
 // installed and left alone. The engine fetches the Web Store listing of every
 // other id, then shows ONE native confirmation sheet for the whole batch
-// (the extensions' names) on the key shell window; on accept it installs the
+// (each extension's name with the permission warnings Chrome's own prompt shows)
+// on the key shell window; on accept it installs the
 // ones it found, without a per-extension prompt, on decline it fails them
 // with "not confirmed". An id that is not a Web Store id, one the store does
-// not have, and an unreachable store fail only their own results; nothing
+// not have, an unreachable store and a listing that does not answer within
+// 30 s fail only their own results; nothing
 // else stops. Built on the Web Store install path a click on "Add to Chrome"
 // uses (WebstoreStandaloneInstaller), with its install prompt replaced by the
 // batch sheet.
@@ -920,6 +922,12 @@ NS_SWIFT_UI_ACTOR
                completion:(void (^)(NSArray<id<ArktExtensionInstallResult>>*
                                         results))completion
     NS_SWIFT_NAME(installExtensions(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
+// Ends the installs in progress early: the batch sheet closes, listing
+// fetches stop and every id that is not being installed yet fails with
+// "cancelled"; the batch's completion then runs as usual. An id whose install
+// was already confirmed finishes with its real result. Does nothing when no
+// batch is running.
+- (void)cancelExtensionInstalls NS_SWIFT_NAME(cancelExtensionInstalls());
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).

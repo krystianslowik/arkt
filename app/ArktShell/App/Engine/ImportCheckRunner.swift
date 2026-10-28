@@ -153,7 +153,18 @@ final class ImportCheckRunner {
         }
         print("ARKT_IMPORT no sheet round \(round)")
       }
-      let results = await engine.installExtensionResults(ids: ids)
+      let work = Task { @MainActor in await engine.installExtensionResults(ids: ids) }
+      // ARKT_EXTENSION_CANCEL_AFTER (seconds): the first round cancels its task that long after it started.
+      if round == 1, let after = ProcessInfo.processInfo.environment["ARKT_EXTENSION_CANCEL_AFTER"].flatMap(Double.init) {
+        Task { @MainActor in
+          try? await Task.sleep(for: .seconds(after))
+          print("ARKT_IMPORT cancelling round 1")
+          work.cancel()
+        }
+      }
+      let started = Date()
+      let results = await work.value
+      print("ARKT_IMPORT round \(round) took \(Int(Date().timeIntervalSince(started))) s")
       presser.cancel()
       for result in results ?? [] { print("ARKT_IMPORT extension round \(round) \(result.id) \(result.outcome)") }
       let actions = engine.extensionActions(in: window)

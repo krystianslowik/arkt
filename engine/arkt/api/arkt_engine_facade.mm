@@ -3615,6 +3615,10 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
           },
           completion));
 }
+- (void)cancelExtensionInstalls {
+  arkt::CheckFacadeEntry();
+  arkt::CancelWebstoreExtensionInstalls();
+}
 
 // MARK: Downloads (#132)
 

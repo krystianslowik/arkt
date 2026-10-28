@@ -170,4 +170,23 @@ struct ChromiumImportTests {
     let engine = ChromiumEngine(facade: facade)
     #expect(await engine.installExtensionResults(ids: []) == [])
   }
+
+  @Test func cancellingTheTaskAsksTheFacadeToEndTheBatchAndResolvesTheIdsAsCancelled() async {
+    let engine = ChromiumEngine(facade: facade)
+    facade.holdsExtensionBatch = true
+    let ids = ["a", "b"].map { String(repeating: $0, count: 32) }
+    let task = Task { @MainActor in await engine.installExtensionResults(ids: ids) }
+    while facade.installedExtensionBatches.isEmpty { await Task.yield() }
+    task.cancel()
+    let results = await task.value
+
+    #expect(facade.extensionCancelCount == 1)
+    #expect(results == ids.map { ExtensionInstallResult(id: $0, outcome: .failed("cancelled")) })
+  }
+
+  @Test func aBatchThatIsNotCancelledNeverTellsTheFacadeToCancel() async {
+    let engine = ChromiumEngine(facade: facade)
+    _ = await engine.installExtensionResults(ids: [String(repeating: "a", count: 32)])
+    #expect(facade.extensionCancelCount == 0)
+  }
 }

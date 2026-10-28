@@ -27,10 +27,12 @@ struct ExtensionInstallOutcome {
 // - Every other id's Web Store listing is fetched; once all fetches are done,
 //   one sheet on the key window lists the names of the extensions found. On
 //   accept they are installed without a further prompt; on decline (or with
-//   no window to ask in) they fail with "not confirmed".
+//   no window to ask in) they fail with "not confirmed". The sheet shows each
+//   extension's name with the permission warnings Chrome's own install prompt
+//   shows (PermissionMessages), and scrolls when the list is long.
 // - A bad id, a listing the store does not return (missing item or
-//   unreachable store, which the fetch cannot tell apart) and an install
-//   error fail only their own id.
+//   unreachable store, which the fetch cannot tell apart), a listing that has
+//   not answered after 30 s and an install error fail only their own id.
 //
 // `done` runs from a posted task, never inside this call, with one outcome per
 // distinct id in the order the ids first appear; also for an empty batch.
@@ -38,6 +40,11 @@ void InstallWebstoreExtensions(
     Profile* profile,
     std::vector<std::string> ids,
     base::OnceCallback<void(std::vector<ExtensionInstallOutcome>)> done);
+
+// Ends every batch in progress early (the import was cancelled): sheets close,
+// fetches stop, ids not being installed yet fail with "cancelled", and each
+// batch's `done` runs as usual. Does nothing when no batch is running.
+void CancelWebstoreExtensionInstalls();
 
 }  // namespace arkt
 

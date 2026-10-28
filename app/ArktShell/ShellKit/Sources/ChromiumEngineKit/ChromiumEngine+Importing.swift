@@ -122,10 +122,17 @@ extension ChromiumEngine: EngineImporting {
   }
 
   public func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? {
-    await withCheckedContinuation { continuation in
-      facade.installExtensions(ids) { results in
-        continuation.resume(returning: results.map(ExtensionInstallResult.init))
+    // Cancelling the task asks the facade to end the batch early; its completion still runs once, so the
+    // continuation is resumed exactly once.
+    let facade = self.facade
+    return await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        facade.installExtensions(ids) { results in
+          continuation.resume(returning: results.map(ExtensionInstallResult.init))
+        }
       }
+    } onCancel: {
+      Task { @MainActor in facade.cancelExtensionInstalls() }
     }
   }
 }
