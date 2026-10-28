@@ -69,11 +69,18 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_Tab, character: "", modifiers: [.control, .shift]),
   ] + spaceKeys + splitKeys)
 
-  /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041: `SpacesMenu`), on the digit row and on the numeric keypad: the menu takes
-  /// the keypad digits as the same key equivalents.
-  private static let spaceKeys: [Key] = (digits.map { ($0.code, $0.character) } + keypadDigits).map {
-    Key(keyCode: $0.0, character: $0.1, modifiers: .control, matchesKeyCode: true)
-  }
+  /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041: `SpacesMenu`). The numeric keypad digits count too, with or without Shift:
+  /// Shift does not change what a keypad digit types, and the menu takes Ctrl-Shift-keypad 5 as Space 5 (seen in the
+  /// layout test of #497).
+  private static let spaceKeys: [Key] = {
+    var keys = digits.map { Key(keyCode: $0.code, character: $0.character, modifiers: .control, matchesKeyCode: true) }
+    for flags: NSEvent.ModifierFlags in [.control, [.control, .shift]] {
+      for digit in keypadDigits {
+        keys.append(Key(keyCode: digit.code, character: digit.character, modifiers: flags, matchesKeyCode: true))
+      }
+    }
+    return keys
+  }()
 
   private static let keypadDigits: [(code: Int, character: String)] = [
     (kVK_ANSI_Keypad1, "1"), (kVK_ANSI_Keypad2, "2"), (kVK_ANSI_Keypad3, "3"), (kVK_ANSI_Keypad4, "4"),

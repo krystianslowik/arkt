@@ -134,10 +134,12 @@ struct ReservedKeysTests {
     (kVK_ANSI_Keypad1, "1"), (kVK_ANSI_Keypad4, "4"), (kVK_ANSI_Keypad5, "5"), (kVK_ANSI_Keypad9, "9"),
   ])
   func `keypad digit keys are reserved for spaces`(keyCode: Int, character: String) {
-    let flags: NSEvent.ModifierFlags = [.control, .numericPad]
-    #expect(keys.matches(keyCode: UInt16(keyCode), character: character, modifiers: flags))
-    #expect(keys.matches(keyCode: UInt16(keyCode), character: "", modifiers: flags))
-    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_Keypad0), character: "0", modifiers: flags))
+    for flags: NSEvent.ModifierFlags in [[.control, .numericPad], [.control, .shift, .numericPad]] {
+      #expect(keys.matches(keyCode: UInt16(keyCode), character: character, modifiers: flags))
+      #expect(keys.matches(keyCode: UInt16(keyCode), character: "", modifiers: flags))
+      #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_Keypad0), character: "0", modifiers: flags))
+    }
+    #expect(!keys.matches(keyCode: UInt16(keyCode), character: character, modifiers: [.command, .numericPad]))
   }
 
   /// #497: the Split View switch keys (Ctrl-Shift-1 ... 4) on AZERTY, and "-", "=" and the bracket keys, which sit on
