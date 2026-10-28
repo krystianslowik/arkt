@@ -1,6 +1,7 @@
 import ArcImport
 import CoreTestSupport
 import Foundation
+import Synchronization
 import Testing
 
 struct ArcImportRecordTests {
@@ -64,7 +65,8 @@ struct ArcImportRecordTests {
         loginDatabase: manifest.loginDataURL, keyProvider: ReaderTestSupport.provider()
       ) { logins += $0 }
       let bookmarks = try BookmarksReader.read(from: manifest.bookmarksURL).bookmarks
-      let keys = cookies.map(ArcImportKey.cookie) + logins.map(ArcImportKey.login) + bookmarks.map(ArcImportKey.bookmark)
+      let keys = cookies.map { ArcImportKey.cookie($0) } + logins.map { ArcImportKey.login($0) }
+        + bookmarks.map { ArcImportKey.bookmark($0) }
       #expect(!keys.isEmpty && Set(keys).count == keys.count)
       for key in keys {
         #expect(key.count == 32 && key.allSatisfy { $0.isHexDigit })
@@ -72,6 +74,22 @@ struct ArcImportRecordTests {
       let session = try #require(cookies.first { $0.name == "session" })
       #expect(ArcImportKey.cookie(session) == ArcImportKey.cookie(session))
     }
+  }
+
+  @Test func theSaltChangesEveryKeyAndSurvivesTheRecord() throws {
+    let bookmark = BookmarkRecord(root: "bar", folderPath: [], title: "One", url: "https://a.test/", guid: "g", dateAdded: nil)
+    #expect(ArcImportKey.bookmark(bookmark, salt: "one") != ArcImportKey.bookmark(bookmark, salt: "two"))
+    #expect(ArcImportKey.bookmark(bookmark, salt: "one") == ArcImportKey.bookmark(bookmark, salt: "one"))
+    let salt = ArcImportKey.makeSalt()
+    #expect(salt.count == 32 && salt != ArcImportKey.makeSalt())
+    var stored = ArcImportRecord(salt: "first")
+    stored.formUnion(ArcImportRecord(salt: "second"))
+    #expect(stored.salt == "first")
+    var unsalted = ArcImportRecord()
+    unsalted.formUnion(ArcImportRecord(salt: "second"))
+    #expect(unsalted.salt == "second")
+    let data = try JSONEncoder().encode(ArcImportRecord(salt: "s"))
+    #expect(try JSONDecoder().decode(ArcImportRecord.self, from: data).salt == "s")
   }
 
   @Test func bookmarkKeyIgnoresTheTitleWhenTheGuidIsKnown() {
@@ -119,5 +137,64 @@ struct ProfileDataCounterTests {
     try Data("not a database".utf8).write(to: file)
     defer { try? FileManager.default.removeItem(at: file) }
     #expect(throws: (any Error).self) { try ProfileDataCounter.logins(in: file) }
+  }
+}
+
+struct ChromiumKeyTests {
+  private final class CountingProvider: SafeStorageKeyProvider {
+    private let asked = Mutex(0)
+    var timesAsked: Int { asked.withLock { $0 } }
+    func withPassword<R>(_ body: ([UInt8]) throws -> R) throws -> R {
+      asked.withLock { $0 += 1 }
+      return try body(Array(FakeChromiumProfile.safeStoragePassword.utf8))
+    }
+  }
+
+  @Test func windowsDecryptWithOneKeyFetchAndMatchTheFullRead() throws {
+    try ReaderTestSupport.withProfile { manifest in
+      let provider = CountingProvider()
+      let key = try ChromiumKey(provider: provider)
+      let reader = CookieReader(now: { ReaderTestSupport.fixtureNow }, log: { _ in })
+      var names: [String] = []
+      var scanned: [Int] = []
+      for window in [0..<2, 2..<4, 4..<6] {
+        let summary = try key.withDecryptor { decryptor in
+          try reader.read(cookiesDatabase: manifest.cookiesURL, decryptor: decryptor, rows: window) { names += $0.map(\.name) }
+        }
+        scanned.append(summary.scanned)
+      }
+      #expect(scanned == [2, 1, 0])
+      var full: [String] = []
+      try reader.read(cookiesDatabase: manifest.cookiesURL, keyProvider: ReaderTestSupport.provider()) { full += $0.map(\.name) }
+      #expect(names == full)
+      #expect(provider.timesAsked == 1)
+    }
+  }
+
+  @Test func loginWindowsCoverEveryRowOnce() throws {
+    try ReaderTestSupport.withProfile { manifest in
+      let key = try ChromiumKey(provider: ReaderTestSupport.provider())
+      var users: [String] = []
+      for window in [0..<2, 2..<4] {
+        try key.withDecryptor { decryptor in
+          try LoginReader(log: { _ in }).read(loginDatabase: manifest.loginDataURL, decryptor: decryptor, rows: window) {
+            users += $0.map(\.username)
+          }
+        }
+      }
+      #expect(users.sorted() == manifest.logins.map(\.username).sorted())
+    }
+  }
+
+  @Test func aWipedKeyDecryptsNothing() throws {
+    try ReaderTestSupport.withProfile { manifest in
+      let key = try ChromiumKey(provider: ReaderTestSupport.provider())
+      key.wipe()
+      var count = 0
+      let summary = try key.withDecryptor { decryptor in
+        try LoginReader(log: { _ in }).read(loginDatabase: manifest.loginDataURL, decryptor: decryptor) { count += $0.count }
+      }
+      #expect(count == 0 && summary.skippedUndecryptable == manifest.logins.count)
+    }
   }
 }

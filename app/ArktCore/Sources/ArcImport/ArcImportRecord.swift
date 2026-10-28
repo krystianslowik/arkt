@@ -7,7 +7,7 @@ import Foundation
 /// Version 1 held Arc's own ids: Space ids from `StorableSidebar.json`'s `spaces` and Favorite ids of the top-level items
 /// under a profile's Favorites root. Version 2 (#515) adds what the browser-data import wrote, per type: the newest
 /// history visit (a watermark) and a digest key for each bookmark, cookie, login and extension. A key is the first 16
-/// bytes of a SHA-256 over the item's identity (`ArcImportKey`), so the stored record holds no host, username, URL or
+/// bytes of a SHA-256 over the item's identity (`ArcImportKey`, salted per install), so the stored record holds no host, username, URL or
 /// extension name. Stored as JSON with sorted arrays, so the stored bytes are deterministic; every field is read with
 /// `decodeIfPresent`, so a version 1 record stays readable.
 public struct ArcImportRecord: Hashable, Sendable, Codable {
@@ -20,11 +20,15 @@ public struct ArcImportRecord: Hashable, Sendable, Codable {
   public var loginKeys: Set<String>
   /// Chrome Web Store ids (public identifiers, stored as they are).
   public var extensionIDs: Set<String>
+  /// A random per-install value mixed into every digest key (`ArcImportKey`), so two installs' records cannot be
+  /// compared and a key cannot be guessed from a known site list. Set once, by the first import that records keys; a
+  /// merge keeps the one already stored.
+  public var salt: String?
 
   public init(
     spaceIDs: Set<String> = [], favoriteItemIDs: Set<String> = [], historyWatermark: Date? = nil,
     bookmarkKeys: Set<String> = [], cookieKeys: Set<String> = [], loginKeys: Set<String> = [],
-    extensionIDs: Set<String> = []
+    extensionIDs: Set<String> = [], salt: String? = nil
   ) {
     self.spaceIDs = spaceIDs
     self.favoriteItemIDs = favoriteItemIDs
@@ -33,6 +37,7 @@ public struct ArcImportRecord: Hashable, Sendable, Codable {
     self.cookieKeys = cookieKeys
     self.loginKeys = loginKeys
     self.extensionIDs = extensionIDs
+    self.salt = salt
   }
 
   /// Nothing recorded: no import ran yet, or the last one ran before the record existed.
@@ -46,6 +51,7 @@ public struct ArcImportRecord: Hashable, Sendable, Codable {
     cookieKeys.formUnion(other.cookieKeys)
     loginKeys.formUnion(other.loginKeys)
     extensionIDs.formUnion(other.extensionIDs)
+    salt = salt ?? other.salt
     historyWatermark = [historyWatermark, other.historyWatermark].compactMap { $0 }.max()
   }
 
@@ -57,6 +63,7 @@ public struct ArcImportRecord: Hashable, Sendable, Codable {
     case cookieKeys
     case loginKeys
     case extensionIDs
+    case salt
   }
 
   public init(from decoder: any Decoder) throws {
@@ -68,6 +75,7 @@ public struct ArcImportRecord: Hashable, Sendable, Codable {
     cookieKeys = try container.decodeIfPresent(Set<String>.self, forKey: .cookieKeys) ?? []
     loginKeys = try container.decodeIfPresent(Set<String>.self, forKey: .loginKeys) ?? []
     extensionIDs = try container.decodeIfPresent(Set<String>.self, forKey: .extensionIDs) ?? []
+    salt = try container.decodeIfPresent(String.self, forKey: .salt)
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -80,21 +88,29 @@ public struct ArcImportRecord: Hashable, Sendable, Codable {
     if !cookieKeys.isEmpty { try container.encode(cookieKeys.sorted(), forKey: .cookieKeys) }
     if !loginKeys.isEmpty { try container.encode(loginKeys.sorted(), forKey: .loginKeys) }
     if !extensionIDs.isEmpty { try container.encode(extensionIDs.sorted(), forKey: .extensionIDs) }
+    try container.encodeIfPresent(salt, forKey: .salt)
   }
 }
 
 /// The digest keys of `ArcImportRecord` v2: one-way, so the settings database never holds a host, a username or a URL.
 public enum ArcImportKey {
-  public static func cookie(_ cookie: ArcCookie) -> String { digest([cookie.name, cookie.hostKey, cookie.path]) }
+  /// A new random salt for a record that has none.
+  public static func makeSalt() -> String {
+    (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
+  }
 
-  public static func login(_ login: ArcLogin) -> String {
-    digest([login.signonRealm, login.username, login.actionURL ?? ""])
+  public static func cookie(_ cookie: ArcCookie, salt: String = "") -> String {
+    digest([salt, cookie.name, cookie.hostKey, cookie.path])
+  }
+
+  public static func login(_ login: ArcLogin, salt: String = "") -> String {
+    digest([salt, login.signonRealm, login.username, login.actionURL ?? ""])
   }
 
   /// The guid when Chromium wrote one, else the folder path, title and URL.
-  public static func bookmark(_ bookmark: BookmarkRecord) -> String {
-    if let guid = bookmark.guid?.lowercased(), !guid.isEmpty { return digest(["guid", guid]) }
-    return digest(["path"] + bookmark.folderPath + [bookmark.title, bookmark.url])
+  public static func bookmark(_ bookmark: BookmarkRecord, salt: String = "") -> String {
+    if let guid = bookmark.guid?.lowercased(), !guid.isEmpty { return digest([salt, "guid", guid]) }
+    return digest([salt, "path"] + bookmark.folderPath + [bookmark.title, bookmark.url])
   }
 
   static func digest(_ parts: [String]) -> String {

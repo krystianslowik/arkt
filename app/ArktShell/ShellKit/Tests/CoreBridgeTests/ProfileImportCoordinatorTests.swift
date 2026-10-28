@@ -1,5 +1,5 @@
 import ArcImport
-import CoreBridge
+@testable import CoreBridge
 import CoreTestSupport
 import EngineAPI
 import Foundation
@@ -280,6 +280,93 @@ struct ProfileImportCoordinatorTests {
     #expect(harness.engine.visitCount == 2)
     #expect(summary.outcomes[.history] == Self.counts(2, skipped: 3))
     #expect(harness.engine.historyCalls.first?.watermark == times[2])
+  }
+
+  // MARK: Plaintext lifetime
+
+  private static func isZeroed(_ secret: SecretBytes) -> Bool {
+    secret.count > 0 && secret.utf8String().unicodeScalars.allSatisfy { $0.value == 0 }
+  }
+
+  @Test func theCoordinatorZeroesEveryBatchItWrote() async throws {
+    let harness = try Harness(batchSize: 1)
+    harness.engine.wipesSecrets = false
+    _ = try await harness.summary(ImportSelection([.cookies, .passwords]))
+    #expect(harness.engine.receivedCookies.count == 2 && harness.engine.receivedLogins.count == 3)
+    #expect(harness.engine.receivedCookies.allSatisfy { Self.isZeroed($0.value) })
+    #expect(harness.engine.receivedLogins.allSatisfy { Self.isZeroed($0.password) })
+  }
+
+  @Test func aCancelAfterDecryptingZeroesTheBatchAndDecryptsNothingMore() async throws {
+    let harness = try Harness(batchSize: 1)
+    harness.engine.wipesSecrets = false
+    let coordinator = harness.coordinator
+    var pulls: [[ArcCookie]] = []
+    coordinator.afterPull = { type, items in
+      guard type == .cookies, let cookies = items as? [ArcCookie] else { return }
+      pulls.append(cookies)
+      if pulls.count == 1 { coordinator.cancel() }
+    }
+    let summary = try await harness.summary(ImportSelection([.cookies, .passwords]))
+    #expect(summary.cancelled)
+    #expect(pulls.count == 1 && pulls[0].count == 1)           // only one batch was ever in plaintext
+    #expect(pulls[0].allSatisfy { Self.isZeroed($0.value) })    // and the coordinator zeroed it, not the engine
+    #expect(harness.engine.cookieCount == 0 && harness.engine.loginCount == 0)
+    #expect(summary.outcomes[.passwords] == .skipped(reason: "cancelled"))
+    #expect(harness.folder.leftoverSnapshots.isEmpty)
+  }
+
+  @Test func aCancelBetweenBatchesLeavesNoPlaintextBehind() async throws {
+    let harness = try Harness(batchSize: 1)
+    harness.engine.wipesSecrets = false
+    let coordinator = harness.coordinator
+    harness.engine.afterCall = { name, count in if name == "passwords", count == 1 { coordinator.cancel() } }
+    var pulled: [ArcLogin] = []
+    coordinator.afterPull = { type, items in if type == .passwords { pulled += (items as? [ArcLogin]) ?? [] } }
+    let summary = try await harness.summary(ImportSelection([.passwords]))
+    #expect(summary.cancelled && harness.engine.loginCount == 1)
+    #expect(pulled.count == 1 && pulled.allSatisfy { Self.isZeroed($0.password) })
+  }
+
+  // MARK: Salt
+
+  @Test func recordKeysAreSaltedWithAPerInstallSaltStoredInTheRecord() async throws {
+    let harness = try Harness()
+    _ = try await harness.summary(ImportSelection([.bookmarks]))
+    let record = await harness.records.stored
+    let salt = try #require(record.salt)
+    #expect(salt.count == 32)
+    let bookmarks = try BookmarksReader.read(from: harness.folder.manifest.bookmarksURL).bookmarks
+    #expect(record.bookmarkKeys == Set(bookmarks.map { ArcImportKey.bookmark($0, salt: salt) }))
+    #expect(record.bookmarkKeys.isDisjoint(with: Set(bookmarks.map { ArcImportKey.bookmark($0) })))
+    // A later run reuses the salt, so it still recognizes what the first one wrote.
+    let second = try await harness.summary(ImportSelection([.bookmarks]))
+    #expect(second.outcomes[.bookmarks] == Self.counts(0, skipped: bookmarks.count))
+    #expect(await harness.records.stored.salt == salt)
+  }
+
+  @Test func aStoredSaltIsKept() async throws {
+    let harness = try Harness(record: ArcImportRecord(salt: "stored-salt"))
+    _ = try await harness.summary(ImportSelection([.bookmarks]))
+    #expect(await harness.records.stored.salt == "stored-salt")
+  }
+
+  // MARK: History failures
+
+  @Test func theWatermarkStopsAtAVisitTheEngineRefused() async throws {
+    let harness = try Harness(historyVisitsPerBatch: 2)
+    let times = harness.folder.manifest.history.flatMap(\.visits).map(\.date).sorted()
+    let engine = harness.engine
+    // The first batch is stored; from the second on the engine refuses one visit per batch.
+    engine.afterCall = { name, count in
+      if name == "history", count == 1 {
+        engine.scripted["history"] = ImportWriteResult(written: 1, failed: 1, latestVisit: times[3])
+      }
+    }
+    let summary = try await harness.summary(ImportSelection([.history]))
+    #expect(engine.historyCalls.map(\.visits) == [2, 2, 1])      // the rest still imports
+    #expect(summary.outcomes[.history] == Self.counts(4, failed: 2))
+    #expect(await harness.records.stored.historyWatermark == times[1])
   }
 
   // MARK: Failures

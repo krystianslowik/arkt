@@ -24,6 +24,10 @@ final class RecordingImportEngine: EngineImporting {
   var scripted: [String: ImportWriteResult] = [:]
   /// Runs after each call has been recorded, with the call's name and the number of calls of that kind so far.
   var afterCall: ((String, Int) -> Void)?
+  /// False keeps the secrets unwiped after a call, so a test can check that the coordinator zeroes them itself.
+  var wipesSecrets = true
+  private(set) var receivedCookies: [ArcCookie] = []
+  private(set) var receivedLogins: [ArcLogin] = []
 
   var cookieCount: Int { cookieBatches.reduce(0) { $0 + $1.count } }
   var loginCount: Int { loginBatches.reduce(0) { $0 + $1.count } }
@@ -40,7 +44,7 @@ final class RecordingImportEngine: EngineImporting {
     cookieBatches.append(batch.map {
       ImportedCookieRecord(hostKey: $0.hostKey, name: $0.name, value: $0.value.utf8String(), path: $0.path)
     })
-    for cookie in batch { cookie.value.wipe() }
+    if wipesSecrets { for cookie in batch { cookie.value.wipe() } } else { receivedCookies += batch }
     return finish("cookies", default: ImportWriteResult(written: batch.count))
   }
 
@@ -49,7 +53,7 @@ final class RecordingImportEngine: EngineImporting {
       ImportedLoginRecord(
         signonRealm: $0.signonRealm, username: $0.username, actionURL: $0.actionURL, password: $0.password.utf8String())
     })
-    for login in batch { login.password.wipe() }
+    if wipesSecrets { for login in batch { login.password.wipe() } } else { receivedLogins += batch }
     return finish("passwords", default: ImportWriteResult(written: batch.count))
   }
 

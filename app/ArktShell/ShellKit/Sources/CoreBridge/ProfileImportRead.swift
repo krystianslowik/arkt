@@ -18,16 +18,12 @@ enum ProfileImportRead {
     var unavailable: [ImportDataType: ImportTypeOutcome] = [:]
   }
 
-  struct Secrets: Sendable {
-    var cookies = PreparedBatches<ArcCookie>()
-    var logins = PreparedBatches<ArcLogin>()
-    var failures: [ImportDataType: ImportTypeOutcome] = [:]
-
-    /// Zeroes every secret still held.
-    func wipe() {
-      for batch in cookies.batches { for cookie in batch { cookie.value.wipe() } }
-      for batch in logins.batches { for login in batch { login.password.wipe() } }
-    }
+  /// One window of decrypted rows: the plaintext items to write now, and how many rows of the window were left out
+  /// because an earlier import handled them.
+  struct Window<Item: Sendable>: Sendable {
+    var items: [Item] = []
+    var scanned = 0
+    var alreadyHandled = 0
   }
 
   static let notInProfile = "not in the Arc profile"
@@ -38,6 +34,10 @@ enum ProfileImportRead {
   static func snapshot(root: URL, scratchParent: URL) async throws -> ArcProfileSnapshot {
     try ArcProfileSnapshot.make(root: root, scratchParent: scratchParent)
   }
+
+  /// Deletes the scratch copy off the main actor. `ArcProfileSnapshot.sweepStale` at launch is the backstop.
+  @concurrent
+  static func remove(_ snapshot: ArcProfileSnapshot) async { snapshot.remove() }
 
   /// The profile the import reads: Arc's `Default`, else the first one by name.
   static func profile(in snapshot: ArcProfileSnapshot) -> ArcProfileSnapshot.Profile? {
@@ -92,19 +92,23 @@ enum ProfileImportRead {
 
   /// The visits after `watermark` and not older than `oldest`, regrouped into batches in time order, so the newest visit of
   /// a batch is a valid watermark for the batches after it. A batch is never cut between two visits with the same time.
+  /// The read streams: visits outside the window are dropped as each batch of entries arrives, so only the visits the
+  /// engine would accept are held.
   @concurrent
   static func history(
     file: URL, after watermark: Date?, oldest: Date, visitsPerBatch: Int
   ) async throws -> PreparedBatches<ImportedHistoryEntry> {
     var entries: [ImportedHistoryEntry] = []
-    try HistoryReader.read(from: file) { entries += $0 }
-
     var visits: [(entry: Int, visit: HistoryVisit)] = []
     var total = 0
-    for (index, entry) in entries.enumerated() {
-      for visit in entry.visits {
-        total += 1
-        if visit.time >= oldest, watermark.map({ visit.time > $0 }) ?? true { visits.append((index, visit)) }
+    try HistoryReader.read(from: file) { batch in
+      for entry in batch {
+        let index = entries.count
+        entries.append(entry.keepingNoVisits())
+        for visit in entry.visits {
+          total += 1
+          if visit.time >= oldest, watermark.map({ visit.time > $0 }) ?? true { visits.append((index, visit)) }
+        }
       }
     }
     visits.sort { ($0.visit.time, $0.entry) < ($1.visit.time, $1.entry) }
@@ -134,10 +138,10 @@ enum ProfileImportRead {
 
   @concurrent
   static func bookmarks(
-    profile: ArcProfileSnapshot.Profile, known: Set<String>, batchSize: Int
+    profile: ArcProfileSnapshot.Profile, known: Set<String>, salt: String, batchSize: Int
   ) async throws -> PreparedBatches<BookmarkRecord> {
     let all = try BookmarksReader.read(profile: profile).bookmarks
-    let fresh = all.filter { !known.contains(ArcImportKey.bookmark($0)) }
+    let fresh = all.filter { !known.contains(ArcImportKey.bookmark($0, salt: salt)) }
     return PreparedBatches(batches: chunks(fresh, of: batchSize), alreadyHandled: all.count - fresh.count)
   }
 
@@ -150,63 +154,69 @@ enum ProfileImportRead {
 
   // MARK: Cookies and passwords
 
-  /// Fetches the Safe Storage key once and reads the cookies and the logins with it. The key is dropped when this returns;
-  /// no decryptor outlives the call, so the secrets come back as plaintext batches that the caller writes and wipes.
+  /// Reads the Safe Storage password once and derives the key. The key is held by the caller between windows and wiped by
+  /// it; no plaintext is read here.
   @concurrent
-  static func secrets(
-    profile: ArcProfileSnapshot.Profile, readCookies: Bool, readLogins: Bool, provider: any SafeStorageKeyProvider,
-    now: Date, knownCookies: Set<String>, knownLogins: Set<String>, batchSize: Int
-  ) async -> Secrets {
-    var result = Secrets()
+  static func openKey(provider: any SafeStorageKeyProvider) async -> Result<ChromiumKey, KeyFailure> {
+    do { return .success(try ChromiumKey(provider: provider)) } catch {
+      return .failure(KeyFailure(reason: keyFailureReason(error)))
+    }
+  }
+
+  struct KeyFailure: Error, Sendable { var reason: String }
+
+  /// Decrypts the cookies of rows `rows` and returns those no earlier import handled. Plaintext exists only in the
+  /// returned window; if the read throws, everything decrypted so far is wiped first.
+  @concurrent
+  static func cookieWindow(
+    file: URL, key: ChromiumKey, rows: Range<Int>, now: Date, known: Set<String>, salt: String
+  ) async throws -> Window<ArcCookie> {
+    var window = Window<ArcCookie>()
     do {
-      try ChromiumDecryptor.withDecryptor(provider: provider) { decryptor in
-        if readCookies, let file = profile.copiedFile("Network/Cookies", "Cookies") {
-          var fresh: [ArcCookie] = []
-          do {
-            try CookieReader(now: { now }, log: { _ in }).read(cookiesDatabase: file, decryptor: decryptor) { batch in
-              for cookie in batch {
-                if knownCookies.contains(ArcImportKey.cookie(cookie)) {
-                  result.cookies.alreadyHandled += 1
-                  cookie.value.wipe()
-                } else {
-                  fresh.append(cookie)
-                }
-              }
+      let summary = try key.withDecryptor { decryptor in
+        try CookieReader(now: { now }, log: { _ in }).read(cookiesDatabase: file, decryptor: decryptor, rows: rows) { batch in
+          for cookie in batch {
+            if known.contains(ArcImportKey.cookie(cookie, salt: salt)) {
+              window.alreadyHandled += 1
+              cookie.value.wipe()
+            } else {
+              window.items.append(cookie)
             }
-            result.cookies.batches = chunks(fresh, of: batchSize)
-          } catch {
-            for cookie in fresh { cookie.value.wipe() }
-            result.failures[.cookies] = .failed(reason: "could not read Cookies")
-          }
-        }
-        if readLogins, let file = profile.copiedFile("Login Data") {
-          var fresh: [ArcLogin] = []
-          do {
-            try LoginReader(log: { _ in }).read(loginDatabase: file, decryptor: decryptor) { batch in
-              for login in batch {
-                if knownLogins.contains(ArcImportKey.login(login)) {
-                  result.logins.alreadyHandled += 1
-                  login.password.wipe()
-                } else {
-                  fresh.append(login)
-                }
-              }
-            }
-            result.logins.batches = chunks(fresh, of: batchSize)
-          } catch {
-            for login in fresh { login.password.wipe() }
-            result.failures[.passwords] = .failed(reason: "could not read Login Data")
           }
         }
       }
+      window.scanned = summary.scanned
+      return window
     } catch {
-      result.wipe()
-      result = Secrets()
-      let reason = keyFailureReason(error)
-      if readCookies { result.failures[.cookies] = .failed(reason: reason) }
-      if readLogins { result.failures[.passwords] = .failed(reason: reason) }
+      for cookie in window.items { cookie.value.wipe() }
+      throw error
     }
-    return result
+  }
+
+  @concurrent
+  static func loginWindow(
+    file: URL, key: ChromiumKey, rows: Range<Int>, known: Set<String>, salt: String
+  ) async throws -> Window<ArcLogin> {
+    var window = Window<ArcLogin>()
+    do {
+      let summary = try key.withDecryptor { decryptor in
+        try LoginReader(log: { _ in }).read(loginDatabase: file, decryptor: decryptor, rows: rows) { batch in
+          for login in batch {
+            if known.contains(ArcImportKey.login(login, salt: salt)) {
+              window.alreadyHandled += 1
+              login.password.wipe()
+            } else {
+              window.items.append(login)
+            }
+          }
+        }
+      }
+      window.scanned = summary.scanned
+      return window
+    } catch {
+      for login in window.items { login.password.wipe() }
+      throw error
+    }
   }
 
   /// A fixed phrase for a failed key fetch; nothing from the error's payload.
@@ -224,5 +234,13 @@ enum ProfileImportRead {
 
   static func chunks<Item>(_ items: [Item], of size: Int) -> [[Item]] {
     stride(from: 0, to: items.count, by: size).map { Array(items[$0..<min($0 + size, items.count)]) }
+  }
+}
+
+extension ImportedHistoryEntry {
+  /// The same entry without its visits, so a streamed read keeps the entry's fields and only the visits that pass the
+  /// filter.
+  fileprivate func keepingNoVisits() -> ImportedHistoryEntry {
+    ImportedHistoryEntry(url: url, title: title, visitCount: visitCount, typedCount: typedCount, lastVisit: lastVisit, visits: [])
   }
 }
