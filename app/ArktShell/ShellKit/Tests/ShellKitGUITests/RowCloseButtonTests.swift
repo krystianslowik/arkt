@@ -309,7 +309,8 @@ final class RowCloseButtonTests: XCTestCase {
   // MARK: Fade
 
   /// Hover out during the fade-in: the fade-out starts from the opacity on screen (no jump to full opacity first),
-  /// and the replaced fade-in's completion does not hide the X early (no pop).
+  /// and the replaced fade-in's completion does not hide the X early (no pop). The on-screen opacity and both
+  /// completions are stepped by hand, so a stalled main actor cannot move the fade off the value under test.
   func testFadeOutInterruptingAFadeInStartsFromTheCurrentOpacity() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
@@ -317,25 +318,25 @@ final class RowCloseButtonTests: XCTestCase {
     let button = try harness.cell(world.today[0]).closeButton
     button.reducesMotion = { false }
     button.fadeDuration = 1
+    let onScreen: CGFloat = 0.4
+    var completions: [@MainActor () -> Void] = []
+    button.fadeFinisher = { completions.append($0) }
+
     row.isHovered = true
-    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.3))
-    let midway = button.displayedOpacity
-    XCTAssertGreaterThan(midway, 0.05)
-    XCTAssertLessThan(midway, 0.95)
-
+    button.presentedOpacity = onScreen
     row.isHovered = false
-    let fade = try XCTUnwrap(button.layer?.animation(forKey: "opacity") as? CABasicAnimation)
-    XCTAssertEqual((fade.fromValue as? NSNumber)?.doubleValue ?? -1, Double(midway), accuracy: 0.1)
-    XCTAssertEqual(fade.duration, Double(midway), accuracy: 0.1, "the remaining distance at the same speed")
-    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
-    XCTAssertFalse(button.isHidden, "still fading out")
 
-    let hidden = expectation(description: "hidden after the fade-out")
-    Task { @MainActor in
-      while !button.isHidden { try? await Task.sleep(for: .milliseconds(20)) }
-      hidden.fulfill()
-    }
-    wait(for: [hidden], timeout: 3)
+    let fade = try XCTUnwrap(button.layer?.animation(forKey: "opacity") as? CABasicAnimation)
+    let from = (fade.fromValue as? NSNumber)?.doubleValue ?? -1
+    XCTAssertEqual(from, Double(onScreen), accuracy: 0.001, "starts from the opacity on screen, not from 1")
+    XCTAssertEqual(fade.duration, Double(onScreen), accuracy: 0.001, "the remaining distance at the same speed")
+    XCTAssertFalse(button.isHidden, "still fading out")
+    XCTAssertEqual(completions.count, 2)
+
+    completions[0]()
+    XCTAssertFalse(button.isHidden, "the replaced fade-in's completion does not hide the X")
+    completions[1]()
+    XCTAssertTrue(button.isHidden, "the fade-out hides the X when it ends")
     harness.controller.close()
   }
 
