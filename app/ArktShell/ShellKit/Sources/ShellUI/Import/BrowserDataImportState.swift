@@ -20,6 +20,18 @@ public enum BrowserDataKind: CaseIterable, Hashable, Sendable {
     }
   }
 
+  /// The name in accessibility identifiers (`AXID.BrowserDataImport.row`).
+  public var identifier: String {
+    switch self {
+    case .spacesAndTabs: "spaces"
+    case .history: "history"
+    case .bookmarks: "bookmarks"
+    case .extensions: "extensions"
+    case .cookies: "cookies"
+    case .passwords: "passwords"
+    }
+  }
+
   /// Read with the browser's Safe Storage key, which macOS asks the user's password for.
   public var needsPassword: Bool { self == .cookies || self == .passwords }
 
