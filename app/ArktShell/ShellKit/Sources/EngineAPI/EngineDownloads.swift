@@ -376,7 +376,7 @@ public typealias DownloadDestinationChooser = @MainActor (DownloadDestinationReq
 /// stream, through the same FIFO as `EngineEvent` (contract rule 24).
 ///
 /// Implementations: InMemoryEngine (scripted), FakeEngine (WKDownload; no pause, no danger judgement), ChromiumEngine
-/// (not wired yet: the methods are stubs the engine-lane task fills).
+/// (wired to the profile's DownloadManager through the facade, #132).
 @MainActor
 public protocol EngineDownloads: AnyObject {
   /// The list in creation order; the newest is last.
