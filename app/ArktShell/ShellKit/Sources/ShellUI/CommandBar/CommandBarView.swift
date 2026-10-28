@@ -53,6 +53,16 @@ final class CommandBarView: NSView {
   let hintStrip = CommandBarHintStrip(frame: .zero)
   let selectionIndicator = CommandBarSelectionIndicator(frame: .zero)
   let selectionMotion = CommandBarSelectionMotion()
+  let previewColumn = CommandBarPreviewColumn(frame: .zero)
+  let widthMotion = CommandBarWidthMotion()
+  /// Width on screen. The panel may already be the wide size while this is still catching up.
+  private(set) var drawnWidth: CGFloat = CommandBarGeometry.preferredWidth
+  /// While a width spring runs, layout must not snap the mask to the panel's full width.
+  private var keepsDrawnWidth = false
+  /// Layouts so far. A width frame must not increment it.
+  private(set) var layoutCount = 0
+  private let widthMask = CALayer()
+  private let fieldClip = CALayer()
   /// The header text over the rows that start a group, by row (empty state); those rows are taller by the header.
   var groupHeaders: [Int: String] = [:]
   /// Whether a selection change slides the indicator. Off while results reload, so new results do not slide.
@@ -115,6 +125,7 @@ final class CommandBarView: NSView {
     field.isBordered = false
     field.isBezeled = false
     field.drawsBackground = false
+    field.wantsLayer = true
     field.focusRingType = .none
     field.font = .systemFont(ofSize: 22)
     field.cell?.isScrollable = true
@@ -137,6 +148,7 @@ final class CommandBarView: NSView {
     noticeLabel.cell?.usesSingleLineMode = true
     noticeLabel.setAccessibilityIdentifier(AXID.CommandBar.notice)
     noticeView.addSubview(noticeLabel)
+    noticeDismissButton.wantsLayer = true
     noticeDismissButton.isBordered = false
     noticeDismissButton.imagePosition = .imageOnly
     noticeDismissButton.toolTip = "Dismiss"
@@ -167,6 +179,12 @@ final class CommandBarView: NSView {
       syncSelectionIndicator(animated: selectionAnimates)
     }
     selectionMotion.onFrame = { [weak self] in self?.applySelectionOffset() }
+    widthMotion.onFrame = { [weak self] width in self?.applyDrawnWidth(CGFloat(width)) }
+    widthMask.backgroundColor = NSColor.black.cgColor
+    widthMask.cornerRadius = CommandBarGeometry.cornerRadius
+    widthMask.cornerCurve = .continuous
+    layer?.mask = widthMask
+    fieldClip.backgroundColor = NSColor.black.cgColor
 
     // One tracking area for the life of the view (never per show): pointer moves select the row under them
     // and show its remove button (BH-109); leaving the list hides it again.
@@ -186,6 +204,7 @@ final class CommandBarView: NSView {
     hintDivider.wantsLayer = true
     addSubview(hintDivider)
     addSubview(hintStrip)
+    addSubview(previewColumn)
     apply(flavor: .dark)
   }
 
@@ -227,6 +246,7 @@ final class CommandBarView: NSView {
     scopeChip.layer?.backgroundColor = ShellTokens.commandBarSelectedRow.resolve(flavor).cgColor
     noticeLabel.textColor = ShellTokens.commandBarTertiaryText.resolve(flavor).nsColor()
     escapeKey.configure(CommandBarKeyCaps.escape, flavor: flavor)
+    previewColumn.apply(flavor: flavor)
     selectionIndicator.flavorForColors = flavor
     refreshPlaceholder(scopePlaceholder ?? Self.placeholder)
     refreshMagnifier()
@@ -356,7 +376,41 @@ final class CommandBarView: NSView {
 
   // MARK: Layout
 
+  /// Remembers `width` so the next layout, which sizes the wide panel, keeps the mask where the spring is.
+  func holdDrawnWidth(_ width: CGFloat) {
+    drawnWidth = width
+    keepsDrawnWidth = true
+  }
+
+  func releaseDrawnWidth() { keepsDrawnWidth = false }
+
+  /// A narrowing spring keeps the wide layout so the column can clip away. Layout must not snap the mask open.
+  func keepDrawnWidth() { keepsDrawnWidth = true }
+
+  /// Mask and trailing-cluster transform only. No layout.
+  func applyDrawnWidth(_ width: CGFloat) {
+    drawnWidth = width
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    widthMask.frame = CGRect(x: 0, y: 0, width: max(0, width), height: bounds.height)
+    let shift = width - bounds.width
+    let transform = CATransform3DMakeTranslation(shift, 0, 0)
+    pills.layer?.transform = transform
+    escapeKey.layer?.transform = transform
+    noticeDismissButton.layer?.transform = transform
+    if abs(shift) < 0.5 {
+      field.layer?.mask = nil
+    } else {
+      let anchor = pills.isHidden ? escapeKey.frame.minX : pills.frame.minX
+      let fieldWidth = max(0, anchor + shift - 12 - field.frame.minX)
+      fieldClip.frame = CGRect(x: 0, y: 0, width: fieldWidth, height: max(field.bounds.height, 1))
+      field.layer?.mask = fieldClip
+    }
+    CATransaction.commit()
+  }
+
   override func layout() {
+    layoutCount += 1
     super.layout()
     let g = CommandBarGeometry.self
     let scale = window?.backingScaleFactor ?? 2
@@ -412,9 +466,18 @@ final class CommandBarView: NSView {
     let stripTop = bounds.height - g.hintStripHeight
     hintStrip.frame = NSRect(x: 0, y: stripTop, width: bounds.width, height: g.hintStripHeight)
     hintDivider.frame = NSRect(x: 0, y: stripTop - 1, width: bounds.width, height: hairline)
-    scrollView.frame = NSRect(x: g.listPadding, y: listTop, width: bounds.width - 2 * g.listPadding,
+    let showsColumn = !previewColumn.isHidden && hasResults
+    let columnWidth = showsColumn ? g.previewColumnWidth : 0
+    let listWidth = showsColumn ? bounds.width - g.listPadding - columnWidth : bounds.width - 2 * g.listPadding
+    scrollView.frame = NSRect(x: g.listPadding, y: listTop, width: max(0, listWidth),
                               height: max(0, stripTop - 1 - g.listPadding - listTop))
+    if showsColumn {
+      previewColumn.frame = NSRect(x: bounds.width - columnWidth, y: divider.frame.maxY,
+                                  width: columnWidth, height: max(0, hintDivider.frame.minY - divider.frame.maxY))
+    }
     table.tableColumns.first?.width = scrollView.contentSize.width
     syncSelectionIndicator(animated: false)
+    if !keepsDrawnWidth, !widthMotion.isRunning { drawnWidth = bounds.width }
+    applyDrawnWidth(drawnWidth)
   }
 }

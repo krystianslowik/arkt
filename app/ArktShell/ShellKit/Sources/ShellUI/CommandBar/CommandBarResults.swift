@@ -13,11 +13,27 @@ public enum CommandBarResults {
     public let url: URL
     public let isSplitPane: Bool
     /// When the tab was last shown in this window; nil when it has not been since the app started. The empty state's
-    /// Recent tabs rows say "12 min" from it.
+    /// Recent tabs rows say "12 min" from it. The preview column says "12 min ago".
     public let lastViewed: Date?
-    public init(node: NodeID, title: String, url: URL, isSplitPane: Bool = false, lastViewed: Date? = nil) {
+    /// The Space the tab is open in. The preview's meta line names it.
+    public let spaceTitle: String?
+    public init(node: NodeID, title: String, url: URL, isSplitPane: Bool = false, lastViewed: Date? = nil,
+                spaceTitle: String? = nil) {
       self.node = node; self.title = title; self.url = url; self.isSplitPane = isSplitPane
       self.lastViewed = lastViewed
+      self.spaceTitle = spaceTitle
+    }
+  }
+
+  /// A page the history provider remembers. There is no history store yet: the app passes none, and tests pass
+  /// synthetic visits. `openTab` is set when that page is already an open tab, so Return switches to it.
+  public struct HistoryVisit: Sendable, Equatable {
+    public let title: String
+    public let url: URL
+    public let visited: Date?
+    public let openTab: NodeID?
+    public init(title: String, url: URL, visited: Date? = nil, openTab: NodeID? = nil) {
+      self.title = title; self.url = url; self.visited = visited; self.openTab = openTab
     }
   }
 
@@ -85,6 +101,9 @@ public enum CommandBarResults {
     public var siteSearchEngines: [SiteSearchEngine] = []
     /// The clock for "12 min"; injected so results are deterministic.
     public var now = Date()
+    /// History visits matching is the caller's job only in the sense that the provider already filtered; `make`
+    /// still matches `query` and caps the rows. Empty until a history store exists.
+    public var history: [HistoryVisit] = []
     /// An empty query lists the open tabs plainly, without the empty state's groups (Little Arkt's lookup, which has
     /// no clipboard, recent tabs or actions).
     public var listsOpenTabsForAnEmptyQuery = false
@@ -107,6 +126,8 @@ public enum CommandBarResults {
     case action(String)
     /// BH-104: switch to this Space.
     case switchSpace(SpaceID)
+    /// A history visit (#372). Return opens it, or switches when `previewFacts` says it is already open.
+    case history(URL)
     /// A filter that matches nothing: one row that says so (design/command-bar/README.md, Filters). Not actionable.
     case noMatch
 
@@ -120,6 +141,7 @@ public enum CommandBarResults {
       case .siteSearch: "siteSearch"
       case .action: "action"
       case .switchSpace: "switchSpace"
+      case .history: "history"
       case .noMatch: "noMatch"
       }
     }
@@ -141,6 +163,9 @@ public enum CommandBarResults {
     public var siteSearchEngine: SiteSearchEngine?
     /// "12 min": when a recent tab was last shown. The caption stays the Switch to Tab hint for accessibility.
     public var timeText: String?
+    /// Preview facts for an open tab or a history row. Nil for every other kind. The column still stays hidden
+    /// on an empty query (`CommandBarPreview.content`).
+    public var previewFacts: CommandBarPreviewFacts?
 
     /// Accessibility value for `commandBar.row` ("Switch to Tab", "Switch to Split View", "Open", "Search").
     public var accessibilityCaption: String {
@@ -152,6 +177,7 @@ public enum CommandBarResults {
       case .pasteAndGo: "Paste and Go"
       case .action: "Action"
       case .switchSpace: "Switch to Space"
+      case .history: previewFacts?.isAlsoOpen == true ? CommandBarResults.switchHint : "Open"
       case .noMatch: title
       }
     }
@@ -181,6 +207,7 @@ public enum CommandBarResults {
   }
 
   public static let maxSwitchResults = 6
+  public static let maxHistoryResults = 6
   public static let maxSpaceResults = 3
   public static let switchHint = "Switch to Tab"
   /// The caption of an open tab that is a split pane (BH-104, [S] string).
@@ -225,6 +252,13 @@ public enum CommandBarResults {
     }
     for tab in matching.prefix(input.isCountingAllMatches ? .max : maxSwitchResults) {
       results.append(tabRow(tab, group: nil, now: input.now))
+    }
+
+    let history = input.history.filter { visit in
+      visit.title.localizedStandardContains(query) || visit.url.absoluteString.localizedStandardContains(query)
+    }
+    for visit in history.prefix(input.isCountingAllMatches ? .max : maxHistoryResults) {
+      results.append(historyRow(visit, now: input.now))
     }
 
     // Spaces (BH-104): after the tabs, capped.
@@ -300,6 +334,26 @@ public enum CommandBarResults {
     if group == .recentTabs, let viewed = tab.lastViewed {
       row.timeText = CommandBarRelativeTime.text(from: viewed, to: now)
     }
+    row.previewFacts = CommandBarPreviewFacts(
+      rowKind: .openTab, title: tab.title, host: tab.url.host() ?? tab.url.absoluteString,
+      spaceTitle: tab.spaceTitle,
+      timeText: tab.lastViewed.map { CommandBarRelativeTime.preview(from: $0, to: now) },
+      isAlsoOpen: false, url: tab.url, node: tab.node)
+    return row
+  }
+
+  private static func historyRow(_ visit: HistoryVisit, now: Date) -> Result {
+    let host = visit.url.host() ?? visit.url.absoluteString
+    var row = Result(kind: .history(visit.url), title: visit.title,
+                     subtitle: CommandBarTitleMatch.displayURL(visit.url.absoluteString),
+                     trailingHint: nil, removalID: "history:\(visit.url.absoluteString)")
+    if let visited = visit.visited {
+      row.timeText = CommandBarRelativeTime.text(from: visited, to: now)
+    }
+    row.previewFacts = CommandBarPreviewFacts(
+      rowKind: .history, title: visit.title, host: host, spaceTitle: nil,
+      timeText: visit.visited.map { CommandBarRelativeTime.preview(from: $0, to: now) },
+      isAlsoOpen: visit.openTab != nil, url: visit.url, node: visit.openTab)
     return row
   }
 
@@ -341,17 +395,18 @@ extension CommandBarResults {
   /// A split contributes its first pane, marked as a split pane (activating it shows the split).
   @MainActor
   public static func openTabs(in source: any SidebarSource, space: SpaceID) -> [OpenTab] {
+    let spaceTitle = source.space(space)?.title
     var tabs: [OpenTab] = []
     func visit(_ id: NodeID, depth: Int) {
       guard depth < 64, let info = source.node(id) else { return }   // depth guard against a malformed source
       switch info {
       case .tab(let node, let url, let title):
-        tabs.append(OpenTab(node: node, title: title, url: url))
+        tabs.append(OpenTab(node: node, title: title, url: url, spaceTitle: spaceTitle))
       case .folder(let folder, _):
         for child in source.children(of: .folder(folder)) { visit(child, depth: depth + 1) }
       case .split:
         if let first = source.firstTab(at: id), case .tab(let node, let url, let title)? = source.node(first) {
-          tabs.append(OpenTab(node: node, title: title, url: url, isSplitPane: true))
+          tabs.append(OpenTab(node: node, title: title, url: url, isSplitPane: true, spaceTitle: spaceTitle))
         }
       }
     }
