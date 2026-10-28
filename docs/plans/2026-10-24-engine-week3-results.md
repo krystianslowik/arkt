@@ -4153,3 +4153,35 @@ deps on `//components/history/core/browser` and `//components/bookmarks/browser`
 
 - The coordinator (#515) stores the watermark and the "Imported" folder is not user-configurable.
 - Arc's own `typed_count` is not forced; it is derived from the typed visits.
+
+## #465: the current Favorite tile's selection fades during Open in
+
+Date 2026-10-28. Branch `feat/465-favorite-tile-fade` off `main` at `08db486`. Design: `docs/design/little-arkt.md`, Motion, Open in Space. Follow-up to #455 (the outline-row fade). Closes the known gap recorded in the #455 section: a current Favorite has no outline row, so its tile fill stayed at full strength.
+
+### What changed
+
+- The tile's selection fill and its shadow live on `FavoriteTileView.fillLayer`. `selectionAlpha` sets that layer's opacity, and only while the tile is current. The view layer stays clear at opacity 1, so the favicon (a subview) does not fade. The title is the tile's accessibility label, not a text view, and it is not faded.
+- The flight's existing room value is the only clock. `presentArrival` already receives `room` on each flying frame and now also calls `fadeCurrentFavoriteSelection`. The current Favorite is captured once on the first frame (nil when the current tab is not a Favorite; a later current does not start a fade). Fill opacity is `1 - clamp(room, 0, 1)`, the same formula as the outline row.
+- Landing (`finishReceiving`) and an abort (`cancelReceiving`) end the fade before the selection moves, so the same turn leaves the tile at fill opacity 1. Reduce Motion never starts a flight, so the tile changes at once and the fade is a no-op. No new timer and no per-frame layout: a frame sets one layer's opacity. A reload mid-flight reapplies the stored fade in `configure`.
+
+### Verification
+
+- Red first, before the fade was wired: `testTheCurrentFavoriteTilesSelectionFadesOnTheRoomSpring` failed because the fill stayed at full strength (`XCTAssertEqualWithAccuracy failed: ("1.0") is not equal to ("0.29524988")` at the stepped 0.26 s room, and `("1.0") is not equal to ("0.0")` at 0.36 s). The same run also failed an assertion on the favicon image view's layer opacity (`("0.0") is not equal to ("1.0")`): AppKit reports that layer at 0 while the view's `alphaValue` is 1. That assertion was removed; the view's `alphaValue`, the tile's `alphaValue` and the tile layer opacity stay the content checks.
+- Focused GUI, after the wiring, `nice -n 20 swift test -j 2 --filter 'LittleArktFlightTests|SidebarViewTests'` (window tests, under the GUI lock):
+  - `LittleArktFlightTests`: Executed 39 tests, with 2 tests skipped and 0 failures (0 unexpected) in 8.322 (8.327) seconds
+  - `SidebarViewTests`: Executed 21 tests, with 0 failures (0 unexpected) in 2.181 (2.183) seconds
+  - `ShellKitGUITests` selected: Executed 60 tests, with 2 tests skipped and 0 failures (0 unexpected) in 10.503 (10.510) seconds
+  - The new tests are `testTheCurrentFavoriteTilesSelectionFadesOnTheRoomSpring` (ticks the flight at 0, `roomDelay`, 0.26 and 0.36, then steps to landing; expected opacity comes from a separate `LittleArktFlightSpringSet`, not the production helper) and `testReduceMotionKeepsTheFavoriteTileChangeInstant` (flight is nil, tile not current, fill opacity 1).
+- `cd app/ArktShell/ShellKit && nice -n 20 swift test -j 2 --skip ShellKitGUITests`: 1095, 38, 60, 7, 181, 49, 257, 111, 23 passed (1821), 0 failed. This change adds no non-GUI tests.
+- Not run: ArktCore (`swift test`), the app build and the XCUITest suite. `app/ArktShell/App` and `project.yml` were not touched. The full GUI suite was not run; only the two classes above.
+
+### Deviations
+
+- The issue says the favicon and the title stay at full opacity. The title is the accessibility label, so the test checks that label and the favicon view's `alphaValue`, not a title layer.
+- The selection shadow moved onto `fillLayer` with the fill, matching the outline row (the shadow fades with the selection). `testTileShadowPathAndDarkOpacity` now reads `fillLayer`.
+
+### Not covered
+
+- A reload of the tile while it is fading (`configure` reapplies the stored alpha; no dedicated test).
+- A page closed mid-flight restoring this tile's fill (wired in `cancelReceiving`; the outline abort tests still pass; no favorite-specific abort assertion).
+- These are local runs, not CI.
