@@ -279,8 +279,9 @@ struct ThemeCrossfadeTests {
     #expect(controller.consumeThemeCrossfade() == false)
   }
 
+  /// The first and last stop: the layer holds the OKLab-expanded gradient (#381), whose ends are the theme's stops.
   private func stops(_ colors: [CGColor]) -> [[CGFloat]] {
-    colors.map { color in (color.components ?? []).map { ($0 * 1000).rounded() / 1000 } }
+    [colors.first, colors.last].compactMap { $0 }.map { color in (color.components ?? []).map { ($0 * 1000).rounded() / 1000 } }
   }
 
   /// Polls once a millisecond until the crossfade has settled (its animation removed), so the check waits on the

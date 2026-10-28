@@ -16,7 +16,9 @@ public struct ThemeContext: Equatable, Sendable {
 /// Applied when drawing, never stored: the window draws `drawn(_:in:)`, the source keeps the user's colors. Per color
 /// of the theme, in the current appearance:
 ///
-/// 1. Composite the color at the theme's opacity over the window surface (`BrandTokens.surfaceBrand`).
+/// 1. Composite the color at the theme's opacity over the window surface (`BrandTokens.surfaceBrand`). The theme's
+///    overlay colors (#381) are drawn above it at their own alpha times the same opacity: the opacity is the overlay's
+///    strength, and at each stop the overlay color at that stop's position is composited over the stop before measuring.
 /// 2. Measure `primaryText`, composited at its own alpha, over that with WCAG 2.x (`Contrast.ratio`). Target 4.5:1,
 ///    7:1 with Increase Contrast.
 /// 3. If it falls short, mix the color toward near-black #121214 (light text) or porcelain (dark text) in 1 % steps
@@ -50,66 +52,103 @@ public enum ThemeContrast {
     public var tone: ThemeFlavor
     public var colors: [RGBA]
     public var mixes: [Double]
+    /// The overlay colors to draw: each with its alpha times the opacity (empty without overlay colors).
+    public var overlay: [RGBA] = []
   }
 
-  /// The drawn colors and tone for `stops` at `opacity`; nil without stops.
-  public static func resolve(stops: [RGBA], opacity: Double, in context: ThemeContext) -> Resolution? {
+  /// The drawn colors and tone for `stops` at `opacity`, with `overlay` colors above them; nil without stops.
+  public static func resolve(stops: [RGBA], opacity: Double, overlay: [RGBA] = [],
+                             in context: ThemeContext) -> Resolution? {
     guard !stops.isEmpty else { return nil }
     let opacity = min(max(opacity, 0), 1)
+    let tints = overlayTints(overlay, stops: stops.count, opacity: opacity)
+    func fits(_ tone: ThemeFlavor, _ mixes: [Double?]) -> Bool {
+      stops.indices.allSatisfy { index in
+        mixes[index].map { passes(stops[index], mix: $0, tone: tone, opacity: opacity, tint: tints[index], in: context) }
+          ?? false
+      }
+    }
+    func result(_ tone: ThemeFlavor, _ mixes: [Double]) -> Resolution {
+      resolution(stops, mixes: mixes, tone: tone, opacity: opacity, overlay: overlay, in: context)
+    }
     let own = context.appearance
     let other: ThemeFlavor = own == .light ? .dark : .light
-    for tone in [own, other] where stops.allSatisfy({ passes($0, mix: 0, tone: tone, opacity: opacity, in: context) }) {
-      return resolution(stops, mixes: stops.map { _ in 0 }, tone: tone, opacity: opacity, in: context)
-    }
+    let none = stops.map { _ in Double?.some(0) }
+    for tone in [own, other] where fits(tone, none) { return result(tone, none.map { $0 ?? 0 }) }
     for tone in [own, other] {
-      let steps = stops.map { requiredStep($0, tone: tone, opacity: opacity, in: context) }
+      let steps = stops.indices.map {
+        requiredStep(stops[$0], tone: tone, opacity: opacity, tint: tints[$0], in: context)
+      }
       guard steps.allSatisfy({ $0 != nil }) else { continue }
-      return resolution(stops, mixes: steps.map { Double($0 ?? 0) / 100 }, tone: tone, opacity: opacity, in: context)
+      return result(tone, steps.map { Double($0 ?? 0) / 100 })
     }
     // Neither tone reaches the target within 50 %: the appearance's tone at the strongest mix.
-    return resolution(stops, mixes: stops.map { _ in maximumMix }, tone: own, opacity: opacity, in: context)
+    return result(own, stops.map { _ in maximumMix })
   }
 
   /// `theme` as the window draws it in `context`: resolved, opaque colors at opacity 1 and the resolved tone in
-  /// `isDark`. Texture and strength are kept. A theme without colors is returned as it is.
+  /// `isDark`, and overlay colors whose alpha carries the opacity. Texture and strength are kept. A theme without colors is returned as it is.
   public static func drawn(_ theme: SpaceThemeInfo, in context: ThemeContext) -> SpaceThemeInfo {
-    guard let resolution = resolve(stops: theme.baseColors, opacity: theme.opacity, in: context) else { return theme }
+    guard let resolution = resolve(stops: theme.baseColors, opacity: theme.opacity, overlay: theme.overlayColors,
+                                   in: context) else { return theme }
     var drawn = theme
     drawn.baseColors = resolution.colors
+    drawn.overlayColors = resolution.overlay
     drawn.opacity = 1
     drawn.isDark = resolution.tone == .dark
     return drawn
   }
 
-  /// `stop` mixed `mix` toward the end color for `tone`, at `opacity` over the surface. Keeps the stop's color
-  /// space; with no mix at full opacity it is the stop itself.
-  static func composite(_ stop: RGBA, mix: Double, tone: ThemeFlavor, opacity: Double,
+  /// The overlay color above each of `count` evenly spaced stops, its alpha times `opacity`; clear where there is no
+  /// overlay. The overlay gradient runs over the same diagonal as the base, so a stop's position is its index over
+  /// `count - 1`.
+  static func overlayTints(_ overlay: [RGBA], stops count: Int, opacity: Double) -> [RGBA?] {
+    guard !overlay.isEmpty else { return Array(repeating: nil, count: count) }
+    return (0..<count).map { index in
+      var tint = ThemeGradient.sample(overlay, at: count > 1 ? Double(index) / Double(count - 1) : 0)
+      tint.alpha *= opacity
+      return tint
+    }
+  }
+
+  /// `stop` mixed `mix` toward the end color for `tone`, at `opacity` over the surface, with `tint` above it. Keeps
+  /// the stop's color space; with no mix at full opacity and no tint it is the stop itself.
+  static func composite(_ stop: RGBA, mix: Double, tone: ThemeFlavor, opacity: Double, tint: RGBA? = nil,
                         in context: ThemeContext) -> RGBA {
     let end = tone == .dark ? nearBlack : porcelain
     let mixed = mix > 0 ? RGBA.mix(stop, end, mix) : stop
     let alpha = mixed.alpha * opacity
     let surface = surface(context.appearance)
-    func over(_ top: Double, _ bottom: Double) -> Double { top * alpha + bottom * (1 - alpha) }
-    return RGBA(red: over(mixed.red, surface.red), green: over(mixed.green, surface.green),
-                blue: over(mixed.blue, surface.blue), alpha: 1, space: stop.space)
+    func over(_ top: Double, _ bottom: Double, _ alpha: Double) -> Double { top * alpha + bottom * (1 - alpha) }
+    let base = RGBA(red: over(mixed.red, surface.red, alpha), green: over(mixed.green, surface.green, alpha),
+                    blue: over(mixed.blue, surface.blue, alpha), alpha: 1, space: stop.space)
+    guard let tint, tint.alpha > 0 else { return base }
+    // A theme keeps one color space for its colors and its overlay, so the components blend as they are.
+    return RGBA(red: over(tint.red, base.red, tint.alpha), green: over(tint.green, base.green, tint.alpha),
+                blue: over(tint.blue, base.blue, tint.alpha), alpha: 1, space: base.space)
   }
 
-  private static func passes(_ stop: RGBA, mix: Double, tone: ThemeFlavor, opacity: Double,
+  private static func passes(_ stop: RGBA, mix: Double, tone: ThemeFlavor, opacity: Double, tint: RGBA?,
                              in context: ThemeContext) -> Bool {
-    let background = composite(stop, mix: mix, tone: tone, opacity: opacity, in: context)
+    let background = composite(stop, mix: mix, tone: tone, opacity: opacity, tint: tint, in: context)
     let text = BrandTokens.composite(ShellTokens.primaryText.resolve(tone), over: background)
     return Contrast.ratio(text, background) >= target(increaseContrast: context.increaseContrast)
   }
 
   /// The smallest mix, in 1 % steps, at which `stop` passes in `tone`; nil past `maximumMix`.
-  private static func requiredStep(_ stop: RGBA, tone: ThemeFlavor, opacity: Double,
+  private static func requiredStep(_ stop: RGBA, tone: ThemeFlavor, opacity: Double, tint: RGBA?,
                                    in context: ThemeContext) -> Int? {
-    (0...mixSteps).first { passes(stop, mix: Double($0) / 100, tone: tone, opacity: opacity, in: context) }
+    (0...mixSteps).first { passes(stop, mix: Double($0) / 100, tone: tone, opacity: opacity, tint: tint, in: context) }
   }
 
   private static func resolution(_ stops: [RGBA], mixes: [Double], tone: ThemeFlavor, opacity: Double,
-                                 in context: ThemeContext) -> Resolution {
+                                 overlay: [RGBA], in context: ThemeContext) -> Resolution {
     let colors = zip(stops, mixes).map { composite($0, mix: $1, tone: tone, opacity: opacity, in: context) }
-    return Resolution(tone: tone, colors: colors, mixes: mixes)
+    let scaled = overlay.map { color -> RGBA in
+      var color = color
+      color.alpha *= opacity
+      return color
+    }
+    return Resolution(tone: tone, colors: colors, mixes: mixes, overlay: scaled)
   }
 }

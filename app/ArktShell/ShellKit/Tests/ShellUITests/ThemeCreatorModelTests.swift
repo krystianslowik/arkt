@@ -124,3 +124,15 @@ struct ThemeCreatorModelTests {
     #expect(!model.theme.isDark)
   }
 }
+
+/// The creator has no control for the overlay (#381), so editing the colors keeps an imported theme's overlay.
+struct ThemeCreatorOverlayTests {
+  @Test func editingKeepsTheOverlayColors() {
+    let stored = SpaceThemeInfo(baseColors: [ThemePad.color(ThemeCreatorModelTests.blue)],
+                                overlayColors: [.black(0.2), .white(0.1)], opacity: 0.8, isDark: false)
+    var model = ThemeCreatorModel(theme: stored, isNew: false)
+    model.moveDot(0, to: ThemeCreatorModelTests.copper)
+    model.setOpacity(0.5)
+    #expect(model.theme.overlayColors == stored.overlayColors)
+  }
+}

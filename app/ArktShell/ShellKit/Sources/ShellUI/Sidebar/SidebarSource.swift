@@ -24,7 +24,8 @@ public enum SidebarLocation: Hashable, Sendable {
 public struct SpaceThemeInfo: Equatable, Sendable {
   /// Gradient stops, top-left to bottom-right (Track B: `SpaceTheme.baseColors`).
   public var baseColors: [RGBA]
-  /// Arc's second gradient layer (Track B: `SpaceTheme.overlayColors`). Not rendered yet.
+  /// Arc's second gradient layer (Track B: `SpaceTheme.overlayColors`), drawn above the base
+  /// gradient (#381). Each color's alpha is its strength; `ThemeContrast.drawn` multiplies in `opacity`.
   public var overlayColors: [RGBA]
   /// Tiled overlay texture: "grain", "sand", "denim" or "tweed" (Track B: `SpaceTheme.texture`); see `ThemeTexture`.
   public var texture: String?

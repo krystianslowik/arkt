@@ -11,8 +11,9 @@ import Testing
 ///   Black and white are the same in sRGB and P3, so the black/white text levels composite exactly.
 /// - The composited color is converted to sRGB (unclamped) before `Contrast.ratio`, so P3 luminance is not
 ///   read through sRGB coefficients.
-/// - Gradients are sampled between every pair of stops, because the luminance of a component-wise blend can dip
-///   below both ends.
+/// - Gradients are sampled between every pair of stops in OKLab (`ThemeGradient.mix`), the interpolation the window
+///   draws (#381); the luminance of a blend can dip below both ends. A theme's overlay colors are composited over
+///   each sample at the same position.
 /// - The texture multiplies the gradient (#120), so it darkens: each sample is also measured multiplied by the
 ///   theme's mean texture factor (`SpaceThemeInfo.meanTextureFactor`, encoded components).
 /// - Arc-imported themes are user data and not covered; the measured set is what ships: the bridge default, the
@@ -46,9 +47,15 @@ enum ShellContrastProbe {
 
   static func sampleGradient(_ theme: SpaceThemeInfo) -> [RGBA] {
     let stops = theme.baseColors.map(toP3)
-    let samples = stops.count > 1 ? zip(stops, stops.dropFirst()).flatMap { a, b in
-      (0...samplesPerSegment).map { RGBA.mix(a, b, Double($0) / Double(samplesPerSegment)) }
+    var samples = stops.count > 1 ? zip(stops, stops.dropFirst()).flatMap { a, b in
+      (0...samplesPerSegment).map { ThemeGradient.mix(a, b, Double($0) / Double(samplesPerSegment)) }
     } : stops
+    if !theme.overlayColors.isEmpty, samples.count > 1 {
+      let overlay = theme.overlayColors.map(toP3)
+      samples = samples.enumerated().map { index, base in
+        over(ThemeGradient.sample(overlay, at: Double(index) / Double(samples.count - 1)), base)
+      }
+    }
     let factor = theme.meanTextureFactor
     guard factor < 1 else { return samples }
     return samples + samples.map {
