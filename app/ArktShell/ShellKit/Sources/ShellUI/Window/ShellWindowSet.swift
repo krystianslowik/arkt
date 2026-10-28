@@ -282,11 +282,13 @@ public final class ShellWindowSet {
     controllers.reduce(into: []) { $0.formUnion($1.nodesHoldingClose) }
   }
 
-  /// What auto-archive skips this pass: every window's visible tabs and the tabs that would hold their close.
+  /// What auto-archive skips this pass: every window's visible tabs, the tabs that would hold their close, and
+  /// loaded tabs the engine reports as audible (BH-076), including a muted page that still plays.
   public var autoArchiveExempt: Set<NodeID> {
     controllers.reduce(into: []) { result, controller in
       result.formUnion(controller.sidebarController.resolver.visible)
       result.formUnion(controller.nodesHoldingClose)
+      result.formUnion(controller.nodesPlayingMedia)
     }
   }
 
