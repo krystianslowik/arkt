@@ -120,4 +120,25 @@ extension ChromiumEngine: EngineImporting {
       facade.importBookmarks(records) { continuation.resume(returning: ImportWriteResult($0)) }
     }
   }
+
+  public func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? {
+    await withCheckedContinuation { continuation in
+      facade.installExtensions(ids) { results in
+        continuation.resume(returning: results.map(ExtensionInstallResult.init))
+      }
+    }
+  }
+}
+
+extension ExtensionInstallResult {
+  @MainActor fileprivate init(_ result: any ArktExtensionInstallResult) {
+    let outcome: ExtensionInstallOutcome
+    switch result.status {
+    case .installed: outcome = .installed
+    case .alreadyInstalled: outcome = .alreadyInstalled
+    case .failed: outcome = .failed(result.failureReason ?? "install failed")
+    @unknown default: outcome = .failed(result.failureReason ?? "install failed")
+    }
+    self.init(id: result.extensionID, outcome: outcome)
+  }
 }

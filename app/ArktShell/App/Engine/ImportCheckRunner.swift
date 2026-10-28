@@ -14,7 +14,9 @@ import Foundation
 /// to the last days (the fixture's are from 2024, past the 90 days Chromium keeps), and writes them through
 /// `importHistory` and `importBookmarks`, twice: the second history call passes the first one's newest visit as the
 /// watermark and must write nothing. `verify` skips the import and only loads the page, for the run
-/// after a relaunch. Prints one `ARKT_IMPORT` line per step and quits through the application's own terminate.
+/// after a relaunch. `=extensions` (#513) installs the Web Store ids of `ARKT_EXTENSION_IDS` (comma separated) twice
+/// through `installExtensionResults`, pressing "Install" on the batch sheet from inside the process, and prints the
+/// results and the ids the engine reports as extension actions. Prints one `ARKT_IMPORT` line per step and quits through the application's own terminate.
 @MainActor
 final class ImportCheckRunner {
   static let switchName = "--arkt-import-check"
@@ -42,6 +44,10 @@ final class ImportCheckRunner {
     do {
       guard let engine = ChromiumEmbedding.makeEngine() else { throw RunnerError("no engine (before engineDidStart)") }
       guard engine.testAPIEnabled else { throw RunnerError("launch with --arkt-engine-test-api") }
+      if phase == "extensions" {
+        try await installExtensions(through: engine)
+        return 0
+      }
       if phase == "import" { try await importFixture(into: engine) }
       if phase == "verify" {
         // An empty batch writes nothing; the engine logs how many logins its store holds.
@@ -124,6 +130,54 @@ final class ImportCheckRunner {
     print("ARKT_IMPORT read bookmarks \(bookmarks.bookmarks.count) skipped \(bookmarks.skippedNodes)")
     print("ARKT_IMPORT bookmarks \(describe(await engine.importBookmarks(bookmarks.bookmarks)))")
     print("ARKT_IMPORT bookmarks again \(describe(await engine.importBookmarks(bookmarks.bookmarks)))")
+  }
+
+  private static func installExtensions(through engine: ChromiumEngine) async throws {
+    guard let list = ProcessInfo.processInfo.environment["ARKT_EXTENSION_IDS"] else {
+      throw RunnerError("ARKT_EXTENSION_IDS is not set")
+    }
+    let ids = list.split(separator: ",").map(String.init)
+    let host = RunnerWindowHost(index: 0)
+    let window = engine.createWindow(host: host)
+    host.window.makeKeyAndOrderFront(nil)
+    for round in 1...2 {
+      // The sheet is the shell's to answer in a real run; here the process presses its own "Install" button.
+      let presser = Task { @MainActor in
+        for _ in 0..<600 {
+          if let sheet = host.window.attachedSheet, let button = installButton(in: sheet.contentView) {
+            print("ARKT_IMPORT sheet shown round \(round): \(sheet.contentView.map(sheetText) ?? "")")
+            button.performClick(nil)
+            return
+          }
+          try? await Task.sleep(for: .milliseconds(100))
+        }
+        print("ARKT_IMPORT no sheet round \(round)")
+      }
+      let results = await engine.installExtensionResults(ids: ids)
+      presser.cancel()
+      for result in results ?? [] { print("ARKT_IMPORT extension round \(round) \(result.id) \(result.outcome)") }
+      let actions = engine.extensionActions(in: window)
+      print("ARKT_IMPORT extension actions \(actions.count): \(actions.map(\.name).joined(separator: ", "))")
+    }
+    engine.closeWindow(window)
+    host.window.orderOut(nil)
+  }
+
+  private static func installButton(in view: NSView?) -> NSButton? {
+    guard let view else { return nil }
+    if let button = view as? NSButton, button.title == "Install" { return button }
+    for subview in view.subviews { if let found = installButton(in: subview) { return found } }
+    return nil
+  }
+
+  private static func sheetText(_ view: NSView) -> String {
+    var parts: [String] = []
+    func walk(_ view: NSView) {
+      if let field = view as? NSTextField, !field.stringValue.isEmpty { parts.append(field.stringValue) }
+      view.subviews.forEach(walk)
+    }
+    walk(view)
+    return parts.joined(separator: " | ")
   }
 
   private static func showCookies(in engine: ChromiumEngine) async throws {

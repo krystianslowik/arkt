@@ -15,6 +15,22 @@ struct InMemoryEngineImportTests {
     try await EngineImportContract.runBookmarks(InMemoryEngine())
   }
 
+  @Test func keepsTheExtensionContract() async throws {
+    try await EngineImportContract.runExtensions(InMemoryEngine())
+  }
+
+  @Test func reportsAnUnavailableExtensionAndKeepsGoing() async {
+    let engine = InMemoryEngine()
+    let missing = String(repeating: "d", count: 32), present = String(repeating: "e", count: 32)
+    engine.unavailableExtensionIDs = [missing]
+    let results = await engine.installExtensionResults(ids: [missing, present])
+    #expect(results == [
+      ExtensionInstallResult(id: missing, outcome: .failed("not available from the Web Store")),
+      ExtensionInstallResult(id: present, outcome: .installed),
+    ])
+    #expect(engine.imports.extensionIDs == [present])
+  }
+
   @Test func recordsVisitsWithTheirCoreTransitionAndFoldersWithTheirPath() async {
     let engine = InMemoryEngine()
     let entry = EngineImportContract.historyEntry("https://example.com/", title: "T", transitions: [.typed, .keyword])

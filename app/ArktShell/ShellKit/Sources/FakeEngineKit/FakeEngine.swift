@@ -24,6 +24,11 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     imports.record(batch, after: watermark)
   }
   public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { imports.record(batch) }
+  /// Pretend Web Store ids the stub reports as "not available from the Web Store" (#513).
+  public var unavailableExtensionIDs: Set<String> = []
+  public func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? {
+    imports.record(extensions: ids, unavailable: unavailableExtensionIDs)
+  }
 
   private final class Entry {
     let webView: WKWebView

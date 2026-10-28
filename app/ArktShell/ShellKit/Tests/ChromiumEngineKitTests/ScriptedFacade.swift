@@ -1100,6 +1100,31 @@ final class ScriptedFacade: NSObject, ArktEngine {
     Task { @MainActor in completion(result) }
   }
 
+  /// What each `installExtensions` call received.
+  private(set) var installedExtensionBatches: [[String]] = []
+  /// The scripted result per id; an id not in it is installed.
+  var extensionAnswers: [String: (status: ArktExtensionInstallStatus, reason: String?)] = [:]
+
+  final class ScriptedExtensionResult: NSObject, ArktExtensionInstallResult {
+    let extensionID: String
+    let status: ArktExtensionInstallStatus
+    let failureReason: String?
+    init(_ id: String, _ status: ArktExtensionInstallStatus, _ reason: String?) {
+      extensionID = id; self.status = status; failureReason = reason
+    }
+  }
+
+  func installExtensions(
+    _ ids: [String], completion: @escaping ([any ArktExtensionInstallResult]) -> Void
+  ) {
+    installedExtensionBatches.append(ids)
+    let results: [any ArktExtensionInstallResult] = ids.map { id in
+      let answer = extensionAnswers[id] ?? (.installed, nil)
+      return ScriptedExtensionResult(id, answer.status, answer.reason)
+    }
+    Task { @MainActor in completion(results) }
+  }
+
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool {
     guard testAPIEnabled, let tab = tab as? ScriptedTab else { return false }
     return tab.answer(accept: accept)

@@ -417,6 +417,10 @@ final class TestEngine: NSObject, ArktEngine {
       written: 1, skipped: 1, failed: 0, failureReason: nil, lastVisitTime: entries.first?.visitTimes.last))
   }
 
+  func installExtensions(_ ids: [String], completion: @escaping ([any ArktExtensionInstallResult]) -> Void) {
+    completion([])
+  }
+
   func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {
     importedBookmarkPaths += bookmarks.map(\.folderPath)
     completion(TestImportResult(written: bookmarks.count, skipped: 0, failed: 0, failureReason: nil))

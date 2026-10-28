@@ -4239,3 +4239,83 @@ Cleanup: the app (SIGTERM) and the loopback server were stopped by PID; `lsregis
 - `OnDownloadRemoved` removes the observer before untracking.
 - Checks: `ChromiumDownloadTests` and `ChromiumEngineContractTests` pass; `out/Spike` incremental build and the Engine app build succeed. `.patches` 10 = rev-list 10.
 - Not run: Cmd-S in the real app. This session has no assistive access, so no key can be sent; the index pass-through is checked by reading `SavePackageFilePicker::FileSelected` (the index is its 1-based `save_types_` position, the same one passed to `SelectFile`), not by a run.
+
+## #513: Install extensions by Web Store id (Import from Arc, #131)
+
+Date 2026-10-29. Branch `engine/513-install-extensions` off `main` at `b5e1fc9`. `$CR` branch `arkt` at 10 commits (0001-0010) before and
+after: no patch. Overlay and facade only. `ProfileImportCoordinator` (#545) already calls `EngineImporting.installExtensions(ids:)`;
+`ExtensionListReader` (#523) supplies the ids.
+
+### Gate
+
+1. Task: install Web Store extensions by id, with a confirmation, one result per id, skipping what is installed. A seam does it:
+   `WebstoreStandaloneInstaller` (the class behind a Web Store "Add to Chrome" click, #121) has virtual hooks for the prompt, so a
+   subclass in `//arkt/browser` needs no upstream edit.
+2. Facade header: additive only. New `ArktExtensionInstallStatus`, `ArktExtensionInstallResult` and
+   `-installExtensions:completion:`; both header copies identical (`cmp`).
+3. `.patches`: no change, no patch number claimed.
+4. Build and checks: `out/Spike` incremental, the Engine app, ShellKit tests, one real run.
+
+### Decision: one confirmation for the import, then silent installs
+
+Per-extension prompts would show one sheet per extension (an Arc profile often has 10 or more), each asking the same thing after the user
+already chose to import. Chromium's `WebstoreInstallWithPrompt` always prompts; but `WebstoreStandaloneInstaller` skips the prompt when
+`CreateInstallPrompt()` returns null (`ProceedWithInstallPrompt` then accepts at once), and parks in `OnManifestParsed()` after the listing
+is fetched. So `BatchInstaller` (`engine/arkt/browser/arkt_extension_batch_install.mm`) keeps the whole Web Store path (listing fetch,
+CRX download, unpack, `CrxInstaller`, blocklist and policy checks) and replaces only the prompt:
+
+1. Every id that the profile does not have starts its fetch in parallel and stops at `OnManifestParsed()`.
+2. When all fetches are done, one `ArktDialogSheet` on the key window (else the main, else the frontmost visible window) lists the names
+   found (at most 8, then "and N more") with Install and Not now (Not now is the default button, Escape cancels).
+3. Install: `ProceedWithInstallPrompt()` on each, no further prompt, no post-install tab. Not now, a dismissed sheet or no window:
+   every waiting id fails with "not confirmed".
+
+Trade-off, stated in the sheet: the batch sheet does not show each extension's permission list (the Chromium prompt does). The sheet says an
+extension can read and change data on the sites the user visits and that each can be removed from Extensions afterwards. If a maintainer
+wants per-extension permission lists, the answer is a second sheet kind, not per-extension prompts. Not decided here.
+
+### Contract
+
+| Layer | Change |
+|---|---|
+| Facade (`arkt_engine.h`, both copies) | `-installExtensions:(NSArray<NSString*>*)ids completion:` with one `ArktExtensionInstallResult` per distinct id (`extensionID`, `status` installed / alreadyInstalled / failed, `failureReason`), main thread, never inside the call, also for an empty array |
+| `EngineAPI` | `ExtensionInstallOutcome` (`.installed`, `.alreadyInstalled`, `.failed(String)`), `ExtensionInstallResult`, `EngineImporting.installExtensionResults(ids:) -> [ExtensionInstallResult]?` (default nil). `installExtensions(ids:)` keeps its signature for the coordinator and now defaults to counting the results (`written` installed, `skipped` already installed, `failed` by reason) |
+| `ChromiumEngine` | `installExtensionResults` over the facade |
+| `InMemoryEngine`, `FakeEngine` | record installed ids; `unavailableExtensionIDs` stands in for ids the store lacks; `EngineImportContract.runExtensions` (order, duplicates, already installed, bad id fails alone, counts) |
+
+Reasons carry no id or name: "not a Web Store id", "not available from the Web Store", "not confirmed", "blocked by policy", "flagged as unsafe",
+"already being installed", "not supported on this Mac", "the Web Store listing could not be read", "install failed". A missing item (HTTP 404)
+and an unreachable store both reach `WebstoreStandaloneInstaller` as `WEBSTORE_REQUEST_ERROR`, so they share one reason. There is no
+batch timeout: a hung fetch holds its own result until the network layer gives up (not seen in the checks).
+
+### Checks
+
+| Check | Result | Evidence |
+|---|---|---|
+| New tests | PASS | `FakeEngineImportTests` and `InMemoryEngineImportTests` +2 each (contract, unavailable id), `ChromiumImportTests` +4 (results per id, coordinator counts, failed without reason, empty batch) |
+| ShellKit `swift test --skip ShellKitGUITests` | PASS | 1100, 38, 60, 9, 183, 49, 286, 123, 25 = 1873 passed, 0 failed (`nice -n 20`, `-j 2`) |
+| `out/Spike` incremental | PASS | `nice -n 20 autoninja -C out/Spike chrome -j 4`: finished successfully (twice: after the files, after the window fallback) |
+| Engine app | PASS | `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try513 -jobs 2`: `BUILD SUCCEEDED` |
+| `.patches` | in sync | 10 = `git rev-list --count 156.0.8078.48..arkt` 10 |
+| Header copies | identical | `cmp` |
+
+Real engine (Engine app on `out/Spike`, bundle id `dev.arkt.Arkt.try513`, throwaway profile, shell data folder and defaults suite under
+`profiles/513-*`, `--use-mock-keychain`, `--arkt-import-check=extensions` with `ARKT_EXTENSION_IDS`; the runner presses the sheet's
+Install button inside the process, so no synthetic input reached any other app):
+
+| Check | Result | Evidence |
+|---|---|---|
+| Valid id installs after one confirmation | PASS | ids: uBlock Origin Lite, `not-an-id`, 32 `a`; log `extension install sheet shown count=1`; sheet text "Install 1 extension?" with the one name (the other two failed before the sheet); result `installed` |
+| Invalid id fails cleanly | PASS | `failed("not a Web Store id")` at once, no sheet row, the other ids unaffected |
+| Well-formed id the store lacks | PASS | `failed("not available from the Web Store")` (`result=6`) |
+| Installed for real | PASS | extension actions of the window: 1, "uBlock Origin Lite"; profile folder `Default/Extensions/<id>` exists after the run |
+| Second call skips | PASS | round 2: `alreadyInstalled`, no sheet, same two failures |
+| Store unreachable | PASS | second run with `--proxy-server=http://127.0.0.1:9`: `failed("not available from the Web Store")` in both rounds, no `Extensions` folder, exit 0, no `FATAL`, `NOTREACHED` or `Check failed` |
+| Stderr | PASS | 0 hits of `FATAL`, `NOTREACHED`, `Check failed` in the first run |
+
+Not run: the decline path in the real app (covered by the scripted facade answers and the `Decline()` branch is a one-line call); more than one
+extension in the sheet (the list is a loop); the sidebar import flow end to end (#514 and #545 are the shell side).
+
+Cleanup: both processes exited by themselves (PIDs 87260 and 88803, confirmed with `ps -p`); `lsregister -u` on the embed copy (4 records for `dev.arkt.Arkt.try513`
+before, 0 after); the two profiles, the embed folder with its 518 dylib copies, derived data, build logs and the two defaults suites were
+deleted. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
