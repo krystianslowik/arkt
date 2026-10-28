@@ -275,8 +275,9 @@ as usual (Personal sample theme in light, Dev in dark).
   crossfade starts on the next display frame after the page is mounted in the main card. Open in with no main window
   open takes the no-flight path (the window it opens has no laid-out card to fly to). The Today row is in the sidebar
   from the start of the flight and drawn by its clock; the old selection fades out on the room spring and the new
-  row's selection fades in with the row, then the selection moves to it when the page lands (#455; a current
-  Favorite tile's fill is not covered yet, #465) and the flying card carries the card shadow (#456, decided
+  row's selection fades in with the row, then the selection moves to it when the page lands (#455). A current
+  Favorite has no outline row, so its tile's selection fill fades on that same room value; the favicon stays, and
+  the title is the tile's accessibility label, which is not faded (#465). The flying card carries the card shadow (#456, decided
   2026-10-26: the prototype's lifted plate has `--card-shadow`; light only, none in dark where the token is clear). It
   is a layer of its own under the card (the card's mask would clip it) with the main card's values (`cardShadow`,
   blur 3, offset 1 pt down), the card's position, scale and opacity, so it fades with the landing's crossfade, and an

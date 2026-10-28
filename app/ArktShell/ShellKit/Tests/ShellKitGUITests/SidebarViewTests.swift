@@ -699,7 +699,7 @@ final class SidebarReviewTests: XCTestCase {
     let tile = try XCTUnwrap(controller.view.favorites.tile(for: favorite))
     tile.layoutSubtreeIfNeeded()
     tile.displayIfNeeded()
-    let layer = try XCTUnwrap(tile.layer)
+    let layer = tile.fillLayer
     XCTAssertEqual(layer.shadowOpacity, 1)
     XCTAssertEqual(try XCTUnwrap(layer.shadowPath).boundingBox, layer.bounds)
     tile.flavor = .dark
