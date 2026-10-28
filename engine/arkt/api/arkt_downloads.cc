@@ -60,6 +60,20 @@ bool IsOpenable(int danger_type) {
   }
 }
 
+// The file is held for the user's answer: not openable and not a scan still
+// running. The same set as the shell's `DownloadDangerType.isHeldForDecision`
+// (it includes types `DownloadItem::IsDangerous()` reports false for, such as
+// a failed deep scan and maybe-dangerous content).
+bool IsHeld(int danger_type) {
+  switch (static_cast<download::DownloadDangerType>(danger_type)) {
+    case download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING:
+    case download::DOWNLOAD_DANGER_TYPE_ASYNC_LOCAL_PASSWORD_SCANNING:
+      return false;
+    default:
+      return !IsOpenable(danger_type);
+  }
+}
+
 // The danger types for which the only answer is Delete (a policy, a failed
 // scan, a forced upload): not kept, only discarded.
 bool IsBlocked(int danger_type) {
@@ -205,6 +219,7 @@ void DownloadWatcher::OnDownloadRemoved(download::DownloadItem* item) {
   if (std::find(items_.begin(), items_.end(), item) == items_.end()) {
     return;
   }
+  item->RemoveObserver(this);
   Untrack(item);
   delegate_->DownloadRemoved(MakeSnapshot(item));
 }
@@ -289,12 +304,14 @@ void DownloadWatcher::Perform(DownloadCommand command,
       }
       break;
     case DownloadCommand::kKeepDangerous:
+      // Chromium can validate only what it reports as dangerous; a held type
+      // it does not (failed scan, maybe dangerous) has nothing to validate.
       if (item->IsDangerous() && !IsBlocked(danger)) {
         item->ValidateDangerousDownload();
       }
       break;
     case DownloadCommand::kDiscardDangerous:
-      if (item->IsDangerous() || IsBlocked(danger)) {
+      if (IsHeld(danger) || item->IsDangerous()) {
         // Cancel deletes the partial file of an active download; the target
         // of a finished one is deleted here.
         const base::FilePath target = item->GetTargetFilePath();
@@ -373,6 +390,7 @@ class ArktSaveDialog : public ui::SelectFileDialog {
       return;
     }
     pending_ = true;
+    file_type_index_ = file_type_index;
     Handler().Run(
         default_path.BaseName().AsUTF8Unsafe(), default_path.DirName(),
         base::BindOnce(&ArktSaveDialog::Answered, weak_factory_.GetWeakPtr()));
@@ -396,7 +414,9 @@ class ArktSaveDialog : public ui::SelectFileDialog {
       return;
     }
     if (chosen && !chosen->empty()) {
-      listener_->FileSelected(ui::SelectedFileInfo(*chosen), 0);
+      // The index is the one the caller offered: Save Page As reads its save
+      // type from it.
+      listener_->FileSelected(ui::SelectedFileInfo(*chosen), file_type_index_);
     } else {
       listener_->FileSelectionCanceled();
     }
@@ -404,6 +424,7 @@ class ArktSaveDialog : public ui::SelectFileDialog {
 
   scoped_refptr<ui::SelectFileDialog> platform_;
   bool pending_ = false;
+  int file_type_index_ = 0;
   base::WeakPtrFactory<ArktSaveDialog> weak_factory_{this};
 };
 

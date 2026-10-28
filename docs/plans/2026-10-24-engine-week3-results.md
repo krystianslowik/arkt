@@ -4230,3 +4230,12 @@ Real app (Engine app on `out/Spike`, bundle id `dev.arkt.Arkt.try132`, copy on t
 | Stderr | PASS | no `FATAL`, `NOTREACHED`, `Check failed` |
 
 Cleanup: the app (SIGTERM) and the loopback server were stopped by PID; `lsregister -u` on both app paths (0 records for `dev.arkt.Arkt.try132`); the copy, the 518 dylib copies, the embed folder, derived data, logs, the defaults suite and the saved files were deleted.
+
+### #132 review fixes
+
+- Save panel: the shell's answer now carries the file type index the caller offered, so Save Page As (which reads its save type from it) no longer gets index 0 (`SAVE_PAGE_TYPE_UNKNOWN`). Plain download saves pass their own index.
+- Keep and Discard: Discard acts on every type the shell holds (`IsHeld`, the same set as `isHeldForDecision`) or that Chromium reports dangerous. Keep still calls `ValidateDangerousDownload` only for what `IsDangerous()` reports, because Chromium can validate nothing else: a failed deep scan or maybe-dangerous content stays held in the shell with Discard only in effect.
+- A persisted `.ask` preference installs the panel handler in init; `ChromiumDownloadTests` covers it.
+- `OnDownloadRemoved` removes the observer before untracking.
+- Checks: `ChromiumDownloadTests` and `ChromiumEngineContractTests` pass; `out/Spike` incremental build and the Engine app build succeed. `.patches` 10 = rev-list 10.
+- Not run: Cmd-S in the real app. This session has no assistive access, so no key can be sent; the index pass-through is checked by reading `SavePackageFilePicker::FileSelected` (the index is its 1-based `save_types_` position, the same one passed to `SelectFile`), not by a run.

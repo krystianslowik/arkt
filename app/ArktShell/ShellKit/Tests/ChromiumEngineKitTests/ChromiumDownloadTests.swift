@@ -108,6 +108,7 @@ struct ChromiumDownloadTests {
   @Test func theEngineStartsFromThePrefsTheProfileHas() {
     facade.downloadPromptsForLocation = true
     #expect(ChromiumEngine(facade: facade).downloadSavePreference == .ask)
+    #expect(facade.downloadDestinationHandler != nil, "a persisted .ask has its panel handler from the start")
     facade.downloadPromptsForLocation = false
     #expect(ChromiumEngine(facade: facade).downloadSavePreference == .folder(facade.downloadDirectory))
   }

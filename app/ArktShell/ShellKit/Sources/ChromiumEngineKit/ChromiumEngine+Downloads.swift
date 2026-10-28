@@ -92,7 +92,7 @@ extension ChromiumEngine {
 
   /// Answers Chromium's save panel with the shell's chooser. Without a chooser the download goes to the default folder
   /// under its suggested name.
-  private func installDestinationHandler() {
+  func installDestinationHandler() {
     facade.downloadDestinationHandler = { [weak self] suggested, directory, answer in
       MainActor.assumeIsolated {
         guard let chooser = self?.downloadDestinationChooser else {

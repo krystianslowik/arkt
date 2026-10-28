@@ -129,6 +129,8 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
   init(facade: any ArktEngine) {
     self.facade = facade
     downloadSavePreference = facade.downloadPromptsForLocation ? .ask : .folder(facade.downloadDirectory)
+    // `didSet` does not run in init: the persisted `.ask` still needs its panel handler.
+    if downloadSavePreference == .ask { installDestinationHandler() }
     sinkToken = facade.addEventSink { [weak self] batch in
       self?.receive(batch)
     }
