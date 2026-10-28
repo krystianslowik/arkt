@@ -948,7 +948,9 @@ extension FakeEngine {
     guard let record = downloadRecords[id], let item = download(id) else { return }
     record.isEnding = true
     record.progressObservation = nil
-    record.download?.cancel { _ in }
+    // WebKit finishes the cancel asynchronously: keep the download alive until it has, so it is never released while
+    // it is still starting up.
+    if let download = record.download { download.cancel { _ in withExtendedLifetime(download) {} } }
     record.download = nil
     if let target = item.targetPath {
       try? FileManager.default.removeItem(at: target)

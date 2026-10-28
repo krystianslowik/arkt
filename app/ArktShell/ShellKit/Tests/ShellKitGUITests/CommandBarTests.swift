@@ -1200,7 +1200,8 @@ final class CommandBarTests: XCTestCase {
     outline.layoutSubtreeIfNeeded()
     let rowView = try XCTUnwrap(outline.rowView(atRow: row, makeIfNecessary: true))
     let content = try XCTUnwrap(shell.window?.contentView)
-    let hit = content.hitTest(rowView.convert(NSPoint(x: 10, y: rowView.bounds.midY), to: content))
+    // `hitTest` takes the point in the superview's coordinates; the content view is flipped, its superview is not.
+    let hit = content.hitTest(rowView.convert(NSPoint(x: 10, y: rowView.bounds.midY), to: content.superview))
     XCTAssertTrue(hit?.isDescendant(of: outline) ?? false,
                   "the click lands on the sidebar row, not the bar (hit: \(hit.map { String(describing: type(of: $0)) } ?? "nil"))")
 

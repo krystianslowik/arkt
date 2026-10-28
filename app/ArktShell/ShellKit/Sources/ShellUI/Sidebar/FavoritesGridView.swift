@@ -243,7 +243,11 @@ final class FavoritesCollectionView: NSCollectionView {
     let downIndexPath = indexPathForItem(at: convert(event.locationInWindow, from: nil))
     onMouseDownBegan?()
     super.mouseDown(with: event)
-    let endEvent = NSApp.currentEvent ?? event
+    // The tracking loop ends on this window's mouse-up. When no loop ran, the current event is an unrelated earlier
+    // one, so only a mouse-up of this window counts; otherwise the press itself decides.
+    let endEvent = NSApp.currentEvent.flatMap {
+      $0.type == .leftMouseUp && $0.windowNumber == event.windowNumber ? $0 : nil
+    } ?? event
     onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
   }
 
