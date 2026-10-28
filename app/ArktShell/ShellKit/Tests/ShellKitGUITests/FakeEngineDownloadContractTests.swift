@@ -28,7 +28,12 @@ final class FakeEngineDownloadContractTests: XCTestCase {
   func testDownloadIsReportedProgressesAndCompletes() async throws {
     try await EngineContract.downloadIsReportedProgressesAndCompletes(harness)
   }
-  func testCancelEndsAnActiveDownloadOnce() async throws { try await EngineContract.cancelEndsAnActiveDownloadOnce(harness) }
+  func testCancelEndsAnActiveDownloadOnce() async throws {
+    do { try await EngineContract.cancelEndsAnActiveDownloadOnce(harness) } catch {
+      print("DIAG cancel test threw \(String(reflecting: error)) of type \(type(of: error))")
+      throw error
+    }
+  }
   func testRemoveForgetsADownloadAndKeepsItsFile() async throws {
     try await EngineContract.removeForgetsADownloadAndKeepsItsFile(harness)
   }

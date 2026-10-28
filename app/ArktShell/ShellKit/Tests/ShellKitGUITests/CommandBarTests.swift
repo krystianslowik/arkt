@@ -1191,18 +1191,22 @@ final class CommandBarTests: XCTestCase {
     XCTAssertTrue(shell.commandBar.isVisible)
 
     let outline = try XCTUnwrap(shell.sidebarController.view.currentOutline)
-    outline.layoutSubtreeIfNeeded()
+    let content = try XCTUnwrap(shell.window?.contentView)
+    content.layoutSubtreeIfNeeded()
     let outlineController = try XCTUnwrap(shell.sidebarController.currentPage?.outlineController)
     let row = outlineController.row(for: target)
     XCTAssertGreaterThanOrEqual(row, 0)
     // A runner screen smaller than the 1400 x 900 frame shrinks the window; the row must be on screen to be hit.
     outline.scrollRowToVisible(row)
-    outline.layoutSubtreeIfNeeded()
+    content.layoutSubtreeIfNeeded()
     let rowView = try XCTUnwrap(outline.rowView(atRow: row, makeIfNecessary: true))
-    let content = try XCTUnwrap(shell.window?.contentView)
-    let hit = content.hitTest(rowView.convert(NSPoint(x: 10, y: rowView.bounds.midY), to: content))
+    let point = rowView.convert(NSPoint(x: 10, y: rowView.bounds.midY), to: content)
+    let hit = content.hitTest(point)
+    let diagnostics = "window \(shell.window?.frame ?? .zero), content \(content.bounds), point \(point), "
+      + "row \(row) of \(outline.numberOfRows), outline visible \(outline.visibleRect), "
+      + "sidebar \(shell.sidebarController.view.frame), pager \(shell.sidebarController.view.pager.frame)"
     XCTAssertTrue(hit?.isDescendant(of: outline) ?? false,
-                  "the click lands on the sidebar row, not the bar (hit: \(hit.map { String(describing: type(of: $0)) } ?? "nil"))")
+                  "the click lands on the sidebar row, not the bar (hit: \(hit.map { String(describing: type(of: $0)) } ?? "nil"); \(diagnostics))")
 
     // The click's two effects, as AppKit delivers them: the shell window goes key and the row activates.
     shell.commandBar.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification,

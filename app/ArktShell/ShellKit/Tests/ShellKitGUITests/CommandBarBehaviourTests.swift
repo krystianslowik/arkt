@@ -327,11 +327,13 @@ final class CommandBarBehaviourTests: XCTestCase {
   }
 
   func testANarrowWindowKeepsTheQueryFieldWideAndHidesThePills() throws {
+    window.minSize = NSSize(width: 320, height: 200)       // the shell's own minimum would hold the window wider
     window.setFrame(NSRect(x: 100, y: 100, width: 420, height: 700), display: true)
     showMixed()
     bar.barView.layoutSubtreeIfNeeded()
     XCTAssertGreaterThanOrEqual(bar.barView.field.frame.width, CommandBarView.minimumFieldWidth)
-    XCTAssertTrue(bar.barView.pills.isHidden, "the pills give way; Cmd-1 to Cmd-4 still filter")
+    XCTAssertTrue(bar.barView.pills.isHidden,
+                  "the pills give way; Cmd-1 to Cmd-4 still filter (window \(window.frame), bar \(bar.panel.frame), pills \(bar.barView.pills.frame), field \(bar.barView.field.frame))")
     try command(2)
     XCTAssertEqual(bar.filter, .tabs)
     window.setFrame(NSRect(x: 100, y: 100, width: 1280, height: 800), display: true)

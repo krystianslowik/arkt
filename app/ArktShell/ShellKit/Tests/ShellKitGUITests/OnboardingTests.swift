@@ -614,9 +614,11 @@ final class OnboardingTests: XCTestCase {
     onboarding.performPrimary()                                           // Welcome to Make it yours
     onboarding.performEscape()                                            // Skip to Default browser
     XCTAssertEqual(onboarding.flow.step, .defaultBrowser)
-    settle(0.3)
     let footer: [NSView] = [onboarding.view.backButton, onboarding.view.progressLabel, onboarding.view.skipButton]
     let layers = try footer.map { try XCTUnwrap($0.layer) }
+    // The step change fades the footer in; the fold's fade starts from what is presented, so wait for the presented
+    // value to reach 1 instead of a fixed time that a loaded runner overruns.
+    XCTAssertTrue(spin { layers.allSatisfy { $0.presentation()?.opacity == 1 } }, "the footer finished fading in")
     XCTAssertEqual(layers.map(\.opacity), [1, 1, 1], "the whole footer shows before the finish")
     let shownProgress = onboarding.view.progressLabel.text
     XCTAssertFalse(shownProgress.isEmpty)
