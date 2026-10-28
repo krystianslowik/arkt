@@ -14,6 +14,7 @@
 #include "arkt/api/arkt_embedder.h"
 #include "arkt/api/arkt_import_writer.h"
 #include "arkt/browser/arkt_browser_window.h"
+#include "arkt/browser/arkt_extension_batch_install.h"
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
@@ -837,6 +838,19 @@ NSData* PNGForInfobarIcon(NSImage* image) {
 @synthesize failed = _failed;
 @synthesize failureReason = _failureReason;
 @synthesize lastVisitTime = _lastVisitTime;
+@end
+
+// One id of an extension install batch (#513).
+@interface ArktFacadeExtensionInstallResult : NSObject <ArktExtensionInstallResult>
+@property(nonatomic, copy) NSString* extensionID;
+@property(nonatomic, assign) ArktExtensionInstallStatus status;
+@property(nonatomic, copy, nullable) NSString* failureReason;
+@end
+
+@implementation ArktFacadeExtensionInstallResult
+@synthesize extensionID = _extensionID;
+@synthesize status = _status;
+@synthesize failureReason = _failureReason;
 @end
 
 // One registered event sink.
@@ -3561,6 +3575,50 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
       base::BindOnce(&arkt::DeliverImportResult, completion));
 }
 
+- (void)installExtensions:(NSArray<NSString*>*)ids
+               completion:(void (^)(NSArray<id<ArktExtensionInstallResult>>*
+                                        results))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<std::string> list;
+  list.reserve(ids.count);
+  for (NSString* extension_id in ids) {
+    list.push_back(base::SysNSStringToUTF8(extension_id));
+  }
+  LOG(WARNING) << "ARKT: facade installExtensions " << list.size();
+  arkt::InstallWebstoreExtensions(
+      arkt::EmbedderProfile(), std::move(list),
+      base::BindOnce(
+          [](void (^completion)(NSArray<id<ArktExtensionInstallResult>>*),
+             std::vector<arkt::ExtensionInstallOutcome> outcomes) {
+            NSMutableArray<id<ArktExtensionInstallResult>>* results =
+                [NSMutableArray arrayWithCapacity:outcomes.size()];
+            for (const arkt::ExtensionInstallOutcome& outcome : outcomes) {
+              ArktFacadeExtensionInstallResult* result =
+                  [[ArktFacadeExtensionInstallResult alloc] init];
+              result.extensionID = base::SysUTF8ToNSString(outcome.id);
+              switch (outcome.status) {
+                case arkt::ExtensionInstallOutcome::Status::kInstalled:
+                  result.status = ArktExtensionInstallStatusInstalled;
+                  break;
+                case arkt::ExtensionInstallOutcome::Status::kAlreadyInstalled:
+                  result.status = ArktExtensionInstallStatusAlreadyInstalled;
+                  break;
+                case arkt::ExtensionInstallOutcome::Status::kFailed:
+                  result.status = ArktExtensionInstallStatusFailed;
+                  result.failureReason =
+                      base::SysUTF8ToNSString(outcome.reason);
+                  break;
+              }
+              [results addObject:result];
+            }
+            completion(results);
+          },
+          completion));
+}
+- (void)cancelExtensionInstalls {
+  arkt::CheckFacadeEntry();
+  arkt::CancelWebstoreExtensionInstalls();
+}
 
 // MARK: Downloads (#132)
 

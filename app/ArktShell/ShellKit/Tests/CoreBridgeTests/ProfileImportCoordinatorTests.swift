@@ -467,6 +467,16 @@ struct ProfileImportCoordinatorTests {
     #expect(harness.engine.installCalls.count == 1)
   }
 
+  @Test func cancelDuringTheInstallEndsTheRunWithoutRecordingTheIds() async throws {
+    let harness = try Harness()
+    let coordinator = harness.coordinator
+    harness.engine.installResult = ImportWriteResult(failed: 1, failureReason: "cancelled: 1\n")
+    harness.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
+    let summary = try await harness.summary(ImportSelection([.extensions]))
+    #expect(summary.cancelled)
+    #expect(await harness.records.stored.extensionIDs.isEmpty)
+  }
+
   // MARK: Counts only
 
   @Test func eventsAndSummaryHoldNoItemText() async throws {
