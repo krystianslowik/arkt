@@ -244,6 +244,7 @@ final class FavoritesCollectionView: NSCollectionView {
     onMouseDownBegan?()
     super.mouseDown(with: event)
     let endEvent = NSApp.currentEvent ?? event
+    print("DIAG grid mouseDown down=\(String(describing: downIndexPath)) endEvent=\(endEvent.type.rawValue) loc=\(endEvent.locationInWindow) win=\(endEvent.windowNumber) mine=\(window?.windowNumber ?? -9) isNilCurrent=\(NSApp.currentEvent == nil)")
     onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
   }
 
@@ -622,6 +623,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   }
 
   private func mouseDownEnded(downIndexPath: IndexPath?, at point: NSPoint) {
+    print("DIAG grid ended tracking=\(isTrackingMouse) drag=\(didDragInMouseDown) dragging=\(isDragging) down=\(String(describing: downIndexPath)) at=\(point) now=\(String(describing: collectionView.indexPathForItem(at: point))) id=\(String(describing: downIndexPath.flatMap { nodeID(at: $0) }))")
     isTrackingMouse = false
     collectionView.deselectItems(at: collectionView.selectionIndexPaths)
     guard !didDragInMouseDown, !isDragging,

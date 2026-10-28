@@ -30,7 +30,7 @@ final class FakeEngineDownloadContractTests: XCTestCase {
   }
   func testCancelEndsAnActiveDownloadOnce() async throws {
     do { try await EngineContract.cancelEndsAnActiveDownloadOnce(harness) } catch {
-      print("DIAG cancel test threw \(String(reflecting: error)) of type \(type(of: error))")
+      print("DIAG cancel test threw \(String(reflecting: error)) of type \(type(of: error)) trace \(EngineContract.diagTrace)")
       throw error
     }
   }

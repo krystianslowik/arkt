@@ -1207,7 +1207,11 @@ final class CommandBarTests: XCTestCase {
       + "sidebar \(shell.sidebarController.view.frame), pager \(shell.sidebarController.view.pager.frame), "
       + "content flipped \(content.isFlipped), row rect \(outline.rect(ofRow: row)), outline frame \(outline.frame), "
       + "clip bounds \(outline.enclosingScrollView?.contentView.bounds ?? .zero), scroll frame \(outline.enclosingScrollView?.frame ?? .zero), "
-      + "hit frame \(hit?.frame ?? .zero) chain \(sequence(first: hit, next: { $0?.superview }).prefix(6).map { String(describing: type(of: $0)) })"
+      + "hit frame \(hit?.frame ?? .zero), pager hidden \(shell.sidebarController.view.pager.isHidden) "
+      + "alpha \(shell.sidebarController.view.pager.alphaValue) strip \(shell.sidebarController.view.pager.strip.frame) "
+      + "pages \(shell.sidebarController.view.pager.pages.map(\.frame)) index \(shell.sidebarController.view.pager.index) "
+      + "pagerHit \(String(describing: shell.sidebarController.view.pager.hitTest(shell.sidebarController.view.convert(point, from: content)).map { type(of: $0) })) "
+      + "sidebarSubviews \(shell.sidebarController.view.subviews.map { "\(type(of: $0)) \($0.frame) hidden=\($0.isHidden)" })"
     XCTAssertTrue(hit?.isDescendant(of: outline) ?? false,
                   "the click lands on the sidebar row, not the bar (hit: \(hit.map { String(describing: type(of: $0)) } ?? "nil"); \(diagnostics))")
 

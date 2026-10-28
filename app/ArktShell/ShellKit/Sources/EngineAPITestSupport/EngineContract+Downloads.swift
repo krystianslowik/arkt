@@ -35,6 +35,7 @@ public struct DownloadDrivers {
 // MARK: - Rule 24
 
 extension EngineContract {
+  nonisolated(unsafe) public static var diagTrace: [String] = []
   /// The size every check's download has.
   static let downloadSize: Int64 = 4_000
 
@@ -97,29 +98,25 @@ extension EngineContract {
   }
 
   public static func cancelEndsAnActiveDownloadOnce(_ h: EngineHarness) async throws {
-    print("DIAG cancel 1")
+    diagTrace = ["start"]
     let (client, engine, drivers) = try downloadEngine(h)
     let recorder = EventRecorder(client)
-    print("DIAG cancel 2")
+    diagTrace.append("engine")
     let id = try await drivers.start(client, "Cancel.bin", downloadSize)
-    print("DIAG cancel 3 started \(String(describing: engine.download(id)))")
+    diagTrace.append("started")
     engine.perform(.cancel, on: id)
-    print("DIAG cancel 4 performed \(String(describing: engine.download(id)?.state))")
-    do { try await waitUntil(timeout: .seconds(10)) { downloadState(engine, id) == .cancelled } } catch {
-      print("DIAG cancel wait threw \(String(reflecting: error)) \(type(of: error))"); throw error
-    }
-    print("DIAG cancel 5")
+    diagTrace.append("cancelled")
+    try await waitUntil(timeout: .seconds(10)) { downloadState(engine, id) == .cancelled }
+    diagTrace.append("waited")
     try require(engine.download(id)?.endTime != nil, "a cancelled download has an end time")
     let count = recorder.downloadEvents(for: id).count
-    print("DIAG cancel 6 events \(recorder.downloadEvents(for: id))")
     engine.perform(.cancel, on: id)                                  // finished: nothing happens
     engine.perform(.pause, on: id)
     engine.perform(.resume, on: id)
     engine.perform(.cancel, on: DownloadID("unknown"))               // unknown: nothing happens
-    print("DIAG cancel 7")
+    diagTrace.append("noops")
     try require(recorder.downloadEvents(for: id).count == count && downloadState(engine, id) == .cancelled,
                 "a command that does not apply must change nothing: \(recorder.downloadEvents(for: id))")
-    print("DIAG cancel 8")
     if let target = engine.download(id)?.targetPath {
       try require(!FileManager.default.fileExists(atPath: target.path()), "the partial file is deleted")
     }
