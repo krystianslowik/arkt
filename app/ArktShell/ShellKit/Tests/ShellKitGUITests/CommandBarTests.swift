@@ -1204,7 +1204,10 @@ final class CommandBarTests: XCTestCase {
     let hit = content.hitTest(point)
     let diagnostics = "window \(shell.window?.frame ?? .zero), content \(content.bounds), point \(point), "
       + "row \(row) of \(outline.numberOfRows), outline visible \(outline.visibleRect), "
-      + "sidebar \(shell.sidebarController.view.frame), pager \(shell.sidebarController.view.pager.frame)"
+      + "sidebar \(shell.sidebarController.view.frame), pager \(shell.sidebarController.view.pager.frame), "
+      + "content flipped \(content.isFlipped), row rect \(outline.rect(ofRow: row)), outline frame \(outline.frame), "
+      + "clip bounds \(outline.enclosingScrollView?.contentView.bounds ?? .zero), scroll frame \(outline.enclosingScrollView?.frame ?? .zero), "
+      + "hit frame \(hit?.frame ?? .zero) chain \(sequence(first: hit, next: { $0?.superview }).prefix(6).map { String(describing: type(of: $0)) })"
     XCTAssertTrue(hit?.isDescendant(of: outline) ?? false,
                   "the click lands on the sidebar row, not the bar (hit: \(hit.map { String(describing: type(of: $0)) } ?? "nil"); \(diagnostics))")
 
