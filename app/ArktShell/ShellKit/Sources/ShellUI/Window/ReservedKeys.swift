@@ -11,6 +11,11 @@ import Carbon.HIToolbox
 /// no ASCII character (a Cyrillic layout) matches by its virtual key code (`kVK_ANSI_W` for the W key), as the main
 /// menu does for such layouts. Keys without a character (arrows) match by key code. Modifiers must match exactly:
 /// Shift-Cmd-T is not Cmd-T.
+///
+/// The digit row and the punctuation keys (`matchesKeyCode`) also match by key code on every layout: AZERTY types
+/// "&" on the 1 key and QWERTZ types "-" on the slash key, so the typed character is not the menu's key. Matching
+/// more than the menu does is harmless, because a reserved key only goes to the main menu first and the menu
+/// decides; matching less drops the key when a page has focus (#497).
 public struct ReservedKeys: Sendable {
   public struct Key: Hashable, Sendable {
     public let keyCode: UInt16
@@ -18,11 +23,15 @@ public struct ReservedKeys: Sendable {
     public let character: String
     /// Device-independent modifiers, `.function` and `.numericPad` excluded.
     public let modifiers: UInt
+    /// Whether the key code matches whatever the layout types on that key (digit row, punctuation). Letters stay
+    /// off: AZERTY's Z key sits where W is, and Cmd-Z there belongs to the page.
+    public let matchesKeyCode: Bool
 
-    public init(keyCode: Int, character: String, modifiers: NSEvent.ModifierFlags) {
+    public init(keyCode: Int, character: String, modifiers: NSEvent.ModifierFlags, matchesKeyCode: Bool = false) {
       self.keyCode = UInt16(keyCode)
       self.character = character
       self.modifiers = modifiers.rawValue
+      self.matchesKeyCode = matchesKeyCode
     }
   }
 
@@ -62,14 +71,15 @@ public struct ReservedKeys: Sendable {
 
   /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041: `SpacesMenu`).
   private static let spaceKeys: [Key] = digits.map {
-    Key(keyCode: $0.code, character: $0.character, modifiers: .control)
+    Key(keyCode: $0.code, character: $0.character, modifiers: .control, matchesKeyCode: true)
   }
 
-  /// Ctrl-Shift-=, -, ], [ and Ctrl-Shift-1 ... 4 (KB-070 to KB-072: `SplitMenu`), the unshifted US characters.
+  /// Ctrl-Shift-=, -, ], [ and Ctrl-Shift-1 ... 4 (KB-070 to KB-072: `SplitMenu`): the unshifted US characters, and
+  /// the US key codes on any layout (#497).
   private static let splitKeys: [Key] = (
     [(kVK_ANSI_Equal, "="), (kVK_ANSI_Minus, "-"), (kVK_ANSI_RightBracket, "]"), (kVK_ANSI_LeftBracket, "[")]
       + digits.prefix(4).map { ($0.code, $0.character) }
-  ).map { Key(keyCode: $0.0, character: $0.1, modifiers: [.control, .shift]) }
+  ).map { Key(keyCode: $0.0, character: $0.1, modifiers: [.control, .shift], matchesKeyCode: true) }
 
   private static let digits: [(code: Int, character: String)] = [
     (kVK_ANSI_1, "1"), (kVK_ANSI_2, "2"), (kVK_ANSI_3, "3"), (kVK_ANSI_4, "4"), (kVK_ANSI_5, "5"),
@@ -89,6 +99,7 @@ public struct ReservedKeys: Sendable {
     let typesASCII = character.unicodeScalars.count == 1 && character.unicodeScalars.allSatisfy(\.isASCII)
     return keys.contains { key in
       guard key.modifiers == flags else { return false }
+      if key.matchesKeyCode, key.keyCode == keyCode { return true }
       guard !key.character.isEmpty, typesASCII else { return key.keyCode == keyCode }
       return key.character == character
     }

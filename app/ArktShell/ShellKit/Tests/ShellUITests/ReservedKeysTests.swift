@@ -119,6 +119,53 @@ struct ReservedKeysTests {
     #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_A), character: "a", modifiers: .control))
   }
 
+  /// #497: AZERTY types "&", "é", quote, apostrophe, "(", "§", "è", "!" and "ç" on the digit row without Shift, so the
+  /// Space keys must match by key code there (the character is not the digit).
+  @Test(arguments: [
+    (kVK_ANSI_1, "&"), (kVK_ANSI_2, "é"), (kVK_ANSI_3, "\""), (kVK_ANSI_4, "'"), (kVK_ANSI_5, "("),
+    (kVK_ANSI_6, "§"), (kVK_ANSI_7, "è"), (kVK_ANSI_8, "!"), (kVK_ANSI_9, "ç"),
+  ])
+  func `azerty digit row keys are reserved for spaces`(keyCode: Int, character: String) {
+    #expect(keys.matches(keyCode: UInt16(keyCode), character: character, modifiers: .control))
+  }
+
+  /// #497: the Split View switch keys (Ctrl-Shift-1 ... 4) on AZERTY, and "-", "=" and the bracket keys, which sit on
+  /// other key codes or type other characters there.
+  @Test func `azerty split keys are reserved`() {
+    let flags: NSEvent.ModifierFlags = [.control, .shift]
+    for (code, character) in [(kVK_ANSI_1, "&"), (kVK_ANSI_2, "é"), (kVK_ANSI_3, "\""), (kVK_ANSI_4, "'")] {
+      #expect(keys.matches(keyCode: UInt16(code), character: character, modifiers: flags), "switch \(character)")
+    }
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_6), character: "-", modifiers: flags), "AZERTY's minus key")
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_Equal), character: "=", modifiers: flags))
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_RightBracket), character: "$", modifiers: flags), "the ] key")
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_LeftBracket), character: "^", modifiers: flags), "the [ key")
+  }
+
+  /// #497: QWERTZ keeps the digit row, moves Z and Y, and types "-" on the slash key.
+  @Test func `qwertz keys`() {
+    for (code, character) in [(kVK_ANSI_1, "1"), (kVK_ANSI_5, "5"), (kVK_ANSI_9, "9")] {
+      #expect(keys.matches(keyCode: UInt16(code), character: character, modifiers: .control))
+    }
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_Slash), character: "-", modifiers: [.control, .shift]),
+            "QWERTZ's minus key")
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_RightBracket), character: "+", modifiers: [.control, .shift]))
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_LeftBracket), character: "ü", modifiers: [.control, .shift]))
+    // Z and Y trade places: Cmd-Z (undo) on QWERTZ's Z key is the page's, Cmd-W is still the W key.
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_Y), character: "z", modifiers: .command))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_Z), character: "y", modifiers: .command))
+    #expect(keys.matches(keyCode: UInt16(kVK_ANSI_W), character: "w", modifiers: .command))
+  }
+
+  /// #497: matching a digit-row key by key code must not reserve other modifiers or the zero key.
+  @Test func `layout keys keep exact modifiers`() {
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_1), character: "&", modifiers: []))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_1), character: "&", modifiers: .command))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_1), character: "&", modifiers: [.control, .option]))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_0), character: "à", modifiers: .control))
+    #expect(!keys.matches(keyCode: UInt16(kVK_ANSI_Q), character: "a", modifiers: .control))
+  }
+
   /// #489: every main-menu key equivalent without Cmd is reserved, because a focused page swallows it and the engine
   /// hands back only Cmd keys. Guards the Space items (Ctrl-1 ... Ctrl-9) and the Split View items (Ctrl-Shift-...).
   @MainActor
