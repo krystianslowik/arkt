@@ -28,7 +28,34 @@ final class FakeEngineDownloadContractTests: XCTestCase {
   func testDownloadIsReportedProgressesAndCompletes() async throws {
     try await EngineContract.downloadIsReportedProgressesAndCompletes(harness)
   }
-  func testCancelEndsAnActiveDownloadOnce() async throws { try await EngineContract.cancelEndsAnActiveDownloadOnce(harness) }
+  func testCancelEndsAnActiveDownloadOnce() async throws {
+    func note(_ text: String) { FileHandle.standardError.write(Data("DIAG \(text)\n".utf8)) }
+    do {
+      let h = harness!
+      let (client, engine, drivers) = try EngineContract.downloadEngine(h)
+      note("engine ready")
+      let recorder = EventRecorder(client)
+      let id = try await drivers.start(client, "Cancel.bin", EngineContract.downloadSize)
+      note("started \(id)")
+      engine.perform(.cancel, on: id)
+      note("cancel performed")
+      try await EngineContract.waitUntil(timeout: .seconds(10)) { EngineContract.downloadState(engine, id) == .cancelled }
+      note("cancelled")
+      let count = recorder.downloadEvents(for: id).count
+      engine.perform(.cancel, on: id)
+      engine.perform(.pause, on: id)
+      engine.perform(.resume, on: id)
+      engine.perform(.cancel, on: DownloadID("unknown"))
+      note("repeat commands done")
+      try EngineContract.require(recorder.downloadEvents(for: id).count == count, "events changed")
+      note("finished")
+    } catch {
+      note("ERROR type=\(String(reflecting: type(of: error))) description=\(error)")
+      note("ERROR mirror=\(String(reflecting: Mirror(reflecting: error).children.map { "\($0.label ?? "?")=\($0.value)" }))")
+      note("ERROR nsdomain=\((error as NSError).domain) code=\((error as NSError).code)")
+      throw error
+    }
+  }
   func testRemoveForgetsADownloadAndKeepsItsFile() async throws {
     try await EngineContract.removeForgetsADownloadAndKeepsItsFile(harness)
   }
