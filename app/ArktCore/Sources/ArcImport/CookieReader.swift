@@ -105,6 +105,17 @@ public struct CookieReader: Sendable {
   public func read(
     cookiesDatabase: URL, decryptor: borrowing ChromiumDecryptor, onBatch: ([ArcCookie]) throws -> Void
   ) throws -> CookieReadSummary {
+    try read(cookiesDatabase: cookiesDatabase, decryptor: decryptor, rows: 0..<Int.max, onBatch: onBatch)
+  }
+
+  /// Reads only the rows at positions `rows` of the table (0-based, in storage order), so a caller can decrypt one
+  /// window at a time and keep plaintext only for the window it is about to write. `scanned` of the summary counts
+  /// the rows of the window; fewer than the window's size means the table ended.
+  @discardableResult
+  public func read(
+    cookiesDatabase: URL, decryptor: borrowing ChromiumDecryptor, rows: Range<Int>,
+    onBatch: ([ArcCookie]) throws -> Void
+  ) throws -> CookieReadSummary {
     let database = try ChromiumDatabase(url: cookiesDatabase)
     let present = try database.columns(of: "cookies")
     let missing = Self.required.filter { !present.contains($0) }
@@ -117,7 +128,11 @@ public struct CookieReader: Sendable {
     var batch: [ArcCookie] = []
     batch.reserveCapacity(Self.batchSize)
 
+    var position = -1
     while try cursor.next() {
+      position += 1
+      if position < rows.lowerBound { continue }
+      if position >= rows.upperBound { break }
       summary.scanned += 1
       guard let host = cursor.text("host_key"), let name = cursor.text("name"), let path = cursor.text("path"),
         let expiresMicros = cursor.int("expires_utc")

@@ -50,6 +50,7 @@ extension ShellWindowController: LittleArktFlightDestination {
     guard tabsByNode[node] == tab else { return false }
     if let dialog { javaScriptDialogs.adopt(dialog) }
     let endedArrival = sidebarController.outline(containing: node)?.endArrival() ?? false
+    sidebarController.endFavoriteSelectionFade()
     engine.moveTab(tab, to: ensureEngineWindow())
     activate(node: node)
     if clearingPrevious, endedArrival { sidebarController.clearPrevious() }
@@ -63,6 +64,7 @@ extension ShellWindowController: LittleArktFlightDestination {
   /// go of it first; a row the page's own close already archived is left alone.
   func cancelReceiving(_ tab: TabID, node: NodeID) {
     sidebarController.outline(containing: node)?.endArrival()
+    sidebarController.endFavoriteSelectionFade()
     guard tabsByNode[node] == tab else { return }
     _ = releaseLiveTab(of: node)
     archive(node, heldCurrent: false)
@@ -70,6 +72,7 @@ extension ShellWindowController: LittleArktFlightDestination {
 
   func presentArrival(of node: NodeID, room: Double, appear: Double) {
     sidebarController.outline(containing: node)?.presentArrival(of: node, room: room, appear: appear)
+    sidebarController.fadeCurrentFavoriteSelection(room: room)
   }
 
   var flightWindow: NSWindow? { window }

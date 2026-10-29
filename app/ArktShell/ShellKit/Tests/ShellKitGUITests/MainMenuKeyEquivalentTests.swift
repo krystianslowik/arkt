@@ -154,6 +154,33 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     }
   }
 
+  /// #497: whatever the active keyboard layout, a key press that a menu item without Cmd takes (Space 1 ... 9, the
+  /// Split View items) is reserved. Every key code is tried with Ctrl and Ctrl-Shift, so the digit row and the
+  /// punctuation keys are covered on the layout the test runs under (US, AZERTY, QWERTZ ...): ReservedKeys must be
+  /// a superset of what the menu matches, or a focused page swallows the key.
+  func testEveryMenuKeyWithoutCommandIsReservedOnTheActiveLayout() throws {
+    // Ctrl-Space (Reveal Current Tab, KB-036) is not a Space or Split View item and is outside this check.
+    let items = allItems().filter {
+      !$0.keyEquivalent.isEmpty && $0.keyEquivalent != " " && !$0.keyEquivalentModifierMask.contains(.command)
+    }
+    XCTAssertGreaterThanOrEqual(items.count, 9 + 8, "the Space and Split View items carry keys")
+    let source = CGEventSource(stateID: .privateState)
+    var matched = 0
+    for keyCode in 0..<128 {
+      for flags in [CGEventFlags.maskControl, [.maskControl, .maskShift]] {
+        guard let cg = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true) else { continue }
+        cg.flags = flags
+        guard let event = NSEvent(cgEvent: cg) else { continue }
+        for item in items where Self.matches(item, event) {
+          matched += 1
+          XCTAssertTrue(ReservedKeys.arkt.matches(event),
+                        "\(item.title): key \(keyCode) types \(event.charactersIgnoringModifiers ?? "")")
+        }
+      }
+    }
+    XCTAssertGreaterThan(matched, 0, "some key on this layout reaches a Space or Split View item")
+  }
+
   /// Whether `item`'s key equivalent alone takes `event`: a one-item menu with the same key, aimed at a probe.
   static func matches(_ item: NSMenuItem, _ event: NSEvent) -> Bool {
     let probe = KeyProbe()
