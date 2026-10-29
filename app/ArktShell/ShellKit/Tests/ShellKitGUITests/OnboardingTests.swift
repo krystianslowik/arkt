@@ -1,4 +1,6 @@
 import AppKit
+import ArcImport
+@testable import CoreBridge
 import EngineAPITestSupport
 import XCTest
 @testable import ShellUI
@@ -22,6 +24,8 @@ final class FakeOnboardingServices: OnboardingServices {
   var importSkipped = 0
   private var importContinuation: CheckedContinuation<Void, Never>?
   private(set) var importStarted = false
+  /// The browser data import the Import step hands off to; nil keeps the step's own import.
+  var makeImportSource: (@MainActor () -> any BrowserDataImportSource)?
   let sidebar: StubSidebar
 
   init(sidebar: StubSidebar, arcFound: Bool) {
@@ -38,6 +42,8 @@ final class FakeOnboardingServices: OnboardingServices {
       if fails { continuation.finish(throwing: CocoaError(.fileReadCorruptFile)) } else { continuation.finish() }
     }
   }
+
+  func makeBrowserDataImport() -> (any BrowserDataImportSource)? { makeImportSource?() }
 
   func importArcData() async -> OnboardingImportResult {
     importStarted = true
@@ -250,6 +256,83 @@ final class OnboardingTests: XCTestCase {
     XCTAssertTrue(spin { window.commandBar.isVisible }, "the command bar opens")
     XCTAssertFalse(window.rootView.card.isHidden)
     window.commandBar.hide()
+    window.close()
+  }
+
+  // MARK: - Import hands off to the browser data import (#514)
+
+  /// Import now opens the consent in place of the step, in the Hero style; Not now returns to the step untouched; a
+  /// second Import runs to a result, and Continue returns to the step's Imported state. The footer stays.
+  func testImportHandsOffToTheHeroConsentAndReturnsToImported() throws {
+    let stub = StubSidebar()
+    let window = makeWindow(stub)
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: true)
+    let importer = ScriptedProfileImporter()
+    services.makeImportSource = {
+      BrowserDataImportModel(coordinator: importer, root: URL(fileURLWithPath: "/nonexistent"), spaces: nil,
+                             locale: Locale(identifier: "en_US"))
+    }
+    let onboarding = present(window, services)
+    onboarding.performPrimary()                                           // Get started
+    XCTAssertTrue(spin { onboarding.flow.importPhase == .ready })
+    let step = try stepView(onboarding)
+    onboarding.performPrimary()                                           // Import now
+    let hero = try XCTUnwrap(onboarding.view.importHero, "the consent replaces the step in place")
+    XCTAssertTrue(step.isHidden)
+    XCTAssertFalse(services.importStarted, "the step no longer imports at once")
+    XCTAssertEqual(onboarding.flow.importPhase, .importing)
+    XCTAssertFalse(onboarding.view.backButton.isEnabled, "no Back while the import shows")
+    XCTAssertTrue(onboarding.view.skipButton.isEnabled, "Skip setup stays")
+    XCTAssertEqual(onboarding.view.progressLabel.text, "1 of 5", "the footer stays")
+    XCTAssertTrue(onboarding.view.subviews.contains(onboarding.stage.view), "the particle field stays")
+
+    XCTAssertTrue(spin { importer.consent != nil })
+    let counts = ProfileDataCounts(historyURLs: 100, historyVisits: 48_210, bookmarks: 0, cookies: 3_904, logins: 312, extensions: 14)
+    let answer = Task { @MainActor in await importer.consent?(counts) ?? nil }
+    XCTAssertTrue(spin { hero.source.state.phase == .consent })
+    XCTAssertEqual(hero.content.title.text, "Choose what comes over.")
+    XCTAssertEqual(hero.content.eyebrow.text, "Your browser data")
+    XCTAssertEqual(hero.content.groupViews.map { $0.heading.text }, ["Ready to import", "Needs your Mac password"])
+    XCTAssertEqual(hero.primaryButton.title, "Import")
+    XCTAssertEqual(hero.secondaryButton.title, "Not now")
+    XCTAssertEqual(hero.primaryButton.frame.height, 50, "the website's pills")
+    XCTAssertEqual(hero.content.rowViews[.history]?.preferredHeight, 52)
+    XCTAssertEqual(hero.content.rowViews[.history]?.valueText.text, "48,210")
+    XCTAssertNotNil(hero.content.groupViews[1].noticeView, "the Keychain line, inside the second group")
+    XCTAssertEqual(hero.primaryButton.accessibilityIdentifier(), AXID.BrowserDataImport.primary)
+    XCTAssertTrue(onboarding.view.accessibilityChildren()?.contains { ($0 as? NSView) === hero.content } == true)
+
+    onboarding.performEscape()                                            // Not now
+    XCTAssertTrue(spin { onboarding.view.importHero == nil })
+    XCTAssertEqual(onboarding.flow.importPhase, .ready, "Not now returns to the step as it was")
+    XCTAssertFalse(try stepView(onboarding).isHidden)
+    XCTAssertEqual(try stepView(onboarding).primaryButton?.isEnabled, true)
+    _ = Task { _ = await answer.value }
+    XCTAssertTrue(spin(timeout: 1) { hero.superview == nil }, "the hero leaves after its fade")
+
+    onboarding.performPrimary()                                           // Import now, again
+    let second = try XCTUnwrap(onboarding.view.importHero)
+    XCTAssertTrue(spin { importer.consent != nil })
+    let secondAnswer = Task { @MainActor in await importer.consent?(counts) ?? nil }
+    XCTAssertTrue(spin { second.source.state.phase == .consent })
+    second.primaryButton.performClick(nil)                                // Import
+    XCTAssertTrue(spin { second.content.title.text == "Bringing it over." })
+    XCTAssertTrue(second.content.primaryButton.isHidden, "Cancel is the only button while importing")
+    importer.send(.progress(.history, .writing(done: 100, total: 48_210)))
+    XCTAssertTrue(spin { second.content.rowViews[.history]?.valueText.text == "100 of 48,210" })
+    var summary = ProfileImportSummary()
+    summary.outcomes = [.history: .done(ImportItemCounts(written: 48_210)), .extensions: .done(ImportItemCounts(written: 14)),
+                        .cookies: .done(ImportItemCounts(written: 3_904)), .passwords: .done(ImportItemCounts(written: 312))]
+    importer.finish(summary)
+    XCTAssertTrue(spin { second.content.title.text == "Your setup is here." })
+    XCTAssertEqual(second.primaryButton.title, "Continue")
+    XCTAssertEqual(onboarding.flow.importPhase, .importing, "the step is not Imported until Continue")
+    second.primaryButton.performClick(nil)
+    XCTAssertTrue(spin { onboarding.flow.importPhase == .imported(skipped: 0) })
+    XCTAssertNil(onboarding.view.importHero)
+    XCTAssertEqual(try stepView(onboarding).primaryButton?.accessibilityIdentifier(), AXID.Onboarding.continueButton)
+    XCTAssertEqual(services.saved.last?.imported, true)
+    _ = secondAnswer
     window.close()
   }
 

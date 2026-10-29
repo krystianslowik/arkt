@@ -64,6 +64,9 @@ final class AppOnboardingServices: OnboardingServices {
     return await session.arcFiles.isAvailable()
   }
 
+  /// The sidebar count the Import step already shows, so the consent reuses it instead of counting again (#514).
+  private var knownCounts: OnboardingCounts?
+
   func countArcData() -> AsyncThrowingStream<OnboardingCounts, any Error> {
     guard let files = session?.arcFiles else {
       return AsyncThrowingStream { $0.finish(throwing: CancellationError()) }
@@ -73,8 +76,10 @@ final class AppOnboardingServices: OnboardingServices {
       let task = Task {
         do {
           for try await counts in source {
-            continuation.yield(OnboardingCounts(spaces: counts.spaces, pinnedTabs: counts.pinnedTabs,
-                                                favorites: counts.favorites, folders: counts.folders))
+            let update = OnboardingCounts(spaces: counts.spaces, pinnedTabs: counts.pinnedTabs,
+                                          favorites: counts.favorites, folders: counts.folders)
+            knownCounts = update
+            continuation.yield(update)
           }
           continuation.finish()
         } catch {
@@ -84,6 +89,11 @@ final class AppOnboardingServices: OnboardingServices {
       }
       continuation.onTermination = { _ in task.cancel() }
     }
+  }
+
+  func makeBrowserDataImport() -> (any BrowserDataImportSource)? {
+    let known = knownCounts.map { SpacesAndTabsCount(items: $0.pinnedTabs + $0.favorites, spaces: $0.spaces) }
+    return session?.makeBrowserDataImport(knownSidebar: known)
   }
 
   func importArcData() async -> OnboardingImportResult {

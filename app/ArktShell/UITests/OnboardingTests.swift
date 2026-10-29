@@ -25,6 +25,20 @@ final class OnboardingTests: ArktUITestCase {
     element.click()
   }
 
+  /// Import now opens the browser data import in place of the step (#514): its consent, then progress, then a result.
+  /// Import there runs what is ticked; Continue on the result returns to the step's Imported state.
+  private func runImportHandOff(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) throws {
+    let primary = button(app, AXID.BrowserDataImport.primary)
+    XCTAssertTrue(Waits.until("the consent's Import") { primary.exists && primary.isEnabled && primary.label == "Import" },
+                  file: file, line: line)
+    try assertNoArc(app)
+    primary.click()
+    XCTAssertTrue(Waits.until("the result's Continue") { primary.exists && primary.label == "Continue" },
+                  file: file, line: line)
+    try assertNoArc(app)
+    primary.click()
+  }
+
   private func step(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
     Shell.element(app, ID.step(identifier))
   }
@@ -73,6 +87,7 @@ final class OnboardingTests: ArktUITestCase {
     XCTAssertEqual(Shell.element(app, ID.progress).label, "1 of 5")
     try assertNoArc(app)
     press(app, ID.importData)
+    try runImportHandOff(app)
 
     XCTAssertTrue(waitFor(button(app, ID.continueButton)))
     XCTAssertTrue(Shell.element(app, ID.countSpaces).label.hasSuffix(", imported"))
@@ -169,6 +184,9 @@ final class OnboardingTests: ArktUITestCase {
     let app = try launch(sandbox)
     press(app, ID.getStarted)
     press(app, ID.importData)
+    let primary = button(app, AXID.BrowserDataImport.primary)
+    XCTAssertTrue(Waits.until("the consent's Import") { primary.exists && primary.isEnabled && primary.label == "Import" })
+    primary.click()
     press(app, ID.skipSetup)
     let sheet = app.sheets.firstMatch
     XCTAssertTrue(waitFor(sheet))
