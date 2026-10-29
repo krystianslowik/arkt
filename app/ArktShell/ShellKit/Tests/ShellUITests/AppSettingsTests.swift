@@ -29,6 +29,7 @@ struct AppSettingsTests {
     #expect(settings.lastPane == .general)
     #expect(!settings.toolbar.isVisible)
     #expect(settings.toolbar.showsFullURL)
+    #expect(!settings.warnsBeforeQuitting)
   }
 
   /// Arc's key names: Count Favorites is stored inverted (`excludeFavoritesInSwitchToNthTab`).
@@ -146,6 +147,22 @@ struct AppSettingsTests {
     #expect(suite.defaults.bool(forKey: AppSettings.Key.sendsCrashReports))
     #expect(suite.defaults.bool(forKey: AppSettings.Key.crashReportAskAnswered))
     #expect(AppSettings(defaults: suite.defaults).sendsCrashReports)
+  }
+
+  @Test func warnBeforeQuittingIsOffUntilSet() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    let recorder = Recorder()
+    settings.addObserver(recorder)
+    #expect(!settings.warnsBeforeQuitting)
+    settings.warnsBeforeQuitting = false
+    #expect(recorder.count == 0)
+    settings.warnsBeforeQuitting = true
+    #expect(recorder.count == 1)
+    #expect(suite.defaults.bool(forKey: AppSettings.Key.shouldWarnBeforeQuitting))
+    #expect(AppSettings(defaults: suite.defaults).warnsBeforeQuitting)
+    settings.warnsBeforeQuitting = false
+    #expect(!AppSettings(defaults: suite.defaults).warnsBeforeQuitting)
   }
 }
 

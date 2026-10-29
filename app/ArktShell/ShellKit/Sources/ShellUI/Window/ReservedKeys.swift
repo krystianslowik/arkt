@@ -43,7 +43,8 @@ public struct ReservedKeys: Sendable {
   /// #108), Shift-Cmd-K (Clear Today Tabs, KB-019, #110), Cmd-Opt-Right, Cmd-Opt-Left, and the tab switcher's
   /// Ctrl-Tab and Ctrl-Shift-Tab (#103; `ShellWindow.sendEvent` already hands those to the switcher before any view).
   /// The copy-link keys (KB-013 to KB-016, #118) are here too: a page must not swallow them. Incognito
-  /// (Shift-Cmd-N) joins when Arkt has it. Cmd-Z stays the page's first (`ReopenUndoRouter`).
+  /// (Shift-Cmd-N, KB-007) and Blank Window (Ctrl-Cmd-N, KB-006) are reserved with them (#487). Cmd-Z stays the
+  /// page's first (`ReopenUndoRouter`).
   ///
   /// #489: every main-menu key equivalent without Cmd is reserved too: Space 1 to 9 (Ctrl-1 ... Ctrl-9) and the Split
   /// View items (Ctrl-Shift-=, -, ], [, 1 ... 4). A focused page takes any key equivalent first, and the engine hands
@@ -56,6 +57,8 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_ANSI_W, character: "w", modifiers: .command),
     Key(keyCode: kVK_ANSI_W, character: "w", modifiers: [.command, .shift]),
     Key(keyCode: kVK_ANSI_N, character: "n", modifiers: .command),
+    Key(keyCode: kVK_ANSI_N, character: "n", modifiers: [.command, .shift]),     // KB-007 (#487)
+    Key(keyCode: kVK_ANSI_N, character: "n", modifiers: [.command, .control]),   // KB-006 (#487)
     Key(keyCode: kVK_ANSI_Q, character: "q", modifiers: .command),
     Key(keyCode: kVK_ANSI_D, character: "d", modifiers: .command),
     Key(keyCode: kVK_ANSI_C, character: "c", modifiers: [.command, .shift]),             // KB-013

@@ -5,10 +5,10 @@ import EngineAPI
 import EngineAPITestSupport
 import SidebarModel
 import XCTest
-@testable import ShellUI
+@_spi(Smoke) @testable import ShellUI
 
-/// #115 (preview scope): New Window, Close Window, last-window close, full screen and auto-archive across windows,
-/// on InMemoryEngine and the real main menu. Incognito, Blank Window and the quit warning are not offered.
+/// #115 and #487: New Window, Close Window, last-window close, full screen and auto-archive across windows,
+/// plus Blank Window (Ctrl-Cmd-N) and Incognito (Cmd-Shift-N), on InMemoryEngine and the real main menu.
 @MainActor
 final class WindowLifecycleTests: XCTestCase {
   private var sets: [ShellWindowSet] = []
@@ -29,6 +29,7 @@ final class WindowLifecycleTests: XCTestCase {
   /// Two Spaces, each with Today tabs, on one sidebar shared by every window.
   private struct Fixture {
     let set: ShellWindowSet
+    let source: ModelSidebarSource
     let engine: InMemoryEngine
     let work: SpaceID
     let other: SpaceID
@@ -54,7 +55,8 @@ final class WindowLifecycleTests: XCTestCase {
       return set.host(for: request)
     }
     sets.append(set)
-    return Fixture(set: set, engine: engine, work: work, other: other, workToday: workToday, otherToday: otherToday)
+    return Fixture(set: set, source: source, engine: engine, work: work, other: other,
+                   workToday: workToday, otherToday: otherToday)
   }
 
   private func key(_ keyCode: Int, _ flags: CGEventFlags) throws -> NSEvent {
@@ -211,34 +213,132 @@ final class WindowLifecycleTests: XCTestCase {
     XCTAssertFalse(f.set.autoArchiveExempt.contains(f.workToday[0]), "a closed window shows nothing")
   }
 
-  // MARK: Not offered in the preview
+  // MARK: Blank Window and Incognito (#487, BH-170, BH-174)
 
-  func testIncognitoAndBlankWindowAreNotInAnyMenu() throws {
+  /// Ctrl-Cmd-N (KB-006): a window whose sidebar has no items. The window it was opened beside keeps its Spaces,
+  /// and the shared sidebar is unchanged. Cmd-N stays New Window.
+  func testCtrlCmdNOpensABlankWindowWithNoSidebarItems() throws {
     let menu = MainMenu.make(commands: AppCommands()).menu
-    var titles: [String] = []
-    func collect(_ menu: NSMenu) {
-      for item in menu.items {
-        titles.append(item.title)
-        if let submenu = item.submenu { collect(submenu) }
-      }
+    let file = try XCTUnwrap(menu.items.first { $0.title == "File" }?.submenu)
+    let blankItem = try XCTUnwrap(file.items.first { $0.title == "New Blank Window" })
+    XCTAssertEqual(blankItem.action, #selector(AppCommands.newBlankWindow(_:)))
+    XCTAssertEqual(blankItem.keyEquivalent, "n")
+    XCTAssertEqual(blankItem.keyEquivalentModifierMask, [.command, .control])
+    let newWindow = try XCTUnwrap(file.items.first { $0.title == "New Window" })
+    XCTAssertEqual(newWindow.keyEquivalent, "n")
+    XCTAssertEqual(newWindow.keyEquivalentModifierMask, .command)
+    let event = try key(kVK_ANSI_N, [.maskCommand, .maskControl])
+    XCTAssertTrue(ReservedKeys.arkt.matches(event))
+
+    let f = try makeFixture()
+    let first = f.set.openWindow()
+    let before = f.source.sidebar
+    let blank = f.set.openWindow(opensFirstTab: false)
+    blank.makeBlank()
+
+    XCTAssertEqual(blank.sidebarController.presentation, .blank)
+    XCTAssertTrue(blank.sidebarController.spaces.isEmpty)
+    XCTAssertNil(blank.sidebarController.currentPage)
+    XCTAssertTrue(blank.sidebarController.view.favorites.isHidden)
+    XCTAssertTrue(blank.sidebarController.view.spaceDots.isHidden)
+    XCTAssertTrue(blank.sidebarController.view.incognitoLabel.isHidden)
+    XCTAssertEqual(f.source.sidebar, before, "a blank window does not change the shared sidebar")
+    XCTAssertEqual(first.sidebarController.spaces.count, 2, "the other window still shows its Spaces")
+    XCTAssertFalse(visibleStrings(in: blank.sidebarController.view).contains { ["Work", "Other", "W0", "W1", "O0", "O1"].contains($0) })
+  }
+
+  /// Cmd-Shift-N (KB-007): the Incognito label is in the sidebar and nowhere else in the window, and a command-bar
+  /// visit is absent from the shared sidebar. The same visit from a normal window is recorded.
+  func testCmdShiftNOpensIncognitoAndDoesNotPersistTheVisit() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let file = try XCTUnwrap(menu.items.first { $0.title == "File" }?.submenu)
+    let item = try XCTUnwrap(file.items.first { $0.title == "New Incognito Window" })
+    XCTAssertEqual(item.action, #selector(AppCommands.newIncognitoWindow(_:)))
+    XCTAssertEqual(item.keyEquivalent, "n")
+    XCTAssertEqual(item.keyEquivalentModifierMask, [.command, .shift])
+    let event = try key(kVK_ANSI_N, [.maskCommand, .maskShift])
+    XCTAssertTrue(ReservedKeys.arkt.matches(event))
+
+    let f = try makeFixture()
+    let normal = f.set.openWindow()
+    let incognito = f.set.openWindow(opensFirstTab: false)
+    incognito.makeIncognito()
+    assertIncognitoLabelOnlyInTheSidebar(incognito)
+    XCTAssertTrue(incognito.sidebarController.spaces.isEmpty)
+    XCTAssertTrue(incognito.sidebarController.view.favorites.isHidden)
+
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    incognito.commandBar.show(.newTab)
+    incognito.commandBar.setQueryForTesting("secret-visit.example")
+    incognito.commandBar.commit()
+    XCTAssertEqual(saves, 0, "the visit does not schedule a sidebar save")
+    XCTAssertEqual(f.source.sidebar, before)
+    XCTAssertFalse(tabURLs(f.source.sidebar).contains { $0.contains("secret-visit.example") })
+    XCTAssertTrue(incognito.sidebarController.spaces.isEmpty, "the visit does not fill the incognito sidebar")
+    assertIncognitoLabelOnlyInTheSidebar(incognito)
+
+    normal.commandBar.show(.newTab)
+    normal.commandBar.setQueryForTesting("kept-visit.example")
+    normal.commandBar.commit()
+    XCTAssertGreaterThan(saves, 0)
+    XCTAssertTrue(tabURLs(f.source.sidebar).contains { $0.contains("kept-visit.example") })
+    XCTAssertFalse(tabURLs(f.source.sidebar).contains { $0.contains("secret-visit.example") })
+  }
+
+  private func tabURLs(_ sidebar: SidebarModel.Sidebar) -> [String] {
+    sidebar.nodes.values.compactMap { node in
+      if case .tab(let tab) = node.kind { tab.url.absoluteString } else { nil }
     }
-    collect(menu)
-    XCTAssertTrue(titles.contains("New Window"), "the menu was built")
-    for title in titles {
-      let lowered = title.lowercased()
-      XCTAssertFalse(lowered.contains("incognito") || lowered.contains("private window") || lowered.contains("blank window"),
-                     "\(title) is cut for the preview")
+  }
+
+  private func assertIncognitoLabelOnlyInTheSidebar(_ controller: ShellWindowController,
+                                                    file: StaticString = #filePath, line: UInt = #line) {
+    let sidebar = controller.sidebarController.view
+    let label = sidebar.incognitoLabel
+    XCTAssertEqual(label.stringValue, "Incognito", file: file, line: line)
+    XCTAssertFalse(label.isHidden, file: file, line: line)
+    XCTAssertEqual(label.accessibilityIdentifier(), AXID.Incognito.label, file: file, line: line)
+    XCTAssertTrue(label.isDescendant(of: sidebar), file: file, line: line)
+    let window = controller.window
+    XCTAssertFalse(window?.title.localizedCaseInsensitiveContains("incognito") ?? false, file: file, line: line)
+    var hosts: [NSView] = []
+    if let content = window?.contentView { hosts.append(content) }
+    for child in window?.childWindows ?? [] {
+      if let content = child.contentView { hosts.append(content) }
     }
-    // Cmd-Shift-N (Incognito) and Ctrl-Cmd-N (Blank Window) are bound to nothing.
-    var bound: [(String, NSEvent.ModifierFlags)] = []
-    func collectKeys(_ menu: NSMenu) {
-      for item in menu.items {
-        if !item.keyEquivalent.isEmpty { bound.append((item.keyEquivalent.lowercased(), item.keyEquivalentModifierMask)) }
-        if let submenu = item.submenu { collectKeys(submenu) }
-      }
+    let fields = hosts.flatMap { textFields(in: $0) }.filter {
+      $0.stringValue.localizedCaseInsensitiveContains("incognito") && isShown($0)
     }
-    collectKeys(menu)
-    XCTAssertFalse(bound.contains { $0.0 == "n" && $0.1 == [.command, .shift] })
-    XCTAssertFalse(bound.contains { $0.0 == "n" && $0.1 == [.command, .control] })
+    XCTAssertEqual(fields.map(\.stringValue), ["Incognito"], file: file, line: line)
+    XCTAssertTrue(fields.allSatisfy { $0.isDescendant(of: sidebar) }, file: file, line: line)
+  }
+
+  private func visibleStrings(in view: NSView) -> [String] {
+    guard isShown(view) else { return [] }
+    var strings: [String] = []
+    if let field = view as? NSTextField {
+      let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !text.isEmpty { strings.append(text) }
+    }
+    for subview in view.subviews { strings.append(contentsOf: visibleStrings(in: subview)) }
+    return strings
+  }
+
+  private func textFields(in view: NSView) -> [NSTextField] {
+    var fields: [NSTextField] = []
+    if let field = view as? NSTextField { fields.append(field) }
+    for subview in view.subviews { fields.append(contentsOf: textFields(in: subview)) }
+    return fields
+  }
+
+  private func isShown(_ view: NSView) -> Bool {
+    var current: NSView? = view
+    while let view = current {
+      if view.isHidden || view.alphaValue == 0 { return false }
+      current = view.superview
+    }
+    return true
   }
 }
