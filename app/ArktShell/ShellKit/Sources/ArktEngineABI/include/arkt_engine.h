@@ -28,6 +28,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @protocol ArktBrowserHandle;
 @protocol ArktEngine;
+@protocol ArktDownloadItem;
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
 @protocol ArktHistoryEntry;
@@ -175,6 +176,19 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // WebContentsDelegate::UpdateTargetURL. Values: url (nil when the pointer
   // left the link). Only changes are reported; nothing is delayed or merged.
   ArktEngineEventKindTargetURLChanged = 22,
+  // A download exists (#132): started, or found in the profile's list at
+  // launch. Values: download. Downloads belong to no tab and no window, so
+  // `tab` and `browser` are nil on the three download kinds. Sent for every
+  // download of the profile, in Chromium's order.
+  ArktEngineEventKindDownloadCreated = 23,
+  // Any change to a download's values (#132): bytes, speed, state, target,
+  // danger. Values: download, a snapshot read when the change happened. The
+  // engine merges the updates of one download in a batch into the last one,
+  // so received bytes never go backwards across events.
+  ArktEngineEventKindDownloadUpdated = 24,
+  // The download left the list (#132); its file stays unless it was deleted.
+  // Values: download, as it was last. Nothing follows for that guid.
+  ArktEngineEventKindDownloadRemoved = 25,
 };
 
 // Why the engine asks the embedder for a window host.
@@ -261,6 +275,49 @@ typedef NS_ENUM(NSInteger, ArktFindAction) {
   ArktFindActionActivate = 2,
 };
 
+// A download's state (#132), as download::DownloadItem: Paused is IN_PROGRESS
+// with IsPaused().
+typedef NS_ENUM(NSInteger, ArktDownloadState) {
+  ArktDownloadStateInProgress = 0,
+  ArktDownloadStatePaused = 1,
+  ArktDownloadStateComplete = 2,
+  ArktDownloadStateCancelled = 3,
+  ArktDownloadStateInterrupted = 4,
+};
+
+// What the shell asks of a download (#132), by guid. Each is a no-op for an
+// unknown guid or a state it does not apply to.
+typedef NS_ENUM(NSInteger, ArktDownloadCommand) {
+  // DownloadItem::Cancel(true): an active download becomes Cancelled and its
+  // partial file is deleted.
+  ArktDownloadCommandCancel = 0,
+  // DownloadItem::Pause().
+  ArktDownloadCommandPause = 1,
+  // DownloadItem::Resume(true): a paused download continues, an interrupted
+  // one that can resume continues where it stopped.
+  ArktDownloadCommandResume = 2,
+  // DownloadItem::OpenDownload(), only for a complete download whose danger
+  // type is not dangerous (not dangerous, user validated, allowlisted by
+  // policy, deep scanned safe). Anything else does nothing.
+  ArktDownloadCommandOpen = 3,
+  // DownloadItem::ShowDownloadInShell().
+  ArktDownloadCommandShowInFinder = 4,
+  // A cancelled or interrupted download starts again: in place
+  // (Resume(true)) when it can resume, else as a new download of the same
+  // URL (DownloadManager::DownloadUrl) and the old item is removed in the
+  // same call: DownloadRemoved at once, DownloadCreated when the new download
+  // has started.
+  ArktDownloadCommandRetry = 5,
+  // DownloadItem::ValidateDangerousDownload(), only while the item
+  // IsDangerous(); a blocked download is not kept.
+  ArktDownloadCommandKeepDangerous = 6,
+  // The held file is deleted and the item removed.
+  ArktDownloadCommandDiscardDangerous = 7,
+  // DownloadItem::Remove(): the item leaves the list and keeps its file; an
+  // active download is cancelled first.
+  ArktDownloadCommandRemove = 8,
+};
+
 // One recorded engine change, as plain values. Fields that do not apply to
 // the kind are nil, NO, ArktCloseReasonNone or ArktWindowCloseReasonNone.
 NS_SWIFT_UI_ACTOR
@@ -293,6 +350,41 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) NSInteger findOrdinal;
 @property(nonatomic, readonly) NSInteger findCount;
 @property(nonatomic, readonly) BOOL findIsFinal;
+// DownloadCreated, DownloadUpdated and DownloadRemoved; nil on every other
+// kind.
+@property(nonatomic, readonly, nullable) id<ArktDownloadItem> download;
+@end
+
+// One download as plain values, read when the event was recorded (#132).
+NS_SWIFT_UI_ACTOR
+@protocol ArktDownloadItem <NSObject>
+// download::DownloadItem::GetGuid(), stable across restarts.
+@property(nonatomic, readonly, copy) NSString* guid;
+// GetURL(): the final URL of the request.
+@property(nonatomic, readonly, copy) NSURL* url;
+// GetFileNameToReportUser(), or the suggested name while the target is not
+// chosen yet; never empty.
+@property(nonatomic, readonly, copy) NSString* filename;
+// GetTargetFilePath(); nil until the target is chosen.
+@property(nonatomic, readonly, nullable, copy) NSURL* targetPath;
+// GetTotalBytes(); 0 when the server did not say.
+@property(nonatomic, readonly) int64_t totalBytes;
+// GetReceivedBytes().
+@property(nonatomic, readonly) int64_t receivedBytes;
+@property(nonatomic, readonly) ArktDownloadState state;
+// GetLastReason() as download::DownloadInterruptReason when the state is
+// Interrupted; 0 otherwise.
+@property(nonatomic, readonly) NSInteger interruptReason;
+// GetDangerType() as download::DownloadDangerType; 0 is not dangerous.
+@property(nonatomic, readonly) NSInteger dangerType;
+@property(nonatomic, readonly, copy) NSString* mimeType;
+@property(nonatomic, readonly, copy) NSDate* startTime;
+// GetEndTime(); nil while the download is active.
+@property(nonatomic, readonly, nullable, copy) NSDate* endTime;
+// CurrentSpeed(), bytes per second; 0 when not moving.
+@property(nonatomic, readonly) int64_t bytesPerSecond;
+// CanResume().
+@property(nonatomic, readonly) BOOL canResume;
 @end
 
 // A page's alert, confirm or prompt, held until the shell answers it or the
@@ -788,6 +880,37 @@ NS_SWIFT_UI_ACTOR
 - (void)importBookmarks:(NSArray<id<ArktImportBookmark>>*)bookmarks
              completion:(void (^)(id<ArktImportResult> result))completion
     NS_SWIFT_NAME(importBookmarks(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
+
+// Downloads (#132), of the profile the engine started with. The events are
+// DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).
+// The list in creation order, newest last: a snapshot of every download the
+// profile holds, including those found at launch before a sink was added.
+@property(nonatomic, readonly, copy) NSArray<id<ArktDownloadItem>>* downloads;
+// Runs `command` on the download with that guid.
+- (void)performDownloadCommand:(ArktDownloadCommand)command
+             onDownloadWithGUID:(NSString*)guid
+    NS_SWIFT_NAME(perform(download:on:));
+// DownloadManager::DownloadUrl for `url`, as Save Link As does (no user
+// gesture, no tab).
+- (void)startDownloadFromURL:(NSURL*)url NS_SWIFT_NAME(startDownload(from:));
+// Where downloads go: the profile's download.prompt_for_download and
+// download.default_directory prefs. The folder is used as given; the caller
+// checks it exists and is writable (Chromium creates a missing one). Setting
+// either applies to downloads that start afterwards.
+@property(nonatomic) BOOL downloadPromptsForLocation;
+@property(nonatomic, copy) NSURL* downloadDirectory;
+// DownloadPrefs::GetDefaultDownloadDirectory(): the system Downloads folder.
+@property(nonatomic, readonly, copy) NSURL* defaultDownloadDirectory;
+// Answers a download's save panel (the prompt_for_download case) and Save As
+// of other saves: while set, a SELECT_SAVEAS_FILE dialog is not shown by
+// Chromium but handed to this block with the suggested file name and the
+// folder to open in. `answer` takes the chosen file URL, or nil when the user
+// cancels (the download is then cancelled), exactly once, on the main thread.
+// Every other kind of file dialog keeps Chromium's. Nil restores Chromium's
+// panels.
+@property(nonatomic, copy, nullable) void (^downloadDestinationHandler)
+    (NSString* suggestedFilename, NSURL* directory,
+     void (^answer)(NSURL* _Nullable chosen));
 @end
 
 // Implemented by the Swift app: @objc(ArktShellEmbedder), in the main
