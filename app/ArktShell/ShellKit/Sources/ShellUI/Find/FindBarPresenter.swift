@@ -15,8 +15,9 @@ public struct FindBarDisplay: Equatable, Sendable {
 }
 
 /// The state behind the find bar (#134, design/find-in-page direction A) and its calls to the engine. One bar per tab:
-/// each tab keeps its own text, count and open state while it is hidden. The view draws `display` and sends what the
-/// user does back here; no AppKit in this file.
+/// each tab keeps its own text, count and open state while it is hidden. While a split shows, an open query follows
+/// the focused pane (`moveOpenSearch`). The view draws `display` and sends what the user does back here; no AppKit
+/// in this file.
 ///
 /// Typing searches as you type, `debounce` after the last keystroke, on an injected sleeper. Return and Cmd-G go to
 /// the next match, Shift-Return and Shift-Cmd-G to the previous one; both run a search that is still waiting for its
@@ -45,7 +46,8 @@ public final class FindBarPresenter {
   private let engine: any EngineClient
   /// The debounce's sleeper. Set before the first keystroke; tests replace it.
   public var sleep: FindSleep
-  /// The tab whose bar may show: the window's current tab, nil for none (a split, an empty Space).
+  /// The tab whose bar may show: the window's current tab, or the focused pane while a split shows. Nil for none
+/// (no focused pane, an empty Space).
   public private(set) var visibleTab: TabID?
   /// True while `open()` runs its change: the view animates an entrance for that show only, not for a tab switch.
   public private(set) var isOpening = false
@@ -102,6 +104,37 @@ public final class FindBarPresenter {
   public func shownTabChanged(_ tab: TabID?) {
     visibleTab = tab
     onChange?()
+  }
+
+  /// The focused split pane changed (#493). An open query stays in the field and is searched in `tab`; the pane that
+  /// had the search stops finding, so the highlights move with it. A closed bar, the same tab, or no pane
+  /// (`nil`) only changes which tab is shown, and the query stays where it was.
+  public func moveOpenSearch(to tab: TabID?) {
+    guard let tab, let previous = visibleTab, previous != tab, var from = entries[previous], from.isOpen else {
+      shownTabChanged(tab)
+      return
+    }
+    cancelPending(previous)
+    let text = from.text
+    if from.isActive {
+      from.isActive = false
+      engine.stopFinding(previous, action: .clear)
+    }
+    from.isOpen = false
+    entries[previous] = from
+
+    var to = entries[tab] ?? Entry()
+    if text.isEmpty, to.isActive { engine.stopFinding(tab, action: .clear) }
+    to.text = text
+    to.isOpen = true
+    to.isActive = false
+    to.ordinal = 0
+    to.count = 0
+    to.hasResult = false
+    entries[tab] = to
+    visibleTab = tab
+    onChange?()
+    if !text.isEmpty { runSearch(tab, forward: true) }
   }
 
   /// `tab` left this window or closed: its bar and text go, and nothing is sent to the engine (a move ends the find

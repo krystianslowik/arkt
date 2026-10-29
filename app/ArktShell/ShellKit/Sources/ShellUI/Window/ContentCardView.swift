@@ -28,12 +28,16 @@ public final class ContentCardView: NSView {
       needsLayout = true
     }
   }
-  /// The find bar (#134), above the page at the top trailing corner of the page area; one per card, set once.
+  /// The find bar (#134), above the page at the top trailing corner of the page area. One bar for the window: the
+  /// single card hosts it, or the focused pane's card while a split shows (#493). A pane's close button stays under it.
   var findBarView: FindBarView? {
     didSet {
       guard findBarView !== oldValue else { return }
-      oldValue?.removeFromSuperview()
-      if let findBarView { addSubview(findBarView, positioned: .above, relativeTo: clipView) }
+      // A transfer moves the view to the next card first, so the one it left must not pull it back out.
+      if oldValue?.superview === self { oldValue?.removeFromSuperview() }
+      if let findBarView, findBarView.superview !== self {
+        addSubview(findBarView, positioned: .above, relativeTo: closeButton ?? clipView)
+      }
       needsLayout = true
     }
   }
@@ -258,9 +262,10 @@ public final class ContentCardView: NSView {
     if closeButton.frame != frame { closeButton.frame = frame }
   }
 
-  /// 12 points from the top and trailing edges of the page area, below the Toolbar when it shows.
+  /// 12 points from the top and trailing edges of this card's page area, below the Toolbar when it shows. On a split
+  /// pane that page area is the pane, so the bar anchors there rather than to the whole content card.
   func layoutFindBar() {
-    guard let findBarView, !findBarView.isHidden else { return }
+    guard let findBarView, !findBarView.isHidden, findBarView.superview === self else { return }
     let frame = FindBarLayout.frame(in: split.contentFrame)
     if findBarView.frame != frame { findBarView.frame = frame }
   }

@@ -434,6 +434,87 @@ struct FindBarPresenterTests {
     #expect(rig.presenter.display?.text == "", "a tab that comes back starts with an empty field")
   }
 
+  @Test func `an open query stays and the search moves to the newly focused tab`() throws {
+    let rig = Rig(occurrences: 3)
+    let other = rig.engine.createTab(url: InMemoryEngine.findPageURL(occurrences: 5, link: Self.link))
+    rig.presenter.open()
+    rig.presenter.setText("nee")
+    rig.presenter.step(forward: true)
+    rig.presenter.step(forward: true)
+    #expect(rig.countText == "2 of 3")
+    let focus = rig.focusRequests
+    let closes = rig.closes
+
+    rig.presenter.moveOpenSearch(to: other)
+
+    #expect(rig.presenter.visibleTab == other)
+    #expect(rig.presenter.display?.text == "nee", "the query stays")
+    #expect(rig.countText == "1 of 5", "the search starts on the focused tab")
+    #expect(rig.presenter.isOpen(other))
+    #expect(!rig.presenter.isOpen(rig.tab), "the pane the search left is not still finding")
+    #expect(try rig.engine.selectedText(rig.tab) == "", "its highlights are cleared")
+    #expect(rig.focusRequests == focus, "focus does not jump back to the field")
+    #expect(rig.closes == closes, "moving is not closing")
+    rig.presenter.step(forward: false)
+    #expect(rig.countText == "5 of 5", "Find Previous steps the focused tab")
+
+    rig.presenter.moveOpenSearch(to: rig.tab)
+    #expect(rig.presenter.display?.text == "nee")
+    #expect(rig.countText == "1 of 3", "coming back searches that pane again, from the first match")
+  }
+
+  @Test func `a search still waiting on the debounce moves with the query`() async {
+    let rig = Rig(occurrences: 3)
+    let other = rig.engine.createTab(url: InMemoryEngine.findPageURL(occurrences: 5, link: Self.link))
+    rig.presenter.open()
+    rig.presenter.setText("nee")
+    await Self.until("the debounce timer is parked") { await rig.sleeper.parkedCount == 1 }
+
+    rig.presenter.moveOpenSearch(to: other)
+
+    #expect(rig.presenter.display?.text == "nee")
+    #expect(rig.countText == "1 of 5", "the focused tab is searched at once, not the one that was waiting")
+    await Self.until("the parked timer was cancelled") { await rig.sleeper.parkedCount == 0 }
+    #expect(rig.presenter.pendingSearches == 0)
+  }
+
+  @Test func `a closed find stays on its tab when the focused pane changes`() {
+    let rig = Rig(occurrences: 3)
+    let other = rig.engine.createTab(url: InMemoryEngine.findPageURL(occurrences: 5, link: Self.link))
+    rig.presenter.open()
+    rig.presenter.setText("nee")
+    rig.presenter.step(forward: true)
+    rig.presenter.close()
+
+    rig.presenter.moveOpenSearch(to: other)
+
+    #expect(rig.presenter.display == nil, "a closed bar does not open on the pane that gained focus")
+    #expect(!rig.presenter.isOpen(other))
+    #expect(rig.presenter.visibleTab == other)
+    rig.presenter.moveOpenSearch(to: rig.tab)
+    rig.presenter.open()
+    #expect(rig.presenter.display?.text == "nee", "the query stayed on the tab that had it")
+  }
+
+  @Test func `no focused pane hides the bar and searches nothing new`() throws {
+    let rig = Rig(occurrences: 3)
+    rig.presenter.open()
+    rig.presenter.setText("nee")
+    rig.presenter.step(forward: true)
+    let replies = rig.replies.count
+
+    rig.presenter.moveOpenSearch(to: nil)
+
+    #expect(rig.presenter.display == nil)
+    #expect(rig.presenter.visibleTab == nil)
+    #expect(rig.replies.count == replies, "nothing is searched while no pane is focused")
+    #expect(rig.closes == 0, "hiding is not closing")
+    #expect(rig.presenter.isOpen(rig.tab), "the query stays")
+    rig.presenter.moveOpenSearch(to: rig.tab)
+    #expect(rig.presenter.display?.text == "nee")
+    #expect(rig.countText == "1 of 3")
+  }
+
   @Test func `the engine ends a moved tab's find itself, so the shell makes no stop call`() throws {
     let rig = Rig(occurrences: 3)
     let window = rig.engine.createWindow(host: StubWindowHost())
