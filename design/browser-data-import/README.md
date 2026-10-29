@@ -1,7 +1,7 @@
 # Browser data import sheet design
 
 The consent, progress and result sheet for importing data from another browser's profile (#514, part of #131; the
-plan is the comment on #131). Two directions are mocked for the maintainer to pick from. Nothing is built yet.
+plan is the comment on #131). Two directions were mocked; the maintainer picked **B (Tiers)** and it is built in #514. A is kept as the record of the other option.
 
 - Prototype: [`prototype.html`](prototype.html). Open it from disk. States by hash:
   `#<dir>-<entry>-<state>[&dark][&rm][&shot]`, for example `#a-menu-consent`, `#b-hero-denied&dark`.
@@ -151,7 +151,23 @@ read, not watched.
 - Both appearances, Reduce Motion, Reduce Transparency (nothing here is translucent in the sheet) and Increase
   Contrast (hairlines move to the `Increase Contrast` values already used by the other sheets).
 
-## Open questions for the maintainer
+## Decisions (maintainer, built in #514)
+
+1. **Direction**: B, Tiers.
+2. **Defaults**: Cookies and Passwords start checked, like every other type that has something in it.
+3. **Retry scope**: only the failed types.
+4. **Onboarding**: the consent replaces the Import step's content in place.
+5. **Cancel**: keeps what came over.
+
+### Where the build differs from the mock
+
+- **Bookmarks** is a sixth row in Ready to import. The profile coordinator imports bookmarks as a type of its own; the five-row mock had no place for it. It dims to 0 when the other browser has none.
+- **Spaces and tabs** is the existing sidebar import, run first as one row; the other rows run through the profile coordinator.
+- When the other browser's profile folder cannot be read but its sidebar file can, the consent offers Spaces and tabs alone.
+- The Keychain line shows again during a Retry's progress, inside the password group, as the spec says for the pre-prompt line.
+- "Waiting for macOS" is inferred: from the user's answer until the coordinator's first progress event, because the coordinator reports no event for the Keychain prompt.
+
+## Open questions (answered above)
 
 1. **Direction**: A or B (the one open choice).
 2. **Defaults**: should Cookies and Passwords start checked? The prototype checks everything; starting them
