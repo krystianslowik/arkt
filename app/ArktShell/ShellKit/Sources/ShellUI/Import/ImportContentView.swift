@@ -216,8 +216,9 @@ final class ImportContentView: NSView {
       row.onToggle = { [weak self] kind, isOn in self?.source.setSelected(kind, isOn) }
       rowViews[kind] = row
     }
-    for view in [eyebrow, title, subtitle, overallLead, overallTrail, overallBar, footnote, secondaryButton, primaryButton]
-      as [NSView] { addSubview(view) }
+    for view in [eyebrow, title, subtitle, overallLead, overallTrail, overallBar, footnote] as [NSView] { addSubview(view) }
+    // The Hero entry scrolls its content when the window is short; its buttons stay put, so the host owns them.
+    if !style.isHero { for button in [secondaryButton, primaryButton] { addSubview(button) } }
     eyebrow.tone = .accent
     footnote.tone = .secondary
     overallTrail.tone = .secondary
@@ -263,7 +264,7 @@ final class ImportContentView: NSView {
     for (view, group) in zip(groupViews, groups) {
       let views = group.rows.compactMap { row -> ImportRowView? in
         guard let rowView = rowViews[row.kind] else { return nil }
-        rowView.apply(row, animated: animated)
+        rowView.apply(row, animated: animated, counting: new.phase == .counting)
         used.insert(row.kind)
         return rowView
       }
@@ -377,7 +378,7 @@ final class ImportContentView: NSView {
       y += height + style.groupGap
     }
     if !groupViews.isEmpty { y -= style.groupGap }
-    y += style.isHero ? 22 : 20
+    y += footnote.text.isEmpty && style.isHero ? 0 : (style.isHero ? 18 : 20)
     layoutFooter(width: width, y: &y)
     return y + bottomInset
   }
@@ -386,17 +387,12 @@ final class ImportContentView: NSView {
     let buttons = [secondaryButton, primaryButton].filter { !$0.isHidden }
     let sizes = buttons.map(\.intrinsicContentSize)
     let height = sizes.map(\.height).max() ?? 0
-    let gap: CGFloat = style.isHero ? 12 : 8
+    let gap: CGFloat = 8
     if style.isHero {
       footnote.place(x: 0, y: y, width: min(width, 520).rounded())
       footnote.frame.origin.x = ((width - footnote.frame.width) / 2).rounded()
-      if footnote.frame.height > 0 { y += footnote.frame.height + 18 }
-      let total = sizes.reduce(0) { $0 + $1.width } + gap * CGFloat(max(0, buttons.count - 1))
-      var x = ((width - total) / 2).rounded()
-      for (button, size) in zip(buttons, sizes) {
-        button.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
-        x += size.width + gap
-      }
+      if footnote.frame.height > 0 { y += footnote.frame.height }
+      return
     } else {
       var x = width - side
       for (button, size) in zip(buttons.reversed(), sizes.reversed()) {
@@ -442,7 +438,7 @@ final class ImportContentView: NSView {
       children.append(group)
     }
     if !footnote.text.isEmpty { children.append(footnote) }
-    for button in [secondaryButton, primaryButton] where !button.isHidden { children.append(button) }
+    if !style.isHero { for button in [secondaryButton, primaryButton] where !button.isHidden { children.append(button) } }
     return children
   }
 }

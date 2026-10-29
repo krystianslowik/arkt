@@ -78,6 +78,7 @@ public final class BrowserDataImportModel: BrowserDataImportSource {
   private var consent: CheckedContinuation<Decision, Never>?
   private var lastSummary: ProfileImportSummary?
   private var spacesResult: SpacesAndTabsResult?
+  private var sidebarCounting: Task<SpacesAndTabsCount?, Never>?
   private var cancelRequested = false
   private var didFinish = false
 
@@ -152,6 +153,7 @@ public final class BrowserDataImportModel: BrowserDataImportSource {
 
   private func runFlow() async {
     let counting = Task { [spaces] in await spaces?.count() }
+    sidebarCounting = counting
     let stream: AsyncStream<ProfileImportEvent>
     do {
       stream = try coordinator.run(root: root) { [weak self] counts in
@@ -257,6 +259,18 @@ public final class BrowserDataImportModel: BrowserDataImportSource {
   private func finished(_ summary: ProfileImportSummary) {
     lastSummary = summary
     if state.phase == .dismissed { return }
+    if summary.abortReason != nil, state.phase == .counting, !cancelRequested, let counting = sidebarCounting {
+      // The profile could not be read (no data folder), but the sidebar part may still be there: ask about that alone.
+      sidebarCounting = nil
+      Task { [weak self] in await self?.sidebarOnly(after: summary, counting: counting) }
+      return
+    }
+    finishRun(summary)
+  }
+
+  private func finishRun(_ summary: ProfileImportSummary) {
+    lastSummary = summary
+    if state.phase == .dismissed { return }
     if cancelRequested, state.phase == .counting || state.phase == .consent {
       dismiss()
       return
@@ -277,13 +291,25 @@ public final class BrowserDataImportModel: BrowserDataImportSource {
     state.phase = .result
   }
 
+  /// The profile import aborted before the consent: offers the sidebar part alone, or reports that nothing could be
+  /// read when there is no sidebar data either.
+  private func sidebarOnly(after summary: ProfileImportSummary, counting: Task<SpacesAndTabsCount?, Never>) async {
+    guard (await counting.value)?.items ?? 0 > 0 else {
+      finishRun(summary)
+      return
+    }
+    let answer = await askConsent(ProfileDataCounts(), spaces: counting)
+    guard answer != nil else { return }        // declined: the sheet is already closed
+    finishRun(ProfileImportSummary())
+  }
+
   private func dismiss() {
     guard !didFinish else { return }
     didFinish = true
     state.phase = .dismissed
     let anything = state.rows.values.contains { if case .imported = $0 { true } else { false } }
     onFinish?(BrowserDataImportOutcome(
-      importedAnything: anything, skippedSidebarItems: spacesResult?.skipped ?? 0,
+      importedAnything: anything, attempted: !state.rows.isEmpty || state.result.couldNotRead, skippedSidebarItems: spacesResult?.skipped ?? 0,
       addedSpaces: spacesResult?.addedSpaces ?? []))
   }
 
@@ -322,4 +348,32 @@ public final class BrowserDataImportModel: BrowserDataImportSource {
   static func reason(_ reason: String) -> BrowserDataNotImportedReason {
     reason.hasPrefix("Keychain") ? .keychainDenied : .unreadable
   }
+}
+
+/// The profile import for an engine that cannot write imported data into its profile: the count pass finds nothing
+/// and the run does nothing, so the sheet still offers the sidebar part.
+@MainActor
+public final class UnavailableProfileImporter: ProfileImporting {
+  public init() {}
+
+  public func run(root: URL, consent: @escaping @MainActor (ProfileDataCounts) async -> ImportSelection?) throws
+    -> AsyncStream<ProfileImportEvent> {
+    AsyncStream { continuation in
+      Task { @MainActor in
+        var summary = ProfileImportSummary()
+        if await consent(ProfileDataCounts()) == nil { summary.cancelled = true }
+        continuation.yield(.finished(summary))
+        continuation.finish()
+      }
+    }
+  }
+
+  public func retry(root: URL, after summary: ProfileImportSummary) throws -> AsyncStream<ProfileImportEvent> {
+    AsyncStream { continuation in
+      continuation.yield(.finished(ProfileImportSummary()))
+      continuation.finish()
+    }
+  }
+
+  public func cancel() {}
 }

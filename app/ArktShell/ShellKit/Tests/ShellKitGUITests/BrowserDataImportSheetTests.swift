@@ -31,35 +31,9 @@ func browserDataImportUntil(_ state: String, timeout: TimeInterval = 5, file: St
 /// Synthetic counts only.
 @MainActor
 final class BrowserDataImportSheetTests: XCTestCase {
-  @MainActor
-  private final class ScriptedImporter: ProfileImporting {
-    var consent: (@MainActor (ProfileDataCounts) async -> ImportSelection?)?
-    var continuation: AsyncStream<ProfileImportEvent>.Continuation?
-    private(set) var retries = 0
-    private(set) var cancels = 0
-
-    func run(root: URL, consent: @escaping @MainActor (ProfileDataCounts) async -> ImportSelection?) throws
-      -> AsyncStream<ProfileImportEvent> {
-      self.consent = consent
-      return AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
-    }
-
-    func retry(root: URL, after summary: ProfileImportSummary) throws -> AsyncStream<ProfileImportEvent> {
-      retries += 1
-      return AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
-    }
-
-    func cancel() { cancels += 1 }
-    func send(_ event: ProfileImportEvent) { continuation?.yield(event) }
-    func finish(_ summary: ProfileImportSummary) {
-      continuation?.yield(.finished(summary))
-      continuation?.finish()
-    }
-  }
-
   @MainActor private struct Rig {
     let controller: ShellWindowController
-    let importer = ScriptedImporter()
+    let importer = ScriptedProfileImporter()
     let model: BrowserDataImportModel
     let sheet: BrowserDataImportSheet
     var window: NSWindow { controller.window! }

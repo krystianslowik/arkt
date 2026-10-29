@@ -287,6 +287,23 @@ struct BrowserDataImportStateTests {
     #expect(state.primaryButton?.action == .done)
   }
 
+  // MARK: Hero type
+
+  /// The Hero entry's roles (design spec): headline 56 DemiBold, rows 18 medium, counts 26 DemiBold tabular, the
+  /// compact sizes for windows below 700 pt.
+  @MainActor @Test func theHeroTypeFollowsTheSpec() {
+    typealias R = BrandType.Role
+    let title = R.dataTitle.style(compact: false)
+    #expect(title.weight == .demiBold && title.size == 56 && title.leading == 0.92 && title.trackingEm == -0.055)
+    #expect(R.dataTitle.style(compact: true).size == 46)
+    #expect(R.dataRow.style(compact: false).size == 18 && R.dataRow.style(compact: false).weight == .medium)
+    let count = R.dataCount.style(compact: false)
+    #expect(count.size == 26 && count.weight == .demiBold && count.tabular)
+    #expect(R.dataCount.style(compact: true).size == 22)
+    #expect(R.dataStatus.style(compact: false).tabular)
+    #expect(R.dataNote.style(compact: false).leading == 1.45)
+  }
+
   // MARK: Words
 
   @Test func noStateNamesTheOtherBrowser() {

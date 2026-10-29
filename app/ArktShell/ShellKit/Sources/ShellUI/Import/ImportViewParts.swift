@@ -278,11 +278,13 @@ final class ImportGlyphView: NSView {
 
   func apply(style: ImportViewStyle) {
     self.style = style
-    if let shown { set(shown, animated: false) }
+    if let shown { set(shown, animated: false, force: true) }
   }
 
-  func set(_ leading: BrowserDataImportRow.Leading, animated: Bool) {
+  func set(_ leading: BrowserDataImportRow.Leading, animated: Bool, force: Bool = false) {
     let previous = shown
+    // The same glyph again (a progress event for a row that keeps working) must not restart its spin.
+    if previous == leading, !force { return }
     shown = leading
     let palette = style.palette
     let size = style.glyphSize
@@ -553,6 +555,13 @@ final class ImportCheckbox: NSView {
     }
   }
 
+  /// A checkbox that takes focus scrolls into view (the Hero entry scrolls when the window is short).
+  override func becomeFirstResponder() -> Bool {
+    let accepted = super.becomeFirstResponder()
+    if accepted { scrollToVisible(bounds.insetBy(dx: -8, dy: -12)) }
+    return accepted
+  }
+
   override func drawFocusRingMask() {
     NSBezierPath(roundedRect: bounds, xRadius: 4.5, yRadius: 4.5).fill()
   }
@@ -636,7 +645,7 @@ final class ImportRowView: NSView {
     needsLayout = true
   }
 
-  func apply(_ row: BrowserDataImportRow, animated: Bool) {
+  func apply(_ row: BrowserDataImportRow, animated: Bool, counting: Bool = false) {
     self.row = row
     nameText.text = row.title
     nameText.tone = row.isDimmed ? .secondary : .primary
@@ -649,6 +658,10 @@ final class ImportRowView: NSView {
     case .checkbox, .done: valueText.role = .count
     default: valueText.role = .status
     }
+    // A type with nothing in it is the one row that fades; the others say it in words.
+    var faded = false
+    if case .checkbox(_, let isEnabled) = row.leading, !isEnabled, !counting { faded = true }
+    for text in [nameText, detailText, valueText] { text.alphaValue = faded ? 0.5 : 1 }
     switch row.leading {
     case .checkbox(let isOn, let isEnabled):
       checkbox.isHidden = false

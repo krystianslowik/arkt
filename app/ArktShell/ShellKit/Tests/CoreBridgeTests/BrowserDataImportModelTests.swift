@@ -311,6 +311,7 @@ struct BrowserDataImportModelTests {
 
   @Test func aRunThatCouldNotReadAnythingShowsNoRowsAndOnlyDone() async {
     let rig = Rig()
+    rig.spaces.count = nil
     rig.model.start()
     _ = await settle { rig.importer.runs == 1 }
     var summary = ProfileImportSummary()
@@ -320,6 +321,40 @@ struct BrowserDataImportModelTests {
     #expect(rig.state.result.couldNotRead)
     #expect(rig.state.groups.isEmpty)
     #expect(rig.state.subtitle == "Arkt couldn't read your other browser's data.", "the abort reason (it names Arc) never reaches the sheet")
+  }
+
+  @Test func withoutAProfileFolderTheSidebarPartIsStillOffered() async {
+    let rig = Rig()
+    rig.model.start()
+    _ = await settle { rig.importer.runs == 1 }
+    var summary = ProfileImportSummary()
+    summary.abortReason = "Arc data not found"
+    rig.importer.finish(summary)
+    #expect(await settle { rig.state.phase == .consent })
+    #expect(rig.state.counts[.spacesAndTabs] == 213)
+    #expect(rig.state.availableKinds == [.spacesAndTabs], "nothing else to import")
+    #expect(!rig.state.showsKeychainLine)
+    rig.model.beginImport()
+    #expect(await settle { rig.state.phase == .result })
+    #expect(rig.spaces.runs == 1)
+    #expect(rig.state.result == BrowserDataImportResult())
+    #expect(rig.state.rows[.spacesAndTabs] == .imported(count: 213, failed: 0))
+    #expect(rig.importer.retries.isEmpty)
+    rig.model.finish()
+    #expect(rig.outcomes.finished.first?.importedAnything == true)
+  }
+
+  @Test func cancelOnTheSidebarOnlyConsentClosesTheSheet() async {
+    let rig = Rig()
+    rig.model.start()
+    _ = await settle { rig.importer.runs == 1 }
+    var summary = ProfileImportSummary()
+    summary.abortReason = "Arc data not found"
+    rig.importer.finish(summary)
+    #expect(await settle { rig.state.phase == .consent })
+    rig.model.cancel()
+    #expect(rig.state.phase == .dismissed)
+    #expect(rig.spaces.runs == 0)
   }
 
   // MARK: Denied Keychain and Retry

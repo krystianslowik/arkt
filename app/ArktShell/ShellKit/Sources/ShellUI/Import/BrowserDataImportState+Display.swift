@@ -275,7 +275,6 @@ extension BrowserDataImportState {
           let refused = "\(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported"
           detail = detail.map { "\($0), \(refused)" } ?? refused
         }
-        bar = phase == .progress ? 1 : nil
         label = "\(kind.title), \(value), imported" + (failed > 0 ? ", \(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported" : "")
       case .skipped:
         leading = .skipped; value = "Skipped"; dimmed = true
@@ -410,11 +409,15 @@ public protocol BrowserDataImportSource: AnyObject {
 public struct BrowserDataImportOutcome: Equatable, Sendable {
   /// At least one type came over.
   public var importedAnything: Bool
+  /// The user chose Import (or nothing could be read): the first run offers Try again, not the untouched step.
+  public var attempted: Bool
   public var skippedSidebarItems: Int
   public var addedSpaces: [SpaceID]
 
-  public init(importedAnything: Bool, skippedSidebarItems: Int = 0, addedSpaces: [SpaceID] = []) {
+  public init(importedAnything: Bool, attempted: Bool = false, skippedSidebarItems: Int = 0,
+              addedSpaces: [SpaceID] = []) {
     self.importedAnything = importedAnything
+    self.attempted = attempted || importedAnything
     self.skippedSidebarItems = skippedSidebarItems
     self.addedSpaces = addedSpaces
   }

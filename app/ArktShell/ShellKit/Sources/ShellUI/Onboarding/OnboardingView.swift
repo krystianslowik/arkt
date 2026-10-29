@@ -23,6 +23,8 @@ final class OnboardingView: NSView {
   let wash = CAGradientLayer()
   let stage: any OnboardingStage
   private(set) var stepView: OnboardingStepView?
+  /// The browser data import while it replaces the Import step's content (#514).
+  var importHero: ImportHeroView? { didSet { rebuildKeyLoop() } }
   let backButton: PillButton
   let skipButton: PillButton
   let progressLabel: BrandLabel
@@ -185,7 +187,7 @@ final class OnboardingView: NSView {
 
   /// Tab and Shift-Tab: the step's controls in reading order, then Back and Skip setup (section 10).
   func rebuildKeyLoop() {
-    var views: [NSView] = stepView?.keyViews ?? []
+    var views: [NSView] = importHero?.keyViews ?? stepView?.keyViews ?? []
     if backButton.isEnabled { views.append(backButton) }
     if skipButton.isEnabled { views.append(skipButton) }
     guard let first = views.first else {
@@ -213,7 +215,7 @@ final class OnboardingView: NSView {
   // MARK: Accessibility
 
   override func accessibilityChildren() -> [Any]? {
-    var children: [Any] = stepView.map { [$0] } ?? []
+    var children: [Any] = importHero?.accessibilityElementsInOrder ?? stepView.map { [$0] } ?? []
     if backButton.cell?.isAccessibilityElement() == true { children.append(backButton) }
     if progressLabel.isAccessibilityElement() { children.append(progressLabel) }
     if skipButton.cell?.isAccessibilityElement() == true { children.append(skipButton) }

@@ -104,7 +104,7 @@ public final class BrowserDataImportSheet: NSWindowController {
     window?.setAccessibilityLabel(state.title)
     content.apply(state)
     if state.phase == .dismissed {
-      close(sheet: ())
+      closeSheet()
       return
     }
     resize()
@@ -146,7 +146,7 @@ public final class BrowserDataImportSheet: NSWindowController {
     ])
   }
 
-  private func close(sheet: Void) {
+  private func closeSheet() {
     guard let window else { return }
     source.onChange = nil
     (parent ?? window.sheetParent)?.endSheet(window)
