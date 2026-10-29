@@ -213,7 +213,8 @@ struct ThemeCrossfadeTests {
     #expect(controlPoint(animation.timingFunction, at: 1) == (0.42, 0))
     #expect(controlPoint(animation.timingFunction, at: 2) == (0.58, 1))
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.paper.baseColors.map(\.cgColor)))
-    try #require(completion)()
+    let settle = try #require(completion)
+    settle()
     #expect(view.crossfadeAnimationForTesting == nil)
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.dusk.baseColors.map(\.cgColor)))
   }
