@@ -41,13 +41,21 @@ final class FakeEngineDownloadContractTests: XCTestCase {
       note("cancel performed")
       try await EngineContract.waitUntil(timeout: .seconds(10)) { EngineContract.downloadState(engine, id) == .cancelled }
       note("cancelled")
+      try EngineContract.require(engine.download(id)?.endTime != nil, "a cancelled download has an end time")
+      note("endTime ok")
       let count = recorder.downloadEvents(for: id).count
       engine.perform(.cancel, on: id)
       engine.perform(.pause, on: id)
       engine.perform(.resume, on: id)
       engine.perform(.cancel, on: DownloadID("unknown"))
       note("repeat commands done")
-      try EngineContract.require(recorder.downloadEvents(for: id).count == count, "events changed")
+      try EngineContract.require(recorder.downloadEvents(for: id).count == count && EngineContract.downloadState(engine, id) == .cancelled,
+                  "a command that does not apply must change nothing: \(recorder.downloadEvents(for: id))")
+      note("unchanged ok")
+      if let target = engine.download(id)?.targetPath {
+        note("target \(target.lastPathComponent)")
+        try EngineContract.require(!FileManager.default.fileExists(atPath: target.path()), "the partial file is deleted")
+      }
       note("finished")
     } catch {
       note("ERROR type=\(String(reflecting: type(of: error))) description=\(error)")
