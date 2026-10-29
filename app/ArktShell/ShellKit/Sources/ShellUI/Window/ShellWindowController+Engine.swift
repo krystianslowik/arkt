@@ -264,6 +264,18 @@ extension ShellWindowController {
     return result
   }
 
+  /// Loaded tabs whose page plays media, and the split a playing pane belongs to (BH-076). Same rule as Clear
+  /// (`pagePlaysMedia`): the engine snapshot's `isAudible`, which stays true for a muted page that still plays.
+  /// Mute alone does not count. A page that is not loaded has no snapshot, so it is never exempt.
+  var nodesPlayingMedia: Set<NodeID> {
+    var result: Set<NodeID> = []
+    for node in tabsByNode.keys where pagePlaysMedia(node) {
+      result.insert(node)
+      if case .split(let split)? = sidebar.parent(of: node) { result.insert(split) }
+    }
+    return result
+  }
+
   // MARK: Commands (Decision 9)
 
   /// The commands the shell implements (week-3 results, W3-8 step 3): New Tab opens the command bar, Close Tab
