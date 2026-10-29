@@ -1,4 +1,5 @@
 import AppKit
+import ArcImport
 import Archive
 import CoreBridge
 import EngineAPI
@@ -34,6 +35,8 @@ final class AppSession {
   let commandBarSettings = CommandBarSettings(defaults: AppEnvironment.userDefaults)
   let archiveStore: ArchiveStore
   let settingsStore: SettingsStore
+  /// The engine, for the import's writes (`EngineImporting`) next to what `windows` does with it.
+  private let engine: any EngineClient
   let importer: ArcImportCoordinator
   /// Archive and restore: the model first, then an outbox to `archiveStore` (decision 11).
   let archive: ArchiveCoordinator
@@ -57,6 +60,9 @@ final class AppSession {
   private(set) var isArcImportAvailable = false
   /// The availability check in flight; at most one at a time.
   private var availabilityCheck: Task<Void, Never>?
+  /// The import sheet's model while the sheet shows (#514); one at a time.
+  private var browserDataImport: BrowserDataImportModel?
+  private var profileImporterStorage: (any ProfileImporting)?
   /// nil when the favicon folder was refused (it never is for Arkt's own data folder).
   private let faviconStore: FaviconStore?
   private var faviconWriter: FaviconWriter?
@@ -81,6 +87,7 @@ final class AppSession {
        hostLookup: ShellWindowSet.HostLookup? = nil) {
     self.location = location
     self.database = state.database
+    self.engine = engine
     let source = ModelSidebarSource(sidebar: state.sidebar ?? SidebarModel.Sidebar())
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
@@ -467,7 +474,8 @@ final class AppSession {
 
   /// Off while a first run covers a window: it runs its own import, and a second one would collide with it.
   var canImportFromArc: Bool {
-    isArcImportAvailable && !importer.isRunning && !windows.controllers.contains(where: \.isShowingOnboarding)
+    isArcImportAvailable && !importer.isRunning && browserDataImport == nil
+      && !windows.controllers.contains(where: \.isShowingOnboarding)
   }
 
   /// Re-checks whether Arc's sidebar file exists, off the main actor, unless a check is already running. The menu
@@ -486,15 +494,56 @@ final class AppSession {
     }
   }
 
-  /// File > Import from Arc... and the empty state's button. Reads Arc's folder only now, off the main actor.
+  /// File > Import Browser Data... and the empty state's button: the consent, progress and result sheet (#514) on the
+  /// window the user is in. Arc's folder is read only after the user chose what to import.
   func importFromArc() {
     guard canImportFromArc else { return }
-    Task { [weak self] in await self?.runImport() }
+    let model = makeBrowserDataImport()
+    browserDataImport = model
+    model.onFinish = { [weak self] outcome in
+      self?.browserDataImport = nil
+      Self.log.notice("browser data import finished imported \(outcome.importedAnything, privacy: .public)")
+    }
+    if shownWindow().presentBrowserDataImport(source: model) == nil { browserDataImport = nil }
   }
 
-  private func runImport() async {
-    guard let outcome = await performImport() else { return }
-    showSummary(outcome.summary)
+  /// The import behind the sheet and the first run's Import step: the sidebar part (Spaces, tabs, Favorites) through
+  /// the existing coordinator, the rest (history, bookmarks, cookies, passwords, extensions) through the one
+  /// `ProfileImportCoordinator`. `knownSidebar` is a count the caller already has (the first run's), so the sidebar
+  /// file is counted once.
+  func makeBrowserDataImport(knownSidebar: SpacesAndTabsCount? = nil) -> BrowserDataImportModel {
+    let spaces = SpacesAndTabsStep(
+      count: { [arcFiles] in
+        if let knownSidebar { return knownSidebar }
+        var last: ArcImportCounts?
+        do { for try await counts in ArcImportCounter.counts(arcFiles) { last = counts } } catch { return nil }
+        return last.map { SpacesAndTabsCount(items: $0.pinnedTabs + $0.favorites, spaces: $0.spaces) }
+      },
+      run: { [weak self] in
+        guard let outcome = await self?.performImport(showsFailureToast: false) else {
+          return SpacesAndTabsResult(items: 0, skipped: 0, failed: true, addedSpaces: [])
+        }
+        let summary = outcome.summary
+        return SpacesAndTabsResult(items: summary.tabs + summary.favorites, skipped: summary.skipped + summary.archiveSkipped,
+                                   failed: false, addedSpaces: outcome.addedSpaces)
+      })
+    return BrowserDataImportModel(
+      coordinator: profileImporter, root: arcFiles.directory.appendingPathComponent("User Data", isDirectory: true),
+      spaces: spaces)
+  }
+
+  /// One coordinator for the session: a second run is refused while one is going.
+  private var profileImporter: any ProfileImporting {
+    if let existing = profileImporterStorage { return existing }
+    let made: any ProfileImporting
+    if let importing = engine as? any EngineImporting {
+      made = ProfileImportCoordinator(engine: importing, importRecord: settingsStore,
+                                      keyProvider: KeychainSafeStorageKeyProvider())
+    } else {
+      made = UnavailableProfileImporter()
+    }
+    profileImporterStorage = made
+    return made
   }
 
   /// Runs the import and applies its favicons; nil when it was already running or failed (the failure toast is
@@ -524,19 +573,6 @@ final class AppSession {
       Self.log.error("arc import failed \(errorType, privacy: .public) \(code, privacy: .public)")
       if showsFailureToast { shownWindow().toasts.show(Toast(text: ToastText.importFailed, kind: .error)) }
       return nil
-    }
-  }
-
-  /// Counts only (decision 6d).
-  private func showSummary(_ summary: ArcImportSummary) {
-    let alert = NSAlert()
-    alert.messageText = "Import complete"
-    alert.informativeText = summary.lines.joined(separator: "\n")
-    alert.addButton(withTitle: "OK")
-    if let sheetWindow = shownWindow().window {
-      alert.beginSheetModal(for: sheetWindow)
-    } else {
-      alert.runModal()
     }
   }
 
