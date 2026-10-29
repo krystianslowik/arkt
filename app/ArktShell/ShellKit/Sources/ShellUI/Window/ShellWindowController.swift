@@ -104,6 +104,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var nodeToReshow: NodeID?
   /// Engine tabs are created lazily, when a sidebar node is first shown (`openEngineTab(for:)`).
   var tabsByNode: [NodeID: TabID] = [:]
+  /// Page thumbnails for the command bar's preview (#372, #370). The app assigns this after the window exists;
+  /// the preview closures below read it when a row is selected.
+  public var pageThumbnails: PageThumbnails?
   var nodeByTab: [TabID: NodeID] = [:]
   /// Where Copy Link writes and Paste URL as New Tab reads (#105); tests use a private pasteboard.
   var linkPasteboard: NSPasteboard = .general
@@ -251,6 +254,20 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       self.engine.reload(tab)
     }
     commandBar.onSwitch = { [weak self] node in self?.activate(node: node) }
+    commandBar.thumbnailForPreview = { [weak self] thumbnail in
+      guard let self, let thumbnails = self.pageThumbnails else { return nil }
+      switch thumbnail {
+      case .liveTab(let node):
+        guard let tab = self.tabsByNode[node] else { return nil }
+        return await thumbnails.thumbnail(of: tab)
+      case .cachedPage(let url):
+        return await thumbnails.thumbnail(for: url)
+      }
+    }
+    commandBar.faviconForPreview = { [weak self] thumbnail in
+      guard let self, case .liveTab(let node) = thumbnail else { return nil }
+      return self.sidebarController.favicons[node]
+    }
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
     commandBar.recentTabsProvider = { [weak self] in self?.recentTabs() ?? [] }
     // #112: settings, Paste and Go (BH-108, GS-035), Spaces as results (BH-104), action search (BH-106),
@@ -637,10 +654,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// tab on screen (Return on it would only close the bar), then the tabs not shown since the app started, current
   /// Space first like the suggestions (BH-111). Forgets the time of a tab that is gone.
   private func recentTabs() -> [CommandBarResults.OpenTab] {
-    let open = openTabs().map { tab in
-      CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
-                                lastViewed: viewedAt[tab.node])
-    }
+    let open = openTabs()
     viewedAt = viewedAt.filter { entry in open.contains { $0.node == entry.key } }
     let candidates = open.filter { $0.node != currentNode }
     let viewed = candidates.filter { $0.lastViewed != nil }
@@ -651,11 +665,16 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// BH-104: open tabs of every Space of this profile, the current Space first (so the BH-111 refresh reorders).
   private func openTabs() -> [CommandBarResults.OpenTab] {
     let spaces = sidebarController.spaces
-    guard let current = sidebarController.currentSpace else {
-      return CommandBarResults.openTabs(in: sidebar, spaces: spaces)
+    let ordered: [SpaceID]
+    if let current = sidebarController.currentSpace {
+      ordered = [current] + spaces.filter { space in space != current }
+    } else {
+      ordered = spaces
     }
-    return CommandBarResults.openTabs(in: sidebar,
-                                      spaces: [current] + spaces.filter { space in space != current })
+    return CommandBarResults.openTabs(in: sidebar, spaces: ordered).map { tab in
+      CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
+                                lastViewed: viewedAt[tab.node], spaceTitle: tab.spaceTitle)
+    }
   }
 
   /// The action search's verbs (BH-106); ids are handled in `runCommandBarAction`.

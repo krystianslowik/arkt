@@ -2720,3 +2720,61 @@ entering a scope resets the filter; the empty "No <filter> match" row is not sel
   or opacity are edited, and the live preview draws them through the same path.
 - Not measured: frame time (no per-frame work was added: layer opacities only) and before/after screenshots (the app was
   not launched on the machine that finished this).
+
+## Command bar preview column (#372) (2026-10-28)
+
+### What changed
+
+- The bar widens from 680 pt to 968 pt when the selected row is an open tab or a history row and the query is not empty. Suggestions, site search, actions, Paste and Go, archived results, an address row, a Space and a no-match row stay at 680, as does an empty query. The wide bar keeps the narrow bar's leading edge and grows to the right, so the list's leading edge does not move. The column is 300 pt wide with 12 pt padding and a hairline on its leading edge. It is no taller than the five rows, and the bar does not grow vertically for it. A shorter band shrinks the thumbnail and hides it below 48 pt.
+- Width is an interruptible `SpringPreset.firmFast` spring (`CommandBarWidthMotion`) on a mask and on the trailing cluster's transform. The panel is laid out once when it becomes wide, and once when a narrowing spring settles. A frame of the spring does not layout. Up or Down mid-flight retargets from the current width and velocity. Moving between two preview rows keeps the column and cross-fades its content. Reduce Motion sets the width at once and still fades the content. The signpost `CommandBarPreviewWidth` covers the spring and stays open across a retarget. Reduce Motion does not begin it.
+- The thumbnail is 116 pt high with 10 pt corners when the band fits. An open tab asks `PageThumbnails.thumbnail(of:)` for a live image. A history row asks `thumbnail(for:)` for the cached image, including when that page is also open. Until the image arrives the well shows the favicon, or the row symbol. A token from an earlier selection is dropped. The well is on screen before the request, and the image is decoded on the main actor after the await.
+- The title is 14 pt semibold, one line. An open tab's meta line is "<host> · open in <Space>, <time>" with a 6 pt green dot. History is "<host> · visited <time>" with no dot. Preview times come from `CommandBarRelativeTime.preview` ("11 min ago"; "Now" and "Yesterday" stay as they are). The history row's trailing time stays without "ago".
+- Split View (Cmd-Return) is the secondary button and opens the page in a new split pane. Switch to Tab (Return) is the only mustard button; the label is graphite on the mustard fill. A history row that is not open uses "Open", and Split View still opens a new split pane. A history row that is also an open tab uses "Switch to Tab", keeps the visited line and still uses the cached thumbnail. Opt-Return on a visible preview opens a new tab. Opt-Return on a switch row with no preview, including the empty query, still switches.
+- VoiceOver gets the group "Preview, <title>" when the column appears, and two labelled buttons. The buttons are not in the Tab order.
+- The app wires `PageThumbnails` from `AppSession` through `ShellWindowController`. History rows appear only when `historyProvider` returns visits. The app passes none until a store exists.
+
+### Deviations
+
+- No 240 pt column and no rule that hides the preview on a narrow window (README open question 5). When the window cannot hold 968 pt past the leading edge, the width clips to the window and the column stays 300 pt, so the list shrinks.
+- The wide bar is anchored to the narrow bar's leading edge. On a 1280 pt window the right margin is 12 pt, and the width is exactly 968 pt.
+- An empty query stays at 680 pt even when a recent open tab is selected.
+- There is no history store in the product. The History pill stays at 0 in the app. History rows exist when `historyProvider` returns visits.
+- Opt-Return on a visible preview opens a new tab. Opt-Return on an empty-query Switch to Tab row still switches, so the existing empty-query test stays valid.
+- A window resize with no preview snaps. Only a visible preview, or a width spring that is already running, animates the width. The height follows the rows immediately, including while the column is still clipping away.
+- The preview's text and controls sit in a flipped content group. The column and the bar are both flipped; an unflipped group drew the thumbnail and the buttons upside down.
+- The history screenshot uses five synthetic visits so the five-row band can show the 116 pt thumbnail. One history row hides it, because the column is shorter than the thumbnail plus the text and the buttons.
+- Frame time of the widening spring: not run. `testTheBarWidensOnASpringWithoutMovingTheLeadingEdgeOrLayingOutPerFrame` asserts that a frame while the spring runs does not increment the layout counter, and it passed. A live frame-time number needs a display link and a wall-clock wait. The tests step the spring by hand and do not sleep. The `commandbar.latency.ms` sample in `CommandBarTests` is the show-latency gate, not this spring.
+- The spring's unit tests live in ShellUITests, the same place as the selection-motion tests. The window, the spring on a live bar, Reduce Motion, the no-layout assertion, accessibility, Cmd-Return and the screenshots live in ShellKitGUITests.
+
+### Tests
+
+`cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests` (nice -n 20), exit 0, on the final sources:
+
+- Test run with 1114 tests in 137 suites passed after 1.050 seconds.
+- Test run with 38 tests in 6 suites passed after 0.036 seconds.
+- Test run with 60 tests in 7 suites passed after 2.151 seconds.
+- Test run with 7 tests in 2 suites passed after 0.027 seconds.
+- Test run with 181 tests in 18 suites passed after 0.281 seconds.
+- Test run with 49 tests in 6 suites passed after 3.163 seconds.
+- Test run with 257 tests in 24 suites passed after 1.011 seconds.
+- Test run with 111 tests in 15 suites passed after 0.552 seconds.
+- Test run with 23 tests in 8 suites passed after 0.175 seconds.
+
+1840 tests, 0 failures. The 19 new tests are `CommandBarPreviewTests` (12) and `CommandBarWidthMotionTests` (7), inside the 1114.
+
+GUI, the command-bar classes, under the GUI lock (`swift test --filter 'CommandBarPreviewWindowTests|CommandBarHybridTests|CommandBarBehaviourTests|CommandBarArchivedTests/|CommandBarTests/'`), exit 0:
+
+- CommandBarArchivedTests: Executed 2 tests, with 0 failures in 0.490 seconds.
+- CommandBarBehaviourTests: Executed 52 tests, with 1 test skipped and 0 failures in 13.569 seconds.
+- CommandBarHybridTests: Executed 28 tests, with 1 test skipped and 0 failures in 7.934 seconds.
+- CommandBarPreviewWindowTests: Executed 8 tests, with 0 failures in 3.146 seconds.
+- CommandBarTests: Executed 67 tests, with 0 failures in 38.080 seconds.
+- ShellKitGUITests.xctest: Executed 157 tests, with 2 tests skipped and 0 failures in 63.218 seconds.
+
+The two skips are the pre-existing screenshot renders. `commandbar.latency.ms` on that run: median 17.13, p95 17.51, bound 17.66, asserted=yes. That is the show-latency gate.
+
+`cd app/ArktCore && swift test`: not run. ArktCore was not edited.
+
+UI test `ArktShellUITests/CommandBarKeyTests/test_372_cmdReturnOpensTheSelectedTabInASplit`: not run to a result. xcodebuild reached Set Up, then XCTest stayed in `recordIssue` while symbolication blocked in `open`. The harness refuses to launch when `dev.arkt.Arkt` is already running, and another worktree's ArktShell (pid 82119) holds that bundle id. It was left running. The in-process twin `CommandBarPreviewWindowTests.testCmdReturnSplitsAndOptReturnOpensATab` passed. The XCUITest method is in `CommandBarKeyTests`.
+
+Widening frame time: not run. The structural no-layout assertion passed, as above.

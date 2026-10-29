@@ -26,6 +26,7 @@ final class CommandBarBehaviourTests: XCTestCase {
     bar.announce = { [unowned self] in announcements.append($0) }
     bar.dismissFinisher = { _ in }            // the fade is ended by hand where a test looks at it
     bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
+    bar.barView.widthMotion.drivesFramesItself = false
     bar.prewarm()
     announcements = []
   }
@@ -103,7 +104,8 @@ final class CommandBarBehaviourTests: XCTestCase {
     showMixed()
     try command(2)
     try command(3)
-    XCTAssertEqual(announcements, ["Tabs, 3 results", "History, 0 results"])
+    // The first matching tab opens the preview, which announces once. The filter changes follow.
+    XCTAssertEqual(announcements, ["Preview, Tab 1", "Tabs, 3 results", "History, 0 results"])
     try command(4)
     XCTAssertEqual(announcements.last, "Actions, 1 result")
   }

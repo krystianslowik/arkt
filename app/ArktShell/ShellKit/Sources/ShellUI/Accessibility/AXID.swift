@@ -143,6 +143,10 @@ public enum AXID {
     public static let hints = "commandBar.hints"
     /// The Esc key cap at the right end of the field row; it closes the bar.
     public static let escape = "commandBar.escape"
+    /// The preview column (#372). Label: "Preview, <title>".
+    public static let preview = "commandBar.preview"
+    public static let previewSplit = "commandBar.preview.split"
+    public static let previewPrimary = "commandBar.preview.primary"
     public static let open = "open"
     public static let closed = "closed"
   }

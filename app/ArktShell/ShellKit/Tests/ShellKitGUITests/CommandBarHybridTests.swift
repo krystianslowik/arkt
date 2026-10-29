@@ -24,6 +24,7 @@ final class CommandBarHybridTests: XCTestCase {
     bar.settings.dismissSearchSuggestionNotice()
     bar.dismissFinisher = { $0() }
     bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
+    bar.barView.widthMotion.drivesFramesItself = false
     bar.prewarm()
   }
 

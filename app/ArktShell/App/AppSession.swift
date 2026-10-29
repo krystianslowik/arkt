@@ -201,6 +201,7 @@ final class AppSession {
     // Settings (#307): Cmd-1 ... Cmd-9 counting, and the Peek link switches read from the app's defaults suite.
     window.tabNavigationSettings = settings.tabNavigation
     window.peek.linkSettings = { [weak self] in self?.settings.peekLinks ?? PeekLinkSettings() }
+    window.pageThumbnails = pageThumbnails
     window.commandBar.archivedProvider = { [weak self] query in await self?.archiveSearch.matches(for: query) ?? [] }
     window.commandBar.onRestoreArchived = { [weak self] id in self?.archiveSearch.restore(id) }   // BH-104
     guard let writer = faviconWriter else { return }

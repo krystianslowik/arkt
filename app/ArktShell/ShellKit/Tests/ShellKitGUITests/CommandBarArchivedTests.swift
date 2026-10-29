@@ -16,6 +16,7 @@ final class CommandBarArchivedTests: XCTestCase {
     parent.isReleasedWhenClosed = false
     parent.orderFront(nil)
     bar = CommandBarController(parent: parent)
+    bar.barView.widthMotion.drivesFramesItself = false
   }
 
   override func tearDown() async throws {
