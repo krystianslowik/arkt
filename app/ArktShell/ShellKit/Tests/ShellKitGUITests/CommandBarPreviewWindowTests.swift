@@ -19,9 +19,14 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     NSApp.setActivationPolicy(.accessory)
     shell = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     window = try XCTUnwrap(shell.window)
-    window.setFrame(NSRect(x: 100, y: 100, width: 1280, height: 800), display: true)
     shell.showWindow(nil)
     window.makeKeyAndOrderFront(nil)
+    // Sit in the visible frame, at most the 1280 by 800 the layout is measured at. A screen that cannot
+    // hold that clamps the window, and the preview width is whatever frame AppKit kept.
+    let visible = (window.screen ?? NSScreen.main)?.visibleFrame
+      ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+    let size = NSSize(width: min(1280, visible.width), height: min(800, visible.height))
+    window.setFrame(NSRect(origin: visible.origin, size: size), display: true)
     bar = CommandBarController(parent: window)
     bar.settings.dismissSearchSuggestionNotice()
     bar.announce = { [unowned self] in announcements.append($0) }
@@ -61,6 +66,13 @@ final class CommandBarPreviewWindowTests: XCTestCase {
   private func settleWidth() {
     clock += 2
     bar.barView.widthMotion.presentFrame()
+  }
+
+  /// The preview width the live window can hold. A frame that fits 968 returns 968; a smaller one clips to its edge.
+  private func fittedPreviewWidth() -> CGFloat {
+    CommandBarGeometry.frame(parentFrame: window.frame,
+                             contentHeight: CommandBarGeometry.contentHeight(rowCount: bar.results.count),
+                             showsPreview: true).width
   }
 
   /// A small synthetic page image. Not a capture of a real page.
@@ -119,7 +131,8 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     let scrollMinX = bar.barView.scrollView.frame.minX
 
     bar.setQueryForTesting("example")
-    XCTAssertEqual(bar.panel.frame.width, 968, accuracy: 0.5)
+    let fitted = fittedPreviewWidth()
+    XCTAssertEqual(bar.panel.frame.width, fitted, accuracy: 0.5)
     XCTAssertEqual(bar.panel.frame.minX, narrowMinX, accuracy: 0.5, "the list's leading edge does not move")
     XCTAssertEqual(bar.panel.frame.height, CommandBarGeometry.contentHeight(rowCount: bar.results.count), accuracy: 0.5)
     XCTAssertEqual(bar.barView.scrollView.frame.minX, scrollMinX, accuracy: 0.5)
@@ -133,8 +146,8 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     clock += 0.05
     bar.barView.widthMotion.presentFrame()
     XCTAssertEqual(bar.barView.layoutCount, layouts, "a presented frame does not lay out")
-    XCTAssertGreaterThan(bar.barView.drawnWidth, 680)
-    XCTAssertLessThan(bar.barView.drawnWidth, 968)
+    XCTAssertGreaterThan(bar.barView.drawnWidth, narrowWidth)
+    XCTAssertLessThan(bar.barView.drawnWidth, fitted)
 
     let mid = bar.barView.drawnWidth
     let fades = bar.barView.previewColumn.contentFadeCount
@@ -143,7 +156,7 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     XCTAssertEqual(bar.barView.drawnWidth, mid, accuracy: 0.01, "moving between preview rows keeps the width")
     XCTAssertGreaterThan(bar.barView.previewColumn.contentFadeCount, fades)
     XCTAssertEqual(previewAnnouncements().count, 1, "VoiceOver is not told again on a crossfade")
-    XCTAssertEqual(bar.panel.frame.width, 968, accuracy: 0.5)
+    XCTAssertEqual(bar.panel.frame.width, fitted, accuracy: 0.5)
     XCTAssertTrue(bar.barView.widthMotion.isSignpostOpen, "a retarget does not open a second interval")
 
     moveDown()
@@ -164,15 +177,16 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     bar.openTabsProvider = { [self.tab("Pull requests"), self.tab("Notes")] }
     bar.toggle(.newTab)
     bar.setQueryForTesting("example")
+    let fitted = fittedPreviewWidth()
     XCTAssertFalse(bar.barView.widthMotion.isRunning)
     XCTAssertFalse(bar.barView.widthMotion.isSignpostOpen)
-    XCTAssertEqual(bar.panel.frame.width, 968, accuracy: 0.5)
-    XCTAssertEqual(bar.barView.drawnWidth, 968, accuracy: 0.5)
+    XCTAssertEqual(bar.panel.frame.width, fitted, accuracy: 0.5)
+    XCTAssertEqual(bar.barView.drawnWidth, fitted, accuracy: 0.5)
     let fades = bar.barView.previewColumn.contentFadeCount
     XCTAssertGreaterThan(fades, 0)
     moveDown()
     XCTAssertGreaterThan(bar.barView.previewColumn.contentFadeCount, fades)
-    XCTAssertEqual(bar.panel.frame.width, 968, accuracy: 0.5)
+    XCTAssertEqual(bar.panel.frame.width, fitted, accuracy: 0.5)
     XCTAssertEqual(bar.barView.previewColumn.lastTransition, .crossfade)
     moveDown()
     XCTAssertEqual(bar.panel.frame.width, 680, accuracy: 0.5)
