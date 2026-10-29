@@ -100,6 +100,10 @@ enum MainMenu {
     [
       item("New Tab", #selector(ShellWindowController.newTab(_:)), "t"),                  // KB-001
       item("New Window", #selector(AppCommands.newWindow(_:)), "n", target: commands),   // KB-005
+      item("New Incognito Window", #selector(AppCommands.newIncognitoWindow(_:)), "n",
+           [.command, .shift], target: commands),                                      // KB-007, BH-174
+      item("New Blank Window", #selector(AppCommands.newBlankWindow(_:)), "n",
+           [.command, .control], target: commands),                                    // KB-006, BH-170
       // KB-044, BH-130: the quick lookup bar; Return opens the result in a Little Arkt window.
       item("New Little Arkt Window", #selector(AppCommands.newLittleArktWindow(_:)), "n",
            [.command, .option], target: commands),

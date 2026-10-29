@@ -8,6 +8,8 @@ import XCTest
 @MainActor
 final class AppCommands: NSObject {
   @objc func newWindow(_ sender: Any?) {}
+  @objc func newBlankWindow(_ sender: Any?) {}
+  @objc func newIncognitoWindow(_ sender: Any?) {}
   @objc func newLittleArktWindow(_ sender: Any?) {}
   @objc func showSettings(_ sender: Any?) {}
   @objc func importFromArc(_ sender: Any?) {}
@@ -274,6 +276,8 @@ final class MainMenuInventoryTests: XCTestCase {
     }
     let toCommands: [(String, Selector)] = [
       ("New Window", #selector(AppCommands.newWindow(_:))),
+      ("New Incognito Window", #selector(AppCommands.newIncognitoWindow(_:))),
+      ("New Blank Window", #selector(AppCommands.newBlankWindow(_:))),
       ("Settings...", #selector(AppCommands.showSettings(_:))),
       ("Import Browser Data...", #selector(AppCommands.importFromArc(_:))),
       ("Show Archive", #selector(AppCommands.showArchive(_:))),
@@ -357,6 +361,8 @@ final class MainMenuInventoryTests: XCTestCase {
     let expected: [(String, Selector, String, NSEvent.ModifierFlags)] = [
       ("New Tab", #selector(ShellWindowController.newTab(_:)), "t", .command),
       ("New Window", #selector(AppCommands.newWindow(_:)), "n", .command),
+      ("New Incognito Window", #selector(AppCommands.newIncognitoWindow(_:)), "n", [.command, .shift]),
+      ("New Blank Window", #selector(AppCommands.newBlankWindow(_:)), "n", [.command, .control]),
       ("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l", .command),
       ("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w", .command),
       ("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift]),   // KB-010
@@ -387,6 +393,8 @@ final class MainMenuInventoryTests: XCTestCase {
       (kVK_ANSI_W, .maskCommand, "Archive Tab"),
       (kVK_ANSI_W, [.maskCommand, .maskShift], "Close Window"),
       (kVK_ANSI_N, .maskCommand, "New Window"),
+      (kVK_ANSI_N, [.maskCommand, .maskShift], "New Incognito Window"),
+      (kVK_ANSI_N, [.maskCommand, .maskControl], "New Blank Window"),
       (kVK_ANSI_Q, .maskCommand, "Quit Arkt"),
       (kVK_RightArrow, [.maskCommand, .maskAlternate], "Next Space"),
       (kVK_LeftArrow, [.maskCommand, .maskAlternate], "Previous Space"),

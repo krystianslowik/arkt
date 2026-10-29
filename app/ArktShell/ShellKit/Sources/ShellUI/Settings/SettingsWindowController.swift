@@ -46,6 +46,8 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var preview: SettingsAppearancePreview?
   var peekCrossSiteSwitch: SettingsSwitch?
   var peekShiftSwitch: SettingsSwitch?
+  /// Settings > General > Warn before quitting (#487, BH-177).
+  var warnBeforeQuittingSwitch: SettingsSwitch?
   /// The lookup hotkey's switch and row (#354); the row's caption carries the registration answer.
   var littleArktHotKeySwitch: SettingsSwitch?
   var littleArktHotKeyRow: SettingsRowView?
@@ -411,6 +413,7 @@ extension SettingsWindowController: AppSettingsObserver {
   public func appSettingsDidChange(_ settings: AppSettings) {
     peekCrossSiteSwitch?.setOn(settings.peekLinks.opensCrossSiteLinks, animated: true)
     peekShiftSwitch?.setOn(settings.peekLinks.opensShiftClickedLinks, animated: true)
+    warnBeforeQuittingSwitch?.setOn(settings.warnsBeforeQuitting, animated: true)
     applyLittleArktHotKeyState()                    // #354
     countFavoritesSwitch?.setOn(settings.tabNavigation.countsFavorites, animated: true)
     ninthTabSwitch?.setOn(settings.tabNavigation.ninthOpensNinth, animated: true)

@@ -313,7 +313,7 @@ final class SettingsWindowTests: XCTestCase {
   func testUnbuiltRowsAreShownDisabled() throws {
     let controller = make()
     controller.show()
-    for name in ["warnBeforeQuitting", "updateAutomatically"] {
+    for name in ["updateAutomatically"] {
       let control = try find(AXID.Settings.control("general", name), in: controller, as: SettingsSwitch.self)
       XCTAssertFalse(control.isEnabled, name)
       XCTAssertEqual(control.alphaValue, 0.42, accuracy: 0.001, name)
@@ -327,6 +327,30 @@ final class SettingsWindowTests: XCTestCase {
                            as: SettingsPopUpButton.self)
     XCTAssertFalse(restore.isEnabled)
     XCTAssertEqual(restore.selectedTitle, "Restore last windows")
+  }
+
+  /// BH-177: the row is a real switch, off until the user turns it on, and a later change follows the setting.
+  func testWarnBeforeQuittingIsARealToggleDefaultOff() throws {
+    let settings = AppSettings(defaults: defaults)
+    let controller = make(settings: settings)
+    controller.show()
+    let control = try find(AXID.Settings.control("general", "warnBeforeQuitting"), in: controller,
+                           as: SettingsSwitch.self)
+    XCTAssertTrue(control.isEnabled)
+    XCTAssertFalse(control.isOn)
+    XCTAssertEqual(control.alphaValue, 1, accuracy: 0.001)
+    let row = try XCTUnwrap(control.enclosingSettingsRow)
+    XCTAssertFalse(row.isPlanned)
+    XCTAssertEqual(row.captionText, "Hold Command-Q to quit while a window is open.")
+    XCTAssertFalse(row.captionText.contains("Not available yet."))
+
+    control.performClick(nil)
+    XCTAssertTrue(settings.warnsBeforeQuitting)
+    XCTAssertEqual(defaults.object(forKey: AppSettings.Key.shouldWarnBeforeQuitting) as? Bool, true)
+
+    settings.warnsBeforeQuitting = false
+    XCTAssertFalse(control.isOn)
+    XCTAssertEqual(defaults.object(forKey: AppSettings.Key.shouldWarnBeforeQuitting) as? Bool, false)
   }
 
   // MARK: - Appearance

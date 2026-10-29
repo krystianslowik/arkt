@@ -46,7 +46,8 @@ final class LittleArktLookupBarTests: XCTestCase {
 
   // MARK: Menu
 
-  /// File > New Little Arkt Window on Cmd-Opt-N (KB-044), in the File menu after New Window.
+  /// File > New Little Arkt Window on Cmd-Opt-N (KB-044), in the File menu after New Window. Incognito and Blank
+  /// Window sit between them (#487).
   func testFileMenuHasNewLittleArktWindowOnOptionCommandN() throws {
     _ = NSApplication.shared
     let commands = AppCommands()
@@ -58,7 +59,7 @@ final class LittleArktLookupBarTests: XCTestCase {
     XCTAssertEqual(item.action, #selector(AppCommands.newLittleArktWindow(_:)))
     XCTAssertNotNil(item.target, "targets the app's commands, so the engine's AppController never sees it")
     let newWindow = try XCTUnwrap(file.items.firstIndex { $0.title == "New Window" })
-    XCTAssertEqual(file.items.firstIndex(of: item), newWindow + 1)
+    XCTAssertEqual(file.items.firstIndex(of: item), newWindow + 3)
   }
 
   // MARK: Bar

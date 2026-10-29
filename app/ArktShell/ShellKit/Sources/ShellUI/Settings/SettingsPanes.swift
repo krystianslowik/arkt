@@ -90,14 +90,17 @@ extension SettingsWindowController {
     }
     peekCrossSiteSwitch = crossSite
     peekShiftSwitch = shift
+    let warnBeforeQuitting = toggle(.general, "warnBeforeQuitting", on: settings.warnsBeforeQuitting) { [weak self] on in
+      self?.settings.warnsBeforeQuitting = on
+    }
+    warnBeforeQuittingSwitch = warnBeforeQuitting
     return [
       section("Default browser", [browser]),
       section("Opening and quitting", [
         row("When Arkt opens", "Your Spaces, pinned tabs and Favorites are always kept.",
             [popUp(.general, "whenArktOpens", ["Restore last windows", "Open a new window"], "Restore last windows")],
             planned: true),
-        row("Warn before quitting", "Hold Command-Q to quit while a window is open.",
-            [toggle(.general, "warnBeforeQuitting", on: false)], planned: true),
+        row("Warn before quitting", "Hold Command-Q to quit while a window is open.", [warnBeforeQuitting]),
       ]),
       section("Links", [
         row(PeekLinkCopy.crossSite, PeekLinkCopy.crossSiteNote, [crossSite]),
