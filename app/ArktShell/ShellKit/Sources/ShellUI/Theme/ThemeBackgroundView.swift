@@ -43,6 +43,10 @@ public final class ThemeBackgroundView: WindowDragView {
   /// Whether the window can be seen (not occluded, not miniaturized); a texture draw waits until it can. Tests
   /// replace it.
   var windowIsVisible: @MainActor (NSWindow) -> Bool = { $0.occlusionState.contains(.visible) && !$0.isMiniaturized }
+  /// Receives the settle step of a theme crossfade in place of Core Animation's completion block, so a test finishes
+  /// the crossfade by calling it instead of waiting for a view without a window to render the animation. Nil in
+  /// production.
+  var crossfadeCompletionDriver: (@MainActor (@escaping @MainActor () -> Void) -> Void)?
   private var crossfadeToken = 0
   private var crossfadeActive = false
   private var suppressSnap = false
@@ -174,12 +178,15 @@ public final class ThemeBackgroundView: WindowDragView {
     crossfadeActive = true
     // The settle is tied to the animations themselves (#296): the completion block runs when they finish (or are
     // removed, which `cancelCrossfade` guards against via the token), never at a wall-clock deadline.
+    let settle: @MainActor () -> Void = { [weak self] in
+      guard let self, self.crossfadeToken == token, self.crossfadeActive else { return }
+      self.setPosition(self.position)
+    }
     CATransaction.begin()
-    CATransaction.setCompletionBlock { [weak self] in
-      MainActor.assumeIsolated {
-        guard let self, self.crossfadeToken == token, self.crossfadeActive else { return }
-        self.setPosition(self.position)
-      }
+    if let crossfadeCompletionDriver {
+      crossfadeCompletionDriver(settle)
+    } else {
+      CATransaction.setCompletionBlock { MainActor.assumeIsolated { settle() } }
     }
     fade(overlay, from: 0, to: 1, duration: duration)
     if tintsOut { fade(tintLower, from: 1, to: 0, duration: duration) }
