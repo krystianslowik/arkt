@@ -21,9 +21,12 @@ final class SessionRestoreTests: XCTestCase {
     UserDefaults().removePersistentDomain(forName: suiteName)
   }
 
-  /// A screen the test machine's screens always contain, so AppKit never constrains the restored frame.
-  private static let screen = ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 900, height: 620),
-                                             visibleFrame: CGRect(x: 0, y: 0, width: 900, height: 600))
+  /// The machine's own main screen, so AppKit never constrains a frame that sits inside it: a screen of fixed size can
+  /// reach under the Dock or the menu bar of the machine that runs the test (the CI runner's 1024 x 768 screen has a
+  /// 63 pt Dock strip), and AppKit then moves the window.
+  private static let screen = ScreenGeometry(
+    frame: NSScreen.main?.frame ?? CGRect(x: 0, y: 0, width: 1024, height: 768),
+    visibleFrame: NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 63, width: 1024, height: 674))
 
   @MainActor private struct World {
     let sidebar = StubSidebar.sample()
@@ -60,7 +63,9 @@ final class SessionRestoreTests: XCTestCase {
     return set
   }
 
-  private static let savedFrame = CGRect(x: 40, y: 60, width: 700, height: 500)
+  /// Inside the usable area, above the Dock, and no smaller than the window's minimum (640 x 420).
+  private static let savedFrame = CGRect(x: screen.visibleFrame.minX + 40, y: screen.visibleFrame.minY + 40,
+                                         width: 640, height: 440)
 
   // MARK: Restoring at launch
 
@@ -86,7 +91,9 @@ final class SessionRestoreTests: XCTestCase {
     let window = set.openWindow()
     XCTAssertEqual(window.currentSpace, world.personal)
     XCTAssertEqual(window.currentNode, world.sidebar.children(of: .pinned(world.personal)).first)
-    XCTAssertEqual(window.window?.frame.size, CGSize(width: 1200, height: 800), "the default size")
+    let usable = Self.screen.visibleFrame.size
+    XCTAssertEqual(window.window?.frame.size, CGSize(width: min(1200, usable.width), height: min(800, usable.height)),
+                   "the default size, shrunk to the usable area of a screen too small for it")
     window.close()
   }
 
@@ -97,7 +104,8 @@ final class SessionRestoreTests: XCTestCase {
     let set = makeSet(world, store: store)
 
     let window = set.openWindow()
-    XCTAssertEqual(window.window?.frame, CGRect(x: 200, y: 100, width: 700, height: 500),
+    let area = Self.screen.visibleFrame
+    XCTAssertEqual(window.window?.frame, CGRect(x: area.maxX - 700, y: area.maxY - 500, width: 700, height: 500),
                    "against the corner nearest to where it was, inside the visible area")
     window.close()
   }

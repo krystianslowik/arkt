@@ -309,6 +309,79 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertEqual(arrivedRow.state, .current)
   }
 
+  /// #465: a current Favorite has no outline row. Its tile's selection fill fades on the same room spring; the
+  /// favicon and the tile that carries the title stay fully opaque. The room value is the flight's, read from the
+  /// same spring the flight presents; nothing here waits on a clock.
+  func testTheCurrentFavoriteTilesSelectionFadesOnTheRoomSpring() throws {
+    let scene = try makeScene()
+    let favorite = try XCTUnwrap(scene.main.sidebar.children(of: .favorites(profile: "default")).first)
+    scene.main.activate(node: favorite)
+    scene.main.window?.contentView?.layoutSubtreeIfNeeded()
+    let grid = scene.main.sidebarController.view.favorites
+    grid.collectionView.layoutSubtreeIfNeeded()
+    let tile = try XCTUnwrap(grid.tile(for: favorite))
+    tile.layoutSubtreeIfNeeded()
+    tile.displayIfNeeded()
+    XCTAssertTrue(tile.isCurrent)
+    XCTAssertEqual(tile.accessibilityLabel(), "Fav", "the title is the tile's accessibility label")
+    XCTAssertEqual(tile.fillLayer.opacity, 1, accuracy: 1e-6)
+
+    scene.little.openIn()
+    let flight = try XCTUnwrap(scene.little.flight)
+    flight.tick(at: 0)
+    XCTAssertEqual(tile.fillLayer.opacity, 1, accuracy: 1e-6, "the room spring has not started")
+    assertFavoriteContentStaysOpaque(tile)
+
+    flight.tick(at: LittleArktFlightMotion.roomDelay)
+    XCTAssertEqual(tile.fillLayer.opacity,
+                   Float(Self.favoriteFillOpacity(room: Self.flightRoom(at: LittleArktFlightMotion.roomDelay))),
+                   accuracy: 1e-5)
+    XCTAssertEqual(tile.fillLayer.opacity, 1, accuracy: 1e-5, "the room spring starts at 200 ms")
+
+    flight.tick(at: 0.26)
+    let mid = Self.favoriteFillOpacity(room: Self.flightRoom(at: 0.26))
+    XCTAssertGreaterThan(mid, 0)
+    XCTAssertLessThan(mid, 1)
+    XCTAssertEqual(tile.fillLayer.opacity, Float(mid), accuracy: 1e-5, "the fill follows the room value")
+    XCTAssertEqual(tile.selectionAlpha, mid, accuracy: 1e-5)
+    XCTAssertTrue(tile.isCurrent, "only the fill fades; the tile stays current")
+    assertFavoriteContentStaysOpaque(tile)
+
+    flight.tick(at: 0.36)
+    let later = Self.favoriteFillOpacity(room: Self.flightRoom(at: 0.36))
+    XCTAssertLessThan(later, mid, "the fill keeps following the room as it opens")
+    XCTAssertEqual(tile.fillLayer.opacity, Float(later), accuracy: 1e-5)
+    assertFavoriteContentStaysOpaque(tile)
+
+    XCTAssertNotNil(step(flight, from: 0.37) { flight.stage != .flying })
+    XCTAssertFalse(tile.isCurrent, "the Favorite is no longer the selection once the page lands")
+    XCTAssertEqual(tile.fillLayer.opacity, 1, accuracy: 1e-6, "the resting fill is fully drawn")
+    XCTAssertEqual(tile.selectionAlpha, 1, accuracy: 1e-6)
+    assertFavoriteContentStaysOpaque(tile)
+  }
+
+  /// The favicon, and the tile view that carries the title, stay at full opacity while the fill fades.
+  private func assertFavoriteContentStaysOpaque(_ tile: FavoriteTileView, file: StaticString = #filePath,
+                                                line: UInt = #line) {
+    XCTAssertEqual(tile.faviconView.alphaValue, 1, "the favicon stays fully opaque", file: file, line: line)
+    XCTAssertEqual(tile.alphaValue, 1, "the title's view stays fully opaque", file: file, line: line)
+    XCTAssertEqual(tile.layer?.opacity ?? 0, 1, "only the fill layer fades, not the whole tile", file: file, line: line)
+    XCTAssertNotNil(tile.faviconView.image, file: file, line: line)
+  }
+
+  /// The flight's room channel at `t`, for a flight whose first frame is at 0. Independent of the card's rect.
+  private static func flightRoom(at t: Double) -> Double {
+    let start = LittleArktFlightMotion.start(visibleCard: .zero, scale: 1, opacity: 1, snapshotReady: true)
+    var springs = LittleArktFlightSpringSet(scene: start)
+    springs.apply(LittleArktFlightMotion.flight(to: CGRect(x: 0, y: 0, width: 100, height: 100)), at: 0)
+    return springs.scene(at: t)[.room]
+  }
+
+  /// The selection fill's opacity for a room value: fully drawn at 0, gone at 1, clamped when the spring overshoots.
+  private static func favoriteFillOpacity(room: Double) -> CGFloat {
+    1 - CGFloat(min(max(room, 0), 1))
+  }
+
   /// #455: a landing before the first arrival frame never faded the old fill, so the old row keeps the previous fill
   /// the no-flight path draws instead of losing it without a fade.
   func testAFlightAbortedBeforeItsFirstFrameKeepsThePreviousFill() throws {
@@ -460,6 +533,33 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertEqual(outline.state(for: old), .previous, "today's instant path keeps the previous fill")
     XCTAssertEqual(outline.rowStyle(for: old), .rest)
     XCTAssertEqual(outline.rowStyle(for: arrived), .rest)
+  }
+
+  /// #465: Reduce Motion has no flight, so the Favorite tile's selection changes at once and nothing is left faded.
+  func testReduceMotionKeepsTheFavoriteTileChangeInstant() throws {
+    let scene = try makeScene(reduceMotion: true)
+    let favorite = try XCTUnwrap(scene.main.sidebar.children(of: .favorites(profile: "default")).first)
+    scene.main.activate(node: favorite)
+    scene.main.window?.contentView?.layoutSubtreeIfNeeded()
+    let grid = scene.main.sidebarController.view.favorites
+    grid.collectionView.layoutSubtreeIfNeeded()
+    let tile = try XCTUnwrap(grid.tile(for: favorite))
+    tile.layoutSubtreeIfNeeded()
+    tile.displayIfNeeded()
+    XCTAssertTrue(tile.isCurrent)
+    XCTAssertEqual(tile.fillLayer.opacity, 1, accuracy: 1e-6)
+
+    scene.little.openIn()
+    XCTAssertNil(scene.little.flight, "Reduce Motion takes no flight and no room spring")
+    scene.little.finishMotion()
+
+    let space = try XCTUnwrap(scene.main.currentSpace)
+    let arrived = try XCTUnwrap(scene.main.sidebar.children(of: .today(space)).first)
+    XCTAssertEqual(scene.main.sidebarController.current, arrived)
+    XCTAssertFalse(tile.isCurrent, "the selection changes at once")
+    XCTAssertEqual(tile.fillLayer.opacity, 1, accuracy: 1e-6, "the resting fill is not left faded")
+    XCTAssertEqual(tile.selectionAlpha, 1, accuracy: 1e-6)
+    assertFavoriteContentStaysOpaque(tile)
   }
 
   // MARK: Abort (a flight that cannot land by itself)

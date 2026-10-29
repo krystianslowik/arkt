@@ -24,7 +24,23 @@ public final class FavoriteTileView: NSView {
       closeButton.image = SidebarGlyphs.close(flavor: flavor, scale: shellBackingScale)
     }
   }
-  public var isCurrent = false { didSet { if isCurrent != oldValue { needsDisplay = true } } }
+  public var isCurrent = false {
+    didSet {
+      guard isCurrent != oldValue else { return }
+      needsDisplay = true
+      applyFillOpacity()
+    }
+  }
+  /// The selection fill's layer opacity (#465): Little Arkt's arrival fades it on the flight's room spring. Only
+  /// the fill fades; the favicon stays, and the title is this view's accessibility label.
+  public var selectionAlpha: CGFloat = 1 {
+    didSet {
+      guard selectionAlpha != oldValue else { return }
+      applyFillOpacity()
+    }
+  }
+  /// The rounded fill. Its opacity is the only thing the arrival fade changes.
+  public let fillLayer = CALayer()
   /// Also shows or hides the X, fading with the fill.
   public var isHovered = false {
     didSet {
@@ -51,6 +67,10 @@ public final class FavoriteTileView: NSView {
     super.init(frame: frameRect)
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
+    fillLayer.cornerRadius = FavoritesLayout.tileCornerRadius
+    fillLayer.cornerCurve = .continuous
+    fillLayer.shadowRadius = 2
+    fillLayer.shadowOffset = CGSize(width: 0, height: -1)
     faviconView.imageScaling = .scaleProportionallyUpOrDown
     faviconView.autoresizingMask = []
     faviconView.setAccessibilityElement(false)
@@ -71,24 +91,48 @@ public final class FavoriteTileView: NSView {
 
   public override func updateLayer() {
     guard let layer else { return }
+    if fillLayer.superlayer !== layer { layer.insertSublayer(fillLayer, at: 0) }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    layer.cornerRadius = FavoritesLayout.tileCornerRadius
-    layer.cornerCurve = .continuous
-    layer.backgroundColor = displayedFill.cgColor
+    layer.backgroundColor = nil
+    layer.shadowOpacity = 0
+    layer.shadowPath = nil
+    fillLayer.frame = bounds
+    fillLayer.cornerRadius = FavoritesLayout.tileCornerRadius
+    fillLayer.cornerCurve = .continuous
+    fillLayer.backgroundColor = displayedFill.cgColor
     let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
-    layer.shadowColor = shadow.cgColor
-    layer.shadowRadius = 2
-    layer.shadowOffset = CGSize(width: 0, height: -1)
-    layer.shadowOpacity = isCurrent && shadow.alpha > 0 ? 1 : 0
-    layer.shadowPath = CGPath(roundedRect: layer.bounds, cornerWidth: FavoritesLayout.tileCornerRadius,
-                              cornerHeight: FavoritesLayout.tileCornerRadius, transform: nil)
+    fillLayer.shadowColor = shadow.cgColor
+    fillLayer.shadowRadius = 2
+    fillLayer.shadowOffset = CGSize(width: 0, height: -1)
+    fillLayer.shadowOpacity = isCurrent && shadow.alpha > 0 ? 1 : 0
+    updateFillShadowPath()
+    fillLayer.opacity = Float(isCurrent ? selectionAlpha : 1)
     CATransaction.commit()
+  }
+
+  /// Only the fill fades. The favicon is a subview of this view, so it keeps the view's opacity.
+  private func applyFillOpacity() {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    fillLayer.opacity = Float(isCurrent ? selectionAlpha : 1)
+    CATransaction.commit()
+  }
+
+  /// Explicit path so Core Animation never derives the shadow from layer contents offscreen.
+  private func updateFillShadowPath() {
+    let radius = FavoritesLayout.tileCornerRadius
+    fillLayer.shadowPath = CGPath(roundedRect: fillLayer.bounds, cornerWidth: radius, cornerHeight: radius,
+                                  transform: nil)
   }
 
   public override func layout() {
     super.layout()
-    needsDisplay = true                                 // shadowPath follows the bounds
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    fillLayer.frame = bounds
+    updateFillShadowPath()
+    CATransaction.commit()
     let size = SidebarMetrics.favoriteFaviconSize
     faviconView.frame = NSRect(x: ((bounds.width - size) / 2).rounded(), y: ((bounds.height - size) / 2).rounded(),
                                width: size, height: size)
@@ -143,6 +187,7 @@ public final class FavoriteTileView: NSView {
     super.prepareForReuse()
     isHovered = false
     isCurrent = false
+    selectionAlpha = 1
     isKeyboardFocused = false
     nodeID = nil
     setCloseAction(nil)
@@ -198,7 +243,11 @@ final class FavoritesCollectionView: NSCollectionView {
     let downIndexPath = indexPathForItem(at: convert(event.locationInWindow, from: nil))
     onMouseDownBegan?()
     super.mouseDown(with: event)
-    let endEvent = NSApp.currentEvent ?? event
+    // The tracking loop ends on this window's mouse-up. When no loop ran, the current event is an unrelated earlier
+    // one, so only a mouse-up of this window counts; otherwise the press itself decides.
+    let endEvent = NSApp.currentEvent.flatMap {
+      $0.type == .leftMouseUp && $0.windowNumber == event.windowNumber ? $0 : nil
+    } ?? event
     onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
   }
 
@@ -486,6 +535,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     let tile = item.tileView
     tile.flavor = flavor
     tile.isCurrent = resolver.state(for: id) == .current
+    tile.selectionAlpha = selectionFade?.node == id ? (selectionFade?.alpha ?? 1) : 1
     tile.isKeyboardFocused = keyboardFocusID == id
     var title = "", url: URL?
     if case .tab(_, let tabURL, let tabTitle)? = source.node(id) { title = tabTitle; url = tabURL }
@@ -637,6 +687,22 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   public func setRowStates(_ resolver: TabRowState.Resolver) {
     self.resolver = resolver
     refreshVisibleTiles()
+  }
+
+  /// The Favorite whose selection fill is fading, and how far it has faded (1 full, 0 gone). Nil at rest.
+  private var selectionFade: (node: NodeID, alpha: CGFloat)?
+
+  /// Sets one tile's selection-fill opacity (#465). Only that layer's opacity changes: no reload and no layout.
+  /// Nil `node` ends the fade and restores the tile that was fading.
+  func setSelectionFade(_ alpha: CGFloat, for node: NodeID?) {
+    let previous = selectionFade?.node
+    selectionFade = node.map { ($0, alpha) }
+    if let previous, previous != node {
+      tile(for: previous)?.selectionAlpha = 1
+    }
+    if let node {
+      tile(for: node)?.selectionAlpha = alpha
+    }
   }
 
   /// Tile currently showing `id`, if realized.

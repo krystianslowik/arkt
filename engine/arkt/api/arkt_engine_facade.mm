@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "arkt/api/arkt_downloads.h"
 #include "arkt/api/arkt_embedder.h"
 #include "arkt/api/arkt_import_writer.h"
 #include "arkt/browser/arkt_browser_window.h"
@@ -38,6 +39,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/time/time.h"
+#include "chrome/browser/download/download_prefs.h"  // nogncheck
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/tab_list/tab_removed_reason.h"
@@ -54,7 +56,9 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "components/favicon/content/content_favicon_driver.h"
+#include "chrome/common/pref_names.h"
 #include "components/javascript_dialogs/tab_modal_dialog_manager.h"
+#include "components/prefs/pref_service.h"
 #include "components/favicon/core/favicon_driver.h"
 #include "components/favicon/core/favicon_driver_observer.h"
 #include "components/find_in_page/find_notification_details.h"
@@ -329,6 +333,12 @@ const char* KindName(ArktEngineEventKind kind) {
       return "FindResult";
     case ArktEngineEventKindTargetURLChanged:
       return "TargetURLChanged";
+    case ArktEngineEventKindDownloadCreated:
+      return "DownloadCreated";
+    case ArktEngineEventKindDownloadUpdated:
+      return "DownloadUpdated";
+    case ArktEngineEventKindDownloadRemoved:
+      return "DownloadRemoved";
   }
   return "unknown";
 }
@@ -363,6 +373,7 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic) NSInteger findOrdinal;
 @property(nonatomic) NSInteger findCount;
 @property(nonatomic) BOOL findIsFinal;
+@property(nonatomic, nullable) id<ArktDownloadItem> download;
 @end
 
 @implementation ArktFacadeEvent
@@ -389,6 +400,73 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize findOrdinal = _findOrdinal;
 @synthesize findCount = _findCount;
 @synthesize findIsFinal = _findIsFinal;
+@synthesize download = _download;
+@end
+
+// One download as plain values (#132), read from a snapshot when the change
+// was recorded.
+@interface ArktFacadeDownload : NSObject <ArktDownloadItem>
+- (instancetype)initWithSnapshot:(const arkt::DownloadSnapshot&)snapshot;
+@end
+
+@implementation ArktFacadeDownload
+@synthesize guid = _guid;
+@synthesize url = _url;
+@synthesize filename = _filename;
+@synthesize targetPath = _targetPath;
+@synthesize totalBytes = _totalBytes;
+@synthesize receivedBytes = _receivedBytes;
+@synthesize state = _state;
+@synthesize interruptReason = _interruptReason;
+@synthesize dangerType = _dangerType;
+@synthesize mimeType = _mimeType;
+@synthesize startTime = _startTime;
+@synthesize endTime = _endTime;
+@synthesize bytesPerSecond = _bytesPerSecond;
+@synthesize canResume = _canResume;
+
+- (instancetype)initWithSnapshot:(const arkt::DownloadSnapshot&)snapshot {
+  if ((self = [super init])) {
+    using State = arkt::DownloadSnapshot::State;
+    _guid = base::SysUTF8ToNSString(snapshot.guid);
+    _url = arkt::ToNSURL(snapshot.url);
+    if (!_url) {
+      _url = [NSURL URLWithString:@"about:blank"];
+    }
+    _filename = base::SysUTF8ToNSString(snapshot.filename);
+    _targetPath = snapshot.target_path.empty()
+                      ? nil
+                      : [NSURL fileURLWithPath:base::SysUTF8ToNSString(
+                                                   snapshot.target_path.value())];
+    _totalBytes = snapshot.total_bytes;
+    _receivedBytes = snapshot.received_bytes;
+    switch (snapshot.state) {
+      case State::kInProgress:
+        _state = ArktDownloadStateInProgress;
+        break;
+      case State::kPaused:
+        _state = ArktDownloadStatePaused;
+        break;
+      case State::kComplete:
+        _state = ArktDownloadStateComplete;
+        break;
+      case State::kCancelled:
+        _state = ArktDownloadStateCancelled;
+        break;
+      case State::kInterrupted:
+        _state = ArktDownloadStateInterrupted;
+        break;
+    }
+    _interruptReason = snapshot.interrupt_reason;
+    _dangerType = snapshot.danger_type;
+    _mimeType = base::SysUTF8ToNSString(snapshot.mime_type);
+    _startTime = snapshot.start_time.ToNSDate();
+    _endTime = snapshot.end_time.is_null() ? nil : snapshot.end_time.ToNSDate();
+    _bytesPerSecond = snapshot.bytes_per_second;
+    _canResume = snapshot.can_resume;
+  }
+  return self;
+}
 @end
 
 // A page's alert, confirm or prompt (#400): plain values read once when the
@@ -860,7 +938,9 @@ namespace arkt {
 namespace {
 
 // The facade's model: handles, the pending event batch and the sinks.
-class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
+class Facade : public BrowserCollectionObserver,
+               public TabStripModelObserver,
+               public DownloadWatcherDelegate {
  public:
   explicit Facade(FacadeDelegate* delegate) : delegate_(delegate) {
     pending_ = [[NSMutableArray alloc] init];
@@ -887,6 +967,38 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
           Adopt(browser);
           return true;
         });
+    if (Profile* profile = EmbedderProfile()) {
+      downloads_ = std::make_unique<DownloadWatcher>(profile, this);
+    }
+  }
+
+  // The downloads of the embedder profile (#132), or null without one.
+  DownloadWatcher* downloads() { return downloads_.get(); }
+
+  // DownloadWatcherDelegate, called from Chromium's download notifications.
+  // The updates of one download in a batch merge into the last one, so the
+  // shell sees a download move at most once per batch.
+  void DownloadCreated(const DownloadSnapshot& download) override {
+    RecordDownload(ArktEngineEventKindDownloadCreated, download);
+  }
+  void DownloadUpdated(const DownloadSnapshot& download) override {
+    DropPendingUpdates(download.guid);
+    RecordDownload(ArktEngineEventKindDownloadUpdated, download);
+  }
+  void DownloadRemoved(const DownloadSnapshot& download) override {
+    DropPendingUpdates(download.guid);
+    RecordDownload(ArktEngineEventKindDownloadRemoved, download);
+  }
+  // The active tab of an Arkt window: the page a retry or a saved link is
+  // attributed to.
+  content::WebContents* ContentsForNewDownload() override {
+    for (auto& [browser, handle] : browser_handles_) {
+      if (content::WebContents* contents =
+              browser->GetTabStripModel()->GetActiveWebContents()) {
+        return contents;
+      }
+    }
+    return nullptr;
   }
 
   FacadeDelegate* delegate() { return delegate_; }
@@ -1151,6 +1263,27 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     posted_ = true;
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&Facade::Deliver, base::Unretained(this)));
+  }
+
+  void RecordDownload(ArktEngineEventKind kind,
+                      const DownloadSnapshot& download) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = kind;
+    event.download = [[ArktFacadeDownload alloc] initWithSnapshot:download];
+    RecordFromNotification(event);
+  }
+
+  // A newer update of the same download replaces the pending ones.
+  void DropPendingUpdates(const std::string& guid) {
+    NSString* key = base::SysUTF8ToNSString(guid);
+    for (NSInteger i = static_cast<NSInteger>(pending_.count) - 1; i >= 0;
+         --i) {
+      ArktFacadeEvent* event = pending_[static_cast<NSUInteger>(i)];
+      if (event.kind == ArktEngineEventKindDownloadUpdated &&
+          [event.download.guid isEqualToString:key]) {
+        [pending_ removeObjectAtIndex:static_cast<NSUInteger>(i)];
+      }
+    }
   }
 
   // Keeps the Objective-C dialog alive until its request ends.
@@ -1584,6 +1717,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   }
 
   const raw_ptr<FacadeDelegate> delegate_;
+  std::unique_ptr<DownloadWatcher> downloads_;
   int in_notification_ = 0;
   bool posted_ = false;
   bool terminating_ = false;
@@ -3091,7 +3225,9 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
 @interface ArktFacadeEngine : NSObject <ArktEngine>
 @end
 
-@implementation ArktFacadeEngine
+@implementation ArktFacadeEngine {
+  void (^_downloadDestinationHandler)(NSString*, NSURL*, void (^)(NSURL*));
+}
 
 - (void)embedderReady {
   arkt::CheckFacadeEntry();
@@ -3423,6 +3559,153 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
   arkt::ImportBookmarks(
       arkt::EmbedderProfile(), std::move(batch),
       base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
+
+// MARK: Downloads (#132)
+
+- (NSArray<id<ArktDownloadItem>>*)downloads {
+  arkt::CheckFacadeEntry();
+  NSMutableArray<id<ArktDownloadItem>>* list = [NSMutableArray array];
+  if (arkt::DownloadWatcher* watcher = arkt::g_facade->downloads()) {
+    for (const arkt::DownloadSnapshot& snapshot : watcher->Snapshots()) {
+      [list addObject:[[ArktFacadeDownload alloc]
+                          initWithSnapshot:snapshot]];
+    }
+  }
+  return list;
+}
+
+- (void)performDownloadCommand:(ArktDownloadCommand)command
+             onDownloadWithGUID:(NSString*)guid {
+  arkt::CheckFacadeEntry();
+  arkt::g_facade->CheckNotInNotification("perform(download:on:)");
+  arkt::DownloadWatcher* watcher = arkt::g_facade->downloads();
+  if (!watcher) {
+    return;
+  }
+  arkt::DownloadCommand mapped;
+  switch (command) {
+    case ArktDownloadCommandCancel:
+      mapped = arkt::DownloadCommand::kCancel;
+      break;
+    case ArktDownloadCommandPause:
+      mapped = arkt::DownloadCommand::kPause;
+      break;
+    case ArktDownloadCommandResume:
+      mapped = arkt::DownloadCommand::kResume;
+      break;
+    case ArktDownloadCommandOpen:
+      mapped = arkt::DownloadCommand::kOpen;
+      break;
+    case ArktDownloadCommandShowInFinder:
+      mapped = arkt::DownloadCommand::kShowInFinder;
+      break;
+    case ArktDownloadCommandRetry:
+      mapped = arkt::DownloadCommand::kRetry;
+      break;
+    case ArktDownloadCommandKeepDangerous:
+      mapped = arkt::DownloadCommand::kKeepDangerous;
+      break;
+    case ArktDownloadCommandDiscardDangerous:
+      mapped = arkt::DownloadCommand::kDiscardDangerous;
+      break;
+    case ArktDownloadCommandRemove:
+      mapped = arkt::DownloadCommand::kRemove;
+      break;
+    default:
+      return;
+  }
+  LOG(WARNING) << "ARKT: facade download command " << static_cast<int>(command)
+               << " on " << base::SysNSStringToUTF8(guid);
+  watcher->Perform(mapped, base::SysNSStringToUTF8(guid));
+}
+
+- (void)startDownloadFromURL:(NSURL*)url {
+  arkt::CheckFacadeEntry();
+  arkt::g_facade->CheckNotInNotification("startDownload(from:)");
+  if (arkt::DownloadWatcher* watcher = arkt::g_facade->downloads()) {
+    watcher->StartDownload(arkt::ToGURL(url));
+  }
+}
+
+- (BOOL)downloadPromptsForLocation {
+  arkt::CheckFacadeEntry();
+  Profile* profile = arkt::EmbedderProfile();
+  return profile && profile->GetPrefs()->GetBoolean(prefs::kPromptForDownload);
+}
+
+- (void)setDownloadPromptsForLocation:(BOOL)prompts {
+  arkt::CheckFacadeEntry();
+  if (Profile* profile = arkt::EmbedderProfile()) {
+    profile->GetPrefs()->SetBoolean(prefs::kPromptForDownload, prompts);
+  }
+}
+
+- (NSURL*)downloadDirectory {
+  arkt::CheckFacadeEntry();
+  Profile* profile = arkt::EmbedderProfile();
+  DownloadPrefs* prefs =
+      profile ? DownloadPrefs::FromBrowserContext(profile) : nullptr;
+  return prefs ? [NSURL fileURLWithPath:base::SysUTF8ToNSString(
+                                            prefs->DownloadPath().value())]
+               : [self defaultDownloadDirectory];
+}
+
+- (void)setDownloadDirectory:(NSURL*)directory {
+  arkt::CheckFacadeEntry();
+  Profile* profile = arkt::EmbedderProfile();
+  if (DownloadPrefs* prefs =
+          profile ? DownloadPrefs::FromBrowserContext(profile) : nullptr) {
+    prefs->SetDownloadPath(
+        base::FilePath(base::SysNSStringToUTF8(directory.path)));
+  }
+}
+
+- (NSURL*)defaultDownloadDirectory {
+  arkt::CheckFacadeEntry();
+  return [NSURL fileURLWithPath:base::SysUTF8ToNSString(
+                                    DownloadPrefs::GetDefaultDownloadDirectory()
+                                        .value())];
+}
+
+- (void (^)(NSString*, NSURL*, void (^)(NSURL*)))downloadDestinationHandler {
+  return _downloadDestinationHandler;
+}
+
+- (void)setDownloadDestinationHandler:
+    (void (^)(NSString*, NSURL*, void (^)(NSURL*)))handler {
+  arkt::CheckFacadeEntry();
+  _downloadDestinationHandler = [handler copy];
+  if (!handler) {
+    arkt::SetDownloadDestinationHandler(arkt::DownloadDestinationHandler());
+    return;
+  }
+  // The block takes one answer: the first call runs the engine's callback, a
+  // later one does nothing.
+  void (^block)(NSString*, NSURL*, void (^)(NSURL*)) = [handler copy];
+  arkt::SetDownloadDestinationHandler(base::BindRepeating(
+      [](void (^block)(NSString*, NSURL*, void (^)(NSURL*)),
+         const std::string& name, const base::FilePath& directory,
+         base::OnceCallback<void(std::optional<base::FilePath>)> answer) {
+        auto shared = std::make_shared<
+            base::OnceCallback<void(std::optional<base::FilePath>)>>(
+            std::move(answer));
+        block(base::SysUTF8ToNSString(name),
+              [NSURL fileURLWithPath:base::SysUTF8ToNSString(
+                                         directory.value())],
+              ^(NSURL* chosen) {
+                if (!*shared) {
+                  return;
+                }
+                auto callback = std::move(*shared);
+                std::move(callback).Run(
+                    chosen ? std::optional<base::FilePath>(base::FilePath(
+                                 base::SysNSStringToUTF8(chosen.path)))
+                           : std::nullopt);
+              });
+      },
+      block));
 }
 
 @end

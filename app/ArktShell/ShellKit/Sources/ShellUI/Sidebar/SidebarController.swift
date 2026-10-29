@@ -99,6 +99,9 @@ public final class SidebarController {
   private(set) var loadedNodes: Set<NodeID> = []
   /// Loaded Favorites, least to most recently used (BH-049); activations append, closes and removals drop.
   private var favoriteLoadOrder: [NodeID] = []
+  /// The current Favorite captured on the first arrival frame (#465). A Favorite that becomes current later does
+  /// not start fading. `captured` stays set, with a nil node, when that frame had no current Favorite.
+  private var favoriteFade: (captured: Bool, node: NodeID?) = (false, nil)
   /// The drop overlay over the Favorites band and the Space page, shown during a sidebar drag (BH-047).
   private(set) var dropOverlay: FavoritesDropOverlayView?
   /// Tabs the window shows besides the current one (the other panes of a shown split), drawn as `.contentVisible`.
@@ -562,6 +565,26 @@ public final class SidebarController {
     guard previous != nil else { return }
     previous = nil
     applyRowStates()
+  }
+
+  /// One frame of the arrival's room spring. When the current tab is a Favorite, its tile's selection fill fades
+  /// with `room` (1 at the start, 0 when the room has opened). The flight's room value is the only clock.
+  func fadeCurrentFavoriteSelection(room: Double) {
+    if !favoriteFade.captured {
+      let node = current.flatMap { source.section(containing: $0) == .favorites(profile: profile) ? $0 : nil }
+      favoriteFade = (true, node)
+    }
+    guard let node = favoriteFade.node else { return }
+    let alpha = 1 - CGFloat(min(max(room, 0), 1))
+    view.favorites.setSelectionFade(alpha, for: node)
+  }
+
+  /// The arrival ended: the tile draws its fill at full opacity again (the selection itself changes with the row
+  /// state, on the landing or when the page never arrives).
+  func endFavoriteSelectionFade() {
+    guard favoriteFade.captured else { return }
+    favoriteFade = (false, nil)
+    view.favorites.setSelectionFade(1, for: nil)
   }
 
   /// The window created `node`'s page without activating it (a background pane of a shown split, #156 review).
