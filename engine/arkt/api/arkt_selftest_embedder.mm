@@ -625,6 +625,11 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << window;
         [self logActionsOf:event.browser];
         break;
+      case ArktEngineEventKindDownloadCreated:
+      case ArktEngineEventKindDownloadUpdated:
+      case ArktEngineEventKindDownloadRemoved:
+        // The self-test shows no downloads.
+        break;
     }
   }
   if (windows_changed) {

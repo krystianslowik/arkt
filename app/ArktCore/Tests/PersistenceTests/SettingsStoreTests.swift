@@ -180,6 +180,18 @@ struct SettingsStoreTests {
     #expect(!record.isEmpty)
   }
 
+  @Test func recordArcImportMergesVersionTwoFieldsAndKeepsTheLaterWatermark() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    let early = Self.date
+    let late = Self.date.addingTimeInterval(500)
+    try await store.recordArcImport(ArcImportRecord(historyWatermark: late, cookieKeys: ["c1"]), at: Self.date)
+    try await store.recordArcImport(
+      ArcImportRecord(historyWatermark: early, bookmarkKeys: ["b1"], cookieKeys: ["c2"], extensionIDs: ["e1"]), at: Self.date)
+    let record = try await store.loadArcImportRecord()
+    #expect(record == ArcImportRecord(
+      historyWatermark: late, bookmarkKeys: ["b1"], cookieKeys: ["c1", "c2"], extensionIDs: ["e1"]))
+  }
+
   @Test func arcImportRecordIsStoredSortedAndSurvivesReopen() async throws {
     try await withTemporaryDirectory { directory in
       let url = directory.appendingPathComponent("Arkt.sqlite")
