@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct ThemeOverlayTests {
   private func theme(overlay: [RGBA] = []) -> SpaceThemeInfo {
-    SpaceThemeInfo(baseColors: [.p3(hex: 0xF2EAE4), .p3(hex: 0xF29BBB)], overlayColors: overlay, isDark: false)
+    SpaceThemeInfo(baseColors: [.p3(hex: 0xF2EAE4, alpha: 1), .p3(hex: 0xF29BBB, alpha: 1)], overlayColors: overlay, isDark: false)
   }
 
   private func view(_ themes: [SpaceThemeInfo]) -> ThemeBackgroundView {
@@ -42,7 +42,7 @@ struct ThemeOverlayTests {
   }
 
   @Test func unequalStopsUseExplicitUnionLocationsInOneGradientPerSpace() throws {
-    let a = SpaceThemeInfo(baseColors: [.p3(hex: 0x224466), .p3(hex: 0xAACCEE)],
+    let a = SpaceThemeInfo(baseColors: [.p3(hex: 0x224466, alpha: 1), .p3(hex: 0xAACCEE, alpha: 1)],
                            overlayColors: [.p3(hex: 0xFF0000, alpha: 0.4), .p3(hex: 0x00FF00, alpha: 0.2),
                                            .p3(hex: 0x0000FF, alpha: 0.3), .p3(hex: 0xFFFFFF, alpha: 0.1)],
                            isDark: false)
@@ -51,7 +51,7 @@ struct ThemeOverlayTests {
     #expect(layers.count == 2)
     let lower = try #require(layers.first)
     let colors = try #require(lower.colors as? [CGColor])
-    let locations = try #require(lower.locations?.map(\.doubleValue))
+    let locations = try #require(lower.locations?.map { $0.doubleValue })
     #expect(colors.count == locations.count)
     #expect(locations.contains { abs($0 - 1.0 / 3.0) < 1e-9 })
     #expect(locations.contains { abs($0 - 1.0 / 32.0) < 1e-9 })
