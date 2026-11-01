@@ -167,7 +167,8 @@ struct ThemeOverlayTests {
     #expect((animation.fromValue as? NSNumber)?.floatValue == 0 && (animation.toValue as? NSNumber)?.floatValue == 1)
     let upper = try #require(gradients(view).last?.colors as? [CGColor])
     #expect(upper != oldColors)
-    try #require(completion)()
+    let finishCrossfade = try #require(completion)
+    finishCrossfade()
     #expect(view.crossfadeAnimationForTesting == nil)
     #expect(view.baseColorsForTesting == upper)
     view.reducesMotion = { true }
