@@ -185,6 +185,18 @@ struct ThemeContrastTests {
     }
   }
 
+  /// An overlay stop between base stops also needs readable text, even when the base endpoints pass unchanged.
+  @Test func overlayMiddleStopParticipatesInContrast() throws {
+    let base = RGBA.srgb(hex: 0x333333)
+    let overlay: [RGBA] = [.white(0), .white(0.5), .white(0)]
+    let resolution = try #require(ThemeContrast.resolve(stops: [base, base], opacity: 1, overlay: overlay,
+                                                        in: Self.light))
+    let middle = ThemeGradient.sample(resolution.colors, at: 0.5)
+    let background = ThemeContrast.composite(middle, mix: 0, tone: resolution.tone, opacity: 1,
+                                             tint: resolution.overlay[1], in: Self.light)
+    #expect(Self.ratio(background, tone: resolution.tone) >= ThemeContrast.target(increaseContrast: false))
+  }
+
   /// A sample of a gradient: the ends are exact, the middle is the perceptual mix, one color is flat.
   @Test func aGradientIsSampledByPosition() {
     let stops = [RGBA.white(1), RGBA.black(1), RGBA.srgb(hex: 0xFF0000)]
