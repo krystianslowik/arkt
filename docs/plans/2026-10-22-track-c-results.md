@@ -2720,3 +2720,25 @@ entering a scope resets the filter; the empty "No <filter> match" row is not sel
   or opacity are edited, and the live preview draws them through the same path.
 - Not measured: frame time (no per-frame work was added: layer opacities only) and before/after screenshots (the app was
   not launched on the machine that finished this).
+
+
+## Composite Space theme overlays (#534)
+
+The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
+stop locations in their shared color space. Each Space uses one opaque gradient below the separate texture layers.
+The view caches both colors and explicit locations for the current drawn themes, reuses them across swipes and drops
+entries when those themes change, including appearance or contrast changes. An empty base falls back to white before
+compositing; a single stop is duplicated for Core Animation. Finite stops approximate the continuous result between
+samples when overlay alpha varies. The previous #381 overlay-layer description records the original implementation.
+
+At `eb6c176acc7d97a069e94ceaf814a6ef6b509e17`, CI run 41359921341 passed 1,873 pure ShellKit tests in 225 suites,
+the app build, lint and the required Swift gate. At `ef54cfad6fa41d3c0363eb5eb405a740c8b348f8`, CI run 41360815820
+failed compilation before tests: the pure job found the missing renderer counter and fixture initializer/type errors;
+the GUI compiler asserted while typechecking a closure for the missing crossfade completion seam. The assertion may
+be a cascading diagnostic. The required gate failed with the pure job. These results do not validate the renderer.
+The fixture errors and completion seam are addressed here; new-head CI and independent review remain outstanding.
+
+Local full builds and tests were not run because the available SDK/toolchain cannot compile baseline ShellKit.
+Before/after light and dark screenshots, the quiet-machine 120 Hz swipe gate, and the crossfade test's 20 runs under
+load and deliberate-break check are not run. No frame-time improvement is claimed. The compatible deterministic
+completion seam follows open PR #551, planned to merge first; reconcile the overlap after it lands.
