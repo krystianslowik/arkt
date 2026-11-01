@@ -201,17 +201,41 @@ struct ThemeCrossfadeTests {
   }
 
   /// #296: the crossfade eases in and out, and the settle onto the new theme is tied to the animation's
-  /// completion (CATransaction), not a wall-clock timer. A view in no window has no render server pacing, so
-  /// the test does not watch the clock: it checks the curve's control points and that the settle happens.
-  @Test func theCrossfadeEasesInAndOutAndSettlesOnCompletion() async throws {
+  /// completion, driven by hand because a view without a window has no render-server pacing (#549).
+  @Test func theCrossfadeEasesInAndOutAndSettlesOnCompletion() throws {
     let view = background()
+    var completion: (@MainActor () -> Void)?
+    view.crossfadeCompletionDriver = { completion = $0 }
     view.replaceThemes([SpaceThemeCatalog.dusk, SpaceThemeCatalog.paper], crossfade: true)
     let animation = try #require(view.crossfadeAnimationForTesting)
     #expect(controlPoint(animation.timingFunction, at: 1) == (0.42, 0))
     #expect(controlPoint(animation.timingFunction, at: 2) == (0.58, 1))
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.paper.baseColors.map(\.cgColor)))
-    #expect(await settled(view, timeout: 5))
+    try #require(completion)()
+    #expect(view.crossfadeAnimationForTesting == nil)
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.dusk.baseColors.map(\.cgColor)))
+  }
+
+  /// A completion from a replaced or interrupted animation cannot settle a newer transition (#549).
+  @Test func staleCompletionsCannotSettleNewerOrInterruptedCrossfades() throws {
+    let view = background()
+    var completions: [@MainActor () -> Void] = []
+    view.crossfadeCompletionDriver = { completions.append($0) }
+    view.replaceThemes([SpaceThemeCatalog.dusk, SpaceThemeCatalog.paper], crossfade: true)
+    view.replaceThemes([SpaceThemeCatalog.paper, SpaceThemeCatalog.paper], crossfade: true)
+    #expect(completions.count == 2)
+    completions[0]()
+    #expect(view.crossfadeAnimationForTesting != nil)
+    completions[1]()
+    #expect(view.crossfadeAnimationForTesting == nil)
+    view.replaceThemes([SpaceThemeCatalog.dusk, SpaceThemeCatalog.paper], crossfade: true)
+    #expect(completions.count == 3)
+    view.setPosition(0.4)
+    let colors = view.baseColorsForTesting
+    completions[2]()
+    #expect(view.position == 0.4)
+    #expect(view.baseColorsForTesting == colors)
+    #expect(view.crossfadeAnimationForTesting == nil)
   }
 
   /// While the theme creator is open, a programmatic theme change (a preset, adding or removing a colour) animates
@@ -282,17 +306,6 @@ struct ThemeCrossfadeTests {
   /// The first and last stop: the layer holds the OKLab-expanded gradient (#381), whose ends are the theme's stops.
   private func stops(_ colors: [CGColor]) -> [[CGFloat]] {
     [colors.first, colors.last].compactMap { $0 }.map { color in (color.components ?? []).map { ($0 * 1000).rounded() / 1000 } }
-  }
-
-  /// Polls once a millisecond until the crossfade has settled (its animation removed), so the check waits on the
-  /// condition rather than a fixed interval.
-  private func settled(_ view: ThemeBackgroundView, timeout: Double) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while view.crossfadeAnimationForTesting != nil {
-      if Date() > deadline { return false }
-      try? await Task.sleep(for: .milliseconds(1))
-    }
-    return true
   }
 
   /// CAMediaTimingFunction has no name getter; the curve is identified by its two control points. A missing

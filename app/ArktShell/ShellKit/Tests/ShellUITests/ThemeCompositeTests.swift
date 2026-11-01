@@ -55,4 +55,18 @@ struct ThemeCompositeTests {
       #expect(abs(stop.location - Double(index) / Double(expanded.count - 1)) < 1e-9)
     }
   }
+
+  @Test func emptyAndSingleStopsAndSharedUnionLocations() throws {
+    #expect(ThemeGradient.composite(base: [], overlay: [.black(0.5)]).isEmpty)
+    let flat = ThemeGradient.composite(base: [.p3(hex: 0x0000FF)], overlay: [.p3(hex: 0xFF0000, alpha: 0.5)])
+    let stop = try #require(flat.first)
+    #expect(flat.count == 1 && stop.location == 0)
+    #expect(stop.color.space == .displayP3)
+    #expect(abs(stop.color.red - 0.5) < 1e-9 && abs(stop.color.blue - 0.5) < 1e-9)
+    let shared = ThemeGradient.composite(base: [.black(1), .white(1)],
+                                         overlay: [.black(0), .white(0.5), .black(0)])
+    #expect(shared.filter { $0.location == 0.5 }.count == 1)
+    #expect(zip(shared, shared.dropFirst()).allSatisfy { $0.location < $1.location })
+  }
+
 }
