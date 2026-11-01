@@ -80,6 +80,19 @@ struct ThemeOverlayTests {
     for color in upper { expectColor(color, RGBA(red: 0.5, green: 0, blue: 0.5, alpha: 1)) }
   }
 
+  @Test(arguments: [0.25, 1.0])
+  func emptyBasePreservesDisplayP3Overlay(alpha: Double) throws {
+    let overlay = RGBA.p3(hex: 0xFF0000, alpha: alpha)
+    let theme = SpaceThemeInfo(baseColors: [], overlayColors: [overlay], isDark: false)
+    let colors = try #require(gradients(view([theme])).first?.colors as? [CGColor])
+    #expect(colors.count == 2)
+    for color in colors {
+      #expect(color.colorSpace?.name == CGColorSpace.displayP3)
+      expectColor(color, RGBA(red: 1, green: 1 - alpha, blue: 1 - alpha,
+                              alpha: 1, space: .displayP3))
+    }
+  }
+
   /// The counter counts completed expansions/composites, including both colors and locations, per drawn theme.
   /// It is a test-only cumulative observation, not a control for the cache.
   @Test func swipesReuseCachedStopsAndChangedDrawnThemesInvalidateThem() throws {
