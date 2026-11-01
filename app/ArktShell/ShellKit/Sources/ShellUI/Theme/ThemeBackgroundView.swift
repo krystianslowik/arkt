@@ -262,10 +262,12 @@ public final class ThemeBackgroundView: WindowDragView {
     overlay.animation(forKey: Self.crossfadeKey) as? CABasicAnimation
   }
 
-  /// Cache only themes in the current drawn set. Empty bases retain the white fallback before compositing.
+  /// Cache only themes in the current drawn set. Empty bases use white in the overlay's color space.
   private func composite(for theme: SpaceThemeInfo) -> CompositeGradient {
     if let cached = composites.first(where: { $0.theme == theme }) { return cached.gradient }
-    let baseColors = theme.baseColors.isEmpty ? [RGBA.white(1)] : theme.baseColors
+    let fallback = RGBA(red: 1, green: 1, blue: 1, alpha: 1,
+                        space: theme.overlayColors.first?.space ?? .sRGB)
+    let baseColors = theme.baseColors.isEmpty ? [fallback] : theme.baseColors
     let stops = ThemeGradient.composite(base: baseColors, overlay: theme.overlayColors)
     var colors = stops.map { $0.color.cgColor }
     var locations = stops.map { NSNumber(value: $0.location) }
