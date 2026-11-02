@@ -55,14 +55,61 @@ public protocol EngineImporting: AnyObject {
   /// or whose url and title its target folder holds, is skipped; an invalid url fails.
   func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult
   /// Installs Chrome Web Store extensions by id (#513), an optional step: nil means this engine cannot install by id, and
-  /// the coordinator reports the type as skipped with the reason "not yet available". The default implementation returns
-  /// nil, so an engine adopts the step by implementing it. Counts are in extensions; `written` is the extensions
-  /// installed and `skipped` those the profile already has.
+  /// the coordinator reports the type as skipped with the reason "not yet available". Counts are in extensions;
+  /// `written` is the extensions installed and `skipped` those the profile already has. The default implementation
+  /// counts `installExtensionResults(ids:)`, so an engine adopts the step by implementing that one.
   func installExtensions(ids: [String]) async -> ImportWriteResult?
+  /// Installs the extensions by Web Store id with one confirmation for the whole batch, and answers one result per
+  /// distinct id, in the order the ids first appear. An id the profile already has is `.alreadyInstalled` and is not
+  /// installed again; an id that is not a Web Store id, that the store does not have, or that cannot be reached is
+  /// `.failed` with a reason that holds no id. Declining the confirmation fails every id that needed it. Never throws and
+  /// never stops at one failure; nil: this engine cannot install by id.
+  func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]?
 }
 
 extension EngineImporting {
-  public func installExtensions(ids: [String]) async -> ImportWriteResult? { nil }
+  public func installExtensions(ids: [String]) async -> ImportWriteResult? {
+    guard let results = await installExtensionResults(ids: ids) else { return nil }
+    return ImportWriteResult(counting: results)
+  }
+  public func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? { nil }
+}
+
+/// What happened to one extension of an install batch (#513).
+public enum ExtensionInstallOutcome: Equatable, Sendable {
+  case installed
+  case alreadyInstalled
+  /// The reason is a short sentence without the extension's id or name.
+  case failed(String)
+}
+
+public struct ExtensionInstallResult: Equatable, Sendable {
+  public var id: String
+  public var outcome: ExtensionInstallOutcome
+
+  public init(id: String, outcome: ExtensionInstallOutcome) {
+    self.id = id; self.outcome = outcome
+  }
+}
+
+extension ImportWriteResult {
+  /// Installed extensions are written, ones the profile had are skipped, failures are counted by reason.
+  public init(counting results: [ExtensionInstallResult]) {
+    self.init()
+    var reasons: [String: Int] = [:]
+    var order: [String] = []
+    for result in results {
+      switch result.outcome {
+      case .installed: written += 1
+      case .alreadyInstalled: skipped += 1
+      case .failed(let reason):
+        failed += 1
+        if reasons[reason] == nil { order.append(reason) }
+        reasons[reason, default: 0] += 1
+      }
+    }
+    if !order.isEmpty { failureReason = order.map { "\($0): \(reasons[$0] ?? 0)" }.joined(separator: "\n") + "\n" }
+  }
 }
 
 /// What a recording engine received: the plain values of the records, taken before their secrets were zeroed.
@@ -118,6 +165,8 @@ public struct ImportRecording: Sendable {
   public private(set) var logins: [ImportedLoginRecord] = []
   public private(set) var visits: [ImportedVisitRecord] = []
   public private(set) var bookmarks: [ImportedBookmarkRecord] = []
+  /// The Web Store ids installed, in order (#513).
+  public private(set) var extensionIDs: [String] = []
   /// Last-access stamps of the cookies kept, parallel to `cookies`.
   private var stamps: [Date] = []
   private var loginStamps: [Date] = []
@@ -231,5 +280,29 @@ public struct ImportRecording: Sendable {
       result.written += 1
     }
     return result
+  }
+
+  /// A Web Store id is 32 letters from a to p.
+  public static func isWebStoreID(_ id: String) -> Bool {
+    id.utf8.count == 32 && id.utf8.allSatisfy { $0 >= UInt8(ascii: "a") && $0 <= UInt8(ascii: "p") }
+  }
+
+  /// `unavailable` are ids the stub's pretend store does not have.
+  public mutating func record(extensions ids: [String], unavailable: Set<String> = []) -> [ExtensionInstallResult] {
+    var seen: Set<String> = []
+    var results: [ExtensionInstallResult] = []
+    for id in ids where seen.insert(id).inserted {
+      if !Self.isWebStoreID(id) {
+        results.append(ExtensionInstallResult(id: id, outcome: .failed("not a Web Store id")))
+      } else if extensionIDs.contains(id) {
+        results.append(ExtensionInstallResult(id: id, outcome: .alreadyInstalled))
+      } else if unavailable.contains(id) {
+        results.append(ExtensionInstallResult(id: id, outcome: .failed("not available from the Web Store")))
+      } else {
+        extensionIDs.append(id)
+        results.append(ExtensionInstallResult(id: id, outcome: .installed))
+      }
+    }
+    return results
   }
 }

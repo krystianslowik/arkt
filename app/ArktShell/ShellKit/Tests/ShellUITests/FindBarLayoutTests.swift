@@ -28,6 +28,17 @@ struct FindBarLayoutTests {
     #expect(FindBarLayout.frame(in: card).minX == 12)
   }
 
+  @Test func `a split pane anchors the bar to that pane, not the card around it`() {
+    let pane = CGRect(x: 510, y: 0, width: 400, height: 600)
+    #expect(FindBarLayout.frame(in: pane) == CGRect(x: 510 + 400 - 12 - 372, y: 600 - 12 - 36, width: 372, height: 36))
+    let narrow = CGRect(x: 20, y: 40, width: 240, height: 500)             // the shortest pane
+    let shrunk = FindBarLayout.frame(in: narrow)
+    #expect(shrunk.width == 216)
+    #expect(shrunk.maxX == narrow.maxX - 12)
+    #expect(shrunk.maxY == narrow.maxY - 12)
+    #expect(shrunk.minX == narrow.minX + 12)
+  }
+
   @Test func `the parts at 372 with the minimum count width`() {
     let parts = FindBarLayout.parts(width: 372, countWidth: 56)
     #expect(parts.glyph == CGRect(x: 13, y: 11, width: 14, height: 14))

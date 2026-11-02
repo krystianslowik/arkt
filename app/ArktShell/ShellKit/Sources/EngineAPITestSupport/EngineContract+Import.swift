@@ -169,4 +169,32 @@ public enum EngineImportContract {
     ])
     try EngineContract.require(result == ImportWriteResult(written: 1, skipped: 1), "url and title by folder: \(result)")
   }
+
+  /// Extensions by Web Store id (#513): one result per distinct id in first-seen order, an id the profile has is
+  /// already installed, a bad id fails without stopping the rest, and the counts follow the results.
+  @MainActor
+  public static func runExtensions(_ engine: some EngineImporting) async throws {
+    let a = String(repeating: "a", count: 32), b = String(repeating: "b", count: 32)
+    var results = await engine.installExtensionResults(ids: [])
+    try EngineContract.require(results == [], "empty extension batch: \(String(describing: results))")
+
+    results = await engine.installExtensionResults(ids: [a, "not-an-id", b, a])
+    try EngineContract.require(
+      results == [
+        ExtensionInstallResult(id: a, outcome: .installed),
+        ExtensionInstallResult(id: "not-an-id", outcome: .failed("not a Web Store id")),
+        ExtensionInstallResult(id: b, outcome: .installed),
+      ], "first extension batch: \(String(describing: results))")
+
+    results = await engine.installExtensionResults(ids: [b, a])
+    try EngineContract.require(
+      results == [
+        ExtensionInstallResult(id: b, outcome: .alreadyInstalled), ExtensionInstallResult(id: a, outcome: .alreadyInstalled),
+      ], "installed again: \(String(describing: results))")
+
+    let counts = await engine.installExtensions(ids: [a, "short", String(repeating: "c", count: 32)])
+    try EngineContract.require(
+      counts == ImportWriteResult(written: 1, skipped: 1, failed: 1, failureReason: "not a Web Store id: 1\n"),
+      "extension counts: \(String(describing: counts))")
+  }
 }

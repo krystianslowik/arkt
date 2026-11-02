@@ -1100,6 +1100,49 @@ final class ScriptedFacade: NSObject, ArktEngine {
     Task { @MainActor in completion(result) }
   }
 
+  /// What each `installExtensions` call received.
+  private(set) var installedExtensionBatches: [[String]] = []
+  /// The scripted result per id; an id not in it is installed.
+  var extensionAnswers: [String: (status: ArktExtensionInstallStatus, reason: String?)] = [:]
+
+  final class ScriptedExtensionResult: NSObject, ArktExtensionInstallResult {
+    let extensionID: String
+    let status: ArktExtensionInstallStatus
+    let failureReason: String?
+    init(_ id: String, _ status: ArktExtensionInstallStatus, _ reason: String?) {
+      extensionID = id; self.status = status; failureReason = reason
+    }
+  }
+
+  /// A scripted batch stays open until `finishHeldExtensionBatch()` or `cancelExtensionInstalls()`.
+  var holdsExtensionBatch = false
+  private(set) var extensionCancelCount = 0
+  private var heldBatch: (ids: [String], completion: ([any ArktExtensionInstallResult]) -> Void)?
+
+  func installExtensions(
+    _ ids: [String], completion: @escaping ([any ArktExtensionInstallResult]) -> Void
+  ) {
+    installedExtensionBatches.append(ids)
+    if holdsExtensionBatch {
+      heldBatch = (ids, completion)
+      return
+    }
+    let results: [any ArktExtensionInstallResult] = ids.map { id in
+      let answer = extensionAnswers[id] ?? (.installed, nil)
+      return ScriptedExtensionResult(id, answer.status, answer.reason)
+    }
+    Task { @MainActor in completion(results) }
+  }
+
+  /// What the real facade does: every id not yet confirmed fails with "cancelled", then the completion runs.
+  func cancelExtensionInstalls() {
+    extensionCancelCount += 1
+    guard let held = heldBatch else { return }
+    heldBatch = nil
+    let results: [any ArktExtensionInstallResult] = held.ids.map { ScriptedExtensionResult($0, .failed, "cancelled") }
+    Task { @MainActor in held.completion(results) }
+  }
+
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool {
     guard testAPIEnabled, let tab = tab as? ScriptedTab else { return false }
     return tab.answer(accept: accept)

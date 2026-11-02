@@ -2778,3 +2778,15 @@ The two skips are the pre-existing screenshot renders. `commandbar.latency.ms` o
 UI test `ArktShellUITests/CommandBarKeyTests/test_372_cmdReturnOpensTheSelectedTabInASplit`: not run to a result. xcodebuild reached Set Up, then XCTest stayed in `recordIssue` while symbolication blocked in `open`. The harness refuses to launch when `dev.arkt.Arkt` is already running, and another worktree's ArktShell (pid 82119) holds that bundle id. It was left running. The in-process twin `CommandBarPreviewWindowTests.testCmdReturnSplitsAndOptReturnOpensATab` passed. The XCUITest method is in `CommandBarKeyTests`.
 
 Widening frame time: not run. The structural no-layout assertion passed, as above.
+
+## Auto-archive exempts a playing Today tab (#92) (2026-10-28)
+
+BH-076's auto-archive half. Clear already leaves a playing row (`pagePlaysMedia`). Auto-archive now uses the same rule.
+
+- `ShellWindowSet.autoArchiveExempt` also unions each window's loaded tabs whose engine snapshot `isAudible` is true, including a tab that is not the one showing. Chromium keeps `isAudible` true for a muted page that still plays, so that page is exempt too. Mute alone is not. A page that was never loaded has no snapshot and is not exempt.
+- A playing pane is exempt, and so is its parent split, matching `nodesHoldingClose`. `AutoArchivePolicy.lastActive` already keeps a split when any pane is exempt; the policy was not changed.
+- Little Arkt window auto-archive (`littleArcWindowsToArchive`, exempt window ids) is a separate path and was not changed.
+
+`AppSession.startAutoArchive` already reads `windows.autoArchiveExempt`, so that file was not edited. Its comment still says media-playing tabs join once the engine reports audio. The engine reports it, and the exempt set now includes those tabs.
+
+Tests (written first: the new GUI case failed on the audible background tab, the muted page that still plays, and the split, and passed the mute-only and never-loaded cases, before the code): `ShellWindowSetTests` 12 run, 0 failures (the class had 11; the new case is `testAnAudibleBackgroundTabIsExemptFromAutoArchive`). ShellKit unit (`swift test -j 2 --skip ShellKitGUITests`): 1821 Swift Testing tests passed, 0 failures (1095 + 38 + 60 + 7 + 181 + 49 + 257 + 111 + 23). ArktCore not run: no ArktCore change. App build and XCUITest not run: `app/ArktShell/App` and `project.yml` were not touched.
