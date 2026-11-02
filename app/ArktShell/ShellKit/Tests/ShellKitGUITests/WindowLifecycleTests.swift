@@ -287,6 +287,40 @@ final class WindowLifecycleTests: XCTestCase {
     XCTAssertFalse(tabURLs(f.source.sidebar).contains { $0.contains("secret-visit.example") })
   }
 
+  /// A blank or incognito window still navigates: a command-bar commit and Paste and Go load the page in that
+  /// window, and neither writes the shared sidebar.
+  func testBlankAndIncognitoWindowsLoadCommandBarAndPasteAndGoVisits() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+
+    for incognito in [false, true] {
+      let window = f.set.openWindow(opensFirstTab: false)
+      if incognito { window.makeIncognito() } else { window.makeBlank() }
+      XCTAssertNil(window.currentTab)
+
+      window.commandBar.show(.newTab)
+      window.commandBar.setQueryForTesting("private-visit.example")
+      window.commandBar.commit()
+      let first = try XCTUnwrap(window.currentTab, "the commit loads a page in this window")
+      XCTAssertTrue(f.engine.snapshot(of: first)?.url?.absoluteString.contains("private-visit.example") ?? false)
+
+      let pasted = EngineWorld.url("pasted-visit")
+      let onPasteAndGo = try XCTUnwrap(window.sidebarController.onPasteAndGo)
+      onPasteAndGo(pasted)
+      let second = try XCTUnwrap(window.currentTab)
+      XCTAssertEqual(f.engine.snapshot(of: second)?.url, pasted, "Paste and Go loads in this window")
+
+      XCTAssertEqual(saves, 0, "no visit schedules a sidebar save")
+      XCTAssertEqual(f.source.sidebar, before, "no visit reaches the shared sidebar")
+      XCTAssertTrue(window.sidebarController.spaces.isEmpty)
+      XCTAssertTrue(tabURLs(f.source.sidebar).allSatisfy {
+        !$0.contains("private-visit.example") && !$0.contains("pasted-visit")
+      })
+    }
+  }
+
   private func tabURLs(_ sidebar: SidebarModel.Sidebar) -> [String] {
     sidebar.nodes.values.compactMap { node in
       if case .tab(let tab) = node.kind { tab.url.absoluteString } else { nil }

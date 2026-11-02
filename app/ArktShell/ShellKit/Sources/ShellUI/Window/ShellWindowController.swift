@@ -105,6 +105,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Engine tabs are created lazily, when a sidebar node is first shown (`openEngineTab(for:)`).
   var tabsByNode: [NodeID: TabID] = [:]
   var nodeByTab: [TabID: NodeID] = [:]
+  /// The one page of a blank or incognito window (#487): an engine tab with no sidebar row, so a visit never reaches
+  /// the shared sidebar. Nil in a normal window.
+  var privateTab: TabID?
   /// Where Copy Link writes and Paste URL as New Tab reads (#105); tests use a private pasteboard.
   var linkPasteboard: NSPasteboard = .general
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
