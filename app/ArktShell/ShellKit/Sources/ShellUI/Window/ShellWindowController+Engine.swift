@@ -206,7 +206,8 @@ extension ShellWindowController {
 
   // MARK: Held closes (Decision 11)
 
-  /// Rows whose close the engine holds behind a leave-site prompt show their closing state.
+  /// Rows whose close the engine holds behind a leave-site prompt show their closing state. A blank or incognito
+  /// window's private page has no row (`nodeByTab`), so it is skipped here and never shows a closing state.
   func markHeldCloses(_ tabs: [TabID]) {
     for tab in tabs {
       guard let node = nodeByTab[tab], engine.snapshot(of: tab)?.isClosing == true else { continue }

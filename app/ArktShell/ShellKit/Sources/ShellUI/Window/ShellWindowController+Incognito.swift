@@ -43,4 +43,25 @@ extension ShellWindowController {
     setShown([])
     refreshAddress()
   }
+
+  /// The events of the private page, which has no row to route them through. The address bar and the Back and
+  /// Forward state follow the page; a page the engine closed (a script, or this window closing) leaves the window
+  /// empty, and the next visit makes a new one.
+  func handlePrivateTabEvent(_ event: EngineEvent) -> Bool {
+    guard let tab = privateTab, event.tabID == tab else { return false }
+    switch event {
+    case .urlChanged, .historyChanged:
+      if tab == currentTab { refreshAddress() }
+    case .tabClosed:
+      privateTab = nil
+      if currentTab == tab {
+        currentTab = nil
+        rootView.card.setContent(nil)
+      }
+      refreshAddress()
+    default:
+      return false
+    }
+    return true
+  }
 }

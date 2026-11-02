@@ -773,6 +773,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       break
     }
     guard let node = nodeByTab[event.tabID] else {
+      if handlePrivateTabEvent(event) { return }                    // a blank or incognito window's page (#487)
       if handleParkedTabEvent(event) { return }                     // a closed page's copy (#346)
       if case .tabCreated(let tab) = event { engineDidCreateTab(tab) }
       if case .activeTabChanged(let tab) = event {      // a tab without a row took it
