@@ -118,6 +118,18 @@ final class CommandBarKeyTests: ArktUITestCase {
     try openEditedURLInNewTab(modifiers: .option, server: server, app: app)
   }
 
+  /// Cmd-Return on the selected open tab opens that page in a new split pane (#372).
+  func test_372_cmdReturnOpensTheSelectedTabInASplit() async throws {
+    let (_, app) = try await launchWithThreeTabs()
+    showFixtureResults(in: app)
+    XCTAssertEqual(Shell.selectedCommandBarRow(app)?.value as? String, "Switch to Tab")
+    XCTAssertTrue(Shell.commitSelectedRow(app, modifiers: .command))
+    XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
+    XCTAssertTrue(waitForOutlineRows("a split row after Cmd-Return") {
+      app.outlineRows.matching(identifier: AXID.Sidebar.rowSplit).firstMatch.exists
+    })
+  }
+
   // MARK: - Setup
 
   private func launchWithThreeTabs() async throws -> (FixtureServer, XCUIApplication) {

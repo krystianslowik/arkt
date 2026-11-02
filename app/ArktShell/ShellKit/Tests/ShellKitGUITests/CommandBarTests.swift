@@ -23,6 +23,7 @@ final class CommandBarTests: XCTestCase {
     bar.settings.dismissSearchSuggestionNotice()
     bar.dismissFinisher = { $0() }                  // the dismiss fade ends at once; its own tests step it by hand
     bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
+    bar.barView.widthMotion.drivesFramesItself = false
     bar.prewarm()
     try await Task.sleep(for: .milliseconds(300))   // let the window server settle
   }

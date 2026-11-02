@@ -5,12 +5,24 @@ import AppKit
 @MainActor
 final class CommandBarKeyCapView: NSView {
   static let height: CGFloat = 18
-  private static let minWidth: CGFloat = 18
-  private static let horizontalPadding: CGFloat = 5
-  private static let cornerRadius: CGFloat = 5
+
+  /// 18 pt in the field row, the hint strip and on rows. The preview's buttons use 16 (#372).
+  struct Metrics: Equatable {
+    var height: CGFloat
+    var fontSize: CGFloat
+    var cornerRadius: CGFloat
+    var horizontalPadding: CGFloat
+    static let standard = Metrics(height: 18, fontSize: 10.5, cornerRadius: 5, horizontalPadding: 5)
+    static let preview = Metrics(height: 16, fontSize: 10, cornerRadius: 4, horizontalPadding: 4)
+  }
+
+  /// A key cap drawn on the mustard button: graphite at 14% fill, graphite text, no border.
+  enum Tone: Equatable { case neutral, onMustard }
 
   private(set) var text = ""
   private var flavor: ThemeFlavor = .dark
+  private var metrics = Metrics.standard
+  private var tone: Tone = .neutral
   private let label = NSTextField(labelWithString: "")
   /// Click handler; nil for a decorative key cap.
   var onClick: (() -> Void)?
@@ -20,10 +32,10 @@ final class CommandBarKeyCapView: NSView {
   override init(frame: NSRect) {
     super.init(frame: frame)
     wantsLayer = true
-    layer?.cornerRadius = Self.cornerRadius
+    layer?.cornerRadius = Metrics.standard.cornerRadius
     layer?.cornerCurve = .continuous
     layer?.borderWidth = 0.5
-    label.font = .systemFont(ofSize: 10.5, weight: .medium)
+    label.font = .systemFont(ofSize: Metrics.standard.fontSize, weight: .medium)
     label.alignment = .center
     label.lineBreakMode = .byClipping
     label.cell?.usesSingleLineMode = true
@@ -34,11 +46,15 @@ final class CommandBarKeyCapView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-  func configure(_ text: String, flavor: ThemeFlavor) {
-    guard text != self.text || flavor != self.flavor else { return }
+  func configure(_ text: String, flavor: ThemeFlavor, metrics: Metrics = .standard, tone: Tone = .neutral) {
+    guard text != self.text || flavor != self.flavor || metrics != self.metrics || tone != self.tone else { return }
     self.text = text
     self.flavor = flavor
+    self.metrics = metrics
+    self.tone = tone
     label.stringValue = text
+    label.font = .systemFont(ofSize: metrics.fontSize, weight: .medium)
+    layer?.cornerRadius = metrics.cornerRadius
     apply()
     invalidateIntrinsicContentSize()
     needsLayout = true
@@ -48,17 +64,25 @@ final class CommandBarKeyCapView: NSView {
   override func isAccessibilityElement() -> Bool { onClick != nil }
 
   private func apply() {
-    layer?.backgroundColor = ShellTokens.commandBarKeyCap.resolve(flavor).cgColor
-    layer?.borderColor = ShellTokens.commandBarDivider.resolve(flavor).cgColor
-    label.textColor = ShellTokens.commandBarSecondaryText.resolve(flavor).nsColor()
+    switch tone {
+    case .neutral:
+      layer?.backgroundColor = ShellTokens.commandBarKeyCap.resolve(flavor).cgColor
+      layer?.borderWidth = 0.5
+      layer?.borderColor = ShellTokens.commandBarDivider.resolve(flavor).cgColor
+      label.textColor = ShellTokens.commandBarSecondaryText.resolve(flavor).nsColor()
+    case .onMustard:
+      layer?.backgroundColor = RGBA.srgb(hex: 0x202321, alpha: 0.14).cgColor
+      layer?.borderWidth = 0
+      label.textColor = BrandTokens.onAccent.resolve(flavor).nsColor()
+    }
   }
 
   override var intrinsicContentSize: NSSize { size }
 
   /// The key cap's size: at least square, wider for a word.
   var size: NSSize {
-    let width = ceil(label.fittingSize.width) + 2 * Self.horizontalPadding
-    return NSSize(width: max(Self.minWidth, width), height: Self.height)
+    let width = ceil(label.fittingSize.width) + 2 * metrics.horizontalPadding
+    return NSSize(width: max(metrics.height, width), height: metrics.height)
   }
 
   override func layout() {

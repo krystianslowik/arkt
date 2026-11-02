@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 import os
 
 /// Arc's command bar: a pre-warmed floating panel over the shell window.
@@ -52,6 +53,13 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// BH-109: a removed suggestion; the session exclusion is already applied. A future history store persists
   /// removals through this hook.
   public var onRemoveSuggestion: ((CommandBarResults.Result) -> Void)?
+  /// History visits for the query. Empty until a history store exists; tests and screenshots pass synthetic visits.
+  public var historyProvider: () -> [CommandBarResults.HistoryVisit] = { [] }
+  /// The preview thumbnail (#370). Nil keeps the well. A slow reply must not block the bar: the column shows the
+  /// well first and drops the image if the selection moved.
+  public var thumbnailForPreview: (@MainActor (CommandBarPreview.Thumbnail) async -> PageImage?)?
+  /// A cached favicon for a live tab's well. Nil shows the row's symbol.
+  public var faviconForPreview: (@MainActor (CommandBarPreview.Thumbnail) -> NSImage?)?
 
   /// The bar's scope: normal, action search (BH-106) or a site-search engine (BH-107).
   public private(set) var scope: CommandBarResults.Scope = .normal
@@ -133,6 +141,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   private var invalidated = false
   private var signpostState: OSSignpostIntervalState?
   private weak var parent: NSWindow?
+  private var thumbnailTask: Task<Void, Never>?
+  private var thumbnailGate = CommandBarThumbnailGate()
 
   public init(parent: NSWindow) {
     self.parent = parent
@@ -155,6 +165,9 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.onDismissNotice = { [weak self] in self?.dismissNotice() }
     barView.onEscapeKey = { [weak self] in self?.hide() }
     barView.pills.onSelect = { [weak self] in self?.setFilter($0) }
+    barView.previewColumn.onSplit = { [weak self] in self?.openSplitFromPreview() }
+    barView.previewColumn.onPrimary = { [weak self] in self?.commit() }
+    barView.widthMotion.onSettled = { [weak self] _ in self?.widthDidSettle() }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
     for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification,
                  NSWindow.didChangeBackingPropertiesNotification] {
@@ -295,6 +308,11 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     endSignpost()
     panel.isPresented = false                       // stays ordered in, inert at once; alpha 0 after the fade
     barView.selectionMotion.settleNow()
+    thumbnailTask?.cancel()
+    _ = thumbnailGate.begin()
+    barView.widthMotion.stopWithoutSettling()
+    barView.releaseDrawnWidth()
+    barView.previewColumn.setContent(nil, flavor: flavor)
     fadeOut()
     if restoreFocus { parent?.makeKey() }
   }
@@ -404,7 +422,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   @objc private func parentFrameDidChange(_ notification: Notification) {
     guard let parent else { return }
     if isVisible {
-      setPanelFrame(frame(in: parent), display: false)
+      syncWidth(display: false)
       refreshCellScaleIfNeeded()
     } else if notification.name == NSWindow.didChangeScreenNotification {
       setPanelFrame(frame(in: parent), display: false)
@@ -475,6 +493,13 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     }
     guard Self.isReturn(event, withExactly: [.command, .option]) else { return false }
     if let editor = barView.field.currentEditor() as? NSTextView, editor.hasMarkedText() { return false }
+    let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+    // Cmd-Return on a preview row opens that page in a new split pane (#372). Opt-Return stays a new tab, and so
+    // does Cmd-Return on every row without a preview (KB-085).
+    if flags == .command, currentPreview != nil {
+      openSplitFromPreview()
+      return true
+    }
     commit(forcing: .newTab)
     return true
   }
@@ -616,7 +641,21 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     switch kind {
     case .open(let url), .search(let url), .pasteAndGo(let url), .siteSearch(let url): onOpen?(url, target)
     // [I] A "Switch to Tab" result switches in every mode, the split pane bar included: the tab is already open.
-    case .switchTo(let node): onSwitch?(node)
+    case .switchTo(let node):
+      // Opt-Return on a visible preview opens a new tab (#372). A switch row with no preview, including
+      // the empty query, still switches under Opt-Return (KB-085).
+      let showsPreview = CommandBarPreview.content(for: results[row].previewFacts, queryIsEmpty: queryIsEmpty) != nil
+      if forced == .newTab, showsPreview, let url = results[row].previewFacts?.url {
+        onOpen?(url, .newTab)
+      } else {
+        onSwitch?(node)
+      }
+    case .history(let url):
+      if forced == nil, let facts = results[row].previewFacts, facts.isAlsoOpen, let node = facts.node {
+        onSwitch?(node)
+      } else {
+        onOpen?(url, target)
+      }
     case .restore(let id): onRestoreArchived?(id)
     case .action(let id): onAction?(id)
     case .switchSpace(let space): onSwitchSpace?(space)
@@ -669,13 +708,92 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     return CommandBarGeometry.frame(parentFrame: parent.frame,
                                     contentHeight: CommandBarGeometry.contentHeight(
                                       rowCount: results.count, headerCount: headers, showsNotice: isNoticeVisible,
-                                      maxRows: maxRows))
+                                      maxRows: maxRows),
+                                    showsPreview: currentPreview != nil)
   }
 
-  /// Sets the panel's frame for the current results and notice, when it changed.
+  /// Sets the panel's frame for the current results and notice. A preview widens on the spring; leaving one
+  /// narrows on the spring and lays the narrow frame out once it rests.
   private func relayout(display: Bool = true) {
+    syncWidth(display: display)
+  }
+
+  /// The selected row's preview, when the query is non-empty and the row is a tab or a history visit.
+  private var currentPreview: CommandBarPreview.Content? {
+    let row = barView.table.selectedRow
+    guard results.indices.contains(row) else { return nil }
+    return CommandBarPreview.content(for: results[row].previewFacts, queryIsEmpty: queryIsEmpty)
+  }
+
+  private func refreshPreview() {
+    let content = currentPreview
+    let previous = barView.previewColumn.content
+    if let content, content != previous {
+      let appeared = previous == nil
+      barView.previewColumn.setContent(content, flavor: flavor)
+      if appeared { announce("Preview, \(content.title)") }
+      loadThumbnail(for: content)
+    }
+    syncWidth(display: false)
+  }
+
+  private func loadThumbnail(for content: CommandBarPreview.Content) {
+    let token = thumbnailGate.begin()
+    thumbnailTask?.cancel()
+    barView.previewColumn.showWell(favicon: faviconForPreview?(content.thumbnail))
+    let request = content.thumbnail
+    thumbnailTask = Task { [weak self] in
+      let image = await self?.thumbnailForPreview?(request)
+      let cgImage = image.flatMap(CommandBarPreviewImage.cgImage(from:))
+      guard let self, self.thumbnailGate.accepts(token), !Task.isCancelled else { return }
+      self.barView.previewColumn.showImage(cgImage)
+    }
+  }
+
+  private func openSplitFromPreview() {
+    guard let content = currentPreview else { return }
+    hide()
+    onOpen?(content.url, .newSplitPane)
+  }
+
+  /// One layout when the bar becomes wide (the mask stays at the width on screen), then the spring. Narrowing
+  /// keeps that wide panel until the spring rests, so the column can clip away, but the height follows the rows
+  /// at once. A window resize with no preview snaps: it is not a preview spring. The list's leading edge stays.
+  private func syncWidth(display: Bool) {
     guard let parent else { return }
-    setPanelFrame(frame(in: parent), display: display)
+    let target = frame(in: parent)
+    let drawn = barView.drawnWidth
+    if currentPreview != nil {
+      if panel.frame != target {
+        barView.holdDrawnWidth(drawn)
+        setPanelFrame(target, display: display)
+        barView.layoutSubtreeIfNeeded()
+      }
+      barView.widthMotion.retarget(to: Double(target.width), from: Double(barView.drawnWidth), in: barView)
+    } else if barView.widthMotion.isRunning || barView.previewColumn.content != nil {
+      barView.keepDrawnWidth()
+      let clipping = NSRect(x: target.minX, y: target.minY, width: max(panel.frame.width, target.width),
+                            height: target.height)
+      if panel.frame != clipping {
+        setPanelFrame(clipping, display: display)
+        barView.layoutSubtreeIfNeeded()
+      }
+      barView.widthMotion.retarget(to: Double(target.width), from: Double(barView.drawnWidth), in: barView)
+    } else {
+      barView.releaseDrawnWidth()
+      setPanelFrame(target, display: display)
+    }
+  }
+
+  /// The spring landed. The narrow frame is applied once here; a wide landing is already the panel's frame.
+  private func widthDidSettle() {
+    barView.releaseDrawnWidth()
+    guard let parent else { return }
+    if currentPreview == nil {
+      barView.previewColumn.setContent(nil, flavor: flavor)
+    }
+    setPanelFrame(frame(in: parent), display: false)
+    barView.layoutSubtreeIfNeeded()
   }
 
   /// Asks for the archived matches of the field's text; a reply for an older text is dropped.
@@ -692,8 +810,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
             self.barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
       self.archived = matches
       self.archivedQuery = query
+      // reloadResults syncs the width. A direct setFrame here would snap a narrowing spring.
       self.reloadResults()
-      if let parent = self.parent, self.isVisible { self.setPanelFrame(self.frame(in: parent), display: true) }
     }
   }
 
@@ -726,6 +844,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     input.archived = current
     input.recentTabs = scope == .normal && trimmed.isEmpty ? recentTabsProvider() : []
     input.siteSearchEngines = scope == .normal ? siteSearchProvider() : []
+    input.history = historyProvider()
     lastInput = input
     unfilteredResults = CommandBarResults.make(query: text, input: input)
     let fresh = scope == .normal ? filter.apply(to: unfilteredResults, query: text) : unfilteredResults
@@ -749,6 +868,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.selectionAnimates = true
     updatePillsAndHints(query: text, trimmed: trimmed)
     updateNotice()
+    refreshPreview()
   }
 
   /// The pills (selection and counts of the unfiltered rows) and the hint strip, for the rows on screen.
@@ -836,11 +956,13 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// `scroll` is false for hover: the row under the pointer is already visible.
   private func select(_ row: Int, scroll: Bool) {
     guard row >= 0, row < results.count else { return }
-    if barView.table.selectedRow != row {
+    let changed = barView.table.selectedRow != row
+    if changed {
       barView.table.selectRowIndexes([row], byExtendingSelection: false)
       refreshHints()
     }
     if scroll { barView.table.scrollRowToVisible(row) }
+    if changed { refreshPreview() }
   }
 
   // MARK: Table

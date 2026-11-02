@@ -29,6 +29,16 @@ public enum CommandBarGeometry {
   public static let maxEmptyStateRows = 7
   /// BH-113 notice strip under the input row.
   public static let noticeHeight: CGFloat = 32
+  /// The bar with the preview column (#372). The wide frame keeps the narrow frame's minX, so the list's leading
+  /// edge does not move; a window that cannot hold this width clips to its edge and the column stays 300.
+  public static let previewWidth: CGFloat = 968
+  public static let previewColumnWidth: CGFloat = 300
+  public static let previewColumnPadding: CGFloat = 12
+  public static let previewThumbnailHeight: CGFloat = 116
+  public static let previewThumbnailRadius: CGFloat = 10
+  public static let previewButtonHeight: CGFloat = 30
+  public static let previewButtonRadius: CGFloat = 8
+  public static let previewOpenDot: CGFloat = 6
 
   /// The bar's height: the field, the notice, and, when there are rows, a hairline, the padded list, a hairline and
   /// the hint strip. `headerCount` group headers sit inside the list. More than `maxRows` rows scroll.
@@ -42,9 +52,12 @@ public enum CommandBarGeometry {
   }
 
   /// Screen-space frame (origin bottom-left), top edge pinned so result changes grow downward.
-  public static func frame(parentFrame p: CGRect, contentHeight: CGFloat) -> CGRect {
-    let width = min(preferredWidth, p.width - 2 * sideMargin)
+  /// `showsPreview` widens to the right of the narrow bar's leading edge. It does not change the height.
+  public static func frame(parentFrame p: CGRect, contentHeight: CGFloat, showsPreview: Bool = false) -> CGRect {
+    let narrow = min(preferredWidth, max(0, p.width - 2 * sideMargin))
+    let leading = p.midX - narrow / 2
+    let width = showsPreview ? min(previewWidth, max(0, p.maxX - leading)) : narrow
     let top = p.maxY - topFraction * p.height
-    return CGRect(x: p.midX - width / 2, y: top - contentHeight, width: width, height: contentHeight)
+    return CGRect(x: leading, y: top - contentHeight, width: width, height: contentHeight)
   }
 }

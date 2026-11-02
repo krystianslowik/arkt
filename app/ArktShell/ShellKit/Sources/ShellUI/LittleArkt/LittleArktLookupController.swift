@@ -128,6 +128,9 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
     case .switchTo(let node):
       hide(returningActivation: false)
       onSwitch?(node)
+    case .history(let url):
+      hide(returningActivation: false)
+      onOpen?(url)
     case .restore, .action, .switchSpace, .noMatch:
       hide()
     }
