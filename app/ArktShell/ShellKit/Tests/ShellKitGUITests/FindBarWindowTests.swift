@@ -594,13 +594,16 @@ final class FindBarWindowTests: XCTestCase {
     XCTAssertLessThanOrEqual(rig.bar.field.frame.maxX, rig.bar.countLabel.frame.minX)
   }
 
-  func testCmdFInASplitDoesNothingAndTheBarHidesAndComesBack() async throws {
+  func testASinglePageBarHidesInASplitAndComesBack() async throws {
     var sidebar = SidebarModel.Sidebar()
     let space = sidebar.addSpace(title: "Work")
     let page = try sidebar.addTab(url: InMemoryEngine.findPageURL(occurrences: 3, link: Self.link), title: "P",
                                   in: .today(space))
     let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(space))
-    let panes = try (0..<2).map { try sidebar.addTab(url: Self.link, title: "L\($0)", in: .split(split)) }
+    let panes = try (0..<2).map {
+      try sidebar.addTab(url: InMemoryEngine.findPageURL(occurrences: 4 + $0, link: Self.link), title: "L\($0)",
+                         in: .split(split))
+    }
     let harness = EngineHarnessWindow(sidebar)
     harnesses.append(harness)
     let sleeper = Sleeper()
@@ -612,15 +615,14 @@ final class FindBarWindowTests: XCTestCase {
     XCTAssertFalse(rig.bar.isHidden)
 
     harness.controller.activate(node: panes[0])
-    XCTAssertTrue(rig.bar.isHidden, "no bar over a split")
-    XCTAssertTrue(harness.controller.engineHost.perform(.find, disposition: .currentTab),
-                  "claimed: nothing falls through to the engine's own find")
-    XCTAssertTrue(rig.bar.isHidden, "and nothing opens")
-    XCTAssertTrue(harness.engine.executedCommands.isEmpty)
+    let paneBar = try XCTUnwrap(harness.controller.rootView.split.paneCards[0].findBarView)
+    XCTAssertTrue(paneBar.isHidden, "the page's bar does not jump onto the pane; that pane has its own")
+    XCTAssertTrue(harness.engine.executedCommands.isEmpty, "claimed: Chromium's own find is never asked")
 
     harness.controller.activate(node: page)
     XCTAssertFalse(rig.bar.isHidden, "the bar comes back when the split ends")
     XCTAssertEqual(rig.bar.field.stringValue, "nee")
+    XCTAssertTrue(rig.bar.isDescendant(of: rig.controller.rootView.card))
   }
 
   /// Keys the shell owns still reach it while the find field has the keyboard: the window offers a key to its views
@@ -665,12 +667,217 @@ final class FindBarWindowTests: XCTestCase {
     XCTAssertEqual(probe.hits, ["New Tab", "Open Location", "Space 1", "Space 2", "Space 3"])
   }
 
-  func testFindIsDisabledWhileASplitShows() throws {
-    let world = try EngineWorld.make()
-    let harness = EngineHarnessWindow(world.sidebar)
+  // MARK: Split View (#493)
+
+  /// Two find pages in one split. Pane 0 has 3 copies of the find word, pane 1 has 5.
+  @MainActor
+  private struct SplitRig {
+    let harness: EngineHarnessWindow
+    let sleeper: Sleeper
+    let panes: [UUID]
+    var controller: ShellWindowController { harness.controller }
+    var engine: InMemoryEngine { harness.engine }
+    var window: NSWindow { controller.window! }
+    func card(_ index: Int) -> ContentCardView { controller.rootView.split.paneCards[index] }
+    func bar(on index: Int) -> FindBarView? { card(index).findBarView }
+  }
+
+  private func makeSplitRig() throws -> SplitRig {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(space))
+    let panes = try [3, 5].enumerated().map { index, count in
+      try sidebar.addTab(url: InMemoryEngine.findPageURL(occurrences: count, link: Self.link),
+                         title: "Pane \(index)", in: .split(split))
+    }
+    let harness = EngineHarnessWindow(sidebar)
     harnesses.append(harness)
-    harness.controller.activate(node: world.panes[0])
-    XCTAssertEqual(harness.controller.engineHost.claim(.find), CommandClaim(isEnabled: false),
-                   "split panes are out of this change; the bar belongs to a single card")
+    let sleeper = Sleeper()
+    harness.controller.findBar.sleep = { try await sleeper.sleep($0) }
+    harness.controller.activate(node: panes[0])
+    harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    return SplitRig(harness: harness, sleeper: sleeper, panes: panes)
+  }
+
+  /// Types `text` into the find field and lets the debounce run out.
+  private func search(_ text: String, bar: FindBarView, window: NSWindow, sleeper: Sleeper) async throws {
+    let editor = try XCTUnwrap(window.firstResponder as? NSTextView, "the field is being edited")
+    for character in text { editor.insertText(String(character), replacementRange: editor.selectedRange()) }
+    await until("the debounce timer is parked") { await sleeper.parkedCount == 1 }
+    await sleeper.resumeNext()
+    await until("the count for \(text)") { bar.countLabel.stringValue != "" }
+  }
+
+  /// The page area `layoutFindBar` anchors to: the card, below the Toolbar when it shows.
+  private func pageArea(of card: ContentCardView) -> CGRect {
+    guard card.showsToolbar else { return card.bounds }
+    return CGRect(x: 0, y: 0, width: card.bounds.width, height: card.bounds.height - ContentToolbarView.height)
+  }
+
+  private func expectAnchored(_ bar: FindBarView, to card: ContentCardView, file: StaticString = #filePath,
+                              line: UInt = #line) {
+    XCTAssertFalse(bar.isHidden, file: file, line: line)
+    XCTAssertTrue(bar.superview === card, "the bar is on that pane", file: file, line: line)
+    card.layoutSubtreeIfNeeded()
+    XCTAssertEqual(bar.frame, FindBarLayout.frame(in: pageArea(of: card)), file: file, line: line)
+  }
+
+  func testCmdFFindsInTheFocusedSplitPane() async throws {
+    let rig = try makeSplitRig()
+    let host = rig.controller.engineHost
+    XCTAssertEqual(host.claim(.find), CommandClaim(isEnabled: true))
+    XCTAssertEqual(host.claim(.findNext), CommandClaim(isEnabled: false), "nothing to find again")
+    XCTAssertTrue(host.perform(.find, disposition: .currentTab))
+    let bar = try XCTUnwrap(rig.bar(on: 0))
+    XCTAssertTrue(rig.window.firstResponder is NSTextView, "the field has the keyboard")
+    try await search("nee", bar: bar, window: rig.window, sleeper: rig.sleeper)
+
+    rig.window.contentView?.layoutSubtreeIfNeeded()
+    expectAnchored(bar, to: rig.card(0))
+    XCTAssertEqual(bar.countLabel.stringValue, "1 of 3", "the focused pane is the one searched")
+    XCTAssertTrue(rig.engine.executedCommands.isEmpty, "Chromium's own find bar is never asked")
+    let tab = try XCTUnwrap(rig.controller.currentTab)
+    let point = try XCTUnwrap(rig.card(0).superview).convert(NSPoint(x: 12, y: 12), from: bar.closeButton)
+    XCTAssertTrue(rig.card(0).hitTest(point) === bar.closeButton, "the click lands on the bar, not the page")
+    XCTAssertEqual(try rig.engine.selectedText(tab), "", "the match is not the selection until the bar closes")
+  }
+
+  func testTheBarFollowsTheFocusedPaneAndTheQueryStays() async throws {
+    let rig = try makeSplitRig()
+    XCTAssertTrue(rig.controller.engineHost.perform(.find, disposition: .currentTab))
+    let first = try XCTUnwrap(rig.bar(on: 0))
+    try await search("nee", bar: first, window: rig.window, sleeper: rig.sleeper)
+    XCTAssertEqual(first.countLabel.stringValue, "1 of 3")
+
+    rig.controller.activate(node: rig.panes[1])
+    rig.window.contentView?.layoutSubtreeIfNeeded()
+
+    let second = try XCTUnwrap(rig.bar(on: 1))
+    XCTAssertTrue(second === first, "one bar moves; a pane does not grow its own")
+    expectAnchored(second, to: rig.card(1))
+    XCTAssertNil(rig.card(0).findBarView, "the pane that lost focus is not still hosting it")
+    XCTAssertEqual(second.field.stringValue, "nee", "the query stays")
+    XCTAssertEqual(second.countLabel.stringValue, "1 of 5", "the search moved to the focused pane")
+    let focusedTab = try XCTUnwrap(rig.controller.currentTab)
+    XCTAssertTrue(rig.window.firstResponder === rig.engine.contentView(for: focusedTab),
+                  "the focused pane's page takes the keyboard, as any focus change does")
+    XCTAssertEqual(try rig.engine.selectedText(try XCTUnwrap(rig.controller.engineTab(of: rig.panes[0]))), "")
+
+    XCTAssertTrue(rig.controller.engineHost.perform(.findNext, disposition: .currentTab))
+    XCTAssertEqual(second.countLabel.stringValue, "2 of 5")
+    XCTAssertTrue(rig.controller.engineHost.perform(.findPrevious, disposition: .currentTab))
+    XCTAssertEqual(second.countLabel.stringValue, "1 of 5")
+
+    rig.controller.activate(node: rig.panes[0])
+    rig.window.contentView?.layoutSubtreeIfNeeded()
+    let back = try XCTUnwrap(rig.bar(on: 0))
+    expectAnchored(back, to: rig.card(0))
+    XCTAssertEqual(back.field.stringValue, "nee")
+    XCTAssertEqual(back.countLabel.stringValue, "1 of 3", "the pane that gained focus is searched from the start")
+  }
+
+  func testTheBarSitsBelowTheToolbarOfTheFocusedPane() async throws {
+    let rig = try makeSplitRig()
+    rig.controller.toggleToolbar(nil)
+    XCTAssertTrue(rig.controller.engineHost.perform(.find, disposition: .currentTab))
+    let bar = try XCTUnwrap(rig.bar(on: 0))
+    rig.window.contentView?.layoutSubtreeIfNeeded()
+    XCTAssertTrue(rig.card(0).showsToolbar)
+    expectAnchored(bar, to: rig.card(0))
+    XCTAssertEqual(bar.frame.maxY, rig.card(0).bounds.maxY - ContentToolbarView.height - 12, accuracy: 0.01)
+  }
+
+  func testALongQueryInANarrowPaneStaysInsideThePane() async throws {
+    let rig = try makeSplitRig()
+    XCTAssertTrue(rig.controller.engineHost.perform(.find, disposition: .currentTab))
+    let bar = try XCTUnwrap(rig.bar(on: 0))
+    bar.field.stringValue = String(repeating: "needle ", count: 40) + "検索"
+    bar.refreshLayout()
+    rig.window.contentView?.layoutSubtreeIfNeeded()
+    expectAnchored(bar, to: rig.card(0))
+    XCTAssertLessThanOrEqual(bar.frame.maxX, rig.card(0).bounds.maxX - 12)
+    XCTAssertGreaterThanOrEqual(bar.frame.minX, rig.card(0).bounds.minX)
+    XCTAssertLessThanOrEqual(bar.field.frame.maxX, bar.countLabel.frame.minX)
+  }
+
+  func testClosingTheBarInASplitStillWorks() async throws {
+    let rig = try makeSplitRig()
+    let host = rig.controller.engineHost
+    XCTAssertTrue(host.perform(.find, disposition: .currentTab))
+    let bar = try XCTUnwrap(rig.bar(on: 0))
+    try await search("nee", bar: bar, window: rig.window, sleeper: rig.sleeper)
+    let firstTab = try XCTUnwrap(rig.controller.currentTab)
+
+    try rig.window.sendEvent(key(kVK_Escape, in: rig.window, "\u{1B}"))
+
+    XCTAssertTrue(bar.isHidden)
+    XCTAssertEqual(try rig.engine.selectedText(firstTab), "nee", "activate: the match becomes that pane's selection")
+    XCTAssertTrue(rig.window.firstResponder === rig.engine.contentView(for: firstTab))
+
+    XCTAssertTrue(host.perform(.find, disposition: .currentTab))
+    XCTAssertFalse(bar.isHidden, "Cmd-F opens the same pane's bar again")
+    rig.controller.activate(node: rig.panes[1])
+    let focused = try XCTUnwrap(rig.bar(on: 1))
+    XCTAssertEqual(focused.field.stringValue, "nee")
+    XCTAssertEqual(focused.countLabel.stringValue, "1 of 5")
+    let secondTab = try XCTUnwrap(rig.controller.engineTab(of: rig.panes[1]))
+    focused.closeButton.performClick(nil)
+
+    XCTAssertTrue(focused.isHidden)
+    XCTAssertEqual(try rig.engine.selectedText(secondTab), "nee")
+    XCTAssertTrue(rig.window.firstResponder === rig.engine.contentView(for: secondTab))
+    XCTAssertEqual(host.claim(.findNext), CommandClaim(isEnabled: true), "the query stayed, so Find Next can reopen")
+
+    rig.controller.activate(node: rig.panes[0])
+    XCTAssertTrue(try XCTUnwrap(rig.bar(on: 0)).isHidden, "closing hid the bar; focus does not open the other pane's")
+    XCTAssertTrue(host.perform(.findNext, disposition: .currentTab))
+    let reopened = try XCTUnwrap(rig.bar(on: 0))
+    XCTAssertFalse(reopened.isHidden)
+    XCTAssertEqual(reopened.field.stringValue, "nee")
+    XCTAssertEqual(reopened.countLabel.stringValue, "1 of 3")
+  }
+
+  func testASplitWithNoFocusedPaneDoesNotFind() async throws {
+    let rig = try makeSplitRig()
+    let host = rig.controller.engineHost
+    XCTAssertTrue(host.perform(.find, disposition: .currentTab))
+    let bar = try XCTUnwrap(rig.bar(on: 0))
+    try await search("nee", bar: bar, window: rig.window, sleeper: rig.sleeper)
+
+    rig.controller.splitState.focus = nil
+    rig.controller.refreshFindBar()
+
+    XCTAssertEqual(host.claim(.find), CommandClaim(isEnabled: false))
+    XCTAssertEqual(host.claim(.findNext), CommandClaim(isEnabled: false))
+    XCTAssertEqual(host.claim(.findPrevious), CommandClaim(isEnabled: false))
+    XCTAssertTrue(bar.isHidden, "nothing is focused, so the bar hides")
+    XCTAssertTrue(host.perform(.find, disposition: .currentTab), "claimed, so nothing falls through")
+    XCTAssertTrue(bar.isHidden)
+    XCTAssertTrue(rig.engine.executedCommands.isEmpty)
+
+    rig.controller.splitState.focus = rig.panes[0]
+    rig.controller.refreshFindBar()
+    XCTAssertEqual(host.claim(.find), CommandClaim(isEnabled: true))
+    XCTAssertFalse(bar.isHidden, "the query stayed")
+    XCTAssertEqual(bar.field.stringValue, "nee")
+    XCTAssertEqual(bar.countLabel.stringValue, "1 of 3")
+  }
+
+  func testOnboardingDisablesFindInASplit() throws {
+    let rig = try makeSplitRig()
+    let host = rig.controller.engineHost
+    XCTAssertEqual(host.claim(.find), CommandClaim(isEnabled: true))
+    let stage = LateFoldStage()
+    _ = rig.controller.presentOnboarding(services: FakeOnboardingServices(sidebar: StubSidebar(), arcFound: false),
+                                         options: .init(mode: .reentry, includesExtensions: false), stage: stage)
+
+    XCTAssertEqual(host.claim(.find), CommandClaim(isEnabled: false))
+    XCTAssertEqual(host.claim(.findNext), CommandClaim(isEnabled: false))
+    XCTAssertTrue(host.perform(.find, disposition: .currentTab), "claimed, so Chromium's find is not asked")
+    XCTAssertTrue(rig.engine.executedCommands.isEmpty)
+    XCTAssertNil(rig.controller.findBar.display, "the bar stays closed")
+
+    rig.controller.onboardingDidFinish()
+    XCTAssertEqual(host.claim(.find), CommandClaim(isEnabled: true))
   }
 }

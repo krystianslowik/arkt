@@ -209,4 +209,38 @@ final class ShellWindowSetTests: XCTestCase {
     XCTAssertEqual(set.nodesHoldingClose, [world.today[1]])
     XCTAssertTrue(set.autoArchiveExempt.isSuperset(of: [world.today[0], world.today[1]]))
   }
+
+  /// BH-076: a loaded tab the engine reports as audible is exempt even when another tab is showing. Chromium keeps
+  /// `isAudible` true for a muted page that still plays, so that page is exempt too; mute alone is not. A playing
+  /// pane also exempts its split, the same way a close-holding pane does.
+  func testAnAudibleBackgroundTabIsExemptFromAutoArchive() throws {
+    let (set, engine, _, world) = try makeSet()
+    let window = set.openWindow(opensFirstTab: false)
+    window.activate(node: world.today[1])
+    window.activate(node: world.today[2])
+    window.activate(node: world.split)
+    window.activate(node: world.today[0])
+
+    let playing = try XCTUnwrap(window.engineTab(of: world.today[1]))
+    let mutedOnly = try XCTUnwrap(window.engineTab(of: world.today[2]))
+    let mutedPlaying = try XCTUnwrap(window.engineTab(of: world.panes[0]))
+    XCTAssertNotNil(window.engineTab(of: world.panes[1]), "the other pane stayed loaded")
+    XCTAssertNil(window.engineTab(of: world.pinned), "a tab that was never shown has no page")
+    XCTAssertEqual(window.visibleNodes, [world.today[0]])
+    XCTAssertTrue(set.nodesHoldingClose.isEmpty)
+
+    engine.setAudible(playing, true)
+    engine.setMuted(mutedOnly, muted: true)
+    engine.setAudible(mutedPlaying, true)
+    engine.setMuted(mutedPlaying, muted: true)
+
+    let exempt = set.autoArchiveExempt
+    XCTAssertTrue(exempt.contains(world.today[0]), "the visible tab stays exempt")
+    XCTAssertTrue(exempt.contains(world.today[1]), "an audible tab that is not showing is exempt")
+    XCTAssertFalse(exempt.contains(world.today[2]), "mute alone does not exempt")
+    XCTAssertTrue(exempt.contains(world.panes[0]), "a muted page that still plays is exempt")
+    XCTAssertFalse(exempt.contains(world.panes[1]), "a silent pane is not exempt")
+    XCTAssertTrue(exempt.contains(world.split), "a playing pane protects its split")
+    XCTAssertFalse(exempt.contains(world.pinned), "a tab that was never loaded is not exempt")
+  }
 }

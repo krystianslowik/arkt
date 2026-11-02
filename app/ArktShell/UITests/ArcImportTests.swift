@@ -5,7 +5,6 @@ import XCTest
 /// directory when the menu must stay disabled.
 final class ArcImportTests: ArktUITestCase {
   private static let importMenuTitle = "Import Browser Data..."
-  private static let importedSheetTitle = "Import complete"
 
   func test_E_importFromEmptyState() async throws {
     let server = try await fixtureServer()
@@ -16,7 +15,7 @@ final class ArcImportTests: ArktUITestCase {
     let importButton = app.buttons[AXID.EmptyState.importFromArc]
     XCTAssertTrue(waitFor(importButton))
     importButton.click()
-    dismissImportedSheet(in: app, requiring: Self.firstImportLines)
+    completeImportSheet(in: app)
 
     let dots = Shell.spaceDots(app)
     XCTAssertTrue(Waits.until("2 Space dots") { dots.count == ArcFixture.expected.spaces })
@@ -41,15 +40,15 @@ final class ArcImportTests: ArktUITestCase {
     let item = openImportMenuItem(in: app)
     XCTAssertTrue(item.isEnabled, "Import from Arc... is disabled with Arc data present")
     item.click()
-    dismissImportedSheet(in: app, requiring: Self.firstImportLines)
+    completeImportSheet(in: app)
 
     let dots = Shell.spaceDots(app)
     XCTAssertTrue(Waits.until("3 Space dots") { dots.count == ArcFixture.expected.spaces + 1 })
     try assertArcCopyUnchanged(checksums, in: sandbox)
   }
 
-  /// The second import writes nothing: its sheet reports 0 new Spaces, 0 Favorites added and 0 new archived items
-  /// (the coordinator's counts of what it wrote), and the sidebar and the Archive still hold the first import's
+  /// The second import writes nothing: its result reports 0 tabs and Favorites added (the coordinator's count of what
+  /// it wrote), and the sidebar and the Archive still hold the first import's
   /// counts. The Archive window is first opened after the re-import, so the first page it applies is the count
   /// after both imports; a stale page from before the re-import cannot satisfy the wait.
   func test_E_reimportIsIdempotent() async throws {
@@ -61,7 +60,7 @@ final class ArcImportTests: ArktUITestCase {
     let importButton = app.buttons[AXID.EmptyState.importFromArc]
     XCTAssertTrue(waitFor(importButton))
     importButton.click()
-    dismissImportedSheet(in: app, requiring: Self.firstImportLines)
+    completeImportSheet(in: app)
 
     let dots = Shell.spaceDots(app)
     XCTAssertTrue(Waits.until("2 Space dots") { dots.count == ArcFixture.expected.spaces })
@@ -71,8 +70,8 @@ final class ArcImportTests: ArktUITestCase {
     let item = openImportMenuItem(in: app)
     XCTAssertTrue(item.isEnabled, "Import from Arc... is disabled after the first import finished")
     item.click()
-    // The sheet appears after the import applied, so the counts read after it are the final ones.
-    dismissImportedSheet(in: app, requiring: ["0 new Spaces", "0 favorites added", "0 new archived items"])
+    // The result shows after the import applied, so the counts read after it are the final ones.
+    completeImportSheet(in: app, expectsNothingNew: true)
 
     XCTAssertEqual(dots.count, ArcFixture.expected.spaces)
     XCTAssertEqual(tiles.count, ArcFixture.expected.favorites)
@@ -108,7 +107,7 @@ final class ArcImportTests: ArktUITestCase {
     let importButton = app.buttons[AXID.EmptyState.importFromArc]
     XCTAssertTrue(waitFor(importButton))
     importButton.click()
-    dismissImportedSheet(in: app, requiring: Self.firstImportLines)
+    completeImportSheet(in: app)
 
     let tiles = favoriteTiles(app)
     XCTAssertTrue(Waits.until("2 favorite tiles") { tiles.count == ArcFixture.expected.favorites })
@@ -125,15 +124,6 @@ final class ArcImportTests: ArktUITestCase {
 
   // MARK: - Import sheet and menu
 
-  /// The summary lines a first import into an empty profile shows (`ArcImportSummary.lines`), as line prefixes.
-  static var firstImportLines: [String] {
-    let expected = ArcFixture.expected
-    return ["\(counted(expected.spaces, "Space")), ", "\(counted(expected.favorites, "favorite")) added",
-            "\(expected.archive) new archived \(expected.archive == 1 ? "item" : "items")"]
-  }
-
-  private static func counted(_ value: Int, _ noun: String) -> String { "\(value) \(noun)\(value == 1 ? "" : "s")" }
-
   /// Opens File once and returns "Import from Arc..." when the open menu shows it. AppKit validated the item as the
   /// menu opened, so its enabled state is the app's answer at that moment. Callers act on it (click, or Escape).
   func openImportMenuItem(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
@@ -146,41 +136,32 @@ final class ArcImportTests: ArktUITestCase {
     return item
   }
 
-  /// Waits for the "Imported from Arc" sheet, checks that its text has a line starting with each of `lines` (the
-  /// coordinator's counts of what this import wrote), and closes it with OK.
-  func dismissImportedSheet(
-    in app: XCUIApplication, requiring lines: [String], file: StaticString = #filePath, line: UInt = #line
+  /// The import sheet (#514): waits for its consent, presses Import (the fixture has the sidebar part only, so that is
+  /// the one ticked row), waits for the result, checks the Spaces and tabs row (a first import added some, a second
+  /// adds none) and closes it with Done.
+  func completeImportSheet(
+    in app: XCUIApplication, expectsNothingNew: Bool = false, file: StaticString = #filePath, line: UInt = #line
   ) {
-    let title = Self.importedSheetTitle
-    var found: XCUIElement?
-    XCTAssertTrue(Waits.until("sheet titled \(title)", file: file, line: line) {
-      found = Self.importedSheet(in: app)
-      return found != nil
+    let primary = app.buttons[AXID.BrowserDataImport.primary]
+    XCTAssertTrue(Waits.until("the sheet's Import", file: file, line: line) {
+      primary.exists && primary.isEnabled && primary.label == "Import"
     }, file: file, line: line)
-    guard let host = found else { return }
-    var shown: [String] = []
-    XCTAssertTrue(Waits.until("sheet lines \(lines) (shown: \(shown))", file: file, line: line) {
-      shown = host.staticTexts.allElementsBoundByIndex.flatMap { text -> [String] in
-        let strings = [(text.value as? String) ?? "", text.label]
-        return strings.flatMap { $0.components(separatedBy: "\n") }
-      }
-      return lines.allSatisfy { prefix in shown.contains { $0.hasPrefix(prefix) } }
-    }, file: file, line: line)
-    let ok = host.buttons["OK"]
-    XCTAssertTrue(waitFor(ok, file: file, line: line), file: file, line: line)
-    ok.click()
-    XCTAssertTrue(waitUntilGone(host, file: file, line: line), file: file, line: line)
-  }
-
-  private static func importedSheet(in app: XCUIApplication) -> XCUIElement? {
-    let title = importedSheetTitle
-    let named = [app.sheets[title], app.dialogs[title], app.windows[title]]
-    if let match = named.first(where: { $0.exists }) { return match }
-    if app.staticTexts[title].exists {
-      if app.sheets.firstMatch.exists { return app.sheets.firstMatch }
-      if app.dialogs.firstMatch.exists { return app.dialogs.firstMatch }
+    primary.click()
+    let root = Shell.element(app, AXID.BrowserDataImport.root)
+    XCTAssertTrue(Waits.until("the result", file: file, line: line) { root.exists && root.label == "Import finished" },
+                  file: file, line: line)
+    let row = Shell.element(app, AXID.BrowserDataImport.row("spaces"))
+    XCTAssertTrue(waitFor(row, file: file, line: line), file: file, line: line)
+    if expectsNothingNew {
+      XCTAssertEqual(row.label, "Spaces and tabs, 0, imported", file: file, line: line)
+    } else {
+      XCTAssertTrue(row.label.hasPrefix("Spaces and tabs, ") && row.label.hasSuffix(", imported")
+                      && row.label != "Spaces and tabs, 0, imported", row.label, file: file, line: line)
     }
-    return nil
+    let done = app.buttons[AXID.BrowserDataImport.primary]
+    XCTAssertEqual(done.label, "Done", file: file, line: line)
+    done.click()
+    XCTAssertTrue(waitUntilGone(root, file: file, line: line), file: file, line: line)
   }
 
   // MARK: - Counts

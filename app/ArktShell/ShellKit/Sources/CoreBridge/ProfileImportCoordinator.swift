@@ -307,13 +307,15 @@ public final class ProfileImportCoordinator {
       guard let ids = prepared.batches.first else {
         return TypeResult(outcome: .done(ImportItemCounts(skipped: prepared.alreadyHandled)))
       }
+      if Task.isCancelled { return TypeResult(outcome: .done(ImportItemCounts(skipped: prepared.alreadyHandled)), cancelled: true) }
       guard let result = await engine.installExtensions(ids: ids) else {
         return TypeResult(outcome: .skipped(reason: "not yet available"))
       }
       var counts = ImportItemCounts(skipped: prepared.alreadyHandled)
       counts.add(result)
+      // A cancelled batch resolves its pending ids as failed, so nothing is recorded as handled.
       if result.failed == 0 { await persist(ArcImportRecord(extensionIDs: Set(ids))) }
-      return TypeResult(outcome: .done(counts))
+      return TypeResult(outcome: .done(counts), cancelled: Task.isCancelled)
     }
   }
 

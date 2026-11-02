@@ -47,6 +47,18 @@ public enum AXID {
     public static let input = "dialog.input"
   }
 
+  /// The browser data import (#514): the sheet and the first run's Hero entry share these.
+  public enum BrowserDataImport {
+    /// Label: the title.
+    public static let root = "browserDataImport"
+    public static let primary = "browserDataImport.primary"
+    public static let secondary = "browserDataImport.secondary"
+    /// One checkbox or status row per type: `row` + "." + "spaces", "history", "bookmarks", "extensions", "cookies",
+    /// "passwords".
+    public static let row = "browserDataImport.row"
+    public static func row(_ kind: String) -> String { "\(row).\(kind)" }
+  }
+
   /// The infobar row over the top of a tab's page (`InfobarRowView`); one per infobar, in order.
   public enum Infobar {
     /// Label: the message; role: group.

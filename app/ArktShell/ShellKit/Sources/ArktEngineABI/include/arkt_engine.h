@@ -31,6 +31,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktDownloadItem;
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
+@protocol ArktExtensionInstallResult;
 @protocol ArktHistoryEntry;
 @protocol ArktImportBookmark;
 @protocol ArktImportCookie;
@@ -615,6 +616,27 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSDate* lastVisitTime;
 @end
 
+// How one extension of an install batch ended (#513).
+typedef NS_ENUM(NSInteger, ArktExtensionInstallStatus) {
+  // Downloaded from the Chrome Web Store and installed.
+  ArktExtensionInstallStatusInstalled = 0,
+  // The profile already has it (enabled or not); nothing was changed.
+  ArktExtensionInstallStatusAlreadyInstalled = 1,
+  // Not installed; see failureReason.
+  ArktExtensionInstallStatusFailed = 2,
+};
+
+// The result for one id of installExtensions.
+NS_SWIFT_UI_ACTOR
+@protocol ArktExtensionInstallResult <NSObject>
+@property(nonatomic, readonly, copy) NSString* extensionID;
+@property(nonatomic, readonly) ArktExtensionInstallStatus status;
+// Failed only: a short sentence that holds no id or name ("not a Web Store
+// id", "not available from the Web Store" (a missing item and an unreachable
+// store look the same to the fetch), "not confirmed", ...); nil otherwise.
+@property(nonatomic, readonly, nullable, copy) NSString* failureReason;
+@end
+
 // A user link activation in a tab's main frame (a click or key press on a
 // link, with a user gesture), before Chromium starts the navigation (#313).
 // Script navigations, forms, reloads and history moves are never reported.
@@ -880,6 +902,32 @@ NS_SWIFT_UI_ACTOR
 - (void)importBookmarks:(NSArray<id<ArktImportBookmark>>*)bookmarks
              completion:(void (^)(id<ArktImportResult> result))completion
     NS_SWIFT_NAME(importBookmarks(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
+
+// Extensions by Chrome Web Store id (#513), into the profile the engine
+// started with. Each distinct id gets one result, in the order the ids first
+// appear, in `completion` (main thread, never inside the call, also for an
+// empty array). An id the profile already has is reported as already
+// installed and left alone. The engine fetches the Web Store listing of every
+// other id, then shows ONE native confirmation sheet for the whole batch
+// (each extension's name with the permission warnings Chrome's own prompt shows)
+// on the key shell window; on accept it installs the
+// ones it found, without a per-extension prompt, on decline it fails them
+// with "not confirmed". An id that is not a Web Store id, one the store does
+// not have, an unreachable store and a listing that does not answer within
+// 30 s fail only their own results; nothing
+// else stops. Built on the Web Store install path a click on "Add to Chrome"
+// uses (WebstoreStandaloneInstaller), with its install prompt replaced by the
+// batch sheet.
+- (void)installExtensions:(NSArray<NSString*>*)ids
+               completion:(void (^)(NSArray<id<ArktExtensionInstallResult>>*
+                                        results))completion
+    NS_SWIFT_NAME(installExtensions(_:completion:)) NS_SWIFT_DISABLE_ASYNC;
+// Ends the installs in progress early: the batch sheet closes, listing
+// fetches stop and every id that is not being installed yet fails with
+// "cancelled"; the batch's completion then runs as usual. An id whose install
+// was already confirmed finishes with its real result. Does nothing when no
+// batch is running.
+- (void)cancelExtensionInstalls NS_SWIFT_NAME(cancelExtensionInstalls());
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).
