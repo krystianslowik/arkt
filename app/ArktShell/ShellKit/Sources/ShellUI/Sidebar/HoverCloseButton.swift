@@ -19,6 +19,11 @@ public final class HoverCloseButton: NSButton {
   var fadeDuration = SidebarMetrics.closeButtonFadeDuration
   /// Read on every show or hide; tests replace it.
   var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// Stands in for the presentation layer when set. Nil in the product, which reads the layer.
+  var presentedOpacity: CGFloat?
+  /// When set, a fade hands its completion here instead of running it at the end of the real duration. Nil in the
+  /// product.
+  var fadeFinisher: (@MainActor (@escaping @MainActor () -> Void) -> Void)?
   /// Bumped by every show or hide. A replaced fade's completion runs early; it applies only while it is the latest.
   private var generation = 0
 
@@ -37,9 +42,10 @@ public final class HoverCloseButton: NSButton {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-  /// The opacity on screen: a running fade's current value, else the model value.
+  /// The opacity on screen: a running fade's current value, else the model value. A set `presentedOpacity` wins, so a
+  /// test can name the value an interrupt starts from without waiting on the render server.
   var displayedOpacity: CGFloat {
-    layer?.presentation().map { CGFloat($0.opacity) } ?? alphaValue
+    presentedOpacity ?? layer?.presentation().map { CGFloat($0.opacity) } ?? alphaValue
   }
 
   /// Fades to shown or hidden. Unanimated (or with Reduce Motion, or outside a window) the state is set at once and a
@@ -57,15 +63,37 @@ public final class HoverCloseButton: NSButton {
     let start = displayedOpacity
     let fade = generation
     isHidden = false
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = HoverCloseFade.duration(from: start, to: target, full: fadeDuration)
-      context.allowsImplicitAnimation = true
-      animator().alphaValue = target
-    } completionHandler: { [weak self] in
-      MainActor.assumeIsolated {
-        guard let self, self.generation == fade, !shown else { return }
-        self.isHidden = true                            // a faded-out X takes no clicks
-      }
+    let finish: @MainActor () -> Void = { [weak self] in
+      guard let self, self.generation == fade, !shown else { return }
+      self.isHidden = true                            // a faded-out X takes no clicks
     }
+    // The model is already the previous target, and the presentation layer lags when the main thread is busy.
+    // Pin the from-value to the opacity on screen so an interrupt does not jump.
+    startFade(from: start, to: target, duration: HoverCloseFade.duration(from: start, to: target, full: fadeDuration),
+              completion: fadeFinisher == nil ? finish : nil)
+    fadeFinisher?(finish)
+  }
+
+  /// Opacity only. The model lands on `target` immediately; the animation is what is on screen until it ends.
+  private func startFade(from start: CGFloat, to target: CGFloat, duration: CFTimeInterval,
+                         completion: (@MainActor () -> Void)?) {
+    guard let layer else {
+      alphaValue = target
+      completion?()
+      return
+    }
+    let animation = CABasicAnimation(keyPath: "opacity")
+    animation.fromValue = NSNumber(value: Double(start))
+    animation.toValue = NSNumber(value: Double(target))
+    animation.duration = duration
+    animation.timingFunction = NSAnimationContext.current.timingFunction
+    CATransaction.begin()
+    if let completion {
+      CATransaction.setCompletionBlock { MainActor.assumeIsolated { completion() } }
+    }
+    layer.add(animation, forKey: "opacity")
+    CATransaction.setDisableActions(true)
+    alphaValue = target
+    CATransaction.commit()
   }
 }
