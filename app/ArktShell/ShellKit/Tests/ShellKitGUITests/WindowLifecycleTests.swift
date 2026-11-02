@@ -310,7 +310,9 @@ final class WindowLifecycleTests: XCTestCase {
       let onPasteAndGo = try XCTUnwrap(window.sidebarController.onPasteAndGo)
       onPasteAndGo(pasted)
       let second = try XCTUnwrap(window.currentTab)
+      XCTAssertEqual(second, first, "a second visit reuses the window's one page")
       XCTAssertEqual(f.engine.snapshot(of: second)?.url, pasted, "Paste and Go loads in this window")
+      XCTAssertEqual(f.engine.tabIDs.filter { f.engine.snapshot(of: $0)?.window == window.engineWindow }.count, 1)
 
       XCTAssertEqual(saves, 0, "no visit schedules a sidebar save")
       XCTAssertEqual(f.source.sidebar, before, "no visit reaches the shared sidebar")
@@ -319,6 +321,42 @@ final class WindowLifecycleTests: XCTestCase {
         !$0.contains("private-visit.example") && !$0.contains("pasted-visit")
       })
     }
+  }
+
+  /// The private page follows its engine tab: a redirect or link click updates the address bar, a page the engine
+  /// closed clears the window and the next visit makes a new one, and closing the window closes the page.
+  func testPrivatePageFollowsItsEngineTab() throws {
+    let f = try makeFixture()
+    let window = f.set.openWindow(opensFirstTab: false)
+    window.makeIncognito()
+    window.commandBar.show(.newTab)
+    window.commandBar.setQueryForTesting("private-visit.example")
+    window.commandBar.commit()
+    let first = try XCTUnwrap(window.currentTab)
+
+    let redirected = EngineWorld.url("redirected")
+    f.engine.navigate(first, to: redirected)
+    XCTAssertEqual(window.urlBar.url, redirected, "the address bar follows the page")
+    f.engine.navigate(first, to: EngineWorld.url("second-page"))
+    f.engine.goBack(first)
+    XCTAssertEqual(window.urlBar.url, redirected, "Back moves the address bar")
+
+    f.engine.engineCloseTab(first)
+    XCTAssertNil(window.privateTab)
+    XCTAssertNil(window.currentTab, "a closed page clears the window")
+    XCTAssertNil(window.urlBar.url)
+
+    window.commandBar.show(.newTab)
+    window.commandBar.setQueryForTesting("again.example")
+    window.commandBar.commit()
+    let again = try XCTUnwrap(window.currentTab, "the next visit makes a new page")
+    XCTAssertNotEqual(again, first)
+    XCTAssertEqual(window.privateTab, again)
+
+    window.window?.performClose(nil)
+    XCTAssertNil(window.privateTab, "closing the window leaves no private page behind")
+    XCTAssertNil(f.engine.snapshot(of: again))
+    XCTAssertTrue(f.engine.tabIDs.isEmpty)
   }
 
   private func tabURLs(_ sidebar: SidebarModel.Sidebar) -> [String] {
