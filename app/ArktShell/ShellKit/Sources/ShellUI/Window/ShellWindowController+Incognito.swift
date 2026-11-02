@@ -2,7 +2,7 @@ import AppKit
 
 extension ShellWindowController {
   /// File > New Blank Window (Ctrl-Cmd-N, BH-170): this window, with no sidebar items. The shared sidebar stays.
-  func makeBlank() {
+  public func makeBlank() {
     savesSession = false
     sidebarController.present(.blank)
     keepVisitsOutOfTheSharedSidebar()
@@ -10,7 +10,7 @@ extension ShellWindowController {
 
   /// File > New Incognito Window (Cmd-Shift-N, BH-174): the same window, plus the sidebar label. A visit here is not
   /// written to the shared sidebar, which is what a relaunch restores.
-  func makeIncognito() {
+  public func makeIncognito() {
     savesSession = false
     sidebarController.present(.incognito)
     keepVisitsOutOfTheSharedSidebar()
