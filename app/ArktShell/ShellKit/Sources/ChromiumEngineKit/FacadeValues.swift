@@ -83,6 +83,27 @@ extension ExtensionAction {
   }
 }
 
+extension DownloadItem {
+  /// The values of one facade snapshot. A total of 0 is "not said" (Chromium); an unknown state or reason round-trips
+  /// through `DownloadInterruptReason`.
+  @MainActor init(facade item: any ArktDownloadItem) {
+    let state: DownloadState
+    switch item.state {
+    case .inProgress: state = .inProgress
+    case .paused: state = .paused
+    case .complete: state = .complete
+    case .cancelled: state = .cancelled
+    case .interrupted: state = .interrupted(DownloadInterruptReason(rawValue: item.interruptReason))
+    @unknown default: state = .interrupted(.crash)
+    }
+    self.init(id: DownloadID(item.guid), url: item.url, filename: item.filename, targetPath: item.targetPath,
+              totalBytes: item.totalBytes > 0 ? item.totalBytes : nil, receivedBytes: item.receivedBytes,
+              state: state, dangerType: DownloadDangerType(rawValue: item.dangerType), mimeType: item.mimeType,
+              startTime: item.startTime, endTime: item.endTime, bytesPerSecond: item.bytesPerSecond,
+              canResume: item.canResume)
+  }
+}
+
 /// A JSON-compatible value answered by the test API's `evaluateScript` (`NSNumber`, `NSString`, `NSArray`,
 /// `NSDictionary`, `NSNull` from the facade), as a `Sendable` value.
 public enum ScriptValue: Equatable, Sendable {

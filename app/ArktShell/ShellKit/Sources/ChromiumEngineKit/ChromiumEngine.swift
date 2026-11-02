@@ -62,9 +62,13 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
 
   let facade: any ArktEngine
   let hub = EngineEventHub()
-  /// Downloads (#132): the shell's save-location choice, kept until the engine-lane task wires it to the profile's
-  /// download prefs (`ChromiumEngine+Downloads.swift`).
-  public var downloadSavePreference: DownloadSavePreference = .folder(ChromiumEngine.systemDownloadsFolder)
+  /// Downloads (#132, `ChromiumEngine+Downloads.swift`): the list kept from the facade's download events, and the
+  /// shell's save-location choice, pushed to the profile's download prefs.
+  var downloadTable: [DownloadID: DownloadItem] = [:]
+  var downloadOrder: [DownloadID] = []
+  public var downloadSavePreference: DownloadSavePreference {
+    didSet { applySavePreference(downloadSavePreference) }
+  }
   public var downloadDestinationChooser: DownloadDestinationChooser?
   private var sinkToken: (any NSObjectProtocol)?
 
@@ -124,8 +128,16 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
 
   init(facade: any ArktEngine) {
     self.facade = facade
+    downloadSavePreference = facade.downloadPromptsForLocation ? .ask : .folder(facade.downloadDirectory)
+    // `didSet` does not run in init: the persisted `.ask` still needs its panel handler.
+    if downloadSavePreference == .ask { installDestinationHandler() }
     sinkToken = facade.addEventSink { [weak self] batch in
       self?.receive(batch)
+    }
+    // Downloads the profile held before this engine listened (found at launch, or started meanwhile).
+    for item in facade.downloads.map(DownloadItem.init(facade:)) where downloadTable[item.id] == nil {
+      downloadTable[item.id] = item
+      downloadOrder.append(item.id)
     }
   }
 

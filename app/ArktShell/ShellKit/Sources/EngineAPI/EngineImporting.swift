@@ -54,6 +54,15 @@ public protocol EngineImporting: AnyObject {
   /// (bar, other, synced) is not kept: everything lands under the one folder. A bookmark whose guid the profile holds,
   /// or whose url and title its target folder holds, is skipped; an invalid url fails.
   func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult
+  /// Installs Chrome Web Store extensions by id (#513), an optional step: nil means this engine cannot install by id, and
+  /// the coordinator reports the type as skipped with the reason "not yet available". The default implementation returns
+  /// nil, so an engine adopts the step by implementing it. Counts are in extensions; `written` is the extensions
+  /// installed and `skipped` those the profile already has.
+  func installExtensions(ids: [String]) async -> ImportWriteResult?
+}
+
+extension EngineImporting {
+  public func installExtensions(ids: [String]) async -> ImportWriteResult? { nil }
 }
 
 /// What a recording engine received: the plain values of the records, taken before their secrets were zeroed.

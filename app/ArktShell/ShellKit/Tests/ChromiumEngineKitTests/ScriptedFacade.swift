@@ -33,6 +33,7 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var findOrdinal = 0
   var findCount = 0
   var findIsFinal = false
+  var download: (any ArktDownloadItem)?
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -849,6 +850,19 @@ final class ScriptedFacade: NSObject, ArktEngine {
   var testAPIEnabled = true
   /// Answers engine window requests (`-hostForEngineWindowRequest:` on the embedder).
   var hostProvider: ((any ArktWindowRequest) -> any ArktWindowHost)?
+
+  /// Downloads (`ScriptedDownloads.swift`): the list, the prefs, and what Open and Show in Finder were asked of.
+  var scriptedDownloads: [ScriptedDownloadItem] = []
+  var openedDownloads: [String] = []
+  var revealedDownloads: [String] = []
+  var downloadPromptsForLocation = false
+  var downloadDestinationHandler: ((String, URL, @escaping (URL?) -> Void) -> Void)?
+  /// The default folder is a fresh temporary one, so a test never writes to the real Downloads folder.
+  let defaultDownloadDirectory = FileManager.default.temporaryDirectory
+    .appending(path: "arkt-scripted-downloads-\(UUID().uuidString)")
+  lazy var downloadDirectory: URL = defaultDownloadDirectory
+
+  deinit { try? FileManager.default.removeItem(at: defaultDownloadDirectory) }
 
   var browsers: [any ArktBrowserHandle] { browserList.filter { !$0.isClosed } }
   /// No event waits for delivery.

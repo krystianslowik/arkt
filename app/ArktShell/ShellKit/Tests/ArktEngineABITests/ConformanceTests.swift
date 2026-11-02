@@ -98,6 +98,7 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var findOrdinal = 0
   var findCount = 0
   var findIsFinal = false
+  var download: (any ArktDownloadItem)?
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -390,6 +391,19 @@ final class TestEngine: NSObject, ArktEngine {
   }
 
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool { false }
+
+  // Downloads (#132): a list the tests fill, and the commands and prefs the shell sets.
+  var downloads: [any ArktDownloadItem] = []
+  private(set) var downloadCommands: [(command: ArktDownloadCommand, guid: String)] = []
+  private(set) var startedDownloads: [URL] = []
+  var downloadPromptsForLocation = false
+  var downloadDirectory = URL(fileURLWithPath: "/tmp/arkt-abi-downloads")
+  let defaultDownloadDirectory = URL(fileURLWithPath: "/tmp/arkt-abi-default")
+  var downloadDestinationHandler: ((String, URL, @escaping (URL?) -> Void) -> Void)?
+  func perform(download command: ArktDownloadCommand, on guid: String) {
+    downloadCommands.append((command, guid))
+  }
+  func startDownload(from url: URL) { startedDownloads.append(url) }
 
   private(set) var importedValues: [String] = []
   private(set) var importedHistoryVisits = 0
@@ -693,8 +707,12 @@ struct ConformanceTests {
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
              .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged,
              .dialogRequested, .dialogEnded, .permissionRequested, .permissionEnded, .infobarsChanged,
-             .findResult, .targetURLChanged].map(\.rawValue)
-      == Array(0...22))
+             .findResult, .targetURLChanged, .downloadCreated, .downloadUpdated, .downloadRemoved].map(\.rawValue)
+      == Array(0...25))
+    #expect([ArktDownloadState.inProgress, .paused, .complete, .cancelled, .interrupted].map(\.rawValue)
+      == Array(0...4))
+    #expect([ArktDownloadCommand.cancel, .pause, .resume, .open, .showInFinder, .retry, .keepDangerous,
+             .discardDangerous, .remove].map(\.rawValue) == Array(0...8))
     #expect([ArktFindAction.clear, .keep, .activate].map(\.rawValue) == [0, 1, 2])
     #expect([ArktInfobarKind.other, .debugger, .automation, .reload].map(\.rawValue) == Array(0...3))
     #expect([ArktInfobarAction.ok, .cancel, .link, .messageLink, .close].map(\.rawValue) == Array(0...4))
@@ -896,6 +914,53 @@ struct PermissionRequestABITests {
     #expect(carried.respond(choice: .allowThisTime))
     #expect(!carried.respond(choice: .block), "the answer after the end is refused")
     #expect(carried.isEnded && request.choices == [.allowThisTime])
+  }
+}
+
+/// Downloads (#132): the event carries one plain snapshot, the commands go by guid, and the prefs and the destination
+/// handler are plain properties.
+@MainActor
+struct DownloadABITests {
+  final class Item: NSObject, ArktDownloadItem {
+    let guid = "00000000-0000-4000-8000-0000000000d1"
+    let url = URL(string: "https://files.test/Report.bin")!
+    let filename = "Report.bin"
+    let targetPath: URL? = URL(fileURLWithPath: "/tmp/Report.bin")
+    let totalBytes: Int64 = 4_000
+    let receivedBytes: Int64 = 1_000
+    let state = ArktDownloadState.interrupted
+    let interruptReason = 22
+    let dangerType = 0
+    let mimeType = "application/octet-stream"
+    let startTime = Date(timeIntervalSince1970: 10)
+    let endTime: Date? = nil
+    let bytesPerSecond: Int64 = 0
+    let canResume = true
+  }
+
+  @Test func theEventCarriesTheSnapshotAndNoTab() throws {
+    let event = TestEvent(.downloadCreated, tab: nil, browser: nil)
+    event.download = Item()
+    let carried = try #require(event.download)
+    #expect(event.tab == nil && event.browser == nil)
+    #expect(carried.guid.hasSuffix("d1") && carried.filename == "Report.bin" && carried.totalBytes == 4_000)
+    #expect(carried.state == .interrupted && carried.interruptReason == 22 && carried.canResume)
+    #expect(TestEvent(.infobarsChanged, tab: nil, browser: nil).download == nil)
+  }
+
+  @Test func commandsGoByGuidAndThePrefsAreProperties() {
+    let engine = TestEngine()
+    engine.perform(download: .retry, on: "guid")
+    engine.startDownload(from: URL(string: "https://files.test/a.zip")!)
+    #expect(engine.downloadCommands.map(\.command) == [.retry] && engine.downloadCommands.map(\.guid) == ["guid"])
+    #expect(engine.startedDownloads == [URL(string: "https://files.test/a.zip")!])
+    engine.downloadPromptsForLocation = true
+    engine.downloadDirectory = URL(fileURLWithPath: "/tmp/elsewhere")
+    #expect(engine.downloadPromptsForLocation && engine.downloadDirectory.lastPathComponent == "elsewhere")
+    var answered: URL?
+    engine.downloadDestinationHandler = { name, directory, answer in answer(directory.appending(path: name)) }
+    engine.downloadDestinationHandler?("a.zip", URL(fileURLWithPath: "/tmp"), { answered = $0 })
+    #expect(answered?.path == "/tmp/a.zip")
   }
 }
 

@@ -74,6 +74,15 @@ public struct LoginReader: Sendable {
   public func read(
     loginDatabase: URL, decryptor: borrowing ChromiumDecryptor, onBatch: ([ArcLogin]) throws -> Void
   ) throws -> LoginReadSummary {
+    try read(loginDatabase: loginDatabase, decryptor: decryptor, rows: 0..<Int.max, onBatch: onBatch)
+  }
+
+  /// Reads only the rows at positions `rows` of the table (0-based, in storage order); see `CookieReader`.
+  @discardableResult
+  public func read(
+    loginDatabase: URL, decryptor: borrowing ChromiumDecryptor, rows: Range<Int>,
+    onBatch: ([ArcLogin]) throws -> Void
+  ) throws -> LoginReadSummary {
     let database = try ChromiumDatabase(url: loginDatabase)
     let present = try database.columns(of: "logins")
     let missing = Self.required.filter { !present.contains($0) }
@@ -84,7 +93,11 @@ public struct LoginReader: Sendable {
     var batch: [ArcLogin] = []
     batch.reserveCapacity(Self.batchSize)
 
+    var position = -1
     while try cursor.next() {
+      position += 1
+      if position < rows.lowerBound { continue }
+      if position >= rows.upperBound { break }
       summary.scanned += 1
       guard let origin = cursor.text("origin_url"), let realm = cursor.text("signon_realm"),
         let blob = cursor.blob("password_value")

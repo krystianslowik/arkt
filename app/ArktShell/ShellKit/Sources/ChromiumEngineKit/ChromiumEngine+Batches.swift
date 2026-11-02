@@ -62,6 +62,9 @@ extension ChromiumEngine {
     case .permissionRequested: permissionRequested(event)
     case .permissionEnded: permissionEnded(event)
     case .infobarsChanged: infobarsChanged(event)
+    case .downloadCreated: downloadCreated(event)
+    case .downloadUpdated: downloadUpdated(event)
+    case .downloadRemoved: downloadRemoved(event)
     default: tabChanged(event)
     }
   }

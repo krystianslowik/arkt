@@ -89,8 +89,7 @@ public struct EngineHarness {
   /// pointer input may focus and blur the link, which reaches the same renderer report. Nil: not applicable.
   public let hoverLink: EngineTabAction?
   public let leaveLink: EngineTabAction?
-  /// Makes the engine's downloads happen (rule 24). Nil: not applicable (an engine with no downloads, or one that is
-  /// not wired yet).
+  /// Makes the engine's downloads happen (rule 24). Nil: not applicable (an engine with no downloads).
   public let downloads: DownloadDrivers?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
