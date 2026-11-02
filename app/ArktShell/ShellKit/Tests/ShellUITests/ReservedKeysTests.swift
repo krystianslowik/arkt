@@ -13,6 +13,8 @@ struct ReservedKeysTests {
     (kVK_ANSI_W, "w", NSEvent.ModifierFlags.command.rawValue),
     (kVK_ANSI_W, "w", NSEvent.ModifierFlags([.command, .shift]).rawValue),
     (kVK_ANSI_N, "n", NSEvent.ModifierFlags.command.rawValue),
+    (kVK_ANSI_N, "n", NSEvent.ModifierFlags([.command, .shift]).rawValue),    // KB-007 (#487)
+    (kVK_ANSI_N, "n", NSEvent.ModifierFlags([.command, .control]).rawValue),  // KB-006 (#487)
     (kVK_ANSI_Q, "q", NSEvent.ModifierFlags.command.rawValue),
     (kVK_ANSI_D, "d", NSEvent.ModifierFlags.command.rawValue),    // KB-012 (#108)
     (kVK_ANSI_T, "t", NSEvent.ModifierFlags([.command, .shift]).rawValue),   // KB-010 (#346): reopen

@@ -108,6 +108,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// the preview closures below read it when a row is selected.
   public var pageThumbnails: PageThumbnails?
   var nodeByTab: [TabID: NodeID] = [:]
+  /// The one page of a blank or incognito window (#487): an engine tab with no sidebar row, so a visit never reaches
+  /// the shared sidebar. Nil in a normal window.
+  var privateTab: TabID?
   /// Where Copy Link writes and Paste URL as New Tab reads (#105); tests use a private pasteboard.
   var linkPasteboard: NSPasteboard = .general
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
@@ -789,6 +792,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       break
     }
     guard let node = nodeByTab[event.tabID] else {
+      if handlePrivateTabEvent(event) { return }                    // a blank or incognito window's page (#487)
       if handleParkedTabEvent(event) { return }                     // a closed page's copy (#346)
       if case .tabCreated(let tab) = event { engineDidCreateTab(tab) }
       if case .activeTabChanged(let tab) = event {      // a tab without a row took it

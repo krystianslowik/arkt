@@ -1,5 +1,12 @@
 import AppKit
 
+/// What one window's sidebar draws. The shared source stays as it is: blank and incognito draw no items of it.
+public enum SidebarPresentation: Equatable, Sendable {
+  case standard
+  case blank
+  case incognito
+}
+
 /// Owns the sidebar column for one window: Space pages, favorites, and the current / previous tab states.
 /// Engine-agnostic: the window controller listens to `onActivate` to create engine tabs and fill the card,
 /// and feeds titles back through the source and favicons through `setFavicon(_:for:)`.
@@ -12,6 +19,8 @@ public final class SidebarController {
   /// The previously current tab (drawn at the 32% level).
   public private(set) var previous: NodeID?
   public private(set) var currentSpace: SpaceID?
+  /// Blank and incognito windows draw no Spaces, tabs or Favorites. The source is shared with the other windows.
+  public private(set) var presentation: SidebarPresentation = .standard
 
   /// A tab became current (fires on every activation, including re-activating the current tab).
   public var onActivate: (@MainActor (NodeID) -> Void)?
@@ -207,8 +216,32 @@ public final class SidebarController {
 
   public var isThemeCreatorOpen: Bool { themeCreator != nil }
 
-  /// Spaces of this window's profile, in sidebar order.
-  public var spaces: [SpaceID] { source.spaceOrder.filter { source.space($0)?.profile == profile } }
+  /// Spaces of this window's profile, in sidebar order. Empty for a blank or incognito window (BH-170, BH-174).
+  public var spaces: [SpaceID] {
+    guard presentation == .standard else { return [] }
+    return source.spaceOrder.filter { source.space($0)?.profile == profile }
+  }
+
+  /// Draws this window's sidebar as a normal, blank or incognito window. Does not change the shared source.
+  public func present(_ presentation: SidebarPresentation) {
+    guard presentation != self.presentation else { return }
+    self.presentation = presentation
+    let hidesItems = presentation != .standard
+    if hidesItems {
+      current = nil
+      previous = nil
+      currentSpace = nil
+      visible = []
+      view.setCurrent(page: nil)
+      onEmptySpace?()
+    }
+    syncPages()
+    view.favorites.isHidden = hidesItems
+    view.spaceDots.isHidden = hidesItems
+    view.pager.isHidden = hidesItems
+    view.setIncognitoLabelVisible(presentation == .incognito)
+    if presentation == .standard, let first = spaces.first { showSpace(first) }
+  }
 
   /// True once, after the current Space's theme changed. The window consumes it in `refreshThemes`.
   public func consumeThemeCrossfade() -> Bool {
@@ -236,6 +269,7 @@ public final class SidebarController {
 
   /// Makes `id` the current Space now and shows its page without animating (activation, launch).
   public func showSpace(_ id: SpaceID) {
+    guard presentation == .standard else { return }
     guard let info = source.space(id), info.profile == profile else { return }
     syncPages()
     guard let index = pagedSpaces.firstIndex(of: id) else { return }
@@ -245,6 +279,7 @@ public final class SidebarController {
 
   /// Animates to the Space at `index` (dots, Ctrl-1..9); it becomes current when the pager settles.
   public func goToSpace(at index: Int) {
+    guard presentation == .standard else { return }
     syncPages()
     guard pagedSpaces.indices.contains(index) else { return }
     view.pager.go(to: index)

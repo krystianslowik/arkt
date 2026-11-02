@@ -174,6 +174,17 @@ extension DialogContent {
     defaultButton: .primary, escapeAnswersCancel: true)
 }
 
+// MARK: - Quit warning (#487, BH-177)
+
+extension DialogContent {
+  /// Cmd-Q while "Warn before quitting" is on: Quit (Return) continues, Cancel (Escape) leaves the app running.
+  public static let quitWarning = DialogContent(
+    title: "Quit Arkt?", icon: .appIcon, iconPlacement: .stacked,
+    paragraphs: [.init("A window is still open.")],
+    primaryTitle: "Quit", cancelTitle: "Cancel",
+    defaultButton: .primary, escapeAnswersCancel: true)
+}
+
 // MARK: - Motion (section 7)
 
 /// Dialog motion as data. AppKit animates the window sheet; the app-modal alert grows from its center on `firmFast`,

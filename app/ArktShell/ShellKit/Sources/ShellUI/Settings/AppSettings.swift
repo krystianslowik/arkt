@@ -19,6 +19,8 @@ public final class AppSettings {
     /// Settings > Privacy > Send crash reports (#129). The app reads both crash keys straight from the defaults when a
     /// crash is captured, so they are public.
     public static let sendsCrashReports = "crashReportsEnabled"
+    /// Settings > General > Warn before quitting (#487, BH-177). Off: Cmd-Q quits without asking.
+    public static let shouldWarnBeforeQuitting = "shouldWarnBeforeQuitting"
     /// The launch's one-time "Send a report?" was answered (Send, Don't Send or Always Send): never asked again.
     public static let crashReportAskAnswered = "crashReportAskAnswered"
     /// Settings > General > Downloads (#132, BH-182): "Ask Where to Save", and the folder for "Save to Folder" as a path.
@@ -88,6 +90,16 @@ public final class AppSettings {
     set {
       guard newValue != opensLittleArktWithHotKey else { return }
       set(newValue, Key.globalLittleBrowserHotkeyEnabled)
+      notifyObservers()
+    }
+  }
+
+  /// Settings > General > Warn before quitting (BH-177). Off by default: Cmd-Q quits without asking.
+  public var warnsBeforeQuitting: Bool {
+    get { bool(Key.shouldWarnBeforeQuitting, default: false) }
+    set {
+      guard newValue != warnsBeforeQuitting else { return }
+      set(newValue, Key.shouldWarnBeforeQuitting)
       notifyObservers()
     }
   }

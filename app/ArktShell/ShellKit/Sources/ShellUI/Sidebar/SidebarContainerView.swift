@@ -425,6 +425,18 @@ public final class SidebarContainerView: NSView {
     }
   }
   public let favorites: FavoritesGridView
+  /// "Incognito", shown only while this window is incognito (BH-174). Hidden in every other window.
+  public let incognitoLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "Incognito")
+    label.font = .systemFont(ofSize: SidebarMetrics.spaceTitleFontSize, weight: .medium)
+    label.lineBreakMode = .byTruncatingTail
+    label.usesSingleLineMode = true
+    label.cell?.isScrollable = false
+    label.setAccessibilityIdentifier(AXID.Incognito.label)
+    label.setAccessibilityLabel("Incognito")
+    label.isHidden = true
+    return label
+  }()
   /// Every Space page of this profile side by side; swipes and Space switches move it.
   public let pager = SpacePagerView(frame: .zero)
   /// The pager (C3 name).
@@ -486,6 +498,17 @@ public final class SidebarContainerView: NSView {
       view.autoresizingMask = []
       addSubview(view)
     }
+    incognitoLabel.autoresizingMask = []
+    incognitoLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
+    addSubview(incognitoLabel)
+  }
+
+  /// Shows or hides the sidebar's Incognito label (BH-174). Nowhere else in the window carries it.
+  public func setIncognitoLabelVisible(_ visible: Bool) {
+    guard incognitoLabel.isHidden == visible else { return }
+    incognitoLabel.isHidden = !visible
+    incognitoLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
+    needsLayout = true
   }
 
   @available(*, unavailable)
@@ -522,7 +545,7 @@ public final class SidebarContainerView: NSView {
     didSet {
       guard isDimmed != oldValue else { return }
       let alpha = isDimmed ? Self.dimmedAlpha : 1
-      for view in [urlBar, favorites, pager, bottomBar] as [NSView] { view.alphaValue = alpha }
+      for view in [urlBar, favorites, pager, bottomBar, incognitoLabel] as [NSView] { view.alphaValue = alpha }
     }
   }
 
@@ -540,6 +563,7 @@ public final class SidebarContainerView: NSView {
     favorites.flavor = flavor
     spaceDots.flavor = flavor
     urlBar.flavor = flavor
+    incognitoLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
     applyButtonImages()
   }
 
@@ -594,9 +618,13 @@ public final class SidebarContainerView: NSView {
                           width: max(0, width - 2 * padding), height: SidebarMetrics.urlBarHeight)
     let favoritesWidth = FavoritesLayout.contentWidth(sidebarWidth: width)
     favorites.updateColumns(contentWidth: favoritesWidth)     // before its height: the columns set the rows
-    let favoritesHeight = favorites.preferredHeight
-    let favoritesY = (showsURLBar ? urlBar.frame.maxY : topBarHeight) + SidebarMetrics.favoritesTopGap
+    let showsFavorites = !favorites.isHidden
+    let favoritesHeight = showsFavorites ? favorites.preferredHeight : 0
+    let favoritesY = (showsURLBar ? urlBar.frame.maxY : topBarHeight) + (showsFavorites ? SidebarMetrics.favoritesTopGap : 0)
     favorites.frame = NSRect(x: padding, y: favoritesY, width: favoritesWidth, height: favoritesHeight)
+    let labelTop = (showsURLBar ? urlBar.frame.maxY : topBarHeight) + SidebarMetrics.favoritesTopGap
+    let labelHeight = ceil(incognitoLabel.intrinsicContentSize.height)
+    incognitoLabel.frame = NSRect(x: padding, y: labelTop, width: max(0, width - 2 * padding), height: labelHeight)
     let pagesY = favoritesY + favoritesHeight + (favoritesHeight > 0 ? SidebarMetrics.favoritesBottomGap : 0)
     let pagerFrame = NSRect(x: 0, y: pagesY, width: width, height: max(0, bounds.height - pagesY - bottomHeight))
     if pager.frame != pagerFrame { pager.frame = pagerFrame }
