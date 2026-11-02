@@ -735,6 +735,8 @@ final class DownloadRecord {
   var lastSample: (date: Date, bytes: Int64)?
   /// The user cancelled or removed it: a failure callback that follows is not an interruption.
   var isEnding = false
+  /// Removes the partial file and marks the item cancelled; runs once, when WebKit has finished the cancel.
+  var finishCancel: (@MainActor () -> Void)?
 }
 
 /// The WKDownloadDelegate of one download, forwarding to the engine.
@@ -922,6 +924,7 @@ extension FakeEngine {
   func downloadFailed(_ id: DownloadID, error: any Error, resumeData: Data?) {
     guard let record = downloadRecords[id], let item = download(id), item.state.isActive, !record.isEnding else {
       downloadRecords[id]?.download = nil
+      downloadRecords[id]?.finishCancel?()          // the cancel failed the download: it is over either way
       return
     }
     record.progressObservation = nil
@@ -950,19 +953,30 @@ extension FakeEngine {
   // MARK: Internals
 
   private func cancelDownload(_ id: DownloadID) {
-    guard let record = downloadRecords[id], let item = download(id) else { return }
+    guard let record = downloadRecords[id], let item = download(id), !record.isEnding else { return }
     record.isEnding = true
     record.progressObservation = nil
-    // WebKit finishes the cancel asynchronously: keep the download alive until it has, so it is never released while
-    // it is still starting up.
-    if let download = record.download { download.cancel { _ in withExtendedLifetime(download) {} } }
-    record.download = nil
-    if let target = item.targetPath {
-      try? FileManager.default.removeItem(at: target)
-      try? FileManager.default.removeItem(at: target.appendingPathExtension("download"))
+    // WebKit finishes the cancel asynchronously and may still create or write the file until it has, so the file goes
+    // and the item reads cancelled only once WebKit says the cancel is done. The download stays alive until then, so
+    // it is never released while it is still starting up.
+    record.finishCancel = { [weak self, weak record] in
+      record?.finishCancel = nil
+      if let target = item.targetPath {
+        try? FileManager.default.removeItem(at: target)
+        try? FileManager.default.removeItem(at: target.appendingPathExtension("download"))
+      }
+      guard let self else { return }
+      let end = self.downloadClock()
+      self.changeDownload(id) { $0.state = .cancelled; $0.bytesPerSecond = 0; $0.endTime = end }
     }
-    let end = downloadClock()
-    changeDownload(id) { $0.state = .cancelled; $0.bytesPerSecond = 0; $0.endTime = end }
+    guard let download = record.download else { record.finishCancel?(); return }
+    record.download = nil
+    download.cancel { _ in
+      MainActor.assumeIsolated {
+        withExtendedLifetime(download) {}
+        record.finishCancel?()
+      }
+    }
   }
 
   private func resumeDownload(_ id: DownloadID) {
