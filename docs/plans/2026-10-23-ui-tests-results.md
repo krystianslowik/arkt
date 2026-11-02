@@ -1233,3 +1233,27 @@ all U9 scenarios were run directly. No screenshot is needed for test-only change
 The menu assertion was checked against a deliberate regression: temporarily assigning `x` to Show Archive in
 `MainMenu.swift` made the targeted menu test fail (1 test, 1 failure); restoring the original empty key made it pass
 again (1 test, 0 failures). The temporary change was not committed.
+
+## U10: Favorites close and pinned rows (#175)
+
+Added `app/ArktShell/UITests/FavoritesAndPinnedTests.swift` for the four plan cases. Seed is `seedFromArcFixture`.
+BH-070 carries `PARITY(NEEDS-RUNTIME-CHECK RT-17)`. No product code changed. Archive rows, the archive footer and
+sidebar outline rows are read once; a missing `favorites.tile` or `sidebar.row.pinned` would skip for #269 rather
+than poll. That path was not reached.
+
+The first `xcodebuild` of `ArktShellUITests/FavoritesAndPinnedTests` failed to compile: `wikiPath` inside the server-log
+closure needed a local copy. A later run started all four tests and failed before launch because another Debug
+`ArktShell` (`dev.arkt.Arkt`, pid 56398) was already running. That process was not quit. After it had exited, the
+class-only run passed. Favorites tiles and pinned rows were present, so the #269 skip was not used.
+
+`xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build -jobs 2 -collect-test-diagnostics never test -only-testing:ArktShellUITests/FavoritesAndPinnedTests`:
+
+Executed 4 tests, with 0 failures (0 unexpected) in 111.307 (111.313) seconds. TEST SUCCEEDED.
+
+- `test_BH048_cmdWOnFavoriteDoesNotArchive` passed (25.884 seconds)
+- `test_BH048_GS043_favoriteXClosesPageKeepsTile` passed (26.183 seconds)
+- `test_BH067_cmdWOnPinnedTabKeepsPin` passed (28.485 seconds)
+- `test_BH070_pinnedHoverXCloseAndKeepPinned` passed (30.755 seconds)
+
+`cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests` was not run. ShellKit production and ShellKit
+tests were not changed. ArktCore was not run for the same reason.
