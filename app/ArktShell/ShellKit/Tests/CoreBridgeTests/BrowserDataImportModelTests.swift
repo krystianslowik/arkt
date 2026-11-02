@@ -439,13 +439,67 @@ struct BrowserDataImportModelTests {
     #expect(rig.state.result.canRetry)
     rig.spaces.result = SpacesAndTabsResult(items: 213, skipped: 2, failed: false, addedSpaces: [UUID()])
     rig.model.retry()
-    #expect(await settle { rig.importer.retries.count == 1 })
-    #expect(rig.spaces.runs == 2)
-    #expect(rig.state.rows[.spacesAndTabs] == .imported(count: 213, failed: 2))
-    rig.importer.finish(Self.summary([:]))
     #expect(await settle { rig.state.phase == .result })
+    #expect(rig.spaces.runs == 2)
+    #expect(rig.importer.retries.isEmpty, "a Spaces-only Retry has nothing for the coordinator: no snapshot copy")
+    #expect(rig.state.rows[.spacesAndTabs] == .imported(count: 213, failed: 2))
+    #expect(rig.state.result == BrowserDataImportResult())
     rig.model.finish()
     #expect(rig.outcomes.finished.first?.skippedSidebarItems == 2)
+  }
+
+  @Test func aFailedSidebarStepAndADeniedKeychainAreRetriedTogether() async {
+    let rig = Rig()
+    rig.spaces.result = SpacesAndTabsResult(items: 0, skipped: 0, failed: true, addedSpaces: [])
+    _ = await rig.reachProgress()
+    rig.importer.finish(Self.summary([.history: .done(ImportItemCounts(written: 1)), .cookies: Self.denial]))
+    #expect(await settle { rig.state.phase == .result })
+    rig.spaces.result = SpacesAndTabsResult(items: 213, skipped: 0, failed: false, addedSpaces: [UUID()])
+    rig.model.retry()
+    #expect(await settle { rig.importer.retries.count == 1 })
+    #expect(rig.spaces.runs == 2)
+    rig.importer.finish(Self.summary([.cookies: .done(ImportItemCounts(written: 5))]))
+    #expect(await settle { rig.state.phase == .result })
+    #expect(rig.state.result == BrowserDataImportResult())
+  }
+
+  @Test func cancelDuringTheSidebarOnlySpacesStepEndsInACancelledResult() async {
+    let rig = Rig()
+    rig.spaces.onRun = { rig.model.cancel() }
+    rig.model.start()
+    _ = await settle { rig.importer.runs == 1 }
+    var summary = ProfileImportSummary()
+    summary.abortReason = "Arc data not found"
+    rig.importer.finish(summary)
+    #expect(await settle { rig.state.phase == .consent })
+    rig.model.beginImport()
+    #expect(await settle { rig.state.phase == .result }, "Cancel never leaves the sheet stuck in progress")
+    #expect(rig.state.result.cancelled)
+    #expect(!rig.state.isStopping)
+    #expect(rig.state.rows[.spacesAndTabs] == .imported(count: 213, failed: 0), "what came over stays")
+    #expect(rig.state.primaryButton?.action == .done)
+    rig.model.finish()
+    #expect(rig.state.phase == .dismissed)
+    #expect(rig.outcomes.finished.count == 1, "the host is told, so the import menu is enabled again")
+    #expect(rig.outcomes.finished.first?.importedAnything == true)
+  }
+
+  @Test func cancelDuringARetrysSpacesRedoEndsInACancelledResult() async {
+    let rig = Rig()
+    rig.spaces.result = SpacesAndTabsResult(items: 0, skipped: 0, failed: true, addedSpaces: [])
+    _ = await rig.reachProgress()
+    rig.importer.finish(Self.summary([.history: .done(ImportItemCounts(written: 1)), .cookies: Self.denial]))
+    #expect(await settle { rig.state.phase == .result })
+    rig.spaces.result = SpacesAndTabsResult(items: 213, skipped: 0, failed: false, addedSpaces: [UUID()])
+    rig.spaces.onRun = { rig.model.cancel() }
+    rig.model.retry()
+    #expect(await settle { rig.state.phase == .result })
+    #expect(rig.importer.retries.isEmpty, "the coordinator is not started after a Cancel")
+    #expect(rig.state.result.cancelled)
+    #expect(rig.state.rows[.cookies] == .notImported(.keychainDenied), "the denied rows are as they were")
+    #expect(rig.state.result.canRetry)
+    rig.model.finish()
+    #expect(rig.outcomes.finished.count == 1)
   }
 
   @Test func theRetryFailingToStartEndsInAResult() async {

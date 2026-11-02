@@ -296,7 +296,9 @@ final class OnboardingTests: XCTestCase {
     XCTAssertEqual(hero.primaryButton.title, "Import")
     XCTAssertEqual(hero.secondaryButton.title, "Not now")
     XCTAssertEqual(hero.primaryButton.frame.height, 50, "the website's pills")
-    XCTAssertEqual(hero.content.rowViews[.history]?.preferredHeight, 52)
+    // 52 pt rows, 44 pt in a window under 700 pt (the runner's screen decides): the layout's own constant.
+    XCTAssertEqual(hero.content.rowViews[.history]?.preferredHeight, hero.content.style.rowHeight)
+    XCTAssertTrue([44, 52].contains(hero.content.style.rowHeight))
     XCTAssertEqual(hero.content.rowViews[.history]?.valueText.text, "48,210")
     XCTAssertNotNil(hero.content.groupViews[1].noticeView, "the Keychain line, inside the second group")
     XCTAssertEqual(hero.primaryButton.accessibilityIdentifier(), AXID.BrowserDataImport.primary)

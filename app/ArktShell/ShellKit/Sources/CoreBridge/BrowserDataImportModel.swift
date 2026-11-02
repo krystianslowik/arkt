@@ -171,6 +171,14 @@ public final class BrowserDataImportModel: BrowserDataImportSource {
 
   private func runRetry(after summary: ProfileImportSummary, redoSpaces: Bool, rowsBefore: [BrowserDataKind: BrowserDataRowStatus]) async {
     if redoSpaces { await runSpacesStep() }
+    // Cancel during the Spaces redo, or nothing left for the coordinator (a Spaces-only Retry: no snapshot copy):
+    // the result again, with the earlier outcomes of the types that were not run.
+    if cancelRequested || summary.retryTypes.isEmpty {
+      var settled = summary
+      settled.cancelled = cancelRequested
+      finishRun(settled)
+      return
+    }
     state.phase = .progress
     let stream: AsyncStream<ProfileImportEvent>
     do { stream = try coordinator.retry(root: root, after: summary) } catch {
@@ -299,7 +307,9 @@ public final class BrowserDataImportModel: BrowserDataImportSource {
       return
     }
     let answer = await askConsent(ProfileDataCounts(), spaces: counting)
-    guard answer != nil else { return }        // declined: the sheet is already closed
+    // Declined in the consent: the sheet is already closed and `finishRun` does nothing. Cancelled while the Spaces
+    // step ran: the result shows what came over, as a cancelled run.
+    if answer == nil, state.phase == .dismissed { return }
     finishRun(ProfileImportSummary())
   }
 
