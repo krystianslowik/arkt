@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 
 extension ShellWindowController {
   /// File > New Blank Window (Ctrl-Cmd-N, BH-170): this window, with no sidebar items. The shared sidebar stays.
