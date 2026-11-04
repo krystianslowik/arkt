@@ -2818,4 +2818,7 @@ fixture against main `a4009de5bbd2bc70def89fe05b62dec0faf9bfa3` and the dispatch
 checkouts. The only baseline adaptation is copying the test fixture into its test target; baseline production code is
 unchanged. The `theme-overlay-evidence` artifact records revision SHAs, light/dark before/after PNGs, render logs,
 20 crossfade runs with load readings, and a deliberate guard-removal test followed by restoration. These checks are
-pending execution; hosted CI cannot establish the quiet physical 120 Hz swipe frame gate.
+pending completion; hosted CI cannot establish the quiet physical 120 Hz swipe frame gate. Manual run 41916874513
+produced the two baseline PNGs but its baseline XCTest exited with signal 11 before completing. The after render,
+load runs and deliberate break did not run. The fixture now disables release-on-close for its Swift-owned window,
+matching the existing screenshot window's lifecycle; the crash cause remains unconfirmed pending a fresh CI run.

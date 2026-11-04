@@ -17,6 +17,9 @@ final class ThemeOverlayScreenshotTests: XCTestCase {
     for dark in [false, true] {
       let frame = NSRect(x: 80, y: 80, width: 800, height: 600)
       let window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+      // Swift owns this window; close must not release it separately.
+      window.isReleasedWhenClosed = false
+      defer { window.close() }
       window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
       let view = ThemeBackgroundView(frame: NSRect(origin: .zero, size: frame.size))
       view.themes = [SpaceThemeInfo(baseColors: [.p3(hex: 0x224466, alpha: 1), .p3(hex: 0xAACCEE, alpha: 1)],
@@ -36,7 +39,6 @@ final class ThemeOverlayScreenshotTests: XCTestCase {
       capture.waitUntilExit()
       XCTAssertEqual(capture.terminationStatus, 0)
       XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
-      window.close()
     }
   }
 }
