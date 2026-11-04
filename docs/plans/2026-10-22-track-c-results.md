@@ -2790,3 +2790,25 @@ BH-076's auto-archive half. Clear already leaves a playing row (`pagePlaysMedia`
 `AppSession.startAutoArchive` already reads `windows.autoArchiveExempt`, so that file was not edited. Its comment still says media-playing tabs join once the engine reports audio. The engine reports it, and the exempt set now includes those tabs.
 
 Tests (written first: the new GUI case failed on the audible background tab, the muted page that still plays, and the split, and passed the mute-only and never-loaded cases, before the code): `ShellWindowSetTests` 12 run, 0 failures (the class had 11; the new case is `testAnAudibleBackgroundTabIsExemptFromAutoArchive`). ShellKit unit (`swift test -j 2 --skip ShellKitGUITests`): 1821 Swift Testing tests passed, 0 failures (1095 + 38 + 60 + 7 + 181 + 49 + 257 + 111 + 23). ArktCore not run: no ArktCore change. App build and XCUITest not run: `app/ArktShell/App` and `project.yml` were not touched.
+
+## Composite Space theme overlays (#534)
+
+The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
+stop locations in their shared color space. Each Space uses one opaque gradient below the separate texture layers.
+The view caches both colors and explicit locations for the current drawn themes, reuses them across swipes and drops
+entries when those themes change, including appearance or contrast changes. An empty base falls back to white before
+compositing; a single stop is duplicated for Core Animation. Finite stops approximate the continuous result between
+samples when overlay alpha varies. The previous #381 overlay-layer description records the original implementation.
+
+At `6ad459c75bc321647a8ce4c849b97b1662952288`, CI run 41362710601 passed 1,872 pure ShellKit tests in 225
+suites, the app build, lint and the required Swift gate. The informative GUI run had 1,501 tests, 38 skipped and one
+failure in download cancellation. The partial-file cleanup race was subsequently fixed in merged PR #551; its
+`InvalidTransition` message was identified as coming from Apple's gesture framework. This evidence predates the
+integration with current main; CI for the integrated head is pending. The empty-base fallback uses white in the first
+overlay color's space, or sRGB without an overlay. Renderer tests cover P3 overlays at alpha 0.25 and 1.
+
+Local full builds and tests were not run because the available SDK/toolchain cannot compile baseline ShellKit.
+Before/after light and dark screenshots, the quiet-machine 120 Hz swipe gate, and the crossfade test's 20 runs under
+load and deliberate-break check remain outstanding. No frame-time improvement is claimed. Merged PR #551 supplies
+the deterministic completion and download cancellation fixes. The existing 50% contrast fallback may remain below
+target, and the pre-existing empty-base opacity-scaling limitation remains unchanged.

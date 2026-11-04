@@ -40,6 +40,36 @@ public enum ThemeGradient {
     return out
   }
 
+  /// Composite a resolved opaque base and an already opacity-scaled overlay in their shared color space. The
+  /// returned stops match the two expanded gradients at their union of locations; interpolation between those
+  /// locations is an approximation when overlay alpha varies. Texture is applied separately by the renderer.
+  public static func composite(base: [RGBA], overlay: [RGBA]) -> [(location: Double, color: RGBA)] {
+    let base = expand(base)
+    guard !base.isEmpty else { return [] }
+    func locations(_ colors: [RGBA]) -> [Double] {
+      colors.indices.map { Double($0) / Double(max(colors.count - 1, 1)) }
+    }
+    let baseLocations = locations(base)
+    guard !overlay.isEmpty else { return zip(baseLocations, base).map { (location: $0.0, color: $0.1) } }
+    let overlay = expand(overlay)
+    let positions = Set(baseLocations + locations(overlay)).sorted()
+    func interpolated(_ colors: [RGBA], at position: Double) -> RGBA {
+      guard colors.count > 1 else { return colors[0] }
+      let scaled = position * Double(colors.count - 1)
+      let index = min(Int(scaled), colors.count - 2)
+      return RGBA.mix(colors[index], colors[index + 1], scaled - Double(index))
+    }
+    return positions.map { position in
+      let bottom = interpolated(base, at: position)
+      let top = interpolated(overlay, at: position)
+      let alpha = top.alpha
+      let color = RGBA(red: top.red * alpha + bottom.red * (1 - alpha),
+                       green: top.green * alpha + bottom.green * (1 - alpha),
+                       blue: top.blue * alpha + bottom.blue * (1 - alpha), alpha: 1, space: bottom.space)
+      return (location: position, color: color)
+    }
+  }
+
   /// The color of an evenly spaced gradient of `colors` at `position` (0...1): the OKLab mix of the two stops around
   /// it. A single color is flat; no colors is clear black. Matches what `expand` draws at the same position.
   public static func sample(_ colors: [RGBA], at position: Double) -> RGBA {
