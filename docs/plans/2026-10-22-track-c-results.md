@@ -2812,3 +2812,10 @@ Before/after light and dark screenshots, the quiet-machine 120 Hz swipe gate, an
 load and deliberate-break check remain outstanding. No frame-time improvement is claimed. Merged PR #551 supplies
 the deterministic completion and download cancellation fixes. The existing 50% contrast fallback may remain below
 target, and the pre-existing empty-base opacity-scaling limitation remains unchanged.
+
+The opt-in `Swift tests` manual dispatch input `theme_overlay_evidence` runs the same synthetic overlay screenshot
+fixture against main `a4009de5bbd2bc70def89fe05b62dec0faf9bfa3` and the dispatched revision in separate CI
+checkouts. The only baseline adaptation is copying the test fixture into its test target; baseline production code is
+unchanged. The `theme-overlay-evidence` artifact records revision SHAs, light/dark before/after PNGs, render logs,
+20 crossfade runs with load readings, and a deliberate guard-removal test followed by restoration. These checks are
+pending execution; hosted CI cannot establish the quiet physical 120 Hz swipe frame gate.
