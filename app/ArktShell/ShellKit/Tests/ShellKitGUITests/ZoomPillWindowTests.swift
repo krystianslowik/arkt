@@ -91,6 +91,7 @@ final class ZoomPillWindowTests: XCTestCase {
     let pill = try XCTUnwrap(harness.controller.rootView.card.zoomPillView)
     pill.reduceMotion = { reduceMotion }
     pill.postAnnouncement = { box.announcements.append($0) }
+    pill.pointerInWindow = { _ in nil }                         // the real pointer never decides a test
     harness.controller.activate(node: nodes[0])
     harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
     return Rig(harness: harness, sleeper: sleeper, nodes: nodes, box: box)
@@ -175,6 +176,19 @@ final class ZoomPillWindowTests: XCTestCase {
     await until("the pill closed") { rig.pill.isHidden }
   }
 
+  func testAPillThatAppearsUnderTheStillPointerStartsHeldOpen() async throws {
+    let rig = try makeRig()
+    rig.pill.pointerInWindow = { pill in pill.convert(NSPoint(x: pill.bounds.midX, y: pill.bounds.midY), to: nil) }
+    rig.engine.zoomIn(rig.tab)
+    for _ in 0..<50 { await Task.yield() }
+    let parked = await rig.sleeper.parkedCount
+    XCTAssertEqual(parked, 0, "no timer while the pointer is over the pill")
+    XCTAssertFalse(rig.controller.zoomPill.isTimerArmed)
+
+    rig.controller.zoomPill.setHovering(false)
+    await until("leaving armed the timer") { await rig.sleeper.parkedCount == 1 }
+  }
+
   // MARK: Tabs
 
   func testSwitchingTabsClosesThePill() throws {
@@ -216,6 +230,7 @@ final class ZoomPillWindowTests: XCTestCase {
     harnesses.append(harness)
     let sleeper = Sleeper()
     harness.controller.zoomPill.sleep = { try await sleeper.sleep($0) }
+    harness.controller.rootView.card.zoomPillView?.pointerInWindow = { _ in nil }
     harness.controller.activate(node: panes[0])
     harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
     let tab = try XCTUnwrap(harness.controller.findTarget)

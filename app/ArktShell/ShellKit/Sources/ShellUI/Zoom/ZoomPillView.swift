@@ -24,6 +24,9 @@ public final class ZoomPillView: NSView {
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion } {
     didSet { for button in [zoomOutButton, zoomInButton] { button.reduceMotion = reduceMotion } }
   }
+  /// Where the pointer is in the window, for a pill that appears under it; nil: unknown. Tests set it, so the real
+  /// pointer never decides a test.
+  var pointerInWindow: @MainActor (NSView) -> NSPoint? = { $0.window?.mouseLocationOutsideOfEventStream }
   /// Speaks the percent instead of VoiceOver. Tests set it.
   var postAnnouncement: (@MainActor (String) -> Void)?
 
@@ -96,7 +99,14 @@ public final class ZoomPillView: NSView {
     (superview as? ContentCardView)?.layoutZoomPill()
     needsLayout = true
     layoutSubtreeIfNeeded()
+    if wasHidden { seedHover() }
     if wasHidden, presenter?.isOpening == true { animateEntrance() }
+  }
+
+  /// A pill that appears under a pointer that is not moving gets no `mouseEntered`; it starts out held open.
+  private func seedHover() {
+    guard let point = pointerInWindow(self) else { return }
+    if bounds.contains(convert(point, from: nil)) { presenter?.setHovering(true) }
   }
 
   /// The percent after a change the user made, polite: it does not interrupt what VoiceOver is saying.
