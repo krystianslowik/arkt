@@ -120,6 +120,38 @@ final class RestorePagesWindowTests: XCTestCase {
     XCTAssertEqual(engine.crashedSession.dismissals, 0)
   }
 
+  func testTransferredOfferSkipsAWindowWithAHeldClose() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample(),
+                             hostLookup: { [engine] in engine.host(of: $0) })
+    let owner = set.openWindow()
+    owner.window?.isReleasedWhenClosed = false
+    set.beginSessionRecovery(engine.crashedSession)
+    let closing = set.openWindow()
+    closing.window?.isReleasedWhenClosed = false
+    let available = set.openWindow(opensFirstTab: false)
+    available.window?.isReleasedWhenClosed = false
+    defer { owner.close(); closing.close(); available.close() }
+    XCTAssertNotNil(owner.rootView.subviews.first { $0 is RestorePagesView })
+    let tab = try XCTUnwrap(closing.currentTab)
+    engine.holdClose(tab)
+    defer { _ = engine.answerDialog(tab, accept: false) }
+    let closingWindow = try XCTUnwrap(closing.window)
+    closingWindow.performClose(nil)
+    XCTAssertTrue(closing.isWindowCloseRequested)
+    NotificationCenter.default.post(name: NSWindow.didBecomeMainNotification, object: closingWindow)
+    XCTAssertTrue(set.primary === closing)
+
+    owner.close()
+
+    XCTAssertNotNil(available.rootView.subviews.first { $0 is RestorePagesView })
+    XCTAssertFalse(closing.rootView.subviews.contains { $0 is RestorePagesView })
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+  }
+
   func testLaunchNoticesAppearInSequence() {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
