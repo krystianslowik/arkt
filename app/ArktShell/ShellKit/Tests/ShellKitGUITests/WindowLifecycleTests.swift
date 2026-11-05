@@ -414,6 +414,31 @@ final class WindowLifecycleTests: XCTestCase {
     XCTAssertTrue(f.engine.tabIDs.isEmpty)
   }
 
+  /// #559: when the shown private page closes, the window shows the page shown before it, not the engine's own pick
+  /// (its next tab in the strip), and tells the engine.
+  func testClosingAPrivatePageShowsThePageShownBeforeItOverTheEnginesPick() throws {
+    let f = try makeFixture()
+    let window = f.set.openWindow(opensFirstTab: false)
+    window.makeIncognito()
+    window.commandBar.show(.newTab)
+    window.commandBar.setQueryForTesting("private-visit.example")
+    window.commandBar.commit()
+    let opener = try XCTUnwrap(window.currentTab)
+    let engineWindow = try XCTUnwrap(window.engineWindow)
+    let popup = f.engine.engineCreateTab(url: EngineWorld.url("popup"), in: engineWindow, opener: opener)
+    let background = f.engine.engineCreateTab(url: EngineWorld.url("background"), in: engineWindow,
+                                              opener: popup, active: false)
+    f.engine.engineActivate(background)
+    f.engine.engineActivate(opener)
+    XCTAssertEqual(window.privateTabs, [popup, background, opener])
+
+    f.engine.engineCloseTab(opener)                       // the engine's pick is its next tab, `popup`
+    XCTAssertEqual(window.currentTab, background, "the page shown before the closed one is shown")
+    XCTAssertEqual(f.engine.activeTab(in: engineWindow), background, "the engine is told the shell's pick")
+    XCTAssertEqual(window.urlBar.url, EngineWorld.url("background"))
+    window.window?.performClose(nil)
+  }
+
   private func tabURLs(_ sidebar: SidebarModel.Sidebar) -> [String] {
     sidebar.nodes.values.compactMap { node in
       if case .tab(let tab) = node.kind { tab.url.absoluteString } else { nil }

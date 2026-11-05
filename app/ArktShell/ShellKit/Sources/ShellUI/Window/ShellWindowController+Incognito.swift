@@ -42,7 +42,8 @@ extension ShellWindowController {
 
   /// A tab the engine opened in this window on its own (#559): a `target=_blank` link, `window.open` or
   /// `chrome.tabs.create`. It becomes a private page. One the engine made active, or the first page of an empty
-  /// window, is shown; any other waits behind the shown page until the engine activates it or the shown page closes.
+  /// window, is shown; any other is queued just behind the shown page, so it is the next one shown when that page
+  /// closes, unless the engine activates it first.
   func adoptPrivatePage(_ tab: TabID) {
     guard !privateTabs.contains(tab) else { return }
     let isActive = engineWindow.map { engine.latestActiveTab(in: $0) == tab } ?? false
@@ -67,8 +68,9 @@ extension ShellWindowController {
   }
 
   /// The events of the private pages, which have no row to route them through. The address bar and the Back and
-  /// Forward state follow the shown page; an engine activation shows its page. A shown page the engine closed (a
-  /// script, an extension) shows the page before it, or leaves the window empty, and the next visit makes a new one.
+  /// Forward state follow the shown page; an engine activation shows its page. When the engine closes the shown page
+  /// (a script, an extension), the page shown before it comes back, over the engine's own pick; with none left the
+  /// window is empty, and the next visit makes a new one.
   func handlePrivateTabEvent(_ event: EngineEvent) -> Bool {
     let tab = event.tabID
     guard privateTabs.contains(tab) else { return false }
