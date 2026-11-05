@@ -187,6 +187,7 @@ extension ArktDialogKind {
     case .alert: self = .alert
     case .confirm: self = .confirm
     case .prompt: self = .prompt
+    case .beforeUnload: preconditionFailure("the facade has no leave-site dialog kind yet (#585)")
     }
   }
 }
