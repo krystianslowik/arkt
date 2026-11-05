@@ -42,6 +42,9 @@ final class AppSession {
   let archive: ArchiveCoordinator
   /// The auto-archive pass every minute (E5d).
   let autoArchive: AutoArchiveTimer
+  /// The archive thresholds Settings edits (#448): each change reaches `autoArchive` at once and is stored. Little
+  /// Arkt reads its threshold here (`littleArktThreshold`, 6 hours by default).
+  let archiveSettings: ArchiveSettingsModel
   /// Archived matches in every window's command bar (#111).
   let archiveSearch: ArchiveCommandBarSearch
   /// The command bar preview's page thumbnails (#370): live tabs through the engine, history items from the cache.
@@ -109,7 +112,11 @@ final class AppSession {
     let archive = ArchiveCoordinator(source: source, store: archiveStore)
     self.archive = archive
     autosaver.beforeSave = { [weak archive] in await archive?.flushPendingAdds() ?? true }
-    self.autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
+    let autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
+    self.autoArchive = autoArchive
+    let archiveSettings = ArchiveSettingsModel(state: settingsStore)
+    archiveSettings.onChange = { [weak autoArchive] in autoArchive?.apply($0) }
+    self.archiveSettings = archiveSettings
     self.archiveSearch = ArchiveCommandBarSearch(source: source, store: archiveStore, coordinator: archive)
     self.faviconStore = faviconStore
     let pageImageCache = AppEnvironment.pageImageCache(in: location)
@@ -255,13 +262,14 @@ final class AppSession {
     }
     importer.onAutoArchiveClockReset = { [weak self] date in self?.autoArchive.clockDidReset(to: date) }
     // #355, BH-137: idle Little Arkt windows close and archive after "Archive Little Arkts after:" (the archive
-    // settings' Little Arkt threshold, 6 hours by default; its Settings row is #448).
+    // settings' Little Arkt threshold, 6 hours by default; the Settings row, #448, updates it live).
     autoArchive.littleArkts = { [weak self] in
       (self?.windows.littleArktIdleCandidates() ?? []).map {
         LittleArcWindowActivity(id: $0.id, lastActiveAt: $0.lastActiveAt)
       }
     }
     autoArchive.onLittleArktsIdle = { [weak self] ids in self?.windows.closeIdleLittleArkts(ids) }
+    Task { [archiveSettings] in await archiveSettings.load() }
     resumeAutoArchive()
   }
 
@@ -482,6 +490,7 @@ final class AppSession {
     services.crashReportCount = { [weak self] in self?.crashCapture.storedCount ?? 0 }     // #129
     services.sendCrashReport = { [weak self] in self?.crashCapture.sendNewest() }
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
+    services.archiveRows = archiveSettings.settingsRows                                // #448
     return services
   }
 

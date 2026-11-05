@@ -100,6 +100,27 @@ final class FoldWatchStage: OnboardingStage {
   func setVisible(_ visible: Bool) {}
 }
 
+/// Holds the onboarding's delayed work until the test runs it, so nothing waits on wall time.
+@MainActor
+final class ManualOnboardingSchedule {
+  private(set) var delays: [TimeInterval] = []
+  private var pending: [@MainActor () -> Void] = []
+
+  func install(on onboarding: OnboardingController) {
+    onboarding.schedule = { [unowned self] delay, work in
+      delays.append(delay)
+      pending.append(work)
+    }
+  }
+
+  /// Runs everything scheduled so far, as if every delay had passed.
+  func runAll() {
+    let work = pending
+    pending = []
+    for item in work { item() }
+  }
+}
+
 /// The first run over a real shell window (onboarding spec sections 2, 6, 10 to 13): both branches to the browser,
 /// Skip setup, the Name field's Escape, the arrow rules, resume, and no "Arc" in anything VoiceOver reads.
 @MainActor
@@ -118,9 +139,9 @@ final class OnboardingTests: XCTestCase {
 
   private func present(_ window: ShellWindowController, _ services: FakeOnboardingServices,
                        mode: OnboardingMode = .firstRun, resume: OnboardingFlow.Snapshot? = nil,
-                       extensions: Bool = false) -> OnboardingController {
+                       extensions: Bool = false, stage: (any OnboardingStage)? = nil) -> OnboardingController {
     let onboarding = window.presentOnboarding(
-      services: services, options: .init(mode: mode, includesExtensions: extensions, resume: resume))
+      services: services, options: .init(mode: mode, includesExtensions: extensions, resume: resume), stage: stage)
     onboarding.view.layoutSubtreeIfNeeded()
     spin(until: { onboarding.flow.conditions.arc != .checking })
     return onboarding
@@ -196,7 +217,10 @@ final class OnboardingTests: XCTestCase {
     let stub = StubSidebar()
     let window = makeWindow(stub)
     let services = FakeOnboardingServices(sidebar: stub, arcFound: true)
-    let onboarding = present(window, services)
+    let stage = LateFoldStage()
+    let onboarding = present(window, services, stage: stage)
+    let schedule = ManualOnboardingSchedule()
+    schedule.install(on: onboarding)
     onboarding.performPrimary()                                           // Get started
     XCTAssertEqual(onboarding.flow.step, .importData)
     XCTAssertTrue(spin { onboarding.flow.importPhase == .ready })
@@ -244,8 +268,13 @@ final class OnboardingTests: XCTestCase {
     XCTAssertEqual(onboarding.flow.step, .done)
     XCTAssertTrue(onboarding.view.skipButton.isEnabled == false, "Done shows an empty footer")
     onboarding.performPrimary()                                           // Start browsing
-    XCTAssertTrue(spin(timeout: 3) { !window.isShowingOnboarding })
-    XCTAssertTrue(spin(timeout: 4) { onboarding.view.superview == nil }, "the overlay leaves once the field faded")
+    XCTAssertEqual(schedule.delays.count, 2, "the browser shows through, then takes over")
+    XCTAssertTrue(window.isShowingOnboarding, "the browser waits for its delay")
+    schedule.runAll()
+    XCTAssertFalse(window.isShowingOnboarding)
+    XCTAssertNotNil(onboarding.view.superview, "the field is still folding")
+    stage.endFold()
+    XCTAssertNil(onboarding.view.superview, "the overlay leaves once the field faded")
     XCTAssertEqual(services.completed, 1)
     XCTAssertEqual(stub.spaceOrder, [imported], "no Space is added after an import")
     XCTAssertEqual(window.currentSpace, imported)

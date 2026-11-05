@@ -106,6 +106,22 @@ struct AutoArchiveTimerTests {
     harness.timer.stop()
   }
 
+  @Test func aLittleArktThresholdChangedInSettingsAppliesFromTheNextTick() async throws {  // #448
+    let harness = Harness()
+    let window = LittleArcWindowActivity(id: UUID(), lastActiveAt: Self.start.addingTimeInterval(-2 * Self.hour))
+    var reported: [[UUID]] = []
+    harness.timer.littleArkts = { [window] }
+    harness.timer.onLittleArktsIdle = { reported.append($0) }
+    try await harness.timer.start()
+    #expect(reported.isEmpty, "two hours is under the 6-hour default")
+
+    harness.timer.apply(ArchiveSettings(littleArcThreshold: .oneHour))
+    harness.timer.tick()
+
+    #expect(reported == [[window.id]])
+    harness.timer.stop()
+  }
+
   @Test func neverKeepsLittleArktWindowsOpen() async throws {
     let harness = Harness()
     await harness.state.setSettings(ArchiveSettings(littleArcThreshold: .never))
@@ -256,6 +272,44 @@ struct AutoArchiveTimerTests {
 
     try await harness.timer.start()
 
+    #expect(harness.reports.map { $0.map(\.id) } == [[tab]])
+    harness.timer.stop()
+  }
+
+  /// #448: a threshold changed in Settings applies from the next tick, without a restart.
+  @Test func appliedSettingsReachTheNextTick() async throws {
+    let harness = Harness()
+    await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))
+    let tab = try harness.addTodayTab(idleHours: 2)
+    try await harness.timer.start()
+    #expect(harness.reports.isEmpty)
+
+    var settings = ArchiveSettings()
+    settings.setTabThreshold(.oneHour, forProfile: ArchiveSettings.defaultProfile, scope: .thisProfile)
+    harness.timer.apply(settings)
+
+    #expect(harness.timer.settings == settings)
+    #expect(harness.reports.isEmpty, "nothing archives until the next tick")
+    #expect(harness.timer.tick().map(\.id) == [tab])
+    harness.timer.stop()
+  }
+
+  /// #448: a change made while `start()` still loads is not overwritten by the stored value it loads.
+  @Test func settingsAppliedDuringTheLoadWin() async throws {
+    let harness = Harness()
+    await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))
+    let tab = try harness.addTodayTab(idleHours: 2)
+    await harness.state.holdLoads()
+    let starting = Task { try await harness.timer.start() }
+    await eventually { await harness.state.heldLoadCount == 1 }
+
+    var settings = ArchiveSettings()
+    settings.setTabThreshold(.oneHour, forProfile: ArchiveSettings.defaultProfile, scope: .thisProfile)
+    harness.timer.apply(settings)
+    await harness.state.releaseLoads()
+    try await starting.value
+
+    #expect(harness.timer.settings == settings)
     #expect(harness.reports.map { $0.map(\.id) } == [[tab]])
     harness.timer.stop()
   }

@@ -4,8 +4,8 @@ import Foundation
 /// Runs `ArchiveCoordinator.runAutoArchive` once at start and then every `interval` (Track E, Task E5d).
 ///
 /// `start()` resolves the auto-archive start (`ArchiveState.autoArchiveStartedAt`, set once on first use) and loads
-/// the archive settings from the store, off the main actor, then ticks at once and keeps ticking until `stop()`. The
-/// settings are read once per start; there is no settings UI yet (BH-081 to BH-083 are a later track).
+/// the archive settings from the store, off the main actor, then ticks at once and keeps ticking until `stop()`. A
+/// threshold changed in Settings arrives through `apply(_:)` and counts from the next tick, without a restart (#448).
 ///
 /// The clock only moves forward: an Arc import that adds a Space resets it to the import time (plan decision 7) and
 /// reports that through `clockDidReset(to:)`, which applies to the next tick even while `start()` is still loading.
@@ -31,7 +31,8 @@ public final class AutoArchiveTimer {
   /// the ones that must stay (the key window, a page playing sound, a page that would ask before leaving).
   public var littleArkts: @MainActor () -> [LittleArcWindowActivity] = { [] }
   /// Called with the Little Arkt windows idle for `settings.littleArcThreshold` or longer ("Archive Little Arkts
-  /// after:", 6 hours by default), only when there are some; the caller closes and archives them.
+  /// after:", 6 hours by default; a change in Settings arrives through `apply(_:)`), only when there are some; the
+  /// caller closes and archives them.
   public var onLittleArktsIdle: (@MainActor ([UUID]) -> Void)?
 
   private let coordinator: ArchiveCoordinator
@@ -45,6 +46,8 @@ public final class AutoArchiveTimer {
   private var isLoaded = false
   /// Set by `stop()`: no tick archives afterwards, and a `start()` still loading does not begin the loop.
   private var stopRequested = false
+  /// `apply(_:)` was called: settings `start()` loads afterwards are older and do not replace them.
+  private var settingsApplied = false
 
   public init(
     coordinator: ArchiveCoordinator,
@@ -74,7 +77,7 @@ public final class AutoArchiveTimer {
     defer { isStarting = false }
     let resolved = try await state.resolveAutoArchiveStart(now: now())
     let loaded = try await state.loadArchiveSettings()
-    settings = loaded
+    if !settingsApplied { settings = loaded }
     clockDidReset(to: resolved)
     isLoaded = true
     guard !stopRequested else { return }
@@ -95,6 +98,13 @@ public final class AutoArchiveTimer {
     stopRequested = true
     loop?.cancel()
     loop = nil
+  }
+
+  /// The settings changed (Settings > Spaces and Profiles > Archive, #448): the next tick uses them. Also before or
+  /// during `start()`, whose load then keeps these.
+  public func apply(_ settings: ArchiveSettings) {
+    settingsApplied = true
+    self.settings = settings
   }
 
   /// Moves the clock start to `date` when that is later than the current one (an Arc import reset it).
