@@ -108,6 +108,11 @@ public final class SidebarController {
     get { faviconLoader.decoder }
     set { faviconLoader.decoder = newValue }
   }
+  /// Tests: the decoded-image cache (production: shared by the whole process).
+  var faviconImageCache: NSCache<NSData, NSImage> {
+    get { faviconLoader.decoded }
+    set { faviconLoader.decoded = newValue }
+  }
   /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page; pages the
   /// window creates without an activation (the other panes of a split) are added through `markLoaded(node:)`, and
   /// the window calls `deactivate(node:)` when any page closes; nodes that leave the source are dropped like

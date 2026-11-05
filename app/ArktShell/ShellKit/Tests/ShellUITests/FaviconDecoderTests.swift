@@ -68,7 +68,7 @@ struct FaviconDecoderTests {
 
   @Test func theNewestBytesForAKeyWinAndTheOlderDecodeIsCancelled() async throws {
     let gate = GatedFaviconDecoder()
-    let loader = FaviconImageLoader<Int>(decoder: gate.decoder)
+    let loader = FaviconImageLoader<Int>(decoder: gate.decoder, cache: NSCache())
     var applied: [[Int: NSImage?]] = []
     loader.load([1: FaviconFixtures.png(1, pixels: 8)]) { applied.append($0) }
     loader.load([1: FaviconFixtures.png(2, pixels: 16)]) { applied.append($0) }
@@ -83,7 +83,7 @@ struct FaviconDecoderTests {
 
   @Test func aCancelledKeyGetsNothingAndItsJobIsCancelled() async {
     let gate = GatedFaviconDecoder()
-    let loader = FaviconImageLoader<Int>(decoder: gate.decoder)
+    let loader = FaviconImageLoader<Int>(decoder: gate.decoder, cache: NSCache())
     var applied: [[Int: NSImage?]] = []
     loader.load([1: FaviconFixtures.png(1, pixels: 8)]) { applied.append($0) }
     loader.cancel(1)
@@ -95,7 +95,7 @@ struct FaviconDecoderTests {
 
   @Test func aJobKeepsRunningForItsOtherKeysWhenOneIsDropped() async throws {
     let gate = GatedFaviconDecoder()
-    let loader = FaviconImageLoader<Int>(decoder: gate.decoder)
+    let loader = FaviconImageLoader<Int>(decoder: gate.decoder, cache: NSCache())
     var applied: [[Int: NSImage?]] = []
     loader.load([1: FaviconFixtures.png(1, pixels: 8), 2: FaviconFixtures.png(2, pixels: 8)]) { applied.append($0) }
     loader.cancel(1)
@@ -108,7 +108,7 @@ struct FaviconDecoderTests {
 
   @Test func aBatchDecodesEachDistinctImageOnceInOneJob() async {
     let gate = GatedFaviconDecoder()
-    let loader = FaviconImageLoader<Int>(decoder: gate.decoder)
+    let loader = FaviconImageLoader<Int>(decoder: gate.decoder, cache: NSCache())
     let shared = FaviconFixtures.png(1, pixels: 8)
     var applied: [[Int: NSImage?]] = []
     loader.load([1: shared, 2: shared, 3: FaviconFixtures.png(3, pixels: 8), 4: Data("junk".utf8)]) {
@@ -129,7 +129,7 @@ struct FaviconDecoderTests {
   @Test func decodedBytesAreShownAtOnceWithoutAnotherDecode() async {
     let gate = GatedFaviconDecoder()
     await gate.release()
-    let loader = FaviconImageLoader<Int>(decoder: gate.decoder)
+    let loader = FaviconImageLoader<Int>(decoder: gate.decoder, cache: NSCache())
     let data = FaviconFixtures.png(1, pixels: 8)
     var first: NSImage?
     loader.load([1: data]) { first = $0[1] ?? nil }

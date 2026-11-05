@@ -2,8 +2,9 @@ import AppKit
 
 /// Decodes favicons of keyed rows (sidebar nodes, Archive items) off the main actor and hands the images back on it
 /// (#605). Only the newest bytes per key count: bytes set again for a key, or a key cancelled, drop the older request,
-/// and a job whose keys are all dropped is cancelled. Images are cached by their bytes, so tabs of one site and an
-/// icon reported again are decoded once and shown at once.
+/// and a job whose keys are all dropped is cancelled. Images are cached by their bytes, process-wide by default, so tabs
+/// of one site, an icon reported again and a tab handed to another window (its bytes replayed there before the
+/// window first draws) are decoded once and shown at once.
 @MainActor
 final class FaviconImageLoader<Key: Hashable & Sendable> {
   var decoder: FaviconDecoder
@@ -14,11 +15,15 @@ final class FaviconImageLoader<Key: Hashable & Sendable> {
   /// Every job's task until it ends, cancelled or not.
   private var tasks: [Int: Task<Void, Never>] = [:]
   private var nextJob = 0
-  private let decoded = NSCache<NSData, NSImage>()
+  /// Decoded images by their bytes.
+  var decoded: NSCache<NSData, NSImage>
 
-  init(decoder: FaviconDecoder = .offMain, cacheLimit: Int = 256) {
+  /// The cache every loader shares unless given its own.
+  static var sharedCache: NSCache<NSData, NSImage> { FaviconDecoder.sharedImages }
+
+  init(decoder: FaviconDecoder = .offMain, cache: NSCache<NSData, NSImage>? = nil) {
     self.decoder = decoder
-    decoded.countLimit = cacheLimit
+    self.decoded = cache ?? Self.sharedCache
   }
 
   isolated deinit { cancelAll() }

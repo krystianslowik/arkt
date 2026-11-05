@@ -41,6 +41,7 @@ final class SidebarFaviconDecodeTests: XCTestCase {
   private func makeSidebar(_ sidebar: StubSidebar, decoder: FaviconDecoder) -> SidebarController {
     let controller = SidebarController(source: sidebar)
     controller.faviconDecoder = decoder
+    controller.faviconImageCache = NSCache()              // the shared cache would carry images across tests
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 190, height: 800), styleMask: [.titled],
                           backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
@@ -145,5 +146,31 @@ final class SidebarFaviconDecodeTests: XCTestCase {
     XCTAssertEqual(calls, 1)
     XCTAssertEqual(controller.favicons.count, 3)
     XCTAssertEqual(try shown(controller, today[2])?.size, NSSize(width: 16, height: 16))
+  }
+
+  /// A tab handed to another window replays its favicon bytes there before that window first draws: the image decoded
+  /// for the first window shows at once, with no decode and no letter in between. Windows share the cache.
+  func testAnotherWindowShowsAnAlreadyDecodedFaviconAtOnce() async throws {
+    XCTAssertTrue(SidebarController(source: StubSidebar.sample()).faviconImageCache === FaviconDecoder.sharedImages,
+                  "production sidebars share one cache")
+    let cache = NSCache<NSData, NSImage>()
+    let open = HeldDecoder()
+    await open.release()
+    let firstSidebar = StubSidebar.sample()
+    let first = makeSidebar(firstSidebar, decoder: open.decoder)
+    first.faviconImageCache = cache
+    let data = png(8)
+    first.setFavicon(data, for: firstSidebar.children(of: .today(firstSidebar.spaceOrder[0]))[0])
+    await first.settleFaviconDecodes()
+
+    let held = HeldDecoder()                                 // never released: any decode would leave the letter
+    let secondSidebar = StubSidebar.sample()
+    let second = makeSidebar(secondSidebar, decoder: held.decoder)
+    second.faviconImageCache = cache
+    let tab = secondSidebar.children(of: .today(secondSidebar.spaceOrder[0]))[0]
+    second.setFavicon(data, for: tab)
+    XCTAssertEqual(try shown(second, tab)?.size, NSSize(width: 8, height: 8), "shown in the same turn")
+    let calls = await held.calls
+    XCTAssertEqual(calls, 0)
   }
 }

@@ -49,6 +49,15 @@ public struct FaviconDecoder: Sendable {
     return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
   }
 
+  /// Decoded favicons by their bytes, shared by every sidebar and the Archive: an icon decoded for one window shows at
+  /// once in another. Bounded by count; NSCache also drops entries under memory pressure.
+  @MainActor
+  static let sharedImages: NSCache<NSData, NSImage> = {
+    let cache = NSCache<NSData, NSImage>()
+    cache.countLimit = 512
+    return cache
+  }()
+
   /// The image views take: sized in points as the bitmap's pixels, like `NSImage(data:)` of a 72 dpi PNG. Main actor
   /// only, never off it.
   @MainActor
