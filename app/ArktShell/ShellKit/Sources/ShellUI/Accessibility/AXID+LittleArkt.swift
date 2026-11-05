@@ -14,12 +14,9 @@ extension AXID {
   public enum LittleArktLookup {
     public static let root = "littleArkt.lookup"
     public static let tag = "littleArkt.lookup.tag"
-    /// Label: "Little Arkt: Search or Enter URL"; value: open while the bar shows.
+    /// Label: "Little Arkt: Search or Enter URL".
     public static let field = "littleArkt.lookup.field"
     public static let results = "littleArkt.lookup.results"
     public static let row = "littleArkt.lookup.row"
-    /// Value of `root` while the bar shows and while it does not.
-    public static let open = "open"
-    public static let closed = "closed"
   }
 }
