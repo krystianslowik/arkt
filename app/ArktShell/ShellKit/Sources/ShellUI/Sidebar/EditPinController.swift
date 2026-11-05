@@ -9,7 +9,10 @@ import Motion
 final class EditPinController: NSObject, NSTextFieldDelegate {
   /// What the popover points at, in the host view's coordinates.
   enum Anchor: Equatable {
-    /// A pinned row: the arrow on the leading edge touches the row's trailing edge, level with its middle.
+    /// A pinned row: the arrow on the leading edge touches the row's trailing edge, level with its middle. When the
+    /// popover does not fit beside the row (a wide sidebar in a small window), it opens below the row, or above it
+    /// near the window's bottom, against the window's trailing margin so it covers as little of the sidebar as it
+    /// can, and never the row itself; the arrow on its top or bottom edge points at the row.
     case row(NSRect)
     /// A Favorite tile: the popover opens below it, the arrow on its top edge centered on the tile.
     case tile(NSRect)
@@ -92,11 +95,23 @@ final class EditPinController: NSObject, NSTextFieldDelegate {
     switch anchor {
     case .row(let rect):
       let row = fromTop(rect)
-      let x = min(row.maxX + m.arrowDepth, maxX)
-      let top = min(max(row.midY - m.arrowCenter, m.windowMargin), maxTop)
       let lowest = m.cornerRadius + m.arrowHalfBase
-      view.setArrow(.leading(y: min(max(row.midY - top, lowest), size.height - lowest)))
-      origin = NSPoint(x: x, y: top)
+      if row.maxX + m.arrowDepth + size.width + m.windowMargin <= host.bounds.width {
+        let top = min(max(row.midY - m.arrowCenter, m.windowMargin), maxTop)
+        view.setArrow(.leading(y: min(max(row.midY - top, lowest), size.height - lowest)))
+        origin = NSPoint(x: row.maxX + m.arrowDepth, y: top)
+      } else {
+        let x = maxX
+        let arrowX = min(max(row.maxX - m.rowArrowInset - x, lowest), size.width - lowest)
+        let below = row.maxY + m.arrowDepth + m.anchorGap
+        if below + size.height + m.windowMargin <= hostHeight {
+          view.setArrow(.top(x: arrowX))
+          origin = NSPoint(x: x, y: below)
+        } else {
+          view.setArrow(.bottom(x: arrowX))
+          origin = NSPoint(x: x, y: max(row.minY - m.arrowDepth - m.anchorGap - size.height, m.windowMargin))
+        }
+      }
     case .tile(let rect):
       let tile = fromTop(rect)
       let x = min(max(tile.midX - size.width / 2, m.windowMargin), maxX)
@@ -227,7 +242,9 @@ final class EditPinController: NSObject, NSTextFieldDelegate {
     guard view.errorLine.isHidden == shown else { return }
     let height = EditPinMetrics.height(showingError: shown)
     var frame = view.frame
-    if let host = view.superview, !host.isFlipped { frame.origin.y = frame.maxY - height }   // the top stays put
+    // The edge with the arrow stays put: the top, or the bottom for an arrow below the popover.
+    let keepsTop: Bool = if case .bottom = view.arrow { false } else { true }
+    if let host = view.superview, host.isFlipped != keepsTop { frame.origin.y = frame.maxY - height }
     frame.size.height = height
     view.setErrorShown(shown)
     if shown, let duration = EditPinMotion.errorResizeDuration(reducesMotion: reducesMotion()) {

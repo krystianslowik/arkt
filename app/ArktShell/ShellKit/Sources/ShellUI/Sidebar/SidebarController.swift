@@ -153,6 +153,8 @@ public final class SidebarController {
   /// The Edit Pin popover's Reduce Motion and VoiceOver announcements. Tests replace them.
   var editPinReducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   var editPinAnnounce: AXAnnouncement.Poster = { AXAnnouncement.post($0, priority: $1) }
+  /// The Edit Pin popover opened (true) or closed (false). The window holds a hover-revealed sidebar out meanwhile.
+  public var onEditPinChange: (@MainActor (Bool) -> Void)?
 
   public init(source: any SidebarSource, profile: String = "default",
               topBarHeight: CGFloat = ShellMetrics.standard.sidebarTopBarHeight) {
@@ -566,8 +568,10 @@ public final class SidebarController {
     controller.onClose = { [weak self, weak controller] in
       guard let self, self.editPin === controller else { return }
       self.editPin = nil
+      self.onEditPinChange?(false)
     }
     editPin = controller
+    onEditPinChange?(true)
     controller.show(in: host, anchor: anchor)
     return true
   }

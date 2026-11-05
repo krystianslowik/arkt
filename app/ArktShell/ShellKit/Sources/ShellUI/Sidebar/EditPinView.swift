@@ -11,8 +11,10 @@ enum EditPinMetrics {
   static let arrowHalfBase: CGFloat = 8
   /// The leading arrow's center, from the top: the 12 pt notch starts 16 pt down.
   static let arrowCenter: CGFloat = 22
-  /// Space between a Favorite tile and the arrow's tip.
+  /// Space between a Favorite tile (or a row the popover opens below or above) and the arrow's tip.
   static let anchorGap: CGFloat = 2
+  /// How far in from a row's trailing edge a top or bottom arrow points, when the popover cannot sit beside the row.
+  static let rowArrowInset: CGFloat = 24
   /// The popover keeps this far from the window's edges.
   static let windowMargin: CGFloat = 8
   static let titleHeight: CGFloat = 16
@@ -60,11 +62,13 @@ enum EditPinMotion {
   }
 }
 
-/// Where the popover's arrow sits: on its leading edge at `y` from the top (a pinned row), or on its top edge at `x`
-/// from the leading edge (a Favorite tile).
+/// Where the popover's arrow sits: on its leading edge at `y` from the top (a pinned row), on its top edge at `x` from
+/// the leading edge (a Favorite tile, or a row it cannot sit beside), or on its bottom edge (such a row near the
+/// window's bottom).
 enum EditPinArrow: Equatable {
   case leading(y: CGFloat)
   case top(x: CGFloat)
+  case bottom(x: CGFloat)
 }
 
 /// One of the popover's fields: a recessed rounded field (`ArchiveTokens.listField`, radius 8) holding a plain text
@@ -176,16 +180,16 @@ final class EditPinView: NSView {
   private let dropShadow = CAShapeLayer()
   private let contactShadow = CAShapeLayer()
 
-  /// The arrow tip's x from the leading edge: its center for a top arrow, outside the leading edge otherwise.
-  var arrowX: CGFloat {
-    if case .top(let x) = arrow { x } else { -EditPinMetrics.arrowDepth }
-  }
+  /// The arrow tip's x from the leading edge: its center for a top or bottom arrow, outside the leading edge
+  /// otherwise.
+  var arrowX: CGFloat { arrowTip.x }
 
   /// The arrow tip, in this view's coordinates: the point the open animation grows from.
   var arrowTip: NSPoint {
     switch arrow {
     case .leading(let y): NSPoint(x: -EditPinMetrics.arrowDepth, y: y)
     case .top(let x): NSPoint(x: x, y: -EditPinMetrics.arrowDepth)
+    case .bottom(let x): NSPoint(x: x, y: bounds.height + EditPinMetrics.arrowDepth)
     }
   }
 
@@ -343,7 +347,7 @@ final class EditPinView: NSView {
     needsLayout = true
   }
 
-  /// A rounded rectangle with the arrow on its leading or top edge, softened at its tip (flipped coordinates).
+  /// A rounded rectangle with the arrow on its leading, top or bottom edge, softened at its tip (flipped coordinates).
   static func surfacePath(size: CGSize, arrow: EditPinArrow) -> CGPath {
     let r = EditPinMetrics.cornerRadius
     let half = EditPinMetrics.arrowHalfBase, tip = EditPinMetrics.arrowDepth
@@ -359,6 +363,11 @@ final class EditPinView: NSView {
     path.addArc(tangent1End: CGPoint(x: w, y: 0), tangent2End: CGPoint(x: w, y: r), radius: r)
     path.addLine(to: CGPoint(x: w, y: h - r))
     path.addArc(tangent1End: CGPoint(x: w, y: h), tangent2End: CGPoint(x: w - r, y: h), radius: r)
+    if case .bottom(let x) = arrow {
+      path.addLine(to: CGPoint(x: x + half, y: h))
+      path.addQuadCurve(to: CGPoint(x: x, y: h + tip), control: CGPoint(x: x + half * 0.3, y: h + tip * 0.55))
+      path.addQuadCurve(to: CGPoint(x: x - half, y: h), control: CGPoint(x: x - half * 0.3, y: h + tip * 0.55))
+    }
     path.addLine(to: CGPoint(x: r, y: h))
     path.addArc(tangent1End: CGPoint(x: 0, y: h), tangent2End: CGPoint(x: 0, y: h - r), radius: r)
     if case .leading(let y) = arrow {

@@ -117,4 +117,33 @@ struct EditPinFormTests {
     #expect(EditPinMetrics.height(showingError: true) - EditPinMetrics.height(showingError: false)
               == EditPinMetrics.errorGap + EditPinMetrics.errorHeight)
   }
+
+  /// An untouched title with spaces around it is not stored as a custom title; an edited one is, trimmed.
+  @Test func anUntouchedTitleWithSpacesStaysUnstored() {
+    var form = form(name: "  Q4 planning ")
+    #expect(form.submit() == .save(name: nil, url: nil))
+    form.edit(name: "  Roadmap ")
+    #expect(form.submit() == .save(name: "Roadmap", url: nil))
+  }
+
+  /// An internationalized host reads in Unicode in the field and is stored encoded again.
+  @Test func anInternationalizedHostShowsInUnicodeAndRoundTrips() {
+    let stored = URL(string: "https://xn--mnchen-3ya.de/plan")!
+    var form = form(url: stored)
+    #expect(form.urlText == "münchen.de/plan")
+    #expect(form.submit() == .save(name: nil, url: nil), "untouched: the stored address stays")
+    form.edit(urlText: "münchen.de/plan2")
+    #expect(form.submit() == .save(name: nil, url: URL(string: "https://xn--mnchen-3ya.de/plan2")!))
+    let http = EditPinForm(kind: .favorite, name: "B", url: URL(string: "http://xn--bcher-kva.example:8080/a")!,
+                           currentPage: stored)
+    #expect(http.urlText == "http://bücher.example:8080/a")
+  }
+
+  @Test func punycodeDecodesLabelsAndLeavesOthers() {
+    #expect(Punycode.unicodeHost("xn--mnchen-3ya.de") == "münchen.de")
+    #expect(Punycode.unicodeHost("www.xn--bcher-kva.example") == "www.bücher.example")
+    #expect(Punycode.unicodeHost("xn--wgv71a119e.jp") == "日本語.jp")
+    #expect(Punycode.unicodeHost("example.com") == "example.com")
+    #expect(Punycode.unicodeHost("xn--!!.com") == "xn--!!.com", "not Punycode: kept")
+  }
 }

@@ -26,6 +26,8 @@ extension ShellWindowController {
     sidebarController.onResetPinned = { [weak self] node in self?.resetPinned(node: node) }
     sidebarController.onReplacePin = { [weak self] node in self?.replacePin(node: node) }
     sidebarController.onSeparateFromPinned = { [weak self] node in self?.separateFromPinned(node: node) }
+    // A hover-revealed sidebar stays out while the Edit Pin popover points into it (#363).
+    sidebarController.onEditPinChange = { [weak self] open in self?.rootView.sidebarOverlay.isHeldOpen = open }
     sidebarController.onPinnedFaviconClick = { [weak self] node, modifiers in
       self?.pinnedFaviconClicked(node: node, modifiers: modifiers)
     }

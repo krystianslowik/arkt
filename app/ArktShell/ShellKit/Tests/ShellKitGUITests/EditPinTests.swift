@@ -4,7 +4,7 @@ import EngineAPI
 import EngineAPITestSupport
 import SidebarModel
 import XCTest
-@testable import ShellUI
+@_spi(Smoke) @testable import ShellUI
 
 /// The Edit Pin popover (#363, design/edit-pin, direction B): Edit Pinned URL on a pinned row and Rename or Edit
 /// Pinned URL on a Favorite tile open one popover anchored to the row or tile. Save stores the name as the custom
@@ -466,5 +466,91 @@ final class EditPinTests: XCTestCase {
       }
       harness.controller.close()
     }
+  }
+
+  // MARK: Wide sidebar, hover-revealed sidebar
+
+  /// A 400 pt sidebar in a 640 pt window leaves no room beside the row: the popover opens below the row against the
+  /// window's trailing margin, covering none of the row and as little of the sidebar as it can, its top arrow
+  /// pointing into the row.
+  func testAWideSidebarInASmallWindowOpensBelowTheRow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar, size: NSSize(width: 640, height: 600))
+    harness.controller.rootView.sidebarWidth = 400
+    harness.root.layoutSubtreeIfNeeded()
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p0)
+    let popover = try harness.popover()
+    let outline = try harness.outline()
+    let row = outline.outlineView.convert(outline.outlineView.rect(ofRow: outline.row(for: world.p0)), to: harness.root)
+
+    XCTAssertEqual(popover.frame.width, EditPinMetrics.width)
+    XCTAssertTrue(harness.root.bounds.contains(popover.frame), "inside the window")
+    XCTAssertEqual(popover.frame.maxX, harness.root.bounds.maxX - EditPinMetrics.windowMargin, accuracy: 0.5,
+                   "against the trailing margin: as little of the sidebar as it can")
+    XCTAssertFalse(popover.frame.intersects(row), "the row stays visible")
+    guard case .top = popover.arrow else { return XCTFail("the arrow is on the top edge") }
+    let tipX = popover.frame.minX + popover.arrowTip.x
+    XCTAssertTrue((row.minX...row.maxX).contains(tipX), "the arrow points into the row")
+    let gap = harness.root.isFlipped ? popover.frame.minY - row.maxY : row.minY - popover.frame.maxY
+    XCTAssertEqual(gap, EditPinMetrics.arrowDepth + EditPinMetrics.anchorGap, accuracy: 0.5)
+    harness.controller.close()
+  }
+
+  /// With no room below either, it opens above the row with the arrow on its bottom edge.
+  func testAWideSidebarNearTheBottomOpensAboveTheRow() throws {
+    var world = try Self.makeWorld()
+    var last = world.p1
+    for index in 0..<12 {
+      last = try world.sidebar.addTab(url: Self.url("x\(index)"), title: "X\(index)", in: .pinned(world.space))
+    }
+    let harness = Harness(world.sidebar, size: NSSize(width: 640, height: 640))
+    harness.controller.rootView.sidebarWidth = 400
+    harness.root.layoutSubtreeIfNeeded()
+    let outline = try harness.outline()
+    let rowIndex = outline.row(for: last)
+    outline.outlineView.scrollRowToVisible(rowIndex)
+    let row = outline.outlineView.convert(outline.outlineView.rect(ofRow: rowIndex), to: harness.root)
+    let rowBottom = harness.root.isFlipped ? row.maxY : harness.root.bounds.height - row.minY
+    try XCTSkipUnless(rowBottom + EditPinMetrics.height(showingError: false) + 20 > harness.root.bounds.height,
+                      "the row is not near the bottom on this screen")
+    try harness.choose("Edit Pinned URL\u{2026}", on: last)
+    let popover = try harness.popover()
+    guard case .bottom = popover.arrow else { return XCTFail("the arrow is on the bottom edge") }
+    XCTAssertFalse(popover.frame.intersects(row))
+    XCTAssertTrue(harness.root.bounds.contains(popover.frame))
+    harness.controller.close()
+  }
+
+  /// A hover-revealed sidebar stays out while the popover is open, though the pointer left it for the popover; once
+  /// the popover closes, an abandoned sidebar goes back.
+  func testAHoverRevealedSidebarStaysOutWhileThePopoverIsOpen() async throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let overlay = harness.controller.rootView.sidebarOverlay
+    overlay.revealDelay = .zero
+    overlay.concealDelay = .zero
+    overlay.pointerIsInside = { false }
+    overlay.mouseButtonsDown = { false }
+    overlay.reduceMotionForTesting = true
+    harness.controller.toggleSidebarVisibility(nil)
+    let revealed = expectation(description: "revealed")
+    overlay.onSettleForTesting = { _ in revealed.fulfill() }
+    overlay.reveal()
+    await fulfillment(of: [revealed], timeout: 3)
+    overlay.onSettleForTesting = nil
+    harness.root.layoutSubtreeIfNeeded()
+
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p0)
+    XCTAssertNotNil(harness.editPin)
+    XCTAssertTrue(overlay.isHeldOpen)
+    overlay.pointerLeft()                                   // the pointer moves onto the popover
+    await overlay.pendingForTesting?.value
+    XCTAssertTrue(overlay.isRevealed, "the sidebar stays out under the popover's arrow")
+
+    try XCTUnwrap(harness.editPin).cancel()
+    XCTAssertFalse(overlay.isHeldOpen)
+    await overlay.pendingForTesting?.value
+    XCTAssertFalse(overlay.isRevealed, "the abandoned sidebar goes back once the popover closed")
+    harness.controller.close()
   }
 }
