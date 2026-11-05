@@ -148,6 +148,11 @@ public final class SidebarController {
   /// The theme creator's haptics and Reduce Motion. Tests count haptics through an injected performer.
   var makeThemeHaptics: @MainActor () -> ThemeHaptics = { ThemeHaptics() }
   var themeCreatorReducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// The open Edit Pin popover, if any (#363).
+  private(set) var editPin: EditPinController?
+  /// The Edit Pin popover's Reduce Motion and VoiceOver announcements. Tests replace them.
+  var editPinReducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  var editPinAnnounce: AXAnnouncement.Poster = { AXAnnouncement.post($0, priority: $1) }
 
   public init(source: any SidebarSource, profile: String = "default",
               topBarHeight: CGFloat = ShellMetrics.standard.sidebarTopBarHeight) {
@@ -331,6 +336,7 @@ public final class SidebarController {
     if changed, let creator = themeCreator, creator.spaceID != id { creator.close(animated: true) }   // #410
     if changed, let old = currentSpace { pages[old]?.outlineController.clearSelection() }   // design 6
     if changed { folderPreview.hide(animated: false) }                              // BH-093: the page left
+    if changed { editPin?.close(animated: false) }                                  // #363: its row left
     // The page leaving the screen ends its folder springs, so no closed folder's rows wait there for its return.
     if changed, let old = currentSpace { pages[old]?.outlineController.folderMotion.settleNow() }
     currentSpace = id
@@ -527,6 +533,54 @@ public final class SidebarController {
   @discardableResult
   public func beginRename(node: NodeID) -> Bool {
     currentPage?.outlineController.beginRename(node) ?? false
+  }
+
+  // MARK: Edit Pin (#363)
+
+  /// Opens the Edit Pin popover on `node` (design/edit-pin): anchored to its row in the current Space page when it
+  /// is a pinned tab, to its tile when it is a Favorite. `currentPage` is the address the tab shows now, for Use
+  /// Current Page. One at a time: an open popover closes first. False when the node has no row or
+  /// tile on screen.
+  @discardableResult
+  public func openEditPin(node: NodeID, focus: EditPinFocus, currentPage: URL?) -> Bool {
+    editPin?.close(animated: false)
+    guard let host = view.window?.contentView else { return false }
+    host.layoutSubtreeIfNeeded()
+    let kind: EditPinKind
+    let anchor: EditPinController.Anchor
+    switch source.section(containing: node) {
+    case .favorites?:
+      guard let tile = view.favorites.tile(for: node) else { return false }
+      kind = .favorite
+      anchor = .tile(tile.convert(tile.bounds, to: host))
+    case .pinned?:
+      guard let row = editPinRowFrame(node, in: host) else { return false }
+      kind = .pinnedTab
+      anchor = .row(row)
+    default:
+      return false
+    }
+    guard let controller = EditPinController(nodeID: node, kind: kind, focus: focus, currentPage: currentPage,
+                                             source: source, reducesMotion: editPinReducesMotion,
+                                             announce: editPinAnnounce) else { return false }
+    controller.onClose = { [weak self, weak controller] in
+      guard let self, self.editPin === controller else { return }
+      self.editPin = nil
+    }
+    editPin = controller
+    controller.show(in: host, anchor: anchor)
+    return true
+  }
+
+  /// The pinned row's frame in `host`, its trailing edge held to the sidebar's.
+  private func editPinRowFrame(_ node: NodeID, in host: NSView) -> NSRect? {
+    guard let outline = currentPage?.outlineController else { return nil }
+    let row = outline.row(for: node)
+    guard row >= 0 else { return nil }
+    let rect = outline.outlineView.convert(outline.outlineView.rect(ofRow: row), to: host)
+    let sidebar = view.convert(view.bounds, to: host)
+    return NSRect(x: rect.minX, y: rect.minY, width: max(min(rect.maxX, sidebar.maxX) - rect.minX, 0),
+                  height: rect.height)
   }
 
   // MARK: Folders (#109)
@@ -806,6 +860,7 @@ public final class SidebarController {
     loadedNodes = loadedNodes.filter { source.node($0) != nil }
     audio = audio.filter { source.node($0.key) != nil }
     favoriteLoadOrder = favoriteLoadOrder.filter { source.node($0) != nil }
+    editPin?.sourceDidChange()                                                       // #363: its node went away
   }
 
   private func apply(_ change: SidebarChange) {

@@ -204,6 +204,15 @@ extension ShellWindowController {
     return live.flatMap { $0.isEmpty ? nil : $0 } ?? (url.host() ?? url.absoluteString)
   }
 
+  // MARK: Edit Pin (#363)
+
+  /// Edit Pinned URL... on a pinned tab or a Favorite, Rename... on a Favorite: the Edit Pin popover
+  /// (design/edit-pin). Use Current Page fills in the live page's address, the stored one for a tab with no page.
+  func editPin(node: NodeID, focus: EditPinFocus) {
+    let live = tabsByNode[node].flatMap { engine.snapshot(of: $0)?.url }
+    sidebarController.openEditPin(node: node, focus: focus, currentPage: live)
+  }
+
   // MARK: Menu validation
 
   /// Titles File > Pin / Unpin Tab for the current tab and gates the three pinned commands; nil for other items.

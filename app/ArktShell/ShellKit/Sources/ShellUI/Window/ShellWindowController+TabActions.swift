@@ -29,6 +29,7 @@ extension ShellWindowController {
     case .archive(let ids): closeAll(ids)
     case .resetPinned(let id): resetPinned(node: id)
     case .replacePin(let id): replacePin(node: id)
+    case .editPin(let id, let focus): editPin(node: id, focus: focus)
     case .separateFromPinned(let id): separateFromPinned(node: id)
     case .removeFromFavorites(let id): removeFromFavorites(id)
     case .openInSplitView(let ids): openInSplitView(ids)

@@ -956,8 +956,8 @@ final class TabActionsTests: XCTestCase {
                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     let menu = try XCTUnwrap(grid.collectionView.menu(for: event), "the tile has a menu")
     XCTAssertEqual(menu.items.filter { !$0.isAlternate }.map(\.title),
-                   ["Rename", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL", "", "Copy Link", "",
-                    "Remove from Favorites", "Close and Keep Favorite"])
+                   ["Rename\u{2026}", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
+                    "Copy Link", "", "Remove from Favorites", "Close and Keep Favorite"])
 
     menu.performActionForItem(at: menu.indexOfItem(withTitle: "Remove from Favorites"))
 
