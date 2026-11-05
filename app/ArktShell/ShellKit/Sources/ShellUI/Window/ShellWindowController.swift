@@ -187,6 +187,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private(set) lazy var infobarStrips = makeInfobarPresenter()
   /// The find bar's state and engine calls, and its view over the card (#134); see `+Find`.
   private(set) lazy var findBar = makeFindBar()
+  /// The zoom pill's state and its view over the card (#579); see `+Zoom`.
+  private(set) lazy var zoomPill = makeZoomPill()
   private(set) lazy var statusPill = makeStatusPillPresenter()
   /// The crashed tab view over a page whose process went away (#578).
   private(set) lazy var crashedTabs = makeCrashedTabPresenter()
@@ -791,6 +793,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     permissionPrompts.refresh()
     infobarStrips.refresh()
     refreshFindBar()
+    refreshZoomPill()
     statusPill.refresh()
     refreshCrashedTabs()                                            // #578
   }
@@ -878,8 +881,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       break                                                         // routed above, before the row lookup (#114)
     case .tabCrashed, .tabRecovered:
       break                                                         // routed above, before the row lookup (#578)
-    case .zoomChanged, .tabFullscreenChanged:
-      break                                                         // no shell surface yet (#579, #581)
+    case .zoomChanged:
+      zoomPill.handle(event)                                        // #579
+    case .tabFullscreenChanged:
+      break                                                         // no shell surface yet (#581)
     }
   }
 
@@ -893,6 +898,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   ///   stays unloaded as after Cmd-W.
   private func tabDidClose(_ tab: TabID, node: NodeID, reason: CloseReason) {
     findBar.forget(tab)                                     // #134
+    zoomPill.forget(tab)                                    // #579
     tabsByNode[node] = nil
     nodeByTab[tab] = nil
     let wasCurrent = currentTab == tab

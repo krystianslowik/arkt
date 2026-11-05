@@ -105,6 +105,7 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
   func refresh() {
     guard let display = presenter?.display else {
       hide()
+      (superview as? ContentCardView)?.layoutZoomPill()         // the zoom pill moves up into the corner (#579)
       return
     }
     let wasHidden = isHidden
@@ -117,6 +118,7 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
     nextButton.isEnabled = !noMatches
     applyColors()
     (superview as? ContentCardView)?.layoutFindBar()
+    (superview as? ContentCardView)?.layoutZoomPill()           // below the bar (#579)
     needsLayout = true
     layoutSubtreeIfNeeded()
     if wasHidden, presenter?.isOpening == true { animateEntrance() }
