@@ -7,33 +7,20 @@ import EngineAPI
 /// `autoenablesItems` off so each item shows the engine's enabled and checked state as given. Titles are kept
 /// verbatim; AppKit lays out and truncates long ones.
 ///
-/// Separators are tidied the macOS way, at every level: a separator at the start or end of a menu is dropped and a
-/// run of separators shows as one. A submenu left with no items shows its holder disabled, with no arrow.
+/// Separators are tidied the macOS way, at every level (`EngineMenuItem.tidied`): a separator at the start or end of
+/// a menu is dropped and a run of separators shows as one. A submenu left with no items shows its holder disabled,
+/// with no arrow.
 ///
-/// Choosing an enabled command item calls `onCommand` with its command. The menu keeps its command target alive
-/// through the items, and the target holds only `onCommand`, so the menu never retains its owner: an owner that
-/// keeps the menu captures itself weakly in `onCommand`.
+/// Choosing an enabled command item calls `onCommand` with its `EngineMenuCommand`, which goes back to the menu's
+/// source, never to command forwarding. The menu keeps its command target alive through the items'
+/// `representedObject` (taken by the builder; callers leave it alone), and the target holds only `onCommand`, so the
+/// menu never retains its owner: an owner that keeps the menu captures itself weakly in `onCommand`. The builder sets
+/// no `NSMenu.delegate`; a caller that needs to know the menu closed without a choice attaches its own.
 @MainActor
 public enum EngineMenuBuilder {
   public static func menu(_ items: [EngineMenuItem], title: String = "",
-                          onCommand: @escaping @MainActor (EngineCommand) -> Void) -> NSMenu {
-    build(tidied(items), title: title, target: EngineMenuCommandTarget(onCommand))
-  }
-
-  /// `items` with separators dropped at the ends and runs collapsed, in every submenu too.
-  public nonisolated static func tidied(_ items: [EngineMenuItem]) -> [EngineMenuItem] {
-    var result: [EngineMenuItem] = []
-    for item in items {
-      if item.isSeparator {
-        if let last = result.last, !last.isSeparator { result.append(item) }
-      } else if let children = item.submenu {
-        result.append(.submenu(item.title, tidied(children), isEnabled: item.isEnabled))
-      } else {
-        result.append(item)
-      }
-    }
-    if result.last?.isSeparator == true { result.removeLast() }
-    return result
+                          onCommand: @escaping @MainActor (EngineMenuCommand) -> Void) -> NSMenu {
+    build(EngineMenuItem.tidied(items), title: title, target: EngineMenuCommandTarget(onCommand))
   }
 
   private static func build(_ items: [EngineMenuItem], title: String, target: EngineMenuCommandTarget) -> NSMenu {
@@ -70,15 +57,15 @@ public enum EngineMenuBuilder {
 /// Every command item's target in one built menu. It holds the callback only, never the menu or the owner.
 @MainActor
 final class EngineMenuCommandTarget: NSObject {
-  private let onCommand: @MainActor (EngineCommand) -> Void
+  private let onCommand: @MainActor (EngineMenuCommand) -> Void
 
-  init(_ onCommand: @escaping @MainActor (EngineCommand) -> Void) {
+  init(_ onCommand: @escaping @MainActor (EngineMenuCommand) -> Void) {
     self.onCommand = onCommand
   }
 
   /// A disabled item never delivers its command, even when its action is sent by hand.
   @objc func choose(_ sender: NSMenuItem) {
     guard sender.isEnabled else { return }
-    onCommand(EngineCommand(rawValue: sender.tag))
+    onCommand(EngineMenuCommand(rawValue: sender.tag))
   }
 }

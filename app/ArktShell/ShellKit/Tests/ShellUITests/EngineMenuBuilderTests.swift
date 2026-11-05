@@ -11,7 +11,7 @@ struct EngineMenuBuilderTests {
     _ = NSApplication.shared             // `performActionForItem(at:)` sends through `NSApp`
   }
 
-  private static func command(_ raw: Int) -> EngineCommand { EngineCommand(rawValue: raw) }
+  private static func command(_ raw: Int) -> EngineMenuCommand { EngineMenuCommand(rawValue: raw) }
   private static func item(_ title: String, _ raw: Int, enabled: Bool = true, checked: Bool = false) -> EngineMenuItem {
     EngineMenuItem(title: title, command: command(raw), isEnabled: enabled, isChecked: checked)
   }
@@ -138,16 +138,10 @@ struct EngineMenuBuilderTests {
     #expect(EngineMenuBuilder.menu([]) { _ in }.items.isEmpty)
   }
 
-  @Test func tidiedIsPureAndRecursive() {
-    let tidied = EngineMenuBuilder.tidied([.separator, Self.item("A", 1), .separator, .separator,
-                                           .submenu("S", [.separator, Self.item("B", 2)]), .separator])
-    #expect(tidied == [Self.item("A", 1), .separator, .submenu("S", [Self.item("B", 2)])])
-  }
-
   // MARK: Selection
 
   @Test func selectingAnItemCallsBackWithItsCommand() {
-    var received: [EngineCommand] = []
+    var received: [EngineMenuCommand] = []
     let menu = EngineMenuBuilder.menu([Self.item("Copy", 50150), Self.item("Paste", 50151)]) { received.append($0) }
     menu.performActionForItem(at: 1)
     menu.performActionForItem(at: 0)
@@ -155,7 +149,7 @@ struct EngineMenuBuilderTests {
   }
 
   @Test func selectingANestedItemCallsBackWithItsCommand() throws {
-    var received: [EngineCommand] = []
+    var received: [EngineMenuCommand] = []
     let menu = EngineMenuBuilder.menu([.submenu("One", [.submenu("Two", [Self.item("Deep", 77)])])]) {
       received.append($0)
     }
@@ -165,14 +159,14 @@ struct EngineMenuBuilderTests {
   }
 
   @Test func disabledItemNeverDeliversItsCommand() {
-    var received: [EngineCommand] = []
+    var received: [EngineMenuCommand] = []
     let menu = EngineMenuBuilder.menu([Self.item("Off", 9, enabled: false)]) { received.append($0) }
     menu.performActionForItem(at: 0)
     #expect(received.isEmpty)
   }
 
   @Test func checkedItemStillDeliversItsCommand() {
-    var received: [EngineCommand] = []
+    var received: [EngineMenuCommand] = []
     let menu = EngineMenuBuilder.menu([Self.item("Spell check", 5, checked: true)]) { received.append($0) }
     menu.performActionForItem(at: 0)
     #expect(received == [Self.command(5)])
@@ -182,7 +176,7 @@ struct EngineMenuBuilderTests {
 
   /// The owner keeps the menu; the menu reaches the owner only through the callback, which captures it weakly.
   private final class Owner {
-    var received: [EngineCommand] = []
+    var received: [EngineMenuCommand] = []
     var menu: NSMenu?
     @MainActor func show(_ items: [EngineMenuItem]) {
       menu = EngineMenuBuilder.menu(items) { [weak self] in self?.received.append($0) }
