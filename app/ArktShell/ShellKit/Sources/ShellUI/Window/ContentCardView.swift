@@ -9,6 +9,9 @@ public final class ContentCardView: NSView {
   public private(set) var contentView: NSView?
   /// Covers the page inside `clipView` (rounded corners, hairline above it) while set; the first-run empty state.
   public private(set) var emptyStateView: NSView?
+  /// Covers the page area (below the Toolbar) while set: the crashed tab view (#578). Above the page, below the
+  /// Toolbar and the empty state.
+  public private(set) var pageOverlayView: NSView?
   /// Back / Forward / Reload and the full URL at the top of the page while `showsToolbar` (KB-018, BH-032).
   /// Inside `clipView`, so the card's corners clip it; the page and the empty state sit below it.
   public let toolbar = ContentToolbarView(frame: .zero)
@@ -134,6 +137,7 @@ public final class ContentCardView: NSView {
   /// (autoresizing, no constraints).
   public func setContent(_ view: NSView?) {
     if contentView === view { return }
+    setPageOverlay(nil)                                     // it covered the page that leaves
     contentView?.removeFromSuperview()
     contentView = view
     guard let view else { return }
@@ -146,6 +150,7 @@ public final class ContentCardView: NSView {
   /// Forgets the content without removing it: another card mounts the same view next (Little Arkt's Open in moves
   /// the page's view to the main window), and removing it here could take it out of that card.
   public func releaseContent() {
+    setPageOverlay(nil)
     contentView = nil
   }
 
@@ -159,6 +164,18 @@ public final class ContentCardView: NSView {
     view.autoresizingMask = [.width, .height]
     view.frame = clipView.bounds
     clipView.addSubview(view, positioned: .above, relativeTo: nil)
+  }
+
+  /// Installs `view` over the page area, below the Toolbar, or removes the current one when nil.
+  public func setPageOverlay(_ view: NSView?) {
+    if pageOverlayView === view { return }
+    pageOverlayView?.removeFromSuperview()
+    pageOverlayView = view
+    guard let view else { return }
+    view.translatesAutoresizingMaskIntoConstraints = true
+    view.autoresizingMask = [.width, .height]
+    view.frame = contentFrame
+    clipView.addSubview(view, positioned: .below, relativeTo: toolbar)
   }
 
   public override func setFrameSize(_ newSize: NSSize) {
@@ -175,6 +192,7 @@ public final class ContentCardView: NSView {
     let split = split
     toolbar.frame = split.toolbarFrame
     contentView?.frame = split.contentFrame
+    pageOverlayView?.frame = split.contentFrame
     emptyStateView?.frame = clipView.bounds
     layoutFindBar()
     layoutStatusPill()
