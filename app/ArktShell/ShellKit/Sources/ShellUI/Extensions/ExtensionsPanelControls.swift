@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 /// The Extensions panel's motion (design/extensions, Motion), as data. Transform and opacity only.
 @MainActor
@@ -6,14 +7,14 @@ enum ExtensionsPanelMotion {
   /// The design system's `firmFast` `cubic-bezier(0.2, 1, 0.4, 1)` for the panel, `firm` for the drop.
   static let firmFast = CAMediaTimingFunction(controlPoints: 0.2, 1, 0.4, 1)
   static let firm = CAMediaTimingFunction(controlPoints: 0.25, 1, 0.5, 1)
-  static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+  static let easeOut = MotionCurve.strongEaseOut.timingFunction
   /// The panel appears: opacity 0 to 1, scale 0.97 to 1 and 4 pt down to its place over 0.22 s; Reduce Motion fades
   /// in 0.15 s.
   static let appearDuration: CFTimeInterval = 0.22
   static let appearScale: CGFloat = 0.97
   static let appearOffset: CGFloat = 4
-  static let reducedAppearDuration: CFTimeInterval = 0.15
-  static let exitDuration: CFTimeInterval = 0.10
+  static let reducedAppearDuration: CFTimeInterval = FadeDuration.standard
+  static let exitDuration: CFTimeInterval = FadeDuration.quick
   /// The row lifted by its grip scales to 1.02 (Reduce Motion: no scale) and follows the pointer.
   static let liftScale: CGFloat = 1.02
   /// The dropped row settles into its slot in 0.18 s (Reduce Motion: it jumps).
