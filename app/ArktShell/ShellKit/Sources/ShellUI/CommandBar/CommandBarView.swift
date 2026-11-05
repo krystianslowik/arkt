@@ -91,7 +91,6 @@ final class CommandBarView: NSView {
     setAccessibilityRole(.group)
     setAccessibilityLabel("Command bar")
     setAccessibilityIdentifier(AXID.CommandBar.root)
-    setAccessibilityValue(AXID.CommandBar.closed)
     layer?.cornerRadius = CommandBarGeometry.cornerRadius
     layer?.cornerCurve = .continuous
     layer?.masksToBounds = true

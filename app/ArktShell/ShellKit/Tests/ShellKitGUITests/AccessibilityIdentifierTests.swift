@@ -365,9 +365,10 @@ final class AccessibilityIdentifierTests: XCTestCase {
     let bar = controller.commandBar
     bar.prewarm()
 
-    // While hidden, the panel stays ordered in but is inert; its content view carries `commandBar` with value `closed`.
+    // While hidden, the panel stays ordered in but is inert and leaves the tree. The root carries no "open" / "closed"
+    // value for VoiceOver to read (#608).
     XCTAssertEqual(bar.barView.accessibilityIdentifier(), AXID.CommandBar.root)
-    XCTAssertEqual(bar.barView.accessibilityValue() as? String, AXID.CommandBar.closed)
+    XCTAssertNil(bar.barView.accessibilityValue())
     XCTAssertEqual(descendants(of: bar.panel).count, 0, "hidden panel exposes no accessibility children")
 
     controller.newTab(nil)
@@ -382,7 +383,7 @@ final class AccessibilityIdentifierTests: XCTestCase {
 
     let root = try XCTUnwrap(inPanel(AXID.CommandBar.root).first)
     XCTAssertEqual(root.accessibilityRole(), .group)
-    XCTAssertEqual(root.accessibilityValue() as? String, AXID.CommandBar.open)
+    XCTAssertNil(root.accessibilityValue())
     XCTAssertEqual(inPanel(AXID.CommandBar.field).count, 1)
     XCTAssertEqual(inPanel(AXID.CommandBar.results).count, 1)
 
@@ -402,7 +403,8 @@ final class AccessibilityIdentifierTests: XCTestCase {
                    Array(repeating: false, count: rows.count - 1) + [true])
 
     bar.hide(restoreFocus: false)
-    XCTAssertEqual(bar.barView.accessibilityValue() as? String, AXID.CommandBar.closed)
+    XCTAssertNil(bar.barView.accessibilityValue())
+    XCTAssertEqual(descendants(of: bar.panel).count, 0, "hidden again: out of the tree")
     controller.close()
   }
 
