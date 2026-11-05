@@ -49,6 +49,7 @@ final class FavoritesAndPinnedTests: ArktUITestCase {
     let (server, app) = try await launchSeeded()
     let urlBar = try showToolbarURLBar(in: app)
     let row = try pinnedWiki(in: app, server: server, urlBar: urlBar)
+    XCTAssertEqual(row.value as? String, "Pinned, current", "VoiceOver hears the section and state (#607)")
     let titles = archiveTitles(shown: row.label, original: wikiTitle, path: wikiPath)
 
     try foreground(app)

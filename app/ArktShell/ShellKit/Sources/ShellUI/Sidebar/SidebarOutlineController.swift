@@ -616,6 +616,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Rows cannot be selected in the table's sense, so a drag starts on one row: the first node among `items`. It
   /// carries the multi-selection when that row is part of it.
   func draggingSessionWillBegin(items: [Any], session: NSDraggingSession? = nil) {
+    outlineView.lastClickPoint = nil                  // the drag ends the click it began with; no row action follows
     let ids = items.compactMap { ($0 as? OutlineItem)?.nodeID }
     guard let id = ids.first(where: { source.node($0) != nil }) else { return }
     drop.sourceBegan(dragPayload(startingAt: id), session: session)
@@ -709,10 +710,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   // MARK: Accessibility (#269)
 
-  /// Feeds the outline's proxy rows from the model: identifier and label as the rows have them, "Closing" while a
-  /// close is held, the depth and expansion of containers, selection as the `current` row state (outline selection
-  /// stays off), the realized cell (its title and hover close button) as the row's child, and the row's VoiceOver
-  /// actions. Every answer is read when asked; none builds a row view.
+  /// Feeds the outline's proxy rows from the model: identifier and label as the rows have them, the section and
+  /// state as the value (`accessibilityValue(of:)`), the depth and expansion of containers, selection as the
+  /// `current` row state (outline selection stays off), the realized cell (its title and hover close button) as the
+  /// row's child, the row's VoiceOver actions, press (as a click) and show menu (the right-click menu, #607). Every
+  /// answer is read when asked; none builds a row view.
   private func wireAccessibility() {
     let proxies = outlineView.axProxyRows
     proxies.content = { [weak self] row in self?.accessibilityContent(ofRow: row) }
@@ -735,7 +737,28 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       guard let self, let id = self.nodeID(atRow: row) else { return false }
       return self.performAccessibilityAction(named: name, on: id)
     }
+    proxies.performPress = { [weak self] row in
+      guard let self, self.nodeID(atRow: row) != nil else { return false }
+      // A press has no mouse-down: never hit-test the favicon against the point of an earlier click.
+      self.outlineView.lastClickPoint = nil
+      self.handleClick(row: row, modifiers: [])
+      return true
+    }
+    proxies.performShowMenu = { [weak self] row in
+      guard let self, self.nodeID(atRow: row) != nil, let menu = self.menu(forRow: row) else { return false }
+      if let present = self.presentAccessibilityMenu {
+        present(menu, row)
+      } else {
+        let rect = self.outlineView.rect(ofRow: row)
+        menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY), in: self.outlineView)
+      }
+      return true
+    }
   }
+
+  /// Shows the menu of a VoiceOver show-menu on `row`; nil pops it up under the row. Tests replace it to record the
+  /// menu instead of tracking it.
+  var presentAccessibilityMenu: (@MainActor (NSMenu, Int) -> Void)?
 
   func nodeID(atRow row: Int) -> NodeID? {
     (outlineView.item(atRow: row) as? OutlineItem)?.nodeID
@@ -753,10 +776,38 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     case .tab?, nil: nil
     }
     return AXProxyRowContent(
-      identifier: rowIdentifier(for: id), label: title(of: id),
-      value: (closingProvider?(id) ?? false) ? "Closing" : nil,
+      identifier: rowIdentifier(for: id), label: title(of: id), value: accessibilityValue(of: id),
       disclosureLevel: max(0, outlineView.level(forRow: row)),
       isExpanded: isExpanded)
+  }
+
+  /// What VoiceOver reads after a row's title (#607): its section, then "current", the sound ("playing audio" or
+  /// "muted") and "closing" while a close is held, each only when it applies. "Pinned, playing audio";
+  /// "Today, current".
+  private func accessibilityValue(of id: NodeID) -> String {
+    var parts: [String] = []
+    switch source.section(containing: id) {
+    case .pinned?: parts.append("Pinned")
+    case .today?: parts.append("Today")
+    case .favorites?: parts.append("Favorites")
+    case .folder?, .split?, nil: break
+    }
+    if state(for: id) == .current { parts.append("current") }
+    switch audio(of: id) {
+    case .playing: parts.append("playing audio")
+    case .muted: parts.append("muted")
+    case .silent: break
+    }
+    if closingProvider?(id) ?? false { parts.append("closing") }
+    return parts.joined(separator: ", ")
+  }
+
+  /// Tells clients the value of `id`'s row changed, when the row is shown.
+  private func postValueChanged(for id: NodeID) {
+    guard let item = items[id] else { return }
+    let row = outlineView.row(forItem: item)
+    guard row >= 0 else { return }
+    outlineView.axProxyRows.post(.valueChanged, forRow: row)
   }
 
   // MARK: Row state
@@ -816,8 +867,15 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     self.resolver = resolver
     if resolver.current != peekedCurrent { currentChanged() }
     guard !changed.isEmpty else { return }
-    // The proxies read selection from the resolver; tell clients that cached it.
+    // The proxies read selection and the value ("current") from the resolver; tell clients that cached them.
     outlineView.axProxyRows.selectionDidChange()
+    var valueChanged = Set(changed)
+    for id in changed {
+      if let container = source.parent(of: id)?.containerNode, case .split? = source.node(container) {
+        valueChanged.insert(container)                // a split row is current while one of its panes is
+      }
+    }
+    valueChanged.forEach(postValueChanged(for:))
     outlineView.enumerateAvailableRowViews { rowView, row in
       guard let rowView = rowView as? SidebarRowView,
             let item = self.outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }
@@ -858,7 +916,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public func audioChanged(node id: NodeID) {
     guard let item = items[id] else { return }
     let row = outlineView.row(forItem: item)
-    guard row >= 0, let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+    guard row >= 0 else { return }
+    outlineView.axProxyRows.post(.valueChanged, forRow: row)  // the value says the sound (#607)
+    guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
             as? SidebarTabCellView else { return }
     cell.setAudio(audio(of: id), animated: true)
   }
@@ -1340,7 +1400,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// `dragToCombineTabsIntoSplitEnabled` [S]; here they are always on [I]. An Opt-click on any other tab, or on a
   /// pane, activates it like a plain click [I]. A click on a pinned tab's favicon goes to the window's reset path
   /// (GS-005, BH-057, BH-058); anywhere else on the row activates it. The recorded click point serves this click
-  /// only, so an activation without a mouse-down (an AX press) is never hit-tested against a stale point.
+  /// only: it is cleared here, when a drag begins, and before an AX press (which has no mouse-down), so an
+  /// activation is never hit-tested against a stale point.
   func handleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
     defer { outlineView.lastClickPoint = nil }
     guard row >= 0, let item = outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }

@@ -29,7 +29,17 @@ public final class FavoriteTileView: NSView {
       guard isCurrent != oldValue else { return }
       needsDisplay = true
       applyFillOpacity()
+      postAccessibility(.valueChanged)             // the spoken value says "current" (#607)
     }
+  }
+  /// Whether the Favorite's page is loaded in this window; the grid sets it with the `loaded` / `unloaded` value.
+  var isLoaded = false
+  /// Testing seam: receives every accessibility notification this tile posts. Nil (the default) records nothing.
+  var postedNotificationsForTesting: (@MainActor (NSAccessibility.Notification) -> Void)?
+
+  private func postAccessibility(_ notification: NSAccessibility.Notification) {
+    NSAccessibility.post(element: self, notification: notification)
+    postedNotificationsForTesting?(notification)
   }
   /// The selection fill's layer opacity (#465): Little Arkt's arrival fades it on the flight's room spring. Only
   /// the fill fades; the favicon stays, and the title is this view's accessibility label.
@@ -53,6 +63,10 @@ public final class FavoriteTileView: NSView {
   public internal(set) var nodeID: NodeID?
   /// What the X does; nil (no loaded page) never shows it.
   public private(set) var closeAction: RowCloseAction?
+  /// What VoiceOver's press (VO-Space) and show menu (VO-Shift-M) do on this tile (#607); the grid sets them for the
+  /// Favorite shown and reuse clears them. Nil: the tile offers that action to no one.
+  var onAccessibilityPress: (@MainActor () -> Void)?
+  var onAccessibilityShowMenu: (@MainActor () -> Void)?
   /// Whether the X is shown or fading in (the tile is hovered and there is a close action).
   public private(set) var isCloseButtonShown = false
   private var hoverArea: NSTrackingArea?
@@ -190,10 +204,44 @@ public final class FavoriteTileView: NSView {
     selectionAlpha = 1
     isKeyboardFocused = false
     nodeID = nil
+    isLoaded = false
     setCloseAction(nil)
     setCloseButtonShown(false, animated: false)        // no fade on a reused tile
     setAccessibilityValue(nil)
     setAccessibilityCustomActions([])
+    onAccessibilityPress = nil
+    onAccessibilityShowMenu = nil
+  }
+
+  /// The current Favorite reports itself selected, as the current sidebar row does (#607).
+  public override func isAccessibilitySelected() -> Bool { isCurrent }
+
+  /// What VoiceOver speaks for the value (#607): the value itself is the `loaded` / `unloaded` token clients and UI
+  /// tests read, and VoiceOver does not speak "selected" on a button. "Favorites, current"; "Favorites, loaded";
+  /// "Favorites" for a Favorite with no page open.
+  public override func accessibilityValueDescription() -> String? {
+    if isCurrent { return "Favorites, current" }
+    return isLoaded ? "Favorites, loaded" : "Favorites"
+  }
+
+  public override func accessibilityPerformPress() -> Bool {
+    guard let onAccessibilityPress else { return false }
+    onAccessibilityPress()
+    return true
+  }
+
+  public override func accessibilityPerformShowMenu() -> Bool {
+    guard let onAccessibilityShowMenu else { return false }
+    onAccessibilityShowMenu()
+    return true
+  }
+
+  public override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+    if selector == #selector(NSAccessibilityProtocol.accessibilityPerformPress) { return onAccessibilityPress != nil }
+    if selector == #selector(NSAccessibilityProtocol.accessibilityPerformShowMenu) {
+      return onAccessibilityShowMenu != nil
+    }
+    return super.isAccessibilitySelectorAllowed(selector)
   }
 
   public override func accessibilityParent() -> Any? {
@@ -363,6 +411,9 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   public var pageLoadedProvider: (@MainActor (NodeID) -> Bool)?
   /// A Favorite tile's context menu action (design 3.3); the window runs it.
   public var onMenuAction: (@MainActor (SidebarMenuAction) -> Void)?
+  /// Shows the menu of a VoiceOver show-menu on a tile (#607); nil pops it up under the tile. Tests replace it to
+  /// record the menu instead of tracking it.
+  var presentAccessibilityMenu: (@MainActor (NSMenu, FavoriteTileView) -> Void)?
   /// A Favorite tab tile started or ended a drag (#214, S7); the window shows and hides its drop overlay.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   public var onNodeDragEnded: (@MainActor () -> Void)?
@@ -551,12 +602,36 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.setAccessibilityLabel(title)
     tile.nodeID = id
     let isLoaded = pageLoadedProvider?(id) == true
+    tile.isLoaded = isLoaded
     tile.setAccessibilityValue(isLoaded ? AXID.Favorites.loaded : AXID.Favorites.unloaded)
     let action = isLoaded ? RowCloseAction.resolve(id, in: source) : nil
     tile.closeButton.target = self
     tile.closeButton.action = #selector(closeClicked(_:))
     tile.setCloseAction(action)
     tile.setAccessibilityCustomActions(closeAccessibilityActions(for: id, action: action))
+    tile.onAccessibilityPress = { [weak self] in self?.accessibilityPress(id) }
+    tile.onAccessibilityShowMenu = { [weak self, weak tile] in
+      guard let self, let tile else { return }
+      self.accessibilityShowMenu(id, on: tile)
+    }
+  }
+
+  /// VoiceOver's press on a tile: the Favorite activates, as a click on it does (#607).
+  private func accessibilityPress(_ id: NodeID) {
+    guard nodeIDs.contains(id) else { return }
+    keyboardFocusID = nil
+    onActivate?(id)
+  }
+
+  /// VoiceOver's show menu on a tile: the Favorite's right-click menu, under the tile (#607).
+  private func accessibilityShowMenu(_ id: NodeID, on tile: FavoriteTileView) {
+    guard let menu = contextMenu(for: id) else { return }
+    if let presentAccessibilityMenu {
+      presentAccessibilityMenu(menu, tile)
+    } else {
+      let below = NSPoint(x: 0, y: tile.isFlipped ? tile.bounds.maxY : tile.bounds.minY)
+      menu.popUp(positioning: nil, at: below, in: tile)
+    }
   }
 
   // MARK: Close

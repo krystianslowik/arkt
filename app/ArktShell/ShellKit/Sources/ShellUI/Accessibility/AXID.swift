@@ -106,11 +106,13 @@ public enum AXID {
     public static let spaceCollapsePinned = "sidebar.spaceCollapsePinned"
     /// The current Space page's outline of pinned and Today rows (a proxy element, #269).
     public static let outline = "sidebar.outline"
-    /// Label: row title. Selected: row state is `current`.
+    /// Label: row title. Value: section and state, "Pinned, current, playing audio". Selected: row state is
+    /// `current`. Actions: press (activate), show menu (the context menu).
     public static let rowPinned = "sidebar.row.pinned"
-    /// Label: row title. Selected: row state is `current`.
+    /// Label: row title. Value: section and state, "Today, current". Selected: row state is `current`. Actions:
+    /// press (activate), show menu (the context menu).
     public static let rowToday = "sidebar.row.today"
-    /// Label: folder title.
+    /// Label: folder title. Value: section. Actions: press (open or close), show menu (the context menu).
     public static let rowFolder = "sidebar.row.folder"
     /// Label: joined pane titles. Selected: any pane of the split is `current`.
     public static let rowSplit = "sidebar.row.split"
@@ -124,7 +126,8 @@ public enum AXID {
   /// Favorites grid and tiles at the top of the sidebar (group U4b).
   public enum Favorites {
     public static let grid = "favorites.grid"
-    /// Label: title. Value: `loaded` or `unloaded`.
+    /// Label: title. Value: `loaded` or `unloaded`. Selected: the Favorite is current. Actions: press (activate),
+    /// show menu (the context menu).
     public static let tile = "favorites.tile"
     /// Present only while a loaded tile is hovered.
     public static let tileClose = "favorites.tile.close"

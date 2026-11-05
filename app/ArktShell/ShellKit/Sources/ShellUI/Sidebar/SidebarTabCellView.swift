@@ -63,7 +63,6 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
       let alpha: CGFloat = isClosing ? Self.closingAlpha : 1
       titleField.alphaValue = alpha
       faviconView.alphaValue = alpha
-      setAccessibilityValue(isClosing ? "Closing" : nil)
     }
     titleField.stringValue = title
     titleField.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
