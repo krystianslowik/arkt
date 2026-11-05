@@ -234,7 +234,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.sessionStore = sessionStore
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
-    root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
+    root.onSidebarStateChange = { [weak self] in
+      self?.saveSidebarState()
+      self?.extensionsPanel?.sidebarDidChange(isVisible: self?.isSidebarVisible ?? false)   // #595
+    }
     root.onLayout = { [weak self] in
       self?.javaScriptDialogs.layoutDidFinish()                                      // #400
       self?.permissionPrompts.layoutDidFinish()
@@ -925,9 +928,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   // AppKit resets the standard buttons on each of these.
-  public func windowDidResize(_ notification: Notification) { reapplyTrafficLights() }
+  public func windowDidResize(_ notification: Notification) {
+    reapplyTrafficLights()
+    extensionsPanel?.windowDidResize()
+  }
   public func windowDidEndLiveResize(_ notification: Notification) { reapplyTrafficLights() }
-  public func windowWillEnterFullScreen(_ notification: Notification) { frameBeforeFullScreen = window?.frame }
+  public func windowWillEnterFullScreen(_ notification: Notification) {
+    frameBeforeFullScreen = window?.frame
+    extensionsPanel?.windowWillEnterFullScreen()
+  }
   public func windowWillExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidBecomeKey(_ notification: Notification) {
