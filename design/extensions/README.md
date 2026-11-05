@@ -139,3 +139,34 @@ letters in both. The menu uses the system's menu material. Increase Contrast add
 |---|---|
 | `prototype.html` | Single-file prototype, no network, synthetic data |
 | `screens/extensions-<state>-<light\|dark>.png` | 44 screenshots at 2x (1080 x 720 window): `a-`, `b-`, `c-` pinned, reorder, install, install-long; menu, menu-unpinned, shortcuts, shortcuts-conflict; surf-crashed, surf-dialog, surf-restore, surf-pageinfo, surf-zoom, surf-sharing |
+
+## Picked: C panel and B install sheet, added states (#590)
+
+The pick is C (one Extensions button and a panel) for pinned actions and B (the detailed sheet) for install. These
+states complete it; every older state in the prototype renders as before. Screens:
+`screens/extensions-<state>-<light|dark>.png`, 10 files at 2x.
+
+| State | What it shows |
+|---|---|
+| `c-empty` | zero extensions: puzzle tile, "No extensions yet", one line, **Browse the Web Store** (the panel's one primary), Manage Extensions... |
+| `c-none-pinned` | extensions installed, none pinned: the Pinned group shows a hint row (pin the ones you use most; Cmd-E opens each in turn); all six under Not pinned |
+| `c-small` | smallest window (640 x 420, 150 pt sidebar): the panel caps its height to the window, the list scrolls with a faded edge, the footer stays ("Manage..." plus Cmd-E) |
+| `toast-pin` | after Add Extension in the B sheet: "“Quiet Reader” added" with **Pin** (a quiet action). New extensions are not pinned |
+| `shortcuts-record` | the shortcut recorder (the field shows the keys pressed so far) and the row's scope pop-up open: In Arkt (checked) and All Apps, each with a one-line explanation. Scope is per shortcut |
+
+Notes:
+- The conflict notice from `shortcuts-conflict` applies unchanged to All Apps shortcuts; shortcuts macOS reserves are
+  rejected in the recorder ("Some shortcuts are taken by macOS").
+- Under C there are no sidebar icons, so B's "Show in sidebar" switch is not used; Pin from the toast or the panel row
+  pins an extension in the Extensions panel.
+
+### Answered questions (2026-11-05)
+
+1. Pin new extensions on install by default? **No.** The toast offers Pin (`toast-pin`). This replaces "The default
+   for a new extension is pinned" under Pinned actions and question 2 above.
+2. Is the shipped engine-drawn install sheet (#244, #548) close enough to B? **Yes**, no restyle issue.
+
+### Still open
+
+- Default button on a shortcut conflict: Use or Keep Existing (`shortcuts-conflict`, drawn: Use is primary). Waiting
+  for the maintainer's clarification on #590.

@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hover Previews</title>
+<!--
+  Hover previews for pinned and Favorite sites, and link previews (#650), picked direction A: side card, with a
+  snapshot fallback. Single file, no network, synthetic data.
+  Hash: #<mail|calendar|link|empty|long|fallback|settings>[&dark][&rm][&shot]
+    The card is a native list of the site's items, read from the open signed-in tab. When the site's reader fails,
+    the same card shows a picture of the pinned tab instead (fallback).
+  1 CSS px = 1 pt. Site names and content are synthetic.
+-->
+<style>
+:root {
+  /* BrandTokens */
+  --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
+  --graphite: #202321; --porcelain: #FAF9F5;
+  --surface: #FAF9F5;                 /* surfaceBrand */
+  --sys-focus: rgba(0,103,244,0.50);  /* system keyboard focus color */
+  /* ShellTokens */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
+  --text-2: rgba(0,0,0,0.66);                                    /* secondaryText */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --fg: rgba(0,0,0,0.49);                                        /* sidebarForeground */
+  --card-border: rgba(0,0,0,0.10);                               /* cardBorder */
+  --row-cur: rgba(255,255,255,0.85);                             /* tabCurrent */
+  --edge-ic: rgba(0,0,0,0.20);                                   /* increasedContrastEdge */
+  --theme-a: #DCE8F7; --theme-b: #BFD3EE;                        /* sample Space theme (blue) */
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
+  --page: #FFFFFF; --page-text: rgba(0,0,0,0.78); --page-muted: rgba(0,0,0,0.08); --page-link: #1A5FD0; --desktop: #C9CDD2;
+  --win-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --firm-fast: cubic-bezier(0.2, 1, 0.4, 1);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #202321; --sys-focus: rgba(26,145,255,0.55); --fg: rgba(255,255,255,0.57);
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20); --edge-ic: rgba(255,255,255,0.20);
+  --theme-a: #2E3A4C; --theme-b: #1F2734;
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
+  --page: #1E1F22; --page-text: rgba(255,255,255,0.80); --page-muted: rgba(255,255,255,0.08); --page-link: #7FB1FF; --desktop: #2C3036;
+  --win-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--desktop); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color: var(--text); -webkit-font-smoothing: antialiased; display: grid; place-items: center; padding: 40px; overflow: hidden; }
+button, input { font: inherit; color: inherit; }
+svg { display: block; flex: none; }
+.win { width: 1000px; height: 640px; border-radius: 12px; position: relative; overflow: hidden; flex: none;
+  background: linear-gradient(165deg, var(--theme-a), var(--theme-b)); box-shadow: var(--win-shadow); }
+.win.small { width: 720px; height: 520px; }
+.lights { position: absolute; left: 14px; top: 16px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.sidebar { position: absolute; left: 0; top: 0; bottom: 0; width: 220px; padding: 44px 10px 10px; }
+.urlpill { height: 34px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; gap: 7px; padding: 0 10px; color: var(--text-2); margin-bottom: 10px; white-space: nowrap; overflow: hidden; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+.tile { height: 44px; border-radius: 10px; background: var(--fill); display: grid; place-items: center; position: relative; }
+.tile.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.tile.hov { background: var(--fill-hover); }
+.ic { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; color: #fff; font: 700 9.5px/1 -apple-system, sans-serif; flex: none; }
+.tile .ic { width: 20px; height: 20px; border-radius: 5px; font-size: 11px; }
+.stitle { font-size: 11px; font-weight: 600; color: var(--text-2); padding: 6px 9px 4px; }
+.srow { height: 34px; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 0 9px; white-space: nowrap; overflow: hidden; color: var(--text); position: relative; }
+.srow span { overflow: hidden; text-overflow: ellipsis; }
+.srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.srow.hov { background: var(--fill-hover); }
+.sdiv { height: 1px; background: var(--divider); margin: 8px 9px; }
+.card { position: absolute; left: 220px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; overflow: hidden; background: var(--page);
+  box-shadow: 0 0 0 1px var(--card-border), 0 1px 4px rgba(0,0,0,0.10); }
+.cards { position: absolute; left: 220px; top: 10px; right: 10px; bottom: 10px; display: flex; gap: 8px; }
+.cards .card { position: relative; inset: auto; flex: 1; left: auto; top: auto; right: auto; bottom: auto; }
+.page { position: absolute; inset: 0; padding: 56px 0 0; overflow: hidden; color: var(--page-text); }
+.page .col { width: 78%; max-width: 560px; margin: 0 auto; }
+.page h1 { font-size: 26px; line-height: 1.15; letter-spacing: -0.01em; margin: 0 0 14px; font-weight: 650; }
+.page p { font-size: 15px; line-height: 1.6; margin: 0 0 14px; }
+.page a { color: var(--page-link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+.skel { height: 12px; border-radius: 6px; background: var(--page-muted); margin: 0 0 12px; }
+.btn { all: unset; box-sizing: border-box; height: 28px; padding: 0 14px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; background: var(--fill-hover); color: var(--text); white-space: nowrap; }
+.btn.quiet { background: transparent; color: var(--text-2); font-weight: 500; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.nav { position: fixed; left: 12px; top: 8px; z-index: 50; display: flex; gap: 5px; flex-wrap: wrap; font-size: 11px; max-width: calc(100vw - 24px); }
+.nav a { color: var(--text); text-decoration: none; background: var(--surface); padding: 2px 8px; border-radius: 10px; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.15); }
+.nav a.on { background: var(--graphite); color: var(--porcelain); }
+.shot .nav { display: none; }
+.cap { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 11px; color: var(--text-2); }
+.shot .cap { display: none; }
+
+.pv { position: absolute; z-index: 8; background: var(--surface); color: var(--text); border-radius: 12px; box-shadow: var(--overlay-shadow); overflow: hidden;
+  animation: pv-in 180ms var(--firm-fast) both; transform-origin: left top; }
+@keyframes pv-in { from { opacity: 0; transform: translateX(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+body.rm .pv { animation: fade 150ms ease-out both; }
+@keyframes fade { from { opacity: 0; } }
+.shot .pv { animation: none; }
+.pv .hd { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+.pv .hd .t { font-weight: 600; }
+.pv .hd .s { color: var(--text-2); font-size: 12px; margin-left: auto; white-space: nowrap; }
+.pv .cnt { font-size: 11px; font-weight: 600; background: var(--graphite); color: var(--porcelain); border-radius: 8px; padding: 1px 6px; font-variant-numeric: tabular-nums; }
+:root[data-theme="dark"] .pv .cnt { background: var(--porcelain); color: var(--graphite); }
+.pv .it { display: flex; gap: 10px; padding: 7px 12px; align-items: flex-start; }
+.pv .it.hl { background: var(--fill); }
+.pv .it .m { flex: 1; min-width: 0; }
+.pv .it .a { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv .it .b { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.pv .it .tm { color: var(--text-2); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pv .unread { width: 6px; height: 6px; border-radius: 3px; background: var(--text); margin-top: 6px; flex: none; }
+.pv .unread.no { background: transparent; }
+.pv .ft { border-top: 1px solid var(--divider); padding: 7px 12px; color: var(--text-2); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+.pv .empty { padding: 18px 12px 20px; text-align: center; color: var(--text-2); }
+.pv .empty b { display: block; color: var(--text); font-weight: 600; margin-bottom: 2px; }
+.ev { display: flex; gap: 10px; padding: 7px 12px; }
+.ev .bar { width: 3px; border-radius: 2px; background: var(--fg); flex: none; }
+.ev .tm { width: 66px; color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+.snap { margin: 0 10px; border-radius: 8px; overflow: hidden; background: var(--page); box-shadow: 0 0 0 1px var(--card-border); position: relative; }
+.snap .mini { transform-origin: 0 0; position: absolute; left: 0; top: 0; }
+.mini-mail { width: 720px; padding: 18px; font-size: 13px; color: var(--page-text); }
+.mini-mail .r { display: flex; gap: 14px; padding: 9px 4px; border-bottom: 1px solid var(--page-muted); }
+.mini-mail .r b { width: 150px; flex: none; }
+.mini-mail .r span { flex: 1; color: var(--page-text); opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-top { height: 30px; border-radius: 15px; background: var(--page-muted); width: 60%; margin-bottom: 14px; }
+.ph { display: grid; place-items: center; color: var(--text-2); font-size: 12px; height: 100%; background: repeating-linear-gradient(135deg, var(--fill) 0 8px, transparent 8px 16px); }
+.lnk-hov { background: var(--page-muted); border-radius: 3px; }
+.cursor { position: absolute; z-index: 10; width: 14px; height: 20px; }
+.set { position: absolute; left: 240px; top: 30px; width: 520px; background: var(--surface); border-radius: 12px; box-shadow: var(--overlay-shadow); padding: 18px 20px; z-index: 8; }
+.set h2 { font-size: 15px; margin: 0 0 4px; } .set .sub { color: var(--text-2); margin-bottom: 12px; }
+.set .row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--divider); }
+.set .row .l { flex: 1; } .set .row .d { color: var(--text-2); font-size: 12px; }
+.sw { width: 32px; height: 20px; border-radius: 10px; background: var(--fill-hover); position: relative; flex: none; }
+.sw::after { content: ''; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 8px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+.sw.on { background: var(--graphite); } .sw.on::after { left: 14px; }
+:root[data-theme="dark"] .sw.on { background: var(--porcelain); } :root[data-theme="dark"] .sw.on::after { background: var(--graphite); }
+.pop { height: 24px; border-radius: 6px; background: var(--fill-hover); padding: 0 8px; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="nav" class="nav"></div>
+<div id="stage"></div>
+<script>
+// Shared prototype scaffold. Hash: #<dir>-<state>[&dark][&rm][&shot]. Each page defines STATES and VIEWS.
+const SITES = {
+  mail: ['M', '#3A6FD8'], cal: ['C', '#2E9E6A'], docs: ['D', '#7A55C9'], design: ['F', '#D2553D'],
+  notes: ['N', '#5F6B78'], field: ['G', '#B7791F'], tracker: ['T', '#3C8D93'], news: ['R', '#9A4E8C'],
+  shop: ['S', '#C2410C'], wiki: ['W', '#4B5563']
+};
+const ic = (k, cls = '') => { const [l, c] = SITES[k] || ['?', '#777']; return `<i class="ic ${cls}" style="background:${c}">${l}</i>`; };
+const G = {
+  lock: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="10" height="7" rx="1.8"/><path d="M5.3 7V5a2.7 2.7 0 0 1 5.4 0v2"/></svg>',
+  warn: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2 1.8 13.2h12.4z"/><path d="M8 6.5v3.2M8 11.6v.1"/></svg>',
+  chev: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 3 5 5-5 5"/></svg>',
+  updown: '<svg width="8" height="10" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m1.5 4.5 2.5-2.5 2.5 2.5M1.5 7.5 4 10l2.5-2.5"/></svg>',
+  back: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m10 3-5 5 5 5"/></svg>',
+  ext: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5"/></svg>',
+  page: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 1.8h5.2L12.5 5v9.2H4z"/><path d="M9 1.8V5h3.5"/></svg>'
+};
+function sidebar(o = {}) {
+  const fav = o.fav || {};
+  const rows = o.rows || [
+    { k: 'docs', t: 'Quarterly planning notes and the very long title of a shared document', cur: true },
+    { k: 'field', t: 'Field guide: North ridge trail conditions' },
+    { k: 'news', t: 'Morning briefing' },
+    { k: 'wiki', t: 'Glossary of terms' }
+  ];
+  const pinned = o.pinned || [
+    { k: 'tracker', t: 'Release tracker' },
+    { k: 'notes', t: 'Team notes' }
+  ];
+  const r = x => `<div class="srow ${x.cur ? 'cur' : ''} ${x.hov ? 'hov' : ''} ${x.cls || ''}" ${x.id ? `id="${x.id}"` : ''}>${ic(x.k)}<span>${x.t}</span>${x.extra || ''}</div>`;
+  return `<div class="lights"><i></i><i></i><i></i></div>
+  <div class="sidebar">
+    <div class="urlpill ${o.urlCls || ''}" id="urlpill">${o.url || '<span>fieldguide.example/trails/north-ridge</span>'}</div>
+    <div class="favs">${['mail', 'cal', 'docs', 'design'].map(k => `<div class="tile ${fav[k] || ''}" id="fav-${k}">${ic(k)}${o.favExtra?.[k] || ''}</div>`).join('')}</div>
+    ${pinned.map(r).join('')}
+    <div class="sdiv"></div>
+    ${rows.map(r).join('')}
+  </div>`;
+}
+function article(o = {}) {
+  return `<div class="page"><div class="col">
+    <h1>${o.title || 'North ridge trail conditions'}</h1>
+    <p>${o.p || 'The upper switchbacks are clear after the weekend thaw. Expect mud below the tree line and loose rock on the last two hundred meters. The <a id="lnk">winter access notes</a> list the gates that stay closed until spring.'}</p>
+    <p>Water is available at the second hut. Carry a layer for the saddle; the wind there is stronger than the forecast suggests, and the descent on the east side is steeper than the map shows.</p>
+    <p>Parking at the lower lot fills by nine on weekends. The shuttle runs every forty minutes from the village square.</p>
+  </div></div>`;
+}
+function skeleton() {
+  return `<div class="page"><div class="col"><div class="skel" style="width:60%;height:22px;margin-bottom:22px"></div>
+  ${[100, 94, 98, 70, 0, 100, 88, 96, 52].map(w => w ? `<div class="skel" style="width:${w}%"></div>` : '<div style="height:14px"></div>').join('')}</div></div>`;
+}
+function boot() {
+  const parse = () => {
+    const [head, ...flags] = location.hash.slice(1).split('&');
+    return { key: head || Object.keys(VIEWS)[0], dark: flags.includes('dark'), rm: flags.includes('rm'), shot: flags.includes('shot') };
+  };
+  const draw = () => {
+    const s = parse();
+    document.documentElement.dataset.theme = s.dark ? 'dark' : 'light';
+    document.body.classList.toggle('rm', s.rm);
+    document.body.classList.toggle('shot', s.shot);
+    const keys = Object.keys(VIEWS);
+    const key = VIEWS[s.key] ? s.key : keys[0];
+    document.body.dataset.view = key;
+    const flags = (s.dark ? '&dark' : '') + (s.rm ? '&rm' : '');
+    document.getElementById('nav').innerHTML = keys.map(k => `<a href="#${k}${flags}" class="${k === key ? 'on' : ''}">${k}</a>`).join('') +
+      `<a href="#${key}${s.dark ? '' : '&dark'}${s.rm ? '&rm' : ''}">${s.dark ? 'light' : 'dark'}</a><a href="#${key}${s.dark ? '&dark' : ''}${s.rm ? '' : '&rm'}">${s.rm ? 'motion' : 'reduce motion'}</a>`;
+    document.getElementById('stage').innerHTML = VIEWS[key](s);
+  };
+  addEventListener('hashchange', draw);
+  draw();
+}
+
+// SHOTS: mail calendar link empty long fallback settings
+const CUR = `<svg class="cursor" viewBox="0 0 14 20"><path d="M1 1v15l4-4 3 7 2.5-1-3-6.5H13z" fill="#111" stroke="#fff" stroke-width="1.2"/></svg>`;
+const MAIL = [
+  ['Hut warden', 'Second hut water is back on', 'Pump repaired this morning; the tank is full again.', '9:41'],
+  ['Trail crew', 'Saturday work party: bring gloves', 'We meet at the lower lot at eight sharp.', '8:15'],
+  ['Shuttle office', 'Winter timetable from next week', 'Buses leave every forty minutes until dusk.', 'Yesterday'],
+  ['Map room', 'Updated east descent contours', 'The new survey corrects the last two hundred meters.', 'Mon']
+];
+const LONG = [
+  ['Regional mountain rescue coordination committee secretariat', 'Re: Re: Fwd: Minutes of the extraordinary meeting about access gates, signage, parking and the shuttle contract renewal', 'Attached are the minutes and the three appendices.', 'Yesterday'],
+  ...MAIL.slice(0, 3)
+];
+const EVENTS = [['9:30', '10:00', 'Trail crew stand-up'], ['12:00', '13:00', 'Lunch with the hut warden'], ['15:30', '16:15', 'Shuttle contract review']];
+const LINK = { title: 'Winter access notes', host: 'fieldguide.example', desc: 'Which gates stay closed until spring, and the alternate approach from the village.' };
+
+function base(over, o = {}) {
+  return `<div class="win">${sidebar({ fav: { mail: o.favHov ? 'hov' : '' } })}<div class="card">${article()}</div>${over}</div>`;
+}
+const cursorAt = (x, y) => CUR.replace('class="cursor"', `class="cursor" style="left:${x}px;top:${y}px"`);
+const FAV_CUR = cursorAt(40, 112);
+function items(list, n = 4) {
+  return list.slice(0, n).map((m, i) => `<div class="it ${i === 0 ? 'hl' : ''}"><i class="unread ${i > 1 ? 'no' : ''}"></i><div class="m"><div class="a">${m[0]}</div><div class="b" style="color:var(--text)">${m[1]}</div><div class="b">${m[2]}</div></div><div class="tm">${m[3]}</div></div>`).join('');
+}
+function events(n = 3) {
+  return EVENTS.slice(0, n).map(e => `<div class="ev"><i class="bar"></i><div class="tm">${e[0]}<br>${e[1]}</div><div><div style="font-weight:600">${e[2]}</div><div style="color:var(--text-2);font-size:12px">Hut meeting room</div></div></div>`).join('');
+}
+// ---------- Side card ----------
+function A(st) {
+  if (st === 'link') return linkA();
+  const cal = st === 'calendar';
+  const head = cal ? `${ic('cal')}<span class="t">Calendar</span><span class="s">Today, 3 events</span>` :
+    `${ic('mail')}<span class="t">Mail</span><span class="cnt">${st === 'empty' ? 0 : st === 'long' ? '9,999+' : 12}</span><span class="s">you@fieldguide.example</span>`;
+  const body = st === 'empty' ? `<div class="empty"><b>Inbox zero</b>No unread mail</div>` : cal ? events() : items(st === 'long' ? LONG : MAIL);
+  return base(`<div class="pv" style="left:228px;top:84px;width:340px">
+    <div class="hd">${head}</div>${body}
+    <div class="ft">Click a row to open it in the tab</div></div>${FAV_CUR}`, { favHov: true });
+}
+function linkA() {
+  return base(`<div class="pv" style="left:600px;top:168px;width:300px">
+    <div style="height:150px;margin:10px 10px 0;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px var(--card-border);background:var(--page)">${miniArticle()}</div>
+    <div style="padding:9px 12px 11px"><div style="font-weight:600">${LINK.title}</div><div style="color:var(--text-2);font-size:12px;margin-top:2px">${LINK.desc}</div>
+    <div style="display:flex;gap:6px;align-items:center;margin-top:7px;color:var(--text-2);font-size:12px">${ic('field')}${LINK.host}</div></div></div>${cursorAt(800, 138)}`);
+}
+function miniArticle() {
+  return `<div style="transform:scale(0.42);transform-origin:0 0;width:714px;padding:28px 40px;color:var(--page-text)"><div style="font-size:30px;font-weight:650;margin-bottom:14px">Winter access notes</div>
+  ${[100, 96, 90, 98, 60].map(w => `<div class="skel" style="width:${w}%;height:14px"></div>`).join('')}<div style="height:90px;border-radius:10px;background:var(--page-muted);margin-top:16px"></div></div>`;
+}
+// ---------- Snapshot fallback: the same card when the site's reader fails ----------
+function fallback() {
+  const shot = `<div class="mini mini-mail" style="transform:scale(0.44)"><div class="mini-top"></div>${MAIL.concat(MAIL).map(m => `<div class="r"><b>${m[0]}</b><span>${m[1]}</span></div>`).join('')}</div>`;
+  return base(`<div class="pv" style="left:228px;top:84px;width:340px">
+    <div class="hd">${ic('mail')}<span class="t">Mail</span><span class="s">Updated just now</span></div>
+    <div class="snap" style="height:200px">${shot}</div>
+    <div class="ft" style="margin-top:10px">Click to open the tab</div></div>${FAV_CUR}`, { favHov: true });
+}
+function settings() {
+  const row = (l, d, on) => `<div class="row"><div class="l"><div>${l}</div><div class="d">${d}</div></div><i class="sw ${on ? 'on' : ''}"></i></div>`;
+  return `<div class="win">${sidebar()}<div class="card">${article()}</div>
+  <div class="set"><h2>Previews</h2><div class="sub">Built from tabs you already have open. Nothing is fetched for a preview.</div>
+  ${row('Mail', 'Pinned and Favorite mail sites', true)}${row('Calendar', 'Pinned and Favorite calendar sites', true)}
+  ${row('Links', 'Hover a link on a page', true)}
+  <div class="row"><div class="l">Show link previews</div><span class="pop">After a short pause ${G.updown}</span></div></div></div>`;
+}
+const VIEWS = {};
+for (const st of ['mail', 'calendar', 'link', 'empty', 'long']) VIEWS[st] = () => A(st);
+VIEWS.fallback = fallback;
+VIEWS.settings = settings;
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drag Hint and Focus</title>
+<!--
+  Drag-hint tokens (#641) and focus ring token (#642), picked values. One sheet. Single file, no network.
+  Hash: #hint | #focus [&dark][&shot]
+  Drag hint: ink edge and fill, the Space's text tone at 12 % fill and 45 % edge (Split View drop zone: card tone).
+  Focus ring: ink ring, the Space's text tone at 85 %, 3 pt. BrandTokens.focusRing dark is porcelain, never mustard.
+  Drawn on three sample Space themes: blue and sand (dark text), plum (light text).
+-->
+<style>
+:root {
+  /* BrandTokens */
+  --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
+  --graphite: #202321; --porcelain: #FAF9F5;
+  --surface: #FAF9F5;                 /* surfaceBrand */
+  --sys-focus: rgba(0,103,244,0.50);  /* system keyboard focus color */
+  /* ShellTokens */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
+  --text-2: rgba(0,0,0,0.66);                                    /* secondaryText */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --fg: rgba(0,0,0,0.49);                                        /* sidebarForeground */
+  --card-border: rgba(0,0,0,0.10);                               /* cardBorder */
+  --row-cur: rgba(255,255,255,0.85);                             /* tabCurrent */
+  --edge-ic: rgba(0,0,0,0.20);                                   /* increasedContrastEdge */
+  --theme-a: #DCE8F7; --theme-b: #BFD3EE;                        /* sample Space theme (blue) */
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
+  --page: #FFFFFF; --page-text: rgba(0,0,0,0.78); --page-muted: rgba(0,0,0,0.08); --page-link: #1A5FD0; --desktop: #C9CDD2;
+  --win-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --firm-fast: cubic-bezier(0.2, 1, 0.4, 1);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #202321; --sys-focus: rgba(26,145,255,0.55); --fg: rgba(255,255,255,0.57);
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20); --edge-ic: rgba(255,255,255,0.20);
+  --theme-a: #2E3A4C; --theme-b: #1F2734;
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
+  --page: #1E1F22; --page-text: rgba(255,255,255,0.80); --page-muted: rgba(255,255,255,0.08); --page-link: #7FB1FF; --desktop: #2C3036;
+  --win-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--desktop); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color: var(--text); -webkit-font-smoothing: antialiased; display: grid; place-items: center; padding: 40px; overflow: hidden; }
+button, input { font: inherit; color: inherit; }
+svg { display: block; flex: none; }
+.win { width: 1000px; height: 640px; border-radius: 12px; position: relative; overflow: hidden; flex: none;
+  background: linear-gradient(165deg, var(--theme-a), var(--theme-b)); box-shadow: var(--win-shadow); }
+.win.small { width: 720px; height: 520px; }
+.lights { position: absolute; left: 14px; top: 16px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.sidebar { position: absolute; left: 0; top: 0; bottom: 0; width: 220px; padding: 44px 10px 10px; }
+.urlpill { height: 34px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; gap: 7px; padding: 0 10px; color: var(--text-2); margin-bottom: 10px; white-space: nowrap; overflow: hidden; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+.tile { height: 44px; border-radius: 10px; background: var(--fill); display: grid; place-items: center; position: relative; }
+.tile.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.tile.hov { background: var(--fill-hover); }
+.ic { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; color: #fff; font: 700 9.5px/1 -apple-system, sans-serif; flex: none; }
+.tile .ic { width: 20px; height: 20px; border-radius: 5px; font-size: 11px; }
+.stitle { font-size: 11px; font-weight: 600; color: var(--text-2); padding: 6px 9px 4px; }
+.srow { height: 34px; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 0 9px; white-space: nowrap; overflow: hidden; color: var(--text); position: relative; }
+.srow span { overflow: hidden; text-overflow: ellipsis; }
+.srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.srow.hov { background: var(--fill-hover); }
+.sdiv { height: 1px; background: var(--divider); margin: 8px 9px; }
+.card { position: absolute; left: 220px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; overflow: hidden; background: var(--page);
+  box-shadow: 0 0 0 1px var(--card-border), 0 1px 4px rgba(0,0,0,0.10); }
+.cards { position: absolute; left: 220px; top: 10px; right: 10px; bottom: 10px; display: flex; gap: 8px; }
+.cards .card { position: relative; inset: auto; flex: 1; left: auto; top: auto; right: auto; bottom: auto; }
+.page { position: absolute; inset: 0; padding: 56px 0 0; overflow: hidden; color: var(--page-text); }
+.page .col { width: 78%; max-width: 560px; margin: 0 auto; }
+.page h1 { font-size: 26px; line-height: 1.15; letter-spacing: -0.01em; margin: 0 0 14px; font-weight: 650; }
+.page p { font-size: 15px; line-height: 1.6; margin: 0 0 14px; }
+.page a { color: var(--page-link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+.skel { height: 12px; border-radius: 6px; background: var(--page-muted); margin: 0 0 12px; }
+.btn { all: unset; box-sizing: border-box; height: 28px; padding: 0 14px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; background: var(--fill-hover); color: var(--text); white-space: nowrap; }
+.btn.quiet { background: transparent; color: var(--text-2); font-weight: 500; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.nav { position: fixed; left: 12px; top: 8px; z-index: 50; display: flex; gap: 5px; flex-wrap: wrap; font-size: 11px; max-width: calc(100vw - 24px); }
+.nav a { color: var(--text); text-decoration: none; background: var(--surface); padding: 2px 8px; border-radius: 10px; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.15); }
+.nav a.on { background: var(--graphite); color: var(--porcelain); }
+.shot .nav { display: none; }
+.cap { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 11px; color: var(--text-2); }
+.shot .cap { display: none; }
+
+.sheet { display: grid; grid-template-columns: 130px 520px; gap: 12px; }
+.hdr { font-weight: 600; } .hdr small { display: block; font-weight: 400; color: var(--text-2); }
+.lab { color: var(--text-2); font-size: 12px; align-self: center; }
+.cell { border-radius: 10px; padding: 12px; display: flex; gap: 12px; align-items: center; position: relative;
+  --ink: 32,35,33; --ttext: var(--text); color: rgb(var(--ink)); }
+.cell.blue { background: linear-gradient(165deg, #DCE8F7, #BFD3EE); }
+.cell.sand { background: linear-gradient(165deg, #F3E9D2, #E4D3AE); }
+.cell.plum { background: linear-gradient(165deg, #4A3460, #2F213F); --ink: 250,249,245; }
+:root[data-theme="dark"] .cell.blue { background: linear-gradient(165deg, #2E3A4C, #1F2734); --ink: 250,249,245; }
+:root[data-theme="dark"] .cell.sand { background: linear-gradient(165deg, #3F3628, #2B251B); --ink: 250,249,245; }
+:root[data-theme="dark"] .cell.plum { background: linear-gradient(165deg, #3A2848, #241830); --ink: 250,249,245; }
+.cell .srow { width: 170px; background: rgba(255,255,255,0.0); color: rgb(var(--ink)); }
+.cell .srow.cur { background: rgba(255,255,255,0.80); color: #0E0F10; }
+.cell.plum .srow.cur, :root[data-theme="dark"] .cell .srow.cur { background: rgba(250,251,255,0.20); color: rgb(var(--ink)); }
+/* Drag-hint options */
+.h2 { --hf: rgba(var(--ink),0.12); --he: rgba(var(--ink),0.45); }
+.slot { width: 170px; height: 30px; border-radius: 9px; background: var(--hf); box-shadow: inset 0 0 0 1px var(--he); }
+.ftile { width: 44px; height: 40px; border-radius: 10px; background: rgba(var(--ink),0.06); display: grid; place-items: center; position: relative; }
+.ftile.drop::after { content: ''; position: absolute; inset: 0; border-radius: 10px; background: var(--hf); box-shadow: inset 0 0 0 1px var(--he); }
+.zone { width: 120px; height: 70px; border-radius: 8px; background: #fff; display: flex; overflow: hidden; box-shadow: 0 0 0 1px rgba(0,0,0,0.1); }
+:root[data-theme="dark"] .zone { background: #1E1F22; }
+/* The split drop zone sits on the page card, so its tone follows the card (graphite / porcelain), not the Space */
+.zone { --ink: 32,35,33; } :root[data-theme="dark"] .zone { --ink: 250,249,245; }
+.h2 .zone { --hf: rgba(var(--ink),0.12); --he: rgba(var(--ink),0.45); }
+.zone i { flex: 1; } .zone i.on { background: var(--hf); box-shadow: inset 0 0 0 1px var(--he); border-radius: 0 8px 8px 0; }
+/* Focus options */
+.f3 { --ring: rgba(var(--ink),0.85); }
+.fr { box-shadow: 0 0 0 3px var(--ring) !important; }
+.xbtn { width: 22px; height: 22px; border-radius: 11px; background: rgba(var(--ink),0.12); display: grid; place-items: center; color: rgb(var(--ink)); }
+.swt { width: 32px; height: 20px; border-radius: 10px; background: var(--graphite); position: relative; }
+.swt::after { content: ''; position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; border-radius: 8px; background: #fff; }
+:root[data-theme="dark"] .swt { background: var(--porcelain); } :root[data-theme="dark"] .swt::after { background: var(--graphite); }
+.setcell { background: var(--surface); box-shadow: 0 0 0 0.5px var(--card-border); color: var(--text); --ink: 32,35,33; }
+:root[data-theme="dark"] .setcell { --ink: 250,249,245; }
+.flag { font-size: 11px; color: var(--text-2); }
+</style>
+</head>
+<body>
+<div id="nav" class="nav"></div>
+<div id="stage"></div>
+<script>
+// Shared prototype scaffold. Hash: #<dir>-<state>[&dark][&rm][&shot]. Each page defines STATES and VIEWS.
+const SITES = {
+  mail: ['M', '#3A6FD8'], cal: ['C', '#2E9E6A'], docs: ['D', '#7A55C9'], design: ['F', '#D2553D'],
+  notes: ['N', '#5F6B78'], field: ['G', '#B7791F'], tracker: ['T', '#3C8D93'], news: ['R', '#9A4E8C'],
+  shop: ['S', '#C2410C'], wiki: ['W', '#4B5563']
+};
+const ic = (k, cls = '') => { const [l, c] = SITES[k] || ['?', '#777']; return `<i class="ic ${cls}" style="background:${c}">${l}</i>`; };
+const G = {
+  lock: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="10" height="7" rx="1.8"/><path d="M5.3 7V5a2.7 2.7 0 0 1 5.4 0v2"/></svg>',
+  warn: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2 1.8 13.2h12.4z"/><path d="M8 6.5v3.2M8 11.6v.1"/></svg>',
+  chev: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 3 5 5-5 5"/></svg>',
+  updown: '<svg width="8" height="10" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m1.5 4.5 2.5-2.5 2.5 2.5M1.5 7.5 4 10l2.5-2.5"/></svg>',
+  back: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m10 3-5 5 5 5"/></svg>',
+  ext: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5"/></svg>',
+  page: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 1.8h5.2L12.5 5v9.2H4z"/><path d="M9 1.8V5h3.5"/></svg>'
+};
+function sidebar(o = {}) {
+  const fav = o.fav || {};
+  const rows = o.rows || [
+    { k: 'docs', t: 'Quarterly planning notes and the very long title of a shared document', cur: true },
+    { k: 'field', t: 'Field guide: North ridge trail conditions' },
+    { k: 'news', t: 'Morning briefing' },
+    { k: 'wiki', t: 'Glossary of terms' }
+  ];
+  const pinned = o.pinned || [
+    { k: 'tracker', t: 'Release tracker' },
+    { k: 'notes', t: 'Team notes' }
+  ];
+  const r = x => `<div class="srow ${x.cur ? 'cur' : ''} ${x.hov ? 'hov' : ''} ${x.cls || ''}" ${x.id ? `id="${x.id}"` : ''}>${ic(x.k)}<span>${x.t}</span>${x.extra || ''}</div>`;
+  return `<div class="lights"><i></i><i></i><i></i></div>
+  <div class="sidebar">
+    <div class="urlpill ${o.urlCls || ''}" id="urlpill">${o.url || '<span>fieldguide.example/trails/north-ridge</span>'}</div>
+    <div class="favs">${['mail', 'cal', 'docs', 'design'].map(k => `<div class="tile ${fav[k] || ''}" id="fav-${k}">${ic(k)}${o.favExtra?.[k] || ''}</div>`).join('')}</div>
+    ${pinned.map(r).join('')}
+    <div class="sdiv"></div>
+    ${rows.map(r).join('')}
+  </div>`;
+}
+function article(o = {}) {
+  return `<div class="page"><div class="col">
+    <h1>${o.title || 'North ridge trail conditions'}</h1>
+    <p>${o.p || 'The upper switchbacks are clear after the weekend thaw. Expect mud below the tree line and loose rock on the last two hundred meters. The <a id="lnk">winter access notes</a> list the gates that stay closed until spring.'}</p>
+    <p>Water is available at the second hut. Carry a layer for the saddle; the wind there is stronger than the forecast suggests, and the descent on the east side is steeper than the map shows.</p>
+    <p>Parking at the lower lot fills by nine on weekends. The shuttle runs every forty minutes from the village square.</p>
+  </div></div>`;
+}
+function skeleton() {
+  return `<div class="page"><div class="col"><div class="skel" style="width:60%;height:22px;margin-bottom:22px"></div>
+  ${[100, 94, 98, 70, 0, 100, 88, 96, 52].map(w => w ? `<div class="skel" style="width:${w}%"></div>` : '<div style="height:14px"></div>').join('')}</div></div>`;
+}
+function boot() {
+  const parse = () => {
+    const [head, ...flags] = location.hash.slice(1).split('&');
+    return { key: head || Object.keys(VIEWS)[0], dark: flags.includes('dark'), rm: flags.includes('rm'), shot: flags.includes('shot') };
+  };
+  const draw = () => {
+    const s = parse();
+    document.documentElement.dataset.theme = s.dark ? 'dark' : 'light';
+    document.body.classList.toggle('rm', s.rm);
+    document.body.classList.toggle('shot', s.shot);
+    const keys = Object.keys(VIEWS);
+    const key = VIEWS[s.key] ? s.key : keys[0];
+    document.body.dataset.view = key;
+    const flags = (s.dark ? '&dark' : '') + (s.rm ? '&rm' : '');
+    document.getElementById('nav').innerHTML = keys.map(k => `<a href="#${k}${flags}" class="${k === key ? 'on' : ''}">${k}</a>`).join('') +
+      `<a href="#${key}${s.dark ? '' : '&dark'}${s.rm ? '&rm' : ''}">${s.dark ? 'light' : 'dark'}</a><a href="#${key}${s.dark ? '&dark' : ''}${s.rm ? '' : '&rm'}">${s.rm ? 'motion' : 'reduce motion'}</a>`;
+    document.getElementById('stage').innerHTML = VIEWS[key](s);
+  };
+  addEventListener('hashchange', draw);
+  draw();
+}
+
+// SIZE: 1080,720
+// SHOTS: hint focus
+const THEMES = [['blue', 'Blue Space'], ['sand', 'Sand Space'], ['plum', 'Plum Space']];
+function hint() {
+  const opts = [['h2', 'Drag hint: ink edge and fill', 'Space text tone, 12 % fill, 45 % edge; Split View zone in the card tone']];
+  let h = `<div></div>${opts.map(o => `<div class="hdr">${o[1]}<small>${o[2]}</small></div>`).join('')}`;
+  for (const [t, name] of THEMES) {
+    h += `<div class="lab">${name}</div>` + opts.map(([c]) => `<div class="cell ${t} ${c}" style="flex-wrap:wrap">
+      <div><div class="srow">${ic('news')}<span>Morning briefing</span></div><div class="slot"></div><div class="srow">${ic('wiki')}<span>Glossary</span></div></div>
+      <div style="display:grid;grid-template-columns:repeat(2,44px);gap:6px"><div class="ftile">${ic('mail')}</div><div class="ftile drop">${ic('cal')}</div><div class="ftile">${ic('docs')}</div><div class="ftile">${ic('design')}</div></div>
+      <div class="zone"><i></i><i class="on"></i></div></div>`).join('');
+  }
+  return `<div class="sheet">${h}</div><div class="cap">Sidebar drop slot, Favorites drop target, Split View drop zone</div>`;
+}
+function focus() {
+  const opts = [['f3', 'Focus ring: ink ring', 'the Space text tone at 85 %, 3 pt; graphite or porcelain on Settings surfaces']];
+  let h = `<div></div>${opts.map(o => `<div class="hdr">${o[1]}<small>${o[2]}</small></div>`).join('')}`;
+  for (const [t, name] of THEMES) {
+    h += `<div class="lab">${name}</div>` + opts.map(([c]) => `<div class="cell ${t} ${c}">
+      <div class="srow cur fr">${ic('field')}<span>Field guide</span></div>
+      <div class="ftile fr">${ic('mail')}</div>
+      <div class="xbtn fr">${G.back.replace('m10 3-5 5 5 5', 'M4 4l8 8M12 4l-8 8')}</div></div>`).join('');
+  }
+  h += `<div class="lab">Settings</div>` + opts.map(([c]) => `<div class="cell setcell ${c}"><span style="flex:1">Show link previews</span><span class="swt fr" style="border-radius:10px"></span><span class="btn fr">Reset</span></div>`).join('');
+  return `<div class="sheet">${h}</div><div class="cap">Sidebar row, Favorite tile, split close button, Settings controls</div>`;
+}
+const VIEWS = { hint, focus };
+boot();
+</script>
+</body>
+</html>
