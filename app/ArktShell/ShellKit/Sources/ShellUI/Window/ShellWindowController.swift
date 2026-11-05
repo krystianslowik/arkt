@@ -180,6 +180,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
   var pasteboard: NSPasteboard = .general
+  /// The one-off Copy URL tip (BH-196, #404); the window set hands every window the app's stored one.
+  public var copyLinkEducation: CopyLinkEducation = .ephemeral()
   /// Where the sidebar width and hidden state are saved on change (#331).
   let sidebarStateStore: SidebarWindowStateStore
   /// False for a window that is not the one a relaunch restores: its changes must not overwrite the saved state.

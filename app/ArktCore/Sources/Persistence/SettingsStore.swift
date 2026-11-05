@@ -124,6 +124,23 @@ public struct SettingsStore: Sendable {
   @concurrent
   public func loadArchiveSettings() async throws -> ArchiveSettings { try await load(ArchiveSettings.self) }
 
+  /// Applies `change` to the stored `ArchiveSettings` (or the defaults) and stores the result, in one transaction.
+  /// Returns what was stored. An unreadable stored group counts as the defaults.
+  @concurrent
+  public func updateArchiveSettings(
+    at date: Date, _ change: @escaping @Sendable (inout ArchiveSettings) -> Void
+  ) async throws -> ArchiveSettings {
+    dispatchPrecondition(condition: .notOnQueue(.main))
+    let key = ArchiveSettings.storageKey
+    let updatedAt = date.timeIntervalSinceReferenceDate
+    return try await database.writer.write { db in
+      var settings = Self.decode(ArchiveSettings.self, from: try Self.fetchValue(db, key: key))
+      change(&settings)
+      try Self.store(db, key: key, value: try Self.encode(settings), updatedAt: updatedAt)
+      return settings
+    }
+  }
+
   private static func fetchValue(_ db: Database, key: String) throws -> Data? {
     // Optional read: the table is STRICT, so a non-BLOB value cannot occur; nil means missing.
     try Data.fetchOne(db, sql: "SELECT value FROM setting WHERE key = ?", arguments: [key])

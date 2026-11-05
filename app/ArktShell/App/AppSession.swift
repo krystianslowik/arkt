@@ -42,6 +42,9 @@ final class AppSession {
   let archive: ArchiveCoordinator
   /// The auto-archive pass every minute (E5d).
   let autoArchive: AutoArchiveTimer
+  /// The archive thresholds Settings edits (#448): each change reaches `autoArchive` at once and is stored. Little
+  /// Arkt reads its threshold here (`littleArktThreshold`, 6 hours by default).
+  let archiveSettings: ArchiveSettingsModel
   /// Archived matches in every window's command bar (#111).
   let archiveSearch: ArchiveCommandBarSearch
   /// The command bar preview's page thumbnails (#370): live tabs through the engine, history items from the cache.
@@ -92,10 +95,13 @@ final class AppSession {
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
-    self.windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
-                                  sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
-                                  sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
-                                  commandBarSettings: commandBarSettings, hostLookup: hostLookup)
+    let windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
+                                 sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
+                                 sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
+                                 commandBarSettings: commandBarSettings, hostLookup: hostLookup)
+    // BH-196: the one-off Copy URL tip remembers what it showed (#404).
+    windows.copyLinkEducation = CopyLinkEducation(defaults: AppEnvironment.userDefaults)
+    self.windows = windows
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
     self.archiveStore = archiveStore
@@ -109,7 +115,11 @@ final class AppSession {
     let archive = ArchiveCoordinator(source: source, store: archiveStore)
     self.archive = archive
     autosaver.beforeSave = { [weak archive] in await archive?.flushPendingAdds() ?? true }
-    self.autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
+    let autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
+    self.autoArchive = autoArchive
+    let archiveSettings = ArchiveSettingsModel(state: settingsStore)
+    archiveSettings.onChange = { [weak autoArchive] in autoArchive?.apply($0) }
+    self.archiveSettings = archiveSettings
     self.archiveSearch = ArchiveCommandBarSearch(source: source, store: archiveStore, coordinator: archive)
     self.faviconStore = faviconStore
     let pageImageCache = AppEnvironment.pageImageCache(in: location)
@@ -248,6 +258,7 @@ final class AppSession {
                                                   toast: ToastText.autoArchiveToast(count: archived.count))
     }
     importer.onAutoArchiveClockReset = { [weak self] date in self?.autoArchive.clockDidReset(to: date) }
+    Task { [archiveSettings] in await archiveSettings.load() }
     resumeAutoArchive()
   }
 
@@ -468,6 +479,7 @@ final class AppSession {
     services.crashReportCount = { [weak self] in self?.crashCapture.storedCount ?? 0 }     // #129
     services.sendCrashReport = { [weak self] in self?.crashCapture.sendNewest() }
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
+    services.archiveRows = archiveSettings.settingsRows                                // #448
     return services
   }
 
