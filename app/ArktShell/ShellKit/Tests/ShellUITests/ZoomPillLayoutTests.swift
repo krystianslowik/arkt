@@ -34,4 +34,13 @@ struct ZoomPillLayoutTests {
     #expect(frame.minX == 12)
     #expect(ZoomPillLayout.frame(in: .zero, resetWidth: 60).width == 0, "an empty page never goes negative")
   }
+
+  @Test func `a part fits only inside the trailing padding`() {
+    let parts = ZoomPillLayout.parts(resetWidth: 60)
+    let full = ZoomPillLayout.width(resetWidth: 60)
+    #expect(ZoomPillLayout.fits(parts.reset, inWidth: full))
+    #expect(!ZoomPillLayout.fits(parts.reset, inWidth: full - 1))
+    #expect(ZoomPillLayout.fits(parts.zoomIn, inWidth: 112), "minus, the percent and plus need 112")
+    #expect(!ZoomPillLayout.fits(parts.zoomIn, inWidth: 100))
+  }
 }

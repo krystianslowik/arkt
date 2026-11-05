@@ -11,7 +11,9 @@ struct ZoomPillPresenterTests {
   @MainActor
   private final class Rig {
     let engine = InMemoryEngine()
-    let sleeper = ParkingSleeper()
+    let sleeper: ParkingSleeper
+    /// The announcement's delay, separate from the auto-close timer.
+    let speech = ParkingSleeper()
     let presenter: ZoomPillPresenter
     let tab: TabID
     let other: TabID
@@ -19,9 +21,12 @@ struct ZoomPillPresenterTests {
     var changes = 0
     var announcements: [String] = []
 
-    init() {
-      let sleeper = sleeper
-      presenter = ZoomPillPresenter(engine: engine, sleep: { try await sleeper.sleep($0) })
+    init(ignoresCancellation: Bool = false) {
+      let sleeper = ParkingSleeper(ignoresCancellation: ignoresCancellation)
+      let speech = speech
+      self.sleeper = sleeper
+      presenter = ZoomPillPresenter(engine: engine, sleep: { try await sleeper.sleep($0) },
+                                    announceSleep: { try await speech.sleep($0) })
       tab = engine.createTab(url: URL(string: "https://example.com/a")!)
       other = engine.createTab(url: URL(string: "https://example.com/b")!)
       observation = engine.observe { [presenter] in presenter.handle($0) }
@@ -31,10 +36,24 @@ struct ZoomPillPresenterTests {
     }
 
     var percentText: String? { presenter.display?.percentText }
+
+    /// Lets the announcement delay of the last change run out and waits for it to be spoken.
+    func speak(_ count: Int) async {
+      await ZoomPillPresenterTests.until("an announcement waits") { await speech.parkedCount >= 1 }
+      await speech.resumeNext()
+      await ZoomPillPresenterTests.until("\(count) announcements") { announcements.count == count }
+    }
   }
 
-  /// A sleeper whose sleeps end only when the test resumes them, oldest first, or throw when their task is cancelled.
+  /// A sleeper whose sleeps end only when the test resumes them, oldest first, or throw when their task is cancelled
+  /// (unless `ignoresCancellation`: then a cancelled sleep stays parked until resumed, as a timer that fires anyway).
   actor ParkingSleeper {
+    private let ignoresCancellation: Bool
+
+    init(ignoresCancellation: Bool = false) {
+      self.ignoresCancellation = ignoresCancellation
+    }
+
     private struct Parked {
       let id: Int
       let duration: Duration
@@ -47,6 +66,11 @@ struct ZoomPillPresenterTests {
     func sleep(_ duration: Duration) async throws {
       let id = nextID
       nextID += 1
+      if ignoresCancellation {
+        return try await withCheckedThrowingContinuation { continuation in
+          parked.append(Parked(id: id, duration: duration, continuation: continuation))
+        }
+      }
       try await withTaskCancellationHandler {
         try await withCheckedThrowingContinuation { continuation in
           parked.append(Parked(id: id, duration: duration, continuation: continuation))
@@ -62,6 +86,9 @@ struct ZoomPillPresenterTests {
     }
 
     var parkedCount: Int { parked.count }
+    /// Every sleep that began, cancelled ones included.
+    var startedCount: Int { nextID }
+    var parkedIDs: [Int] { parked.map(\.id) }
     var durations: [Duration] { parked.map(\.duration) }
 
     func resumeNext() {
@@ -81,12 +108,16 @@ struct ZoomPillPresenterTests {
 
   // MARK: Showing
 
-  @Test func `a zoom the user asked for shows the pill with the percent`() {
+  @Test func `a zoom the user asked for shows the pill with the percent`() async {
     let rig = Rig()
     #expect(rig.presenter.display == nil, "nothing shows before a zoom change")
     rig.engine.zoomIn(rig.tab)
     #expect(rig.percentText == "110%")
     #expect(rig.presenter.display?.tab == rig.tab)
+    await Self.until("the announcement waits") { await rig.speech.parkedCount == 1 }
+    #expect(await rig.speech.durations == [ZoomPillPresenter.announceDelay])
+    #expect(rig.announcements.isEmpty, "spoken once the changes stop")
+    await rig.speak(1)
     #expect(rig.announcements == ["Zoom 110%"], "VoiceOver reads the percent")
   }
 
@@ -94,7 +125,7 @@ struct ZoomPillPresenterTests {
     let rig = Rig()
     rig.engine.setZoom(rig.tab, percent: 150, userInitiated: false)
     #expect(rig.presenter.display == nil, "a site's saved zoom, or another tab on the same site, shows nothing")
-    #expect(rig.announcements.isEmpty)
+    #expect(!rig.presenter.isAnnouncementPending, "and says nothing")
   }
 
   @Test func `a zoom of a tab that is not on screen does not show the pill`() {
@@ -112,16 +143,30 @@ struct ZoomPillPresenterTests {
     rig.engine.zoomOut(rig.tab)
     #expect(rig.percentText == "110%")
     #expect(openings == [true, false, false], "only the first change opens the pill")
-    #expect(rig.announcements == ["Zoom 110%", "Zoom 125%", "Zoom 110%"])
+  }
+
+  @Test func `a held zoom key speaks only the percent it stopped at`() async {
+    let rig = Rig()
+    rig.engine.zoomIn(rig.tab)
+    rig.engine.zoomIn(rig.tab)
+    rig.engine.zoomIn(rig.tab)
+    await Self.until("three delays began, two were cancelled") {
+      let started = await rig.speech.startedCount
+      let parked = await rig.speech.parkedCount
+      return started == 3 && parked == 1
+    }
+    await rig.speak(1)
+    #expect(rig.announcements == ["Zoom 150%"])
   }
 
   @Test func `an engine change while the pill is up updates the percent quietly`() async {
     let rig = Rig()
     rig.engine.zoomIn(rig.tab)
     await Self.until("the timer is parked") { await rig.sleeper.parkedCount == 1 }
+    await rig.speak(1)
     rig.engine.setZoom(rig.tab, percent: 150, userInitiated: false)
     #expect(rig.percentText == "150%")
-    #expect(rig.announcements == ["Zoom 110%"], "only the user's own changes are spoken")
+    #expect(!rig.presenter.isAnnouncementPending, "only the user's own changes are spoken")
     for _ in 0..<50 { await Task.yield() }
     #expect(await rig.sleeper.parkedCount == 1, "the timer is not restarted")
   }
@@ -140,13 +185,36 @@ struct ZoomPillPresenterTests {
     #expect(rig.presenter.display == nil, "back at the default zoom there is nothing to show")
   }
 
-  @Test func `Reset returns to the default zoom and hides the pill`() {
+  @Test func `Reset returns to the default zoom, hides the pill and says 100%`() async {
     let rig = Rig()
     rig.engine.zoomIn(rig.tab)
     rig.engine.zoomIn(rig.tab)
     rig.presenter.reset()
     #expect(rig.engine.snapshot(of: rig.tab)?.zoom == .default)
     #expect(rig.presenter.display == nil)
+    await Self.until("only the last delay is waiting") {
+      let started = await rig.speech.startedCount
+      let parked = await rig.speech.parkedCount
+      return started == 3 && parked == 1
+    }
+    await rig.speak(1)
+    #expect(rig.announcements == ["Zoom 100%"], "VoiceOver hears where the zoom went though the pill closed")
+  }
+
+  @Test func `Cmd-0 with the pill closed shows nothing but says 100%`() async {
+    let rig = Rig()
+    rig.engine.setZoom(rig.tab, percent: 150, userInitiated: false)       // a site's saved zoom
+    rig.engine.resetZoom(rig.tab)                                          // Cmd-0
+    #expect(rig.presenter.display == nil, "nothing to reset at the default")
+    await rig.speak(1)
+    #expect(rig.announcements == ["Zoom 100%"])
+  }
+
+  @Test func `a reset of a tab that is not on screen says nothing`() {
+    let rig = Rig()
+    rig.engine.setZoom(rig.other, percent: 150, userInitiated: false)
+    rig.engine.resetZoom(rig.other)
+    #expect(!rig.presenter.isAnnouncementPending)
   }
 
   @Test func `zooming out below the default shows the pill too`() {
@@ -173,8 +241,10 @@ struct ZoomPillPresenterTests {
     rig.engine.zoomIn(rig.tab)
     await Self.until("the first timer is parked") { await rig.sleeper.parkedCount == 1 }
     rig.engine.zoomIn(rig.tab)
-    await Self.until("the first timer was cancelled and a new one parked") {
-      await rig.sleeper.parkedCount == 1 && rig.presenter.isTimerArmed
+    await Self.until("the first timer was cancelled and the second parked") {
+      let started = await rig.sleeper.startedCount
+      let parked = await rig.sleeper.parkedIDs
+      return started == 2 && parked == [1]
     }
     await rig.sleeper.resumeNext()
     await Self.until("the pill closed") { rig.presenter.display == nil }
@@ -200,16 +270,24 @@ struct ZoomPillPresenterTests {
     await Self.until("the pill closed") { rig.presenter.display == nil }
   }
 
-  @Test func `a stale timer does not close a pill shown again`() async {
-    let rig = Rig()
+  @Test func `a stale timer that fires anyway does not close a pill shown again`() async {
+    let rig = Rig(ignoresCancellation: true)
     rig.engine.zoomIn(rig.tab)
-    await Self.until("the timer is parked") { await rig.sleeper.parkedCount == 1 }
+    await Self.until("the first timer is parked") { await rig.sleeper.parkedIDs == [0] }
     rig.presenter.reset()
     #expect(rig.presenter.display == nil)
     rig.engine.zoomIn(rig.tab)
     #expect(rig.percentText == "110%")
-    await Self.until("one live timer") { await rig.sleeper.parkedCount == 1 && rig.presenter.isTimerArmed }
-    #expect(rig.presenter.display != nil)
+    await Self.until("the old and the new timer are parked") { await rig.sleeper.parkedIDs == [0, 1] }
+
+    await rig.sleeper.resumeNext()                                  // the cancelled timer's sleep ends after all
+    await Self.until("the stale timer ran") { await rig.sleeper.parkedIDs == [1] }
+    for _ in 0..<50 { await Task.yield() }
+    #expect(rig.presenter.display != nil, "the generation guard keeps the new pill")
+    #expect(rig.presenter.isTimerArmed)
+
+    await rig.sleeper.resumeNext()
+    await Self.until("the live timer closed it") { rig.presenter.display == nil }
   }
 
   // MARK: Tabs

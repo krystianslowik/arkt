@@ -51,6 +51,8 @@ final class ZoomPillWindowTests: XCTestCase {
     }
 
     var parkedCount: Int { parked.count }
+    /// Every sleep that began, cancelled ones included.
+    var startedCount: Int { nextID }
 
     func resumeNext() {
       guard !parked.isEmpty else { return }
@@ -62,6 +64,8 @@ final class ZoomPillWindowTests: XCTestCase {
   private struct Rig {
     let harness: EngineHarnessWindow
     let sleeper: Sleeper
+    /// The announcement's delay.
+    let speech: Sleeper
     let nodes: [UUID]
     var announcements: [String] { box.announcements }
     let box: Box
@@ -87,14 +91,16 @@ final class ZoomPillWindowTests: XCTestCase {
     harnesses.append(harness)
     let sleeper = Sleeper()
     let box = Box()
+    let speech = Sleeper()
     harness.controller.zoomPill.sleep = { try await sleeper.sleep($0) }
+    harness.controller.zoomPill.announceSleep = { try await speech.sleep($0) }
     let pill = try XCTUnwrap(harness.controller.rootView.card.zoomPillView)
     pill.reduceMotion = { reduceMotion }
     pill.postAnnouncement = { box.announcements.append($0) }
     pill.pointerInWindow = { _ in nil }                         // the real pointer never decides a test
     harness.controller.activate(node: nodes[0])
     harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
-    return Rig(harness: harness, sleeper: sleeper, nodes: nodes, box: box)
+    return Rig(harness: harness, sleeper: sleeper, speech: speech, nodes: nodes, box: box)
   }
 
   /// Takes main-actor turns until `condition` holds; bounded, no clock.
@@ -262,7 +268,7 @@ final class ZoomPillWindowTests: XCTestCase {
 
   // MARK: Accessibility and motion
 
-  func testVoiceOverReadsThePercentAndTheButtons() throws {
+  func testVoiceOverReadsThePercentAndTheButtons() async throws {
     let rig = try makeRig()
     rig.engine.zoomIn(rig.tab)
     rig.engine.zoomIn(rig.tab)
@@ -272,7 +278,49 @@ final class ZoomPillWindowTests: XCTestCase {
     XCTAssertEqual(rig.pill.zoomOutButton.accessibilityLabel(), "Zoom out")
     XCTAssertEqual(rig.pill.zoomInButton.accessibilityLabel(), "Zoom in")
     XCTAssertEqual(rig.pill.resetButton.accessibilityLabel(), "Reset zoom")
-    XCTAssertEqual(rig.announcements, ["Zoom 110%", "Zoom 125%"])
+    await until("only the last change waits to be spoken") {
+      let started = await rig.speech.startedCount
+      let parked = await rig.speech.parkedCount
+      return started == 2 && parked == 1
+    }
+    await rig.speech.resumeNext()
+    await until("spoken") { !rig.announcements.isEmpty }
+    XCTAssertEqual(rig.announcements, ["Zoom 125%"], "a held key speaks where it stopped")
+
+    rig.pill.resetButton.performClick(nil)
+    XCTAssertTrue(rig.pill.isHidden)
+    await until("the reset waits to be spoken") { await rig.speech.parkedCount == 1 }
+    await rig.speech.resumeNext()
+    await until("spoken") { rig.announcements.count == 2 }
+    XCTAssertEqual(rig.announcements.last, "Zoom 100%", "heard though the pill closed")
+  }
+
+  func testTheButtonsNeverTakeTheKeyboardFromThePage() throws {
+    let rig = try makeRig()
+    rig.engine.zoomIn(rig.tab)
+    for button in [rig.pill.zoomOutButton, rig.pill.zoomInButton, rig.pill.resetButton] as [NSButton] {
+      XCTAssertTrue(button.refusesFirstResponder)
+      XCTAssertFalse(button.acceptsFirstResponder)
+    }
+    let page = try XCTUnwrap(rig.engine.contentView(for: rig.tab))
+    rig.window.makeFirstResponder(page)
+    let before = rig.window.firstResponder
+    rig.pill.zoomInButton.performClick(nil)
+    XCTAssertTrue(rig.window.firstResponder === before, "the page keeps the keyboard, so the zoom keys keep working")
+    XCTAssertEqual(rig.pill.percentLabel.stringValue, "125%")
+  }
+
+  func testOnANarrowPaneThePartsThatDoNotFitHide() throws {
+    let rig = try makeRig()
+    rig.engine.zoomIn(rig.tab)
+    rig.pill.frame = CGRect(x: 0, y: 0, width: 120, height: 36)
+    rig.pill.layoutSubtreeIfNeeded()
+    XCTAssertTrue(rig.pill.resetButton.isHidden, "Reset goes first")
+    XCTAssertFalse(rig.pill.zoomInButton.isHidden)
+    XCTAssertFalse(rig.pill.percentLabel.isHidden)
+    rig.pill.frame = CGRect(x: 0, y: 0, width: 300, height: 36)
+    rig.pill.layoutSubtreeIfNeeded()
+    XCTAssertFalse(rig.pill.resetButton.isHidden, "back with room")
   }
 
   func testTheEntranceFadesAndRisesOnceAndOnlyFadesWithReduceMotion() throws {

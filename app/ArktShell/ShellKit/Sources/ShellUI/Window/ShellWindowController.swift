@@ -872,8 +872,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       break                                                         // routed above, before the row lookup (#114)
     case .zoomChanged:
       zoomPill.handle(event)                                        // #579
-    case .tabCrashed, .tabRecovered, .tabFullscreenChanged:
-      break                                                         // no shell surface yet (#578, #581)
+    case .tabCrashed, .tabRecovered:
+      break                                                         // no shell surface yet (#578)
+    case .tabFullscreenChanged:
+      break                                                         // no shell surface yet (#581)
     }
   }
 

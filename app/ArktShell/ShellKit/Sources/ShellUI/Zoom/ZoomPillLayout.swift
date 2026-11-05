@@ -40,6 +40,12 @@ enum ZoomPillLayout {
     return CGRect(x: content.maxX - edgeInset - width, y: top - height, width: width, height: height)
   }
 
+  /// Whether `part` fits a pill `width` wide, inside its trailing padding. A part that does not is hidden, so a pane
+  /// narrower than the pill shows minus, the percent and plus, then fewer, and nothing spills past the surface.
+  static func fits(_ part: CGRect, inWidth width: CGFloat) -> Bool {
+    part.maxX <= width - padding + 0.5
+  }
+
   /// The parts from the leading edge.
   static func parts(resetWidth: CGFloat) -> Parts {
     let buttonY = (height - buttonSize) / 2

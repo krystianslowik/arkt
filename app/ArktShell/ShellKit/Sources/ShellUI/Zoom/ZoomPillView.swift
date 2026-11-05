@@ -64,10 +64,9 @@ public final class ZoomPillView: NSView {
     resetButton.action = #selector(resetPressed(_:))
     resetButton.setArchiveAccessibilityLabel("Reset zoom")
     resetButton.setAccessibilityIdentifierWithCell(AXID.Zoom.reset)
+    // A click never takes the keyboard from the page, as the toast's action (the zoom keys keep working).
+    for button in [zoomOutButton, zoomInButton, resetButton] as [NSButton] { button.refusesFirstResponder = true }
     for view in [zoomOutButton, percentLabel, zoomInButton, resetButton] as [NSView] { addSubview(view) }
-    zoomOutButton.nextKeyView = zoomInButton
-    zoomInButton.nextKeyView = resetButton
-    resetButton.nextKeyView = zoomOutButton
 
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
@@ -109,13 +108,14 @@ public final class ZoomPillView: NSView {
     if bounds.contains(convert(point, from: nil)) { presenter?.setHovering(true) }
   }
 
-  /// The percent after a change the user made, polite: it does not interrupt what VoiceOver is saying.
+  /// The percent after a change the user made, polite: it does not interrupt what VoiceOver is saying. Posted on the
+  /// app, so it is heard when the pill closed at the default zoom too.
   func announce(_ text: String) {
     if let postAnnouncement {
       postAnnouncement(text)
       return
     }
-    NSAccessibility.post(element: percentLabel, notification: .announcementRequested, userInfo: [
+    NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
       .announcement: text,
       .priority: NSAccessibilityPriorityLevel.medium.rawValue,
     ])
@@ -135,10 +135,12 @@ public final class ZoomPillView: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     let parts = ZoomPillLayout.parts(resetWidth: resetWidth)
-    zoomOutButton.frame = parts.zoomOut
-    percentLabel.frame = parts.percent
-    zoomInButton.frame = parts.zoomIn
-    resetButton.frame = parts.reset
+    let placed: [(NSView, CGRect)] = [(zoomOutButton, parts.zoomOut), (percentLabel, parts.percent),
+                                      (zoomInButton, parts.zoomIn), (resetButton, parts.reset)]
+    for (view, frame) in placed {
+      view.frame = frame
+      view.isHidden = !ZoomPillLayout.fits(frame, inWidth: bounds.width)     // a narrow pane drops Reset first
+    }
     let shape = CGPath(roundedRect: bounds, cornerWidth: ZoomPillLayout.cornerRadius,
                        cornerHeight: ZoomPillLayout.cornerRadius, transform: nil)
     surfaceLayer.frame = bounds
@@ -154,7 +156,8 @@ public final class ZoomPillView: NSView {
   public override func updateTrackingAreas() {
     super.updateTrackingAreas()
     guard hoverArea == nil else { return }       // `.inVisibleRect` follows the frame; added once
-    let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+    // Always active: leaving while the window is not key still releases the hold, so the pill cannot stay forever.
+    let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                               owner: self, userInfo: nil)
     addTrackingArea(area)
     hoverArea = area
