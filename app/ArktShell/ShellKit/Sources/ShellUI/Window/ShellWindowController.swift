@@ -190,6 +190,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The zoom pill's state and its view over the card (#579); see `+Zoom`.
   private(set) lazy var zoomPill = makeZoomPill()
   private(set) lazy var statusPill = makeStatusPillPresenter()
+  /// The crashed tab view over a page whose process went away (#578).
+  private(set) lazy var crashedTabs = makeCrashedTabPresenter()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
@@ -793,6 +795,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     refreshFindBar()
     refreshZoomPill()
     statusPill.refresh()
+    refreshCrashedTabs()                                            // #578
   }
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -825,6 +828,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       return
     case .targetURLChanged:
       statusPill.handle(event)                                      // #114: a Peek's page has no row, so before the map
+      return
+    case .tabCrashed(let tab, _):
+      refreshCrashedTabs(crashed: tab)                              // #578: before the map, as a private page has no row
+      return
+    case .tabRecovered:
+      refreshCrashedTabs()
       return
     default:
       break
@@ -870,10 +879,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
       break                                                         // routed above, before the row lookup (#114)
+    case .tabCrashed, .tabRecovered:
+      break                                                         // routed above, before the row lookup (#578)
     case .zoomChanged:
       zoomPill.handle(event)                                        // #579
-    case .tabCrashed, .tabRecovered:
-      break                                                         // no shell surface yet (#578)
     case .tabFullscreenChanged:
       break                                                         // no shell surface yet (#581)
     }

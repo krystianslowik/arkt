@@ -1,0 +1,124 @@
+import AppKit
+import EngineAPI
+
+// The crashed tab view in the shell window (#578, part of #122; design/extensions `surf-crashed`). Chromium's own sad
+// tab never shows in an Arkt window (patch 0005), so a tab whose page process went away gets this view over its page
+// area: on the single card, or on the pane card of a split that shows it. The engine's snapshot is the source of truth
+// (`TabSnapshot.crash`), read again at every refresh, so a tab switch, a Space switch, a split and a crash in the
+// background all come out of the same placement. The view goes with `.tabRecovered` (a reload or a new navigation) or
+// when its page leaves the card.
+
+/// Places one `CrashedTabView` on each card that shows a crashed tab and takes it off the others. The controller says
+/// which card shows which crashed tab; this owns the views, their entrance and the spoken alert.
+@MainActor
+final class CrashedTabPresenter {
+  /// A card that shows a crashed tab, and the page's host for the body line.
+  struct Placement {
+    let card: ContentCardView
+    let tab: TabID
+    let host: String?
+  }
+
+  /// Reduce Motion, read at each entrance. Tests set it.
+  var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// Speaks the alert when a view appears. Tests replace it to count what was said.
+  var announce: @MainActor (String, NSView) -> Void = { text, view in
+    NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [
+      .announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue,
+    ])
+  }
+  var onReload: (@MainActor (TabID) -> Void)?
+  var onClose: (@MainActor (TabID) -> Void)?
+
+  /// The view on `card`, if it shows one.
+  func view(on card: ContentCardView) -> CrashedTabView? { card.pageOverlayView as? CrashedTabView }
+
+  /// Puts the views in place on `cards`: a card in `placements` keeps its view for the same tab or gets a new one; any
+  /// other card loses its view. A new view for `crashedNow` (the crash happened on screen) plays its entrance; one that
+  /// came with a tab switch shows at once. Every new view is announced. Returns the new views.
+  @discardableResult
+  func apply(cards: [ContentCardView], placements: [Placement], crashedNow: TabID? = nil) -> [CrashedTabView] {
+    var made: [CrashedTabView] = []
+    for card in cards {
+      guard let placement = placements.first(where: { $0.card === card }) else {
+        if view(on: card) != nil { card.setPageOverlay(nil) }
+        continue
+      }
+      if let existing = view(on: card), existing.tab == placement.tab {
+        existing.update(host: placement.host)
+        continue
+      }
+      let view = CrashedTabView(tab: placement.tab, host: placement.host)
+      let tab = placement.tab
+      view.onReload = { [weak self] in self?.onReload?(tab) }
+      view.onClose = { [weak self] in self?.onClose?(tab) }
+      card.setPageOverlay(view)
+      if tab == crashedNow { view.playEntrance(reduceMotion: reduceMotion()) }
+      announce(CrashedTabView.title + ". " + view.bodyLabel.stringValue, view)
+      made.append(view)
+    }
+    return made
+  }
+}
+
+extension ShellWindowController {
+  func makeCrashedTabPresenter() -> CrashedTabPresenter {
+    let presenter = CrashedTabPresenter()
+    presenter.onReload = { [weak self] tab in self?.reloadCrashedTab(tab) }
+    presenter.onClose = { [weak self] tab in self?.closeCrashedTab(tab) }
+    return presenter
+  }
+
+  /// The cards that can show a page in this window: the single card and the split's panes.
+  private var pageCards: [ContentCardView] { [rootView.card] + rootView.split.paneCards }
+
+  /// Places the crashed tab view on every card whose page is a crashed tab and takes it off the rest. `crashed` is a
+  /// tab whose crash was just reported: its view plays the entrance. A new view on the current tab's card takes focus
+  /// on Reload when the window's focus was on that card (or nowhere) and no Peek is open.
+  func refreshCrashedTabs(crashed: TabID? = nil) {
+    let cards = pageCards
+    let tabs = Array(tabsByNode.values) + privateTabs
+    var placements: [CrashedTabPresenter.Placement] = []
+    for card in cards {
+      guard let page = card.contentView,
+            let tab = tabs.first(where: { engine.contentView(for: $0) === page }),
+            let snapshot = engine.snapshot(of: tab), snapshot.crash != nil else { continue }
+      placements.append(.init(card: card, tab: tab, host: snapshot.url?.host()))
+    }
+    let made = crashedTabs.apply(cards: cards, placements: placements, crashedNow: crashed)
+    // Return is Reload on the current tab's view only (a split may show two), and never while a Peek is open.
+    for card in cards {
+      guard let view = crashedTabs.view(on: card) else { continue }
+      view.isDefault = view.tab == currentTab
+      view.keyboardIsElsewhere = { [weak self] in self?.peek.isOpen ?? true }
+    }
+    guard let window, !peek.isOpen, let current = currentTab, let view = made.first(where: { $0.tab == current }),
+          let card = view.superview?.superview, CrashedTabView.focusIsOnPage(of: card, in: window) else { return }
+    window.makeFirstResponder(view.reloadButton)              // with Full Keyboard Access; else Return presses it
+  }
+
+  /// Reload on the view: the engine reloads the page; `.tabRecovered` takes the view down, and the page gets the focus
+  /// when it was on the card.
+  private func reloadCrashedTab(_ tab: TabID) {
+    let card = pageCards.first { crashedTabs.view(on: $0)?.tab == tab }
+    let focusOnPage = card.flatMap { card in window.map { CrashedTabView.focusIsOnPage(of: card, in: $0) } } ?? false
+    engine.reload(tab)
+    if focusOnPage, tab == currentTab, let window, let page = engine.contentView(for: tab), page.window === window {
+      window.makeFirstResponder(page)
+    }
+  }
+
+  /// Close Tab on the view: what the pane's X does in a split, Cmd-W otherwise.
+  private func closeCrashedTab(_ tab: TabID) {
+    guard let node = nodeByTab[tab] else {
+      // A blank or incognito window's page (#487, #667): the window closes, as Cmd-W does there today.
+      if privateTabs.contains(tab) { window?.performClose(nil) }
+      return
+    }
+    if let index = splitState.panes.firstIndex(of: node), splitState.split != nil {
+      closePane(at: index)
+    } else {
+      close(node: node)
+    }
+  }
+}
