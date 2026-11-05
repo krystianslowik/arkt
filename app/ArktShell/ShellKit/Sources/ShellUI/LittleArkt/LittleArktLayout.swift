@@ -42,6 +42,14 @@ public enum LittleArktLayout {
     return CGRect(x: x, y: top - size.height, width: size.width, height: size.height)
   }
 
+  /// A closed window's last frame for Reopen Closed Tab (#355): as it was when it is fully on a screen's visible
+  /// frame; otherwise (a display was removed or rearranged) moved fully onto the screen it overlaps most, else the
+  /// main screen, shrunk to fit but never below the minimum size (`WindowFramePlacement.restoredFrame`). As it was
+  /// when no screen is known.
+  public static func frame(reopening frame: CGRect, on screens: [ScreenGeometry]) -> CGRect {
+    WindowFramePlacement.restoredFrame(saved: frame, savedScreen: nil, screens: screens, minSize: minimumSize) ?? frame
+  }
+
   /// The page card in the window's content view.
   public static func cardFrame(in bounds: CGRect) -> CGRect {
     CGRect(x: bounds.minX + frameInset, y: bounds.minY + frameInset,

@@ -246,9 +246,12 @@ public final class SettingsPopUpButton: NSButton {
     menu.popUp(positioning: menu.items.first { $0.state == .on }, at: NSPoint(x: 0, y: bounds.height - 3), in: self)
   }
 
-  @objc private func chose(_ sender: NSMenuItem) {
-    guard sender.title != selectedTitle else { return }
-    selectedTitle = sender.title
+  @objc private func chose(_ sender: NSMenuItem) { select(sender.title) }
+
+  /// Chooses `title` as the menu does: a different title restyles and reports it; the current one does nothing.
+  func select(_ title: String) {
+    guard title != selectedTitle, items.contains(title) else { return }
+    selectedTitle = title
     restyle()
     invalidateIntrinsicContentSize()
     onChange?(selectedTitle)

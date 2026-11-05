@@ -138,6 +138,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var onReopenArchived: (@MainActor (NodeID) -> NodeID?)?
   /// Closed tabs and Peeks, most recent on top (#346, #110); see `ShellWindowController+Reopen.swift`.
   var reopenStack = ReopenStack()
+  /// Reopen Closed Tab when this window has nothing of its own to reopen: the last closed Little Arkt window comes
+  /// back (#355). Set by `ShellWindowSet`.
+  var reopenLittleArkt: (@MainActor () -> Void)?
+  var canReopenLittleArkt: @MainActor () -> Bool = { false }
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
   /// The reopen batch the visible undo toast belongs to; nil without one.
@@ -182,6 +186,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
   var pasteboard: NSPasteboard = .general
+  /// The one-off Copy URL tip (BH-196, #404); the window set hands every window the app's stored one.
+  public var copyLinkEducation: CopyLinkEducation = .ephemeral()
   /// Where the sidebar width and hidden state are saved on change (#331).
   let sidebarStateStore: SidebarWindowStateStore
   /// False for a window that is not the one a relaunch restores: its changes must not overwrite the saved state.
@@ -980,7 +986,7 @@ extension ShellWindowController: NSMenuItemValidation {
     if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
     if let enabled = validatePinnedMenuItem(menuItem) { return enabled }
-    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed }
+    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed || canReopenLittleArkt() }
     if menuItem.action == #selector(clearTodayTabs(_:)) { return canClearToday }       // KB-019 (#110)
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
