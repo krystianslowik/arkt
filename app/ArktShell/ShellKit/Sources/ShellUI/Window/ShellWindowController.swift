@@ -192,6 +192,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private(set) lazy var statusPill = makeStatusPillPresenter()
   /// The crashed tab view over a page whose process went away (#578).
   private(set) lazy var crashedTabs = makeCrashedTabPresenter()
+  /// The page info panel below the address pill (#582); see `+PageInfo`.
+  public private(set) lazy var pageInfo = makePageInfoPanel()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
@@ -240,7 +242,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.sessionStore = sessionStore
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
-    root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
+    root.onSidebarStateChange = { [weak self] in
+      self?.saveSidebarState()
+      self?.pageInfo.sidebarDidChange()                                              // #582
+    }
     root.onLayout = { [weak self] in
       self?.javaScriptDialogs.layoutDidFinish()                                      // #400
       self?.permissionPrompts.layoutDidFinish()
@@ -451,6 +456,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     for bar in [urlBar, toolbar.urlBar] {
       bar.onPress = { [weak self] in self?.openLocation(nil) }                        // same as Cmd-L, KB-002
       bar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
+      bar.onPressSiteGlyph = { [weak self, weak bar] in if let bar { self?.toggleSiteControls(from: bar) } }  // #582
     }
     wireToolbarActions(toolbar) { [weak self] in self?.toolbarTab }
     toolbarSetting.addObserver(self)
@@ -541,6 +547,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     urlBar.url = url
     rootView.card.toolbar.urlBar.url = url
     refreshToolbarHistory()
+    refreshPageInfo()                                                                // #582
   }
 
   /// The tab the Toolbar's Back, Forward and Reload act on and show the history of: the current tab, which in a split
@@ -835,6 +842,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .tabRecovered:
       refreshCrashedTabs()
       return
+    case .pageInfoChanged(let tab):
+      if tab == currentTab { refreshPageInfo() }                    // #582: before the map, as a private page has no row
+      return
     default:
       break
     }
@@ -879,8 +889,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
       break                                                         // routed above, before the row lookup (#114)
-    case .tabCrashed, .tabRecovered:
-      break                                                         // routed above, before the row lookup (#578)
+    case .tabCrashed, .tabRecovered, .pageInfoChanged:
+      break                                                         // routed above, before the row lookup (#578, #582)
     case .zoomChanged:
       zoomPill.handle(event)                                        // #579
     case .tabFullscreenChanged:

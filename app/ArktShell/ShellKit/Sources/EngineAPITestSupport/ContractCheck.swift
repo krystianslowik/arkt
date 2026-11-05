@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-25), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-26), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -36,11 +36,15 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case savePreferenceDecidesTheFolder
   // Rule 25 (#576)
   case zoomStepIsReportedOnceAndNothingAtTheEnds, crashedTabStaysListed, reloadRecoversACrashedTabOnce
+  // Rule 26 (#582)
+  case pageInfoNamesTheSiteItShows, permissionChangeIsReadBackAndResetRestoresTheDefault
+  case permissionChangeRaisesTheReloadInfobarOnce
 
-  /// The checks the Chromium engine runs: rule 25 waits for the facade's tab state seams (#577), which add it here.
-  public static var chromiumChecks: [ContractCheck] { allCases.filter { $0.rule != 25 } }
+  /// The checks the Chromium engine runs: rule 25 waits for the facade's tab state seams (#577) and rule 26 for its
+  /// page info seam (#583), which add them here.
+  public static var chromiumChecks: [ContractCheck] { allCases.filter { $0.rule < 25 } }
 
-  /// The contract rule (1-25) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The contract rule (1-26) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -76,6 +80,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
          .interruptedDownloadRetriesAndReplacesItsRow, .dangerousDownloadIsHeldUntilDecided,
          .savePreferenceDecidesTheFolder: 24
     case .zoomStepIsReportedOnceAndNothingAtTheEnds, .crashedTabStaysListed, .reloadRecoversACrashedTabOnce: 25
+    case .pageInfoNamesTheSiteItShows, .permissionChangeIsReadBackAndResetRestoresTheDefault,
+         .permissionChangeRaisesTheReloadInfobarOnce: 26
     }
   }
 
@@ -142,6 +148,11 @@ public enum ContractCheck: String, CaseIterable, Sendable {
       try await EngineContract.zoomStepIsReportedOnceAndNothingAtTheEnds(h)
     case .crashedTabStaysListed: try await EngineContract.crashedTabStaysListed(h)
     case .reloadRecoversACrashedTabOnce: try await EngineContract.reloadRecoversACrashedTabOnce(h)
+    case .pageInfoNamesTheSiteItShows: try await EngineContract.pageInfoNamesTheSiteItShows(h)
+    case .permissionChangeIsReadBackAndResetRestoresTheDefault:
+      try await EngineContract.permissionChangeIsReadBackAndResetRestoresTheDefault(h)
+    case .permissionChangeRaisesTheReloadInfobarOnce:
+      try await EngineContract.permissionChangeRaisesTheReloadInfobarOnce(h)
     }
   }
 }
