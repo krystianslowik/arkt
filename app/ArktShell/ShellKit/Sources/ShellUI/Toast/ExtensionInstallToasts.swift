@@ -19,7 +19,9 @@ final class ExtensionInstallToasts {
   /// `presenter` is the window the toast goes to (the one most recently main); nil: none is open and no toast shows.
   init(extensions: any EngineExtensions, presenter: @escaping @MainActor () -> ToastPresenter?) {
     observation = extensions.observeExtensions { [weak extensions] event in
-      guard case .installed(let info) = event, let extensions, let presenter = presenter() else { return }
+      // A browser import's installs have the import's own summary: no toast each, and the summary stays up.
+      guard case .installed(let info) = event, info.source == .user, let extensions,
+            let presenter = presenter() else { return }
       let isPinned = extensions.pinnedExtensionIDs.contains(info.id)
       let toast = Self.toast(for: info, isPinned: isPinned)
       if isPinned {

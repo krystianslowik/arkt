@@ -304,6 +304,24 @@ struct ExtensionInstallToastTests {
     withExtendedLifetime(toasts) {}
   }
 
+  /// Extensions a browser import installs show no toast each (the import has its own summary), and an import leaves a
+  /// toast already up, such as that summary, in place.
+  @Test func anImportInstallShowsNoToastAndLeavesTheSummaryUp() async {
+    let (engine, presenter, toasts) = make()
+    presenter.show(Toast(text: "Imported 2 extensions"))
+    let ids = [String(repeating: "a", count: 32), String(repeating: "b", count: 32)]
+    let results = await engine.installExtensionResults(ids: ids)
+    #expect(results?.map(\.outcome) == [.installed, .installed])
+    #expect(presenter.current?.text == "Imported 2 extensions")
+    engine.installExtension(InstalledExtension(id: "c", name: "Clips", source: .browserImport))
+    #expect(presenter.current?.text == "Imported 2 extensions")
+    withExtendedLifetime(toasts) {}
+  }
+
+  @Test func anInstallDefaultsToTheUser() {
+    #expect(InstalledExtension(id: "x", name: "X").source == .user)
+  }
+
   @Test func otherExtensionEventsShowNothing() {
     let (engine, presenter, toasts) = make()
     engine.setExtensionCommands([])

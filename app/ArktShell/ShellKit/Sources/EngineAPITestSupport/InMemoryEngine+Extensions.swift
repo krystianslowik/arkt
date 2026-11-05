@@ -170,8 +170,11 @@ extension InMemoryEngine {
   /// Test driver: an extension finished installing (#592), in Chromium's order: its `action` joins every window's list
   /// (pinned at the end of the order with `pinned`), `.extensionActionsChanged` for each window that lists it, then
   /// `.installed`. Whether new extensions pin by default is the shell's product decision, not the engine's (#590,
-  /// question 2).
-  public func installExtension(_ info: InstalledExtension, action: ExtensionAction? = nil, pinned: Bool = false) {
+  /// question 2). `source` overrides `info.source` when given.
+  public func installExtension(_ info: InstalledExtension, action: ExtensionAction? = nil, pinned: Bool = false,
+                               source: ExtensionInstallSource? = nil) {
+    var info = info
+    if let source { info.source = source }
     knownExtensionIDs.insert(info.id)
     if pinned, !pinnedExtensionIDs.contains(info.id) { pinnedExtensionIDs.append(info.id) }
     if let action {

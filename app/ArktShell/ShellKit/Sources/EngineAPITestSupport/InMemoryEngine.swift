@@ -23,8 +23,14 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { imports.record(batch) }
   /// Pretend Web Store ids the stub reports as "not available from the Web Store" (#513).
   public var unavailableExtensionIDs: Set<String> = []
+  /// Each newly installed id is reported as `.installed` with `.browserImport` (named by its id), as an install the
+  /// user did not start from the Web Store (#594).
   public func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? {
-    imports.record(extensions: ids, unavailable: unavailableExtensionIDs)
+    let results = imports.record(extensions: ids, unavailable: unavailableExtensionIDs)
+    for result in results ?? [] where result.outcome == .installed {
+      installExtension(InstalledExtension(id: result.id, name: result.id, source: .browserImport))
+    }
+    return results
   }
 
   /// A close waiting on a leave-site dialog.
