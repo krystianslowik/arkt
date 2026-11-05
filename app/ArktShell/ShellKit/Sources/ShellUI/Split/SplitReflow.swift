@@ -9,7 +9,7 @@ enum SplitReflow {
   /// Firm: settles in about a quarter second without a visible overshoot, like the other layout springs.
   static let parameters = SpringPreset.firm.parameters
   /// Reduce Motion: the frames change at once under a short crossfade.
-  static let fadeDuration: CFTimeInterval = 0.15
+  static let fadeDuration: CFTimeInterval = FadeDuration.standard
   /// Core Animation files every transition under this key, whatever key it is added with.
   static let fadeKey = kCATransition
 
@@ -60,7 +60,7 @@ enum SplitReflow {
     let fade = CATransition()
     fade.type = .fade
     fade.duration = fadeDuration
-    fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)   // strong ease-out
+    fade.timingFunction = MotionCurve.strongEaseOut.timingFunction
     layer?.add(fade, forKey: nil)
   }
 }

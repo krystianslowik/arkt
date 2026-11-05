@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import Motion
 
 extension NSPasteboard.PasteboardType {
   /// A sidebar node dragged inside the app: the node's UUID string. Only tab rows write it (S7).
@@ -1317,8 +1318,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = Float(0)
     fade.toValue = Float(1)
-    fade.duration = 0.15
-    fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+    fade.duration = FadeDuration.standard
+    fade.timingFunction = MotionCurve.strongEaseOut.timingFunction
     rowView.layer?.add(fade, forKey: folderFadeKey)
   }
 

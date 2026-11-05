@@ -286,7 +286,7 @@ final class SidebarDropCanvas: NSView {
     animation.fromValue = from
     animation.toValue = to
     animation.duration = SidebarDropMotion.indicatorFade
-    animation.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)   // strong ease-out
+    animation.timingFunction = MotionCurve.strongEaseOut.timingFunction
     layer.add(animation, forKey: "fade")
   }
 
