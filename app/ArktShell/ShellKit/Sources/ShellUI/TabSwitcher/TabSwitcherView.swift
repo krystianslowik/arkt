@@ -30,10 +30,10 @@ public final class TabSwitcherView: NSView {
   public static let rowHeight: CGFloat = 40
   static let cornerRadius: CGFloat = 12
   static let rowCornerRadius: CGFloat = 8
-  static let fadeDuration: CFTimeInterval = 0.10
+  static let fadeDuration: CFTimeInterval = FadeDuration.quick
   static let fadeKey = "tabSwitcher.fade"
   /// Strong ease-out (`--ease-out` of the motion guidelines) for the dismiss fade and the Reduce Motion crossfades.
-  static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+  static let easeOut = MotionCurve.strongEaseOut.timingFunction
 
   public static func height(rows: Int) -> CGFloat { 2 * padding + CGFloat(rows) * rowHeight }
 

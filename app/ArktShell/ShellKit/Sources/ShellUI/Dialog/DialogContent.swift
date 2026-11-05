@@ -229,6 +229,6 @@ public enum DialogMotion {
     return CATransform3DTranslate(t, -px, -py, 0)
   }
 
-  /// Strong ease-out (the design system's `cubic-bezier(0.23, 1, 0.32, 1)`).
-  static var easeOut: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1) }
+  /// Strong ease-out (the design system's `--ease-out`).
+  static var easeOut: CAMediaTimingFunction { MotionCurve.strongEaseOut.timingFunction }
 }

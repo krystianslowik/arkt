@@ -1,5 +1,6 @@
 import AppKit
 import EngineAPI
+import Motion
 import os
 
 /// One open Peek: a tab with no sidebar row (BH-152) shown over the tab it came from.
@@ -667,8 +668,8 @@ public final class PeekController {
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = 0
     fade.toValue = 1
-    fade.duration = 0.20
-    fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+    fade.duration = FadeDuration.slow
+    fade.timingFunction = MotionCurve.strongEaseOut.timingFunction
     layer.add(fade, forKey: "peekFadeIn")
   }
 

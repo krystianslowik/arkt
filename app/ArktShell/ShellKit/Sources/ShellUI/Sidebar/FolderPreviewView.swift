@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 /// What one Folder Preview row shows.
 struct FolderPreviewRow {
@@ -29,7 +30,7 @@ final class FolderPreviewView: NSView {
   static let enterScaleKey = "folderPreview.enter.scale"
   static let exitKey = "folderPreview.exit"
   /// The strong ease-out of the motion guidelines, as the tab switcher uses it.
-  static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+  static let easeOut = MotionCurve.strongEaseOut.timingFunction
 
   static func height(rows: Int) -> CGFloat {
     let listed = CGFloat(min(max(rows, 1), maximumVisibleRows)) * rowHeight
