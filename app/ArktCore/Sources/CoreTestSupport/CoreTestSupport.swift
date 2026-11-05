@@ -211,6 +211,7 @@ public actor FakeArchiveState: ArchiveStateStoring {
   private var settings = ArchiveSettings()
   private var failsResets = false
   private var failsLoads = false
+  private var failsUpdates = false
   private var holdsLoads = false
   private var heldLoads: [CheckedContinuation<Void, Never>] = []
 
@@ -218,6 +219,7 @@ public actor FakeArchiveState: ArchiveStateStoring {
 
   public func setFailsResets(_ fails: Bool) { failsResets = fails }
   public func setFailsLoads(_ fails: Bool) { failsLoads = fails }
+  public func setFailsUpdates(_ fails: Bool) { failsUpdates = fails }
   public func setStarted(_ date: Date) { started = date }
   public func setSettings(_ settings: ArchiveSettings) { self.settings = settings }
 
@@ -246,6 +248,20 @@ public actor FakeArchiveState: ArchiveStateStoring {
 
   public func loadArchiveSettings() async throws -> ArchiveSettings {
     if failsLoads { throw FakeStoreError() }
+    return settings
+  }
+
+  /// The settings as stored, whatever `failsLoads` says.
+  public var storedSettings: ArchiveSettings { settings }
+  /// How many `updateArchiveSettings` calls stored a value.
+  public private(set) var settingsUpdateCount = 0
+
+  public func updateArchiveSettings(
+    at date: Date, _ change: @escaping @Sendable (inout ArchiveSettings) -> Void
+  ) async throws -> ArchiveSettings {
+    if failsUpdates { throw FakeStoreError() }
+    change(&settings)
+    settingsUpdateCount += 1
     return settings
   }
 }
