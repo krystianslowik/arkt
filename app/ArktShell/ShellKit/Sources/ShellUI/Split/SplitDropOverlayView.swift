@@ -40,7 +40,7 @@ public final class SplitDropOverlayView: NSView {
     registerForDraggedTypes([.sidebarNode])
     previewLayer.cornerRadius = metrics.cardCornerRadius
     previewLayer.cornerCurve = .continuous
-    previewLayer.borderWidth = 2
+    previewLayer.borderWidth = 1
     previewLayer.isHidden = true
     layer?.addSublayer(previewLayer)
   }
@@ -105,12 +105,12 @@ public final class SplitDropOverlayView: NSView {
     CATransaction.commit()
   }
 
-  /// The accent color resolved for the current appearance, read when the preview appears.
-  private func applyColors() {
-    effectiveAppearance.performAsCurrentDrawingAppearance {
-      previewLayer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
-      previewLayer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
-    }
+  /// The drag hint in the page card's tone (#641), read when the preview appears: the zone sits on the card, so it
+  /// follows the window's appearance (graphite in light, porcelain in dark), not the Space's.
+  func applyColors() {
+    let flavor = ThemeFlavor(appearance: effectiveAppearance)
+    previewLayer.backgroundColor = ShellTokens.dragHint.resolve(flavor).cgColor
+    previewLayer.borderColor = ShellTokens.dragHintEdge.resolve(flavor).cgColor
   }
 
   // MARK: NSDraggingDestination

@@ -133,6 +133,12 @@ struct BrandTokensTests {
     #expect(BrandTokens.focusRing.light != BrandTokens.Palette.mustard)
   }
 
+  /// #642: no focus ring is mustard; dark surfaces get porcelain.
+  @Test func focusRingOnDarkSurfacesIsPorcelainNotMustard() {
+    #expect(BrandTokens.focusRing.dark == BrandTokens.Palette.porcelain)
+    #expect(BrandTokens.focusRing.dark != BrandTokens.Palette.mustard)
+  }
+
   // MARK: - Guards: these colors are not text on light surfaces
 
   @Test func mustardAsTextOnLightSurfaceFails() {

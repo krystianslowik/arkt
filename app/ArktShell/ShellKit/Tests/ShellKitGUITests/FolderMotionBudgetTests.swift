@@ -151,6 +151,63 @@ final class FolderMotionBudgetTests: XCTestCase {
     XCTAssertLessThan(max(close.max, open.max), FrameStats().designBudget, "a frame took a whole 120 Hz refresh")
   }
 
+  // MARK: Clear Today (#413)
+
+  /// Clear Today Tabs with 798 Today rows leaving (today[0] is current and stays): presents 120 Hz frames by hand
+  /// until the exit's spring settles. The settling frame archives the rows, once per Clear, so it is not a motion
+  /// frame.
+  private func clearAndRunFrames() throws -> Frames {
+    let outline = try outline()
+    let motion = outline.todayClear
+    motion.now = { [unowned self] in self.clock }
+    motion.drivesFramesItself = false
+    motion.reduceMotion = { false }
+    var frames = Frames()
+    let capturesBefore = outline.motionCaptureCount
+    let clickStart = threadCPU()
+    controller.clearTodayTabs(nil)
+    CATransaction.flush()
+    frames.clickCPU = threadCPU() - clickStart
+    XCTAssertTrue(motion.isRunning)
+    for _ in 0..<240 where motion.isRunning {
+      clock += 1.0 / 120
+      let start = threadCPU()
+      motion.presentFrame()
+      CATransaction.flush()
+      let spent = threadCPU() - start
+      guard motion.isRunning else { break }
+      frames.cpu.append(spent)
+      frames.rowsStyled.append(outline.lastMotionFrameRowsStyled)
+    }
+    frames.captures = outline.motionCaptureCount - capturesBefore
+    XCTAssertFalse(motion.isRunning, "the exit settled within two seconds of frames")
+    return frames
+  }
+
+  /// A Clear of 798 rows: its rows are captured once, when it starts, and a frame styles no more rows than have
+  /// views.
+  func testAClearFrameStylesOnlyTheRowsOnScreen() throws {
+    let outline = try outline()
+    let available = outline.outlineView.rows(in: outline.outlineView.visibleRect).length + 40
+    let frames = try clearAndRunFrames()
+    _ = report("clear", frames)
+    XCTAssertGreaterThan(frames.cpu.count, 10, "the exit ran on frames")
+    XCTAssertEqual(frames.captures, 1, "the exit captured its rows once, when it started")
+    XCTAssertLessThanOrEqual(frames.rowsStyled.max() ?? 0, available, "a frame styled only rows with views")
+    XCTAssertEqual(outline.rowStyle(for: today[0]), .rest, "settled: every row draws at rest")
+    XCTAssertEqual(outline.rowStyle(for: today[1]), .rest)
+  }
+
+  /// The Clear's frames within the folder frames' budget: median under 2 ms, 95th percentile under 4 ms, no frame a
+  /// whole 120 Hz refresh.
+  func testClearFramesStayWithinTheMainThreadCPUBudget() throws {
+    try PacingEnvironment.skipIfScreenBelow120Hz(fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
+    let clear = report("clear", try clearAndRunFrames())
+    XCTAssertLessThan(clear.median, 0.002, "clear frames went over 2 ms of main-thread CPU")
+    XCTAssertLessThan(clear.p95, 0.004, "one clear frame in twenty went over 4 ms of main-thread CPU")
+    XCTAssertLessThan(clear.max, FrameStats().designBudget, "a clear frame took a whole 120 Hz refresh")
+  }
+
   private func threadCPU() -> Double {
     var time = timespec()
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time)

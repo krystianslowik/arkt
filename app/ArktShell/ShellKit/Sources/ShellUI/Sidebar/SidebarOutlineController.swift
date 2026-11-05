@@ -238,9 +238,9 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
       updateKeyboardFocusRing()
     }
   }
-  /// The ring on the focused row: the system focus ring's color (`NSColor.keyboardFocusIndicatorColor`, which follows
-  /// the user's accent color) and width, never mustard. Drawn here because a table view ignores a row-sized focus
-  /// ring mask (it rings the whole table or nothing). Inset into the row fill so the clip view never cuts it.
+  /// The ring on the focused row: `ShellTokens.focusRing` in the Space's text tone (#642). Drawn here because a table
+  /// view ignores a row-sized focus ring mask (it rings the whole table or nothing). Inset into the row fill so the
+  /// clip view never cuts it.
   let keyboardFocusRing = KeyboardFocusRingView(frame: .zero)
   /// Whether Up and Down may stop on a row (the divider may not).
   var isKeyboardFocusable: @MainActor (Int) -> Bool = { _ in true }
@@ -252,6 +252,8 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   var onKeyboardFocusMoved: (@MainActor (Int) -> Void)?
   /// Up passed the first focusable row; the window hands focus to the Favorites grid above (#343).
   var onKeyboardFocusAbove: (@MainActor () -> Void)?
+  /// Tab on a focused row (#413): true when the Clear control above Today took the focus.
+  var onKeyboardTab: (@MainActor () -> Bool)?
 
   /// The focused row's fill, where the ring is drawn.
   func keyboardFocusRect(_ row: Int) -> NSRect {
@@ -261,12 +263,12 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// Places the ring on the focused row (or hides it), above the rows.
   func updateKeyboardFocusRing() {
     guard let row = keyboardFocusRow, row < numberOfRows else {
-      keyboardFocusRing.isHidden = true
+      keyboardFocusRing.setFocused(false)
       return
     }
     if keyboardFocusRing.superview !== self { addSubview(keyboardFocusRing, positioned: .above, relativeTo: nil) }
     keyboardFocusRing.frame = keyboardFocusRect(row)
-    keyboardFocusRing.isHidden = false
+    keyboardFocusRing.setFocused(true)
     keyboardFocusRing.needsDisplay = true
   }
 
@@ -287,6 +289,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     case kVK_UpArrow: moveKeyboardFocus(from: row, by: -1)
     case kVK_Return, kVK_ANSI_KeypadEnter: onKeyboardReturn?(row)
     case kVK_Escape: onKeyboardEscape?()
+    case kVK_Tab where !event.modifierFlags.contains(.shift) && onKeyboardTab?() == true: break
     case kVK_LeftArrow, kVK_RightArrow: break                         // horizontal movement belongs to the grid
     default: super.keyDown(with: event)
     }
@@ -427,6 +430,12 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private var display = FolderDisplay()
   /// The open and close springs of this outline's folders (#109).
   let folderMotion = FolderMotion()
+  /// The spring of the rows the Clear control archives, and of their return on Undo (#413).
+  let todayClear = TodayClearMotion()
+  /// The rows the last Clear archived, so an Undo that brings them back can run the exit in reverse.
+  private var lastCleared: Set<NodeID> = []
+  /// The pointer is over the sidebar: the divider draws the Clear control (#413).
+  public private(set) var isSidebarHovered = false
   /// The rows the folder motion and arrival frames style from, captured once per change of the outline's rows, of
   /// the folders' changing rows or of the arrival's rows (#603). A frame reads no other row of the outline.
   private struct MotionRows {
@@ -434,8 +443,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     var changingGeneration: Int
     var arrivalNode: NodeID?
     var fadingOut: NodeID?
+    var clearGeneration: Int
     /// Each folder in motion that has a row, with its changing rows.
     var blocks: [NodeID: FolderMotionLayout.Block] = [:]
+    /// The rows a Clear moves that have a row (#413).
+    var clearBlock: FolderMotionLayout.Block?
     var arrivalRow = -1
     var arrivalHeight: CGFloat = 0
     var fadingRow = -1
@@ -448,13 +460,16 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private struct MotionFrame: Equatable {
     var progress: [NodeID: Double] = [:]
     var arrival: (room: Double, appear: Double)?
+    /// A Clear's `gone` (#413), and whether it moves the rows (false under Reduce Motion).
+    var clear: (gone: Double, moves: Bool)?
     var rowsBuild = 0
 
-    var isAtRest: Bool { progress.isEmpty && arrival == nil }
+    var isAtRest: Bool { progress.isEmpty && arrival == nil && clear == nil }
 
     static func == (lhs: MotionFrame, rhs: MotionFrame) -> Bool {
       lhs.progress == rhs.progress && lhs.rowsBuild == rhs.rowsBuild
         && lhs.arrival?.room == rhs.arrival?.room && lhs.arrival?.appear == rhs.arrival?.appear
+        && lhs.clear?.gone == rhs.clear?.gone && lhs.clear?.moves == rhs.clear?.moves
     }
   }
   private var motionFrame = MotionFrame()
@@ -515,12 +530,17 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       self?.outlineView.keyboardFocusRow = nil
       self?.onKeyboardFocusExit?()
     }
+    outlineView.onKeyboardTab = { [weak self] in self?.focusClearControl() ?? false }
     scrollView.documentView = outlineView
     outlineView.dropHandler = drop
     outlineView.reloadData()
     syncAllFolders()
     folderMotion.onFrame = { [weak self] progress in self?.presentFolderMotion(progress) }
     folderMotion.onSettle = { [weak self] folder, open in self?.folderMotionSettled(folder, open: open) }
+    todayClear.onFrame = { [weak self] in
+      guard let self else { return }
+      self.presentFolderMotion(self.folderMotion.progress())
+    }
     outlineView.onRowHover = { [weak self] row, hovered in
       guard let self, let id = self.nodeID(atRow: row), case .folder? = self.source.node(id) else { return }
       self.onFolderHover?(id, hovered)
@@ -580,8 +600,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Keyboard focus left the outline through Return or Esc; the window gives focus back to the page.
   public var onKeyboardFocusExit: (@MainActor () -> Void)?
 
-  /// Ctrl-Space: keyboard focus on `row` with the system focus ring (BH-019). The window makes the outline first
-  /// responder.
+  /// Ctrl-Space: keyboard focus on `row` with `ShellTokens.focusRing` (BH-019, #642). The window makes the outline
+  /// first responder.
   public func focusKeyboard(on row: Int) {
     outlineView.keyboardFocusRow = row
   }
@@ -642,6 +662,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// one (#105), else the row alone.
   public func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any)
     -> (any NSPasteboardWriting)? {
+    guard !todayClear.isRunning else { return nil }   // #413: no drag starts while a Clear's rows leave
     guard let id = (item as? OutlineItem)?.nodeID, source.node(id) != nil else { return nil }
     let pasteboardItem = NSPasteboardItem()
     pasteboardItem.setString(id.uuidString, forType: .sidebarNode)
@@ -698,6 +719,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       let view = outlineView.makeView(withIdentifier: SidebarDividerView.reuseIdentifier, owner: self)
         as? SidebarDividerView ?? SidebarDividerView(frame: .zero)
       view.flavor = flavor
+      configureClearControl(of: view, animated: false)
       return view
     }
     let cell = outlineView.makeView(withIdentifier: SidebarTabCellView.reuseIdentifier, owner: self)
@@ -770,7 +792,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       return self.state(for: id) == .current
     }
     proxies.children = { [weak self] row in
-      // The divider row's proxy is the splitter itself, so it lists nothing.
+      // The divider row lists its Clear control (#413), drawn or not; nothing else.
+      if let self, self.nodeID(atRow: row) == nil,
+         let divider = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarDividerView {
+        return [divider.clearButton]
+      }
       guard let self, self.nodeID(atRow: row) != nil,
             let cell = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarTabCellView
       else { return [] }
@@ -954,6 +980,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       } else if let divider = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
                   as? SidebarDividerView {
         divider.flavor = self.flavor
+        self.configureClearControl(of: divider, animated: false)
       }
     }
   }
@@ -1017,6 +1044,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       todayIDs = new
       rebuildRootItems()
       applyDiff(old: old, new: rootItems, parent: nil)
+      updateClearControl(animated: true)
     case .folder(let id), .split(let id):
       // Never asked for: the outline holds no rows for it yet and the next query reads the source fresh.
       guard let parent = items[id], let old = containerChildren[id] else { return }
@@ -1299,6 +1327,91 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     syncAllFolders()
   }
 
+  // MARK: Clear Today (#413)
+
+  /// Tab from a keyboard-focused row (#413): the Clear control takes the keyboard focus, drawn while it has it.
+  /// False when Today has no rows, so Tab goes on as before.
+  @discardableResult
+  func focusClearControl() -> Bool {
+    guard !todayIDs.isEmpty, dividerRow >= 0 else { return false }
+    outlineView.scrollRowToVisible(dividerRow)
+    guard let divider = dividerView, let window = outlineView.window,
+          window.makeFirstResponder(divider.clearButton) else { return false }
+    return true
+  }
+
+  /// The pointer entered or left the sidebar: the divider shows or hides the Clear control, fading.
+  public func setSidebarHovered(_ hovered: Bool) {
+    guard hovered != isSidebarHovered else { return }
+    isSidebarHovered = hovered
+    updateClearControl(animated: true)
+  }
+
+  /// The realized divider, if any.
+  private var dividerView: SidebarDividerView? {
+    let row = dividerRow
+    guard row >= 0 else { return nil }
+    return outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarDividerView
+  }
+
+  private func updateClearControl(animated: Bool) {
+    if let dividerView { configureClearControl(of: dividerView, animated: animated) }
+  }
+
+  /// Drawn while the pointer is over the sidebar and Today has a row; enabled whenever Today has a row (design:
+  /// with no Today tabs it is not drawn and disabled for VoiceOver).
+  private func configureClearControl(of divider: SidebarDividerView, animated: Bool) {
+    divider.onClear = { [weak self] in self?.clearControlPressed() }
+    divider.isClearEnabled = !todayIDs.isEmpty
+    divider.onFocusChange = { [weak self, weak divider] in
+      guard let self, let divider else { return }
+      self.configureClearControl(of: divider, animated: true)
+    }
+    divider.onKeyboardLeave = { [weak self] escape in
+      guard let self else { return }
+      if escape {
+        self.outlineView.window?.makeFirstResponder(nil)
+        self.onKeyboardFocusExit?()
+      } else {
+        let first = self.dividerRow + 1
+        guard first < self.outlineView.numberOfRows else { return }
+        self.outlineView.keyboardFocusRow = first
+        self.outlineView.window?.makeFirstResponder(self.outlineView)
+      }
+    }
+    let shown = (isSidebarHovered || divider.clearButton.hasKeyboardFocus) && !todayIDs.isEmpty
+    divider.setClearShown(shown, animated: animated)
+  }
+
+  /// The Clear control was pressed: the window clears this Space's Today. A Clear during the exit is ignored.
+  func clearControlPressed() {
+    guard !todayClear.isRunning, !todayIDs.isEmpty else { return }
+    perform(.clearToday(spaceID))
+  }
+
+  /// The window's Clear from the control: `rows` collapse upward together on one spring (Reduce Motion: they fade in
+  /// place), the model untouched, and `archive` runs when the motion ends, in the same turn as the rows draw at rest.
+  /// Off screen `archive` runs at once. Ignored while an exit or a return runs.
+  public func runTodayExit(_ rows: [NodeID], archive: @escaping @MainActor () -> Void) {
+    guard !todayClear.isRunning else { return }
+    let leaving = Set(rows)
+    todayClear.start(.leaving, rows: leaving, in: outlineView) { [weak self] in
+      self?.lastCleared = leaving
+      archive()
+    }
+  }
+
+  /// Runs `body` (an Undo); the Today rows it brings back that the last Clear archived come back on the reverse of the
+  /// exit's spring (Reduce Motion: they fade in). Returns `body`'s result.
+  public func returningClearedRows(_ body: () -> Bool) -> Bool {
+    let before = Set(todayIDs)
+    let result = body()
+    let back = Set(todayIDs).subtracting(before).intersection(lastCleared)
+    lastCleared.subtract(back)
+    if !back.isEmpty, !todayClear.isRunning { todayClear.start(.returning, rows: back, in: outlineView) }
+    return result
+  }
+
   // MARK: Arrival (#352)
 
   /// A row arriving from Little Arkt's Open in flight: the rows below make room (`room`, 0 to 1) and the row fades
@@ -1351,6 +1464,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     var frame = MotionFrame(rowsBuild: motionRowsBuild)
     for (folder, value) in progress where rows.blocks[folder] != nil { frame.progress[folder] = value }
     if let arrival, rows.arrivalRow >= 0 { frame.arrival = (arrival.room, arrival.appear) }
+    if rows.clearBlock != nil, let gone = todayClear.gone() { frame.clear = (gone, !todayClear.fades) }
     let raised = Set(frame.progress.keys)
     guard frame != motionFrame || raised != raisedRows else { return }
     let wasAtRest = motionFrame.isAtRest
@@ -1373,11 +1487,13 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let changingGeneration = folderMotion.changingGeneration
     if let motionRows, motionRows.rowsGeneration == rowsGeneration,
        motionRows.changingGeneration == changingGeneration,
-       motionRows.arrivalNode == arrival?.node, motionRows.fadingOut == arrival?.fadingOut {
+       motionRows.arrivalNode == arrival?.node, motionRows.fadingOut == arrival?.fadingOut,
+       motionRows.clearGeneration == todayClear.rowsGeneration {
       return motionRows
     }
     var captured = MotionRows(rowsGeneration: rowsGeneration, changingGeneration: changingGeneration,
-                              arrivalNode: arrival?.node, fadingOut: arrival?.fadingOut)
+                              arrivalNode: arrival?.node, fadingOut: arrival?.fadingOut,
+                              clearGeneration: todayClear.rowsGeneration)
     for (folder, changing) in folderMotion.changing where row(for: folder) >= 0 {
       var entries: [(row: Int, height: CGFloat)] = []
       entries.reserveCapacity(changing.count)
@@ -1392,7 +1508,25 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       if captured.arrivalRow >= 0 { captured.arrivalHeight = outlineView.rect(ofRow: captured.arrivalRow).height }
       captured.fadingRow = arrival.fadingOut.map { row(for: $0) } ?? -1
     }
-    if !folderMotion.changing.isEmpty || arrival != nil { motionCaptureCount += 1 }
+    if !todayClear.rows.isEmpty {
+      // A leaving folder or split leaves with every row it shows (#413): they fade, and their height closes the gap.
+      var rows: Set<Int> = []
+      for node in todayClear.rows {
+        let top = row(for: node)
+        guard top >= 0 else { continue }
+        rows.insert(top)
+        let level = outlineView.level(forRow: top)
+        var next = top + 1
+        while next < outlineView.numberOfRows, outlineView.level(forRow: next) > level {
+          rows.insert(next)
+          next += 1
+        }
+      }
+      if !rows.isEmpty {
+        captured.clearBlock = FolderMotionLayout.Block(rows: rows.map { ($0, outlineView.rect(ofRow: $0).height) })
+      }
+    }
+    if !folderMotion.changing.isEmpty || arrival != nil || !todayClear.rows.isEmpty { motionCaptureCount += 1 }
     motionRowsBuild &+= 1
     motionRows = captured
     return captured
@@ -1412,6 +1546,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
                                  arrivalRow: rows.arrivalRow, oldSelectionRow: rows.fadingRow,
                                  room: springs.room, appear: springs.appear)
     }
+    if let clear = motionFrame.clear, let block = rows.clearBlock {
+      TodayClearLayout.apply(to: &style, atRow: row, block: block, gone: clear.gone, moves: clear.moves)
+    }
     return style
   }
 
@@ -1426,6 +1563,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       transform = CATransform3DTranslate(transform, center.x, center.y, 0)
       transform = CATransform3DScale(transform, style.scale, style.scale, 1)
       transform = CATransform3DTranslate(transform, -center.x, -center.y, 0)
+    }
+    if style.scaleY != 1 {
+      // About the row's top edge: the layer's anchor, at the origin of the outline's flipped geometry.
+      transform = CATransform3DScale(transform, 1, style.scaleY, 1)
     }
     layer.transform = transform
     layer.opacity = Float(style.alpha)
@@ -1478,6 +1619,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// activation is never hit-tested against a stale point.
   func handleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
     defer { outlineView.lastClickPoint = nil }
+    guard !todayClear.isRunning else { return }       // #413: the rows a Clear takes are leaving
     guard row >= 0, let item = outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }
     let flags = modifiers.intersection([.command, .option, .control, .shift])
     let option = flags == .option
@@ -1602,7 +1744,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   }
 
   func handleDoubleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
-    guard row >= 0, modifiers.intersection([.command, .option, .control, .shift]).isEmpty,
+    guard !todayClear.isRunning, row >= 0, modifiers.intersection([.command, .option, .control, .shift]).isEmpty,
           let id = nodeID(atRow: row), case .tab? = source.node(id) else { return }
     beginRename(id)
   }
@@ -1794,56 +1936,5 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       handler(self)?(id)
       return true
     }
-  }
-}
-
-/// The keyboard focus ring on a sidebar row (BH-019): a 3 pt stroke in the system focus ring color, following the
-/// row fill's rounded shape. Not hit-testable and not an accessibility element.
-@MainActor
-final class KeyboardFocusRingView: NSView {
-  static let lineWidth: CGFloat = 3
-  var cornerRadius = SidebarMetrics.rowCornerRadius { didSet { needsDisplay = true } }
-  let ring = CAShapeLayer()
-
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    wantsLayer = true
-    isHidden = true
-    ring.fillColor = nil
-    ring.lineWidth = Self.lineWidth
-    layer?.addSublayer(ring)
-    setAccessibilityElement(false)
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-  override var wantsUpdateLayer: Bool { true }
-  override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-  /// Resolved here so it follows the accent color and the appearance.
-  var strokeColor: CGColor {
-    var color = NSColor.keyboardFocusIndicatorColor.cgColor
-    effectiveAppearance.performAsCurrentDrawingAppearance {
-      color = NSColor.keyboardFocusIndicatorColor.withAlphaComponent(1).cgColor
-    }
-    return color
-  }
-
-  override func updateLayer() {
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    let inset = Self.lineWidth / 2
-    let rect = bounds.insetBy(dx: inset, dy: inset)
-    let radius = max(cornerRadius - inset, 0)
-    ring.frame = bounds
-    ring.path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
-    ring.strokeColor = strokeColor
-    CATransaction.commit()
-  }
-
-  override func layout() {
-    super.layout()
-    needsDisplay = true
   }
 }

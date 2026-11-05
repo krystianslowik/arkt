@@ -49,6 +49,8 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   private var titleBeforeRename = ""
   private var renameCancelled = false
   private var headerHoverArea: NSTrackingArea?
+  /// The whole page: the pointer over the sidebar's list shows the Clear control above Today (#413).
+  private var pageHoverArea: NSTrackingArea?
   private var headerToolTip: NSView.ToolTipTag?
   /// The rect `headerToolTip` covers; nil while the title is open, which shows no reorder tip.
   private var headerToolTipRect: NSRect?
@@ -293,16 +295,58 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
 
   // MARK: - Header hover
 
+  /// A page leaving the screen (a Space switch) presents no more frames: a Clear's exit ends at once, so its rows go
+  /// to the Archive now rather than when the page comes back (#413).
+  public override func viewDidHide() {
+    super.viewDidHide()
+    outlineController.todayClear.settleNow()
+    outlineController.setSidebarHovered(false)       // a hidden page gets no exit event
+  }
+
+  /// A page coming back on screen reads the pointer, which may have entered while it was hidden.
+  public override func viewDidUnhide() {
+    super.viewDidUnhide()
+    resyncSidebarHover()
+  }
+
+  /// Sets the Clear control's hover state from where the pointer is now.
+  func resyncSidebarHover() {
+    guard let window, !isHiddenOrHasHiddenAncestor else {
+      outlineController.setSidebarHovered(false)
+      return
+    }
+    let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    outlineController.setSidebarHovered(visibleRect.contains(point))
+  }
+
   public override func updateTrackingAreas() {
     super.updateTrackingAreas()
     if let headerHoverArea { removeTrackingArea(headerHoverArea) }
     let area = NSTrackingArea(rect: headerRect, options: [.mouseEnteredAndExited, .activeAlways], owner: self)
     addTrackingArea(area)
     headerHoverArea = area
+    if let pageHoverArea { removeTrackingArea(pageHoverArea) }
+    let page = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                              owner: self)
+    addTrackingArea(page)
+    pageHoverArea = page
   }
 
-  public override func mouseEntered(with event: NSEvent) { setHeaderHovered(true) }
-  public override func mouseExited(with event: NSEvent) { setHeaderHovered(false) }
+  public override func mouseEntered(with event: NSEvent) {
+    if event.trackingArea === pageHoverArea {
+      outlineController.setSidebarHovered(true)
+    } else {
+      setHeaderHovered(true)
+    }
+  }
+
+  public override func mouseExited(with event: NSEvent) {
+    if event.trackingArea === pageHoverArea {
+      outlineController.setSidebarHovered(false)
+    } else {
+      setHeaderHovered(false)
+    }
+  }
 
   /// Shows the edit and options buttons while the header is hovered and the title is neither open nor dragged.
   func setHeaderHovered(_ hovered: Bool) {

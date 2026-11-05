@@ -33,7 +33,7 @@ alert has Show Data Folder, and the app icon carries no caution badge.
 | Toast surface | plain white or near-black | `toastSurface` tinted with the Space theme's first stop (the Work Space shows faintly blue) | toasts follow the Space theme |
 | Toast action | bare text after a 1 pt hairline; Undo carried a Cmd-Z hint | a small neutral pill, no hairline, no key hint | one quiet action per toast |
 | Infobar | 1 pt hairline below, small bordered button, underlined link | no hairline (the surface is the edge), small neutral pill, quiet link | no stock chrome |
-| Focus ring | 2 pt graphite (mustard in dark) | the system focus ring | system focus everywhere; mustard is never a stroke |
+| Focus ring | 2 pt graphite (mustard in dark) | the system focus ring, since replaced on buttons by `ShellTokens.focusRing` (#642); text fields keep the system ring | mustard is never a stroke |
 | Import failure toast | "Couldn't import from Arc." | "Couldn't import browser data." | no user-facing "Arc" |
 | Browser context in the screenshots | neutral grey theme | the Work Space's blue theme | shows that toasts and Delete Space take the Space's own color |
 
