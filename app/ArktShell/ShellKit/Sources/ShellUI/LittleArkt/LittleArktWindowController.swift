@@ -89,6 +89,9 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// Moves `tab` into the main window as the first Today tab of `space` (nil: the target Space); false when it could
   /// not, and the page stays here. The page's pending dialog goes with it.
   var onOpenIn: @MainActor (TabID, SpaceID?, JavaScriptDialog?) -> Bool = { _, _, _ in false }
+  /// The chooser's Open in New Window (#356): moves `tab` into a new main window, on the Space Open in names; false
+  /// when it could not, and the page stays here.
+  var onOpenInNewWindow: @MainActor (TabID, JavaScriptDialog?) -> Bool = { _, _ in false }
   /// The user resized the window: new windows use the size (BH-142).
   var onResize: @MainActor (CGSize) -> Void = { _ in }
   /// The window closed; the set forgets it.
@@ -239,6 +242,13 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     javaScriptDialogs.adopt(dialog)
   }
 
+  /// A tab the window set moved in (Opt-Cmd-click on a sidebar tab, #356): shown, unless the engine's activation of
+  /// it mounted it already.
+  func showMovedTab(_ tab: TabID) {
+    guard phase == .open, shownTab != tab, engine.snapshot(of: tab)?.window == engineWindow else { return }
+    mount(tab)
+  }
+
   private func mount(_ tab: TabID) {
     guard let view = engine.contentView(for: tab) else { return }
     shownTab = tab
@@ -324,7 +334,9 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   /// Scale 0.97 and fade (`firmFast`), then the engine closes the window. A page that would ask before leaving
   /// (`beforeunload`) is asked at once, without the motion, so its prompt is never on an invisible window.
-  func requestClose(idle: Bool = false) {
+  /// `withMotion` false asks the engine at once (a hidden window, Close Little Arkt Windows); the page is recorded for
+  /// the Archive and Cmd-Shift-T either way.
+  func requestClose(idle: Bool = false, withMotion: Bool = true) {
     if phase == .flying {
       flight?.abort(.closeRequested)                          // the page lands now, never stranded in a hidden window
       if phase == .handedOff { return }                       // the engine closes the emptied window
@@ -338,11 +350,42 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       return
     }
     phase = .closing
+    guard withMotion else {
+      engineHost.onCloseRequested?()                          // an in-process engine may close at once
+      if engineClosed || engineWindow == nil { finishClose() }
+      return
+    }
     run(.close) { [weak self] _ in
       guard let self else { return }
       if !self.engineClosed { self.engineHost.onCloseRequested?() }   // an in-process engine may close at once
       if self.engineClosed || self.engineWindow == nil { self.finishClose() }
     }
+  }
+
+  // MARK: Dock and Window menus (#356)
+
+  /// The window's row in the Dock and Window menus: its page title, else its host.
+  var menuTitle: String {
+    let url = shownTab.flatMap { engine.snapshot(of: $0)?.url }
+    return LittleArktCopy.menuTitle(pageTitle: window.title, host: LittleArktCopy.host(of: url))
+  }
+
+  /// A Dock or Window menu row: the window comes forward as key, also from Hide All.
+  func bringForward() {
+    guard phase == .open else { return }
+    window.makeKeyAndOrderFront(nil)
+    NSApp.activate()
+  }
+
+  /// Close Little Arkt Windows: the same close as Cmd-W, so the page goes to the Archive and Cmd-Shift-T brings it
+  /// back (#355). A hidden window closes without the motion (it would run where nobody sees it), unless its page asks
+  /// before leaving: then it comes forward first, so the prompt is never on a hidden window.
+  func closeFromMenu() {
+    guard phase == .open, engineWindow != nil else { return }
+    if !window.isVisible, let shownTab, engine.snapshot(of: shownTab)?.wouldHoldClose == true {
+      window.orderFront(nil)
+    }
+    requestClose(withMotion: window.isVisible)
   }
 
   // MARK: Open in (Cmd-O, KB-076)
@@ -364,11 +407,24 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     }
   }
 
-  private func commitOpenIn(_ tab: TabID, space: SpaceID?) {
+  /// The chooser's Open in New Window (#356): this window fades out (0.12 s), then the tab moves into a new main
+  /// window as its first Today tab, selected. No flight: the window it lands in is not on screen yet.
+  func openInNewWindow() {
+    guard phase == .open, let tab = shownTab else { return }
+    carriedDialog = javaScriptDialogs.release(tab)
+    phase = .handingOff
+    run(.fadeOut) { [weak self] completed in
+      guard completed else { return }
+      self?.commitOpenIn(tab, space: nil, newWindow: true)
+    }
+  }
+
+  private func commitOpenIn(_ tab: TabID, space: SpaceID?, newWindow: Bool = false) {
     guard phase == .handingOff else { return }
     let spaceName = self.spaceName(space)
     card.releaseContent()                                   // the main window's card takes the page's view
-    guard onOpenIn(tab, space, carriedDialog) else {
+    let moved = newWindow ? onOpenInNewWindow(tab, carriedDialog) : onOpenIn(tab, space, carriedDialog)
+    guard moved else {
       phase = .open
       if let view = engine.contentView(for: tab) { card.setContent(view) }
       takeBackCarriedDialog()
@@ -513,6 +569,14 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   @objc func showChooser(_ sender: Any?) {
     guard phase == .open else { return }
+    let menu = chooserMenu()
+    let anchor = topBar.chooserButton
+    menu.popUp(positioning: nil, at: Self.menuOrigin(below: anchor), in: anchor)
+  }
+
+  /// "Open in", every Space with its swatch (the target one with Cmd-O), "Open in New Window", "Copy Link"
+  /// (docs/design/little-arkt.md, Copy).
+  func chooserMenu() -> NSMenu {
     let menu = NSMenu(title: LittleArktCopy.chooseSpace)
     let heading = NSMenuItem(title: LittleArktCopy.chooserHeading, action: nil, keyEquivalent: "")
     heading.isEnabled = false
@@ -530,12 +594,18 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       menu.addItem(item)
     }
     menu.addItem(.separator())
+    let newWindow = NSMenuItem(title: LittleArktCopy.openInNewWindow, action: #selector(openInNewWindowAction(_:)),
+                               keyEquivalent: "")
+    newWindow.target = self
+    menu.addItem(newWindow)
+    menu.addItem(.separator())
     let copy = NSMenuItem(title: LittleArktCopy.copyLink, action: #selector(copyLink(_:)), keyEquivalent: "")
     copy.target = self
     menu.addItem(copy)
-    let anchor = topBar.chooserButton
-    menu.popUp(positioning: nil, at: Self.menuOrigin(below: anchor), in: anchor)
+    return menu
   }
+
+  @objc private func openInNewWindowAction(_ sender: Any?) { openInNewWindow() }
 
   /// 4 pt below `view`'s bottom edge, in its own coordinates (a button is flipped).
   static func menuOrigin(below view: NSView) -> NSPoint {

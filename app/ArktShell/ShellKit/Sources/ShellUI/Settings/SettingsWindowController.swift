@@ -51,6 +51,8 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   /// The lookup hotkey's switch and row (#354); the row's caption carries the registration answer.
   var littleArktHotKeySwitch: SettingsSwitch?
   var littleArktHotKeyRow: SettingsRowView?
+  /// Opt-Cmd-click into Little Arkt (#356, BH-132).
+  var littleArktClickSwitch: SettingsSwitch?
   var countFavoritesSwitch: SettingsSwitch?
   var ninthTabSwitch: SettingsSwitch?
   var importButton: ArchivePillButton?
@@ -415,6 +417,7 @@ extension SettingsWindowController: AppSettingsObserver {
     peekShiftSwitch?.setOn(settings.peekLinks.opensShiftClickedLinks, animated: true)
     warnBeforeQuittingSwitch?.setOn(settings.warnsBeforeQuitting, animated: true)
     applyLittleArktHotKeyState()                    // #354
+    littleArktClickSwitch?.setOn(settings.opensLittleArktOnOptionCommandClick, animated: true)   // #356
     countFavoritesSwitch?.setOn(settings.tabNavigation.countsFavorites, animated: true)
     ninthTabSwitch?.setOn(settings.tabNavigation.ninthOpensNinth, animated: true)
     crashReportsSwitch?.setOn(settings.sendsCrashReports, animated: true)

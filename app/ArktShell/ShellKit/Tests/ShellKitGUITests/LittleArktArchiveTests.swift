@@ -251,6 +251,31 @@ final class LittleArktArchiveTests: XCTestCase {
 
   // MARK: Reopen Closed Tab (Cmd-Shift-T)
 
+  /// Close Little Arkt Windows (#356) is the user's close too: a hidden window (Hide All) closes without the motion
+  /// and is archived and reopenable, like a window on screen.
+  func testCloseLittleArktWindowsArchivesHiddenWindowsAndTheyCanBeReopened() throws {
+    let (set, engine) = try makeSet()
+    let (hidden, hiddenID, _) = try openPopup(engine, set)
+    hidden.window.orderOut(nil)
+    let (shown, shownID, _) = try openPopup(engine, set)
+
+    set.littleArktMenus.closeAllWindows(nil)
+
+    XCTAssertTrue(hidden.isClosed, "the hidden window closes at once, without the motion")
+    XCTAssertFalse(engine.windowIDs.contains(hiddenID))
+    shown.finishMotion()
+    XCTAssertTrue(shown.isClosed)
+    XCTAssertFalse(engine.windowIDs.contains(shownID))
+    XCTAssertEqual(archived.map(\.url), [popupURL, popupURL], "both pages go to the Archive")
+    XCTAssertEqual(archived.map(\.isIdle), [false, false])
+
+    XCTAssertNotNil(set.reopenClosedLittleArkt(), "Cmd-Shift-T brings the last one back")
+    let reopened = try XCTUnwrap(set.reopenClosedLittleArkt(), "and the hidden one after it")
+    let tab = try XCTUnwrap(reopened.engineWindow.flatMap { engine.activeTab(in: $0) })
+    XCTAssertEqual(engine.snapshot(of: tab)?.url, popupURL)
+    XCTAssertEqual(takenBack.count, 2)
+  }
+
   func testReopenBringsTheLastClosedLittleArktBackAtItsLastFrame() throws {
     let (set, engine) = try makeSet()
     let (first, _, _) = try openPopup(engine, set)

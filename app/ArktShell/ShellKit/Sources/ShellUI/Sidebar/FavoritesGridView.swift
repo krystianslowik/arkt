@@ -270,7 +270,7 @@ public final class FavoriteTileItem: NSCollectionViewItem {
 @MainActor
 final class FavoritesCollectionView: NSCollectionView {
   var onMouseDownBegan: (@MainActor () -> Void)?
-  var onMouseDownEnded: (@MainActor (IndexPath?, NSPoint) -> Void)?
+  var onMouseDownEnded: (@MainActor (IndexPath?, NSPoint, NSEvent.ModifierFlags) -> Void)?
   var onMoveCommand: (@MainActor (_ deltaColumns: Int, _ deltaRows: Int) -> Void)?
   var onKeyboardReturn: (@MainActor () -> Void)?
   var onKeyboardEscape: (@MainActor () -> Void)?
@@ -296,7 +296,8 @@ final class FavoritesCollectionView: NSCollectionView {
     let endEvent = NSApp.currentEvent.flatMap {
       $0.type == .leftMouseUp && $0.windowNumber == event.windowNumber ? $0 : nil
     } ?? event
-    onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
+    onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil),
+                      event.modifierFlags.intersection(.deviceIndependentFlagsMask))
   }
 
   override func keyDown(with event: NSEvent) {
@@ -399,6 +400,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   private var lastKeyboardFocusID: NodeID?
 
   public var onActivate: (@MainActor (NodeID) -> Void)?
+  /// Opt-Cmd-click on a tile (#356): true when the window opened the page in Little Arkt.
+  public var onOpenInLittleArkt: (@MainActor (NodeID) -> Bool)?
   /// Return or Esc leaves keyboard navigation; Down below the last tile enters the outline.
   var onKeyboardFocusExit: (@MainActor () -> Void)?
   var onKeyboardFocusBelow: (@MainActor () -> Void)?
@@ -472,8 +475,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
         self?.isTrackingMouse = true
         self?.didDragInMouseDown = false
       }
-      favoritesCollectionView.onMouseDownEnded = { [weak self] downIndexPath, point in
-        self?.mouseDownEnded(downIndexPath: downIndexPath, at: point)
+      favoritesCollectionView.onMouseDownEnded = { [weak self] downIndexPath, point, modifiers in
+        self?.mouseDownEnded(downIndexPath: downIndexPath, at: point, modifiers: modifiers)
       }
       favoritesCollectionView.menuProvider = { [weak self] indexPath in
         guard let self, let id = self.nodeID(at: indexPath) else { return nil }
@@ -705,13 +708,20 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     if let indexPath = indexPaths.first, let id = nodeID(at: indexPath) { onActivate?(id) }
   }
 
-  private func mouseDownEnded(downIndexPath: IndexPath?, at point: NSPoint) {
+  private func mouseDownEnded(downIndexPath: IndexPath?, at point: NSPoint, modifiers: NSEvent.ModifierFlags) {
     isTrackingMouse = false
     collectionView.deselectItems(at: collectionView.selectionIndexPaths)
     guard !didDragInMouseDown, !isDragging,
           let indexPath = downIndexPath,
           collectionView.indexPathForItem(at: point) == indexPath,
           let id = nodeID(at: indexPath) else { return }
+    handleTileClick(id, modifiers: modifiers)
+  }
+
+  /// A click on a tile: Opt-Cmd-click opens the Favorite's page in a new Little Arkt window and leaves the Favorite
+  /// as it is (#356, BH-132) while the window takes it; any other click activates it.
+  func handleTileClick(_ id: NodeID, modifiers: NSEvent.ModifierFlags) {
+    if LittleArktRouting.isLittleArktClick(modifiers), isTab(id), onOpenInLittleArkt?(id) == true { return }
     onActivate?(id)
   }
 
