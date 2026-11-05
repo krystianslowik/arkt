@@ -141,9 +141,37 @@ struct FaviconDecoderTests {
     #expect(await gate.calls.count == 1)
   }
 
+  /// The guarantee behind #605, without a clock (#699): the images the loader hands out, through the real off-main
+  /// decoder, are realized bitmaps. An image read from its file (`NSImage(data:)`, `CGImageSourceCreateImageAtIndex`)
+  /// stays tied to its image source and reports the file's type; ImageIO decodes it at first draw, on the main thread.
+  /// A realized bitmap has no source type.
+  ///
+  /// Not covered here: dropping `kCGImageSourceShouldCacheImmediately` from `decodeNow`. The thumbnail is a realized
+  /// bitmap without it on the macOS this was written on, so neither this check nor the `ARKT_FAVICON_GATE` timing run
+  /// fails when it is removed; the option stays as a request ImageIO is free to need on a later release.
+  @Test(arguments: [64, 256])
+  func theLoaderHandsOutBitmapsThatDrawWithoutDecoding(pixels: Int) async throws {
+    let data = FaviconFixtures.png(pixels, pixels: pixels)
+    // Controls: both lazy paths stay tied to their source, so the check below tells them apart.
+    let lazy = try #require(NSImage(data: data)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+    #expect(lazy.utType != nil, "control: NSImage(data:) is decoded at first draw")
+    let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+    let fromSource = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+    #expect(fromSource.utType != nil, "control: CGImageSourceCreateImageAtIndex is decoded at first draw")
+    let loader = FaviconImageLoader<Int>(decoder: .offMain, cache: NSCache())
+    var applied: NSImage?
+    loader.load([1: data]) { applied = $0[1] ?? nil }
+    await loader.settle()
+    let image = try #require(applied)
+    let bitmap = try #require(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+    #expect(bitmap.utType == nil, "a realized bitmap, not one decoded at first draw")
+    #expect(max(bitmap.width, bitmap.height) == min(pixels, FaviconDecoder.maxPixelSize))
+  }
+
   /// The measurement behind #605: main-thread CPU to draw a sidebar's worth of favicons for the first time, as
-  /// `NSImage(data:)` (decoded lazily, inside the draw) and as decoded bitmaps. Printed for the pull request; the
-  /// gate is the ratio, which holds on a loaded machine where absolute times do not.
+  /// `NSImage(data:)` (decoded lazily, inside the draw) and as decoded bitmaps. Always printed; the ratio is asserted
+  /// only with `ARKT_FAVICON_GATE=1`, since at 64 px both sides are a few milliseconds and a busy runner erases the
+  /// margin (#699). The required check is `theLoaderHandsOutBitmapsThatDrawWithoutDecoding`.
   @Test(arguments: [64, 256])
   func drawingDecodedFaviconsSkipsTheDecode(pixels: Int) throws {
     let count = 30                                   // rows a full-height sidebar shows at once
@@ -168,6 +196,8 @@ struct FaviconDecoderTests {
     let decoded = firstDrawCPU(try bytes.map { FaviconDecoder.image(try #require(FaviconDecoder.decodeNow($0))) })
     print(String(format: "favicondecode.firstdraw pixels=%d count=%d lazyMs=%.2f decodedMs=%.2f",
                  pixels, count, lazy * 1000, decoded * 1000))
-    #expect(decoded * 2 < lazy, "decoded favicons draw without decoding")
+    if ProcessInfo.processInfo.environment["ARKT_FAVICON_GATE"] == "1" {
+      #expect(decoded * 2 < lazy, "decoded favicons draw without decoding")
+    }
   }
 }
