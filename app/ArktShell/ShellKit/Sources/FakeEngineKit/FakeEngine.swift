@@ -10,7 +10,9 @@ import EngineAPI
 /// tabs of its own here) and closes never hold (`wouldHoldClose` is always false, so both close modes close at once);
 /// rules 13, 14 and 16 are not applicable, and so is rule 17's audible state (no public WebKit signal). Find in page
 /// (rule 22) selects with `window.find` and counts in page script; the hovered link (rule 23) comes from a script
-/// that posts `mouseover` and `mouseout` of links.
+/// that posts `mouseover` and `mouseout` of links. Tab state (#576): a web content process exit is a crash and the zoom
+/// is `pageZoom`; HTML fullscreen is never reported (WebKit's element fullscreen stays off) and there is no session to
+/// recover.
 /// Nothing outside this file may import WebKit, and the import is `internal`, so the compiler
 /// rejects any WebKit type in the public surface (EngineAPI types and NSView only).
 @MainActor
@@ -61,7 +63,10 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     var onLinkActivation: (@MainActor (URL, NSEvent.ModifierFlags) -> Bool)?
     /// A response WebKit will not show (an attachment, a type with no viewer) or an action it turns into a download.
     var onDownload: (@MainActor (WKDownload) -> Void)?
+    /// The web content process exited (#576).
+    var onTerminate: (@MainActor () -> Void)?
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { onCommit?() }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { onTerminate?() }
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
       let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")
@@ -164,6 +169,7 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     navigation.onCommit = { [weak self] in self?.didCommit(id) }
     navigation.onLinkActivation = { [weak self] url, flags in self?.linkActivated(id, url: url, flags: flags) ?? false }
     navigation.onDownload = { [weak self] download in self?.adoptDownload(download) }
+    navigation.onTerminate = { [weak self] in self?.webContentProcessTerminated(id) }
     webView.navigationDelegate = navigation
     let entry = Entry(webView: webView, navigation: navigation, snapshot: TabSnapshot(id: id, window: window))
     entries[id] = entry
@@ -223,6 +229,7 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     for waiter in faviconFetchWaiters.removeValue(forKey: id) ?? [] { waiter.resume() }
     entry.observations.forEach { $0.invalidate() }
     entry.navigation.onCommit = nil
+    entry.navigation.onTerminate = nil
     entry.webView.navigationDelegate = nil
     entry.webView.stopLoading()
     entry.webView.removeFromSuperview()
@@ -510,9 +517,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     case .stop: web.stopLoading()
     case .back: goBack(tab)
     case .forward: goForward(tab)
-    case .zoomIn: web.pageZoom = Self.zoomSteps.first { $0 > web.pageZoom + 0.001 } ?? web.pageZoom
-    case .zoomOut: web.pageZoom = Self.zoomSteps.last { $0 < web.pageZoom - 0.001 } ?? web.pageZoom
-    case .zoomReset: web.pageZoom = 1
+    case .zoomIn: zoomIn(tab)
+    case .zoomOut: zoomOut(tab)
+    case .zoomReset: resetZoom(tab)
     default: break
     }
   }
@@ -559,6 +566,38 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     }
   }
 
+  // MARK: - Tab state (#576)
+
+  /// WebKit's page zoom, on Safari's steps (`zoomSteps`), reported in percent.
+  public func zoomIn(_ id: TabID) {
+    guard let web = entries[id]?.webView else { return }
+    setPageZoom(id, Self.zoomSteps.first { $0 > web.pageZoom + 0.001 } ?? web.pageZoom)
+  }
+
+  public func zoomOut(_ id: TabID) {
+    guard let web = entries[id]?.webView else { return }
+    setPageZoom(id, Self.zoomSteps.last { $0 < web.pageZoom - 0.001 } ?? web.pageZoom)
+  }
+
+  public func resetZoom(_ id: TabID) { setPageZoom(id, 1) }
+
+  private func setPageZoom(_ id: TabID, _ factor: CGFloat) {
+    guard let web = entries[id]?.webView else { return }
+    web.pageZoom = factor
+    let percent = Int((factor * 100).rounded())
+    let zoom = TabZoom(percent: percent, isDefault: percent == TabZoom.default.percent)
+    update(id) { $0.zoom = zoom } event: { .zoomChanged(id, zoom, userInitiated: true) }
+  }
+
+  /// The public delegate gives no reason, so every exit is `.crashed`. A load in progress ends first; the next
+  /// committed navigation (a reload) recovers the tab in `didCommit`.
+  private func webContentProcessTerminated(_ id: TabID) {
+    guard let entry = entries[id] else { return }
+    entry.pendingFinish = nil
+    update(id) { $0.isLoading = false } event: { .loadingChanged(id, isLoading: false) }
+    update(id) { $0.crash = .crashed } event: { .tabCrashed(id, .crashed) }
+  }
+
   // MARK: - Load lifecycle
 
   /// Contract rule 2 wants urlChanged before loadingChanged(true). WKWebView usually reports url
@@ -574,6 +613,7 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
 
   private func didCommit(_ id: TabID) {
     guard let entry = entries[id] else { return }
+    update(id) { $0.crash = nil } event: { .tabRecovered(id) }       // #576: the page has a process again
     let host = entry.webView.url?.host()
     guard host != entry.committedHost else { return }
     entry.committedHost = host

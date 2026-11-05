@@ -833,6 +833,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
       break                                                         // routed above, before the row lookup (#114)
+    case .tabCrashed, .tabRecovered, .zoomChanged, .tabFullscreenChanged:
+      break                                                         // no shell surface yet (#578, #579, #581)
     }
   }
 
