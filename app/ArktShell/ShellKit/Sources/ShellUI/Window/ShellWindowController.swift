@@ -644,7 +644,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   /// Cmd-T: new Today tab in the current Space (BH-100). Cmd-L: navigate the current tab (BH-101).
+  /// A blank or incognito window opens it in a private page instead, never a row on the shared sidebar (#559).
   func open(_ url: URL, inNewTab: Bool) {
+    if isPrivateWindow {
+      openPrivately(url, inNewPage: inNewTab)
+      return
+    }
     if inNewTab || currentTab == nil {
       // Cmd-T with no Space creates the Space first, then the tab (decision 3) [I].
       guard let space = sidebarController.currentSpace ?? createSpace() else { return }

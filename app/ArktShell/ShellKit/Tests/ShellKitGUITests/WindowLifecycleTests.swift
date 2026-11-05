@@ -439,6 +439,67 @@ final class WindowLifecycleTests: XCTestCase {
     window.window?.performClose(nil)
   }
 
+  /// #559: the user cancels a private window's close at a leave-site prompt. The window is not closing any more: a
+  /// page the engine opens afterwards is adopted, and closing it shows the page before it.
+  func testCancelledCloseOfAPrivateWindowKeepsAdoptingEngineTabs() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let window = f.set.openWindow(opensFirstTab: false)
+    window.makeIncognito()
+    window.commandBar.show(.newTab)
+    window.commandBar.setQueryForTesting("private-visit.example")
+    window.commandBar.commit()
+    let page = try XCTUnwrap(window.currentTab)
+    let engineWindow = try XCTUnwrap(window.engineWindow)
+
+    f.engine.holdClose(page)
+    window.window?.performClose(nil)
+    XCTAssertTrue(window.isWindowCloseRequested, "the close waits on the leave-site prompt")
+    XCTAssertTrue(f.engine.answerDialog(page, accept: false))
+    XCTAssertFalse(window.isWindowCloseRequested, "staying on the page cancels the window close")
+    XCTAssertEqual(window.currentTab, page)
+
+    let popup = f.engine.engineCreateTab(url: EngineWorld.url("after-cancel"), in: engineWindow, opener: page)
+    XCTAssertNotNil(f.engine.snapshot(of: popup), "the page is adopted, not closed on creation")
+    XCTAssertEqual(window.currentTab, popup)
+    f.engine.engineCloseTab(popup)
+    XCTAssertEqual(window.currentTab, page, "closing it shows the page before it")
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+  }
+
+  /// #559: Paste URL as New Tab (Cmd-Opt-V) in a blank or incognito window opens a new private page, not a Today row.
+  func testPasteURLAsNewTabInAPrivateWindowOpensAPrivatePage() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let board = NSPasteboard(name: .init("WindowLifecycleTests.paste"))
+    board.clearContents()
+    board.setString("https://example.com/pasted-new-tab", forType: .string)
+
+    for incognito in [false, true] {
+      let window = f.set.openWindow(opensFirstTab: false)
+      if incognito { window.makeIncognito() } else { window.makeBlank() }
+      window.pasteboard = board
+      window.pasteURLAsNewTab(nil)
+      let first = try XCTUnwrap(window.currentTab, "the pasted URL opens in this window")
+      XCTAssertEqual(f.engine.snapshot(of: first)?.url?.absoluteString, "https://example.com/pasted-new-tab")
+
+      window.pasteURLAsNewTab(nil)
+      let second = try XCTUnwrap(window.currentTab)
+      XCTAssertNotEqual(second, first, "as a new page")
+      XCTAssertEqual(window.privateTabs, [first, second])
+
+      XCTAssertEqual(saves, 0, "no paste schedules a sidebar save")
+      XCTAssertEqual(f.source.sidebar, before, "no paste reaches the shared sidebar")
+      XCTAssertTrue(window.sidebarController.spaces.isEmpty)
+      window.window?.performClose(nil)
+    }
+  }
+
   private func tabURLs(_ sidebar: SidebarModel.Sidebar) -> [String] {
     sidebar.nodes.values.compactMap { node in
       if case .tab(let tab) = node.kind { tab.url.absoluteString } else { nil }

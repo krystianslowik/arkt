@@ -25,10 +25,11 @@ extension ShellWindowController {
     sidebarController.onPasteAndGo = { [weak self] url in self?.openPrivately(url) }
   }
 
-  /// Loads `url` in the shown private page: the first visit creates it, later ones navigate it. The tab has no
-  /// sidebar node, so nothing is written to the shared sidebar. A page the engine closed is made again.
-  private func openPrivately(_ url: URL) {
-    if let shown = privateTab, engine.snapshot(of: shown) != nil {
+  /// Loads `url` in the shown private page: the first visit creates it, later ones navigate it. `inNewPage` (Paste
+  /// URL as New Tab) makes a new private page instead, shown over the others. The tab has no sidebar node, so nothing
+  /// is written to the shared sidebar. A page the engine closed is made again.
+  func openPrivately(_ url: URL, inNewPage: Bool = false) {
+    if !inNewPage, let shown = privateTab, engine.snapshot(of: shown) != nil {
       engine.navigate(shown, to: url)
       showPrivatePage(shown)
       return
@@ -81,6 +82,10 @@ extension ShellWindowController {
       engineDidActivate(tab) { showPrivatePage(tab) }
     case .tabClosed(_, let reason):
       privateTabClosed(tab, reason: reason)
+    case .closeCancelled:
+      // The user stayed on the page: the window close is off, as for a row (`closeWasCancelled`).
+      isWindowCloseRequested = false
+      stampsShownTabsOnWindowClose = false
     default:
       return false
     }
@@ -89,6 +94,7 @@ extension ShellWindowController {
 
   private func privateTabClosed(_ tab: TabID, reason: CloseReason) {
     privateTabs.removeAll { $0 == tab }
+    if tab == engineActiveTab { engineActiveTab = nil }
     guard currentTab == tab else { return }
     let windowIsClosing = isWindowCloseRequested || reason == .windowClosing || reason == .appTerminating
     if !windowIsClosing, let next = privateTab {
