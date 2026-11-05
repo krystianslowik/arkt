@@ -77,6 +77,7 @@ final class SidebarBannerWindowTests: XCTestCase {
     XCTAssertEqual(harness.container.pager.frame.maxY, row.minY, accuracy: 0.5, "the rows end above the banner")
     XCTAssertTrue(harness.container.pager.layer?.mask === harness.container.bannerSlot.fade, "the rows fade out")
     XCTAssertEqual(harness.banner.label.stringValue, "Update")
+    XCTAssertNotNil(NSImage(systemSymbolName: SidebarBannerView.updateSymbol, accessibilityDescription: nil))
     XCTAssertFalse(harness.banner.label.isHidden)
     XCTAssertFalse(harness.banner.restartButton.isHidden)
     XCTAssertTrue(harness.banner.chevron.isHidden)
@@ -206,6 +207,9 @@ final class SidebarBannerWindowTests: XCTestCase {
     let harness = makeHarness([Self.announcement])
     let banner = harness.banner
     XCTAssertEqual(banner.label.stringValue, Self.announcement.title)
+    for name in [SidebarBannerView.announcementSymbol, SidebarBannerView.chevronSymbol] {
+      XCTAssertNotNil(NSImage(systemSymbolName: name, accessibilityDescription: nil), "\(name) exists on this macOS")
+    }
     XCTAssertTrue(banner.restartButton.isHidden)
     XCTAssertFalse(banner.chevron.isHidden)
     XCTAssertLessThanOrEqual(banner.label.frame.maxX, banner.chevron.frame.minX - 8)

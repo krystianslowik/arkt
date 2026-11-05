@@ -61,7 +61,10 @@ final class SidebarBannerPopover: NSObject {
     window.setFrame(Self.frame(for: size, beside: row), display: false)
     parent.addChildWindow(window, ordered: .above)
     window.orderFront(nil)
-    if takesKey { window.makeKey() }
+    if takesKey {
+      window.makeKey()
+      window.makeFirstResponder(nil)                // keys go in; no button shows a ring until Tab moves to it
+    }
     monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
       MainActor.assumeIsolated { self?.mouseDown(in: event.window, at: event.locationInWindow, row: row) }
       return event

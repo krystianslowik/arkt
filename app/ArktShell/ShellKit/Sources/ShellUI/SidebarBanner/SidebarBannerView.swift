@@ -10,6 +10,11 @@ import Motion
 /// stays inside the view; only the row (and the close button while shown) take clicks. Nothing here takes focus.
 @MainActor
 public final class SidebarBannerView: NSView {
+  /// The glyphs (SF Symbols): an update's arrow, an announcement's spark, its chevron.
+  static let updateSymbol = "arrow.down.circle"
+  static let announcementSymbol = "sparkle"
+  static let chevronSymbol = "chevron.right"
+
   public private(set) var notice: SidebarNotice?
   /// The close button (or VoiceOver's press on it).
   var onDismiss: (@MainActor () -> Void)?
@@ -110,10 +115,10 @@ public final class SidebarBannerView: NSView {
     let isUpdate = notice?.isUpdate ?? true
     label.font = .systemFont(ofSize: SidebarBannerMetrics.labelFontSize, weight: isUpdate ? .semibold : .regular)
     label.textColor = text.nsColor()
-    glyph.image = SymbolImageCache.shared.symbol(isUpdate ? "arrow.down.circle" : "sparkle",
+    glyph.image = SymbolImageCache.shared.symbol(isUpdate ? Self.updateSymbol : Self.announcementSymbol,
                                                  box: SidebarBannerMetrics.glyphSize, color: text, scale: scale)
     chevron.image = SymbolImageCache.shared.symbol(
-      "chevron.right", box: SidebarBannerMetrics.chevronHeight, weight: .semibold,
+      Self.chevronSymbol, box: SidebarBannerMetrics.chevronHeight, weight: .semibold,
       color: ShellTokens.sidebarForeground.resolve(flavor), scale: scale)
     closeButton.flavor = flavor
   }

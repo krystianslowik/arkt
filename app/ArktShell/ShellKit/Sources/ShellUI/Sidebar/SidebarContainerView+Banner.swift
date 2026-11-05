@@ -44,7 +44,11 @@ extension SidebarContainerView {
         slot.reservesSpace = false
         needsLayout = true
         layout()
-        animateBannerFade(from: from, step: step) { [weak self] in self?.bannerArrived() }
+        let generation = slot.generation
+        animateBannerFade(from: from, step: step) { [weak self] in
+          guard let self, self.bannerSlot.generation == generation else { return }
+          self.bannerArrived()
+        }
       } else {
         slot.reservesSpace = true
         needsLayout = true
