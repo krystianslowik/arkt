@@ -89,11 +89,12 @@ extension ShellWindowController {
 
   // MARK: Shared
 
-  /// The Edit menu validation: the copy actions need something to copy, Paste URL as New Tab always works.
+  /// The Edit menu validation: the copy actions need something to copy (an open Peek, or a tab among the selected
+  /// rows or the current row; a folder or split row alone has nothing, #564), Paste URL as New Tab always works.
   func validateCopyLinkMenuItem(_ item: NSMenuItem) -> Bool? {
     switch item.action {
     case #selector(copyCurrentURL(_:)), #selector(copyCurrentURLAsMarkdown(_:)), #selector(copyCurrentURLAsQuote(_:)):
-      return currentNode != nil
+      return !copyTargets().isEmpty
     case #selector(pasteURLAsNewTab(_:)):
       return true
     default:
