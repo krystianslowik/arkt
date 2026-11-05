@@ -12,6 +12,7 @@ final class CommandBarBehaviourTests: XCTestCase {
   var bar: CommandBarController!
   var window: NSWindow!
   var announcements: [String] = []
+  var priorities: [NSAccessibilityPriorityLevel] = []
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -23,12 +24,16 @@ final class CommandBarBehaviourTests: XCTestCase {
     window.makeKeyAndOrderFront(nil)
     bar = CommandBarController(parent: window)
     bar.settings.dismissSearchSuggestionNotice()
-    bar.announce = { [unowned self] in announcements.append($0) }
+    bar.announce = { [unowned self] text, priority in
+      announcements.append(text)
+      priorities.append(priority)
+    }
     bar.dismissFinisher = { _ in }            // the fade is ended by hand where a test looks at it
     bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
     bar.barView.widthMotion.drivesFramesItself = false
     bar.prewarm()
     announcements = []
+    priorities = []
   }
 
   override func tearDown() async throws {
@@ -98,6 +103,39 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(bar.barView.pills.counts[.all], 5, "counts are of the unfiltered rows")
     XCTAssertEqual(bar.barView.pills.counts[.tabs], 3)
     XCTAssertEqual(bar.barView.pills.counts[.actions], 1)
+  }
+
+  /// Up / Down and Page Up / Page Down keep focus in the field, so VoiceOver hears the newly selected row's label
+  /// (#608). It interrupts the previous one: holding Down speaks the row it lands on, not every row passed.
+  func testArrowMovesAnnounceTheSelectedRowAndHoverDoesNot() throws {
+    showMixed()
+    announcements = []
+    priorities = []
+    XCTAssertTrue(selector(#selector(NSResponder.moveDown(_:))))
+    XCTAssertEqual(announcements.last, bar.results[1].accessibilityLabel(position: 2, of: 5))
+    XCTAssertEqual(announcements.last, "Tab 2, t2.example, open tab, 2 of 5")
+    XCTAssertEqual(priorities.last, .high)
+    XCTAssertTrue(selector(#selector(NSResponder.moveUp(_:))))
+    XCTAssertEqual(announcements.last, bar.results[0].accessibilityLabel(position: 1, of: 5))
+    XCTAssertTrue(selector(#selector(NSResponder.moveUp(_:))))
+    XCTAssertEqual(announcements.last, bar.results[4].accessibilityLabel(position: 5, of: 5), "wraps to the last row")
+    XCTAssertTrue(selector(#selector(NSResponder.pageUp(_:))))
+    XCTAssertEqual(announcements.last, bar.results[0].accessibilityLabel(position: 1, of: 5))
+
+    let spoken = announcements.count
+    bar.barView.onHoverRow?(2)
+    XCTAssertEqual(bar.barView.table.selectedRow, 2)
+    XCTAssertEqual(announcements.count, spoken, "a pointer hover selects without speaking")
+  }
+
+  /// A move that does not change the row (one result) says nothing new.
+  func testAMoveOnASingleRowAnnouncesNothing() throws {
+    showMixed()
+    try command(4)
+    XCTAssertEqual(bar.results.count, 1)
+    announcements = []
+    XCTAssertTrue(selector(#selector(NSResponder.moveDown(_:))))
+    XCTAssertEqual(announcements, [])
   }
 
   func testTheFilterAnnouncesItsNameAndCount() throws {
