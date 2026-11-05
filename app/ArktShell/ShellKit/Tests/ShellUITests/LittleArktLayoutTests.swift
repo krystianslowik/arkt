@@ -79,8 +79,8 @@ struct LittleArktLayoutTests {
     let screen = ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1440, height: 900), visibleFrame: visible)
     let frame = CGRect(x: 900, y: 200, width: 480, height: 620)
     #expect(LittleArktLayout.frame(reopening: frame, on: [screen]) == frame)
-    let partly = CGRect(x: 1300, y: 200, width: 480, height: 620)     // half off the right edge: still on screen
-    #expect(LittleArktLayout.frame(reopening: partly, on: [screen]) == partly)
+    let partly = CGRect(x: 1300, y: 200, width: 480, height: 620)     // partly off the right edge: moved fully in
+    #expect(LittleArktLayout.frame(reopening: partly, on: [screen]) == CGRect(x: 960, y: 200, width: 480, height: 620))
     #expect(LittleArktLayout.frame(reopening: frame, on: []) == frame, "no screen known: as it was")
   }
 
@@ -96,15 +96,15 @@ struct LittleArktLayoutTests {
 
   @Test func aReopenedFrameGoesToTheScreenItOverlapsMostFittedToIt() {
     let main = ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1440, height: 900), visibleFrame: visible)
-    // Over the second screen's frame but outside every visible frame.
-    let shrunk = ScreenGeometry(frame: CGRect(x: 1440, y: 0, width: 800, height: 600),
-                                visibleFrame: CGRect(x: 1440, y: 0, width: 800, height: 500))
-    let frame = CGRect(x: 1500, y: 520, width: 900, height: 700)       // only its bottom edge strip is visible
+    let second = ScreenGeometry(frame: CGRect(x: 1440, y: 0, width: 800, height: 600),
+                                visibleFrame: CGRect(x: 1440, y: 0, width: 800, height: 600))
+    // 40 pt on the main screen, the rest on the second.
+    let straddling = CGRect(x: 1400, y: 100, width: 480, height: 400)
+    #expect(LittleArktLayout.frame(reopening: straddling, on: [main, second])
+            == CGRect(x: 1440, y: 100, width: 480, height: 400))
 
-    let moved = LittleArktLayout.frame(reopening: frame, on: [main, shrunk])
-
-    #expect(shrunk.visibleFrame.intersects(moved))
-    #expect(shrunk.visibleFrame.contains(moved), "fully on that screen, fitted to it")
-    #expect(moved.width == 800 - LittleArktLayout.rightInset)
+    let large = CGRect(x: 1500, y: 0, width: 900, height: 700)         // larger than the smaller screen
+    let fitted = LittleArktLayout.frame(reopening: large, on: [main, second])
+    #expect(fitted == CGRect(x: 1440, y: 0, width: 800, height: 600), "shrunk to fit, fully on that screen")
   }
 }
