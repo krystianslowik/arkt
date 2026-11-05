@@ -89,22 +89,20 @@ extension ShellWindowController {
     // Return is Reload on the current tab's view only (a split may show two), as the empty state's default button.
     for card in cards { crashedTabs.view(on: card)?.isDefault = crashedTabs.view(on: card)?.tab == currentTab }
     guard let window, let current = currentTab, let view = made.first(where: { $0.tab == current }),
-          let card = view.superview?.superview as? ContentCardView, Self.userIsNotTypingElsewhere(of: card, in: window) else { return }
+          Self.userIsNotTypingElsewhere(in: window) else { return }
     window.makeFirstResponder(view.reloadButton)              // with Full Keyboard Access; else Return presses it
   }
 
-  /// The user is not typing elsewhere in the window: the window's focus is not in text outside `card` (a row being
-  /// renamed, a field of the Toolbar).
-  private static func userIsNotTypingElsewhere(of card: ContentCardView, in window: NSWindow) -> Bool {
-    guard let text = window.firstResponder as? NSText else { return true }
-    return text.isDescendant(of: card)
+  /// The user is not typing in the window: its focus is not in text (a row being renamed). The crashed view has no
+  /// text of its own, so any text with the focus is elsewhere.
+  private static func userIsNotTypingElsewhere(in window: NSWindow) -> Bool {
+    !(window.firstResponder is NSText)
   }
 
   /// Reload on the view: the engine reloads the page; `.tabRecovered` takes the view down, and the page gets the focus
   /// unless the user is typing elsewhere in the window.
   private func reloadCrashedTab(_ tab: TabID) {
-    let card = pageCards.first { crashedTabs.view(on: $0)?.tab == tab }
-    let focusOnPage = card.flatMap { card in window.map { Self.userIsNotTypingElsewhere(of: card, in: $0) } } ?? false
+    let focusOnPage = window.map(Self.userIsNotTypingElsewhere(in:)) ?? false
     engine.reload(tab)
     if focusOnPage, tab == currentTab, let window, let page = engine.contentView(for: tab), page.window === window {
       window.makeFirstResponder(page)

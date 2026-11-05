@@ -71,7 +71,7 @@ final class CrashedTabWindowTests: XCTestCase {
     XCTAssertEqual(view.titleLabel.stringValue, "This page quit unexpectedly")
     XCTAssertEqual(view.bodyLabel.stringValue,
                    "Something went wrong while showing fieldguide.example. Your other tabs are not affected.")
-    XCTAssertEqual(view.reloadButton.keyEquivalent, "\r", "Return reloads")
+    XCTAssertTrue(view.isDefault, "Return reloads")
     if view.reloadButton.canBecomeKeyView {                         // Full Keyboard Access on
       XCTAssertTrue(controller.window?.firstResponder === view.reloadButton, "Reload takes focus")
     }
@@ -91,8 +91,10 @@ final class CrashedTabWindowTests: XCTestCase {
 
     engine.crash(tab, status: .crashed)
 
-    XCTAssertNotNil(crashedView(on: card))
+    let view = try XCTUnwrap(crashedView(on: card))
     XCTAssertTrue(window.firstResponder === editor, "the field keeps editing")
+    XCTAssertFalse(view.performKeyEquivalent(with: try Self.returnKey(in: window)), "the field's Return is its own")
+    XCTAssertNotNil(engine.snapshot(of: tab)?.crash)
     field.removeFromSuperview()
   }
 
@@ -171,6 +173,24 @@ final class CrashedTabWindowTests: XCTestCase {
     XCTAssertTrue(controller.window?.firstResponder === engine.contentView(for: tab))
   }
 
+  func testReturnReloads() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    engine.crash(tab, status: .crashed)
+    let view = try XCTUnwrap(crashedView(on: card))
+
+    XCTAssertTrue(view.performKeyEquivalent(with: try Self.returnKey(in: controller.window)))
+
+    XCTAssertNil(engine.snapshot(of: tab)?.crash)
+    XCTAssertNil(crashedView(on: card))
+  }
+
+  static func returnKey(in window: NSWindow?) throws -> NSEvent {
+    try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                   windowNumber: window?.windowNumber ?? 0, context: nil, characters: "\r",
+                                   charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+  }
+
   func testANewNavigationTakesTheViewDown() throws {
     controller.activate(node: first)
     let tab = try XCTUnwrap(controller.currentTab)
@@ -239,7 +259,9 @@ final class CrashedTabWindowTests: XCTestCase {
     let view = try XCTUnwrap(crashedView(on: cards[1]))
     XCTAssertEqual(view.tab, rightTab)
     XCTAssertFalse(controller.window?.firstResponder === view.reloadButton, "focus stays with the focused pane")
-    XCTAssertEqual(view.reloadButton.keyEquivalent, "", "Return belongs to the focused pane")
+    XCTAssertFalse(view.isDefault, "Return belongs to the focused pane")
+    XCTAssertFalse(view.performKeyEquivalent(with: try Self.returnKey(in: controller.window)))
+    XCTAssertNotNil(engine.snapshot(of: rightTab)?.crash)
 
     view.closeButton.performClick(nil)
 

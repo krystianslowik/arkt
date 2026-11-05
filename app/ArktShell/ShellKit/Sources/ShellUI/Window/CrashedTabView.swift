@@ -36,9 +36,17 @@ final class CrashedTabView: NSView {
   var onReload: (@MainActor () -> Void)?
   var onClose: (@MainActor () -> Void)?
 
-  /// Reload is the default button (Return) while this view covers the current tab.
-  var isDefault = false {
-    didSet { reloadButton.keyEquivalent = isDefault ? "\r" : "" }
+  /// Return (or Enter) presses Reload while this view covers the current tab, unless text elsewhere in the window is
+  /// being edited (its Return is its own). Not a key equivalent on the button, which would take Return from a field.
+  var isDefault = false
+
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function])
+    guard isDefault, event.type == .keyDown, modifiers.isEmpty,
+          event.charactersIgnoringModifiers == "\r" || event.charactersIgnoringModifiers == "\u{3}",
+          !(window?.firstResponder is NSText) else { return super.performKeyEquivalent(with: event) }
+    reloadButton.performClick(nil)
+    return true
   }
 
   /// The entrance played last (tests): nil before any, or when the view came with a tab switch (no motion).
