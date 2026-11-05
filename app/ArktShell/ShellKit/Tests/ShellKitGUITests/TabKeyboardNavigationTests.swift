@@ -202,7 +202,8 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertTrue(ring.superview === outline)
     XCTAssertEqual(ring.frame, outline.keyboardFocusRect(row))
     ring.updateLayer()
-    XCTAssertEqual(ring.ring.strokeColor, ring.strokeColor, "the system focus ring color")
+    XCTAssertEqual(ring.ring.strokeColor, ShellTokens.focusRing.resolve(page.outlineController.flavor).cgColor,
+                   "the ink ring in the Space's text tone (#642)")
     XCTAssertEqual(ring.ring.lineWidth, KeyboardFocusRingView.lineWidth)
   }
 

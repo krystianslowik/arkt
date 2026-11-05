@@ -229,7 +229,7 @@ final class SidebarDropCanvas: NSView {
     line.opacity = 0
     highlight.cornerRadius = SidebarMetrics.rowCornerRadius
     highlight.cornerCurve = .continuous
-    highlight.borderWidth = 2
+    highlight.borderWidth = 1
     highlight.opacity = 0
     layer?.addSublayer(highlight)
     layer?.addSublayer(line)
@@ -296,11 +296,11 @@ final class SidebarDropCanvas: NSView {
     return CGRect(x: rect.minX, y: bounds.height - rect.maxY, width: rect.width, height: rect.height)
   }
 
-  private func applyColors() {
-    effectiveAppearance.performAsCurrentDrawingAppearance {
-      line.backgroundColor = NSColor.controlAccentColor.cgColor
-      highlight.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
-      highlight.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
-    }
+  /// The drag hint in the Space's text tone (#641): the sidebar's appearance follows it.
+  func applyColors() {
+    let flavor = ThemeFlavor(appearance: effectiveAppearance)
+    line.backgroundColor = ShellTokens.dragHintEdge.resolve(flavor).cgColor
+    highlight.backgroundColor = ShellTokens.dragHint.resolve(flavor).cgColor
+    highlight.borderColor = ShellTokens.dragHintEdge.resolve(flavor).cgColor
   }
 }
