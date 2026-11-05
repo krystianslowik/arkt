@@ -85,14 +85,19 @@ extension ShellWindowController {
   // MARK: Engine tabs
 
   /// A tab the engine opened on its own in this window (`window.open`, a link with `target=_blank`,
-  /// `chrome.tabs.create`) becomes a Today tab in the current Space. Tabs this window created (origin `.client`) are
-  /// mapped by the call that created them. A tab the sidebar refuses is closed, so no live tab is left without a row.
+  /// `chrome.tabs.create`) becomes a Today tab in the current Space; in a blank or incognito window, a private page
+  /// (#559). Tabs this window created (origin `.client`) are mapped by the call that created them. A tab the sidebar
+  /// refuses is closed, so no live tab is left without a row.
   func engineDidCreateTab(_ tab: TabID) {
     guard let snapshot = engine.snapshot(of: tab), snapshot.origin == .engine,
           snapshot.window != nil, snapshot.window == engineWindow else { return }
     expectsEngineReactivation = false
     guard !isWindowCloseRequested else {                  // the window is going away: no row that would outlive it
       engine.closeTab(tab, mode: .skipUnloadHandlers)
+      return
+    }
+    if isPrivateWindow {                                  // #559: a page of its own, never a row on the shared sidebar
+      adoptPrivatePage(tab)
       return
     }
     if let opener = snapshot.opener, nodeByTab[opener] != nil || opener == peek.session?.tab {
@@ -179,8 +184,8 @@ extension ShellWindowController {
 
   /// The engine made `tab` its active tab. The shell follows (an extension's `chrome.tabs.update`, an engine tab
   /// opened in the foreground), except for the engine's own pick after the current tab closed: the shell has chosen
-  /// the successor, and the engine is told again.
-  func engineDidActivate(_ tab: TabID, node: NodeID) {
+  /// the successor, and the engine is told again. `follow` shows the tab: its row, or a private window's page.
+  func engineDidActivate(_ tab: TabID, follow: () -> Void) {
     guard let engineWindow, engine.latestActiveTab(in: engineWindow) == tab else { return }
     if tab == engineActiveTab {
       // An in-process engine can still report its automatic successor after this acknowledgement in the same
@@ -201,7 +206,7 @@ extension ShellWindowController {
       if let currentTab { activateEngineTab(currentTab) }
       return
     }
-    activate(node: node)
+    follow()
   }
 
   // MARK: Held closes (Decision 11)

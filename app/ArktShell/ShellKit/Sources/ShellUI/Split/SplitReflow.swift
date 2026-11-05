@@ -1,4 +1,4 @@
-import CoreGraphics
+import AppKit
 import Motion
 import QuartzCore
 
@@ -22,6 +22,59 @@ enum SplitReflow {
     let minY = edge(from.minY, to.minY)
     let maxY = edge(from.maxY, to.maxY)
     return CGRect(x: min(minX, maxX), y: min(minY, maxY), width: abs(maxX - minX), height: abs(maxY - minY))
+  }
+
+  // MARK: Presenting a card in flight (#602)
+  //
+  // A reflow sets each card's real frame once, at the layout's target, so a page is resized once, not per spring
+  // frame. Per frame only layer properties change: a translation moves the card, and a rounded mask the size of the
+  // in-between frame crops it. Nothing is scaled: the page, the Toolbar and the close button stay at their target
+  // size, anchored at the card's top leading corner, and the card's growth reveals more of them (or its shrink
+  // crops them). The mask also clips the card's shadow while it moves.
+
+  /// The rect a card whose real frame is `real` is drawn in when the spring has it at `presented`: `presented`'s top
+  /// leading corner, and no larger than `real` (content beyond the real frame does not exist). `flipped`: the
+  /// superview's y axis runs down, so the top is `minY`.
+  static func drawnFrame(presenting presented: CGRect, in real: CGRect, flipped: Bool) -> CGRect {
+    let width = min(presented.width, real.width)
+    let height = min(presented.height, real.height)
+    let y = flipped ? presented.minY : presented.maxY - height
+    return CGRect(x: presented.minX, y: y, width: width, height: height)
+  }
+
+  /// The translation (in the superview's coordinates) that moves a card whose real frame is `real` so its top
+  /// leading corner sits at `drawn`'s.
+  static func translation(drawing drawn: CGRect, in real: CGRect, flipped: Bool) -> CATransform3D {
+    let dy = flipped ? drawn.minY - real.minY : drawn.maxY - real.maxY
+    return CATransform3DMakeTranslation(drawn.minX - real.minX, dy, 0)
+  }
+
+  /// Draws `view` (real frame `real`) in `drawn`, or at rest when `drawn` is nil: translation and rounded mask set,
+  /// or cleared. Only layer properties change; the caller disables implicit actions.
+  @MainActor
+  static func present(_ view: NSView, in drawn: CGRect?, cornerRadius: CGFloat) {
+    guard let layer = view.layer else { return }
+    guard let drawn else {
+      if !CATransform3DIsIdentity(layer.transform) { layer.transform = CATransform3DIdentity }
+      if layer.mask != nil { layer.mask = nil }
+      return
+    }
+    let flipped = view.superview?.isFlipped ?? false
+    let transform = translation(drawing: drawn, in: view.frame, flipped: flipped)
+    if !CATransform3DEqualToTransform(layer.transform, transform) { layer.transform = transform }
+    let mask = layer.mask ?? {
+      let mask = CALayer()
+      mask.backgroundColor = CGColor(gray: 0, alpha: 1)
+      mask.cornerCurve = .continuous
+      layer.mask = mask
+      return mask
+    }()
+    mask.cornerRadius = cornerRadius
+    // The drawn rect moved back by the translation lands on the real frame; in the view's coordinates it is the mask's
+    // frame (AppKit keeps a view's layer space equal to the view's coordinates).
+    let frame = view.superview.map { view.convert(drawn.offsetBy(dx: -transform.m41, dy: -transform.m42), from: $0) }
+      ?? CGRect(origin: .zero, size: drawn.size)
+    if mask.frame != frame { mask.frame = frame }
   }
 
   /// The gaps between neighbouring `panes`: what the dividers cover while the panes move.
