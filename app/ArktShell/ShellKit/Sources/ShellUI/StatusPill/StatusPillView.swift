@@ -75,6 +75,10 @@ final class StatusPillView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  /// The capsule's own shape casts the shadow, rebuilt with every width change: the pill slides on a display link
+  /// and fades, and without a path each of those frames would derive the shadow offscreen (#604).
+  override func makeBackingLayer() -> CALayer { ShadowPathLayer() }
+
   isolated deinit {
     link?.invalidate()
   }
