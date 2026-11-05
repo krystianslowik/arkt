@@ -63,27 +63,21 @@ extension InMemoryEngine {
   }
 }
 
-/// InMemoryEngine's crashed session: `simulateCrashedExit()` stands in for a run that did not quit cleanly; `answers`
-/// records how it was acknowledged.
+/// InMemoryEngine's crashed session: `simulateCrashedExit()` stands in for a run that did not quit cleanly;
+/// `dismissals` counts the acknowledgements.
 @MainActor
 public final class InMemorySessionRecovery: EngineSessionRecovery {
-  public enum Answer: Equatable, Sendable { case restored, dismissed }
-
   public private(set) var lastSessionCrashed = false
-  public private(set) var answers: [Answer] = []
+  public private(set) var dismissals = 0
 
   public init() {}
 
   /// Test hook: the previous run ended without a clean quit.
   public func simulateCrashedExit() { lastSessionCrashed = true }
 
-  public func restoreLastSession() { answer(.restored) }
-
-  public func dismissLastSession() { answer(.dismissed) }
-
-  private func answer(_ answer: Answer) {
+  public func dismissLastSession() {
     guard lastSessionCrashed else { return }
     lastSessionCrashed = false
-    answers.append(answer)
+    dismissals += 1
   }
 }

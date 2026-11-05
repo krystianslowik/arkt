@@ -163,10 +163,12 @@ public enum EngineEvent: Equatable, Sendable {
   /// The page's process went away (a crash, a kill, out of memory, a failed launch). The tab stays listed; a load in
   /// progress ends first, and so does HTML fullscreen. Reported once until the tab recovers.
   case tabCrashed(TabID, TabTerminationStatus)
-  /// A crashed tab has a live page again (a reload or a new navigation), before that load's own events.
+  /// A crashed tab has a live page again (a reload or a new navigation). Reported once the reloaded or new page has a
+  /// live process, no later than that navigation's commit; it may follow that load's `.loadingChanged(true)`.
   case tabRecovered(TabID)
   /// The page zoom changed: by `zoomIn`, `zoomOut`, `resetZoom` or a zoom command (`userInitiated`), or by the engine
-  /// (a site's saved zoom on navigation, a changed default). Reported once per change.
+  /// (a site's saved zoom on navigation, another tab on the same site was zoomed, a changed default; Chromium keeps
+  /// zoom per host). Reported once per change.
   case zoomChanged(TabID, TabZoom, userInitiated: Bool)
   /// An element of the page entered or left HTML fullscreen (`requestFullscreen`), as opposed to the window's own full
   /// screen. A navigation or a crash leaves it.
@@ -293,7 +295,7 @@ public protocol EngineClient: AnyObject {
   func zoomIn(_ id: TabID)
   func zoomOut(_ id: TabID)
   func resetZoom(_ id: TabID)
-  /// The crashed-session prompt's answers; nil for an engine that keeps no session. Default: nil.
+  /// The crashed-session prompt's state; nil for an engine that keeps no session. Default: nil.
   var sessionRecovery: (any EngineSessionRecovery)? { get }
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it

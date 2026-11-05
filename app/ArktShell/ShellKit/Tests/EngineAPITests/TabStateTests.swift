@@ -243,30 +243,17 @@ struct TabStateTests {
     #expect(!recovery.lastSessionCrashed)
   }
 
-  @Test func restoreAcknowledgesTheCrashedSessionOnce() throws {
+  @Test func dismissAcknowledgesTheCrashedSessionOnce() throws {
     let engine = InMemoryEngine()
     engine.crashedSession.simulateCrashedExit()
     let recovery = try #require(engine.sessionRecovery)
     #expect(recovery.lastSessionCrashed)
 
-    recovery.restoreLastSession()
-    recovery.restoreLastSession()
+    recovery.dismissLastSession()
     recovery.dismissLastSession()
 
     #expect(!recovery.lastSessionCrashed)
-    #expect(engine.crashedSession.answers == [.restored])
-  }
-
-  @Test func dismissAcknowledgesTheCrashedSessionOnce() throws {
-    let engine = InMemoryEngine()
-    engine.crashedSession.simulateCrashedExit()
-    let recovery = try #require(engine.sessionRecovery)
-
-    recovery.dismissLastSession()
-    recovery.restoreLastSession()
-
-    #expect(!recovery.lastSessionCrashed)
-    #expect(engine.crashedSession.answers == [.dismissed])
+    #expect(engine.crashedSession.dismissals == 1)
   }
 
   // MARK: Defaults
@@ -311,5 +298,19 @@ private final class MinimalEngine: EngineClient {
   }
   func observe(window: EngineWindowID, _ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
     hub.add(window: window, handler)
+  }
+}
+
+/// Rule 25 of the shared contract on InMemoryEngine.
+@MainActor
+struct InMemoryTabStateContractTests {
+  let harness = EngineHarness.inMemory()
+
+  @Test func zoomStepIsReportedOnceAndNothingAtTheEnds() async throws {
+    try await EngineContract.zoomStepIsReportedOnceAndNothingAtTheEnds(harness)
+  }
+  @Test func crashedTabStaysListed() async throws { try await EngineContract.crashedTabStaysListed(harness) }
+  @Test func reloadRecoversACrashedTabOnce() async throws {
+    try await EngineContract.reloadRecoversACrashedTabOnce(harness)
   }
 }

@@ -589,6 +589,19 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     update(id) { $0.zoom = zoom } event: { .zoomChanged(id, zoom, userInitiated: true) }
   }
 
+  /// Test hook (reachable through `@testable import`): the pid of the tab's web content process, from WebKit's private
+  /// `_webProcessIdentifier`. Nil when WebKit no longer has that property or the page has no process.
+  func webContentProcessIdentifier(of id: TabID) -> pid_t? {
+    guard let web = entries[id]?.webView, web.responds(to: NSSelectorFromString("_webProcessIdentifier")),
+          let pid = (web.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value, pid > 0 else { return nil }
+    return pid
+  }
+
+  /// Whether this WebKit still has `_webProcessIdentifier`, so a test can skip the real-termination checks without it.
+  nonisolated static var canReadWebContentProcessIdentifier: Bool {
+    NSClassFromString("WKWebView")?.instancesRespond(to: NSSelectorFromString("_webProcessIdentifier")) ?? false
+  }
+
   /// The public delegate gives no reason, so every exit is `.crashed`. A load in progress ends first; the next
   /// committed navigation (a reload) recovers the tab in `didCommit`.
   private func webContentProcessTerminated(_ id: TabID) {

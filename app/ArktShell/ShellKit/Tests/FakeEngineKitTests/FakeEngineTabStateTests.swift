@@ -5,49 +5,69 @@ import Testing
 @testable import FakeEngineKit
 
 /// FakeEngine's tab state from WebKit's own signals (#576): a web content process that really exits is a crash, and
-/// `pageZoom` is the zoom.
+/// `pageZoom` is the zoom. The crash checks kill the tab's real web content process; they are skipped when WebKit no
+/// longer publishes its pid.
 @MainActor
 struct FakeEngineTabStateTests {
-  private let page = URL(string: "data:text/html,%3Ctitle%3ECrash%3C/title%3E%3Cp%3ECrash%3C/p%3E")!
-
   init() { _ = NSApplication.shared }
 
-  private func loadedTab(_ engine: FakeEngine) async throws -> TabID {
-    let tab = engine.createTab(url: page, in: engine.createWindow(host: StubWindowHost()))
-    try await EngineContract.waitUntil(timeout: .seconds(10)) {
-      engine.snapshot(of: tab).map { !$0.isLoading && $0.title == "Crash" } ?? true
+  /// Pages as data URLs (no files, no network) whose title is `title`; the crash driver kills the page's process.
+  static let harness = EngineHarness(
+    makeEngine: { FakeEngine() },
+    pageURL: { title in
+      try #require(URL(string: "data:text/html,%3Ctitle%3E\(title)%3C/title%3E%3Cp%3E\(title)%3C/p%3E"))
+    },
+    settle: { engine, id in
+      try await EngineContract.waitUntil(timeout: .seconds(10)) {
+        engine.snapshot(of: id).map { !$0.isLoading && !$0.title.isEmpty } ?? true
+      }
+    },
+    retitle: { _, _, _ in },
+    pagesOnTwoHosts: { (URL(string: "about:blank")!, URL(string: "about:blank")!) },
+    crashTab: { engine, id in
+      let fake = try #require(engine as? FakeEngine)
+      let pid = try #require(fake.webContentProcessIdentifier(of: id), "the page has a web content process")
+      try #require(kill(pid, SIGKILL) == 0)
     }
-    return tab
-  }
+  )
 
-  /// The pid of the tab's web content process; WebKit publishes it only on its private SPI.
-  private func webContentProcess(of engine: FakeEngine, _ tab: TabID) throws -> pid_t {
-    let view = try #require(engine.contentView(for: tab))
-    let pid = try #require((view.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value)
-    try #require(pid > 0, "the page has a web content process")
-    return pid
-  }
-
-  @Test func webContentProcessExitIsACrashAndReloadRecovers() async throws {
+  @Test(.enabled(if: FakeEngine.canReadWebContentProcessIdentifier))
+  func webContentProcessExitIsACrashAndReloadRecovers() async throws {
     let engine = FakeEngine()
-    let tab = try await loadedTab(engine)
+    let tab = engine.createTab(url: try Self.harness.pageURL("Crash"), in: engine.createWindow(host: StubWindowHost()))
+    try await Self.harness.settle(engine, tab)
     let recorder = EventRecorder(engine)
 
-    #expect(kill(try webContentProcess(of: engine, tab), SIGKILL) == 0)
+    let crash = try #require(Self.harness.crashTab)
+    try await crash(engine, tab)
     try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.snapshot(of: tab)?.crash != nil }
-
-    #expect(recorder.events(for: tab).filter { if case .tabCrashed = $0 { true } else { false } }
-              == [.tabCrashed(tab, .crashed)])
     #expect(engine.snapshot(of: tab)?.crash == .crashed)
-    #expect(engine.tabIDs.contains(tab), "a crashed tab stays listed")
 
     engine.reload(tab)
     try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.snapshot(of: tab)?.crash == nil }
-    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.snapshot(of: tab)?.isLoading == false }
+    try await Self.harness.settle(engine, tab)
 
-    #expect(recorder.events(for: tab).filter { $0 == .tabRecovered(tab) }.count == 1)
+    // The recovery comes with the reload's commit: after the crash, possibly after the reload's loadingChanged(true),
+    // and before its loadingChanged(false).
+    let events = recorder.events(for: tab)
+    let crashed = try #require(events.firstIndex(of: .tabCrashed(tab, .crashed)))
+    let recovered = try #require(events.firstIndex(of: .tabRecovered(tab)))
+    let finished = try #require(events.lastIndex(of: .loadingChanged(tab, isLoading: false)))
+    #expect(crashed < recovered && recovered < finished, "\(events)")
+    #expect(events.filter { $0 == .tabRecovered(tab) }.count == 1)
     #expect(engine.snapshot(of: tab)?.title == "Crash")
     engine.closeTab(tab)
+  }
+
+  // Rule 25 of the shared contract.
+  @Test func zoomStepIsReportedOnceAndNothingAtTheEnds() async throws {
+    try await EngineContract.zoomStepIsReportedOnceAndNothingAtTheEnds(Self.harness)
+  }
+  @Test(.enabled(if: FakeEngine.canReadWebContentProcessIdentifier))
+  func crashedTabStaysListed() async throws { try await EngineContract.crashedTabStaysListed(Self.harness) }
+  @Test(.enabled(if: FakeEngine.canReadWebContentProcessIdentifier))
+  func reloadRecoversACrashedTabOnce() async throws {
+    try await EngineContract.reloadRecoversACrashedTabOnce(Self.harness)
   }
 
   @Test func zoomFollowsPageZoomAndIsReportedOncePerChange() throws {
