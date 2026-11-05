@@ -156,6 +156,30 @@ struct SettingsStoreTests {
     #expect(try await store.loadArchiveSettings() == settings)
   }
 
+  /// #448: each Settings row changes its own field; the other stored field is kept, and the result is what is stored.
+  @Test func updateArchiveSettingsChangesOneFieldAndKeepsTheOther() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    var stored = ArchiveSettings()
+    stored.littleArcThreshold = .never
+    try await store.save(stored, at: Self.date)
+
+    let updated = try await store.updateArchiveSettings(at: Self.date.addingTimeInterval(1)) {
+      $0.setTabThreshold(.thirtyDays, forProfile: ArchiveSettings.defaultProfile, scope: .thisProfile)
+    }
+
+    #expect(updated.tabThreshold(forProfile: ArchiveSettings.defaultProfile) == .thirtyDays)
+    #expect(updated.littleArcThreshold == .never)
+    #expect(try await store.loadArchiveSettings() == updated)
+  }
+
+  @Test func updateArchiveSettingsWithNothingStoredStartsFromTheDefaults() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    let updated = try await store.updateArchiveSettings(at: Self.date) { $0.littleArcThreshold = .oneHour }
+    #expect(updated.littleArcThreshold == .oneHour)
+    #expect(updated.tabThreshold(forProfile: ArchiveSettings.defaultProfile) == .tabsDefault)
+    #expect(try await store.loadArchiveSettings() == updated)
+  }
+
   @Test func storesConformToTheArchiveProtocols() throws {
     let database = try ArktDatabase.inMemory()
     let _: any ArchiveStoring = ArchiveStore(database: database)

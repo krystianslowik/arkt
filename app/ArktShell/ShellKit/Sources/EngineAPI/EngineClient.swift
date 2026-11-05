@@ -286,6 +286,10 @@ public protocol EngineClient: AnyObject {
   /// tab and for a tab with no frame to copy (not drawn yet, hidden long enough to be evicted, discarded); the tab is
   /// never shown, woken or reloaded for it. Default: nil, for an engine that cannot copy frames.
   func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage?
+  /// The text selected in the tab's main-frame page now (#404, BH-193: Copy URL offers a link to it), whitespace as the
+  /// page reports it; nil for no selection, an unknown or closed tab, and after a new document commits. A read only:
+  /// never focuses, wakes or reloads the tab. Default: nil, for an engine that does not report selections.
+  func selectedText(of id: TabID) -> String?
 
   // MARK: Tab state (#576, EngineTabState.swift)
 
@@ -297,6 +301,7 @@ public protocol EngineClient: AnyObject {
   func resetZoom(_ id: TabID)
   /// The crashed-session prompt's state; nil for an engine that keeps no session. Default: nil.
   var sessionRecovery: (any EngineSessionRecovery)? { get }
+
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it
   /// arrives after the call that caused it returns. During queued delivery `snapshot(of:)`
@@ -349,6 +354,8 @@ extension EngineClient {
   public func act(on infobar: InfobarID, action: InfobarAction) {}
 
   public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? { nil }
+
+  public func selectedText(of id: TabID) -> String? { nil }
 
   /// Immediate-state engines already expose the latest selection through `activeTab(in:)`.
   public func latestActiveTab(in window: EngineWindowID) -> TabID? { activeTab(in: window) }
