@@ -54,6 +54,13 @@ final class AppCommands: NSObject {
   @objc func showWelcome(_ sender: Any?) { session?.showWelcome() }
 }
 
+/// The Window menu's Little Arkt section (#356): rebuilt each time the menu opens, from the open Little Arkt windows.
+extension AppCommands: NSMenuDelegate {
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    session?.windows.littleArktMenus.updateWindowMenu(menu)
+  }
+}
+
 extension AppCommands: NSMenuItemValidation {
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     guard let session else { return false }

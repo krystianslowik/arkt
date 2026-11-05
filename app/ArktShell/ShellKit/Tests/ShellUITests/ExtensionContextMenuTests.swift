@@ -193,26 +193,47 @@ struct ExtensionContextMenuTests {
 
   // MARK: The row's menu: right-click, Ctrl-click and the accessibility show-menu action
 
-  @Test func rowGivesTheSameMenuToTheMouseAndToAccessibility() throws {
+  private static let showMenu = #selector(NSAccessibilityProtocol.accessibilityPerformShowMenu)
+
+  private static func mouseDown(_ type: NSEvent.EventType, _ modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
+    try #require(NSEvent.mouseEvent(with: type, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                                    windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+  }
+
+  @Test func rowGivesTheSameMenuToRightClickCtrlClickAndAccessibility() async throws {
     let (engine, window) = Self.engine([Self.action("a", "Alpha", siteAccess: .onClick, options: true)])
     let row = ExtensionContextMenuView(frame: NSRect(x: 0, y: 0, width: 300, height: 44))
     row.menuProvider = { Self.menu(engine, window, "a") }
     var shown: [(NSMenu, NSView)] = []
     row.presentMenu = { shown.append(($0, $1)) }
 
-    let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
-                                                timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
-                                                clickCount: 1, pressure: 1))
-    let mouseMenu = try #require(row.menu(for: event))
+    let rightClickMenu = try #require(row.menu(for: try Self.mouseDown(.rightMouseDown)))
+    let ctrlClickMenu = try #require(row.menu(for: try Self.mouseDown(.leftMouseDown, .control)))
+    #expect(titles(ctrlClickMenu) == titles(rightClickMenu))
+
     #expect(row.accessibilityPerformShowMenu())
+    #expect(shown.isEmpty)                                             // deferred: the action returns first
+    await row.pendingPresentation?.value
     #expect(shown.count == 1)
     let axMenu = try #require(shown.first?.0)
     #expect(shown.first?.1 === row)
-    #expect(titles(axMenu) == titles(mouseMenu))
-    #expect(axMenu.items.map(\.isEnabled) == mouseMenu.items.map(\.isEnabled))
+    #expect(titles(axMenu) == titles(rightClickMenu))
+    #expect(axMenu.items.map(\.isEnabled) == rightClickMenu.items.map(\.isEnabled))
   }
 
-  @Test func rowWithoutAMenuDeclinesTheShowMenuAction() {
+  @Test func rowIsAnAccessibilityElementAdvertisingShowMenu() {
+    let (engine, window) = Self.engine([Self.action("a", "A")])
+    let row = ExtensionContextMenuView(frame: .zero)
+    #expect(row.isAccessibilityElement())
+    #expect(row.accessibilityRole() == .group)
+    #expect(row.isAccessibilitySelectorAllowed(Self.showMenu) == false)   // no provider yet
+    row.menuProvider = { Self.menu(engine, window, "a") }
+    #expect(row.isAccessibilitySelectorAllowed(Self.showMenu))
+    row.setAccessibilityRole(.row)                                     // the panel sets its own role
+    #expect(row.accessibilityRole() == .row)
+  }
+
+  @Test func rowWithoutAMenuDeclinesTheShowMenuAction() async {
     let (engine, window) = Self.engine([Self.action("a", "A")])
     let row = ExtensionContextMenuView(frame: .zero)
     var shown = 0
@@ -220,6 +241,7 @@ struct ExtensionContextMenuTests {
     #expect(row.accessibilityPerformShowMenu() == false)              // no provider
     row.menuProvider = { Self.menu(engine, window, "gone") }
     #expect(row.accessibilityPerformShowMenu() == false)              // the action went away
+    #expect(row.pendingPresentation == nil)
     #expect(shown == 0)
   }
 }

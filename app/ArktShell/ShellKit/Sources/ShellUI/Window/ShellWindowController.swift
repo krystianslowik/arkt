@@ -124,6 +124,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A tab dragged out of the sidebar over no window (GS-013): the window set opens a window at the screen point and
   /// shows the tab there, taking its page over (#300). Nil: the drag-out does nothing.
   var onDragOutToNewWindow: (@MainActor (NodeID, NSPoint) -> Void)?
+  /// Opt-Cmd-click into Little Arkt (#356, BH-132): the Settings > Links switch, read on every click (on by default).
+  public var opensLittleArktOnOptionCommandClick: @MainActor () -> Bool = { true }
+  /// Opens a link in a new Little Arkt window (Opt-Cmd-click); set by the window set. Nil: the engine's own click.
+  var onOpenLinkInLittleArkt: (@MainActor (URL) -> Void)?
+  /// Moves a Today tab's page into a new Little Arkt window (Opt-Cmd-click on its row): the live page from whichever
+  /// window has it, else a new page on `url`. False when it did not (a close held behind a leave-site prompt); the
+  /// row then stays. Set by the window set. Nil: the click activates the tab.
+  var onMoveToLittleArkt: (@MainActor (_ node: NodeID, _ url: URL) -> Bool)?
   /// New Window (Cmd-N, `IDC_NEW_WINDOW`): set by the window set that owns this window. Nil: New Window is disabled.
   public var onNewWindow: (@MainActor () -> Void)?
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
@@ -254,6 +262,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
     wireFavorites()                                   // Move To, the sidebar drop and the BH-049 unload
     wireSidebarDrop()                                 // drag and drop on the Space pages (#104)
+    sidebarController.onOpenInLittleArkt = { [weak self] node in self?.moveToLittleArkt(node) ?? false }   // #356
     wirePinned()                                      // pin/unpin, reset, Replace Pin, Separate, the favicon click
     wireTabActions()                                  // the row context menus, multi-selection, empty-area click
     commandBar.onOpen = { [weak self] url, target in
@@ -309,6 +318,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       switch change {
       case .structure, .spaceRemoved:
         self?.closeEngineTabsOfRemovedNodes()
+        self?.dropPlaceholderOfRemovedRow()
         self?.tabSwitcher.sourceDidChange()
       case .node, .spaceAdded, .spaceMoved, .spaceChanged: break
       }
@@ -611,7 +621,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   /// The tab to show after `node` leaves: the first tab of the nearest sibling below, else above. With no such sibling
   /// inside a split or folder, the container's siblings are tried; never another section.
-  private func successor(of node: NodeID) -> NodeID? {
+  func successor(of node: NodeID) -> NodeID? {
     var current = node
     for _ in 0..<64 {                       // depth guard against a malformed source
       guard let location = sidebar.parent(of: current) else { return nil }
@@ -632,6 +642,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// change delivery, so it must not mutate the sidebar (closing a tab does not). The row is already gone (auto-archive,
   /// Delete Space, an import merge), so nothing could show a leave-site prompt for it: these closes skip
   /// `beforeunload` and never hold, and no live tab outlives its row (week-3 Decision 11).
+  /// The handoff placeholder's row is gone (#356): the card shows nothing rather than "Move here" for a row that no
+  /// longer exists.
+  private func dropPlaceholderOfRemovedRow() {
+    guard let node = handoffPlaceholder?.node, sidebar.node(node) == nil else { return }
+    dropHandoffPlaceholder()
+  }
+
   private func closeEngineTabsOfRemovedNodes() {
     for (node, tab) in tabsByNode where sidebar.node(node) == nil { engine.closeTab(tab, mode: .skipUnloadHandlers) }
   }
