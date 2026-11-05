@@ -69,6 +69,89 @@ struct AutoArchiveTimerTests {
     harness.timer.stop()
   }
 
+  // MARK: Little Arkt windows (#355, BH-137)
+
+  @Test func littleArktWindowsIdleForSixHoursByDefaultAreReported() async throws {
+    let harness = Harness()
+    let now = Self.start
+    let idle = LittleArcWindowActivity(id: UUID(), lastActiveAt: now.addingTimeInterval(-6 * Self.hour))
+    let fresh = LittleArcWindowActivity(id: UUID(), lastActiveAt: now.addingTimeInterval(-6 * Self.hour + 60))
+    var reported: [[UUID]] = []
+    harness.timer.littleArkts = { [idle, fresh] }
+    harness.timer.onLittleArktsIdle = { reported.append($0) }
+
+    try await harness.timer.start()
+
+    #expect(reported == [[idle.id]], "idle time equal to the threshold archives; a minute short does not")
+    harness.clock.now = now.addingTimeInterval(30)
+    harness.timer.tick()
+    #expect(reported == [[idle.id], [idle.id]], "the provider decides what is still open")
+    harness.timer.littleArkts = { [fresh] }
+    harness.timer.tick()
+    #expect(reported.count == 2, "nothing idle reports nothing")
+    harness.timer.stop()
+  }
+
+  @Test func theLittleArktThresholdComesFromTheStore() async throws {  // "Archive Little Arkts after:" (#448)
+    let harness = Harness()
+    await harness.state.setSettings(ArchiveSettings(littleArcThreshold: .oneHour))
+    let window = LittleArcWindowActivity(id: UUID(), lastActiveAt: Self.start.addingTimeInterval(-Self.hour))
+    var reported: [[UUID]] = []
+    harness.timer.littleArkts = { [window] }
+    harness.timer.onLittleArktsIdle = { reported.append($0) }
+
+    try await harness.timer.start()
+
+    #expect(reported == [[window.id]])
+    harness.timer.stop()
+  }
+
+  @Test func aLittleArktThresholdChangedInSettingsAppliesFromTheNextTick() async throws {  // #448
+    let harness = Harness()
+    let window = LittleArcWindowActivity(id: UUID(), lastActiveAt: Self.start.addingTimeInterval(-2 * Self.hour))
+    var reported: [[UUID]] = []
+    harness.timer.littleArkts = { [window] }
+    harness.timer.onLittleArktsIdle = { reported.append($0) }
+    try await harness.timer.start()
+    #expect(reported.isEmpty, "two hours is under the 6-hour default")
+
+    harness.timer.apply(ArchiveSettings(littleArcThreshold: .oneHour))
+    harness.timer.tick()
+
+    #expect(reported == [[window.id]])
+    harness.timer.stop()
+  }
+
+  @Test func neverKeepsLittleArktWindowsOpen() async throws {
+    let harness = Harness()
+    await harness.state.setSettings(ArchiveSettings(littleArcThreshold: .never))
+    let window = LittleArcWindowActivity(id: UUID(), lastActiveAt: .distantPast)
+    var reported: [[UUID]] = []
+    harness.timer.littleArkts = { [window] }
+    harness.timer.onLittleArktsIdle = { reported.append($0) }
+
+    try await harness.timer.start()
+
+    #expect(reported.isEmpty)
+    harness.timer.stop()
+  }
+
+  @Test func noLittleArktPassRunsAfterStop() async throws {  // quit: no window closes during the termination flush
+    let harness = Harness()
+    let window = LittleArcWindowActivity(id: UUID(), lastActiveAt: Self.start.addingTimeInterval(-5 * Self.hour))
+    var reported: [[UUID]] = []
+    harness.timer.littleArkts = { [window] }
+    harness.timer.onLittleArktsIdle = { reported.append($0) }
+    try await harness.timer.start()
+    #expect(reported.isEmpty)
+
+    harness.timer.stop()
+    harness.clock.now = Self.start.addingTimeInterval(2 * Self.hour)
+    harness.timer.tick()
+
+    #expect(reported.isEmpty, "idle by now, but the timer stopped")
+  }
+
   @Test func aTickThatArchivesNothingReportsNothing() async throws {
     let harness = Harness()
     await harness.state.setStarted(Self.start.addingTimeInterval(-100 * Self.hour))

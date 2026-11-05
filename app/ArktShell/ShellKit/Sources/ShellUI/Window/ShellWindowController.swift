@@ -130,6 +130,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var onReopenArchived: (@MainActor (NodeID) -> NodeID?)?
   /// Closed tabs and Peeks, most recent on top (#346, #110); see `ShellWindowController+Reopen.swift`.
   var reopenStack = ReopenStack()
+  /// Reopen Closed Tab when this window has nothing of its own to reopen: the last closed Little Arkt window comes
+  /// back (#355). Set by `ShellWindowSet`.
+  var reopenLittleArkt: (@MainActor () -> Void)?
+  var canReopenLittleArkt: @MainActor () -> Bool = { false }
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
   /// The reopen batch the visible undo toast belongs to; nil without one.
@@ -965,7 +969,7 @@ extension ShellWindowController: NSMenuItemValidation {
     if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
     if let enabled = validatePinnedMenuItem(menuItem) { return enabled }
-    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed }
+    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed || canReopenLittleArkt() }
     if menuItem.action == #selector(clearTodayTabs(_:)) { return canClearToday }       // KB-019 (#110)
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)
