@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import EngineAPI
 import EngineAPITestSupport
 @testable import ShellUI
 
@@ -76,5 +77,23 @@ struct RestorePagesModelTests {
     #expect(model.presentation == .none)
     #expect(engine.crashedSession.dismissals == 1)
     #expect(RestorePagesModel(recovery: engine.crashedSession, pages: offered).presentation == .none)
+  }
+}
+
+@MainActor
+struct RestorePagesProviderTests {
+  @Test func providerReceivesEveryPageExactlyOnce() {
+    let engine = InMemoryEngine()
+    let pages = (0..<5).map { index in
+      RecoveryPage(title: "Page \(index)", url: URL(string: "https://example.invalid/\(index)")!, kind: .peek)
+    }
+    engine.crashedSession.recoveryPages = pages
+    engine.crashedSession.simulateCrashedExit()
+    let model = RestorePagesModel(recovery: engine.crashedSession)
+    model.restore()
+    model.restore()
+    model.dismiss()
+    #expect(engine.crashedSession.restoredPages == [pages])
+    #expect(engine.crashedSession.dismissals == 1)
   }
 }

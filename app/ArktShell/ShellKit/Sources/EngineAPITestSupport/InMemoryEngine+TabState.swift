@@ -69,6 +69,10 @@ extension InMemoryEngine {
 public final class InMemorySessionRecovery: EngineSessionRecovery {
   public private(set) var lastSessionCrashed = false
   public private(set) var dismissals = 0
+  public var recoveryPages: [RecoveryPage] = []
+  public private(set) var restoredPages: [[RecoveryPage]] = []
+
+  public func restorePages(_ pages: [RecoveryPage]) { restoredPages.append(pages) }
 
   public init() {}
 

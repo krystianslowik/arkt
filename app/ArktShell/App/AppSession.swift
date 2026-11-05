@@ -179,13 +179,20 @@ final class AppSession {
 
   /// The recovery notice of this launch; shown in the launch window.
   private var launchNotice: RecoveryNotice?
+  private var didPresentSessionRecovery = false
 
   /// Opens the launch window (with the launch's recovery notice), then starts auto-archive, so its first pass sees
   /// the shown tab. The Chromium engine passes false when the windows it queued before ready (a startup URL, an
   /// extension's `chrome.windows.create`) opened one already.
   func finishLaunch(opensWindow: Bool) {
     let window = opensWindow ? windows.openWindow() : windows.primary
-    if let window { presentOnboardingIfNeeded(on: window) }
+    if let window {
+      presentOnboardingIfNeeded(on: window)
+      if !didPresentSessionRecovery, let recovery = engine.sessionRecovery {
+        didPresentSessionRecovery = true
+        window.presentRestorePages(RestorePagesModel(recovery: recovery))
+      }
+    }
     askAboutCrashIfNeeded()
     if let notice = launchNotice, let window {
       launchNotice = nil

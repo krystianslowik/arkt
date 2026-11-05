@@ -354,6 +354,26 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     _ = peek                                          // its click monitor records where links are clicked
   }
 
+  /// Presents the one launch recovery decision after the sidebar session was restored.
+  public func presentRestorePages(_ model: RestorePagesModel) {
+    switch model.presentation {
+    case .none: break
+    case .notice:
+      toasts.show(Toast(text: "Arkt quit unexpectedly. Your Spaces and tabs are back.",
+                        kind: .recovery, glyph: "exclamationmark.shield", isPolite: true))
+    case .offer(let pages):
+      guard !rootView.card.subviews.contains(where: { $0 is RestorePagesView }) else { return }
+      rootView.layoutSubtreeIfNeeded()
+      let view = RestorePagesView(model: model, pages: pages)
+      let card = rootView.card
+      view.frame.origin = NSPoint(x: card.bounds.width - view.frame.width - 22,
+                                  y: card.bounds.height - view.frame.height - 22)
+      view.autoresizingMask = [.minXMargin, .minYMargin]
+      card.addSubview(view, positioned: .above, relativeTo: nil)
+      view.appear()
+    }
+  }
+
   public func activate(node: NodeID) { sidebarController.activate(node: node) }
   /// The sidebar URL bar (BH-031, GS-042).
   public var urlBar: URLBarView { sidebarController.view.urlBar }

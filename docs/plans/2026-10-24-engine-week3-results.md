@@ -4335,3 +4335,16 @@ Not taken: a window capture of the sheet (the text above was read from the windo
 Cleanup (both rounds of checks): every app process exited by itself and the local hanging socket was stopped by its PID, confirmed with `ps -p`; `lsregister -u` on the embed copy (4 records for `dev.arkt.Arkt.try513`
 before, 0 after); the two profiles, the embed folder with its 518 dylib copies, derived data, build logs and the two defaults suites were
 deleted. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+### Restore pages Swift boundary (#580)
+
+The Swift recovery contract carries only non-private Little Arkt and Peek page titles, URLs and kinds, and accepts an
+explicit request to reopen all selected pages outside the sidebar. The shell presents the offer after its own window
+session restoration; an empty offer acknowledges the crash and shows the status notice. The in-memory provider records
+requests. Chromium integration and killed-process validation remain pending #577.
+
+Test-first CI run 42112475936 at 75b3800 failed to compile the missing model in ShellKit tests (job 127543462923)
+and GUI tests (job 127543462890); the Swift tests gate (job 127547434337) consequently failed. No tests executed in
+those jobs. Local builds and tests were not run: the installed toolchain cannot compile the baseline. Syntax parsing
+and diff checks are recorded in the pull request. GUI, accessibility, motion, app and real-engine validation remain
+pending.

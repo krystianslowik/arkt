@@ -63,3 +63,12 @@ The shared toast (`design/alerts-sheets-toasts`), shield glyph, no action, close
   Little Arkt windows and Peek pages; never private windows; nothing to offer means a toast, not a prompt.
 
 Rejected directions: B (one toast with Reopen) and C (a card in the sidebar).
+
+## Swift engine contract (#580)
+
+`EngineSessionRecovery.recoveryPages` supplies ordered `RecoveryPage` values containing a title, URL and kind
+(`littleArkt` or `peek`) only. Private and sidebar pages must not be persisted or returned. After a Restore answer,
+`restorePages(_:)` receives every offered page and must reopen each in its indicated kind; it must not restore a full
+Chromium session into the sidebar. `dismissLastSession()` acknowledges the crash once for either answer or an empty
+offer. Existing providers default to an empty offer and a no-op restore. The Chromium implementation and killed-process
+validation remain with #577.
