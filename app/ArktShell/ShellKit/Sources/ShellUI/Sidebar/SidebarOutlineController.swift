@@ -335,6 +335,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   public var onDuplicateSplit: (@MainActor (NodeID) -> Void)?
   /// Opt-click on the current plain tab: duplicate it into a split (GS-032).
   public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
+  /// Opt-Cmd-click on a tab (BH-132, #356): the window moves it into a Little Arkt window. False when it did not (the
+  /// setting is off, or the tab is not a Today tab); the click then activates the tab as a plain click does.
+  public var onOpenInLittleArkt: (@MainActor (NodeID) -> Bool)?
   /// Move To > Favorites on a tab row's context menu (BH-047); the window moves the node.
   public var onMoveToFavorites: (@MainActor (NodeID) -> Void)?
   /// Pin / Unpin Tab on a row's context menu (BH-055); the window moves the node.
@@ -1341,6 +1344,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     guard row >= 0, let item = outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }
     let flags = modifiers.intersection([.command, .option, .control, .shift])
     let option = flags == .option
+    if LittleArktRouting.isLittleArktClick(flags), isTab(id), !isPane(id), onOpenInLittleArkt?(id) == true {
+      clearSelection()
+      return
+    }
     if flags == .command || flags == .shift, isSelectable(id), !isPinnedFaviconClick(row: row, id: id) {
       var next = selection
       if flags == .command {

@@ -2790,3 +2790,50 @@ BH-076's auto-archive half. Clear already leaves a playing row (`pagePlaysMedia`
 `AppSession.startAutoArchive` already reads `windows.autoArchiveExempt`, so that file was not edited. Its comment still says media-playing tabs join once the engine reports audio. The engine reports it, and the exempt set now includes those tabs.
 
 Tests (written first: the new GUI case failed on the audible background tab, the muted page that still plays, and the split, and passed the mute-only and never-loaded cases, before the code): `ShellWindowSetTests` 12 run, 0 failures (the class had 11; the new case is `testAnAudibleBackgroundTabIsExemptFromAutoArchive`). ShellKit unit (`swift test -j 2 --skip ShellKitGUITests`): 1821 Swift Testing tests passed, 0 failures (1095 + 38 + 60 + 7 + 181 + 49 + 257 + 111 + 23). ArktCore not run: no ArktCore change. App build and XCUITest not run: `app/ArktShell/App` and `project.yml` were not touched.
+
+## Little Arkt: Dock menu, Window menu and Opt-Cmd-click (#356) (2026-11-05)
+
+### What changed
+
+- `LittleArktMenus` (ShellUI, owned by `ShellWindowSet`): the Dock menu's rows (page titles, Hide All / Show All
+  Little Arkt Windows, Close Little Arkt Windows) and the Window menu's "Little Arkt" section above Bring All to Front.
+  A row brings its window forward, also from hidden. Little Arkt windows are excluded from AppKit's own window list,
+  so they are not listed twice. Rows show the page title, then the host, at most 60 characters.
+- Dock menu: `AppDelegate.applicationDockMenu` builds it with `MainMenu.dockMenu`, adding New Window and New Little
+  Arkt Window (Opt-Cmd-N). The Window menu's delegate is `AppCommands`, which rebuilds the section when it opens.
+- Opt-Cmd-click on a link (exactly Option and Command): `ShellEngineHost.decideLinkActivation` cancels it before
+  Peek routing, and a new Little Arkt window opens on the URL one turn later.
+- Opt-Cmd-click on a Today tab's row: the page moves into a new Little Arkt window (`moveTab`, no reload) from
+  whichever window has it, else a new page opens on its URL; the row then leaves the sidebar the way a closed Today
+  tab does. Pinned tabs and Favorites are not moved; for them the click is a plain click.
+- Settings > Links: "Open Little Arkt when clicking on links with ⌥⌘ held"
+  (`optionCommandClickLittleArcEntryPointEnabled`), on by default. It covers both clicks.
+- Space chooser: "Open in New Window" between the Spaces and Copy Link. The window fades out, then the page moves into
+  a new browser window on the Space Open in names. No flight, because the target window is not on screen yet.
+
+### Deviations and follow-ups
+
+- Engine build Dock menu: Chromium's `AppController` stays `NSApp.delegate` and answers `applicationDockMenu:`, so
+  the Dock menu above is the FakeEngine build's only. The Engine build needs an embedder seam that forwards
+  `applicationDockMenu:` to the shell.
+- A Today row moved into Little Arkt goes through the app's archive path (the only row removal the window has), so it
+  appears in the Archive while its page lives on in the Little Arkt window.
+- The Dock menu has no XCUITest handle (it belongs to the Dock process); its rows are covered in ShellKitGUITests.
+
+### Tests
+
+Written first. Each failed to compile before the code existed.
+
+- `LittleArktClickRoutingTests` (ShellUITests, 7): the modifier rule, the setting default, the copy and the menu row
+  titles. `swift test --filter ShellUITests`: 1162 tests in 140 suites passed.
+- `LittleArktMenusTests` (ShellKitGUITests, 15): Opt-Cmd-click on a link, with the setting off and with other
+  modifiers; Opt-Cmd-click on a loaded and an unloaded Today tab and with the setting off; Open in New Window and the
+  chooser's items; the Dock rows, Hide All / Show All, a row from hidden, Close All with a hidden window; the Window
+  menu section, replaced not doubled, and removed with the last window. 15 run, 0 failures, five runs in a row.
+- `MainMenuKeyEquivalentTests`: two new cases (the Dock menu's last items, the Window menu's delegate). Its class, with
+  the other Little Arkt, Settings, Peek, Handoff, TabActions and sidebar classes (`--filter
+  'MainMenuKeyEquivalentTests|LittleArkt|Settings|SidebarClick|TabActions|Peek|Handoff|SidebarOutline|SplitSidebar'`):
+  315 run, 6 skipped, 0 failures.
+- `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
+  The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
+  the real pointer and keyboard, and the Mac was in use.

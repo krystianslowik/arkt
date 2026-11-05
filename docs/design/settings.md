@@ -45,6 +45,7 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | General | Warn before quitting | toggle | `shouldWarnBeforeQuitting` | off | planned | BH-177, RT-30 |
 | General | Open a Peek window when clicking on links to other sites (note "Only affects Favorites and pinned tabs") | toggle | `modalEnabled` | on | **exists** (#348) | BH-144, BH-056 |
 | General | Open a Peek window when clicking on links with Shift held | toggle | `disableShiftClickToOpenLinksInModal` (inverted) | on | **exists** (#348) | BH-145 |
+| General | Open Little Arkt when clicking on links with ⌥⌘ held (also a sidebar tab) | toggle | `optionCommandClickLittleArcEntryPointEnabled` | on | **exists** (#356) | BH-132, GS-028 |
 | General | Update Arkt automatically | toggle, disabled until the release work (decision 6) | `shouldAutomaticallyUpdate` | off | planned (#128 release) | BH-213 |
 | Spaces | Profile per Space | popup per Space row | model (Space -> profile) | Default | planned | BH-034 |
 | Spaces | Space name, icon, theme | not here: edited in the sidebar header | model | n/a | exists (#287) | BH-038 |

@@ -206,6 +206,9 @@ public final class ShellWindowSet {
 
   // MARK: Little Arkt (#314)
 
+  /// The Dock menu's and the Window menu's Little Arkt rows (#356); their items target it.
+  public private(set) lazy var littleArktMenus = LittleArktMenus(windows: { [weak self] in self?.littleArkts ?? [] })
+
   /// The open Little Arkt windows, the frontmost last.
   public var littleArkts: [LittleArktWindowController] {
     littleArktWindows.removeAll { $0.isClosed }
@@ -228,14 +231,45 @@ public final class ShellWindowSet {
   /// windows' (`makeLittleArkt`).
   @discardableResult
   public func openLittleArkt(url: URL) -> LittleArktWindowController {
-    let screen = NSScreen.main ?? NSScreen.screens.first
-    let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: LittleArktLayout.defaultSize)
-    let frame = LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
-    let little = makeLittleArkt(isPopup: false, frame: frame)
+    let little = makeLittleArkt(isPopup: false, frame: nextLittleArktFrame())
     let id = engine.createWindow(host: little.engineHost)
     little.adopt(engineWindow: id)              // no-op when the engine announced and adopted it already
     engine.createTab(url: url, in: id)
     return little
+  }
+
+  /// Opt-Cmd-click on a Today tab (#356, BH-132): a new Little Arkt window takes `tab`, a page another window let go
+  /// of, with its history and state (`moveTab`, no reload); its pending dialog comes with it.
+  @discardableResult
+  func openLittleArkt(moving tab: TabID, dialog: JavaScriptDialog?) -> LittleArktWindowController {
+    let little = makeLittleArkt(isPopup: false, frame: nextLittleArktFrame())
+    let id = engine.createWindow(host: little.engineHost)
+    little.adopt(engineWindow: id)
+    if let dialog { little.javaScriptDialogs.adopt(dialog) }
+    engine.moveTab(tab, to: id)
+    little.showMovedTab(tab)                    // when the engine's activation did not mount it already
+    return little
+  }
+
+  /// The window's Today row `node` leaves for Little Arkt: the page moves from whichever window has it, else a new
+  /// page opens on `url`. False when its close is held behind a leave-site prompt (it stays).
+  private func moveToLittleArkt(_ node: NodeID, url: URL) -> Bool {
+    switch releaseLiveTab(of: node, for: nil) {
+    case .held:
+      return false
+    case .released(let tab, let dialog):
+      openLittleArkt(moving: tab, dialog: dialog)
+    case .notLive:
+      openLittleArkt(url: url)
+    }
+    return true
+  }
+
+  /// The remembered size at the top-right, cascaded from the frontmost Little Arkt window.
+  private func nextLittleArktFrame() -> CGRect {
+    let screen = NSScreen.main ?? NSScreen.screens.first
+    let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: LittleArktLayout.defaultSize)
+    return LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
   }
 
   /// Places, wires and records a Little Arkt window; shared by the engine's requests and the lookup's result.
@@ -251,6 +285,10 @@ public final class ShellWindowSet {
       guard let self else { return false }
       let target = self.primary ?? self.openWindow(opensFirstTab: false)
       return target.receiveMovedTab(tab, in: space, dialog: dialog)
+    }
+    little.onOpenInNewWindow = { [weak self] tab, dialog in             // the chooser's Open in New Window (#356)
+      guard let self else { return false }
+      return self.openWindow(opensFirstTab: false).receiveMovedTab(tab, in: nil, dialog: dialog)
     }
     little.flightDestination = { [weak self] in self?.primary }        // #352: an open main window only
     little.onResize = { [weak self] size in self?.littleArktSize = size }
@@ -311,6 +349,8 @@ public final class ShellWindowSet {
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
     }
     controller.onDragOutToNewWindow = { [weak self] node, point in self?.openWindow(showing: node, at: point) }
+    controller.onOpenLinkInLittleArkt = { [weak self] url in self?.openLittleArkt(url: url) }               // #356
+    controller.onMoveToLittleArkt = { [weak self] node, url in self?.moveToLittleArkt(node, url: url) ?? false }
     controller.otherWindowsVisibleNodes = { [weak self, weak controller] in
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }

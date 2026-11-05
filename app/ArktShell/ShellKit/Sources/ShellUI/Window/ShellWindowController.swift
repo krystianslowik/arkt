@@ -120,6 +120,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A tab dragged out of the sidebar over no window (GS-013): the window set opens a window at the screen point and
   /// shows the tab there, taking its page over (#300). Nil: the drag-out does nothing.
   var onDragOutToNewWindow: (@MainActor (NodeID, NSPoint) -> Void)?
+  /// Opt-Cmd-click into Little Arkt (#356, BH-132): the Settings > Links switch, read on every click (on by default).
+  public var opensLittleArktOnOptionCommandClick: @MainActor () -> Bool = { true }
+  /// Opens a link in a new Little Arkt window (Opt-Cmd-click); set by the window set. Nil: the engine's own click.
+  var onOpenLinkInLittleArkt: (@MainActor (URL) -> Void)?
+  /// Moves a Today tab's page into a new Little Arkt window (Opt-Cmd-click on its row): the live page from whichever
+  /// window has it, else a new page on `url`. False when it did not (a close held behind a leave-site prompt); the
+  /// row then stays. Set by the window set. Nil: the click activates the tab.
+  var onMoveToLittleArkt: (@MainActor (_ node: NodeID, _ url: URL) -> Bool)?
   /// New Window (Cmd-N, `IDC_NEW_WINDOW`): set by the window set that owns this window. Nil: New Window is disabled.
   public var onNewWindow: (@MainActor () -> Void)?
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
@@ -244,6 +252,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
     wireFavorites()                                   // Move To, the sidebar drop and the BH-049 unload
     wireSidebarDrop()                                 // drag and drop on the Space pages (#104)
+    sidebarController.onOpenInLittleArkt = { [weak self] node in self?.moveToLittleArkt(node) ?? false }   // #356
     wirePinned()                                      // pin/unpin, reset, Replace Pin, Separate, the favicon click
     wireTabActions()                                  // the row context menus, multi-selection, empty-area click
     commandBar.onOpen = { [weak self] url, target in

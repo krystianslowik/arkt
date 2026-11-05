@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import EngineAPI
 import Foundation
@@ -65,6 +66,17 @@ public enum LittleArktRouting {
   public static func opensInLittleArkt(_ request: EngineWindowRequest) -> Bool {
     request.kind == .page || request.isPopup
   }
+
+  /// A link activated with exactly Option and Command held opens in a new Little Arkt window while Settings > Links
+  /// "Open Little Arkt when clicking on links with ⌥⌘ held" is on (#356, BH-132, GS-028).
+  public static func opensInLittleArkt(_ activation: EngineLinkActivation, enabled: Bool) -> Bool {
+    enabled && activation.modifiers == [.command, .option]
+  }
+
+  /// A sidebar click that moves the tab into a Little Arkt window (BH-132): exactly Option and Command.
+  public static func isLittleArktClick(_ flags: NSEvent.ModifierFlags) -> Bool {
+    flags.intersection([.command, .option, .shift, .control]) == [.command, .option]
+  }
 }
 
 /// Little Arkt's copy (docs/design/little-arkt.md, Copy).
@@ -74,6 +86,13 @@ public enum LittleArktCopy {
   public static let chooseSpace = "Choose a Space"
   public static let chooserHeading = "Open in"
   public static let openInNewWindow = "Open in New Window"
+  /// The Dock menu (BH-139, GS-041) and the Window menu's heading (#356).
+  public static let hideAll = "Hide All Little Arkt Windows"
+  public static let showAll = "Show All Little Arkt Windows"
+  public static let closeAll = "Close Little Arkt Windows"
+  public static let windowMenuHeading = "Little Arkt"
+  /// Settings > Links (BH-132), on by default (docs/design/little-arkt.md, Parity notes).
+  public static let optionCommandClickSetting = "Open Little Arkt when clicking on links with \u{2325}\u{2318} held"
 
   /// The primary button: "Open in <Space>", "Open as Tab" for a popup (the quiet style), "Open in New Window" while
   /// no main window has a Space to name.
@@ -93,6 +112,17 @@ public enum LittleArktCopy {
     guard let spaceName, !spaceName.isEmpty else { return "Opened as a tab" }
     return "Opened in \(spaceName)"
   }
+
+  /// A Dock or Window menu row: the page title, else the host, else "Little Arkt"; at most 60 characters, a longer
+  /// title ends in an ellipsis.
+  public static func menuTitle(pageTitle: String, host: String) -> String {
+    let trimmed = pageTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    let title = !trimmed.isEmpty ? trimmed : !host.isEmpty ? host : windowDescription
+    guard title.count > menuTitleLimit else { return title }
+    return String(title.prefix(menuTitleLimit - 1)).trimmingCharacters(in: .whitespaces) + "\u{2026}"
+  }
+
+  static let menuTitleLimit = 60
 
   /// The top bar's host: the URL's host, else the whole URL (about:blank, data:), else nothing.
   public static func host(of url: URL?) -> String {

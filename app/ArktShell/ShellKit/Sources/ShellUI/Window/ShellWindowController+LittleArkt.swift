@@ -89,3 +89,39 @@ extension ShellWindowController: LittleArktFlightDestination {
     currentSpace.flatMap { sidebar.space($0) }
   }
 }
+
+// MARK: - Opt-Cmd-click into Little Arkt (#356, BH-132, GS-028)
+
+extension ShellWindowController {
+  /// A link activated with Option and Command held, while the setting is on: the engine drops it and a new Little
+  /// Arkt window opens on its URL after the call returns (the engine is never called from inside its own decision).
+  func opensLinkInLittleArkt(_ activation: EngineLinkActivation) -> Bool {
+    guard let open = onOpenLinkInLittleArkt,
+          LittleArktRouting.opensInLittleArkt(activation, enabled: opensLittleArktOnOptionCommandClick()) else {
+      return false
+    }
+    let url = activation.url
+    DispatchQueue.main.async { open(url) }
+    return true
+  }
+
+  /// Opt-Cmd-click on a Today tab's row: its page moves into a new Little Arkt window (no reload when it is loaded)
+  /// and the row leaves the sidebar as a closed Today tab does. Pinned tabs and Favorites stay where they are: the
+  /// click activates them. False when nothing moved.
+  func moveToLittleArkt(_ node: NodeID) -> Bool {
+    guard let move = onMoveToLittleArkt, opensLittleArktOnOptionCommandClick(),
+          case .today? = sidebar.section(containing: node),
+          case .tab(_, let url, _)? = sidebar.node(node) else { return false }
+    let heldCurrent = currentNode == node
+    let pageURL = tabsByNode[node].flatMap { engine.snapshot(of: $0)?.url } ?? url
+    guard move(node, pageURL) else { return false }
+    archive(node, heldCurrent: heldCurrent)
+    // No tab took its place: the card does not keep the moved page's placeholder (its row is gone).
+    if currentTab == nil, let placeholder = handoffPlaceholder, placeholder.node == node,
+       rootView.card.contentView === placeholder {
+      rootView.card.setContent(nil)
+      refreshAddress()
+    }
+    return true
+  }
+}
