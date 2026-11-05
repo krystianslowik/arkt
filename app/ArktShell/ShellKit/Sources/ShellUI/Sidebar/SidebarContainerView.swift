@@ -465,6 +465,10 @@ public final class SidebarContainerView: NSView {
     }
   }
   public let topBarHeight: CGFloat
+  /// The notice row above the bottom bar (#648) and the row list's fade while it shows; see
+  /// `SidebarContainerView+Banner.swift`.
+  let bannerSlot = SidebarBannerSlot()
+  public var banner: SidebarBannerView { bannerSlot.view }
 
   public private(set) var currentPage: SpacePageView?
   public var currentOutline: SidebarOutlineView? { currentPage?.outlineView }
@@ -501,6 +505,8 @@ public final class SidebarContainerView: NSView {
     incognitoLabel.autoresizingMask = []
     incognitoLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
     addSubview(incognitoLabel)
+    banner.autoresizingMask = []
+    addSubview(banner)
   }
 
   /// Shows or hides the sidebar's Incognito label (BH-174). Nowhere else in the window carries it.
@@ -545,7 +551,9 @@ public final class SidebarContainerView: NSView {
     didSet {
       guard isDimmed != oldValue else { return }
       let alpha = isDimmed ? Self.dimmedAlpha : 1
-      for view in [urlBar, favorites, pager, bottomBar, incognitoLabel] as [NSView] { view.alphaValue = alpha }
+      for view in [urlBar, favorites, pager, bottomBar, incognitoLabel, banner.row] as [NSView] {
+        view.alphaValue = alpha
+      }
     }
   }
 
@@ -563,6 +571,7 @@ public final class SidebarContainerView: NSView {
     favorites.flavor = flavor
     spaceDots.flavor = flavor
     urlBar.flavor = flavor
+    banner.flavor = flavor
     incognitoLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
     applyButtonImages()
   }
@@ -626,9 +635,11 @@ public final class SidebarContainerView: NSView {
     let labelHeight = ceil(incognitoLabel.intrinsicContentSize.height)
     incognitoLabel.frame = NSRect(x: padding, y: labelTop, width: max(0, width - 2 * padding), height: labelHeight)
     let pagesY = favoritesY + favoritesHeight + (favoritesHeight > 0 ? SidebarMetrics.favoritesBottomGap : 0)
-    let pagerFrame = NSRect(x: 0, y: pagesY, width: width, height: max(0, bounds.height - pagesY - bottomHeight))
+    let pagerFrame = NSRect(x: 0, y: pagesY, width: width,
+                            height: max(0, bounds.height - pagesY - bottomHeight - bannerSlot.reservedHeight))
     if pager.frame != pagerFrame { pager.frame = pagerFrame }
     bottomBar.frame = NSRect(x: 0, y: max(pagesY, bounds.height - bottomHeight), width: width, height: bottomHeight)
+    layoutBanner()
     let buttonSize = SidebarMetrics.bottomBarButtonSize
     let buttonY = ((bottomHeight - buttonSize) / 2).rounded()
     archiveButton.frame = NSRect(x: padding, y: buttonY, width: buttonSize, height: buttonSize)

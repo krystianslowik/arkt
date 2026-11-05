@@ -37,6 +37,8 @@ public final class ShellWindowSet {
   public var downloads: DownloadsCenter? {
     didSet { downloads?.primaryWindow = { [weak self] in self?.primary } }
   }
+  /// The sidebar banner (#648): every window this set builds shows its notice. Nil: no banner.
+  public var sidebarBanner: SidebarBannerCenter?
 
   private let hostLookup: HostLookup?
   private var windows: [ShellWindowController] = []
@@ -446,6 +448,7 @@ public final class ShellWindowSet {
     trackMain(controller)
     configure?(controller)
     downloads?.attach(to: controller)
+    sidebarBanner?.attach(to: controller)
     // #331: the session's first window is the one a relaunch restores; it opens on the saved sidebar state. Later
     // windows (New Window, a Dock reopen) keep the defaults.
     if !adoptedSavedSidebarState {

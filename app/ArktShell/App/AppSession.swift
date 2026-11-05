@@ -141,6 +141,11 @@ final class AppSession {
     // Downloads (#132): the Library button, popover and window, for an engine that has downloads.
     windows.downloads = DownloadsCenter(engine: engine, settings: settings)
     windows.downloads?.onChangeLocation = { [weak self] in self?.showSettings(pane: .general) }
+    // #648: the sidebar banner. The updater (#126) will be its notice source; until then a Debug build shows the
+    // sample notice `ARKT_SIDEBAR_NOTICE` names, and an action withdraws it.
+    windows.sidebarBanner = SidebarBannerCenter(model: SidebarBannerModel(
+      source: AppEnvironment.sidebarNoticeSource(),
+      dismissals: SidebarNoticeDismissals(defaults: AppEnvironment.userDefaults)))
     archiveSearch.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
