@@ -41,6 +41,8 @@ public enum SidebarMenuAction: Hashable, Sendable {
   case newTab
   /// Clear Today Tabs (BH-075): every Today tab of the Space is archived, except a row whose page plays media (BH-076).
   case clearToday(SpaceID)
+  /// The Clear control above Today (#413): the same Clear, with the rows' exit motion.
+  case clearTodayControl(SpaceID)
   /// Mute / Unmute (BH-126, #364): the tab's page is muted or unmuted.
   case toggleMute(NodeID)
 }

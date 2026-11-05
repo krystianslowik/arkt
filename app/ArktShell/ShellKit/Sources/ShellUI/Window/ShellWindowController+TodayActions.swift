@@ -37,6 +37,31 @@ extension ShellWindowController {
     clearToday(space)
   }
 
+  /// The Clear control above Today (#413, design/clear-today-tabs): the same rows as Clear Today Tabs, which collapse
+  /// upward together on one spring before they go to the Archive (Reduce Motion: they fade in place). The model
+  /// changes when the motion ends; a row that left Today meanwhile is skipped. The menu items and Shift-Cmd-K clear at
+  /// once, as other keyboard and menu actions do.
+  func clearTodayWithMotion(_ space: SpaceID) {
+    let rows = todayRows(of: space, scope: .all)
+    guard !rows.isEmpty else { return }
+    guard let outline = sidebarController.outline(containing: rows[0]) else {
+      archiveToday(rows)
+      return
+    }
+    outline.runTodayExit(rows) { [weak self] in
+      guard let self else { return }
+      let still = Set(self.sidebar.children(of: .today(space)))
+      let remaining = rows.filter(still.contains)
+      if !remaining.isEmpty { self.archiveToday(remaining) }
+    }
+  }
+
+  /// Runs an Undo (`body`); rows the Clear control archived come back on the reverse of its spring (#413).
+  func withTodayReturnMotion(_ body: () -> Bool) -> Bool {
+    guard let outline = sidebarController.currentPage?.outlineController else { return body() }
+    return outline.returningClearedRows(body)
+  }
+
   /// The bottom bar's Clear unselected Today tabs (BH-078): the Today rows with nothing selected go, the selected
   /// ones stay; with no selected Today row the action does nothing.
   @objc public func clearUnselectedTodayTabs(_ sender: Any?) {

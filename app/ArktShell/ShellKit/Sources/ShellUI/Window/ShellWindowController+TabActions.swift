@@ -42,6 +42,7 @@ extension ShellWindowController {
     case .pasteURLAsNewTab(let location): pasteURLAsNewTab(in: location)
     case .newTab: newTab(nil)
     case .clearToday(let space): clearToday(space)
+    case .clearTodayControl(let space): clearTodayWithMotion(space)
     case .toggleMute(let id): toggleMute(id)
     }
   }

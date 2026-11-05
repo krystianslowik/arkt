@@ -49,6 +49,8 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   private var titleBeforeRename = ""
   private var renameCancelled = false
   private var headerHoverArea: NSTrackingArea?
+  /// The whole page: the pointer over the sidebar's list shows the Clear control above Today (#413).
+  private var pageHoverArea: NSTrackingArea?
   private var headerToolTip: NSView.ToolTipTag?
   /// The rect `headerToolTip` covers; nil while the title is open, which shows no reorder tip.
   private var headerToolTipRect: NSRect?
@@ -299,10 +301,28 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
     let area = NSTrackingArea(rect: headerRect, options: [.mouseEnteredAndExited, .activeAlways], owner: self)
     addTrackingArea(area)
     headerHoverArea = area
+    if let pageHoverArea { removeTrackingArea(pageHoverArea) }
+    let page = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                              owner: self)
+    addTrackingArea(page)
+    pageHoverArea = page
   }
 
-  public override func mouseEntered(with event: NSEvent) { setHeaderHovered(true) }
-  public override func mouseExited(with event: NSEvent) { setHeaderHovered(false) }
+  public override func mouseEntered(with event: NSEvent) {
+    if event.trackingArea === pageHoverArea {
+      outlineController.setSidebarHovered(true)
+    } else {
+      setHeaderHovered(true)
+    }
+  }
+
+  public override func mouseExited(with event: NSEvent) {
+    if event.trackingArea === pageHoverArea {
+      outlineController.setSidebarHovered(false)
+    } else {
+      setHeaderHovered(false)
+    }
+  }
 
   /// Shows the edit and options buttons while the header is hovered and the title is neither open nor dragged.
   func setHeaderHovered(_ hovered: Bool) {

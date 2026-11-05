@@ -427,6 +427,12 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private var display = FolderDisplay()
   /// The open and close springs of this outline's folders (#109).
   let folderMotion = FolderMotion()
+  /// The spring of the rows the Clear control archives, and of their return on Undo (#413).
+  let todayClear = TodayClearMotion()
+  /// The rows the last Clear archived, so an Undo that brings them back can run the exit in reverse.
+  private var lastCleared: Set<NodeID> = []
+  /// The pointer is over the sidebar: the divider draws the Clear control (#413).
+  public private(set) var isSidebarHovered = false
   /// The rows the folder motion and arrival frames style from, captured once per change of the outline's rows, of
   /// the folders' changing rows or of the arrival's rows (#603). A frame reads no other row of the outline.
   private struct MotionRows {
@@ -434,8 +440,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     var changingGeneration: Int
     var arrivalNode: NodeID?
     var fadingOut: NodeID?
+    var clearGeneration: Int
     /// Each folder in motion that has a row, with its changing rows.
     var blocks: [NodeID: FolderMotionLayout.Block] = [:]
+    /// The rows a Clear moves that have a row (#413).
+    var clearBlock: FolderMotionLayout.Block?
     var arrivalRow = -1
     var arrivalHeight: CGFloat = 0
     var fadingRow = -1
@@ -448,13 +457,16 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private struct MotionFrame: Equatable {
     var progress: [NodeID: Double] = [:]
     var arrival: (room: Double, appear: Double)?
+    /// A Clear's `gone` (#413), and whether it moves the rows (false under Reduce Motion).
+    var clear: (gone: Double, moves: Bool)?
     var rowsBuild = 0
 
-    var isAtRest: Bool { progress.isEmpty && arrival == nil }
+    var isAtRest: Bool { progress.isEmpty && arrival == nil && clear == nil }
 
     static func == (lhs: MotionFrame, rhs: MotionFrame) -> Bool {
       lhs.progress == rhs.progress && lhs.rowsBuild == rhs.rowsBuild
         && lhs.arrival?.room == rhs.arrival?.room && lhs.arrival?.appear == rhs.arrival?.appear
+        && lhs.clear?.gone == rhs.clear?.gone && lhs.clear?.moves == rhs.clear?.moves
     }
   }
   private var motionFrame = MotionFrame()
@@ -521,6 +533,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     syncAllFolders()
     folderMotion.onFrame = { [weak self] progress in self?.presentFolderMotion(progress) }
     folderMotion.onSettle = { [weak self] folder, open in self?.folderMotionSettled(folder, open: open) }
+    todayClear.onFrame = { [weak self] in
+      guard let self else { return }
+      self.presentFolderMotion(self.folderMotion.progress())
+    }
     outlineView.onRowHover = { [weak self] row, hovered in
       guard let self, let id = self.nodeID(atRow: row), case .folder? = self.source.node(id) else { return }
       self.onFolderHover?(id, hovered)
@@ -698,6 +714,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       let view = outlineView.makeView(withIdentifier: SidebarDividerView.reuseIdentifier, owner: self)
         as? SidebarDividerView ?? SidebarDividerView(frame: .zero)
       view.flavor = flavor
+      configureClearControl(of: view, animated: false)
       return view
     }
     let cell = outlineView.makeView(withIdentifier: SidebarTabCellView.reuseIdentifier, owner: self)
@@ -770,7 +787,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       return self.state(for: id) == .current
     }
     proxies.children = { [weak self] row in
-      // The divider row's proxy is the splitter itself, so it lists nothing.
+      // The divider row lists its Clear control (#413), drawn or not; nothing else.
+      if let self, self.nodeID(atRow: row) == nil,
+         let divider = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarDividerView {
+        return [divider.clearButton]
+      }
       guard let self, self.nodeID(atRow: row) != nil,
             let cell = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarTabCellView
       else { return [] }
@@ -954,6 +975,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       } else if let divider = self.outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
                   as? SidebarDividerView {
         divider.flavor = self.flavor
+        self.configureClearControl(of: divider, animated: false)
       }
     }
   }
@@ -1017,6 +1039,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       todayIDs = new
       rebuildRootItems()
       applyDiff(old: old, new: rootItems, parent: nil)
+      updateClearControl(animated: true)
     case .folder(let id), .split(let id):
       // Never asked for: the outline holds no rows for it yet and the next query reads the source fresh.
       guard let parent = items[id], let old = containerChildren[id] else { return }
@@ -1299,6 +1322,63 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     syncAllFolders()
   }
 
+  // MARK: Clear Today (#413)
+
+  /// The pointer entered or left the sidebar: the divider shows or hides the Clear control, fading.
+  public func setSidebarHovered(_ hovered: Bool) {
+    guard hovered != isSidebarHovered else { return }
+    isSidebarHovered = hovered
+    updateClearControl(animated: true)
+  }
+
+  /// The realized divider, if any.
+  private var dividerView: SidebarDividerView? {
+    let row = dividerRow
+    guard row >= 0 else { return nil }
+    return outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarDividerView
+  }
+
+  private func updateClearControl(animated: Bool) {
+    if let dividerView { configureClearControl(of: dividerView, animated: animated) }
+  }
+
+  /// Drawn while the pointer is over the sidebar and Today has a row; enabled whenever Today has a row (design:
+  /// with no Today tabs it is not drawn and disabled for VoiceOver).
+  private func configureClearControl(of divider: SidebarDividerView, animated: Bool) {
+    divider.onClear = { [weak self] in self?.clearControlPressed() }
+    divider.isClearEnabled = !todayIDs.isEmpty
+    divider.setClearShown(isSidebarHovered && !todayIDs.isEmpty, animated: animated)
+  }
+
+  /// The Clear control was pressed: the window clears this Space's Today. A Clear during the exit is ignored.
+  func clearControlPressed() {
+    guard !todayClear.isRunning, !todayIDs.isEmpty else { return }
+    perform(.clearTodayControl(spaceID))
+  }
+
+  /// The window's Clear from the control: `rows` collapse upward together on one spring (Reduce Motion: they fade in
+  /// place), the model untouched, and `archive` runs when the motion ends, in the same turn as the rows draw at rest.
+  /// Off screen `archive` runs at once. Ignored while an exit or a return runs.
+  public func runTodayExit(_ rows: [NodeID], archive: @escaping @MainActor () -> Void) {
+    guard !todayClear.isRunning else { return }
+    let leaving = Set(rows)
+    todayClear.start(.leaving, rows: leaving, in: outlineView) { [weak self] in
+      self?.lastCleared = leaving
+      archive()
+    }
+  }
+
+  /// Runs `body` (an Undo); the Today rows it brings back that the last Clear archived come back on the reverse of the
+  /// exit's spring (Reduce Motion: they fade in). Returns `body`'s result.
+  public func returningClearedRows(_ body: () -> Bool) -> Bool {
+    let before = Set(todayIDs)
+    let result = body()
+    let back = Set(todayIDs).subtracting(before).intersection(lastCleared)
+    lastCleared.subtract(back)
+    if !back.isEmpty, !todayClear.isRunning { todayClear.start(.returning, rows: back, in: outlineView) }
+    return result
+  }
+
   // MARK: Arrival (#352)
 
   /// A row arriving from Little Arkt's Open in flight: the rows below make room (`room`, 0 to 1) and the row fades
@@ -1351,6 +1431,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     var frame = MotionFrame(rowsBuild: motionRowsBuild)
     for (folder, value) in progress where rows.blocks[folder] != nil { frame.progress[folder] = value }
     if let arrival, rows.arrivalRow >= 0 { frame.arrival = (arrival.room, arrival.appear) }
+    if rows.clearBlock != nil, let gone = todayClear.gone() { frame.clear = (gone, !todayClear.fades) }
     let raised = Set(frame.progress.keys)
     guard frame != motionFrame || raised != raisedRows else { return }
     let wasAtRest = motionFrame.isAtRest
@@ -1373,11 +1454,13 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let changingGeneration = folderMotion.changingGeneration
     if let motionRows, motionRows.rowsGeneration == rowsGeneration,
        motionRows.changingGeneration == changingGeneration,
-       motionRows.arrivalNode == arrival?.node, motionRows.fadingOut == arrival?.fadingOut {
+       motionRows.arrivalNode == arrival?.node, motionRows.fadingOut == arrival?.fadingOut,
+       motionRows.clearGeneration == todayClear.rowsGeneration {
       return motionRows
     }
     var captured = MotionRows(rowsGeneration: rowsGeneration, changingGeneration: changingGeneration,
-                              arrivalNode: arrival?.node, fadingOut: arrival?.fadingOut)
+                              arrivalNode: arrival?.node, fadingOut: arrival?.fadingOut,
+                              clearGeneration: todayClear.rowsGeneration)
     for (folder, changing) in folderMotion.changing where row(for: folder) >= 0 {
       var entries: [(row: Int, height: CGFloat)] = []
       entries.reserveCapacity(changing.count)
@@ -1392,7 +1475,14 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       if captured.arrivalRow >= 0 { captured.arrivalHeight = outlineView.rect(ofRow: captured.arrivalRow).height }
       captured.fadingRow = arrival.fadingOut.map { row(for: $0) } ?? -1
     }
-    if !folderMotion.changing.isEmpty || arrival != nil { motionCaptureCount += 1 }
+    if !todayClear.rows.isEmpty {
+      let entries = todayClear.rows.compactMap { node -> (row: Int, height: CGFloat)? in
+        let row = row(for: node)
+        return row >= 0 ? (row, outlineView.rect(ofRow: row).height) : nil
+      }
+      if !entries.isEmpty { captured.clearBlock = FolderMotionLayout.Block(rows: entries) }
+    }
+    if !folderMotion.changing.isEmpty || arrival != nil || !todayClear.rows.isEmpty { motionCaptureCount += 1 }
     motionRowsBuild &+= 1
     motionRows = captured
     return captured
@@ -1412,6 +1502,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
                                  arrivalRow: rows.arrivalRow, oldSelectionRow: rows.fadingRow,
                                  room: springs.room, appear: springs.appear)
     }
+    if let clear = motionFrame.clear, let block = rows.clearBlock {
+      TodayClearLayout.apply(to: &style, atRow: row, block: block, gone: clear.gone, moves: clear.moves)
+    }
     return style
   }
 
@@ -1426,6 +1519,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       transform = CATransform3DTranslate(transform, center.x, center.y, 0)
       transform = CATransform3DScale(transform, style.scale, style.scale, 1)
       transform = CATransform3DTranslate(transform, -center.x, -center.y, 0)
+    }
+    if style.scaleY != 1 {
+      // About the row's top edge: the layer's anchor, at the origin of the outline's flipped geometry.
+      transform = CATransform3DScale(transform, 1, style.scaleY, 1)
     }
     layer.transform = transform
     layer.opacity = Float(style.alpha)

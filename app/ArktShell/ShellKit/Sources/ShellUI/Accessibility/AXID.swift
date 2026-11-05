@@ -117,6 +117,8 @@ public enum AXID {
     /// Label: joined pane titles. Selected: any pane of the split is `current`.
     public static let rowSplit = "sidebar.row.split"
     public static let divider = "sidebar.divider"
+    /// The Clear control on the divider above Today (#413). Label "Clear Today tabs"; present while not drawn.
+    public static let clearToday = "sidebar.clearToday"
     /// Present only while the row's close button is shown. Label: tooltip.
     public static let rowClose = "sidebar.row.close"
     /// A row's audio button (#364): mutes or unmutes the page.
