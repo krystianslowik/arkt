@@ -19,7 +19,7 @@ public final class SplitContainerView: NSView {
   public var focusedIndex = 0 {
     didSet { if focusedIndex != oldValue { updateBorderEmphasis() } }
   }
-  /// Pacing of the last finished divider drag.
+  /// Pacing of the last finished divider drag ("split-divider") or pane close reflow ("split-reflow").
   public private(set) var lastPacing: FrameStats?
   /// Toasts while a split is shown (the single card is hidden then): above every pane, centered on the whole content
   /// area like on the single card [I] (BH-190 deferred). `ShellRootView.showsSplit` moves it here and back.
@@ -113,8 +113,8 @@ public final class SplitContainerView: NSView {
   ///
   /// `animated` (a pane closed by its X, #388): every page still shown moves from where it is on screen to its new
   /// frame on one interruptible spring; a reflow still running hands over its position and speed. The model state
-  /// (`paneCount`, `liveFactors`, the cards' pages) changes at once; only the presented frames move. Reduce Motion
-  /// sets the frames at once under a short crossfade.
+  /// (`paneCount`, `liveFactors`, the cards' pages) and the cards' real frames change at once; only the cards' layer
+  /// transforms move (#602). Reduce Motion sets the frames at once under a short crossfade.
   public func show(panes: [NSView?], axis: SplitAxis, factors: [Double], animated: Bool = false) {
     cancelDrag()
     let onScreen = animated ? framesOnScreen() : [:]
@@ -153,10 +153,24 @@ public final class SplitContainerView: NSView {
   /// Each shown page's card frame as it is on screen now, by page.
   private func framesOnScreen() -> [ObjectIdentifier: CGRect] {
     var frames: [ObjectIdentifier: CGRect] = [:]
-    for card in paneCards {
+    for (card, frame) in zip(paneCards, presentedPaneFrames) {
       guard let page = card.contentView else { continue }
-      frames[ObjectIdentifier(page)] = card.frame
+      frames[ObjectIdentifier(page)] = frame
     }
+    return frames
+  }
+
+  /// Where each shown pane is drawn: its layout frame, or while a reflow runs, its way there.
+  var presentedPaneFrames: [CGRect] { paneCount > 0 ? presented(targetFrames()).panes : [] }
+
+  /// `targets` as drawn: unchanged at rest; while a reflow runs, each pane on its way and the gaps between.
+  private func presented(_ targets: SplitFrames) -> SplitFrames {
+    guard let reflow else { return targets }
+    var frames = targets
+    frames.panes = zip(targets.panes, reflow.from).map { target, from in
+      from.map { SplitReflow.frame(from: $0, to: target, progress: reflow.progress, scale: backingScale) } ?? target
+    }
+    frames.dividers = SplitReflow.dividers(between: frames.panes, axis: axis)
     return frames
   }
 
@@ -177,6 +191,7 @@ public final class SplitContainerView: NSView {
                                   newDistance: distance)
     } ?? 0
     reflow = (from, distance, 0)
+    pacerSession = pacer.begin("split-reflow", in: self)
     reflowDriver.animate(in: self, from: 0, to: distance, initialVelocity: velocity,
                          parameters: SplitReflow.parameters) { [weak self] value in
       guard let self, self.reflow != nil else { return }
@@ -185,6 +200,7 @@ public final class SplitContainerView: NSView {
     } completion: { [weak self] finished in
       guard finished, let self else { return }
       self.reflow = nil
+      self.endReflowPacing()
       self.applyFrames()
     }
   }
@@ -195,8 +211,15 @@ public final class SplitContainerView: NSView {
   private func endReflow() -> (value: Double, velocity: Double, distance: Double)? {
     guard let running = reflow else { return nil }
     reflow = nil
+    endReflowPacing()
     guard let state = reflowDriver.stop() else { return nil }
     return (state.value, state.velocity, running.distance)
+  }
+
+  /// Ends the "split-reflow" pacing session, settled or interrupted. A divider drag's session is not touched.
+  private func endReflowPacing() {
+    guard pacer.isRunning, pacer.label == "split-reflow" else { return }
+    if let stats = pacer.end(session: pacerSession) { lastPacing = stats }
   }
 
   // MARK: Layout
@@ -225,19 +248,24 @@ public final class SplitContainerView: NSView {
     SplitLayout.frames(in: bounds, axis: axis, factors: liveFactors, gap: gap, scale: backingScale)
   }
 
-  /// The layout's frames, or while a reflow runs, each pane on its way there and the dividers in the gaps between.
+  /// The layout's frames. While a reflow runs (#602), the cards keep their layout frames, so each page is resized
+  /// once, when the reflow starts, and a layer transform draws each card on its way there; per spring frame only the
+  /// transforms change. The dividers are empty hit areas (no layer content, no page), so they follow the visible
+  /// gaps by frame and stay clickable mid-flight.
   private func applyFrames() {
     guard paneCount > 0 else { return }
-    var frames = targetFrames()
-    if let reflow {
-      frames.panes = zip(frames.panes, reflow.from).map { target, from in
-        from.map { SplitReflow.frame(from: $0, to: target, progress: reflow.progress, scale: backingScale) } ?? target
-      }
-      frames.dividers = SplitReflow.dividers(between: frames.panes, axis: axis)
-    }
+    let targets = targetFrames()
+    let frames = presented(targets)
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    for (card, frame) in zip(cards, frames.panes) where card.frame != frame { card.frame = frame }
+    for (card, frame) in zip(cards, targets.panes) where card.frame != frame { card.frame = frame }
+    for (index, card) in cards.enumerated() {
+      guard let layer = card.layer else { continue }
+      let transform = reflow != nil && index < frames.panes.count
+        ? SplitReflow.transform(presenting: frames.panes[index], in: targets.panes[index])
+        : CATransform3DIdentity
+      if !CATransform3DEqualToTransform(layer.transform, transform) { layer.transform = transform }
+    }
     for (divider, frame) in zip(dividerViews, frames.dividers) where divider.frame != frame { divider.frame = frame }
     CATransaction.commit()
   }

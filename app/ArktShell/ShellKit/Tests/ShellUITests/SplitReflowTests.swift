@@ -1,4 +1,5 @@
 import CoreGraphics
+import QuartzCore
 import Testing
 @testable import ShellUI
 
@@ -43,6 +44,38 @@ struct SplitReflowTests {
   @Test func dividersFillTheGapsBetweenStackedPanes() {
     let panes = [CGRect(x: 0, y: 310, width: 800, height: 300), CGRect(x: 0, y: 0, width: 800, height: 300)]
     #expect(SplitReflow.dividers(between: panes, axis: .stacked) == [CGRect(x: 0, y: 300, width: 800, height: 10)])
+  }
+
+  // MARK: Transform (#602)
+
+  /// The panes keep their real frames at the layout's targets for the whole reflow; each card's layer transform
+  /// presents it where the spring has it. AppKit anchors a view's layer at its origin, so the transform maps the
+  /// layer's bounds, placed at the real frame's origin, onto the presented frame.
+  @Test func transformPresentsTheRealFrameAtTheInBetweenFrame() {
+    let real = CGRect(x: 0, y: 0, width: 500, height: 600)
+    let presented = CGRect(x: 120.5, y: 10, width: 416.5, height: 580)
+    let transform = SplitReflow.transform(presenting: presented, in: real)
+    let mapped = CGRect(origin: .zero, size: real.size)
+      .applying(CATransform3DGetAffineTransform(transform))
+      .offsetBy(dx: real.minX, dy: real.minY)
+    #expect(abs(mapped.minX - presented.minX) < 1e-9)
+    #expect(abs(mapped.minY - presented.minY) < 1e-9)
+    #expect(abs(mapped.width - presented.width) < 1e-9)
+    #expect(abs(mapped.height - presented.height) < 1e-9)
+  }
+
+  @Test func transformIsIdentityAtRest() {
+    let real = CGRect(x: 510, y: 0, width: 500, height: 600)
+    #expect(CATransform3DIsIdentity(SplitReflow.transform(presenting: real, in: real)))
+  }
+
+  /// A real frame with no size (a pane laid out before the window has one) moves without scaling.
+  @Test func transformOfAnEmptyRealFrameOnlyTranslates() {
+    let transform = SplitReflow.transform(presenting: CGRect(x: 30, y: 40, width: 100, height: 100),
+                                          in: CGRect(x: 10, y: 10, width: 0, height: 0))
+    let affine = CATransform3DGetAffineTransform(transform)
+    #expect(affine.a == 1 && affine.d == 1)
+    #expect(affine.tx == 20 && affine.ty == 30)
   }
 
   // MARK: Distance and interruption

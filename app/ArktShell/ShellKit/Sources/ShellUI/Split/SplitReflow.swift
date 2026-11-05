@@ -24,6 +24,17 @@ enum SplitReflow {
     return CGRect(x: min(minX, maxX), y: min(minY, maxY), width: abs(maxX - minX), height: abs(maxY - minY))
   }
 
+  /// The layer transform that draws a view whose real frame is `real` at `presented` instead (#602): the reflow sets
+  /// each card's real frame once, at the layout's target, and moves only this transform per frame, so a page's
+  /// renderer is not resized on every spring frame. AppKit anchors a view's layer at its origin, so the scale applies
+  /// from there and the translation moves the origin. A real frame with no size only translates.
+  static func transform(presenting presented: CGRect, in real: CGRect) -> CATransform3D {
+    let scaleX = real.width > 0 ? presented.width / real.width : 1
+    let scaleY = real.height > 0 ? presented.height / real.height : 1
+    let move = CATransform3DMakeTranslation(presented.minX - real.minX, presented.minY - real.minY, 0)
+    return CATransform3DScale(move, scaleX, scaleY, 1)
+  }
+
   /// The gaps between neighbouring `panes`: what the dividers cover while the panes move.
   static func dividers(between panes: [CGRect], axis: SplitAxis) -> [CGRect] {
     zip(panes, panes.dropFirst()).map { lead, next in

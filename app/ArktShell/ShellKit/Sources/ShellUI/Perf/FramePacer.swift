@@ -16,7 +16,8 @@ public final class FramePacer: NSObject {
   private var last: CFTimeInterval?
   /// How late the previous callback ran after its vsync (main-thread blocked vs. a skipped vsync).
   private var lastLate: CFTimeInterval = 0
-  private var label = ""
+  /// The running (or last) session's label.
+  public private(set) var label = ""
   private var session = 0
   public private(set) var stats = FrameStats()
   /// Every hitch of the current (or last) session, with the main-thread passes behind it.

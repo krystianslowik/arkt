@@ -50,6 +50,32 @@ final class SplitPaneCloseTests: XCTestCase {
     return view
   }
 
+  /// A page that counts how often its size changes: an engine page resizes its renderer on each one (#602).
+  private final class SizeCountingPage: NSView {
+    private(set) var sizeChanges = 0
+
+    override func setFrameSize(_ newSize: NSSize) {
+      if newSize != frame.size { sizeChanges += 1 }
+      super.setFrameSize(newSize)
+    }
+  }
+
+  private func countingPage() -> SizeCountingPage {
+    let view = SizeCountingPage(frame: .zero)
+    view.wantsLayer = true
+    return view
+  }
+
+  /// Where a card's layer is drawn (its real frame under its transform), in its superview's coordinates.
+  private func onScreen(_ card: ContentCardView) throws -> CGRect { try XCTUnwrap(card.layer).frame }
+
+  private func assertEqual(_ a: CGRect, _ b: CGRect, _ message: String = "",
+                           file: StaticString = #filePath, line: UInt = #line) {
+    for (x, y) in [(a.minX, b.minX), (a.minY, b.minY), (a.width, b.width), (a.height, b.height)] {
+      XCTAssertEqual(x, y, accuracy: 1e-6, "\(a) != \(b) \(message)", file: file, line: line)
+    }
+  }
+
   private func show(_ container: SplitContainerView, _ panes: [NSView?], animated: Bool = false) {
     container.show(panes: panes, axis: .sideBySide,
                    factors: Array(repeating: 1 / Double(panes.count), count: panes.count), animated: animated)
@@ -219,26 +245,88 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertEqual(container.paneCount, 2)
     XCTAssertEqual(container.liveFactors, [0.5, 0.5])
     XCTAssertTrue(container.paneCards[1].contentView === c)
-    XCTAssertEqual(container.paneCards[1].frame, cFrame, "c starts in its old place, not in card 1's")
-    XCTAssertEqual(container.paneCards[0].frame, aFrame)
+    assertEqual(try onScreen(container.paneCards[1]), cFrame, "c starts in its old place, not in card 1's")
+    assertEqual(try onScreen(container.paneCards[0]), aFrame)
     XCTAssertNil(container.layer?.animation(forKey: SplitReflow.fadeKey))
 
     waitUntil("the reflow settles") { !container.isReflowing }
     XCTAssertEqual(container.paneCards[0].frame, NSRect(x: 0, y: 0, width: 500, height: 600))
     XCTAssertEqual(container.paneCards[1].frame, NSRect(x: 510, y: 0, width: 500, height: 600))
     XCTAssertEqual(container.dividers[0].frame, NSRect(x: 500, y: 0, width: 10, height: 600))
+    for card in container.paneCards { assertEqual(try onScreen(card), card.frame, "at rest, no transform left") }
+  }
+
+  /// #602: a reflow sets each pane's real frame once, when it starts, so an engine page resizes its renderer once;
+  /// every spring frame after that only moves the cards' layers. The driver is stepped by hand on a frozen clock.
+  func testReflowResizesEachPageOnceAndMovesOnlyLayersPerFrame() throws {
+    let container = makeContainer(reduceMotion: false)
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (countingPage(), countingPage(), countingPage())
+    show(container, [a, b, c])
+    let (aBefore, cBefore) = (container.paneCards[0].frame, container.paneCards[2].frame)
+
+    show(container, [a, c], animated: true)
+
+    XCTAssertTrue(container.isReflowing)
+    let targets = [NSRect(x: 0, y: 0, width: 500, height: 600), NSRect(x: 510, y: 0, width: 500, height: 600)]
+    XCTAssertEqual(container.paneCards.map(\.frame), targets, "the real frames take the layout at once")
+    assertEqual(try onScreen(container.paneCards[0]), aBefore, "a is still drawn where it was")
+    assertEqual(try onScreen(container.paneCards[1]), cBefore, "c is still drawn where it was")
+    let sizeChanges = [a.sizeChanges, c.sizeChanges]
+
+    for time in [100.02, 100.04, 100.06, 100.08] {
+      container.reflowDriver.tick(at: time)
+      container.needsLayout = true
+      container.layoutSubtreeIfNeeded()                    // a layout pass mid-flight keeps the presented frames
+      XCTAssertTrue(container.isReflowing)
+      XCTAssertEqual(container.paneCards.map(\.frame), targets, "no frame change at \(time)")
+      let c = try onScreen(container.paneCards[1])
+      XCTAssertLessThan(c.minX, cBefore.minX, "c moved at \(time)")
+      XCTAssertGreaterThan(c.minX, targets[1].minX, "c not there yet at \(time)")
+      XCTAssertEqual(c.maxX, targets[1].maxX, accuracy: 1e-6, "its trailing edge stays")
+      XCTAssertGreaterThan(try onScreen(container.paneCards[0]).width, aBefore.width - 1e-6)
+    }
+    XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized per frame")
+
+    container.reflowDriver.tick(at: 105)
+
+    XCTAssertFalse(container.isReflowing)
+    for (card, target) in zip(container.paneCards, targets) {
+      XCTAssertEqual(card.frame, target)
+      XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(card.layer).transform))
+    }
+    XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized at rest either")
+  }
+
+  /// #602: each reflow is measured on its own pacing session, "split-reflow", ended when it settles.
+  func testReflowIsMeasuredAsASplitReflowPacingSession() throws {
+    let container = makeContainer(onScreen: true, reduceMotion: false)
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (page(), page(), page())
+    show(container, [a, b, c])
+
+    show(container, [a, c], animated: true)
+    XCTAssertTrue(container.pacer.isRunning)
+    XCTAssertEqual(container.pacer.label, "split-reflow")
+    container.reflowDriver.tick(at: 105)
+
+    XCTAssertFalse(container.pacer.isRunning)
+    XCTAssertNotNil(container.lastPacing)
   }
 
   /// A second close mid-flight starts from the frames on screen, not from the layout either close left. The clock is
   /// frozen and the driver stepped by hand, so the frame caught mid-flight does not depend on the machine's speed.
   func testInterruptedReflowContinuesFromTheFramesOnScreen() throws {
-    let container = makeContainer(onScreen: true, reduceMotion: false)
+    let container = makeContainer(reduceMotion: false)
     container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
     let (a, b, c) = (page(), page(), page())
     show(container, [a, b, c])
     show(container, [a, c], animated: true)
     container.reflowDriver.tick(at: 100.06)
-    let cOnScreen = container.paneCards[1].frame
+    let cOnScreen = try onScreen(container.paneCards[1])
     XCTAssertTrue(container.isReflowing)
     XCTAssertLessThan(cOnScreen.minX, 680, "moved from its old place")
     XCTAssertGreaterThan(cOnScreen.minX, 510, "not there yet")
@@ -246,9 +334,11 @@ final class SplitPaneCloseTests: XCTestCase {
     show(container, [c], animated: true)
 
     XCTAssertTrue(container.isReflowing)
-    XCTAssertEqual(container.paneCards[0].frame, cOnScreen)
-    waitUntil("the second reflow settles") { !container.isReflowing }
+    assertEqual(try onScreen(container.paneCards[0]), cOnScreen)
+    container.reflowDriver.tick(at: 105)
+    XCTAssertFalse(container.isReflowing)
     XCTAssertEqual(container.paneCards[0].frame, NSRect(x: 0, y: 0, width: 1010, height: 600))
+    assertEqual(try onScreen(container.paneCards[0]), NSRect(x: 0, y: 0, width: 1010, height: 600))
   }
 
   /// A plain show (switching splits, adding a pane) never animates, and ends a running reflow at the layout.
@@ -424,12 +514,68 @@ final class SplitPaneCloseTests: XCTestCase {
 
     let card = harness.controller.rootView.card
     try PacingEnvironment.requireCaught(harness.controller.rootView.isCardReflowing
-                                          && card.frame.width < harness.split.frame.width,
+                                          && (try onScreen(card)).width < harness.split.frame.width,
                                         "the card growing from the pane")
-    XCTAssertGreaterThanOrEqual(card.frame.width, paneFrame.width)
+    XCTAssertGreaterThanOrEqual(try onScreen(card).width, paneFrame.width - 1e-6)
     waitUntil("the card settles") { !harness.controller.rootView.isCardReflowing }
     XCTAssertEqual(card.frame, harness.split.frame)
+    assertEqual(try onScreen(card), harness.split.frame)
     harness.controller.close()
+  }
+
+  /// #602: the card takes its layout frame once, when its reflow starts; each spring frame only moves its layer, from
+  /// the pane's frame to its own. Measured on a "card-reflow" pacing session. Stepped by hand on a frozen clock.
+  func testCardReflowResizesThePageOnceAndMovesOnlyItsLayerPerFrame() throws {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled],
+                          backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    windows.append(window)
+    let root = ShellRootView()
+    root.reduceMotion = { false }
+    root.cardReflowClock = { 100 }
+    root.cardReflowDriver.drivesDisplayLink = false
+    window.contentView = root
+    root.layoutSubtreeIfNeeded()
+    let page = countingPage()
+    root.card.setContent(page)
+    root.layoutSubtreeIfNeeded()
+    let target = root.card.frame
+    // The lower right quarter, as the last pane of a stacked split would be: both axes move.
+    let from = CGRect(x: target.minX + target.width / 2 + 5, y: target.minY + target.height / 2 + 5,
+                      width: target.width / 2 - 5, height: target.height / 2 - 5)
+
+    root.reflowCard(from: from)
+
+    XCTAssertTrue(root.isCardReflowing)
+    XCTAssertEqual(root.card.frame, target, "the real frame stays the layout's")
+    assertEqual(try onScreen(root.card), from, "drawn where the pane was")
+    XCTAssertEqual(root.cardPacer.label, "card-reflow")
+    XCTAssertTrue(root.cardPacer.isRunning)
+    let sizeChanges = page.sizeChanges
+    for time in [100.02, 100.05, 100.08] {
+      root.cardReflowDriver.tick(at: time)
+      root.needsLayout = true
+      root.layoutSubtreeIfNeeded()
+      XCTAssertEqual(root.card.frame, target, "no frame change at \(time)")
+      let drawn = try onScreen(root.card)
+      XCTAssertLessThan(drawn.minX, from.minX, "growing at \(time)")
+      XCTAssertGreaterThan(drawn.minX, target.minX, "not there yet at \(time)")
+      XCTAssertLessThan(drawn.minY, from.minY, "flipped root: the top edge rises at \(time)")
+      XCTAssertGreaterThan(drawn.minY, target.minY)
+      XCTAssertEqual(drawn.maxX, target.maxX, accuracy: 1e-6)
+      XCTAssertEqual(drawn.maxY, target.maxY, accuracy: 1e-6)
+      assertEqual(drawn, root.presentedCardFrame)
+    }
+    XCTAssertEqual(page.sizeChanges, sizeChanges, "no page resized per frame")
+
+    root.cardReflowDriver.tick(at: 105)
+
+    XCTAssertFalse(root.isCardReflowing)
+    XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(root.card.layer).transform))
+    assertEqual(try onScreen(root.card), target)
+    XCTAssertFalse(root.cardPacer.isRunning)
+    XCTAssertNotNil(root.lastCardPacing)
+    XCTAssertEqual(page.sizeChanges, sizeChanges)
   }
 
   /// With motion on, the panes left after a close reflow on the spring; Cmd-W (a keyboard close) does not.
