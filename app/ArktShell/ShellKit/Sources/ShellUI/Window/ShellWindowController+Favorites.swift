@@ -19,6 +19,37 @@ extension ShellWindowController {
     sidebarController.onFavoriteUnload = { [weak self] node in self?.close(node: node) }
   }
 
+  // MARK: Command bar (BH-047, #340)
+
+  static let favoriteTabActionID = "favoriteTab"
+  static let moveToFavoritesActionID = "moveToFavorites"
+
+  /// The command bar's "Favorite Tab" and "Move To Favorites" (BH-047): listed only while the current tab can be
+  /// favorited.
+  func favoriteCommandBarActions() -> [CommandBarAction] {
+    guard favoritableCurrentNode() != nil else { return [] }
+    return [
+      CommandBarAction(id: Self.favoriteTabActionID, title: "Favorite Tab"),
+      CommandBarAction(id: Self.moveToFavoritesActionID, title: "Move To Favorites"),
+    ]
+  }
+
+  /// Both command bar actions: appends the current tab to Favorites, as "Move To > Favorites" on its row does. A
+  /// refusal reports `.moveNode` ("Favorites are full." on a full section).
+  func favoriteCurrentTab() {
+    guard let node = favoritableCurrentNode() else { return }
+    move(node, to: .favorites(profile: sidebarController.profile))
+  }
+
+  /// What favoriting the current tab moves: the tab, or its whole split for a pane (a pane never leaves its split
+  /// this way, as its row has no Move To). Nil without a current tab or when it already is a Favorite.
+  private func favoritableCurrentNode() -> NodeID? {
+    guard let node = currentNode else { return nil }
+    if case .favorites? = sidebar.section(containing: node) { return nil }
+    if case .split(let split)? = sidebar.parent(of: node) { return split }
+    return node
+  }
+
   /// Moves `node` to `location` at `index` (nil appends). False when the model refused; the failure reports
   /// `.moveNode`. A node arriving in Today from another section (an unpin, a Favorite dragged down) becomes an
   /// ordinary Today item: see `didEnterToday(_:)`.
