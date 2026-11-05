@@ -41,6 +41,18 @@ public final class ContentCardView: NSView {
       needsLayout = true
     }
   }
+  /// The zoom pill (#579), above the page at the top trailing corner, below the find bar while that shows. Hosted like
+  /// the find bar: the single card, or the focused pane's card while a split shows.
+  var zoomPillView: ZoomPillView? {
+    didSet {
+      guard zoomPillView !== oldValue else { return }
+      if oldValue?.superview === self { oldValue?.removeFromSuperview() }
+      if let zoomPillView, zoomPillView.superview !== self {
+        addSubview(zoomPillView, positioned: .above, relativeTo: findBarView ?? closeButton ?? clipView)
+      }
+      needsLayout = true
+    }
+  }
   /// The link status pill (#114), above the page at a bottom corner; created on first use.
   private(set) var statusPillView: StatusPillView?
   /// The pointer moved over the card, in the card's coordinates; set with the pill, which it keeps out of the way.
@@ -177,6 +189,7 @@ public final class ContentCardView: NSView {
     contentView?.frame = split.contentFrame
     emptyStateView?.frame = clipView.bounds
     layoutFindBar()
+    layoutZoomPill()
     layoutStatusPill()
     layoutToast()
     // An explicit shadow path avoids an offscreen pass to derive the shadow shape from content alpha.
@@ -268,6 +281,15 @@ public final class ContentCardView: NSView {
     guard let findBarView, !findBarView.isHidden, findBarView.superview === self else { return }
     let frame = FindBarLayout.frame(in: split.contentFrame)
     if findBarView.frame != frame { findBarView.frame = frame }
+  }
+
+  /// At the top trailing corner of this card's page area like the find bar, and 8 points below the find bar while it
+  /// shows on this card.
+  func layoutZoomPill() {
+    guard let zoomPillView, !zoomPillView.isHidden, zoomPillView.superview === self else { return }
+    let findBar = findBarView.flatMap { $0.isHidden || $0.superview !== self ? nil : $0.frame }
+    let frame = ZoomPillLayout.frame(in: split.contentFrame, resetWidth: zoomPillView.resetWidth, below: findBar)
+    if zoomPillView.frame != frame { zoomPillView.frame = frame }
   }
 
   /// Centered, `ToastView.bottomInset` above the bottom edge, at most `ToastView.maxWidth` wide.

@@ -181,6 +181,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private(set) lazy var infobarStrips = makeInfobarPresenter()
   /// The find bar's state and engine calls, and its view over the card (#134); see `+Find`.
   private(set) lazy var findBar = makeFindBar()
+  /// The zoom pill's state and its view over the card (#579); see `+Zoom`.
+  private(set) lazy var zoomPill = makeZoomPill()
   private(set) lazy var statusPill = makeStatusPillPresenter()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
@@ -778,6 +780,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     permissionPrompts.refresh()
     infobarStrips.refresh()
     refreshFindBar()
+    refreshZoomPill()
     statusPill.refresh()
   }
 
@@ -856,8 +859,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
       break                                                         // routed above, before the row lookup (#114)
-    case .tabCrashed, .tabRecovered, .zoomChanged, .tabFullscreenChanged:
-      break                                                         // no shell surface yet (#578, #579, #581)
+    case .zoomChanged:
+      zoomPill.handle(event)                                        // #579
+    case .tabCrashed, .tabRecovered, .tabFullscreenChanged:
+      break                                                         // no shell surface yet (#578, #581)
     }
   }
 
@@ -871,6 +876,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   ///   stays unloaded as after Cmd-W.
   private func tabDidClose(_ tab: TabID, node: NodeID, reason: CloseReason) {
     findBar.forget(tab)                                     // #134
+    zoomPill.forget(tab)                                    // #579
     tabsByNode[node] = nil
     nodeByTab[tab] = nil
     let wasCurrent = currentTab == tab

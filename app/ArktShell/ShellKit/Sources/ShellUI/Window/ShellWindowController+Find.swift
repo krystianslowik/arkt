@@ -23,8 +23,8 @@ extension ShellWindowController {
   }
 
   /// The tab Find acts on: the focused pane's page while a split shows, otherwise the current page. Nil when a split
-  /// has no focused pane, or that pane has no page.
-  private var findTarget: TabID? {
+  /// has no focused pane, or that pane has no page. The zoom pill follows the same tab (#579).
+  var findTarget: TabID? {
     if splitState.split != nil {
       guard let focus = splitState.focus else { return nil }
       return engineTab(of: focus)
@@ -41,8 +41,8 @@ extension ShellWindowController {
     return splitState.panes.contains(node)
   }
 
-  /// The card the bar is drawn on: the focused pane, or the single card when no split is showing.
-  private var findAnchorCard: ContentCardView {
+  /// The card the bar is drawn on: the focused pane, or the single card when no split is showing. The zoom pill's too.
+  var findAnchorCard: ContentCardView {
     if splitState.split != nil, let focus = splitState.focus, let index = splitState.panes.firstIndex(of: focus),
        rootView.split.paneCards.indices.contains(index) {
       return rootView.split.paneCards[index]
