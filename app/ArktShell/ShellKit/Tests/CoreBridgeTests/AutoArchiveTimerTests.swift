@@ -106,7 +106,7 @@ struct AutoArchiveTimerTests {
     harness.timer.stop()
   }
 
-  @Test func neverKeepsLittleArktWindowsOpenAndStopEndsThePass() async throws {
+  @Test func neverKeepsLittleArktWindowsOpen() async throws {
     let harness = Harness()
     await harness.state.setSettings(ArchiveSettings(littleArcThreshold: .never))
     let window = LittleArcWindowActivity(id: UUID(), lastActiveAt: .distantPast)
@@ -115,12 +115,25 @@ struct AutoArchiveTimerTests {
     harness.timer.onLittleArktsIdle = { reported.append($0) }
 
     try await harness.timer.start()
+
+    #expect(reported.isEmpty)
+    harness.timer.stop()
+  }
+
+  @Test func noLittleArktPassRunsAfterStop() async throws {  // quit: no window closes during the termination flush
+    let harness = Harness()
+    let window = LittleArcWindowActivity(id: UUID(), lastActiveAt: Self.start.addingTimeInterval(-5 * Self.hour))
+    var reported: [[UUID]] = []
+    harness.timer.littleArkts = { [window] }
+    harness.timer.onLittleArktsIdle = { reported.append($0) }
+    try await harness.timer.start()
     #expect(reported.isEmpty)
 
     harness.timer.stop()
-    await harness.state.setSettings(ArchiveSettings())
+    harness.clock.now = Self.start.addingTimeInterval(2 * Self.hour)
     harness.timer.tick()
-    #expect(reported.isEmpty, "no pass after stop")
+
+    #expect(reported.isEmpty, "idle by now, but the timer stopped")
   }
 
   @Test func aTickThatArchivesNothingReportsNothing() async throws {

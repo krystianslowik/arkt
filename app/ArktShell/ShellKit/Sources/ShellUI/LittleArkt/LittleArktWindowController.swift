@@ -74,7 +74,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// closed the tab by the time it reports the window closed. Archived when that close ends; forgotten when a
   /// leave-site prompt cancels it.
   private var requestedClose: LittleArktClosedWindow?
-  /// The last time the user was in the window: it opened, became key, stopped being key, or its page navigated.
+  /// The last time the user was in the window: it opened, became key or stopped being key. A page that navigates on
+  /// its own (a refresh, a polling dashboard) does not count.
   public private(set) var lastActiveAt = Date.distantPast
 
   // MARK: Hooks (set by ShellWindowSet)
@@ -185,7 +186,6 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       guard phase == .open || phase == .pending else { return }
       mount(tab)
     case .urlChanged(let tab, _) where tab == shownTab:
-      lastActiveAt = now()
       refreshTopBar()
     case .closeCancelled(let tab) where tab == shownTab:
       requestedClose = nil                                    // the user stayed at the leave-site prompt
