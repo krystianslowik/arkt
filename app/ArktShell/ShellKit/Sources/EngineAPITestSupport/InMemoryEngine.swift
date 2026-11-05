@@ -64,6 +64,8 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public var downloadClock: @MainActor () -> Date = { Date() }
   public internal(set) var openedDownloads: [DownloadID] = []
   public internal(set) var revealedDownloads: [DownloadID] = []
+  /// The crashed-session prompt's state (#576, InMemoryEngine+TabState.swift).
+  public let crashedSession = InMemorySessionRecovery()
 
   /// Builds hosts for `openEngineWindow(_:)`, as the app's provider does for a real engine.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -213,6 +215,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
 
   public func reload(_ id: TabID) {
     guard let current = snapshots[id], current.url != nil, !current.isLoading else { return }
+    prepareForLoad(id)              // #576: a crashed tab recovers
     snapshots[id]?.isLoading = true
     hub.emit(.loadingChanged(id, isLoading: true))
   }
@@ -657,6 +660,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   }
 
   private func load(_ id: TabID, _ url: URL, title: String?, previous: TabSnapshot) {
+    prepareForLoad(id)              // #576: a crashed tab recovers, HTML fullscreen ends
     endDialog(of: id)       // Chromium closes the dialog when a navigation starts
     withdrawPermission(in: id)      // and drops the site's ask
     endFindAndHover(of: id)         // and the page's find and hover go with the old document

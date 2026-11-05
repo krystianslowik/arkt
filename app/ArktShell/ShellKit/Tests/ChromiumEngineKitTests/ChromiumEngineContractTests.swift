@@ -16,7 +16,7 @@ enum FacadeScript: String, CaseIterable, Sendable {
 /// harness driver is present, so no rule is reported as not applicable.
 @MainActor
 struct ChromiumEngineContractTests {
-  @Test(arguments: ContractCheck.allCases, FacadeScript.allCases)
+  @Test(arguments: ContractCheck.chromiumChecks, FacadeScript.allCases)
   func contract(_ check: ContractCheck, _ script: FacadeScript) async throws {
     let harness = ScriptedHarness.make { facade in facade.titleAfterLoadEnd = script == .titleAfterLoadEnd }
     try await check.run(harness)
@@ -46,8 +46,9 @@ struct ChromiumEngineContractTests {
         names.insert(String(match.output.1))
       }
     }
-    #expect(names.count == 50)
+    #expect(names.count == 53)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
-    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...24))
+    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...25))
+    #expect(Set(ContractCheck.chromiumChecks.map(\.rule)) == Set(1...24), "rule 25 joins with #577")
   }
 }
