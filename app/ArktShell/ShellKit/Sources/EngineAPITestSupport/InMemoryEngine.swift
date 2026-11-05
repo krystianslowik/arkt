@@ -47,7 +47,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   private var activeTabs: [EngineWindowID: TabID] = [:]
   private var lastActiveWindow: EngineWindowID?
   private var heldCloses: [TabID: HeldClose] = [:]
-  private var actions: [EngineWindowID: [ExtensionAction]] = [:]
+  var actions: [EngineWindowID: [ExtensionAction]] = [:]
   /// Find sessions, the page selection and the hovered link of the tabs that have them (rules 22, 23).
   var finds: [TabID: FindSession] = [:]
   var pageSelections: [TabID: String] = [:]
@@ -72,6 +72,18 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
                                               window: EngineWindowID)] = []
   /// Actions run through `runExtensionAction`, in order.
   public private(set) var ranExtensionActions: [(id: String, window: EngineWindowID, anchor: NSView)] = []
+  /// Extension pins, commands and context commands (#591; `InMemoryEngine+Extensions.swift`). Pins are profile-wide:
+  /// one order for every window, kept when windows close.
+  public internal(set) var pinnedExtensionIDs: [String] = []
+  /// Extensions the engine has seen, through `setExtensionActions` or `installExtension`. Only these can be pinned; a
+  /// driver action's `isPinned` seeds the pin the first time its extension is seen.
+  var knownExtensionIDs: Set<String> = []
+  public internal(set) var extensionCommands: [ExtensionCommand] = []
+  /// Global shortcuts another application or the system holds: `.global` with one of these is rejected.
+  public var heldGlobalShortcuts: Set<ExtensionShortcut> = []
+  /// Context menu commands run through `performExtensionContextCommand`, in order.
+  public internal(set) var performedExtensionContextCommands: [(command: EngineMenuCommand, actionID: String,
+                                                                window: EngineWindowID)] = []
 
   /// `downloadFolder`: where downloads go by default; a new temporary folder when nil.
   public init(downloadFolder: URL? = nil) {
@@ -478,7 +490,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
 
   // MARK: - Extensions
 
-  public func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { actions[window] ?? [] }
+  public func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { inPinOrder(actions[window] ?? []) }
 
   public func runExtensionAction(_ id: String, in window: EngineWindowID, anchor: NSView) {
     guard actions[window]?.contains(where: { $0.id == id }) == true else { return }
@@ -621,6 +633,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   /// Test driver: the window's extension actions changed.
   public func setExtensionActions(_ list: [ExtensionAction], in window: EngineWindowID) {
     guard windowIDs.contains(window) else { return }
+    seedPins(from: list)
     actions[window] = list
     hub.emit(.extensionActionsChanged(window))
   }

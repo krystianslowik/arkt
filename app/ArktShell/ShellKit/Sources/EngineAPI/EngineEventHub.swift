@@ -26,11 +26,13 @@ public final class EngineEventHub {
     case tab(EngineEvent, window: EngineWindowID?)
     case window(EngineWindowEvent)
     case download(DownloadEvent)
+    case extensionEvent(EngineExtensionEvent)
   }
 
   private var handlers: [Handler] = []
   private var windowHandlers: [(key: UUID, deliver: @MainActor (EngineWindowEvent) -> Void)] = []
   private var downloadHandlers: [(key: UUID, deliver: @MainActor (DownloadEvent) -> Void)] = []
+  private var extensionHandlers: [(key: UUID, deliver: @MainActor (EngineExtensionEvent) -> Void)] = []
   private var live: Set<UUID> = []
   private var closed: Set<TabID> = []
   private var closedWindows: Set<EngineWindowID> = []
@@ -73,6 +75,18 @@ public final class EngineEventHub {
     }
   }
 
+  /// Every profile-wide extension event (#591), in the same FIFO as tab and window events.
+  public func addExtensionObserver(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void)
+    -> EngineObservation {
+    let key = UUID()
+    extensionHandlers.append((key, handler))
+    live.insert(key)
+    return EngineObservation { [weak self] in
+      self?.live.remove(key)
+      self?.extensionHandlers.removeAll { $0.key == key }
+    }
+  }
+
   /// Records the window `tab` is in (nil: none). Call before emitting the tab's `.tabCreated`, and on a move.
   public func assign(_ tab: TabID, to window: EngineWindowID?) {
     windowOfTab[tab] = window
@@ -90,6 +104,10 @@ public final class EngineEventHub {
 
   public func emit(_ event: DownloadEvent) {
     enqueue(.download(event))
+  }
+
+  public func emit(_ event: EngineExtensionEvent) {
+    enqueue(.extensionEvent(event))
   }
 
   // MARK: - Delivery
@@ -117,6 +135,7 @@ public final class EngineEventHub {
       case .tab(let event, let window): deliver(event, window: window)
       case .window(let event): deliver(event)
       case .download(let event): deliver(event)
+      case .extensionEvent(let event): deliver(event)
       }
     }
     pending.removeAll()
@@ -139,5 +158,9 @@ public final class EngineEventHub {
 
   private func deliver(_ event: DownloadEvent) {
     for entry in downloadHandlers where live.contains(entry.key) { entry.deliver(event) }
+  }
+
+  private func deliver(_ event: EngineExtensionEvent) {
+    for entry in extensionHandlers where live.contains(entry.key) { entry.deliver(event) }
   }
 }
