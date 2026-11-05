@@ -134,18 +134,47 @@ final class DragHintFocusRingTests: XCTestCase {
     XCTAssertTrue(ring.isHidden, "focus in a window that is not key draws nothing")
   }
 
-  /// A ring drawn outside its control is raised above the control's neighbors while shown (Settings' pane items are
-  /// 2 pt apart, the ring 3 pt wide).
-  func testAShownOutsideRingRaisesItsControlAboveItsNeighbors() {
+  /// Only a ring that asks for it raises its control above the control's neighbors while shown (Settings' pane items
+  /// are 2 pt apart, the ring 3 pt wide); by default the control stays in place.
+  func testOnlyAnOptedInRingRaisesItsControl() {
     let window = makeWindow()
     let control = NSView(frame: NSRect(x: 20, y: 20, width: 60, height: 24))
     control.wantsLayer = true
     window.contentView?.addSubview(control)
-    let ring = KeyboardFocusRingView.attach(outside: control, radius: 12)
+    let ring = KeyboardFocusRingView.attach(outside: control, radius: 12, raisesHost: true)
     ring.setFocused(true)
     XCTAssertEqual(control.layer?.zPosition, 1)
     ring.setFocused(false)
     XCTAssertEqual(control.layer?.zPosition, 0)
+
+    let plain = NSView(frame: NSRect(x: 100, y: 20, width: 60, height: 24))
+    plain.wantsLayer = true
+    window.contentView?.addSubview(plain)
+    let plainRing = KeyboardFocusRingView.attach(outside: plain, radius: 12)
+    plainRing.setFocused(true)
+    XCTAssertFalse(plainRing.isHidden)
+    XCTAssertEqual(plain.layer?.zPosition, 0)
+  }
+
+  /// The split close button sits under the find bar and the zoom pill, which take the clicks there: focusing it must
+  /// not draw it over them.
+  func testAFocusedSplitCloseButtonStaysInItsLayer() {
+    let window = makeWindow()
+    let close = SplitPaneCloseButton(frame: NSRect(x: 20, y: 20, width: 24, height: 24))
+    window.contentView?.addSubview(close)
+    XCTAssertTrue(window.makeFirstResponder(close) || close.becomeFirstResponder())
+    XCTAssertFalse(close.keyboardFocusRing.isHidden)
+    XCTAssertEqual(close.layer?.zPosition, 0)
+  }
+
+  /// The Settings pane items opt in: a focused item draws above the next one.
+  func testAFocusedSettingsPaneItemIsRaised() {
+    let window = makeWindow()
+    let item = SettingsPaneItemView(pane: SettingsPane.allCases[0])
+    window.contentView?.addSubview(item)
+    XCTAssertTrue(window.makeFirstResponder(item) || item.becomeFirstResponder())
+    XCTAssertFalse(item.keyboardFocusRing.isHidden)
+    XCTAssertEqual(item.layer?.zPosition, 1)
   }
 
   /// Every Settings and Archive button and the split close button, focused through the window: keyboard focus shows

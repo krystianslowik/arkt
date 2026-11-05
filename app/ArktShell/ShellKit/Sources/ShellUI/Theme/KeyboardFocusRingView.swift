@@ -17,8 +17,9 @@ final class KeyboardFocusRingView: NSView {
   let ring = CAShapeLayer()
   /// The owner has keyboard focus. The ring shows while this is true and the window is key.
   private(set) var isFocused = false
-  /// Drawn outside its host (`attach(outside:radius:)`): the host is raised above its siblings while focused, so a
-  /// neighbor closer than the ring's width (Settings' pane items, 2 pt apart) never covers it.
+  /// Raises the host above its siblings while shown (`attach(outside:radius:raisesHost:)`), for hosts whose neighbor
+  /// sits closer than the ring's width (Settings' pane items, 2 pt apart). Off by default: a raised host would draw
+  /// over overlays it does not own (the split close button under the find bar and the zoom pill).
   private var raisesHost = false
   private weak var observedWindow: NSWindow?
 
@@ -38,10 +39,10 @@ final class KeyboardFocusRingView: NSView {
 
   /// A ring drawn just outside `host`, whose shape has corner `radius`; it follows the host's size. The host must not
   /// clip its subviews (the default) and calls `setFocused(_:)` from its responder methods.
-  static func attach(outside host: NSView, radius: CGFloat) -> KeyboardFocusRingView {
+  static func attach(outside host: NSView, radius: CGFloat, raisesHost: Bool = false) -> KeyboardFocusRingView {
     let ring = KeyboardFocusRingView(frame: host.bounds.insetBy(dx: -lineWidth, dy: -lineWidth))
     ring.cornerRadius = radius + lineWidth
-    ring.raisesHost = true
+    ring.raisesHost = raisesHost
     ring.autoresizingMask = [.width, .height]
     host.addSubview(ring, positioned: .above, relativeTo: nil)
     return ring

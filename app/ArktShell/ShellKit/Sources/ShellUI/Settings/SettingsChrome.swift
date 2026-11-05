@@ -20,8 +20,10 @@ public final class SettingsPaneItemView: NSView {
   private var hovering = false
   private var tracking: NSTrackingArea?
   /// `ShellTokens.focusRing` around the item while it has keyboard focus (#642).
+  /// Raised while shown: the next item is only `paneItemGap` (2 pt) away, closer than the ring's width.
   private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
-                                                                         radius: SettingsMetrics.paneItemRadius)
+                                                                         radius: SettingsMetrics.paneItemRadius,
+                                                                         raisesHost: true)
 
   init(pane: SettingsPane) {
     self.pane = pane
