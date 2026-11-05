@@ -128,6 +128,15 @@ svg { display: block; }
 .nav { position: fixed; top: 8px; left: 8px; display: flex; gap: 6px; font-size: 11px; z-index: 99; }
 .nav a { padding: 3px 7px; border-radius: 6px; background: rgba(0,0,0,0.08); color: inherit; text-decoration: none; }
 .shot .nav { display: none; }
+/* Smallest window: 640 x 420, 150 pt sidebar (Library: 150 pt rail) */
+.smallwrap .win { width: 640px; height: 420px; }
+.smallwrap .sidebar { width: 150px; }
+.smallwrap .card { left: 150px; }
+.smallwrap .toast-host { left: 150px; }
+.smallwrap .behind { display: none; }
+.smallwrap .lib { width: 640px; height: 420px; grid-template-columns: 150px minmax(0, 1fr); }
+.smallwrap .lsearch { width: 180px; }
+.smallwrap .sbottom { left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(to bottom, transparent, var(--theme-b) 14px); }
 .swin { position: relative; width: 680px; height: 640px; border-radius: 12px; background: var(--surface); box-shadow: var(--win-shadow); overflow: hidden; }
 .swin .lights { top: 18px; left: 18px; }
 .stitle2 { text-align: center; font-weight: 600; padding-top: 16px; height: 84px; }
@@ -203,6 +212,11 @@ function boot(STATES, NOTES = {}) {
   addEventListener('hashchange', render);
   render();
 }
+/* Library window rail: one order everywhere (Downloads, History, Spaces, Boosts). Captures is not listed yet. */
+const BOOST_G = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 4.5h6M12 4.5h1M3 11.5h1M7 11.5h6"/><circle cx="10.5" cy="4.5" r="1.6"/><circle cx="5.5" cy="11.5" r="1.6"/></svg>';
+const libRail = (on) => `<div class="rail" role="list" aria-label="Library">${[['Downloads', G.dl], ['History', G.clock], ['Spaces', G.spaces], ['Boosts', BOOST_G]].map(([t, g]) => `<div class="ritem ${t === on ? 'on' : ''}" role="listitem">${g}<span>${t}</span></div>`).join('')}</div>`;
+/* Smallest window: 640 x 420, 150 pt sidebar */
+const small = (html) => `<div class="smallwrap">${html}</div>`;
 /* #637 Clear browsing data sheet, on the Settings window (Privacy, "Clear...").
    One compact sheet: a time range pop-up, four checkboxes with what each costs, a summary line that names the
    total, Clear Data (destructive: neutral pill, red title, never the Return default).

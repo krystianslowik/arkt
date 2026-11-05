@@ -3,15 +3,17 @@
 The Spaces section of the Library window: an overview of every Space and a way to move tabs between them, including
 to an empty Space (#635, BH-044). Picked direction: **A, a board of Spaces** (maintainer, 2026-11-05). The Library
 keeps a Spaces section, next to Downloads and History. Prototype: [`prototype.html`](prototype.html), states by hash
-`#<default|drag|worst|done>[&dark][&shot]`. Screens: `screens/library-spaces-<state>-<light|dark>.png` (2x). Synthetic
+`#<default|drag|worst|done|small>[&dark][&shot]`. Screens: `screens/library-spaces-<state>-<light|dark>.png` (2x). Synthetic
 data only.
 
 Everyday chrome: system font, shell tokens, no mustard (the board has no primary action).
 
 ## Layout
 
-- **Window**: the Library window (800 x 540 pt default), rail item "Spaces" under History; search field "Search tabs"
-  filters every column.
+- **Window**: the Library window, titled "Library" (800 x 540 pt default, smallest 640 x 420 pt with a 150 pt rail).
+  The rail is the shared Library window rail (Downloads, History, Spaces, Boosts), documented once in
+  [`design/library-history`](../library-history/README.md#library-window-rail). Search field "Search tabs" filters
+  every column.
 - **Board**: one column per Space, in sidebar order, 146 pt wide, gap 8, radius 10, `listField` background, padding
   8 x 6. More columns than fit scroll sideways; the trailing edge fades over the last 8 % of the board.
 - **Column header**: 14 pt Space swatch (the Space's theme gradient, radius 4), the name (13 pt semibold, truncates at
@@ -52,6 +54,7 @@ Everyday chrome: system font, shell tokens, no mustard (the board has no primary
 | `default` | four Spaces; an empty Space shows its well |
 | `drag` | a tab dragged onto the empty Space: column lifted, "Drop to move here" |
 | `worst` | six Spaces scroll sideways, a long Space name truncates, 14 tabs in one column |
+| `small` | smallest Library window, 640 x 420 pt, 150 pt rail: three columns show, the board scrolls sideways with a faded edge |
 | `done` | after the drop: the tab in the formerly empty Space; toast with Undo |
 
 ## Answered questions

@@ -128,6 +128,15 @@ svg { display: block; }
 .nav { position: fixed; top: 8px; left: 8px; display: flex; gap: 6px; font-size: 11px; z-index: 99; }
 .nav a { padding: 3px 7px; border-radius: 6px; background: rgba(0,0,0,0.08); color: inherit; text-decoration: none; }
 .shot .nav { display: none; }
+/* Smallest window: 640 x 420, 150 pt sidebar (Library: 150 pt rail) */
+.smallwrap .win { width: 640px; height: 420px; }
+.smallwrap .sidebar { width: 150px; }
+.smallwrap .card { left: 150px; }
+.smallwrap .toast-host { left: 150px; }
+.smallwrap .behind { display: none; }
+.smallwrap .lib { width: 640px; height: 420px; grid-template-columns: 150px minmax(0, 1fr); }
+.smallwrap .lsearch { width: 180px; }
+.smallwrap .sbottom { left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(to bottom, transparent, var(--theme-b) 14px); }
 .behind { position: absolute; inset: 0; display: grid; place-items: center; padding: 40px 16px; }
 .lib { position: relative; z-index: 2; width: 800px; height: 540px; border-radius: 12px; background: var(--surface); box-shadow: var(--win-shadow); overflow: hidden; display: grid; grid-template-columns: 164px minmax(0, 1fr); grid-template-rows: 52px 1fr; }
 .lib .lights { top: 20px; left: 16px; }
@@ -227,6 +236,11 @@ function boot(STATES, NOTES = {}) {
   addEventListener('hashchange', render);
   render();
 }
+/* Library window rail: one order everywhere (Downloads, History, Spaces, Boosts). Captures is not listed yet. */
+const BOOST_G = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 4.5h6M12 4.5h1M3 11.5h1M7 11.5h6"/><circle cx="10.5" cy="4.5" r="1.6"/><circle cx="5.5" cy="11.5" r="1.6"/></svg>';
+const libRail = (on) => `<div class="rail" role="list" aria-label="Library">${[['Downloads', G.dl], ['History', G.clock], ['Spaces', G.spaces], ['Boosts', BOOST_G]].map(([t, g]) => `<div class="ritem ${t === on ? 'on' : ''}" role="listitem">${g}<span>${t}</span></div>`).join('')}</div>`;
+/* Smallest window: 640 x 420, 150 pt sidebar */
+const small = (html) => `<div class="smallwrap">${html}</div>`;
 /* #631 Library: the History section.
    One list grouped by day, like the Downloads list. Imported visits merge in by date with no per-row mark; a "Show"
    pop-up filters by source (All history, This Mac, Imported). Each day header carries "Delete Day..." on hover.
@@ -246,10 +260,10 @@ const Y = [
 ];
 const libWin = (content, { title = 'Library', search = '', rail = true } = {}) => `<div class="behind">${browser()}</div>
 <div class="lib"><div class="lights"><i></i><i></i><i></i></div><div class="lhead"><span class="ltitle">${title}</span><span class="grow"></span><div class="lsearch">${G.search}${search ? `<span>${search}</span><span class="caret"></span>` : '<span class="ph">Search history</span>'}</div></div>
-${rail ? `<div class="rail"><div class="ritem">${G.dl}<span>Downloads</span></div><div class="ritem on">${G.clock}<span>History</span></div></div>` : ''}<div class="lbody ${rail ? '' : 'norail'}">${content}</div></div>`;
+${rail ? libRail('History') : ''}<div class="lbody ${rail ? '' : 'norail'}">${content}</div></div>`;
 const vrow = (v, cls = '', hl = '') => `<div class="vrow ${cls}">${tile(v[0][0], v[3], 22)}<div class="vt"><div class="t">${hl ? v[0].replace(hl, `<mark>${hl}</mark>`) : v[0]}</div><div class="h">${v[1]}</div></div><span class="tm">${v[2]}</span>${cls.includes('on') ? '<span class="btn small primary">Open</span>' : ''}</div>`;
 const dayHead = (d, sub, hover) => `<div class="day ${hover ? 'hov' : ''}">${d}<span>${sub}</span>${hover ? '<span class="grow"></span><span class="link red dd" role="button" aria-label="Delete ' + d + '">Delete Day...</span>' : ''}</div>`;
-const foot = (l = 'Clear browsing data...') => `<div class="lfoot"><span class="link">${l}</span><span class="grow"></span><span class="sub">12,486 visits</span></div>`;
+const foot = (l = 'Clear browsing data...', n = '12,486 visits') => `<div class="lfoot"><span class="link">${l}</span><span class="grow"></span><span class="sub">${n}</span></div>`;
 const empty = (msg, sub) => `<div class="empty"><div class="etile">${G.clock}</div><div class="et">${msg}</div><div class="es">${sub}</div></div>`;
 
 const listDays = (hoverToday = false, sel = 1) => `<div class="lscroll">${dayHead('Today', 'Thursday 5 November', hoverToday)}${V.map((v, i) => vrow(v, i === sel ? 'on' : '')).join('')}${dayHead('Yesterday', 'Wednesday 4 November')}${Y.map(v => vrow(v)).join('')}</div>`;
@@ -261,13 +275,23 @@ const aSearch = () => libWin(`<div class="filt"><span class="popup">Show: All hi
 <div class="lscroll"><div class="day">Today</div>${[V[0], V[2]].map((v, i) => vrow(v, i === 0 ? 'on' : '', 'lichen')).join('')}<div class="day">12 October</div>${vrow(['Lichens of the north coast (imported)', 'flora.example', '10:02', 6], '', 'Lichen')}</div>${foot()}`, { search: 'lichen' });
 const aEmpty = () => libWin(empty('No history yet', 'Pages you visit will be listed here.') + foot(''), {});
 
-const STATES = { 'default': aDefault, 'filter': aFilter, 'search': aSearch, 'delete-day': aDelete, 'empty': aEmpty };
+const W = [
+  ['Pull request 48210: rework the sidebar outline diffing for very large Spaces with thousands of rows and nested folders', 'code.example.org', '23:59', 3],
+  ['xn--80ak6aa92e.example: a page whose title is one unbroken word Pneumonoultramicroscopicsilicovolcanoconiosis', 'xn--80ak6aa92e.example', '23:58', 8],
+  ['Untitled', 'localhost:5173', '23:41', 7],
+];
+const aWorst = () => libWin(`<div class="filt"><span class="popup">Show: All history ${G.chev}</span></div>
+<div class="lscroll">${dayHead('Today', '9,999+ pages')}${W.map((v, i) => vrow(v, i === 0 ? 'on' : '')).join('')}${dayHead('Yesterday', '4,812 pages')}${vrow(W[1])}${dayHead('Tuesday 3 November', '3,107 pages')}${vrow(V[3])}${dayHead('Monday 2 November', '2,950 pages')}${vrow(V[4])}${dayHead('Sunday 1 November', '1,844 pages')}${vrow(Y[0])}</div>${foot(undefined, '1,284,113 visits')}`);
+const aSmall = () => small(libWin(filt(false) + listDays() + foot()));
+const STATES = { 'default': aDefault, 'filter': aFilter, 'search': aSearch, 'delete-day': aDelete, 'empty': aEmpty, 'worst': aWorst, 'small': aSmall };
 const NOTES = {
   'default': 'One list by day, as Downloads. Imported visits merge in by date; the selected row shows Open.',
   'filter': 'The Show pop-up filters by source: All history, This Mac, Imported (with its count).',
   'search': 'Search matches titles and addresses across all days, imported included. Matches are tinted with a 35 % mustard fill.',
   'delete-day': 'Pointer over a day header: Delete Day... at its trailing end. It asks first; Delete Day is destructive, never the Return default.',
   'empty': 'Empty: a fresh profile, or after clearing.',
+  'worst': 'Worst case: titles with no break points, a punycode host, 9,999+ pages in a day, many days, 1,284,113 visits.',
+  'small': 'Smallest Library window (640 x 420, 150 pt rail): titles truncate first; times and Open never move.',
 };
 boot(STATES, NOTES);
 </script></body></html>

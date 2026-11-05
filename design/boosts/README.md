@@ -2,7 +2,7 @@
 
 Per-site tweaks: page color, font, hidden elements, custom CSS and JavaScript (#645). The picked direction is A, a
 panel from the address pill; "Code..." opens a code pane inside the card. Prototype: [`prototype.html`](prototype.html),
-states by hash `#<editor|picker|code|manage>[&dark][&rm][&shot]`. Screens: `screens/boosts-<state>-<light|dark>.png`
+states by hash `#<editor|picker|code|small|manage>[&dark][&rm][&shot]`. Screens: `screens/boosts-<state>-<light|dark>.png`
 (2x, 1080 x 720 window). The page and hosts are synthetic.
 
 Everyday chrome: system font, shell tokens (`surface`, `overlayShadow`, `divider`, `fill`). Done is the one mustard
@@ -22,6 +22,26 @@ Not picked: B (inspector beside the page, kept only as the Code pane) and C (tra
   pill) and **Code...** (quiet).
 - **Footer**: Delete Boost (quiet, red title) and **Done** (primary). Changes apply at once; Done only closes.
 
+## Tokens
+
+A Boost page color is the page's own color: it is the same in light and dark appearance, and the page text follows
+it (graphite on the six light colors, porcelain on Night).
+
+| Token | Value | Use |
+|---|---|---|
+| `BoostTokens.pageColorPaper` | `#F4ECDA` | page background |
+| `BoostTokens.pageColorSage` | `#DCE7DA` | page background |
+| `BoostTokens.pageColorSky` | `#DCE6F2` | page background |
+| `BoostTokens.pageColorLilac` | `#E6DEF0` | page background |
+| `BoostTokens.pageColorRose` | `#F2DEDE` | page background |
+| `BoostTokens.pageColorSand` | `#E9E1D2` | page background |
+| `BoostTokens.pageColorNight` | `#202321` | page background |
+| `BoostTokens.pageTextOnLight` | `#202321` (graphite); secondary text 64 % | text on Paper, Sage, Sky, Lilac, Rose, Sand |
+| `BoostTokens.pageTextOnNight` | `#FAF9F5` (porcelain); secondary text 68 % | text on Night |
+
+"Site colors" (the first swatch) removes the color and keeps the site's own. A swatch has a 0.5 pt inner edge (black
+18 % in light, white 28 % in dark) so Night stays visible on the dark panel.
+
 ## Hiding an element (`picker`)
 
 The panel steps aside. A 40 pt bar at the card's top center: cursor glyph, "Click what you want to hide", the count
@@ -35,9 +55,17 @@ host. A CSS / JavaScript segmented control, "Applied" status, a recessed editor 
 numbers in system monospace 12 pt, then one line: "Runs only on <host>. JavaScript runs apart from the page's own
 scripts." Footer: **Done**.
 
+## Smallest window (`small`)
+
+At 640 x 420 (150 pt sidebar) the panel keeps its 300 pt width, 8 pt from the window's leading edge, and caps its
+height to the window (8 pt from the bottom). The middle (colors, fonts, hidden list) scrolls with a 28 pt faded edge;
+the header and the footer with Done stay.
+
 ## Managing Boosts (`manage`)
 
-The Library window gets a Boosts section: one 56 pt row per site (32 pt site tile, host, a one-line summary, an on/off
+The Library window (title "Library") uses the shared rail documented in `design/library-history/README.md`, "Library
+window rail": Downloads, History, Spaces, Boosts, in that order. Captures is not in the rail while the capture
+destination question on #646 is open. The search field reads "Search Boosts". The Boosts section: one 56 pt row per site (32 pt site tile, host, a one-line summary, an on/off
 switch, a more menu). Long hosts truncate; rows that are off are dimmed. The footer reads "Boosts change how a site
 looks on this Mac. Each one runs only on its own site."
 
@@ -48,7 +76,8 @@ looks on this Mac. Each one runs only on its own site."
 | `editor` | the panel open, paper color and serif applied, two hidden elements listed |
 | `picker` | picking mode: bar at the top, the newsletter banner outlined with its label |
 | `code` | the Code pane with CSS, the page reflowed |
-| `manage` | Library, Boosts section, worst-case long host and an off row |
+| `small` | smallest window (640 x 420): the panel capped to the window, its middle scrolling |
+| `manage` | Library window, Boosts selected in the rail, worst-case long host and an off row |
 
 ## Motion
 

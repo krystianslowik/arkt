@@ -2,7 +2,7 @@
 
 The "Restore pages?" prompt after a crashed session (#580). Picked direction: **A, the top trailing panel with a
 list** (maintainer, 2026-11-05). Builds on `design/extensions` `surf-restore`. Prototype:
-[`prototype.html`](prototype.html), states by hash `#<items|long|nothing>[&dark][&shot]`. Screens:
+[`prototype.html`](prototype.html), states by hash `#<items|long|nothing|small>[&dark][&shot]`. Screens:
 `screens/restore-pages-<state>-<light|dark>.png` (2x). Synthetic data only.
 
 ## What Restore means (accepted)
@@ -53,6 +53,7 @@ The shared toast (`design/alerts-sheets-toasts`), shield glyph, no action, close
 |---|---|
 | `items` | three pages outside the sidebar: two Little Arkt windows and a Peek page |
 | `long` | twelve pages: three rows and "and 9 more"; Restore 12 |
+| `small` | smallest window, 640 x 420 pt, 150 pt sidebar: the panel keeps its 340 pt width; long titles truncate |
 | `nothing` | nothing outside the sidebar was open: the notice toast, no prompt |
 
 ## Answered questions

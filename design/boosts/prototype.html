@@ -634,6 +634,10 @@ body { display: flex; justify-content: center; align-items: center; }
 .brow.off .h, .brow.off .fav { opacity: 0.55; }
 .brow.sel { background: var(--fill); }
 
+/* Smallest window: the panel caps its height to the window; its middle scrolls with a faded edge, the footer stays */
+.bx-scroll { flex: 1; min-height: 0; overflow: hidden; -webkit-mask-image: linear-gradient(#000 calc(100% - 28px), transparent); mask-image: linear-gradient(#000 calc(100% - 28px), transparent); }
+:root[data-theme="dark"] .sw i { box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.28); }
+
 </style>
 </head>
 <body>
@@ -830,7 +834,10 @@ function browser(o = {}) {
 /* ---------- This surface ---------- */
 /* ---------- Boosts (#645) ---------- */
 document.head.insertAdjacentHTML('beforeend', `<style>
-:root { --tint: #F4ECDA; } :root[data-theme="dark"] { --tint: #2B2620; }
+:root { --boost-paper: #F4ECDA; --boost-text-light: #202321; --boost-text-night: #FAF9F5; }
+/* A Boost page color is the page's own color: the same in light and dark appearance. Text follows the color. */
+.site.onlight { --text: var(--boost-text-light); --text-2: rgba(32,35,33,0.64); --page-ink: rgba(32,35,33,0.10); --page-ink-2: rgba(32,35,33,0.18); --divider: rgba(32,35,33,0.10); }
+.site.onnight { --text: var(--boost-text-night); --text-2: rgba(250,249,245,0.68); --page-ink: rgba(250,249,245,0.10); --page-ink-2: rgba(250,249,245,0.20); --divider: rgba(250,249,245,0.10); }
 </style>`);
 const SW = [['none', ''], ['paper', '#F4ECDA'], ['sage', '#DCE7DA'], ['sky', '#DCE6F2'], ['lilac', '#E6DEF0'], ['rose', '#F2DEDE'], ['sand', '#E9E1D2'], ['night', '#202321']];
 const swatches = (on = 1, n = 8) => `<div class="sw" role="radiogroup" aria-label="Page color">${SW.slice(0, n).map(([nm, c], i) => `<i class="${nm === 'none' ? 'none' : ''}${i === on ? ' on' : ''}" style="${c ? 'background:' + c : ''}" role="radio" aria-checked="${i === on}" aria-label="${nm === 'none' ? 'Site colors' : nm}"></i>`).join('')}</div>`;
@@ -838,8 +845,8 @@ const fonts = (on = 2) => `<div class="segf" role="radiogroup" aria-label="Font"
 const tgl = (on = true, label = 'Boost on') => `<button class="tg" role="switch" aria-checked="${on}" aria-label="${label}"><i></i></button>`;
 
 function site(o = {}) {
-  const st = `${o.tint ? '--sbg:var(--tint);' : ''}${o.serif ? '--sfont:ui-serif,Georgia,serif;' : ''}${o.right ? 'right:' + o.right + 'px;' : ''}`;
-  return `<div class="site" style="${st}">
+  const st = `${o.tint ? '--sbg:var(--boost-paper);' : ''}${o.serif ? '--sfont:ui-serif,Georgia,serif;' : ''}${o.right ? 'right:' + o.right + 'px;' : ''}`;
+  return `<div class="site${o.tint ? ' onlight' : ''}" style="${st}">
     <div class="top"><span class="logo">Field Guide</span><span>Lichens</span><span>Mosses</span><span>Maps</span><span>Subscribe</span></div>
     ${o.hidePromo ? '' : `<div class="promo${o.pick ? ' picked' : ''}"><b>Get the weekly field notes</b><span style="color:var(--text-2)">Join 80,000 readers. No spam, ever.</span><span class="x">Sign up</span></div>`}
     <div class="art"><div>
@@ -863,6 +870,8 @@ const panelA = `<div class="pnl pre" style="left:12px;top:84px;width:300px" role
   </div>
   <div class="bx-foot"><button class="quiet destructive">Delete Boost</button><span class="sp"></span><button class="pill small primary">Done</button></div></div>`;
 const urlBoost = 'fieldguide.example';
+const panelSmall = panelA.replace('left:12px;top:84px;width:300px', 'left:8px;top:84px;bottom:8px;width:300px;display:flex;flex-direction:column').replace('<div class="bx-sec"><h5>Page color</h5>', '<div class="bx-scroll"><div class="bx-sec"><h5>Page color</h5>').replace('<div class="bx-foot">', '</div><div class="bx-foot">');
+const smallA = () => browser({ small: true, url: urlBoost, pageHtml: site({ tint: true, serif: true, hidePromo: true, hideAd: true }), over: panelSmall });
 const editorA = () => browser({ url: urlBoost, pageHtml: site({ tint: true, serif: true, hidePromo: true, hideAd: true }), over: panelA });
 const pickbar = (n) => `<div class="pickbar pre" role="toolbar" aria-label="Hide elements"><span class="g">${G.cursor}</span><span>Click what you want to hide</span><span class="n">${n} hidden</span><button class="quiet">Undo</button><button class="pill small primary">Done</button></div>`;
 const plabel = (l, t) => `<div class="plabel" style="${l}"><span>Newsletter banner</span><span class="tag">div.signup</span><button class="pill small">Hide</button></div>`;
@@ -890,7 +899,9 @@ const codePane = `<aside class="insp pre" aria-label="Boost code for fieldguide.
 const codeA = () => browser({ url: urlBoost, pageHtml: site({ tint: true, serif: true, hidePromo: true, hideAd: true, right: 300 }) + codePane });
 
 /* ----- Shared: managing Boosts in the Library window ----- */
-const RAIL = [[G.tray, 'Downloads', '12'], [G.hist, 'Archive', '340'], [G.brush, 'Boosts', '5'], [G.capture, 'Captures', '28']];
+G.spaces = sv('<rect x="2" y="4.2" width="9" height="9" rx="2"/><path d="M5 2.4h6.6a2 2 0 0 1 2 2V11"/>');
+/* The shared Library window rail: Downloads, History, Spaces, Boosts (design/library-history, "Library window rail") */
+const RAIL = [[G.tray, 'Downloads'], [G.hist, 'History'], [G.spaces, 'Spaces'], [G.brush, 'Boosts']];
 const BOOSTS = [
   ['F', '#E56B4F', 'fieldguide.example', 'Paper color, serif font, 2 hidden', true, true],
   ['N', '#2E5FD8', 'news.example', '14 hidden elements', true],
@@ -900,14 +911,14 @@ const BOOSTS = [
 ];
 const manage = () => browser({ dim: true }) + `<div style="position:absolute;inset:0;display:grid;place-items:center;z-index:7"><div class="lwin lib pre" role="dialog" aria-label="Library">
   <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
-  <div class="lchrome"><span class="ttl">Boosts</span><div class="fieldp">${G.search}<span class="ph">Search sites</span></div></div>
-  <div class="rail">${RAIL.map(([g, n, c]) => `<div class="rrow${n === 'Boosts' ? ' cur' : ''}">${g}${n}<span class="n">${c}</span></div>`).join('')}</div>
+  <div class="lchrome"><span class="ttl">Library</span><div class="fieldp">${G.search}<span class="ph">Search Boosts</span></div></div>
+  <div class="rail">${RAIL.map(([g, n]) => `<div class="rrow${n === 'Boosts' ? ' cur' : ''}" role="button"${n === 'Boosts' ? ' aria-current="page"' : ''}>${g}${n}</div>`).join('')}</div>
   <div class="lmain"><div class="lscroll">
     ${BOOSTS.map(([l, c, h, s, on, sel]) => `<div class="brow${on ? '' : ' off'}${sel ? ' sel' : ''}"><span class="fav" style="background:${c}">${l}</span><div style="min-width:0"><div class="h">${h}</div><div class="s">${s}</div></div>${tgl(on, 'Boost for ' + h)}<button class="ib" aria-label="More for ${h}">${G.dots}</button></div>`).join('')}
   </div><div class="lfoot">Boosts change how a site looks on this Mac. Each one runs only on its own site.<span class="sp"></span></div></div></div></div>`;
 
 const STATES = {
-  'editor': editorA, 'picker': pickerA, 'code': codeA, 'manage': manage,
+  'editor': editorA, 'picker': pickerA, 'code': codeA, 'small': smallA, 'manage': manage,
 };
 
 applyHash();

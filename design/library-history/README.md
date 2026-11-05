@@ -2,15 +2,16 @@
 
 The History section of the Library window (#631). Picked direction: **A, one list by day** (maintainer, 2026-11-05).
 The Library window is the one drawn in `design/downloads` (A). Prototype: [`prototype.html`](prototype.html), states by
-hash `#<default|filter|search|delete-day|empty>[&dark][&shot]`. Screens:
+hash `#<default|filter|search|delete-day|empty|worst|small>[&dark][&shot]`. Screens:
 `screens/library-history-<state>-<light|dark>.png` (2x). Synthetic data only.
 
 Everyday chrome: system font, shell tokens, one primary pill (Open on the selected row).
 
 ## Layout
 
-- **Window**: the Library window, 800 x 540 pt default; rail 164 pt (Downloads, History, Spaces); 52 pt header with the
-  title and a 240 pt search field ("Search history").
+- **Window**: the Library window, 800 x 540 pt default, smallest 640 x 420 pt; rail 164 pt (150 pt at the smallest
+  size, see below); 52 pt header with the title "Library" and a 240 pt search field ("Search history"; 180 pt at the
+  smallest size).
 - **Filter row** (32 pt): a "Show" pop-up: All history, This Mac, Imported (with its count).
 - **Day headers**: 12 pt semibold `textSecondary` ("Today", "Yesterday", then the weekday or date), followed by the full
   date in `textTertiary`. Padding 12 top, 4 bottom.
@@ -19,6 +20,13 @@ Everyday chrome: system font, shell tokens, one primary pill (Open on the select
   **Open** (small mustard pill, Return).
 - **Footer** (44 pt): "Clear browsing data..." (quiet link, opens the Clear browsing data sheet, `design/clear-browsing-data`)
   and the total visit count trailing.
+
+## Library window rail
+
+One rail for every Library section, in this order: **Downloads, History, Spaces, Boosts**. The window title is
+always "Library". Rail items are 30 pt, radius 8, 16 pt glyph and the section name; the current section takes the
+`rowCurrent` fill. Captures is not in the rail yet: where captures go is still open on #646, and the rail gains it
+only once that is decided. `design/library-spaces` and `design/boosts` use this rail.
 
 ## Imported history
 
@@ -64,6 +72,8 @@ tinted with a mustard fill at 35 % (`accent` 0.35, radius 3). It is a fill, neve
 | `search` | "lichen": results across days, one imported |
 | `delete-day` | pointer on Today's header and the Delete Day sheet |
 | `empty` | no history yet |
+| `worst` | titles with no break points, a punycode host, 9,999+ pages in a day, five days, 1,284,113 visits |
+| `small` | smallest Library window, 640 x 420 pt, 150 pt rail: titles truncate first; times and Open never move |
 
 ## Answered questions
 

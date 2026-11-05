@@ -564,6 +564,7 @@ body { display: flex; justify-content: center; align-items: center; }
 .urlpill { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; line-height: 34px; }
 
 /* ---------- This surface ---------- */
+/* ShellTokens.captureScrim */
 :root { --scrim: rgba(20,22,24,0.34); --selstroke: #FFFFFF; }
 :root[data-theme="dark"] { --scrim: rgba(0,0,0,0.50); }
 /* A page worth capturing */
@@ -607,6 +608,8 @@ body { display: flex; justify-content: center; align-items: center; }
 .law .labar .host { flex: 1; display: flex; align-items: center; gap: 6px; } .law .labar .host svg { color: var(--fg); width: 12px; height: 12px; }
 .law .pg { position: absolute; left: 6px; right: 6px; top: 40px; bottom: 6px; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--card-border); }
 .law .pg .cpage { padding: 24px 24px; } .law .pg .cpage h1 { font-size: 22px; } .law .pg .cpage .fig { height: 160px; }
+
+.win.small .cpage { padding: 28px 32px; } .win.small .cpage h1 { font-size: 24px; } .win.small .cpage .fig { height: 170px; }
 
 </style>
 </head>
@@ -822,13 +825,15 @@ const resultA = () => browser({ url: 'trails.example', pageHtml: cpage(), over: 
 const fpA = `<div class="fp pre" role="dialog" aria-label="Capturing the full page"><div class="strip" aria-hidden="true"><i class="h"></i><i></i><i class="f"></i><i></i><i></i><i style="width:80%"></i><i></i><i class="f"></i><i class="todo"></i><i class="todo"></i><i class="todo f"></i><i class="todo"></i><i class="todo"></i><i class="todo"></i></div>
   <div><div class="t">Capturing the full page</div><div class="c">Part 3 of 7. Scroll stays where it is; the page is copied as it loads.</div><div class="bar g" style="margin-bottom:14px"><i style="transform:scaleX(.43)"></i></div><button class="pill small">Stop</button></div></div>`;
 const fullA = () => browser({ url: 'trails.example', pageHtml: cpage() + '<div style="position:absolute;inset:0;background:var(--scrim);z-index:4"></div>' + fpA });
+const RS = { l: 40, t: 160, w: 300, h: 120 };
+const smallA = () => browser({ small: true, url: 'trails.example', pageHtml: cpage() + sel(RS, { handles: true }) + dockA(RS) });
 const RL = { l: 44, t: 140, w: 300, h: 136 };
 const littleA = () => `<div class="law" role="application" aria-label="Little Arkt window">
   <div class="labar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><span class="host">${G.lock}trails.example</span><button class="ib" aria-label="Copy link">${G.link}</button><button class="pill small">Open in Work</button></div>
   <div class="pg">${cpage()}${sel(RL, { handles: true })}${dockA(RL)}</div></div>`;
 
 const STATES = {
-  'select': selectA, 'result': resultA, 'fullpage': fullA, 'little': littleA,
+  'select': selectA, 'result': resultA, 'small': smallA, 'fullpage': fullA, 'little': littleA,
 };
 
 applyHash();

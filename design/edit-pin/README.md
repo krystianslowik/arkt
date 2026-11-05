@@ -2,7 +2,7 @@
 
 Edit Pinned URL for a pinned tab and Rename for a Favorite (#363). Picked direction: **B, one "Edit Pin" popover**
 (maintainer, 2026-11-05). Prototype: [`prototype.html`](prototype.html), states by hash
-`#<url|fav|invalid>[&dark][&shot]`. Screens: `screens/edit-pin-<state>-<light|dark>.png` (2x). Synthetic data only.
+`#<url|fav|invalid|small>[&dark][&shot]`. Screens: `screens/edit-pin-<state>-<light|dark>.png` (2x). Synthetic data only.
 
 Everyday chrome: system font, shell tokens, one primary pill (Save).
 
@@ -48,6 +48,7 @@ The popover stays open; the line clears on the next edit.
 | `url` | Edit Pinned URL on a pinned row; the longest URL scrolls in its field |
 | `fav` | Rename on a Favorite; Name focused |
 | `invalid` | not a web address; the reason under the field |
+| `small` | smallest window, 640 x 420 pt, 150 pt sidebar: the popover keeps its 320 pt width, anchors to the row and overlaps the page, never the sidebar |
 
 ## Answered questions
 
