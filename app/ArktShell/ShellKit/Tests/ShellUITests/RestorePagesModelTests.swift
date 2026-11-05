@@ -97,3 +97,40 @@ struct RestorePagesProviderTests {
     #expect(engine.crashedSession.dismissals == 1)
   }
 }
+
+@MainActor
+struct RestorePagesRejectionTests {
+  @Test func rejectedRestoreRetainsOfferAndCrash() {
+    let recovery = InMemorySessionRecovery()
+    recovery.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    recovery.simulateCrashedExit()
+    recovery.acceptsRestore = false
+    let model = RestorePagesModel(recovery: recovery)
+    model.restore()
+    #expect(recovery.dismissals == 0)
+    #expect(recovery.lastSessionCrashed)
+    guard case .offer = model.presentation else { Issue.record("Rejected request lost the offer"); return }
+    recovery.acceptsRestore = true
+    model.restore()
+    #expect(recovery.dismissals == 1)
+  }
+}
+
+@MainActor
+private final class LegacyRecovery: EngineSessionRecovery {
+  var lastSessionCrashed = true
+  var dismissals = 0
+  // A similarly named property alone must not advertise a restore capability.
+  var recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+  func dismissLastSession() { lastSessionCrashed = false; dismissals += 1 }
+}
+
+@MainActor
+struct LegacyRecoveryTests {
+  @Test func crashOnlyProviderDoesNotOfferPages() {
+    let recovery = LegacyRecovery()
+    let model = RestorePagesModel(recovery: recovery)
+    #expect(model.presentation == .notice)
+    #expect(recovery.dismissals == 1)
+  }
+}

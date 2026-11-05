@@ -179,7 +179,6 @@ final class AppSession {
 
   /// The recovery notice of this launch; shown in the launch window.
   private var launchNotice: RecoveryNotice?
-  private var didPresentSessionRecovery = false
 
   /// Opens the launch window (with the launch's recovery notice), then starts auto-archive, so its first pass sees
   /// the shown tab. The Chromium engine passes false when the windows it queued before ready (a startup URL, an
@@ -188,18 +187,10 @@ final class AppSession {
     let window = opensWindow ? windows.openWindow() : windows.primary
     if let window {
       presentOnboardingIfNeeded(on: window)
-      if !didPresentSessionRecovery, let recovery = engine.sessionRecovery {
-        didPresentSessionRecovery = true
-        window.presentRestorePages(RestorePagesModel(recovery: recovery))
-      }
     }
     askAboutCrashIfNeeded()
-    if let notice = launchNotice, let window {
-      launchNotice = nil
-      window.toasts.show(notice.toast) { [location] in
-        NSWorkspace.shared.activateFileViewerSelecting([location.directory])
-      }
-    }
+    if let window { presentLaunchNotice(on: window) }
+    windows.beginSessionRecovery(engine.sessionRecovery)
     startAutoArchive()
   }
 
@@ -212,9 +203,18 @@ final class AppSession {
     }
   }
 
+  private func presentLaunchNotice(on window: ShellWindowController) {
+    guard let notice = launchNotice else { return }
+    launchNotice = nil
+    window.toasts.show(notice.toast) { [location] in
+      NSWorkspace.shared.activateFileViewerSelecting([location.directory])
+    }
+  }
+
   /// The app's hooks on every browser window, before it is shown. Its stored favicons load off the main actor
   /// (each window has its own sidebar views); ids the engine reports meanwhile keep the newer one (#91).
   private func wire(_ window: ShellWindowController) {
+    presentLaunchNotice(on: window)
     window.onImportFromArc = { [weak self] in self?.importFromArc() }
     window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
     window.onReopenArchived = { [weak self, weak window] id in                                // Cmd-Shift-T, BH-074

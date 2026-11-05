@@ -123,6 +123,38 @@ public final class ShellWindowSet {
     return open.first
   }
 
+  private var recoveryStarted = false
+  private var pendingRecovery: RestorePagesModel?
+  private weak var recoveryWindow: ShellWindowController?
+
+  /// Starts the launch decision once, including when the engine has not supplied a window yet.
+  public func beginSessionRecovery(_ recovery: (any EngineSessionRecovery)?) {
+    guard !recoveryStarted else { return }
+    recoveryStarted = true
+    guard let recovery else { return }
+    let model = RestorePagesModel(recovery: recovery)
+    pendingRecovery = model
+    model.onAnswer = { [weak self] in
+      self?.pendingRecovery = nil
+      self?.recoveryWindow = nil
+    }
+    presentPendingRecovery()
+  }
+
+  private func presentPendingRecovery() {
+    guard recoveryWindow == nil, let model = pendingRecovery, let window = primary else { return }
+    switch model.presentation {
+    case .none:
+      pendingRecovery = nil
+    case .notice:
+      window.presentRestorePages(model)
+      pendingRecovery = nil
+    case .offer:
+      recoveryWindow = window
+      window.presentRestorePages(model)
+    }
+  }
+
   // MARK: Shell-created windows
 
   /// Builds, wires and shows a window. `opensFirstTab` shows the current Space's tab at once (launch); New Window
@@ -442,8 +474,14 @@ public final class ShellWindowSet {
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }
     windows.append(controller)
+    controller.onRecoveryWindowClosed = { [weak self, weak controller] in
+      guard let self, self.recoveryWindow === controller else { return }
+      self.recoveryWindow = nil
+      self.presentPendingRecovery()
+    }
     trackMain(controller)
     configure?(controller)
+    presentPendingRecovery()
     downloads?.attach(to: controller)
     // #331: the session's first window is the one a relaunch restores; it opens on the saved sidebar state. Later
     // windows (New Window, a Dock reopen) keep the defaults.

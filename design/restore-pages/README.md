@@ -66,9 +66,10 @@ Rejected directions: B (one toast with Reopen) and C (a card in the sidebar).
 
 ## Swift engine contract (#580)
 
-`EngineSessionRecovery.recoveryPages` supplies ordered `RecoveryPage` values containing a title, URL and kind
-(`littleArkt` or `peek`) only. Private and sidebar pages must not be persisted or returned. After a Restore answer,
-`restorePages(_:)` receives every offered page and must reopen each in its indicated kind; it must not restore a full
-Chromium session into the sidebar. `dismissLastSession()` acknowledges the crash once for either answer or an empty
-offer. Existing providers default to an empty offer and a no-op restore. The Chromium implementation and killed-process
-validation remain with #577.
+`EnginePageRecovery` refines the crash-only `EngineSessionRecovery` protocol and requires both ordered
+`recoveryPages` and `restorePages(_:)`. Pages contain a title, URL and kind (`littleArkt` or `peek`) only; private and
+sidebar pages must not be persisted or returned. A restore request supplies every eligible offered page. Returning
+`true` accepts responsibility for restoring exactly those pages in their indicated kinds; returning `false` must leave
+all of them unrestored. A rejected request keeps the offer and crash unacknowledged for retry or dismissal. The shell
+acknowledges once after acceptance, dismissal, or an empty offer. Crash-only legacy providers have no page capability.
+The Chromium implementation and killed-process validation remain with #577; this contract does not implement them.

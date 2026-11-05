@@ -122,6 +122,7 @@ final class RestorePagesView: NSView {
     guard !closing else { return }
     closing = true
     action()
+    guard case .none = model.presentation else { closing = false; return }
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.15
       animator().alphaValue = 0

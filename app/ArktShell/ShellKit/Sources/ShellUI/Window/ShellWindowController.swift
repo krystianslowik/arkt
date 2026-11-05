@@ -79,6 +79,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The window closed. A closed controller is not shown again (its command bar and pager released their display
   /// links); the app builds a new window instead (#241: Dock reopen).
   public private(set) var isClosed = false
+  public var onRecoveryWindowClosed: (@MainActor () -> Void)?
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
   /// Window > Downloads (Cmd-Shift-J) and Show All History (Cmd-Y) open the Library on a section (#132); set by
@@ -362,14 +363,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       toasts.show(Toast(text: "Arkt quit unexpectedly. Your Spaces and tabs are back.",
                         kind: .recovery, glyph: "exclamationmark.shield", isPolite: true))
     case .offer(let pages):
-      guard !rootView.card.subviews.contains(where: { $0 is RestorePagesView }) else { return }
+      guard !rootView.subviews.contains(where: { $0 is RestorePagesView }) else { return }
       rootView.layoutSubtreeIfNeeded()
       let view = RestorePagesView(model: model, pages: pages)
-      let card = rootView.card
-      view.frame.origin = NSPoint(x: card.bounds.width - view.frame.width - 22,
-                                  y: card.bounds.height - view.frame.height - 22)
-      view.autoresizingMask = [.minXMargin, .minYMargin]
-      card.addSubview(view, positioned: .above, relativeTo: nil)
+      let card = rootView.card.frame
+      view.frame.origin = NSPoint(x: card.maxX - view.frame.width - 22, y: card.minY + 22)
+      rootView.addSubview(view, positioned: .above, relativeTo: rootView.split)
       view.appear()
     }
   }
@@ -1011,6 +1010,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
     isClosed = true
+    onRecoveryWindowClosed?()
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
     javaScriptDialogs.closeAll()

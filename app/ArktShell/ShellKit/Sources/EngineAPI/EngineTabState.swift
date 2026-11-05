@@ -61,17 +61,17 @@ public struct RecoveryPage: Equatable, Sendable {
 public protocol EngineSessionRecovery: AnyObject {
   /// The previous run ended without a clean quit and nobody has answered yet.
   var lastSessionCrashed: Bool { get }
-  /// Eligible, non-private pages outside the sidebar, in presentation order.
-  var recoveryPages: [RecoveryPage] { get }
-  /// Reopens all requested pages in their original kinds, without restoring a Chromium session into the sidebar.
-  func restorePages(_ pages: [RecoveryPage])
   /// Acknowledges the crash without restoring anything.
   func dismissLastSession()
 }
 
-extension EngineSessionRecovery {
-  public var recoveryPages: [RecoveryPage] { [] }
-  public func restorePages(_ pages: [RecoveryPage]) {}
+/// An engine that can both offer and restore eligible pages. Legacy crash-only providers do not conform.
+@MainActor
+public protocol EnginePageRecovery: EngineSessionRecovery {
+  var recoveryPages: [RecoveryPage] { get }
+  /// Accepts all supplied eligible pages for restoration, or rejects without restoring any. A rejection leaves
+  /// the crash unacknowledged so the user can retry or dismiss. Never restore a full session into the sidebar.
+  func restorePages(_ pages: [RecoveryPage]) -> Bool
 }
 
 extension EngineClient {

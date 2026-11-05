@@ -4348,3 +4348,15 @@ and GUI tests (job 127543462890); the Swift tests gate (job 127547434337) conseq
 those jobs. Local builds and tests were not run: the installed toolchain cannot compile the baseline. Syntax parsing
 and diff checks are recorded in the pull request. GUI, accessibility, motion, app and real-engine validation remain
 pending.
+
+### Restore pages review fixes (#580)
+
+The window set retains an unanswered decision across regular-window closure and presents it when another window is
+available. The panel remains above the content in Split View. A page-capable provider must accept or reject the exact
+eligible request; rejection retains the offer and crash. Crash-only providers expose no page capability. A persistent
+database-recovery notice remains underneath the six-second crash notice and reappears after dismissal or expiry.
+
+Regression coverage exercises the production window-set coordinator and window lifecycle, capability and rejection,
+Split View, and notice ordering. These additions have not run locally because the installed toolchain cannot compile the
+baseline; syntax parsing alone does not validate behavior. Direct `AppSession.finishLaunch`, GUI, keyboard, accessibility,
+motion and real-engine killed-process validation remain pending. Chromium delivery remains with #577.

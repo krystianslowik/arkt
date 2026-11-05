@@ -28,12 +28,13 @@ public final class RestorePagesModel {
 
   public private(set) var presentation: Presentation = .none
   private let recovery: any EngineSessionRecovery
-  private let reopen: @MainActor ([Page]) -> Void
+  private var reopen: @MainActor ([Page]) -> Bool
+  public var onAnswer: (@MainActor () -> Void)?
 
-  public init(recovery: any EngineSessionRecovery, pages: [Page],
+  init(recovery: any EngineSessionRecovery, pages: [Page],
               restore: @escaping @MainActor ([Page]) -> Void = { _ in }) {
     self.recovery = recovery
-    self.reopen = restore
+    self.reopen = { pages in restore(pages); return true }
     guard recovery.lastSessionCrashed else { return }
     let eligible = pages.filter { $0.kind == .littleArkt || $0.kind == .peek }
     if eligible.isEmpty {
@@ -46,11 +47,16 @@ public final class RestorePagesModel {
 
   /// Production path: the provider owns the reopen operation and its typed payload.
   public convenience init(recovery: any EngineSessionRecovery) {
-    let pages = recovery.recoveryPages.map { page in
+    guard let provider = recovery as? any EnginePageRecovery else {
+      self.init(recovery: recovery, pages: [])
+      return
+    }
+    let pages = provider.recoveryPages.map { page in
       Page(title: page.title, url: page.url, kind: page.kind == .peek ? .peek : .littleArkt)
     }
-    self.init(recovery: recovery, pages: pages) { pages in
-      recovery.restorePages(pages.compactMap { page in
+    self.init(recovery: recovery, pages: pages)
+    self.reopen = { pages in
+      provider.restorePages(pages.compactMap { page in
         let kind: RecoveryPage.Kind
         switch page.kind {
         case .littleArkt: kind = .littleArkt
@@ -66,12 +72,14 @@ public final class RestorePagesModel {
     guard case .offer = presentation else { return }
     presentation = .none
     recovery.dismissLastSession()
+    onAnswer?()
   }
 
   public func restore() {
     guard case let .offer(pages) = presentation else { return }
+    guard reopen(pages) else { return }
     presentation = .none
     recovery.dismissLastSession()
-    reopen(pages)
+    onAnswer?()
   }
 }
