@@ -21,13 +21,13 @@ final class CommandBarPanel: NSPanel {
 
   /// The panel stays ordered in once pre-warmed; presenting is alpha plus key status (C7: ordering a
   /// window in cost one to three extra frames in the window server). While hidden it is inert: clicks pass
-  /// through, it cannot become key, and accessibility does not report it.
+  /// through, it cannot become key, and accessibility does not report it (no "open" / "closed" value: VoiceOver would
+  /// read it, #608; a hidden bar is absent from the tree instead).
   var isPresented = false {
     didSet {
       guard isPresented != oldValue else { return }
       if isPresented { alphaValue = 1 }               // hiding fades out first; the controller then sets alpha 0
       ignoresMouseEvents = !isPresented
-      contentView?.setAccessibilityValue(isPresented ? AXID.CommandBar.open : AXID.CommandBar.closed)
     }
   }
 
