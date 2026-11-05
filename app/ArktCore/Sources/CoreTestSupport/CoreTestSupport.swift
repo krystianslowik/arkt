@@ -212,6 +212,10 @@ public actor FakeArchiveState: ArchiveStateStoring {
   private var failsResets = false
   private var failsLoads = false
   private var failsUpdates = false
+  private var holdsSettingsLoads = false
+  private var heldSettingsLoads: [CheckedContinuation<Void, Never>] = []
+  private var holdsUpdates = false
+  private var heldUpdates: [CheckedContinuation<Void, Never>] = []
   private var holdsLoads = false
   private var heldLoads: [CheckedContinuation<Void, Never>] = []
 
@@ -246,9 +250,32 @@ public actor FakeArchiveState: ArchiveStateStoring {
     resets.append(date)
   }
 
+  /// The stored settings as they were when the call arrived, so a held load answers with what it read then.
   public func loadArchiveSettings() async throws -> ArchiveSettings {
+    let read = settings
+    if holdsSettingsLoads { await withCheckedContinuation { heldSettingsLoads.append($0) } }
     if failsLoads { throw FakeStoreError() }
-    return settings
+    return read
+  }
+
+  /// While true, `loadArchiveSettings` parks after reading until `releaseSettingsLoads()`.
+  public func holdSettingsLoads() { holdsSettingsLoads = true }
+  public var heldSettingsLoadCount: Int { heldSettingsLoads.count }
+
+  public func releaseSettingsLoads() {
+    holdsSettingsLoads = false
+    for held in heldSettingsLoads { held.resume() }
+    heldSettingsLoads = []
+  }
+
+  /// While true, `updateArchiveSettings` parks before writing until `releaseUpdates()`.
+  public func holdUpdates() { holdsUpdates = true }
+  public var heldUpdateCount: Int { heldUpdates.count }
+
+  public func releaseUpdates() {
+    holdsUpdates = false
+    for held in heldUpdates { held.resume() }
+    heldUpdates = []
   }
 
   /// The settings as stored, whatever `failsLoads` says.
@@ -259,6 +286,7 @@ public actor FakeArchiveState: ArchiveStateStoring {
   public func updateArchiveSettings(
     at date: Date, _ change: @escaping @Sendable (inout ArchiveSettings) -> Void
   ) async throws -> ArchiveSettings {
+    if holdsUpdates { await withCheckedContinuation { heldUpdates.append($0) } }
     if failsUpdates { throw FakeStoreError() }
     change(&settings)
     settingsUpdateCount += 1

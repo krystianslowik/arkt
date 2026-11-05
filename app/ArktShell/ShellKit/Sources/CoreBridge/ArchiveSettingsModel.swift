@@ -22,8 +22,10 @@ public final class ArchiveSettingsModel {
   /// Changes made since the model was created; a load or store answer older than the latest change is not applied.
   private var generation = 0
   private var saving: Task<Void, Never>?
-  /// Writes not finished yet; a load answer is not applied while one runs (the write's answer is newer).
+  /// Writes not finished yet. A load that starts while one runs is not applied: it may read the row before the write.
   private var pendingSaves = 0
+  /// Counts every write that started or finished. A load is applied only when none did while it ran.
+  private var saveEvents = 0
   private static let log = Logger(subsystem: ShellSignposts.subsystem, category: "archive-settings")
 
   public init(state: any ArchiveStateStoring, now: @escaping @MainActor () -> Date = { Date() }) {
@@ -37,13 +39,14 @@ public final class ArchiveSettingsModel {
   /// "Archive Little Arkt windows after" (BH-137): 6 hours unless changed.
   public var littleArktThreshold: AutoArchiveThreshold { settings.littleArcThreshold }
 
-  /// Reads the stored settings. A failed read keeps the defaults; a change made before the answer arrives is kept
-  /// (its own write brings the rest of the stored settings).
+  /// Reads the stored settings. A failed read keeps the defaults. The answer is dropped when a write ran during the
+  /// read or a change was made meanwhile: the write's own answer brings the stored settings with the change.
   public func load() async {
-    let started = generation
+    guard pendingSaves == 0 else { return }       // the running write's answer brings the stored settings
+    let (started, events) = (generation, saveEvents)
     do {
       let loaded = try await state.loadArchiveSettings()
-      guard generation == started, pendingSaves == 0 else { return }
+      guard generation == started, saveEvents == events, pendingSaves == 0 else { return }
       adopt(loaded)
     } catch {
       Self.log.error("archive settings not loaded \(String(describing: type(of: error)), privacy: .public)")
@@ -84,17 +87,23 @@ public final class ArchiveSettingsModel {
     adopt(updated)
     let (state, date, previous) = (state, now(), saving)
     pendingSaves += 1
+    saveEvents += 1
     saving = Task { [weak self] in
       await previous?.value                       // writes land in the order they were made
-      let stored: ArchiveSettings?
+      var stored: ArchiveSettings?
       do {
         stored = try await state.updateArchiveSettings(at: date, edit)
       } catch {
-        stored = nil
         Self.log.error("archive settings not saved \(String(describing: type(of: error)), privacy: .public)")
+        // Keep the change in effect for this run, over the stored value of every other field.
+        if var reloaded = try? await state.loadArchiveSettings() {
+          edit(&reloaded)
+          stored = reloaded
+        }
       }
       guard let self else { return }
       self.pendingSaves -= 1
+      self.saveEvents += 1
       // The stored value carries fields this model had not loaded yet; a newer change keeps its own.
       if let stored, self.generation == current { self.adopt(stored) }
     }
