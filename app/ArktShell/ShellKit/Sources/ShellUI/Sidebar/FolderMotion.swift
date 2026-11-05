@@ -26,8 +26,56 @@ enum FolderMotionLayout {
     var progress: Double
   }
 
+  /// One folder's changing rows, captured once when its transition starts or the outline's rows change (#603):
+  /// their sorted row indexes and the summed height of the ones before each. A frame then styles any row from this
+  /// alone, in time logarithmic in the folder's size, without reading the other rows of the outline.
+  struct Block: Equatable, Sendable {
+    /// Sorted row indexes of the rows the folder shows and hides.
+    let rows: [Int]
+    /// `goneAbove[i]` is the summed height of `rows[0..<i]`; one longer than `rows`.
+    let goneAbove: [CGFloat]
+
+    init(rows unsorted: [(row: Int, height: CGFloat)]) {
+      let sorted = unsorted.sorted { $0.row < $1.row }
+      rows = sorted.map(\.row)
+      var sums: [CGFloat] = [0]
+      sums.reserveCapacity(sorted.count + 1)
+      var total: CGFloat = 0
+      for entry in sorted {
+        total += entry.height
+        sums.append(total)
+      }
+      goneAbove = sums
+    }
+
+    /// How many of the changing rows sit above `row`.
+    func countAbove(_ row: Int) -> Int {
+      var low = 0, high = rows.count
+      while low < high {
+        let mid = (low + high) / 2
+        if rows[mid] < row { low = mid + 1 } else { high = mid }
+      }
+      return low
+    }
+  }
+
+  /// `row`'s style for the folders in motion: the same result as `styles(rowHeights:transitions:)[row]`, from the
+  /// captured blocks alone.
+  static func style(atRow row: Int, moving: [(block: Block, progress: Double)]) -> RowStyle {
+    var style = RowStyle.rest
+    for (block, progress) in moving {
+      let missing = CGFloat(1 - progress)
+      let above = block.countAbove(row)
+      style.offsetY -= missing * block.goneAbove[above]
+      if above < block.rows.count, block.rows[above] == row {
+        style.alpha *= CGFloat(min(max(progress, 0), 1))
+      }
+    }
+    return style
+  }
+
   /// A row moves up by the missing share of the changing rows above it, for every folder in motion; a changing row
-  /// fades with its folder's progress.
+  /// fades with its folder's progress. The whole outline at once: the reference `style(atRow:moving:)` matches.
   static func styles(rowHeights: [CGFloat], transitions: [Transition]) -> [RowStyle] {
     var styles = Array(repeating: RowStyle.rest, count: rowHeights.count)
     for transition in transitions {
@@ -68,7 +116,9 @@ final class FolderMotion {
 
   private var field = SpringField<NodeID>()
   /// The rows each folder in motion shows and hides.
-  private(set) var changing: [NodeID: Set<NodeID>] = [:]
+  private(set) var changing: [NodeID: Set<NodeID>] = [:] { didSet { changingGeneration &+= 1 } }
+  /// Moves on every change of `changing`, so the outline recaptures its blocks only then, never per frame (#603).
+  private(set) var changingGeneration = 0
   private var link: CADisplayLink?
 
   var isRunning: Bool { !field.keys.isEmpty }

@@ -94,8 +94,13 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// Number of `reloadData()` calls so far; exists for tests (checks that split edits never reload the whole outline).
   private(set) var reloadDataCount = 0
 
+  /// Moves on every change of which item sits at which row (reload, expand, collapse, insert, remove, move), so the
+  /// folder motion captures its rows again only then, never per frame (#603).
+  private(set) var rowsGeneration = 0
+
   public override func reloadData() {
     reloadDataCount += 1
+    rowsGeneration &+= 1
     super.reloadData()
     axProxyRows.invalidate()
   }
@@ -108,24 +113,28 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 
   public override func expandItem(_ item: Any?) {
     super.expandItem(item)
+    rowsGeneration &+= 1
     axProxyRows.invalidate()
     axProxyRows.post(.rowExpanded, forRow: row(forItem: item))
   }
 
   public override func collapseItem(_ item: Any?) {
     super.collapseItem(item)
+    rowsGeneration &+= 1
     axProxyRows.invalidate()
     axProxyRows.post(.rowCollapsed, forRow: row(forItem: item))
   }
 
   public override func expandItem(_ item: Any?, expandChildren: Bool) {
     super.expandItem(item, expandChildren: expandChildren)
+    rowsGeneration &+= 1
     axProxyRows.invalidate()
     axProxyRows.post(.rowExpanded, forRow: row(forItem: item))
   }
 
   public override func collapseItem(_ item: Any?, collapseChildren: Bool) {
     super.collapseItem(item, collapseChildren: collapseChildren)
+    rowsGeneration &+= 1
     axProxyRows.invalidate()
     axProxyRows.post(.rowCollapsed, forRow: row(forItem: item))
   }
@@ -133,6 +142,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   public override func insertItems(at indexes: IndexSet, inParent parent: Any?,
                                    withAnimation animationOptions: NSTableView.AnimationOptions = []) {
     super.insertItems(at: indexes, inParent: parent, withAnimation: animationOptions)
+    rowsGeneration &+= 1
     axProxyRows.invalidate()
     axProxyRows.post(.rowCountChanged)
   }
@@ -140,6 +150,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   public override func removeItems(at indexes: IndexSet, inParent parent: Any?,
                                    withAnimation animationOptions: NSTableView.AnimationOptions = []) {
     super.removeItems(at: indexes, inParent: parent, withAnimation: animationOptions)
+    rowsGeneration &+= 1
     axProxyRows.invalidate()
     axProxyRows.post(.rowCountChanged)
   }
@@ -147,6 +158,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   public override func moveItem(at fromIndex: Int, inParent oldParent: Any?, to toIndex: Int,
                                 inParent newParent: Any?) {
     super.moveItem(at: fromIndex, inParent: oldParent, to: toIndex, inParent: newParent)
+    rowsGeneration &+= 1
     axProxyRows.invalidate()
   }
 
@@ -411,9 +423,40 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private var display = FolderDisplay()
   /// The open and close springs of this outline's folders (#109).
   let folderMotion = FolderMotion()
-  /// The style each row draws in the current folder motion frame; rows realized mid-motion take theirs from here.
-  /// Keyed by outline item, so the Pinned / Today divider row moves with the rows around it.
-  private var rowStyles: [ObjectIdentifier: FolderMotionLayout.RowStyle] = [:]
+  /// The rows the folder motion and arrival frames style from, captured once per change of the outline's rows, of
+  /// the folders' changing rows or of the arrival's rows (#603). A frame reads no other row of the outline.
+  private struct MotionRows {
+    var rowsGeneration: Int
+    var changingGeneration: Int
+    var arrivalNode: NodeID?
+    var fadingOut: NodeID?
+    /// Each folder in motion that has a row, with its changing rows.
+    var blocks: [NodeID: FolderMotionLayout.Block] = [:]
+    var arrivalRow = -1
+    var arrivalHeight: CGFloat = 0
+    var fadingRow = -1
+  }
+  private var motionRows: MotionRows?
+  /// Moves on every capture of `motionRows`, so a frame after one restyles the rows even at the same progress.
+  private var motionRowsBuild = 0
+  /// The current frame: the progress of each folder in motion that has a row, and the arrival's springs. Any row's
+  /// style, realized mid-motion or not, comes from this and `motionRows`; the divider row moves like any other.
+  private struct MotionFrame: Equatable {
+    var progress: [NodeID: Double] = [:]
+    var arrival: (room: Double, appear: Double)?
+    var rowsBuild = 0
+
+    var isAtRest: Bool { progress.isEmpty && arrival == nil }
+
+    static func == (lhs: MotionFrame, rhs: MotionFrame) -> Bool {
+      lhs.progress == rhs.progress && lhs.rowsBuild == rhs.rowsBuild
+        && lhs.arrival?.room == rhs.arrival?.room && lhs.arrival?.appear == rhs.arrival?.appear
+    }
+  }
+  private var motionFrame = MotionFrame()
+  /// Captures of the moving rows so far, and the row views the last frame styled; exist for tests (#603).
+  private(set) var motionCaptureCount = 0
+  private(set) var lastMotionFrameRowsStyled = 0
   /// Rows a Reduce Motion open shows that had no row view yet; they fade in when it is added.
   private var pendingFades: Set<NodeID> = []
   /// Folder rows drawn above the rows sliding under them.
@@ -794,8 +837,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       row.state = .normal
     }
     let id = item?.nodeID
-    applyStyle(item.flatMap { rowStyles[ObjectIdentifier($0)] } ?? .rest, raised: id.map(raisedRows.contains) ?? false,
-               to: row)
+    let style = motionFrame.isAtRest ? .rest : item.map { motionStyle(atRow: outlineView.row(forItem: $0)) } ?? .rest
+    applyStyle(style, raised: id.map(raisedRows.contains) ?? false, to: row)
   }
 
   private func rowIdentifier(for id: NodeID) -> String {
@@ -966,7 +1009,6 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   /// Drops the cached item and child lists of `id` and of its cached descendants that left the source.
   private func forget(_ id: NodeID) {
-    if let item = items[id] { rowStyles[ObjectIdentifier(item)] = nil }
     items[id] = nil
     display.collapsed.remove(id)
     display.closing.remove(id)
@@ -1008,16 +1050,12 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   /// The style `node`'s row draws in the current folder motion frame.
   func rowStyle(for node: NodeID) -> FolderMotionLayout.RowStyle {
-    items[node].flatMap { rowStyles[ObjectIdentifier($0)] } ?? .rest
+    motionFrame.isAtRest ? .rest : motionStyle(atRow: row(for: node))
   }
 
   /// The style of the row at `row` (the divider too).
   func rowStyle(atRow row: Int) -> FolderMotionLayout.RowStyle {
-    styleKey(atRow: row).flatMap { rowStyles[$0] } ?? .rest
-  }
-
-  private func styleKey(atRow row: Int) -> ObjectIdentifier? {
-    (outlineView.item(atRow: row) as? OutlineItem).map(ObjectIdentifier.init)
+    motionStyle(atRow: row)
   }
 
   /// Whether `node` sits under any of `folders`.
@@ -1242,42 +1280,75 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   }
 
   /// One frame of the folder springs: each realized row gets its offset and opacity as layer properties (never a
-  /// frame change, which would rebuild tracking areas and layout every frame).
+  /// frame change, which would rebuild tracking areas and layout every frame). The work is bounded by the row views
+  /// the outline has (#603): the moving rows are captured once per change, not read again each frame.
   private func presentFolderMotion(_ progress: [NodeID: Double]) {
-    var transitions: [FolderMotionLayout.Transition] = []
-    var raised: Set<NodeID> = []
-    for (folder, value) in progress {
-      guard let changing = folderMotion.changing[folder], row(for: folder) >= 0 else { continue }
-      let rows = Set(changing.map { row(for: $0) }.filter { $0 >= 0 })
-      transitions.append(FolderMotionLayout.Transition(changingRows: rows, progress: value))
-      raised.insert(folder)
-    }
-    var styles: [ObjectIdentifier: FolderMotionLayout.RowStyle] = [:]
-    let arrivalRow = arrival.map { row(for: $0.node) } ?? -1
-    let fadingRow = arrival?.fadingOut.map { row(for: $0) } ?? -1
-    if !transitions.isEmpty || arrivalRow >= 0 {
-      // Every row's height only when a folder is in motion; an arrival needs its own row's alone (#352).
-      var frame = transitions.isEmpty
-        ? Array(repeating: FolderMotionLayout.RowStyle.rest, count: outlineView.numberOfRows)
-        : FolderMotionLayout.styles(rowHeights: (0..<outlineView.numberOfRows).map { outlineView.rect(ofRow: $0).height },
-                                    transitions: transitions)
-      if let arrival, arrivalRow >= 0 {
-        SidebarArrivalLayout.apply(to: &frame, arrivalHeight: outlineView.rect(ofRow: arrivalRow).height,
-                                   arrivalRow: arrivalRow, oldSelectionRow: fadingRow,
-                                   room: arrival.room, appear: arrival.appear)
-      }
-      for (row, style) in frame.enumerated() where style != .rest {
-        if let key = styleKey(atRow: row) { styles[key] = style }
-      }
-    }
-    guard styles != rowStyles || raised != raisedRows else { return }
-    rowStyles = styles
+    let rows = currentMotionRows()
+    var frame = MotionFrame(rowsBuild: motionRowsBuild)
+    for (folder, value) in progress where rows.blocks[folder] != nil { frame.progress[folder] = value }
+    if let arrival, rows.arrivalRow >= 0 { frame.arrival = (arrival.room, arrival.appear) }
+    let raised = Set(frame.progress.keys)
+    guard frame != motionFrame || raised != raisedRows else { return }
+    let wasAtRest = motionFrame.isAtRest
+    motionFrame = frame
     raisedRows = raised
+    if frame.isAtRest && wasAtRest { return }
+    var styled = 0
     outlineView.enumerateAvailableRowViews { rowView, row in
+      styled += 1
       let id = self.nodeID(atRow: row)
-      self.applyStyle(self.styleKey(atRow: row).flatMap { styles[$0] } ?? .rest,
-                      raised: id.map(raised.contains) ?? false, to: rowView)
+      self.applyStyle(self.motionStyle(atRow: row), raised: id.map(raised.contains) ?? false, to: rowView)
     }
+    lastMotionFrameRowsStyled = styled
+  }
+
+  /// The moving rows for the outline as it is now: the last capture, or a new one when the outline's rows, a
+  /// folder's changing rows or the arrival changed since.
+  private func currentMotionRows() -> MotionRows {
+    let rowsGeneration = outlineView.rowsGeneration
+    let changingGeneration = folderMotion.changingGeneration
+    if let motionRows, motionRows.rowsGeneration == rowsGeneration,
+       motionRows.changingGeneration == changingGeneration,
+       motionRows.arrivalNode == arrival?.node, motionRows.fadingOut == arrival?.fadingOut {
+      return motionRows
+    }
+    var captured = MotionRows(rowsGeneration: rowsGeneration, changingGeneration: changingGeneration,
+                              arrivalNode: arrival?.node, fadingOut: arrival?.fadingOut)
+    for (folder, changing) in folderMotion.changing where row(for: folder) >= 0 {
+      var entries: [(row: Int, height: CGFloat)] = []
+      entries.reserveCapacity(changing.count)
+      for node in changing {
+        let row = row(for: node)
+        if row >= 0 { entries.append((row, outlineView.rect(ofRow: row).height)) }
+      }
+      captured.blocks[folder] = FolderMotionLayout.Block(rows: entries)
+    }
+    if let arrival {
+      captured.arrivalRow = row(for: arrival.node)
+      if captured.arrivalRow >= 0 { captured.arrivalHeight = outlineView.rect(ofRow: captured.arrivalRow).height }
+      captured.fadingRow = arrival.fadingOut.map { row(for: $0) } ?? -1
+    }
+    if !folderMotion.changing.isEmpty || arrival != nil { motionCaptureCount += 1 }
+    motionRowsBuild &+= 1
+    motionRows = captured
+    return captured
+  }
+
+  /// `row`'s style in the current frame, from the captured rows alone.
+  private func motionStyle(atRow row: Int) -> FolderMotionLayout.RowStyle {
+    guard row >= 0, !motionFrame.isAtRest else { return .rest }
+    let rows = currentMotionRows()
+    var moving: [(block: FolderMotionLayout.Block, progress: Double)] = []
+    for (folder, value) in motionFrame.progress {
+      if let block = rows.blocks[folder] { moving.append((block, value)) }
+    }
+    var style = FolderMotionLayout.style(atRow: row, moving: moving)
+    if let springs = motionFrame.arrival, rows.arrivalRow >= 0 {
+      SidebarArrivalLayout.apply(to: &style, atRow: row, arrivalHeight: rows.arrivalHeight,
+                                 arrivalRow: rows.arrivalRow, oldSelectionRow: rows.fadingRow,
+                                 room: springs.room, appear: springs.appear)
+    }
+    return style
   }
 
   private func applyStyle(_ style: FolderMotionLayout.RowStyle, raised: Bool, to rowView: NSTableRowView) {
@@ -1324,8 +1395,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
 
   public func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int) {
     let id = nodeID(atRow: row)
-    applyStyle(styleKey(atRow: row).flatMap { rowStyles[$0] } ?? .rest, raised: id.map(raisedRows.contains) ?? false,
-               to: rowView)
+    applyStyle(motionStyle(atRow: row), raised: id.map(raisedRows.contains) ?? false, to: rowView)
     if let id, pendingFades.remove(id) != nil { Self.addFade(to: rowView) }
   }
 

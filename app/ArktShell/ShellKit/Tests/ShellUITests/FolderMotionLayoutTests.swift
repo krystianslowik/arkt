@@ -65,4 +65,65 @@ struct FolderMotionLayoutTests {
       transitions: [.init(changingRows: [1], progress: 0)])
     #expect(styles[2].offsetY == -12)
   }
+
+  // MARK: One row at a time (#603)
+
+  /// A small deterministic generator, so the cases are the same on every run.
+  private struct SplitMix: RandomNumberGenerator {
+    var state: UInt64
+    mutating func next() -> UInt64 {
+      state &+= 0x9E37_79B9_7F4A_7C15
+      var z = state
+      z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+      z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+      return z ^ (z >> 31)
+    }
+  }
+
+  /// Styling one row from the captured blocks gives exactly the whole-outline result, for nested, overlapping and
+  /// overshooting folders, rows of two heights, and an arrival on top.
+  @Test func oneRowFromTheBlocksMatchesTheWholeOutline() {
+    var random = SplitMix(state: 603)
+    for _ in 0..<200 {
+      let count = Int.random(in: 1...60, using: &random)
+      let heights = (0..<count).map { _ in Bool.random(using: &random) ? pitch : 12 }
+      let transitions = (0..<Int.random(in: 0...3, using: &random)).map { _ in
+        FolderMotionLayout.Transition(
+          changingRows: Set((0..<count).filter { _ in Int.random(in: 0..<4, using: &random) == 0 }),
+          progress: Double.random(in: -0.05...1.05, using: &random))
+      }
+      var reference = FolderMotionLayout.styles(rowHeights: heights, transitions: transitions)
+      let arrivalRow = Bool.random(using: &random) ? Int.random(in: 0..<count, using: &random) : -1
+      let oldSelection = Int.random(in: -1..<count, using: &random)
+      let room = Double.random(in: -0.05...1.05, using: &random)
+      let appear = Double.random(in: -0.05...1.05, using: &random)
+      if arrivalRow >= 0 {
+        SidebarArrivalLayout.apply(to: &reference, arrivalHeight: heights[arrivalRow], arrivalRow: arrivalRow,
+                                   oldSelectionRow: oldSelection, room: room, appear: appear)
+      }
+      let moving = transitions.map { transition in
+        (block: FolderMotionLayout.Block(rows: transition.changingRows.map { ($0, heights[$0]) }),
+         progress: transition.progress)
+      }
+      for row in 0..<count {
+        var style = FolderMotionLayout.style(atRow: row, moving: moving)
+        if arrivalRow >= 0 {
+          SidebarArrivalLayout.apply(to: &style, atRow: row, arrivalHeight: heights[arrivalRow], arrivalRow: arrivalRow,
+                                     oldSelectionRow: oldSelection, room: room, appear: appear)
+        }
+        #expect(style == reference[row], "row \(row) of \(count)")
+      }
+    }
+  }
+
+  /// A block is the changing rows in order and the height gone above each, whatever order they were captured in.
+  @Test func aBlockSortsItsRowsAndSumsTheHeightsAbove() {
+    let block = FolderMotionLayout.Block(rows: [(5, pitch), (2, 12), (9, pitch)])
+    #expect(block.rows == [2, 5, 9])
+    #expect(block.goneAbove == [0, 12, 12 + pitch, 12 + 2 * pitch])
+    #expect(block.countAbove(0) == 0)
+    #expect(block.countAbove(5) == 1)
+    #expect(block.countAbove(6) == 2)
+    #expect(block.countAbove(100) == 3)
+  }
 }
