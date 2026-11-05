@@ -295,6 +295,13 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
 
   // MARK: - Header hover
 
+  /// A page leaving the screen (a Space switch) presents no more frames: a Clear's exit ends at once, so its rows go
+  /// to the Archive now rather than when the page comes back (#413).
+  public override func viewDidHide() {
+    super.viewDidHide()
+    outlineController.todayClear.settleNow()
+  }
+
   public override func updateTrackingAreas() {
     super.updateTrackingAreas()
     if let headerHoverArea { removeTrackingArea(headerHoverArea) }

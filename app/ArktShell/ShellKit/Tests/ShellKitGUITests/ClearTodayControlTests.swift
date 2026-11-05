@@ -234,6 +234,40 @@ final class ClearTodayControlTests: XCTestCase {
     for node in harness.today { XCTAssertEqual(try harness.style(node), .rest) }
   }
 
+  func testUnderReduceMotionUndoFadesTheRowsInWithoutMoving() throws {
+    let harness = try Harness()
+    defer { harness.controller.close() }
+    try harness.show(reduceMotion: true)
+    try harness.divider().clearButton.performClick(nil)
+    try harness.advance(by: 1)
+    XCTAssertEqual(harness.todayNow, [harness.today[3]])
+
+    harness.controller.toasts.performActionForTesting()
+    try harness.advance(by: FadeDuration.standard / 2)
+    let fading = try harness.style(harness.today[0])
+    XCTAssertGreaterThan(fading.alpha, 0)
+    XCTAssertLessThan(fading.alpha, 1)
+    XCTAssertEqual(fading.offsetY, 0)
+    XCTAssertEqual(fading.scaleY, 1)
+    XCTAssertEqual(try harness.style(harness.today[3]), .rest)
+
+    try harness.advance(by: FadeDuration.standard)
+    for node in harness.today { XCTAssertEqual(try harness.style(node), .rest) }
+  }
+
+  func testAPageLeavingTheScreenMidExitArchivesAtOnce() throws {
+    let harness = try Harness()
+    defer { harness.controller.close() }
+    try harness.show()
+    try harness.divider().clearButton.performClick(nil)
+    try harness.advance(by: 0.06)
+    XCTAssertEqual(harness.todayNow, harness.today)
+
+    try XCTUnwrap(harness.controller.sidebarController.currentPage).isHidden = true
+    XCTAssertEqual(harness.todayNow, [harness.today[3]], "no frame needed")
+    XCTAssertFalse(try harness.outline().todayClear.isRunning)
+  }
+
   func testAWindowNotOnScreenClearsAtOnce() throws {
     let harness = try Harness()
     defer { harness.controller.close() }
