@@ -218,6 +218,7 @@ final class AppSession {
       return restored.nodeID
     }
     window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
+    window.onManageExtensions = { [weak self] in self?.showSettings(pane: .extensions) }        // #595
     window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
     window.onFaviconChanged = { [weak self] id, data in self?.faviconWriter?.record(data, for: id) }
     window.isArcImportAvailable = isArcImportAvailable
