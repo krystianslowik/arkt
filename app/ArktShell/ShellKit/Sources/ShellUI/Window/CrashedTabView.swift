@@ -36,15 +36,34 @@ final class CrashedTabView: NSView {
   var onReload: (@MainActor () -> Void)?
   var onClose: (@MainActor () -> Void)?
 
-  /// Return (or Enter) presses Reload while this view covers the current tab, unless text elsewhere in the window is
-  /// being edited (its Return is its own). Not a key equivalent on the button, which would take Return from a field.
+  /// Return (or Enter) presses Reload while this view covers the current tab and the window's focus is on its card
+  /// (`focusIsOnPage`). Not a key equivalent on the button, which would take Return from whatever has the focus.
   var isDefault = false
+  /// Something over the card answers the keyboard now (a Peek): Return is not this view's. The window sets it.
+  var keyboardIsElsewhere: @MainActor () -> Bool = { false }
+
+  /// The window's focus is on `card`'s page or on nothing in particular: no responder, the window itself, or a view
+  /// inside the card that is not text. Anything else (the sidebar, the Favorites grid, a field) keeps its keys.
+  static func focusIsOnPage(of card: NSView, in window: NSWindow) -> Bool {
+    switch window.firstResponder {
+    case nil: return true
+    case let responder? where responder === window: return true
+    case is NSText: return false                          // the view has no text: typing is elsewhere
+    case let view as NSView: return view.isDescendant(of: card)
+    default: return false
+    }
+  }
+
+  /// The card this view covers the page of.
+  private var card: NSView? { superview?.superview }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function])
     guard isDefault, event.type == .keyDown, modifiers.isEmpty,
           event.charactersIgnoringModifiers == "\r" || event.charactersIgnoringModifiers == "\u{3}",
-          !(window?.firstResponder is NSText) else { return super.performKeyEquivalent(with: event) }
+          !keyboardIsElsewhere(), let window, let card, Self.focusIsOnPage(of: card, in: window) else {
+      return super.performKeyEquivalent(with: event)
+    }
     reloadButton.performClick(nil)
     return true
   }
@@ -196,7 +215,7 @@ final class CrashedTabTileView: NSView {
     face.lineWidth = 1.4 * unit
     face.lineCapStyle = .round
     face.lineJoinStyle = .round
-    ShellTokens.primaryText.resolve(flavor).nsColor().setStroke()
+    ShellTokens.sidebarForeground.resolve(flavor).nsColor().setStroke()
     face.stroke()
   }
 }

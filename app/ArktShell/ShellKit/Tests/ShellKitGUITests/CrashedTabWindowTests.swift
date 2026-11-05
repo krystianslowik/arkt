@@ -32,10 +32,10 @@ final class CrashedTabWindowTests: XCTestCase {
     first = try sidebar.addTab(url: URL(string: "https://fieldguide.example/lichens")!, title: "A", in: .today(work))
     second = try sidebar.addTab(url: URL(string: "https://example.com/b")!, title: "B", in: .today(work))
     elsewhere = try sidebar.addTab(url: URL(string: "https://example.com/c")!, title: "C", in: .today(home))
-    try await makeController(sidebar)
+    makeController(sidebar)
   }
 
-  private func makeController(_ sidebar: SidebarModel.Sidebar) async throws {
+  private func makeController(_ sidebar: SidebarModel.Sidebar) {
     controller?.close()
     engine = InMemoryEngine()
     source = ModelSidebarSource(sidebar: sidebar, now: { .now })
@@ -58,6 +58,7 @@ final class CrashedTabWindowTests: XCTestCase {
 
   func testACrashOfTheShownTabCoversItsPageWithReloadFocused() throws {
     controller.activate(node: first)
+    controller.returnFocusToPage()
     let tab = try XCTUnwrap(controller.currentTab)
     XCTAssertNil(crashedView(on: card))
 
@@ -93,7 +94,8 @@ final class CrashedTabWindowTests: XCTestCase {
 
     let view = try XCTUnwrap(crashedView(on: card))
     XCTAssertTrue(window.firstResponder === editor, "the field keeps editing")
-    XCTAssertFalse(view.performKeyEquivalent(with: try Self.returnKey(in: window)), "the field's Return is its own")
+    XCTAssertTrue(view.isDefault)
+    XCTAssertFalse(window.performKeyEquivalent(with: try Self.returnKey(in: window)), "the field's Return is its own")
     XCTAssertNotNil(engine.snapshot(of: tab)?.crash)
     field.removeFromSuperview()
   }
@@ -161,6 +163,7 @@ final class CrashedTabWindowTests: XCTestCase {
 
   func testReloadRestoresThePageAndGivesItTheFocus() throws {
     controller.activate(node: first)
+    controller.returnFocusToPage()
     let tab = try XCTUnwrap(controller.currentTab)
     engine.crash(tab, status: .crashed)
     let view = try XCTUnwrap(crashedView(on: card))
@@ -173,13 +176,15 @@ final class CrashedTabWindowTests: XCTestCase {
     XCTAssertTrue(controller.window?.firstResponder === engine.contentView(for: tab))
   }
 
-  func testReturnReloads() throws {
+  func testReturnReloadsWhenTheFocusIsOnThePage() throws {
     controller.activate(node: first)
+    controller.returnFocusToPage()
     let tab = try XCTUnwrap(controller.currentTab)
     engine.crash(tab, status: .crashed)
-    let view = try XCTUnwrap(crashedView(on: card))
+    XCTAssertNotNil(crashedView(on: card))
 
-    XCTAssertTrue(view.performKeyEquivalent(with: try Self.returnKey(in: controller.window)))
+    let window = try XCTUnwrap(controller.window)
+    XCTAssertTrue(window.performKeyEquivalent(with: try Self.returnKey(in: window)))
 
     XCTAssertNil(engine.snapshot(of: tab)?.crash)
     XCTAssertNil(crashedView(on: card))
@@ -189,6 +194,67 @@ final class CrashedTabWindowTests: XCTestCase {
     try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
                                    windowNumber: window?.windowNumber ?? 0, context: nil, characters: "\r",
                                    charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+  }
+
+  /// The Favorites grid has the focus (a keyboard user walking the tiles): its Return opens a Favorite, it never
+  /// reloads the crashed page, and the crash does not take the focus from it.
+  func testTheFavoritesGridKeepsItsReturn() throws {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    _ = try sidebar.addTab(url: URL(string: "https://example.com/f")!, title: "Fav", in: .favorites(profile: "default"))
+    let page = try sidebar.addTab(url: URL(string: "https://example.com/p")!, title: "P", in: .today(space))
+    makeController(sidebar)
+    controller.activate(node: page)
+    let tab = try XCTUnwrap(controller.currentTab)
+    let window = try XCTUnwrap(controller.window)
+    window.contentView?.layoutSubtreeIfNeeded()
+    let grid = try XCTUnwrap(Self.descendant(of: FavoritesCollectionView.self, in: window.contentView))
+    XCTAssertTrue(window.makeFirstResponder(grid))
+
+    engine.crash(tab, status: .crashed)
+
+    XCTAssertTrue(crashedView(on: card)?.isDefault == true)
+    XCTAssertTrue(window.firstResponder === grid, "the grid keeps the focus")
+    _ = window.performKeyEquivalent(with: try Self.returnKey(in: window))
+    XCTAssertNotNil(engine.snapshot(of: tab)?.crash, "Return was not Reload")
+    XCTAssertNotNil(crashedView(on: card))
+  }
+
+  /// A Peek open over the crashed tab answers the keyboard: Return is the Peek page's, not Reload, and the crash
+  /// does not take the focus from the Peek.
+  func testAPeekOverTheCrashedTabKeepsReturn() throws {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let pinned = try sidebar.addTab(url: URL(string: "https://mail.example.com/inbox")!, title: "Mail",
+                                    in: .pinned(space))
+    makeController(sidebar)
+    controller.peek.reduceMotion = { true }
+    controller.peek.linkSettings = { PeekLinkSettings() }
+    controller.peek.announce = { _, _ in }
+    controller.activate(node: pinned)
+    controller.returnFocusToPage()
+    let tab = try XCTUnwrap(controller.currentTab)
+    // A link to another site in a pinned tab opens a Peek (BH-144); it opens after the call returns.
+    XCTAssertEqual(engine.simulateLinkActivation(in: tab, url: URL(string: "https://atlas.example/lisbon")!,
+                                                 modifiers: [], disposition: .currentTab), .cancel)
+    waitUntil("the Peek opens") { controller.peek.isOpen }
+    let responder = controller.window?.firstResponder
+
+    engine.crash(tab, status: .crashed)
+
+    let view = try XCTUnwrap(crashedView(on: card), "the source's card shows the view under the Peek")
+    XCTAssertTrue(controller.window?.firstResponder === responder, "the Peek keeps the focus")
+    XCTAssertFalse(controller.window?.firstResponder === view.reloadButton)
+    let window = try XCTUnwrap(controller.window)
+    _ = window.performKeyEquivalent(with: try Self.returnKey(in: window))
+    XCTAssertNotNil(engine.snapshot(of: tab)?.crash, "Return was not Reload")
+  }
+
+  static func descendant<T: NSView>(of type: T.Type, in view: NSView?) -> T? {
+    guard let view else { return nil }
+    if let match = view as? T { return match }
+    for child in view.subviews { if let match = descendant(of: type, in: child) { return match } }
+    return nil
   }
 
   func testANewNavigationTakesTheViewDown() throws {
@@ -240,13 +306,13 @@ final class CrashedTabWindowTests: XCTestCase {
 
   // MARK: Split View
 
-  func testACrashInASplitPaneCoversThatPaneOnlyAndCloseTabClosesThePane() async throws {
+  func testACrashInASplitPaneCoversThatPaneOnlyAndCloseTabClosesThePane() throws {
     var sidebar = SidebarModel.Sidebar()
     let space = sidebar.addSpace(title: "Work")
     let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(space))
     let left = try sidebar.addTab(url: URL(string: "https://example.com/l")!, title: "L", in: .split(split))
     let right = try sidebar.addTab(url: URL(string: "https://example.com/r")!, title: "R", in: .split(split))
-    try await makeController(sidebar)
+    makeController(sidebar)
     controller.rootView.split.reduceMotion = { true }
     controller.activate(node: left)
     let cards = controller.rootView.split.paneCards
@@ -260,7 +326,9 @@ final class CrashedTabWindowTests: XCTestCase {
     XCTAssertEqual(view.tab, rightTab)
     XCTAssertFalse(controller.window?.firstResponder === view.reloadButton, "focus stays with the focused pane")
     XCTAssertFalse(view.isDefault, "Return belongs to the focused pane")
-    XCTAssertFalse(view.performKeyEquivalent(with: try Self.returnKey(in: controller.window)))
+    let window = try XCTUnwrap(controller.window)
+    controller.returnFocusToPage()                                 // the focused (left) pane's page
+    XCTAssertFalse(window.performKeyEquivalent(with: try Self.returnKey(in: window)))
     XCTAssertNotNil(engine.snapshot(of: rightTab)?.crash)
 
     view.closeButton.performClick(nil)

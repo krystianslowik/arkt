@@ -74,10 +74,10 @@ extension ShellWindowController {
 
   /// Places the crashed tab view on every card whose page is a crashed tab and takes it off the rest. `crashed` is a
   /// tab whose crash was just reported: its view plays the entrance. A new view on the current tab's card takes focus
-  /// on Reload, unless the user is typing somewhere else in the window.
+  /// on Reload when the window's focus was on that card (or nowhere) and no Peek is open.
   func refreshCrashedTabs(crashed: TabID? = nil) {
     let cards = pageCards
-    let tabs = Array(tabsByNode.values) + (privateTab.map { [$0] } ?? [])
+    let tabs = Array(tabsByNode.values) + privateTabs
     var placements: [CrashedTabPresenter.Placement] = []
     for card in cards {
       guard let page = card.contentView,
@@ -86,23 +86,22 @@ extension ShellWindowController {
       placements.append(.init(card: card, tab: tab, host: snapshot.url?.host()))
     }
     let made = crashedTabs.apply(cards: cards, placements: placements, crashedNow: crashed)
-    // Return is Reload on the current tab's view only (a split may show two), as the empty state's default button.
-    for card in cards { crashedTabs.view(on: card)?.isDefault = crashedTabs.view(on: card)?.tab == currentTab }
-    guard let window, let current = currentTab, let view = made.first(where: { $0.tab == current }),
-          Self.userIsNotTypingElsewhere(in: window) else { return }
+    // Return is Reload on the current tab's view only (a split may show two), and never while a Peek is open.
+    for card in cards {
+      guard let view = crashedTabs.view(on: card) else { continue }
+      view.isDefault = view.tab == currentTab
+      view.keyboardIsElsewhere = { [weak self] in self?.peek.isOpen ?? true }
+    }
+    guard let window, !peek.isOpen, let current = currentTab, let view = made.first(where: { $0.tab == current }),
+          let card = view.superview?.superview, CrashedTabView.focusIsOnPage(of: card, in: window) else { return }
     window.makeFirstResponder(view.reloadButton)              // with Full Keyboard Access; else Return presses it
   }
 
-  /// The user is not typing in the window: its focus is not in text (a row being renamed). The crashed view has no
-  /// text of its own, so any text with the focus is elsewhere.
-  private static func userIsNotTypingElsewhere(in window: NSWindow) -> Bool {
-    !(window.firstResponder is NSText)
-  }
-
   /// Reload on the view: the engine reloads the page; `.tabRecovered` takes the view down, and the page gets the focus
-  /// unless the user is typing elsewhere in the window.
+  /// when it was on the card.
   private func reloadCrashedTab(_ tab: TabID) {
-    let focusOnPage = window.map(Self.userIsNotTypingElsewhere(in:)) ?? false
+    let card = pageCards.first { crashedTabs.view(on: $0)?.tab == tab }
+    let focusOnPage = card.flatMap { card in window.map { CrashedTabView.focusIsOnPage(of: card, in: $0) } } ?? false
     engine.reload(tab)
     if focusOnPage, tab == currentTab, let window, let page = engine.contentView(for: tab), page.window === window {
       window.makeFirstResponder(page)
@@ -112,7 +111,8 @@ extension ShellWindowController {
   /// Close Tab on the view: what the pane's X does in a split, Cmd-W otherwise.
   private func closeCrashedTab(_ tab: TabID) {
     guard let node = nodeByTab[tab] else {
-      if tab == privateTab { window?.performClose(nil) }       // a blank or incognito window's one page (#487)
+      // A blank or incognito window's page (#487, #667): the window closes, as Cmd-W does there today.
+      if privateTabs.contains(tab) { window?.performClose(nil) }
       return
     }
     if let index = splitState.panes.firstIndex(of: node), splitState.split != nil {
