@@ -12,7 +12,12 @@ import EngineAPI
 /// window. Without the flight (Reduce Motion, no main window the user can see) the window fades out, then the tab
 /// moves.
 ///
-/// A responder after the window (`nextResponder`), so the main menu's Archive Tab (`closeTab:`) reaches it.
+/// A close the user asks for (close button, Cmd-W) and the idle timer's close archive the page under the Archive's
+/// Little Arkt source (#355, BH-138, BH-137) once the engine closed the window; a page that closes its own popup, a
+/// quit and a hand-off archive nothing.
+///
+/// A responder after the window (`nextResponder`), so the main menu's Archive Tab (`closeTab:`) and Reopen Closed Tab
+/// (`reopenClosedTab:`) reach it.
 @MainActor
 public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   private enum Phase: Equatable {
@@ -32,6 +37,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   public let engine: any EngineClient
   public let isPopup: Bool
+  /// Names the window for the idle timer (#355).
+  public let id = UUID()
   let window: LittleArktWindow
   let rootView: LittleArktRootView
   public let engineHost: LittleArktEngineHost
@@ -63,6 +70,12 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// The Open in flight while it runs, through its crossfade.
   private(set) var flight: LittleArktFlight?
   private var snapshotTask: Task<Void, Never>?
+  /// The page and frame a close the user (or the idle timer) asked for, captured at the request: the engine has
+  /// closed the tab by the time it reports the window closed. Archived when that close ends; forgotten when a
+  /// leave-site prompt cancels it.
+  private var requestedClose: LittleArktClosedWindow?
+  /// The last time the user was in the window: it opened, became key, stopped being key, or its page navigated.
+  public private(set) var lastActiveAt = Date.distantPast
 
   // MARK: Hooks (set by ShellWindowSet)
 
@@ -78,6 +91,14 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   var onResize: @MainActor (CGSize) -> Void = { _ in }
   /// The window closed; the set forgets it.
   var onClosed: @MainActor (LittleArktWindowController) -> Void = { _ in }
+  /// A close the user or the idle timer asked for ended: the page goes to the Archive and the window can be reopened.
+  /// Runs before `onClosed`.
+  var onArchiveClose: @MainActor (LittleArktClosedWindow) -> Void = { _ in }
+  /// Reopen Closed Tab (Cmd-Shift-T) while this window is key; `canReopenClosed` enables the menu item.
+  var onReopenClosed: @MainActor () -> Void = {}
+  var canReopenClosed: @MainActor () -> Bool = { false }
+  /// The clock `lastActiveAt` reads (tests set it).
+  var now: @MainActor () -> Date = { Date() }
   /// The open main window Open in flies to; nil takes today's path (which opens one).
   var flightDestination: @MainActor () -> (any LittleArktFlightDestination)? = { nil }
   /// Whether the main window can take the flight (minimized, another desktop, full screen); Reduce Motion is added.
@@ -144,6 +165,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   func adopt(engineWindow id: EngineWindowID) {
     guard engineWindow == nil, phase == .pending else { return }
     engineWindow = id
+    lastActiveAt = now()
     tabObservation = engine.observe(window: id) { [weak self] event in self?.handle(event) }
     windowObservation = engine.observeWindows { [weak self] event in
       guard let self, event.windowID == self.engineWindow, case .windowClosed = event else { return }
@@ -163,7 +185,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       guard phase == .open || phase == .pending else { return }
       mount(tab)
     case .urlChanged(let tab, _) where tab == shownTab:
+      lastActiveAt = now()
       refreshTopBar()
+    case .closeCancelled(let tab) where tab == shownTab:
+      requestedClose = nil                                    // the user stayed at the leave-site prompt
     case .titleChanged(let tab, let title) where tab == shownTab:
       window.title = title
     case .dialogRequested(let dialog) where isCarrying && dialog.tab == shownTab:
@@ -252,6 +277,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     rootView.removeToolTipsInSubtree()                      // a tool tip shown at the close goes with it (#301)
     window.orderOut(nil)
     window.close()
+    if let requestedClose {
+      self.requestedClose = nil
+      onArchiveClose(requestedClose)
+    }
     onClosed(self)
   }
 
@@ -273,20 +302,33 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     onClosed(self)
   }
 
-  /// The main menu's Archive Tab (Cmd-W) closes the window (KB-080). Archiving under the Little Arkt source comes
-  /// with the Archive's source (follow-up).
+  /// The main menu's Archive Tab (Cmd-W) closes the window and archives its page (KB-080, BH-138).
   @objc public func closeTab(_ sender: Any?) {
     window.performClose(sender)
   }
 
+  /// File > Reopen Closed Tab (Cmd-Shift-T) while a Little Arkt window is key: the last closed Little Arkt window
+  /// comes back (#355).
+  @objc public func reopenClosedTab(_ sender: Any?) {
+    onReopenClosed()
+  }
+
+  /// The idle timer closes the window (BH-137): the same close as the user's, archived as idle.
+  func closeForIdle() {
+    requestClose(idle: true)
+  }
+
   /// Scale 0.97 and fade (`firmFast`), then the engine closes the window. A page that would ask before leaving
   /// (`beforeunload`) is asked at once, without the motion, so its prompt is never on an invisible window.
-  func requestClose() {
+  func requestClose(idle: Bool = false) {
     if phase == .flying {
       flight?.abort(.closeRequested)                          // the page lands now, never stranded in a hidden window
       if phase == .handedOff { return }                       // the engine closes the emptied window
     }
     guard phase == .open, engineWindow != nil else { return }
+    requestedClose = shownTab.flatMap { engine.snapshot(of: $0) }.flatMap { page in
+      page.url.map { LittleArktClosedWindow(url: $0, title: page.title, frame: window.frame, isIdle: idle) }
+    }
     if let shownTab, engine.snapshot(of: shownTab)?.wouldHoldClose == true {
       engineHost.onCloseRequested?()
       return
@@ -533,7 +575,25 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   }
 
   public func windowDidBecomeKey(_ notification: Notification) {
+    lastActiveAt = now()
     refreshTopBar()
+  }
+
+  public func windowDidResignKey(_ notification: Notification) {
+    lastActiveAt = now()
+  }
+
+  /// Marks the window in use now (the idle timer's pass while the user is in it).
+  func touch() {
+    lastActiveAt = now()
+  }
+
+  /// Whether the idle timer may close the window now: open, and its page neither playing sound (BH-076) nor asking
+  /// before it leaves (retried on the next pass).
+  var mayCloseForIdle: Bool {
+    guard phase == .open, engineWindow != nil else { return false }
+    guard let shownTab, let page = engine.snapshot(of: shownTab) else { return true }
+    return !page.isAudible && !page.wouldHoldClose
   }
 
   public func windowDidEndLiveResize(_ notification: Notification) {
@@ -563,5 +623,29 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// Settles the running transition at once (tests).
   func finishMotion() {
     animator.settleNow()
+  }
+}
+
+extension LittleArktWindowController: NSMenuItemValidation {
+  public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed() }
+    return true
+  }
+}
+
+/// A Little Arkt window closed by the user or the idle timer (#355): its page for the Archive, and its frame for
+/// Reopen Closed Tab.
+public struct LittleArktClosedWindow: Equatable, Sendable {
+  public let url: URL
+  public let title: String
+  public let frame: CGRect
+  /// Closed by the idle timer (BH-137) rather than by the user.
+  public let isIdle: Bool
+
+  public init(url: URL, title: String, frame: CGRect, isIdle: Bool) {
+    self.url = url
+    self.title = title
+    self.frame = frame
+    self.isIdle = isIdle
   }
 }

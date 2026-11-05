@@ -27,6 +27,12 @@ public final class AutoArchiveTimer {
   public var exempt: @MainActor () -> Set<UUID> = { [] }
   /// Called with what a tick archived, only when it archived something (the BH-085 toast).
   public var onArchived: (@MainActor ([ArchivedItem]) -> Void)?
+  /// The open Little Arkt windows the idle pass may close (#355, BH-137), read on every tick. The provider leaves out
+  /// the ones that must stay (the key window, a page playing sound, a page that would ask before leaving).
+  public var littleArkts: @MainActor () -> [LittleArcWindowActivity] = { [] }
+  /// Called with the Little Arkt windows idle for `settings.littleArcThreshold` or longer ("Archive Little Arkts
+  /// after:", 6 hours by default), only when there are some; the caller closes and archives them.
+  public var onLittleArktsIdle: (@MainActor ([UUID]) -> Void)?
 
   private let coordinator: ArchiveCoordinator
   private let state: any ArchiveStateStoring
@@ -103,6 +109,14 @@ public final class AutoArchiveTimer {
     guard isLoaded, !stopRequested, let startedAt else { return [] }
     let archived = coordinator.runAutoArchive(startedAt: startedAt, settings: settings, exempt: exempt())
     if !archived.isEmpty { onArchived?(archived) }
+    closeIdleLittleArkts()
     return archived
+  }
+
+  /// The Little Arkt part of a pass (BH-137). Not clamped to `startedAt`: a window's activity is from this run.
+  private func closeIdleLittleArkts() {
+    let idle = AutoArchivePolicy.littleArcWindowsToArchive(
+      littleArkts(), threshold: settings.littleArcThreshold, now: now(), exempt: [])
+    if !idle.isEmpty { onLittleArktsIdle?(idle) }
   }
 }

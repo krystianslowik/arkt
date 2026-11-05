@@ -177,17 +177,49 @@ public final class ArchiveCoordinator {
     let fallback = fallbackSpace.flatMap { sidebar.spaces[$0] == nil ? nil : $0 } ?? sidebar.spaceOrder.first
     guard let fallback else { throw RestoreError.noSpaceForRestore }
     let restored = try source.restore(item, fallbackSpace: fallback)
-    restoredIDs.insert(item.id)
-    recent.removeAll { $0.id == item.id }
-    let wasPending = dropUnsentAdds(of: item.id)
+    withdraw(item.id)
+    return restored
+  }
+
+  /// Takes entry `id` out of the archive (the store side of a restore): marks it restored, forgets it for a reopen,
+  /// and queues its removal from the store, unless it was pending and never sent (see the type comment).
+  private func withdraw(_ id: NodeID) {
+    restoredIDs.insert(id)
+    recent.removeAll { $0.id == id }
+    let wasPending = dropUnsentAdds(of: id)
     // Queued whenever a store call may have written the entry: a failed add may still have landed, and an extra
     // remove is harmless.
-    if !wasPending || mayBeStored.contains(item.id) {
-      outbox.append(.remove([item.id]))
+    if !wasPending || mayBeStored.contains(id) {
+      outbox.append(.remove([id]))
       startWriter(delayFirst: false)
     }
     if wasPending { onPendingItemsChange?() }
-    return restored
+  }
+
+  // MARK: - Little Arkt (#355)
+
+  /// A Little Arkt page closed by the user (BH-138, KB-080) or by the idle timer (BH-137): one tab entry under the
+  /// Little Arkt source, with no section, queued for the store like any other archive. The page has no sidebar row,
+  /// so the sidebar does not change. A restore from the Archive puts it at the top of Today (`Archiver.restore`).
+  @discardableResult
+  public func archiveLittleArkt(url: URL, title: String, reason: ArchiveReason) -> ArchivedItem {
+    let date = now()
+    let item = ArchivedItem(reason: reason, archivedAt: date, source: .littleArc,
+                            snapshot: NodeSnapshot(kind: .tab(TabItem(url: url, title: title)), createdAt: date))
+    enqueue([item])
+    return item
+  }
+
+  /// Reopen Closed Tab on a Little Arkt window: the page comes back in a window, not as a row, so its entry leaves
+  /// the archive without a sidebar insert. False when `id` is not a Little Arkt entry among the latest `recentLimit`
+  /// archives, or was restored or taken back since.
+  @discardableResult
+  public func takeBackLittleArkt(_ id: NodeID) -> Bool {
+    guard !restoredIDs.contains(id), let item = recent.last(where: { $0.id == id }), item.source == .littleArc else {
+      return false
+    }
+    withdraw(id)
+    return true
   }
 
   /// Reopen Closed Tab (#110, BH-074): restores the entry archived as `id` a moment ago, as `restore` does. Nil when it

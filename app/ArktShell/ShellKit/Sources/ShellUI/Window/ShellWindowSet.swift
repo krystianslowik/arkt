@@ -60,6 +60,19 @@ public final class ShellWindowSet {
   public var littleArktReduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   /// Runs on each new Little Arkt window before it appears (tests step its motion by hand).
   var littleArktConfigure: (@MainActor (LittleArktWindowController) -> Void)?
+  /// A Little Arkt window the user or the idle timer closed (#355): the app archives its page under the Little Arkt
+  /// source and returns the entry's id, which Reopen Closed Tab takes back.
+  public var onLittleArktArchive: (@MainActor (LittleArktClosedWindow) -> UUID?)?
+  /// Reopen Closed Tab brought a Little Arkt window back: its Archive entry goes.
+  public var onLittleArktTakeBack: (@MainActor (UUID) -> Void)?
+  /// The clock of Little Arkt activity (tests set it).
+  public var littleArktNow: @MainActor () -> Date = { Date() }
+  /// Whether the user is in a Little Arkt window now: the key window of the active app. The idle timer never closes it.
+  var littleArktIsInUse: @MainActor (LittleArktWindowController) -> Bool = { NSApp.isActive && $0.window.isKeyWindow }
+  /// Closed Little Arkt windows for Reopen Closed Tab, the most recent last.
+  private var closedLittleArkts: [(closed: LittleArktClosedWindow, archiveID: UUID?)] = []
+  /// How many closed Little Arkt windows Reopen Closed Tab can bring back. [I]
+  static let closedLittleArktLimit = 50
 
   /// `hostLookup` is needed only for an engine that asks for windows of its own (a host provider); FakeEngine never
   /// does.
@@ -225,12 +238,13 @@ public final class ShellWindowSet {
 
   /// The quick lookup bar's result (#354, KB-044): a new Little Arkt window on `url`. The shell builds it rather than
   /// the engine, so it creates the engine window itself and adopts it; placement and wiring are the engine's own
-  /// windows' (`makeLittleArkt`).
+  /// windows' (`makeLittleArkt`). `frame` places it there instead (Reopen Closed Tab).
   @discardableResult
-  public func openLittleArkt(url: URL) -> LittleArktWindowController {
+  public func openLittleArkt(url: URL, frame: CGRect? = nil) -> LittleArktWindowController {
     let screen = NSScreen.main ?? NSScreen.screens.first
     let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: LittleArktLayout.defaultSize)
-    let frame = LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
+    let frame = frame
+      ?? LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
     let little = makeLittleArkt(isPopup: false, frame: frame)
     let id = engine.createWindow(host: little.engineHost)
     little.adopt(engineWindow: id)              // no-op when the engine announced and adopted it already
@@ -255,9 +269,56 @@ public final class ShellWindowSet {
     little.flightDestination = { [weak self] in self?.primary }        // #352: an open main window only
     little.onResize = { [weak self] size in self?.littleArktSize = size }
     little.onClosed = { [weak self] closed in self?.littleArktWindows.removeAll { $0 === closed } }
+    little.onArchiveClose = { [weak self] closed in self?.littleArktClosed(closed) }
+    little.onReopenClosed = { [weak self] in self?.reopenClosedLittleArkt() }
+    little.canReopenClosed = { [weak self] in self?.canReopenClosedLittleArkt ?? false }
+    little.now = { [weak self] in self?.littleArktNow() ?? Date() }
     littleArktWindows.append(little)
     littleArktConfigure?(little)
     return little
+  }
+
+  // MARK: Little Arkt archive and reopen (#355)
+
+  private func littleArktClosed(_ closed: LittleArktClosedWindow) {
+    let archiveID = onLittleArktArchive?(closed)
+    closedLittleArkts.append((closed, archiveID))
+    if closedLittleArkts.count > Self.closedLittleArktLimit {
+      closedLittleArkts.removeFirst(closedLittleArkts.count - Self.closedLittleArktLimit)
+    }
+  }
+
+  /// A Little Arkt window the user or the idle timer closed can come back.
+  public var canReopenClosedLittleArkt: Bool { !closedLittleArkts.isEmpty }
+
+  /// Reopen Closed Tab (Cmd-Shift-T): the last closed Little Arkt window comes back on its page, at its last frame,
+  /// and its Archive entry goes. Nil when none was closed.
+  @discardableResult
+  public func reopenClosedLittleArkt() -> LittleArktWindowController? {
+    guard let last = closedLittleArkts.popLast() else { return nil }
+    if let archiveID = last.archiveID { onLittleArktTakeBack?(archiveID) }
+    return openLittleArkt(url: last.closed.url, frame: last.closed.frame)
+  }
+
+  /// The open Little Arkt windows the idle timer may close (BH-137), with the last time the user was in each. A window
+  /// the user is in counts as active now and is left out, as are pages playing sound (BH-076) and pages that would
+  /// ask before leaving.
+  public var littleArktIdleCandidates: [(id: UUID, lastActiveAt: Date)] {
+    littleArkts.compactMap { little in
+      if littleArktIsInUse(little) {
+        little.touch()
+        return nil
+      }
+      return little.mayCloseForIdle ? (little.id, little.lastActiveAt) : nil
+    }
+  }
+
+  /// The idle timer's pass picked these windows: each closes as a user close would, archived as idle.
+  public func closeIdleLittleArkts(_ ids: [UUID]) {
+    let ids = Set(ids)
+    for little in littleArkts where ids.contains(little.id) && little.mayCloseForIdle {
+      little.closeForIdle()
+    }
   }
 
   // MARK: Tab Handoff (#300, BH-066)
@@ -311,6 +372,8 @@ public final class ShellWindowSet {
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
     }
     controller.onDragOutToNewWindow = { [weak self] node, point in self?.openWindow(showing: node, at: point) }
+    controller.reopenLittleArkt = { [weak self] in self?.reopenClosedLittleArkt() }      // #355
+    controller.canReopenLittleArkt = { [weak self] in self?.canReopenClosedLittleArkt ?? false }
     controller.otherWindowsVisibleNodes = { [weak self, weak controller] in
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }

@@ -14,8 +14,11 @@ extension ShellWindowController {
   /// Something can be reopened: a close on the stack, or a Peek still on its way out.
   public var canReopenClosed: Bool { peek.isClosing || !reopenStack.isEmpty }
 
-  /// File > Reopen Closed Tab (Cmd-Shift-T, KB-010).
-  @objc public func reopenClosedTab(_ sender: Any?) { reopenClosed() }
+  /// File > Reopen Closed Tab (Cmd-Shift-T, KB-010). With nothing of this window's to reopen, the last closed Little
+  /// Arkt window comes back (#355).
+  @objc public func reopenClosedTab(_ sender: Any?) {
+    if !reopenClosed() { reopenLittleArkt?() }
+  }
 
   /// Takes the most recent close back. A Peek still closing turns around where it is; otherwise the top of the stack
   /// reopens, skipping items whose row is gone for good. True when something came back.
