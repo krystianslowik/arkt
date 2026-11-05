@@ -416,13 +416,23 @@ final class JavaScriptDialogPresenterTests: XCTestCase {
     try XCTUnwrap(try XCTUnwrap(presenter.panel(for: tab)).pageDim, "a page dialog dims its page")
   }
 
-  /// The dim's frame in screen coordinates.
   private func screenFrame(of view: NSView) throws -> NSRect {
     let window = try XCTUnwrap(view.window)
     return window.convertToScreen(view.convert(view.bounds, to: nil))
   }
 
+  /// The dim is on its way out: model opacity 0, a 0.10 s opacity fade, gone when it ends.
+  private func assertLeaving(_ dim: PageDimView, _ message: String = "", line: UInt = #line) {
+    XCTAssertTrue(dim.isLeaving, message, line: line)
+    XCTAssertEqual(dim.layer?.opacity, 0, message, line: line)
+    let fade = dim.layer?.animation(forKey: PageDimView.fadeKey) as? CABasicAnimation
+    XCTAssertEqual(fade?.keyPath, "opacity", message, line: line)
+    XCTAssertEqual(fade?.duration, 0.10, message, line: line)
+    XCTAssertEqual(dim.layer?.animationKeys() ?? [], [PageDimView.fadeKey], "\(message): it never moves", line: line)
+  }
+
   func testEveryKindHangsFromTheTopEdgeOverTheDimmedPage() throws {
+    presenter.dimExitDuration = 0
     for kind in [JavaScriptDialog.Kind.alert, .confirm, .prompt] {
       _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: kind, message: "Now?"))
       let panel = try XCTUnwrap(presenter.panel(for: tab))
@@ -430,14 +440,40 @@ final class JavaScriptDialogPresenterTests: XCTestCase {
       XCTAssertEqual(panel.panel.frame.maxY, anchorFrame().maxY, "\(kind): on the page's top edge")
       XCTAssertEqual(panel.panel.frame.minX, anchorFrame().minX + DialogPanel.anchorInset, "\(kind)")
       let dim = try pageDim()
-      XCTAssertTrue(dim.window === window, "\(kind): the dim is in the page's window, under every child panel")
+      XCTAssertTrue(dim.page === page, "\(kind)")
       XCTAssertEqual(try screenFrame(of: dim), anchorFrame(), "\(kind): the dim covers the page")
       XCTAssertEqual(dim.layer?.opacity, 1, "\(kind)")
+      XCTAssertEqual(dim.layer?.cornerRadius, 0, "\(kind): the card's clip view rounds it, not the dim")
       XCTAssertNil(dim.hitTest(NSPoint(x: dim.frame.midX, y: dim.frame.midY)), "\(kind): clicks pass through")
       XCTAssertFalse(dim.isAccessibilityElement(), "\(kind): VoiceOver skips it")
       engine.navigate(tab, to: URL(string: "arkt-test://page/Next")!)
       XCTAssertNil(dim.superview, "\(kind): the engine's end takes the dim down")
     }
+  }
+
+  /// In a page's own superview, the dim sits directly above the page view, so whatever the shell draws over the page
+  /// (added after it) stays over the dim.
+  func testTheDimSitsDirectlyAboveThePageInItsSuperview() throws {
+    let root = NSView(frame: page.frame)
+    let card = NSView(frame: root.bounds)
+    let inner = NSView(frame: NSRect(x: 0, y: 0, width: 700, height: 460))
+    let toolbar = NSView(frame: NSRect(x: 0, y: 460, width: 700, height: 40))
+    let pill = NSView(frame: NSRect(x: 10, y: 10, width: 100, height: 24))
+    let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 500))
+    window.contentView = root
+    root.addSubview(card)
+    root.addSubview(sidebar)
+    card.addSubview(inner)
+    card.addSubview(toolbar)
+    card.addSubview(pill)
+    page = inner
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Over the page"))
+    let dim = try pageDim()
+    XCTAssertTrue(dim.superview === card)
+    XCTAssertEqual(card.subviews.map { ObjectIdentifier($0) },
+                   [inner, dim, toolbar, pill].map { ObjectIdentifier($0) }, "toolbar and pill stay over the dim")
+    XCTAssertTrue(root.subviews.last === sidebar, "the sidebar stays over the card and its dim")
+    XCTAssertEqual(dim.frame, inner.frame, "framed in the superview's coordinates, under the toolbar")
   }
 
   func testTheDimTakesTheDesignedColorInLightAndDark() throws {
@@ -450,75 +486,109 @@ final class JavaScriptDialogPresenterTests: XCTestCase {
     }
   }
 
-  func testAnAnswerTakesTheDimDown() throws {
-    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .confirm, message: "Sure?"))
+  /// Every exit path fades the dim out over 0.10 s, even where the panel itself goes at once.
+  func testEveryExitPathFadesTheDimOut() throws {
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .confirm, message: "Answer"))
+    var dim = try pageDim()
+    try XCTUnwrap(presenter.panel(for: tab)).view.primaryButton.performClick(nil)
+    assertLeaving(dim, "answer")
+
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .confirm, message: "End"))
+    dim = try pageDim()
+    engine.navigate(tab, to: URL(string: "arkt-test://page/Next")!)
+    assertLeaving(dim, "engine end")
+
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Hide"))
+    dim = try pageDim()
+    shown = false
+    presenter.refresh()
+    assertLeaving(dim, "tab hidden")
+    shown = true
+    presenter.refresh()
+
+    dim = try pageDim()
+    let released = try XCTUnwrap(presenter.release(tab))
+    assertLeaving(dim, "release")
+    presenter.adopt(released)
+
+    dim = try pageDim()
+    presenter.closeAll()
+    assertLeaving(dim, "window closing")
+  }
+
+  /// A key answer and Reduce Motion take the panel down at once; the dim still fades.
+  func testTheDimFadesOutAfterAKeyAnswerAndUnderReduceMotion() throws {
+    presenter.reduceMotion = { false }
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Key"))
+    var dim = try pageDim()
+    var panel = try XCTUnwrap(presenter.panel(for: tab))
+    panel.panel.cancelOperation(nil)
+    XCTAssertEqual(engine.dialogAnswers.count, 1, "Escape answered the alert")
+    XCTAssertNil(panel.panel.parent, "the panel left at once")
+    assertLeaving(dim, "key answer")
+
+    presenter.reduceMotion = { true }
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .confirm, message: "Reduce"))
+    dim = try pageDim()
+    panel = try XCTUnwrap(presenter.panel(for: tab))
+    panel.view.primaryButton.performClick(nil)
+    XCTAssertNil(panel.panel.parent, "the panel left at once")
+    assertLeaving(dim, "Reduce Motion")
+  }
+
+  /// A dialog that comes up while the last one's dim is leaving takes that dim back: never two dims on one page.
+  func testAFollowUpDialogTakesTheLeavingDimBack() throws {
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "One"))
+    let first = try pageDim()
+    try XCTUnwrap(presenter.panel(for: tab)).view.primaryButton.performClick(nil)
+    XCTAssertTrue(first.isLeaving)
+
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Two"))
+    let second = try pageDim()
+    XCTAssertTrue(second === first, "the same dim")
+    XCTAssertFalse(second.isLeaving)
+    XCTAssertEqual(second.layer?.opacity, 1)
+    XCTAssertEqual(page.subviews.filter { $0 is PageDimView }.count, 1)
+
+    // A later dialog replacing a shown one keeps the one dim too.
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Three"))
+    XCTAssertTrue(try pageDim() === first)
+    XCTAssertFalse(first.isLeaving)
+    XCTAssertEqual(page.subviews.filter { $0 is PageDimView }.count, 1)
+  }
+
+  func testTheTestSeamEndsTheFadeAtOnce() throws {
+    presenter.dimExitDuration = 0
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Now"))
     let dim = try pageDim()
     try XCTUnwrap(presenter.panel(for: tab)).view.primaryButton.performClick(nil)
     XCTAssertNil(dim.superview)
   }
 
-  func testHidingTheTabTakesTheDimDownAndShowingItBringsItBack() throws {
-    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Later"))
-    let first = try pageDim()
-    shown = false
-    presenter.refresh()
-    XCTAssertNil(first.superview, "the tab left the screen: no dim")
-    shown = true
-    presenter.refresh()
-    XCTAssertNotNil(try pageDim().superview)
-  }
-
-  func testReleaseTakesTheDimDownAndTheAdoptingWindowDimsItsPage() throws {
-    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .confirm, message: "Sure?"))
-    let first = try pageDim()
-    let released = try XCTUnwrap(presenter.release(tab))
-    XCTAssertNil(first.superview, "the window the tab left keeps no dim")
-    presenter.adopt(released)
-    XCTAssertNotNil(try pageDim().superview)
-  }
-
-  func testClosingAllTakesTheDimDown() throws {
-    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Bye"))
-    let dim = try pageDim()
-    presenter.closeAll()
-    XCTAssertNil(dim.superview)
-  }
-
-  /// A click fades the panel out and the dim with it; the presenter lets go of the panel at the answer, so the dim
-  /// must still leave when nothing holds it.
+  /// The real fade ends and the dim is gone, with nothing holding the panel.
   func testAMouseAnswerLeavesNoDimBehind() throws {
     presenter.reduceMotion = { false }
     _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Click me"))
     weak let dim = try pageDim()
     let ok = try XCTUnwrap(presenter.panel(for: tab)?.view.primaryButton)
     ok.performClick(nil)
-    XCTAssertEqual(dim?.layer?.animation(forKey: "pageDimFade")?.duration, 0.10, "it fades with the panel")
     waitUntil("the faded dim to leave the page") { dim?.superview == nil }
   }
 
   /// The dim fades in with the panel and only fades: opacity, never a transform, with or without Reduce Motion.
   func testTheDimFadesInWithThePanelAndNeverMoves() throws {
+    presenter.dimExitDuration = 0
     for reduce in [false, true] {
       presenter.reduceMotion = { reduce }
       _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Fade"))
       let layer = try XCTUnwrap(try pageDim().layer)
-      let fade = try XCTUnwrap(layer.animation(forKey: "pageDimFade") as? CABasicAnimation, "reduce: \(reduce)")
+      let fade = try XCTUnwrap(layer.animation(forKey: PageDimView.fadeKey) as? CABasicAnimation, "reduce: \(reduce)")
       XCTAssertEqual(fade.keyPath, "opacity")
       XCTAssertEqual(fade.duration, DialogMotion.panelIn(reduceMotion: reduce).fadeDuration)
-      XCTAssertEqual(layer.animationKeys()?.filter { $0 != "pageDimFade" } ?? [], [], "reduce: \(reduce): no travel")
+      XCTAssertEqual(layer.animationKeys() ?? [], [PageDimView.fadeKey], "reduce: \(reduce): no travel")
       presenter.closeAll()
       engine.navigate(tab, to: URL(string: "arkt-test://page/Next")!)
     }
-  }
-
-  /// Escape answers at once (a key), and the dim goes at once with the panel.
-  func testAKeyboardAnswerTakesTheDimDownAtOnce() throws {
-    presenter.reduceMotion = { false }
-    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Key"))
-    let dim = try pageDim()
-    try XCTUnwrap(presenter.panel(for: tab)).panel.cancelOperation(nil)
-    XCTAssertEqual(engine.dialogAnswers.count, 1, "Escape answered the alert")
-    XCTAssertNil(dim.superview)
   }
 
   func testTheDimFollowsThePage() throws {
@@ -531,27 +601,20 @@ final class JavaScriptDialogPresenterTests: XCTestCase {
     XCTAssertEqual(try screenFrame(of: try pageDim()), anchorFrame())
   }
 
-  /// The infobar rows stay clear: the dim and the panel start below them. The dim rounds the card's corners, the top
-  /// ones only when no row sits above it.
-  func testTheDimLeavesTheInfobarRowsClearAndFollowsTheCardCorners() throws {
-    page.wantsLayer = true
-    page.layer?.cornerRadius = 10
-    page.layer?.masksToBounds = true
-    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "No rows"))
-    var dim = try pageDim()
-    XCTAssertEqual(dim.layer?.cornerRadius, 10)
-    XCTAssertEqual(dim.layer?.maskedCorners, [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner,
-                                              .layerMaxXMaxYCorner])
-    presenter.closeAll()
-    engine.navigate(tab, to: URL(string: "arkt-test://page/Next")!)
-
+  /// The infobar rows stay clear: the dim and the panel start below them, and follow their height on a refresh.
+  func testTheDimLeavesTheInfobarRowsClear() throws {
     presenter.host.topInset = { _ in 40 }
     _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Under a row"))
-    dim = try pageDim()
-    var page = anchorFrame()
-    page.size.height -= 40
-    XCTAssertEqual(try screenFrame(of: dim), page, "the dim starts below the rows")
-    XCTAssertEqual(try XCTUnwrap(presenter.panel(for: tab)).panel.frame.maxY, page.maxY, "so does the panel")
-    XCTAssertEqual(dim.layer?.maskedCorners, [.layerMinXMinYCorner, .layerMaxXMinYCorner], "square under the rows")
+    let dim = try pageDim()
+    var below = anchorFrame()
+    below.size.height -= 40
+    XCTAssertEqual(try screenFrame(of: dim), below, "the dim starts below the rows")
+    XCTAssertEqual(try XCTUnwrap(presenter.panel(for: tab)).panel.frame.maxY, below.maxY, "so does the panel")
+
+    presenter.host.topInset = { _ in 80 }
+    presenter.refresh()
+    below.size.height -= 40
+    XCTAssertEqual(try screenFrame(of: dim), below, "a second row arrived")
+    XCTAssertTrue(try pageDim() === dim)
   }
 }

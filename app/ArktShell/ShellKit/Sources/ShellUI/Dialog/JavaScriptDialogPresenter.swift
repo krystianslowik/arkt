@@ -51,8 +51,8 @@ extension JavaScriptDialog {
 }
 
 /// Shows each pending JavaScript dialog of the tabs the window shows, one per tab, over its dimmed page, and answers
-/// the engine. The dim belongs to the panel, so it goes whenever the panel goes: an answer, the engine's end, the tab
-/// leaving the screen, a release to another window, the window closing. A dialog
+/// the engine. The dim belongs to the panel, so it fades out whenever the panel goes: an answer, the engine's end, the
+/// tab leaving the screen, a release to another window, the window closing. A dialog
 /// of a tab that is not on screen stays pending without a panel and appears when the tab is shown (`refresh()`), as
 /// Chromium keeps a background tab's `alert()` pending. The engine ends a dialog on its own (a navigation, a later
 /// dialog, the tab closing); that closes the panel without an answer, and an answer that races the end is dropped by
@@ -72,6 +72,8 @@ public final class JavaScriptDialogPresenter {
   var reduceMotion: (@MainActor () -> Bool)?
   /// The clock of a leave-site prompt's input protection, handed to each panel. Tests set it.
   var clock: (@MainActor () -> TimeInterval)?
+  /// How long a page's dim takes to leave, handed to each panel. Tests set 0 to end it at once.
+  var dimExitDuration: CFTimeInterval?
   /// Whether a panel's window is really visible (not occluded), handed to each panel. Tests set it.
   var isOnScreen: (@MainActor () -> Bool)?
 
@@ -153,9 +155,8 @@ public final class JavaScriptDialogPresenter {
       }
       return panel
     } show: { [weak self] panel, window, frame in
-      // The dim follows the card's corners; under an infobar row its top corners are square.
-      let radius = self?.anchor(tab).map { InfobarPresenter.cardCornerRadius(of: $0) } ?? 0
-      panel.pageDimStyle = (radius, (self?.host.topInset(tab) ?? 0) <= 0)
+      panel.dimmedPage = self?.anchor(tab)
+      if let dimExitDuration = self?.dimExitDuration { panel.dimExitDuration = dimExitDuration }
       panel.show(over: window, anchoredTo: frame, takesFocus: true)
     }
   }

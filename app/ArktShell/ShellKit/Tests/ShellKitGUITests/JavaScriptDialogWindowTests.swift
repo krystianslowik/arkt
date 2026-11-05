@@ -128,4 +128,62 @@ final class JavaScriptDialogWindowTests: XCTestCase {
       }
     }
   }
+
+  // MARK: The page dim in the window (#693)
+
+  /// Whether `top` is drawn over `bottom`: under their nearest common ancestor, `top`'s branch comes later.
+  private func isDrawn(_ top: NSView, over bottom: NSView) -> Bool {
+    func chain(_ view: NSView) -> [NSView] {
+      var views: [NSView] = []
+      var current: NSView? = view
+      while let next = current { views.insert(next, at: 0); current = next.superview }
+      return views
+    }
+    let a = chain(top), b = chain(bottom)
+    var depth = 0
+    while depth < min(a.count, b.count), a[depth] === b[depth] { depth += 1 }
+    guard depth > 0, depth < a.count, depth < b.count else { return false }
+    let siblings = a[depth - 1].subviews
+    guard let ia = siblings.firstIndex(where: { $0 === a[depth] }),
+          let ib = siblings.firstIndex(where: { $0 === b[depth] }) else { return false }
+    return ia > ib
+  }
+
+  private func dimmedPage() throws -> (tab: TabID, page: NSView, dim: PageDimView) {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Dimmed"))
+    let page = try XCTUnwrap(engine.contentView(for: tab))
+    let dim = try XCTUnwrap(controller.javaScriptDialogs.panel(for: tab)?.pageDim)
+    return (tab, page, dim)
+  }
+
+  /// The dim sits directly above the page in the card, so the card's own surfaces, the slid-out sidebar and the Peek
+  /// stay over it.
+  func testTheDimSitsUnderTheCardsSurfacesTheSidebarAndThePeek() throws {
+    let (tab, page, dim) = try dimmedPage()
+    let card = controller.rootView.card
+    XCTAssertTrue(dim.superview === page.superview, "in the page's own superview")
+    XCTAssertTrue(isDrawn(dim, over: page))
+    XCTAssertTrue(isDrawn(card.toolbar, over: dim), "the Toolbar")
+    XCTAssertTrue(isDrawn(controller.rootView.sidebarOverlay, over: dim), "the slid-out sidebar")
+
+    controller.peek.open(try XCTUnwrap(URL(string: "https://example.com/peeked")), from: tab)
+    let overlay = try XCTUnwrap(controller.peek.overlay, "the Peek opened")
+    XCTAssertTrue(isDrawn(overlay, over: dim), "the Peek card")
+  }
+
+  /// Under the Toolbar the dim starts at the page's top, below the Toolbar, with square corners: the card's clip
+  /// view rounds the card, not the dim.
+  func testTheDimsTopEdgeIsSquareUnderTheToolbar() throws {
+    let card = controller.rootView.card
+    card.showsToolbar = true
+    card.layoutSubtreeIfNeeded()
+    let (_, page, dim) = try dimmedPage()
+    controller.javaScriptDialogs.refresh()
+    XCTAssertFalse(card.toolbar.isHidden)
+    XCTAssertEqual(dim.frame, page.frame, "the page's frame in the same superview")
+    XCTAssertLessThanOrEqual(dim.frame.maxY, card.toolbar.frame.minY + 0.5, "below the Toolbar")
+    XCTAssertEqual(dim.layer?.cornerRadius, 0)
+  }
 }
