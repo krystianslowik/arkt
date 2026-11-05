@@ -12,7 +12,7 @@ public final class SettingsPaneItemView: NSView {
   let pane: SettingsPane
   var onSelect: (@MainActor (SettingsPane) -> Void)?
   public private(set) var isSelected = false
-  private let plate = CALayer()
+  private let plate = ShadowPathLayer()
   private let hoverFill = CALayer()
   private let content = CALayer()
   private let glyph = CALayer()

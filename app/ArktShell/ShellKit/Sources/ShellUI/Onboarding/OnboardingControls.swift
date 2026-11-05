@@ -271,7 +271,7 @@ final class AppearanceSegmentView: NSView {
   }
   private(set) var value: ThemeFlavor = .light
 
-  private let thumb = CALayer()
+  private let thumb = ShadowPathLayer()
   private let focus = CAShapeLayer()
   private let segments: [AppearanceSegment]
 

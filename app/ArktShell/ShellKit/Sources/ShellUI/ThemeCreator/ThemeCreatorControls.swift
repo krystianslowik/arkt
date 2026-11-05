@@ -163,7 +163,7 @@ final class ThemeSliderView: ThemeFocusableView {
   let trackContent = CALayer()
   private let track = CALayer()
   private let trackEdge = CALayer()
-  private let knob = CALayer()
+  private let knob = ShadowPathLayer()
   private let knobEdge = CALayer()
   private var dragging = false
   private static let noActions: [String: CAAction] = ["position": NSNull(), "bounds": NSNull(), "contents": NSNull(),

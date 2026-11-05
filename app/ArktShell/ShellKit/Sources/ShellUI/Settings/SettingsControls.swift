@@ -49,7 +49,7 @@ public final class SettingsSwitch: NSButton {
 
   private let track = CALayer()
   private let onFill = CALayer()
-  private let knob = CALayer()
+  private let knob = ShadowPathLayer()
   fileprivate private(set) var pressing = false
 
   public var isOn: Bool { state == .on }
@@ -305,7 +305,7 @@ final class SettingsSegmentedControl: NSControl {
   let segments: [String]
   private(set) var selectedIndex: Int
   var onChange: (@MainActor (Int) -> Void)?
-  private let plate = CALayer()
+  private let plate = ShadowPathLayer()
   private let labels: [CATextLayer]
   static let segmentSize = NSSize(width: 80, height: 24)
   /// A segment's width: 80 pt, or wider for longer titles (Downloads' "Ask Where to Save").
