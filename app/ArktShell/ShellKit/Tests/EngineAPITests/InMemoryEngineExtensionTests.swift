@@ -247,7 +247,7 @@ struct InMemoryEngineExtensionTests {
     var events: [EngineExtensionEvent] = []
     let token = engine.observeExtensions { events.append($0) }
     let save = ExtensionCommandID(extensionID: "b", name: "save")
-    let shortcut = ExtensionShortcut(key: .letter(.s), modifiers: [.command, .option])
+    let shortcut = ExtensionShortcut(key: .letter(.s), modifiers: [.option, .shift])
     #expect(engine.setExtensionCommandShortcut(save, to: shortcut, scope: .global, replacingConflict: false)
             == .applied)
     let command = engine.extensionCommands.first { $0.id == save }
@@ -316,8 +316,8 @@ struct InMemoryEngineExtensionTests {
     #expect(ExtensionShortcut.Key(character: "E") == .letter(.e))
     #expect(ExtensionShortcut.Key(keyCode: 0x0E) == .letter(.e))
     #expect(ExtensionShortcut.Key(keyCode: 0x7E) == .up)
-    #expect(ExtensionShortcut.Key(keyCode: 0x7A) == .function(1))
-    #expect(ExtensionShortcut.Key(keyCode: 0x5A) == .function(20))
+    #expect(ExtensionShortcut.Key(keyCode: 0x30) == .tab)
+    #expect(ExtensionShortcut.Key(keyCode: 0x7A) == nil)  // F1: not a command key
     #expect(ExtensionShortcut.Key(keyCode: 0x35) == nil)  // Escape
     #expect(ExtensionShortcut(key: .letter(.e), modifiers: .command)
             != ExtensionShortcut(key: .letter(.e), modifiers: .control))
@@ -336,16 +336,34 @@ struct InMemoryEngineExtensionTests {
     #expect(set(.letter(.k), []) == .rejected(.notAllowed))
     #expect(set(.letter(.k), .shift) == .rejected(.notAllowed))
     #expect(set(.letter(.k), [.control, .option]) == .rejected(.notAllowed))
+    #expect(set(.letter(.k), [.command, .option]) == .rejected(.notAllowed))
     #expect(set(.mediaPlayPause, .command) == .rejected(.notAllowed))
-    #expect(set(.function(24), .command) == .rejected(.noKeyCode))
-    engine.heldGlobalShortcuts = [ExtensionShortcut(key: .letter(.k), modifiers: [.command, .option])]
-    #expect(set(.letter(.k), [.command, .option], .global) == .rejected(.globalShortcutTaken))
+    engine.heldGlobalShortcuts = [ExtensionShortcut(key: .letter(.k), modifiers: [.command, .shift])]
+    #expect(set(.letter(.k), [.command, .shift], .global) == .rejected(.globalShortcutTaken))
     #expect(engine.extensionCommands.first { $0.id == save }?.shortcut == nil)
     #expect(events.isEmpty)
 
     #expect(set(.mediaPlayPause, []) == .applied)
-    #expect(set(.letter(.k), [.command, .option]) == .applied)
+    #expect(set(.letter(.k), [.command, .shift]) == .applied)
+    #expect(set(.letter(.k), [.option]) == .applied)
+    #expect(set(.tab, [.option, .shift]) == .applied)
     token.cancel()
+  }
+
+  @Test func mediaKeysAreRejectedOnActionCommands() {
+    let engine = InMemoryEngine()
+    let names = ["_execute_action", "_execute_browser_action", "_execute_page_action"]
+    engine.setExtensionCommands(names.map {
+      ExtensionCommand(id: ExtensionCommandID(extensionID: "a", name: $0), extensionName: "A", description: $0)
+    })
+    for name in names {
+      let id = ExtensionCommandID(extensionID: "a", name: name)
+      #expect(engine.setExtensionCommandShortcut(id, to: ExtensionShortcut(key: .mediaStop, modifiers: []),
+                                                 scope: .inApp, replacingConflict: false) == .rejected(.notAllowed))
+    }
+    let action = ExtensionCommandID(extensionID: "a", name: "_execute_action")
+    #expect(engine.setExtensionCommandShortcut(action, to: ExtensionShortcut(key: .letter(.y), modifiers: .command),
+                                               scope: .inApp, replacingConflict: false) == .applied)
   }
 
   @Test func scopeAloneChangesWithNoShortcut() {

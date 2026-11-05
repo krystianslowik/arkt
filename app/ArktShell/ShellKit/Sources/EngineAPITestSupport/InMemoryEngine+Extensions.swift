@@ -120,7 +120,7 @@ extension InMemoryEngine {
                                           scope: ExtensionCommandScope,
                                           replacingConflict: Bool) -> ExtensionShortcutResult {
     guard let index = extensionCommands.firstIndex(where: { $0.id == id }) else { return .unknownCommand }
-    if let shortcut, let rejection = rejection(of: shortcut, scope: scope) { return .rejected(rejection) }
+    if let shortcut, let rejection = rejection(of: shortcut, for: id, scope: scope) { return .rejected(rejection) }
     let holder = shortcut.flatMap { key in
       extensionCommands.firstIndex { $0.id != id && $0.shortcut == key }
     }
@@ -135,15 +135,20 @@ extension InMemoryEngine {
     return .applied
   }
 
-  /// Chrome's rules for a command shortcut (`extensions/common/command.cc`), and global shortcuts held elsewhere.
-  private func rejection(of shortcut: ExtensionShortcut, scope: ExtensionCommandScope) -> ExtensionShortcutRejection? {
-    if case .function(let number) = shortcut.key, !(1...20).contains(number) { return .noKeyCode }
+  /// The commands that run an extension's action, which take no media key.
+  private static let actionCommandNames: Set<String> = ["_execute_action", "_execute_browser_action",
+                                                        "_execute_page_action"]
+
+  /// Chrome's rules for a command shortcut (`ui::Command::ParseImpl` with Ctrl-Alt not allowed), and global shortcuts
+  /// held elsewhere.
+  private func rejection(of shortcut: ExtensionShortcut, for id: ExtensionCommandID,
+                         scope: ExtensionCommandScope) -> ExtensionShortcutRejection? {
     let modifiers = shortcut.modifiers
     if shortcut.key.isMedia {
-      if !modifiers.isEmpty { return .notAllowed }
+      if !modifiers.isEmpty || Self.actionCommandNames.contains(id.name) { return .notAllowed }
     } else {
       if modifiers.isDisjoint(with: [.command, .option, .control]) { return .notAllowed }
-      if modifiers.isSuperset(of: [.control, .option]) { return .notAllowed }
+      if modifiers.contains(.option), !modifiers.isDisjoint(with: [.command, .control]) { return .notAllowed }
     }
     if scope == .global, heldGlobalShortcuts.contains(shortcut) { return .globalShortcutTaken }
     return nil

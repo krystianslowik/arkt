@@ -160,19 +160,19 @@ public struct ExtensionShortcut: Hashable, Sendable {
     case zero, one, two, three, four, five, six, seven, eight, nine
   }
 
-  /// The keys a `chrome.commands` shortcut can name (Chromium's `ParseImpl` in `extensions/common/command.cc`), plus
-  /// F-keys.
+  /// Exactly the keys a `chrome.commands` shortcut can name (Chromium's `ui::Command::ParseImpl`): A to Z, 0 to 9,
+  /// Comma, Period, the arrows, Insert, Delete, Home, End, Page Up, Page Down, Space, Tab and four media keys. A
+  /// recorder takes letters by character and every other key by key code, so the digit row of an AZERTY layout (which
+  /// types "&" unshifted) still records digits.
   public enum Key: Hashable, Sendable {
     case letter(Letter)
     case digit(Digit)
     case comma, period
     case up, down, left, right
-    case home, end, pageUp, pageDown, space, insert, delete
-    /// F1 to F20, the function keys a Mac keyboard reports. Any other number has no key code.
-    case function(Int)
+    case home, end, pageUp, pageDown, space, tab, insert, delete
     case mediaNextTrack, mediaPreviousTrack, mediaPlayPause, mediaStop
 
-    /// Media keys take no modifiers; every other key needs Command, Option or Control.
+    /// Media keys take no modifiers, and no `_execute_*` command takes one; every other key needs a modifier.
     public var isMedia: Bool {
       switch self {
       case .mediaNextTrack, .mediaPreviousTrack, .mediaPlayPause, .mediaStop: true
@@ -196,7 +196,7 @@ public struct ExtensionShortcut: Hashable, Sendable {
     }
 
     /// The key from a macOS virtual key code (`NSEvent.keyCode`, Carbon's `kVK_*`), which Shift and the layout do not
-    /// change. Letters, digits, comma and period by their ANSI position; named keys and F1 to F20 on any layout. Nil
+    /// change. Letters, digits, comma and period by their ANSI position; named keys on any layout. Nil
     /// for any other code. Media keys arrive as system-defined events, not key codes.
     public init?(keyCode: UInt16) {
       if let key = Self.byKeyCode[keyCode] { self = key } else { return nil }
@@ -217,12 +217,10 @@ public struct ExtensionShortcut: Hashable, Sendable {
       for (code, digit) in digits { map[code] = .digit(digit) }
       let named: [(UInt16, Key)] = [
         (0x2B, .comma), (0x2F, .period), (0x31, .space), (0x7E, .up), (0x7D, .down), (0x7B, .left), (0x7C, .right),
-        (0x73, .home), (0x77, .end), (0x74, .pageUp), (0x79, .pageDown), (0x72, .insert), (0x75, .delete),
+        (0x73, .home), (0x77, .end), (0x74, .pageUp), (0x79, .pageDown), (0x30, .tab), (0x72, .insert),
+        (0x75, .delete),
       ]
       for (code, key) in named { map[code] = key }
-      let functions: [UInt16] = [0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D, 0x67, 0x6F, 0x69, 0x6B,
-                                 0x71, 0x6A, 0x40, 0x4F, 0x50, 0x5A]
-      for (index, code) in functions.enumerated() { map[code] = .function(index + 1) }
       return map
     }()
   }
@@ -267,10 +265,12 @@ public enum ExtensionShortcutResult: Equatable, Sendable {
 
 /// Why the engine refused a shortcut (`ExtensionShortcutResult.rejected`).
 public enum ExtensionShortcutRejection: Equatable, Sendable {
-  /// The key has no `ui::KeyboardCode` (an F-key number past F20).
+  /// The engine could not turn the shortcut into a `ui::KeyboardCode` accelerator: its catch-all for a key it cannot
+  /// map. Every `ExtensionShortcut.Key` has a code, so InMemoryEngine never returns it.
   case noKeyCode
-  /// A combination Chrome forbids: a non-media key without Command, Option or Control, Control with Option, or a media
-  /// key with modifiers.
+  /// A combination Chrome forbids (`ui::Command::ParseImpl`, Ctrl-Alt not allowed): a non-media key without Command,
+  /// Option or Control; Option with Command or Control; a media key with modifiers; a media key on `_execute_action`,
+  /// `_execute_browser_action` or `_execute_page_action`.
   case notAllowed
   /// A global shortcut another application or the system already holds.
   case globalShortcutTaken
