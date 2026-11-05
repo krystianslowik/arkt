@@ -1,21 +1,18 @@
+import Motion
 import QuartzCore
 
 /// Downloads motion (design/downloads, Motion), as data. Transform and opacity only; the progress fill's own change is a
 /// 0.5 s linear ease on every update, retargeted from where it is. Reduce Motion keeps opacity changes and jumps the
 /// progress to its value.
 enum DownloadsMotion {
-  /// A cubic-bezier as its four control numbers, so a test can read it.
-  struct Curve: Equatable {
-    var x1, y1, x2, y2: Float
-    var timingFunction: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: x1, y1, x2, y2) }
-  }
+  typealias Curve = MotionCurve
 
   /// The design system's `firm` curve for rows and cards.
-  static let firm = Curve(x1: 0.25, y1: 1, x2: 0.5, y2: 1)
+  static let firm = Curve(0.25, 1, 0.5, 1)
   /// The popover's `firm-fast` curve.
-  static let firmFast = Curve(x1: 0.2, y1: 1, x2: 0.4, y2: 1)
+  static let firmFast = Curve(0.2, 1, 0.4, 1)
   /// Strong ease-out for removals and the swap.
-  static let easeOut = Curve(x1: 0.23, y1: 1, x2: 0.32, y2: 1)
+  static let easeOut = MotionCurve.strongEaseOut
 
   struct Step: Equatable {
     /// Points below the resting place at the start (rows) or 0.

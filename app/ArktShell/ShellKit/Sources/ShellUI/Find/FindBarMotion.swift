@@ -1,3 +1,4 @@
+import Motion
 import QuartzCore
 
 /// The find bar's motion, as data (design/find-in-page/README.md, Motion). The bar opens from the keyboard, often, so
@@ -5,20 +6,12 @@ import QuartzCore
 /// field once. Reduce Motion keeps the fade and drops the movement and the nudge. Transform and opacity only; layout
 /// never animates.
 enum FindBarMotion {
-  struct Curve: Equatable {
-    let c1x: Float, c1y: Float, c2x: Float, c2y: Float
-    init(_ c1x: Float, _ c1y: Float, _ c2x: Float, _ c2y: Float) {
-      self.c1x = c1x; self.c1y = c1y; self.c2x = c2x; self.c2y = c2y
-    }
+  typealias Curve = MotionCurve
 
-    /// A new instance each time: the class is not Sendable.
-    var timingFunction: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: c1x, c1y, c2x, c2y) }
-  }
-
-  /// `cubic-bezier(0.23, 1, 0.32, 1)`, the design's `--ease-out`.
-  static let strongEaseOut = Curve(0.23, 1, 0.32, 1)
+  /// The design's `--ease-out`.
+  static let strongEaseOut = MotionCurve.strongEaseOut
   /// CSS `ease-out`, the Reduce Motion fade.
-  static let systemEaseOut = Curve(0, 0, 0.58, 1)
+  static let systemEaseOut = MotionCurve.systemEaseOut
 
   struct Entrance: Equatable {
     /// Points above the resting place where the bar starts (the design's `translateY(-6px)`, y up here).

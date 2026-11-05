@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 /// The close (X) at the top trailing corner of a split pane (#388, BH-121 "the X above a pane"): closes that pane the
 /// way Cmd-W closes the focused one. Shown while the pointer is over the pane or the button has keyboard focus.
@@ -14,7 +15,7 @@ public final class SplitPaneCloseButton: NSButton {
   /// Distance from the card's top and trailing edges while the Toolbar is off (inside the 10 pt corner radius).
   static let inset: CGFloat = 8
   /// Full fade, 0 to 1 or back; an interrupted fade covers only what is left (`HoverCloseFade`).
-  static let fadeDuration = 0.15
+  static let fadeDuration = FadeDuration.standard
 
   /// Shown: visible and clickable. Hover and keyboard focus show it; the pane card decides.
   public private(set) var isRevealed = false
@@ -82,7 +83,7 @@ public final class SplitPaneCloseButton: NSButton {
     let start = layer?.presentation().map { CGFloat($0.opacity) } ?? alphaValue
     NSAnimationContext.runAnimationGroup { context in
       context.duration = HoverCloseFade.duration(from: start, to: target, full: Self.fadeDuration)
-      context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)   // strong ease-out
+      context.timingFunction = MotionCurve.strongEaseOut.timingFunction
       context.allowsImplicitAnimation = true
       animator().alphaValue = target
     }

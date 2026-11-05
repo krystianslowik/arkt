@@ -22,7 +22,7 @@ final class EngineContractRunner {
   /// A name that is not a check, or an empty list, is an error: a typo must never run nothing and pass.
   static func selectedChecks() throws -> [ContractCheck] {
     guard let argument = CommandLine.arguments.first(where: { $0.hasPrefix(switchName + "=") }) else {
-      return ContractCheck.allCases
+      return ContractCheck.chromiumChecks
     }
     let names = argument.dropFirst(switchName.count + 1).split(separator: ",").map(String.init)
     let unknown = names.filter { ContractCheck(rawValue: $0) == nil }

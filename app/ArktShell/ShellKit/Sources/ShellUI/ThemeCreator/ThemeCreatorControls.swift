@@ -62,7 +62,7 @@ public enum ThemeCreatorMotion {
   /// Small state changes inside the popover (the colour-count button's swatches, a dot leaving the pad).
   static let stateDuration: TimeInterval = 0.2
   /// The strong ease-out for entering and state changes.
-  @MainActor static var easeOut: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1) }
+  @MainActor static var easeOut: CAMediaTimingFunction { MotionCurve.strongEaseOut.timingFunction }
 }
 
 // MARK: - Focus

@@ -164,12 +164,14 @@ extension ShellWindowController {
     return true
   }
 
-  /// The frame, in the root view, of the one pane still showing a page, if exactly one is.
+  /// The frame, in the root view, of the one pane still showing a page, if exactly one is: where it is drawn, so a
+  /// close during a running reflow grows the card from there (#602).
   private func lastPaneFrame() -> CGRect? {
     let container = rootView.split
-    let shown = container.paneCards.filter { $0.contentView != nil }
-    guard shown.count == 1, let card = shown.first else { return nil }
-    return rootView.convert(card.frame, from: container)
+    let drawn = container.presentedPaneFrames
+    let shown = container.paneCards.indices.filter { container.paneCards[$0].contentView != nil }
+    guard shown.count == 1, let index = shown.first, drawn.indices.contains(index) else { return nil }
+    return rootView.convert(drawn[index], from: container)
   }
 
   /// The split row's pane to focus: the last focused one unless its page was closed, else the first open pane.

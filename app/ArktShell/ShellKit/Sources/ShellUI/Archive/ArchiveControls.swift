@@ -1,17 +1,18 @@
 import AppKit
+import Motion
 
 // MARK: - Motion
 
 /// The Archive window's two small motions (design section 10), both transform or opacity only.
 @MainActor
 enum ArchiveMotion {
-  /// The strong ease-out of the design system: `cubic-bezier(0.23, 1, 0.32, 1)`.
-  static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+  /// The strong ease-out of the design system.
+  static let easeOut = MotionCurve.strongEaseOut.timingFunction
   /// Press feedback on a pill: scale 0.97 for 160 ms.
   static let pressDuration: CFTimeInterval = 0.16
   static let pressScale: CGFloat = 0.97
   /// The chip strip fades in and out in 150 ms; layout never animates.
-  static let fadeDuration: CFTimeInterval = 0.15
+  static let fadeDuration: CFTimeInterval = FadeDuration.standard
   /// Test seam and Reduce Motion: AppKit's setting unless overridden.
   static var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
