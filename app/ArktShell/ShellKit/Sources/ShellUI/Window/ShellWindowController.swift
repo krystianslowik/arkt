@@ -108,9 +108,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// the preview closures below read it when a row is selected.
   public var pageThumbnails: PageThumbnails?
   var nodeByTab: [TabID: NodeID] = [:]
-  /// The one page of a blank or incognito window (#487): an engine tab with no sidebar row, so a visit never reaches
-  /// the shared sidebar. Nil in a normal window.
-  var privateTab: TabID?
+  /// A blank or incognito window (#487): its pages have no sidebar rows, so nothing it opens reaches the shared
+  /// sidebar.
+  var isPrivateWindow = false
+  /// The pages of a blank or incognito window (#487, #559): engine tabs with no sidebar row, the command bar's page and
+  /// the ones the engine opened (`target=_blank`, `window.open`). The shown one is last, the one before it is shown
+  /// when it closes. Empty in a normal window.
+  var privateTabs: [TabID] = []
+  /// The private page shown, the one a command-bar visit navigates. Nil when the window shows none.
+  var privateTab: TabID? { privateTabs.last }
   /// Where Copy Link writes and Paste URL as New Tab reads (#105); tests use a private pasteboard.
   var linkPasteboard: NSPasteboard = .general
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
@@ -821,7 +827,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .tabClosed(let tab, let reason):
       tabDidClose(tab, node: node, reason: reason)
     case .activeTabChanged(let tab):
-      engineDidActivate(tab, node: node)
+      engineDidActivate(tab) { activate(node: node) }
     case .closeCancelled(let tab):
       closeWasCancelled(tab, node: node)
     case .audibleChanged(let tab, _), .mutedChanged(let tab, _):
