@@ -391,6 +391,11 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     get { hoverResync.lookup }
     set { hoverResync.lookup = newValue }
   }
+  /// How a coalesced hover resync waits for the next main-queue turn; tests run it by hand.
+  var hoverResyncEnqueue: @MainActor (@escaping @MainActor () -> Void) -> Void {
+    get { hoverResync.enqueue }
+    set { hoverResync.enqueue = newValue }
+  }
 
   public init(source: any SidebarSource, profile: String) {
     self.source = source

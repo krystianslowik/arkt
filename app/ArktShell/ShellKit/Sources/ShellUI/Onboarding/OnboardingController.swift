@@ -78,6 +78,10 @@ public final class OnboardingController {
   public var onFinish: (@MainActor () -> Void)?
   /// Test seam: runs instead of the `NSAlert` sheet; answer true to confirm Skip setup.
   public var confirmSkip: (@MainActor (@escaping @MainActor (Bool) -> Void) -> Void)?
+  /// Runs `work` after `delay` seconds; the finish's reveal and browser handoff wait on it. Tests run it by hand.
+  var schedule: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { work() }
+  }
 
   let view: OnboardingView
   private weak var window: ShellWindowController?
@@ -783,7 +787,7 @@ public final class OnboardingController {
     if options.mode == .firstRun { land(on: landing, window: window) }
     view.passesEventsThrough = true
     let reveal: CFTimeInterval = reduceMotion ? 0 : 0.65
-    DispatchQueue.main.asyncAfter(deadline: .now() + reveal) { [weak self] in
+    schedule(reveal) { [weak self] in
       // The browser shows through: the brand surface and the wash fade, the field stays for its fold.
       guard let self else { return }
       for layer in [self.view.surface, self.view.wash] as [CALayer] {
@@ -791,7 +795,7 @@ public final class OnboardingController {
       }
     }
     let commandBarDelay: CFTimeInterval = reduceMotion ? 0.05 : 0.9
-    DispatchQueue.main.asyncAfter(deadline: .now() + commandBarDelay) { [weak self] in
+    schedule(commandBarDelay) { [weak self] in
       guard let self else { return }
       browserShown = true
       removeOverlay()
