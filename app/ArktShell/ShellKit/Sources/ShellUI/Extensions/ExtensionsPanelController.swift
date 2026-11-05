@@ -17,7 +17,7 @@ public final class ExtensionsPanelController: NSObject {
   private let engineWindow: @MainActor () -> EngineWindowID?
   private(set) var panel: DialogWindow?
   private(set) var contentView: ExtensionsPanelView?
-  private let container = NSView(frame: .zero)
+  private let container = ExtensionsPanelContainer(frame: .zero)
   private var monitor: Any?
   /// Reduce Motion, read when the panel opens and for each drag (tests set it).
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -36,6 +36,7 @@ public final class ExtensionsPanelController: NSObject {
     self.button = button
     self.engineWindow = engineWindow
     super.init()
+    container.onAppearanceChange = { [weak self] in self?.restyleContainer() }
     button.target = self
     button.action = #selector(buttonPressed(_:))
   }
@@ -52,13 +53,20 @@ public final class ExtensionsPanelController: NSObject {
   // MARK: Opening
 
   @objc private func buttonPressed(_ sender: Any?) {
-    if isShown { hide(keyboard: false) } else { show() }
+    // Space or Return on the focused button: the keyboard goes into the first row.
+    if isShown { hide(keyboard: false) } else { show(fromKeyboard: NSApp.currentEvent?.type == .keyDown) }
   }
 
-  func show() {
+  /// Opens the panel. `fromKeyboard`: the first row (or Browse the Web Store) takes the focus; from a click nothing
+  /// does, so no focus ring shows until Tab.
+  func show(fromKeyboard: Bool = false) {
     guard !isShown, let button, let parent = button.window else { return }
     let view = ExtensionsPanelView(frame: .zero)
     view.reduceMotion = { [weak self] in self?.reduceMotion() ?? false }
+    view.increaseContrast = { [weak self] in self?.increaseContrast() ?? false }
+    view.scheduleSettleTimeout = { [weak self] delay, action in
+      (self?.schedule ?? ExtensionsPanelController.defaultSchedule)(delay, action)
+    }
     wire(view)
     contentView = view
     view.reload(ExtensionsPanelModel(actions: actions))
@@ -88,6 +96,13 @@ public final class ExtensionsPanelController: NSObject {
     parent.addChildWindow(window, ordered: .above)
     window.orderFront(nil)
     window.makeKey()                                  // Tab enters the rows; no ring until the keyboard is used
+    if fromKeyboard {
+      if let first = view.displayedRowIDs.first.flatMap(view.row(for:)) {
+        window.makeFirstResponder(first.runButton)
+      } else if view.state == .empty {
+        window.makeFirstResponder(view.browseButton)
+      }
+    }
     button.isOpen = true
     installMonitor()
     playAppearance()
@@ -96,7 +111,6 @@ public final class ExtensionsPanelController: NSObject {
   func hide(keyboard: Bool) {
     guard let window = panel else { return }
     if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
-    let wasKey = window.isKeyWindow
     panel = nil
     contentView = nil
     button?.isOpen = false
@@ -112,14 +126,42 @@ public final class ExtensionsPanelController: NSObject {
         window.animator().alphaValue = 0
       }, completionHandler: { MainActor.assumeIsolated { leave() } })
     }
-    if wasKey || keyboard { button?.window?.makeFirstResponder(button) }
+    if keyboard { button?.window?.makeFirstResponder(button) }
   }
 
   /// The engine changed the window's actions (a pin, a move, an install, the active tab): the open panel follows.
+  /// The engine window went away (the window closes or waits for its next page): the panel closes instead of showing
+  /// the empty state.
   func refresh() {
     guard let view = contentView, let window = panel, let button, let parent = button.window else { return }
+    guard engineWindow() != nil else { hide(keyboard: false); return }
     view.reload(ExtensionsPanelModel(actions: actions))
     place(window, view: view, in: parent, anchoredTo: button)
+  }
+
+  /// The browser window resized: the panel keeps its place above the bar and its height cap.
+  func windowDidResize() {
+    guard let view = contentView, let window = panel, let button, let parent = button.window else { return }
+    place(window, view: view, in: parent, anchoredTo: button)
+  }
+
+  /// The sidebar was hidden or resized. Hidden, the button is gone, so the panel goes too; resized, it moves along.
+  func sidebarDidChange(isVisible: Bool) {
+    guard isShown else { return }
+    if isVisible { windowDidResize() } else { hide(keyboard: false) }
+  }
+
+  /// The window enters full screen: its frame and the sidebar move, so the panel closes.
+  func windowWillEnterFullScreen() { hide(keyboard: false) }
+
+  /// Increase Contrast, read on each reload (tests set it).
+  var increaseContrast: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
+  /// Runs an action after a delay: the timeout for a drop the engine never answers. Tests replace it with a clock they
+  /// step by hand.
+  var schedule: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void = defaultSchedule
+
+  static func defaultSchedule(_ delay: TimeInterval, _ action: @escaping @MainActor () -> Void) {
+    Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in MainActor.assumeIsolated { action() } }
   }
 
   private func wire(_ view: ExtensionsPanelView) {
@@ -139,13 +181,18 @@ public final class ExtensionsPanelController: NSObject {
     }
     view.menuProvider = { [weak self] id in
       guard let self, let extensions = self.extensions, let window = self.engineWindow() else { return nil }
-      return ExtensionContextMenu.menu(
+      let menu = ExtensionContextMenu.menu(
         forAction: id, in: window, engine: extensions,
         onManage: { [weak self] _ in
           self?.hide(keyboard: true)
           self?.onManage?()
         },
         onRemove: { [weak self] action in self?.onRemove?(action) })
+      // Remove from Arkt... needs the remove sheet; until the app provides it the item stays disabled.
+      if self.onRemove == nil {
+        for item in menu?.items ?? [] where item.tag == ExtensionContextCommand.remove.rawValue { item.isEnabled = false }
+      }
+      return menu
     }
   }
 
@@ -229,5 +276,15 @@ public final class ExtensionsPanelController: NSObject {
     var found: [String: CABasicAnimation] = [:]
     for key in layer.animationKeys() ?? [] { found[key] = layer.animation(forKey: key) as? CABasicAnimation }
     return found
+  }
+}
+
+/// The panel's rounded container; it restyles its fill and edge when the appearance changes.
+@MainActor
+final class ExtensionsPanelContainer: NSView {
+  var onAppearanceChange: (@MainActor () -> Void)?
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    onAppearanceChange?()
   }
 }

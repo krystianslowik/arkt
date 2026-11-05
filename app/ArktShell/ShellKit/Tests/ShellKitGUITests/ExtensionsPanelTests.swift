@@ -89,6 +89,71 @@ final class ExtensionsPanelTests: XCTestCase {
     XCTAssertTrue(button.window?.firstResponder === button)
   }
 
+  func testAMouseDismissalLeavesTheFirstResponderAlone() throws {
+    open([action("a")])
+    let parent = try XCTUnwrap(button.window)
+    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+    parent.contentView?.addSubview(field)
+    parent.makeFirstResponder(field)
+    let responder = parent.firstResponder
+    panel.handleMouseDown(in: parent, at: NSPoint(x: 600, y: 400))
+    XCTAssertFalse(panel.isShown)
+    XCTAssertTrue(parent.firstResponder === responder, "the click elsewhere decides the focus, not the panel")
+    field.removeFromSuperview()
+  }
+
+  func testOpenedFromTheKeyboardTheFirstRowTakesTheFocus() throws {
+    engine.setExtensionActions([action("a", pinned: true), action("b")], in: window)
+    panel.show(fromKeyboard: true)
+    XCTAssertTrue(panel.panel?.firstResponder === (try row("a")).runButton)
+    panel.hide(keyboard: true)
+    engine.setExtensionActions([], in: window)
+    panel.show(fromKeyboard: true)
+    XCTAssertTrue(panel.panel?.firstResponder === view.browseButton)
+  }
+
+  func testTheEngineWindowGoingAwayClosesThePanel() throws {
+    open([action("a")])
+    engine.closeWindow(window)
+    XCTAssertFalse(panel.isShown, "no empty state for a window that has no engine window")
+  }
+
+  func testTheSidebarHidingAndFullScreenCloseThePanel() throws {
+    open([action("a")])
+    harness.controller.toggleSidebarVisibility(nil)
+    XCTAssertFalse(panel.isShown)
+    harness.controller.toggleSidebarVisibility(nil)
+    button.performClick(nil)
+    XCTAssertTrue(panel.isShown)
+    harness.controller.windowWillEnterFullScreen(Notification(name: NSWindow.willEnterFullScreenNotification))
+    XCTAssertFalse(panel.isShown)
+  }
+
+  func testShrinkingTheWindowKeepsThePanelAboveTheBarAndInside() throws {
+    open((0..<8).map { action("x\($0)", pinned: $0 < 4) })
+    let parent = try XCTUnwrap(button.window)
+    let tall = try XCTUnwrap(panel.panel).frame
+    XCTAssertFalse(view.scrolls)
+    parent.setFrame(NSRect(x: parent.frame.minX, y: parent.frame.minY, width: 640, height: 420), display: true)
+    harness.controller.windowDidResize(Notification(name: NSWindow.didResizeNotification))
+    let frame = try XCTUnwrap(panel.panel).frame
+    let anchor = parent.convertToScreen(button.convert(button.bounds, to: nil))
+    XCTAssertLessThan(frame.height, tall.height)
+    XCTAssertEqual(frame.minY, anchor.maxY + ExtensionsPanelMetrics.gap, accuracy: 0.5)
+    XCTAssertLessThanOrEqual(frame.maxY, parent.frame.maxY - ExtensionsPanelMetrics.topMargin + 0.5)
+    XCTAssertTrue(view.scrolls)
+  }
+
+  func testIncreaseContrastEdgesTheRows() throws {
+    panel.increaseContrast = { true }
+    open([action("a")])
+    XCTAssertTrue(try row("a").showsContrastEdge)
+    panel.hide(keyboard: true)
+    panel.increaseContrast = { false }
+    button.performClick(nil)
+    XCTAssertFalse(try row("a").showsContrastEdge)
+  }
+
   func testAClickElsewhereInTheWindowClosesButNotOneInAnotherWindow() throws {
     open([action("a")])
     let popup = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 50, height: 50), styleMask: .borderless,
@@ -202,7 +267,7 @@ final class ExtensionsPanelTests: XCTestCase {
     XCTAssertTrue(try row("b").grip.isHidden)
   }
 
-  func testTheMoreButtonAndRightClickShowTheEnginesContextMenu() throws {
+  func testTheMoreButtonAndRightClickShowTheEnginesContextMenu() async throws {
     open([action("a", pinned: true)])
     let a = try row("a")
     var shown: [String] = []
@@ -210,6 +275,7 @@ final class ExtensionsPanelTests: XCTestCase {
     XCTAssertEqual(a.moreButton.accessibilityLabel(), "More for A")
     a.moreButton.performClick(nil)
     XCTAssertTrue(a.accessibilityPerformShowMenu())
+    await a.pendingPresentation?.value                 // the show-menu action pops the menu up on the next turn
     XCTAssertEqual(shown, ["A", "A"], "the engine's menu, its name as the header")
     let rightClick = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
                                                       timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
@@ -224,6 +290,32 @@ final class ExtensionsPanelTests: XCTestCase {
     a.runButton.mouseDown(with: ctrlClick)
     XCTAssertEqual(shown.count, 3, "Ctrl-click shows the menu")
     XCTAssertTrue(engine.ranExtensionActions.isEmpty, "and does not run the action")
+  }
+
+  func testRemoveIsDisabledUntilTheAppProvidesTheRemoveSheet() throws {
+    open([action("a")])
+    let a = try row("a")
+    let rightClick = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
+                                                      timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                                      clickCount: 1, pressure: 1))
+    let remove = { (menu: NSMenu?) in menu?.items.first { $0.tag == ExtensionContextCommand.remove.rawValue } }
+    XCTAssertEqual(remove(a.menu(for: rightClick))?.isEnabled, false)
+    panel.onRemove = { _ in }
+    XCTAssertEqual(remove(a.menu(for: rightClick))?.isEnabled, true)
+  }
+
+  func testAControlClickOnTheGripIsNotADrag() throws {
+    open([action("a", pinned: true), action("b", pinned: true)])
+    let a = try row("a")
+    var began = false
+    a.grip.onBegin = { _ in began = true }
+    a.menuProvider = nil                    // AppKit would run the real context menu's modal tracking loop
+    let ctrlClick = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: .control,
+                                                     timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                                     clickCount: 1, pressure: 1))
+    a.grip.mouseDown(with: ctrlClick)
+    XCTAssertFalse(began)
+    XCTAssertFalse(a.grip.holdsCursor)
   }
 
   // MARK: Order without a drag
@@ -328,6 +420,73 @@ final class ExtensionsPanelTests: XCTestCase {
     let settle = try XCTUnwrap(try row("a").layer?.animation(forKey: "settle") as? CABasicAnimation)
     XCTAssertEqual(settle.duration, ExtensionsPanelMotion.settleDuration, accuracy: 1e-9)
     XCTAssertEqual(try row("a").layer?.transform.m42 ?? 1, 0, accuracy: 1e-6, "the model value is the slot")
+  }
+
+  func testADropWaitsForAnEngineThatAnswersLater() throws {
+    var pendingTimeouts: [@MainActor () -> Void] = []
+    panel.schedule = { _, action in pendingTimeouts.append(action) }
+    open([action("a", pinned: true), action("b", pinned: true)])
+    var moves: [(String, Int)] = []
+    view.onMove = { id, index in moves.append((id, index)) }    // a batching engine: the order arrives later
+    let a = try row("a")
+    view.beginDrag(a, at: NSPoint(x: 8, y: a.frame.midY))
+    view.continueDrag(to: NSPoint(x: 8, y: try row("b").frame.maxY + 2))
+    let dropped = a.layer?.transform.m42 ?? 0
+    view.endDrag()
+    XCTAssertEqual(moves.map(\.0), ["a"])
+    XCTAssertTrue(view.isAwaitingDrop)
+    XCTAssertEqual(a.layer?.transform.m42 ?? 0, dropped, accuracy: 0.5, "the row stays where it was dropped")
+    XCTAssertEqual(pendingTimeouts.count, 1)
+
+    engine.movePinnedExtension("a", to: 1)                     // the engine's batch arrives
+    XCTAssertFalse(view.isAwaitingDrop)
+    XCTAssertEqual(view.displayedRowIDs, ["b", "a"])
+    XCTAssertEqual(a.layer?.transform.m42 ?? 1, 0, accuracy: 1e-6)
+    XCTAssertNotNil(a.layer?.animation(forKey: "settle"))
+    pendingTimeouts.forEach { $0() }                            // a late timeout changes nothing
+    XCTAssertNotNil(a.layer?.animation(forKey: "settle"))
+  }
+
+  func testADropTheEngineIgnoresSettlesBackAfterTheTimeout() throws {
+    var pendingTimeouts: [@MainActor () -> Void] = []
+    panel.schedule = { _, action in pendingTimeouts.append(action) }
+    open([action("a", pinned: true), action("b", pinned: true)])
+    view.onMove = { _, _ in }
+    let a = try row("a")
+    view.beginDrag(a, at: NSPoint(x: 8, y: a.frame.midY))
+    view.continueDrag(to: NSPoint(x: 8, y: try row("b").frame.maxY + 2))
+    view.endDrag()
+    XCTAssertTrue(view.isAwaitingDrop)
+    pendingTimeouts.forEach { $0() }
+    XCTAssertFalse(view.isAwaitingDrop)
+    XCTAssertEqual(view.displayedRowIDs, ["a", "b"])
+    XCTAssertEqual(a.layer?.transform.m42 ?? 1, 0, accuracy: 1e-6)
+    XCTAssertNotNil(a.layer?.animation(forKey: "settle"), "it eases back to its slot")
+  }
+
+  func testReduceMotionIsReadOnceForTheWholeDrag() throws {
+    var reduced = false
+    panel.reduceMotion = { reduced }
+    open([action("a", pinned: true), action("b", pinned: true)])
+    let a = try row("a")
+    view.beginDrag(a, at: NSPoint(x: 8, y: a.frame.midY))
+    reduced = true
+    view.continueDrag(to: NSPoint(x: 8, y: a.frame.midY + 3))
+    XCTAssertEqual(a.layer?.transform.m11 ?? 0, ExtensionsPanelMotion.liftScale, accuracy: 1e-6)
+    view.endDrag()
+  }
+
+  func testARowRemovedMidDragReleasesTheCursor() throws {
+    open([action("a", pinned: true), action("b", pinned: true)])
+    let a = try row("a")
+    let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [],
+                                                timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                                clickCount: 1, pressure: 1))
+    a.grip.mouseDown(with: down)
+    XCTAssertTrue(a.grip.holdsCursor)
+    engine.setExtensionActions([action("b", pinned: true)], in: window)
+    XCTAssertFalse(a.grip.holdsCursor)
+    XCTAssertNil(view.dragGap)
   }
 
   // MARK: Worst cases

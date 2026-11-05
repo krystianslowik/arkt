@@ -29,6 +29,10 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
   var onMove: (@MainActor (ExtensionsPanelRow, Int) -> Bool)?
 
   var isPinned: Bool { action.isPinned }
+  /// Increase Contrast: a 1 pt edge around the row.
+  var showsContrastEdge = false {
+    didSet { if showsContrastEdge != oldValue { restyle() } }
+  }
   var showsAttentionDot: Bool { !dot.isHidden }
   var showsIconImage: Bool { tile.contents != nil }
 
@@ -206,6 +210,8 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
       dot.borderColor = AlertTokens.dialogSurface.resolve(flavor).cgColor
       dot.borderWidth = 1.5
       background.backgroundColor = isLifted ? AlertTokens.dialogSurface.resolve(flavor).cgColor : nil
+      background.borderWidth = showsContrastEdge ? 1 : 0
+      background.borderColor = AlertTokens.increasedContrastEdge.resolve(flavor).cgColor
       background.shadowColor = shadow.color.resolve(flavor).cgColor
       background.shadowOpacity = isLifted ? 1 : 0
       background.shadowRadius = shadow.radius / 2

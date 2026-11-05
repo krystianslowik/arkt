@@ -37,6 +37,10 @@ final class ExtensionsPanelView: NSView {
   private(set) var listHeight: CGFloat = 0
 
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// Increase Contrast: rows get a 1 pt edge (design/extensions, Light and dark).
+  var increaseContrast: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
+  /// Runs an action after a delay (the settle timeout); the controller passes its clock.
+  var scheduleSettleTimeout: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void = { _, _ in }
   var onRun: (@MainActor (ExtensionAction, NSView) -> Void)?
   var onSetPinned: (@MainActor (String, Bool) -> Void)?
   /// Moves a pinned extension to an index in the pin order.
@@ -153,10 +157,12 @@ final class ExtensionsPanelView: NSView {
     let settle = pendingSettle
     pendingSettle = nil
     if drag != nil { cancelDrag() }
+    let edged = increaseContrast()
     self.model = model
     let shown = model.pinned + model.unpinned
     let ids = shown.map(\.id)
     for (id, row) in rows where !ids.contains(id) {
+      row.grip.releaseCursor()
       row.removeFromSuperview()
       rows[id] = nil
     }
@@ -170,6 +176,7 @@ final class ExtensionsPanelView: NSView {
         list.addSubview(row, positioned: .below, relativeTo: insertionLine)
       }
     }
+    for row in rows.values { row.showsContrastEdge = edged }
     displayedRowIDs = ids
     let nonePinned = model.state == .nonePinned
     pinnedHeader.isHidden = model.state == .empty
@@ -178,7 +185,9 @@ final class ExtensionsPanelView: NSView {
     emptyView.isHidden = model.state != .empty
     scrollView.isHidden = model.state == .empty
     layoutContent()
-    if let settle, let row = rows[settle.id] { playSettle(row, fromTop: settle.top) }
+    if let settle, let row = rows[settle.id] {
+      playSettle(row, fromTop: settle.top, reduceMotion: settle.reduceMotion)
+    }
   }
 
   private func makeRow(_ action: ExtensionAction, place: (index: Int, count: Int)?) -> ExtensionsPanelRow {
@@ -230,22 +239,40 @@ final class ExtensionsPanelView: NSView {
     let row: ExtensionsPanelRow
     let from: Int
     let startY: CGFloat
+    /// Reduce Motion as it was when the row was lifted; the whole gesture keeps it.
+    let reduceMotion: Bool
     var offset: CGFloat = 0
     var gap: Int
   }
 
+  /// A dropped row waiting for the engine's new order: where its top was when dropped. The engine reports the order
+  /// with `.extensionActionsChanged`, at once (InMemoryEngine) or in a later batch (Chromium); until then the row
+  /// stays where it was dropped. A drop the engine never answers settles back after `settleTimeout`.
+  private struct PendingSettle {
+    let id: String
+    let top: CGFloat
+    let reduceMotion: Bool
+    let generation: Int
+  }
+
+  /// How long a dropped row waits for the engine's answer before it settles back into its old slot.
+  static let settleTimeout: TimeInterval = 1.0
+
   private var drag: Drag?
-  /// The row a drop moved, and where its top was when dropped, for the settle after the engine reorders.
-  private var pendingSettle: (id: String, top: CGFloat)?
+  private var pendingSettle: PendingSettle?
+  private var settleGeneration = 0
   /// The gap the dragged row would drop into (0 before the first pinned row); nil without a drag.
   var dragGap: Int? { drag?.gap }
+  /// A dropped row waits for the engine's order.
+  var isAwaitingDrop: Bool { pendingSettle != nil }
 
   /// Lifts a pinned row; `point` is in the list's coordinates.
   func beginDrag(_ row: ExtensionsPanelRow, at point: NSPoint) {
-    guard drag == nil, let from = pinnedRows.firstIndex(where: { $0 === row }) else { return }
-    drag = Drag(row: row, from: from, startY: point.y, gap: from)
+    guard drag == nil, pendingSettle == nil, let from = pinnedRows.firstIndex(where: { $0 === row }) else { return }
+    let drag = Drag(row: row, from: from, startY: point.y, reduceMotion: reduceMotion(), gap: from)
+    self.drag = drag
     row.setLifted(true)
-    setTransform(of: row, offset: 0)
+    setTransform(of: row, offset: 0, scaled: !drag.reduceMotion)
   }
 
   /// Moves the lifted row with the pointer and the insertion line with the drop place. Layer properties only.
@@ -261,7 +288,7 @@ final class ExtensionsPanelView: NSView {
     let pointer = drag.row.frame.midY + (point.y - drag.startY)
     drag.gap = ExtensionsPanelModel.insertionGap(pointerY: pointer, rowMiddles: middles)
     self.drag = drag
-    setTransform(of: drag.row, offset: drag.offset)
+    setTransform(of: drag.row, offset: drag.offset, scaled: !drag.reduceMotion)
     if ExtensionsPanelModel.dropIndex(from: drag.from, gap: drag.gap) == nil {
       insertionLine.isHidden = true
     } else {
@@ -274,25 +301,33 @@ final class ExtensionsPanelView: NSView {
     }
   }
 
-  /// Drops the lifted row: a move goes to the engine, and the row settles into the slot the engine gives it.
+  /// Drops the lifted row: a move goes to the engine and the row stays where it was dropped until the engine reports
+  /// the new order; then it settles into its slot.
   func endDrag() {
     guard let drag else { return }
     self.drag = nil
     insertionLine.isHidden = true
     drag.row.setLifted(false)
+    let top = drag.row.frame.minY + drag.offset
     guard let target = ExtensionsPanelModel.dropIndex(from: drag.from, gap: drag.gap) else {
-      setTransform(of: drag.row, offset: 0)
-      playSettle(drag.row, fromTop: drag.row.frame.minY + drag.offset)
+      playSettle(drag.row, fromTop: top, reduceMotion: drag.reduceMotion)
       return
     }
-    let settle = (id: drag.row.action.id, top: drag.row.frame.minY + drag.offset)
-    pendingSettle = settle
-    setTransform(of: drag.row, offset: 0)
+    settleGeneration += 1
+    let generation = settleGeneration
+    pendingSettle = PendingSettle(id: drag.row.action.id, top: top, reduceMotion: drag.reduceMotion,
+                                  generation: generation)
+    setTransform(of: drag.row, offset: drag.offset, scaled: false)
     onMove?(drag.row.action.extensionID, target)
-    if pendingSettle != nil {                 // the engine did not report a new order: back to the slot
-      pendingSettle = nil
-      playSettle(drag.row, fromTop: settle.top)
-    }
+    guard pendingSettle?.generation == generation else { return }     // answered at once
+    scheduleSettleTimeout(Self.settleTimeout) { [weak self] in self?.settleTimedOut(generation) }
+  }
+
+  /// The engine never answered the drop: the row settles back into its slot.
+  func settleTimedOut(_ generation: Int) {
+    guard let settle = pendingSettle, settle.generation == generation else { return }
+    pendingSettle = nil
+    if let row = rows[settle.id] { playSettle(row, fromTop: settle.top, reduceMotion: settle.reduceMotion) }
   }
 
   private func cancelDrag() {
@@ -300,13 +335,13 @@ final class ExtensionsPanelView: NSView {
     self.drag = nil
     insertionLine.isHidden = true
     drag.row.setLifted(false)
-    setTransform(of: drag.row, offset: 0)
+    drag.row.grip.releaseCursor()
+    setTransform(of: drag.row, offset: 0, scaled: false)
   }
 
-  private func setTransform(of row: ExtensionsPanelRow, offset: CGFloat) {
+  private func setTransform(of row: ExtensionsPanelRow, offset: CGFloat, scaled: Bool) {
     guard let layer = row.layer else { return }
-    let lifted = row.isLifted && !reduceMotion()
-    let scale = lifted ? ExtensionsPanelMotion.liftScale : 1
+    let scale = scaled && row.isLifted ? ExtensionsPanelMotion.liftScale : 1
     let pivot = CGPoint(x: layer.bounds.midX, y: layer.bounds.midY)
     ArchiveMotion.set {
       layer.transform = DialogMotion.transform(scale: scale, offsetY: offset, about: pivot, bounds: layer.bounds,
@@ -315,12 +350,13 @@ final class ExtensionsPanelView: NSView {
   }
 
   /// The row eases from where it was dropped (`top` in the list) to its slot, 0.18 s on `firm`; Reduce Motion: it
-  /// jumps.
-  private func playSettle(_ row: ExtensionsPanelRow, fromTop top: CGFloat) {
+  /// jumps. The layer's model transform is the slot either way.
+  private func playSettle(_ row: ExtensionsPanelRow, fromTop top: CGFloat, reduceMotion: Bool) {
     guard let layer = row.layer else { return }
     layer.removeAnimation(forKey: "settle")
+    setTransform(of: row, offset: 0, scaled: false)
     let delta = top - row.frame.minY
-    guard abs(delta) > 0.5, !reduceMotion() else { return }
+    guard abs(delta) > 0.5, !reduceMotion else { return }
     let animation = CABasicAnimation(keyPath: "transform")
     animation.fromValue = NSValue(caTransform3D: CATransform3DMakeTranslation(0, delta, 0))
     animation.toValue = NSValue(caTransform3D: CATransform3DIdentity)

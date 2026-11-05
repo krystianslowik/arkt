@@ -211,15 +211,37 @@ final class ExtensionsGripView: NSView {
     (superview?.superview ?? self).convert(event.locationInWindow, from: nil)
   }
 
+  /// The closed hand is pushed while the row is lifted.
+  private(set) var holdsCursor = false
+
   override func mouseDown(with event: NSEvent) {
+    // Ctrl-click is a context click (#596): AppKit shows the row's menu.
+    guard !event.modifierFlags.contains(.control) else { super.mouseDown(with: event); return }
     NSCursor.closedHand.push()
+    holdsCursor = true
     onBegin?(listPoint(event))
   }
 
-  override func mouseDragged(with event: NSEvent) { onMove?(listPoint(event)) }
+  override func mouseDragged(with event: NSEvent) {
+    guard holdsCursor else { return }
+    onMove?(listPoint(event))
+  }
 
   override func mouseUp(with event: NSEvent) {
-    NSCursor.pop()
+    guard holdsCursor else { return }
+    releaseCursor()
     onEnd?()
+  }
+
+  /// Pops the closed hand: on the drop, or when the row goes away or the drag is cancelled mid-gesture.
+  func releaseCursor() {
+    guard holdsCursor else { return }
+    holdsCursor = false
+    NSCursor.pop()
+  }
+
+  override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if newWindow == nil { releaseCursor() }
+    super.viewWillMove(toWindow: newWindow)
   }
 }
