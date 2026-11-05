@@ -141,6 +141,12 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
     presentMenu(menu, moreButton)
   }
 
+  /// Ctrl-click on the row: the context menu below the row.
+  func showMenu() {
+    guard let menu = menuProvider?() else { return }
+    presentMenu(menu, self)
+  }
+
   // MARK: Lift
 
   /// The row lifted by its grip: the hovered-row fill and the overlay shadow; the panel sets its transform.

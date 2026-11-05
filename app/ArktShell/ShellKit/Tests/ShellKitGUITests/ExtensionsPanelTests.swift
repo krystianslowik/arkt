@@ -215,6 +215,15 @@ final class ExtensionsPanelTests: XCTestCase {
                                                       timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
                                                       clickCount: 1, pressure: 1))
     XCTAssertEqual(a.menu(for: rightClick)?.items.map(\.title).contains("Unpin from Sidebar"), true)
+    XCTAssertEqual(a.runButton.menu(for: rightClick)?.items.first?.title, "A", "right-click on the main area")
+    XCTAssertEqual(a.pinToggle.menu(for: rightClick)?.items.first?.title, "A")
+
+    let ctrlClick = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: .control,
+                                                     timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                                     clickCount: 1, pressure: 1))
+    a.runButton.mouseDown(with: ctrlClick)
+    XCTAssertEqual(shown.count, 3, "Ctrl-click shows the menu")
+    XCTAssertTrue(engine.ranExtensionActions.isEmpty, "and does not run the action")
   }
 
   // MARK: Order without a drag

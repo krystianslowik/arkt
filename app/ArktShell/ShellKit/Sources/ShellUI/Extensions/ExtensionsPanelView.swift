@@ -285,9 +285,14 @@ final class ExtensionsPanelView: NSView {
       playSettle(drag.row, fromTop: drag.row.frame.minY + drag.offset)
       return
     }
-    pendingSettle = (drag.row.action.id, drag.row.frame.minY + drag.offset)
+    let settle = (id: drag.row.action.id, top: drag.row.frame.minY + drag.offset)
+    pendingSettle = settle
     setTransform(of: drag.row, offset: 0)
     onMove?(drag.row.action.extensionID, target)
+    if pendingSettle != nil {                 // the engine did not report a new order: back to the slot
+      pendingSettle = nil
+      playSettle(drag.row, fromTop: settle.top)
+    }
   }
 
   private func cancelDrag() {

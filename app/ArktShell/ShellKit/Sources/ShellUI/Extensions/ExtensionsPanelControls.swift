@@ -47,6 +47,18 @@ final class ExtensionsRowButton: NSButton {
                  yRadius: ExtensionsPanelMetrics.rowCorner).fill()
   }
   override var focusRingMaskBounds: NSRect { bounds }
+
+  /// Right-click on the row's main area: the row's context menu.
+  override func menu(for event: NSEvent) -> NSMenu? { superview?.menu(for: event) }
+
+  /// Ctrl-click opens the row's context menu instead of running the action.
+  override func mouseDown(with event: NSEvent) {
+    if event.modifierFlags.contains(.control), let row = superview as? ExtensionsPanelRow {
+      row.showMenu()
+      return
+    }
+    super.mouseDown(with: event)
+  }
 }
 
 /// The row's pin toggle (design: "Pin <name>", pressed when pinned): a 28 pt circle, filled with the pin in
@@ -99,6 +111,7 @@ final class ExtensionsPinToggle: NSButton {
   override var wantsUpdateLayer: Bool { true }
   override func updateLayer() { restyleLayer() }
   override func accessibilityValue() -> Any? { isOn }
+  override func menu(for event: NSEvent) -> NSMenu? { superview?.menu(for: event) }
 
   private func restyle() {
     let flavor = archiveFlavor
