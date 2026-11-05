@@ -52,4 +52,59 @@ struct JavaScriptDialogContentTests {
     #expect(prompt.response(for: .primary, input: "Grace") == (true, "Grace"))
     #expect(prompt.response(for: .cancel, input: "Grace") == (false, nil))
   }
+
+  // MARK: Leave site (#584)
+
+  private func leaveSite() -> JavaScriptDialog {
+    JavaScriptDialog(id: DialogID(), tab: TabID(), kind: .beforeUnload, title: "Leave site?",
+                     message: "Changes you made may not be saved.", defaultPromptText: nil, acceptTitle: "Leave",
+                     cancelTitle: "Stay")
+  }
+
+  @Test func leaveSiteMakesStayThePrimaryAndLeaveTheNeutralAnswer() {
+    let content = DialogContent.javaScriptDialog(leaveSite())
+    #expect(content.title == "Leave site?")
+    #expect(content.paragraphs == [.init("Changes you made may not be saved.")])
+    #expect(content.primaryTitle == "Stay")
+    #expect(content.secondaryTitle == "Leave")
+    #expect(content.cancelTitle == nil)
+    #expect(content.defaultButton == .primary)
+    #expect(!content.isDestructive)
+    #expect(!content.neutralPrimary)
+    #expect(content.input == nil)
+    #expect(content.escapeAnswersCancel)
+    #expect(!content.escapeDismisses)
+    #expect(content.inputProtection == DialogContent.leaveSiteInputProtection)
+    #expect(DialogContent.leaveSiteInputProtection > 0 && DialogContent.leaveSiteInputProtection < 0.5)
+  }
+
+  @Test func onlyTheLeaveSitePromptHasInputProtection() {
+    for kind in [JavaScriptDialog.Kind.alert, .confirm, .prompt] {
+      #expect(DialogContent.javaScriptDialog(dialog(kind)).inputProtection == 0, "\(kind)")
+    }
+  }
+
+  @Test func leaveSiteLeavesOnlyOnLeave() {
+    let dialog = leaveSite()
+    #expect(dialog.response(for: .secondary, input: nil) == (true, nil))
+    #expect(dialog.response(for: .primary, input: nil) == (false, nil))
+    // Escape answers cancel: the user stays.
+    #expect(dialog.response(for: .cancel, input: "x") == (false, nil))
+  }
+
+  @Test func leaveSiteKeepsTheEnginesButtonTitles() {
+    var dialog = leaveSite()
+    dialog.acceptTitle = "Verlassen"
+    dialog.cancelTitle = "Bleiben"
+    let content = DialogContent.javaScriptDialog(dialog)
+    #expect(content.primaryTitle == "Bleiben")
+    #expect(content.secondaryTitle == "Verlassen")
+  }
+
+  @Test func leaveSiteAttachesToTheCardsTopEdgeAndOtherDialogsDoNot() {
+    #expect(leaveSite().panelAttachment == .topEdge)
+    #expect(dialog(.alert).panelAttachment == .inset)
+    #expect(dialog(.confirm).panelAttachment == .inset)
+    #expect(dialog(.prompt).panelAttachment == .inset)
+  }
 }
