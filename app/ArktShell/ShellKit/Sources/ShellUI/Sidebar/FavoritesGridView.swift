@@ -29,7 +29,17 @@ public final class FavoriteTileView: NSView {
       guard isCurrent != oldValue else { return }
       needsDisplay = true
       applyFillOpacity()
+      postAccessibility(.valueChanged)             // the spoken value says "current" (#607)
     }
+  }
+  /// Whether the Favorite's page is loaded in this window; the grid sets it with the `loaded` / `unloaded` value.
+  var isLoaded = false
+  /// Testing seam: receives every accessibility notification this tile posts. Nil (the default) records nothing.
+  var postedNotificationsForTesting: (@MainActor (NSAccessibility.Notification) -> Void)?
+
+  private func postAccessibility(_ notification: NSAccessibility.Notification) {
+    NSAccessibility.post(element: self, notification: notification)
+    postedNotificationsForTesting?(notification)
   }
   /// The selection fill's layer opacity (#465): Little Arkt's arrival fades it on the flight's room spring. Only
   /// the fill fades; the favicon stays, and the title is this view's accessibility label.
@@ -194,6 +204,7 @@ public final class FavoriteTileView: NSView {
     selectionAlpha = 1
     isKeyboardFocused = false
     nodeID = nil
+    isLoaded = false
     setCloseAction(nil)
     setCloseButtonShown(false, animated: false)        // no fade on a reused tile
     setAccessibilityValue(nil)
@@ -204,6 +215,14 @@ public final class FavoriteTileView: NSView {
 
   /// The current Favorite reports itself selected, as the current sidebar row does (#607).
   public override func isAccessibilitySelected() -> Bool { isCurrent }
+
+  /// What VoiceOver speaks for the value (#607): the value itself is the `loaded` / `unloaded` token clients and UI
+  /// tests read, and VoiceOver does not speak "selected" on a button. "Favorites, current"; "Favorites, loaded";
+  /// "Favorites" for a Favorite with no page open.
+  public override func accessibilityValueDescription() -> String? {
+    if isCurrent { return "Favorites, current" }
+    return isLoaded ? "Favorites, loaded" : "Favorites"
+  }
 
   public override func accessibilityPerformPress() -> Bool {
     guard let onAccessibilityPress else { return false }
@@ -583,6 +602,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.setAccessibilityLabel(title)
     tile.nodeID = id
     let isLoaded = pageLoadedProvider?(id) == true
+    tile.isLoaded = isLoaded
     tile.setAccessibilityValue(isLoaded ? AXID.Favorites.loaded : AXID.Favorites.unloaded)
     let action = isLoaded ? RowCloseAction.resolve(id, in: source) : nil
     tile.closeButton.target = self

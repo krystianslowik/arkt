@@ -616,6 +616,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Rows cannot be selected in the table's sense, so a drag starts on one row: the first node among `items`. It
   /// carries the multi-selection when that row is part of it.
   func draggingSessionWillBegin(items: [Any], session: NSDraggingSession? = nil) {
+    outlineView.lastClickPoint = nil                  // the drag ends the click it began with; no row action follows
     let ids = items.compactMap { ($0 as? OutlineItem)?.nodeID }
     guard let id = ids.first(where: { source.node($0) != nil }) else { return }
     drop.sourceBegan(dragPayload(startingAt: id), session: session)
@@ -738,6 +739,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
     proxies.performPress = { [weak self] row in
       guard let self, self.nodeID(atRow: row) != nil else { return false }
+      // A press has no mouse-down: never hit-test the favicon against the point of an earlier click.
+      self.outlineView.lastClickPoint = nil
       self.handleClick(row: row, modifiers: [])
       return true
     }
@@ -1397,7 +1400,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// `dragToCombineTabsIntoSplitEnabled` [S]; here they are always on [I]. An Opt-click on any other tab, or on a
   /// pane, activates it like a plain click [I]. A click on a pinned tab's favicon goes to the window's reset path
   /// (GS-005, BH-057, BH-058); anywhere else on the row activates it. The recorded click point serves this click
-  /// only, so an activation without a mouse-down (an AX press) is never hit-tested against a stale point.
+  /// only: it is cleared here, when a drag begins, and before an AX press (which has no mouse-down), so an
+  /// activation is never hit-tested against a stale point.
   func handleClick(row: Int, modifiers: NSEvent.ModifierFlags) {
     defer { outlineView.lastClickPoint = nil }
     guard row >= 0, let item = outlineView.item(atRow: row) as? OutlineItem, let id = item.nodeID else { return }

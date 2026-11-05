@@ -76,6 +76,27 @@ final class AXProxyRowsTests: XCTestCase {
     return try list.map { try XCTUnwrap($0 as? AXProxyRow, file: file, line: line) }
   }
 
+  /// Press and show menu are offered only by a table whose owner handles them (#607); the command bar results have
+  /// no handlers, so their rows refuse both selectors and both actions.
+  func testRowsOfATableWithoutPressOrMenuHandlersRefuseBoth() throws {
+    let fixture = makeFixture(rowCount: 3)
+    let press = #selector(NSAccessibilityProtocol.accessibilityPerformPress)
+    let showMenu = #selector(NSAccessibilityProtocol.accessibilityPerformShowMenu)
+    let row = try XCTUnwrap(try childRows(fixture.element).first)
+    XCTAssertFalse(row.isAccessibilitySelectorAllowed(press))
+    XCTAssertFalse(row.isAccessibilitySelectorAllowed(showMenu))
+    XCTAssertFalse(row.accessibilityPerformPress())
+    XCTAssertFalse(row.accessibilityPerformShowMenu())
+
+    var pressed: [Int] = []
+    fixture.table.axProxyRows.performPress = { pressed.append($0); return true }
+    XCTAssertTrue(row.isAccessibilitySelectorAllowed(press), "a handler turns press on")
+    XCTAssertFalse(row.isAccessibilitySelectorAllowed(showMenu), "and only press")
+    XCTAssertTrue(row.accessibilityPerformPress())
+    XCTAssertEqual(pressed, [0])
+    fixture.window.close()
+  }
+
   func testRowsWithoutRowViewsReportTheModelsLabelAndValue() throws {
     let fixture = makeFixture(rowCount: 40)
     let table = fixture.table
