@@ -687,7 +687,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       CommandBarAction(id: "nextSpace", title: "Next Space"),
       CommandBarAction(id: "previousSpace", title: "Previous Space"),
       CommandBarAction(id: "toggleToolbar", title: ToolbarSetting.menuTitle(isVisible: toolbarSetting.isVisible)),
-    ]
+    ] + favoriteCommandBarActions()
   }
 
   private func runCommandBarAction(_ id: String) {
@@ -696,6 +696,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case "nextSpace": sidebarController.nextSpace()
     case "previousSpace": sidebarController.previousSpace()
     case "toggleToolbar": toggleToolbar(nil)
+    case Self.favoriteTabActionID, Self.moveToFavoritesActionID: favoriteCurrentTab()
     default: break
     }
   }
