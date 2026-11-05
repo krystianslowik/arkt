@@ -320,6 +320,8 @@ extension ShellWindowController {
     guard !links.isEmpty else { return }
     linkPasteboard.clearContents()
     linkPasteboard.setString(SidebarLink.text(for: links, markdown: markdown), forType: .string)
+    // BH-196: a manual copy counts toward the one-off Copy URL tip.
+    if copyLinkEducation.recordManualCopy() { toasts.show(CopyLinkEducation.toast) }
   }
 
   /// Paste URL as New Tab: the clipboard's URL as a new tab in `location` (a folder: at its end; Today: on top).

@@ -48,8 +48,8 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | General | Update Arkt automatically | toggle, disabled until the release work (decision 6) | `shouldAutomaticallyUpdate` | off | planned (#128 release) | BH-213 |
 | Spaces | Profile per Space | popup per Space row | model (Space -> profile) | Default | planned | BH-034 |
 | Spaces | Space name, icon, theme | not here: edited in the sidebar header | model | n/a | exists (#287) | BH-038 |
-| Spaces | Archive Today tabs after | popup: 1 hour, 6 hours, 12 hours, 24 hours, 7 days, 30 days, Never | `autoArchiveTimeThresholdsPerProfile` | 12 hours | planned (policy exists, fixed at 12 h) | BH-080, BH-081, BH-083 |
-| Spaces | Archive Little Arkt windows after | popup, same options | `autoArchiveLittleArcTimeThreshold` | 6 hours | planned (#28) | BH-137 |
+| Spaces | Archive Today tabs after | popup: 1 hour, 6 hours, 12 hours, 24 hours, 7 days, 30 days, Never | `autoArchiveTimeThresholdsPerProfile` | 12 hours | **exists** (#448; edits the Default profile until a profile pane exists) | BH-080, BH-081, BH-083 |
+| Spaces | Archive Little Arkt windows after | popup, same options | `autoArchiveLittleArcTimeThreshold` | 6 hours | **exists** (#448; archiving Little Arkt windows is #355) | BH-137 |
 | Spaces | Profiles list, New Profile... | rows with disclosure, button | profiles | Default | planned | BH-034, 2.13 |
 | Spaces | Links from other apps open in | popup: Current Space / Little Arkt | `openExternalLinksInLittleBrowserEnabled` | Little Arkt | planned (#28) | BH-129, BH-156 |
 | Spaces | Link routes ("contains" / "is") | rows, Edit, Add Route... | routes | none | planned | BH-155 |
