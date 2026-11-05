@@ -137,6 +137,30 @@ final class FakeEngineContractTests: XCTestCase {
     XCTAssertNil(image)
   }
 
+  /// FakeEngine only (#404, BH-193): the page's selection is reported for Copy URL's text link, and a new document
+  /// drops it.
+  func testSelectedTextFollowsThePageSelection() async throws {
+    let engine = FakeEngine()
+    let findPage = try XCTUnwrap(harness.findPage)
+    let id = engine.createTab(url: try findPage(1, try harness.pageURL("Target")))
+    try await harness.settle(engine, id)
+    XCTAssertNil(engine.selectedText(of: id), "nothing is selected yet")
+
+    await engine.runScript("window.getSelection().selectAllChildren(document.querySelector('p'))", in: id)
+    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.selectedText(of: id) != nil }
+    XCTAssertEqual(engine.selectedText(of: id), EngineContract.findWord)
+
+    await engine.runScript("window.getSelection().removeAllRanges()", in: id)
+    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.selectedText(of: id) == nil }
+
+    await engine.runScript("window.getSelection().selectAllChildren(document.querySelector('p'))", in: id)
+    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.selectedText(of: id) != nil }
+    engine.navigate(id, to: try harness.pageURL("Other"))
+    try await harness.settle(engine, id)
+    XCTAssertNil(engine.selectedText(of: id), "a new document has no selection")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+  }
+
   /// Reports a rule without its driver as skipped (not applicable), never as passed.
   private func notApplicable(_ rule: () async throws -> Void) async throws {
     do {

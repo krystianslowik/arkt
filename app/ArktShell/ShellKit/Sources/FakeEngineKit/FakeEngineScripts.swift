@@ -37,6 +37,26 @@ enum FakeEngineScripts {
     })();
     """
 
+  /// The message handler the selection script posts to (#404).
+  static let selectionHandler = "arktSelection"
+
+  /// Posts the main frame's selected text on every selection change, or null when nothing is selected, so the engine
+  /// can answer `selectedText(of:)` without a round trip to the page.
+  static let selection = """
+    (function () {
+      if (window.__arktSelection) { return; }
+      window.__arktSelection = true;
+      var current = null;
+      document.addEventListener('selectionchange', function () {
+        var text = String(window.getSelection() || '');
+        var next = text.length ? text : null;
+        if (next === current) { return; }
+        current = next;
+        window.webkit.messageHandlers.\(selectionHandler).postMessage(next);
+      });
+    })();
+    """
+
   private static func json(_ value: some Encodable) -> String {
     (try? String(data: JSONEncoder().encode(value), encoding: .utf8)) ?? "null"
   }

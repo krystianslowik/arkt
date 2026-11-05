@@ -49,6 +49,8 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     var findRequests = 0
     /// The link the pointer is over, as the hover script last reported it.
     var hoveredLink: URL?
+    /// The main frame's selected text, as the selection script last reported it (#404).
+    var selectedText: String?
     init(webView: WKWebView, navigation: NavigationObserver, snapshot: TabSnapshot) {
       self.webView = webView; self.navigation = navigation; self.snapshot = snapshot
     }
@@ -89,12 +91,17 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
   /// How long the end of a load waits for `document.title` before using what WebKit already knows.
   static let titleTimeout: Duration = .milliseconds(500)
 
-  /// Receives the hover script's messages (#114). The user content controller holds it, so it holds the engine weakly.
+  /// Receives the hover (#114) and selection (#404) scripts' messages. The user content controller holds it, so it
+  /// holds the engine weakly.
   private final class LinkHoverBridge: NSObject, WKScriptMessageHandler {
     weak var engine: FakeEngine?
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
       MainActor.assumeIsolated {
-        engine?.targetURLReported(by: message.webView, body: message.body)
+        if message.name == FakeEngineScripts.selectionHandler {
+          engine?.selectionReported(by: message.webView, body: message.body)
+        } else {
+          engine?.targetURLReported(by: message.webView, body: message.body)
+        }
       }
     }
   }
@@ -142,6 +149,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     configuration.userContentController.add(hoverBridge, name: FakeEngineScripts.targetURLHandler)
     configuration.userContentController.addUserScript(
       WKUserScript(source: FakeEngineScripts.hover, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+    configuration.userContentController.add(hoverBridge, name: FakeEngineScripts.selectionHandler)
+    configuration.userContentController.addUserScript(
+      WKUserScript(source: FakeEngineScripts.selection, injectionTime: .atDocumentStart, forMainFrameOnly: true))
   }
 
   @discardableResult
@@ -306,8 +316,16 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     hub.emit(.targetURLChanged(id, link))
   }
 
-  /// A new document ends the page's find and its hovered link.
+  private func selectionReported(by web: WKWebView?, body: Any) {
+    guard let entry = entries.values.first(where: { $0.webView === web }) else { return }
+    entry.selectedText = (body as? String).flatMap { $0.isEmpty ? nil : $0 }
+  }
+
+  public func selectedText(of id: TabID) -> String? { entries[id]?.selectedText }
+
+  /// A new document ends the page's find, its hovered link and its selection.
   private func endFindAndHover(_ id: TabID, _ entry: Entry) {
+    entry.selectedText = nil
     entry.findText = nil
     entry.findEpoch += 1
     if entry.hoveredLink != nil {
