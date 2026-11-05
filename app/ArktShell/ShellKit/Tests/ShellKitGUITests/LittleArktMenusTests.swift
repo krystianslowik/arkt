@@ -11,6 +11,8 @@ import XCTest
 @MainActor
 final class LittleArktMenusTests: XCTestCase {
   private var sets: [ShellWindowSet] = []
+  /// The rows the windows sent to the Archive.
+  private var archived: [NodeID] = []
   private let pageURL = URL(string: "https://example.com/start")!
   private let linkURL = URL(string: "https://example.org/linked")!
 
@@ -25,16 +27,21 @@ final class LittleArktMenusTests: XCTestCase {
       for little in set.littleArkts { little.window.orderOut(nil) }
     }
     sets = []
+    archived = []
   }
 
-  private func makeSet() throws -> (set: ShellWindowSet, engine: InMemoryEngine, source: ModelSidebarSource) {
+  private func makeSet(reduceMotion: Bool = true) throws
+    -> (set: ShellWindowSet, engine: InMemoryEngine, source: ModelSidebarSource) {
     let engine = InMemoryEngine()
     let world = try EngineWorld.make()
     let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
     let set = ShellWindowSet(engine: engine, sidebar: source, hostLookup: { [engine] in engine.host(of: $0) })
-    set.littleArktReduceMotion = { true }
-    set.configure = { controller in
-      controller.onArchive = { ids in _ = source.archive(ids, reason: .manual, at: EngineWorld.now) }
+    set.littleArktReduceMotion = { reduceMotion }
+    set.configure = { [weak self] controller in
+      controller.onArchive = { ids in
+        self?.archived += ids
+        _ = source.archive(ids, reason: .manual, at: EngineWorld.now)
+      }
     }
     engine.windowHostProvider = { [weak set] request in
       guard let set else { preconditionFailure("the set outlives the test") }
@@ -121,7 +128,96 @@ final class LittleArktMenusTests: XCTestCase {
     XCTAssertTrue(engine.contentView(for: tab) === page)
     XCTAssertTrue(page.isDescendant(of: little.card))
     XCTAssertNil(source.node(node), "the row left the sidebar")
+    XCTAssertTrue(archived.isEmpty, "removed, not archived: the page lives on in Little Arkt")
     XCTAssertNil(main.tabsByNode[node])
+  }
+
+  /// The page is live in window B and the row is clicked in window A: B lets go of it, and no window is left on the
+  /// handoff placeholder of a row that is gone.
+  func testOptionCommandClickOnATabLiveInAnotherWindowLeavesNoPlaceholder() throws {
+    let (set, engine, source) = try makeSet()
+    let first = set.openWindow()
+    first.open(linkURL, inNewTab: true)
+    let sibling = try XCTUnwrap(first.currentNode)
+    first.open(pageURL, inNewTab: true)                    // on top of Today, above the sibling
+    let node = try XCTUnwrap(first.currentNode)
+    let tab = try XCTUnwrap(first.currentTab)
+    let second = set.openWindow(opensFirstTab: false)
+    second.activate(node: node)                            // Tab Handoff: the page moves to the second window
+    waitUntil("the page is in the second window") { second.currentTab == tab }
+    XCTAssertTrue(first.rootView.card.contentView is HandoffPlaceholderView)
+
+    let outline = try XCTUnwrap(first.sidebarController.outline(containing: node))
+    outline.handleClick(row: outline.row(for: node), modifiers: [.command, .option])
+
+    let little = try XCTUnwrap(set.littleArkts.first)
+    waitUntil("the page is in the Little Arkt window") { little.shownTab == tab }
+    XCTAssertNil(source.node(node))
+    XCTAssertTrue(archived.isEmpty)
+    XCTAssertEqual(first.currentNode, sibling, "the clicking window moves on to the next tab")
+    XCTAssertFalse(second.rootView.card.contentView is HandoffPlaceholderView, "no placeholder for a gone row")
+    XCTAssertNil(second.currentTab)
+    XCTAssertFalse(first.rootView.card.contentView is HandoffPlaceholderView)
+  }
+
+  /// A window on the placeholder of a row that leaves some other way (Delete, auto-archive) drops the placeholder.
+  func testAPlaceholderGoesWithItsRow() throws {
+    let (set, _, source) = try makeSet()
+    let first = set.openWindow()
+    first.open(pageURL, inNewTab: true)
+    let node = try XCTUnwrap(first.currentNode)
+    let tab = try XCTUnwrap(first.currentTab)
+    let second = set.openWindow(opensFirstTab: false)
+    second.activate(node: node)
+    waitUntil("the page is in the second window") { second.currentTab == tab }
+    XCTAssertTrue(first.rootView.card.contentView is HandoffPlaceholderView)
+
+    source.removeNode(node)
+
+    XCTAssertFalse(first.rootView.card.contentView is HandoffPlaceholderView)
+  }
+
+  // MARK: Opt-Cmd-click a pinned tab or a Favorite (design: the row stays)
+
+  func testOptionCommandClickOnAPinnedTabOpensItsPageAndKeepsThePin() throws {
+    let (set, engine, source) = try makeSet()
+    let main = set.openWindow()
+    let space = try XCTUnwrap(main.currentSpace)
+    let node = try source.addTab(url: linkURL, title: "Pinned", in: .pinned(space), at: nil)
+    let outline = try XCTUnwrap(main.sidebarController.outline(containing: node))
+
+    outline.handleClick(row: outline.row(for: node), modifiers: [.command, .option])
+
+    waitUntil("a Little Arkt window opened") { set.littleArkts.count == 1 }
+    let shown = try XCTUnwrap(set.littleArkts.first?.shownTab)
+    XCTAssertEqual(engine.snapshot(of: shown)?.url, linkURL)
+    XCTAssertEqual(source.parent(of: node), .pinned(space), "the pin stays")
+    XCTAssertTrue(archived.isEmpty)
+  }
+
+  func testOptionCommandClickOnAFavoriteOpensItsPageAndKeepsTheFavorite() throws {
+    let (set, engine, source) = try makeSet()
+    let main = set.openWindow()
+    let node = try source.addTab(url: linkURL, title: "Favorite", in: .favorites(profile: "default"), at: nil)
+
+    main.sidebarController.view.favorites.handleTileClick(node, modifiers: [.command, .option])
+
+    waitUntil("a Little Arkt window opened") { set.littleArkts.count == 1 }
+    let shown = try XCTUnwrap(set.littleArkts.first?.shownTab)
+    XCTAssertEqual(engine.snapshot(of: shown)?.url, linkURL)
+    XCTAssertEqual(source.parent(of: node), .favorites(profile: "default"), "the Favorite stays")
+    XCTAssertNotEqual(main.currentNode, node, "the click does not also activate the Favorite")
+  }
+
+  func testAPlainClickOnAFavoriteStillActivatesIt() throws {
+    let (set, _, source) = try makeSet()
+    let main = set.openWindow()
+    let node = try source.addTab(url: linkURL, title: "Favorite", in: .favorites(profile: "default"), at: nil)
+
+    main.sidebarController.view.favorites.handleTileClick(node, modifiers: [])
+
+    XCTAssertTrue(set.littleArkts.isEmpty)
+    XCTAssertEqual(main.currentNode, node)
   }
 
   func testOptionCommandClickOnAnUnloadedTodayTabOpensItsURL() throws {
@@ -171,6 +267,33 @@ final class LittleArktMenusTests: XCTestCase {
     XCTAssertTrue(engine.contentView(for: tab) === page, "the same page, not a reload")
     XCTAssertEqual(opened.currentSpace, main.currentSpace, "on the Space Open in names")
     waitUntil("the Little Arkt window closed") { set.littleArkts.isEmpty }
+  }
+
+  /// The same flow with the full motion (the fade-out runs on the window's own clock).
+  func testOpenInNewWindowWithFullMotion() throws {
+    let (set, engine, _) = try makeSet(reduceMotion: false)
+    _ = try mainWindowWithPage(set)
+    let little = try openLittle(set, engine, title: "Atlas")
+    let tab = try XCTUnwrap(little.shownTab)
+
+    little.openInNewWindow()
+
+    XCTAssertEqual(little.lastTransition, .fadeOut)
+    waitUntil("a second main window opened") { set.controllers.count == 2 }
+    let opened = try XCTUnwrap(set.controllers.last)
+    waitUntil("the page is in the new window") { opened.currentTab == tab }
+    waitUntil("the Little Arkt window closed") { set.littleArkts.isEmpty }
+  }
+
+  /// A page the new window cannot take (here: a tab the engine does not know) leaves no empty window behind.
+  func testOpenInNewWindowThatFailsClosesTheNewWindow() throws {
+    let (set, engine, _) = try makeSet()
+    _ = try mainWindowWithPage(set)
+    let little = try openLittle(set, engine, title: "Atlas")
+
+    XCTAssertFalse(little.onOpenInNewWindow(TabID(), nil))
+
+    XCTAssertEqual(set.controllers.count, 1, "the window opened for the page closed again")
   }
 
   func testTheChooserListsOpenInNewWindow() throws {
@@ -276,7 +399,7 @@ final class LittleArktMenusTests: XCTestCase {
     XCTAssertEqual(titles, ["Minimize", "Zoom", "-", LittleArktCopy.windowMenuHeading, "One", "Two", "-",
                             "Bring All to Front"])
     let heading = try XCTUnwrap(menu.items.first { $0.title == LittleArktCopy.windowMenuHeading })
-    XCTAssertFalse(heading.isEnabled, "a heading, not an action")
+    XCTAssertTrue(heading.isSectionHeader, "a heading, not an action")
     XCTAssertTrue(first.window.isExcludedFromWindowsMenu, "AppKit's own list does not show them a second time")
 
     let row = try XCTUnwrap(menu.items.first { $0.title == "One" })

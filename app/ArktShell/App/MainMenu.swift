@@ -243,7 +243,8 @@ enum MainMenu {
 
   /// The Dock menu (#356, BH-139, GS-041; docs/design/little-arkt.md, Copy): the Little Arkt windows by page title,
   /// Hide All / Show All and Close Little Arkt Windows, then New Window and New Little Arkt Window. FakeEngine build
-  /// only: in the Engine build Chromium's `AppController` answers `applicationDockMenu:` (follow-up: an embedder seam).
+  /// only: in the Engine build Chromium's `AppController` answers `applicationDockMenu:` until an embedder seam
+  /// forwards it (#658).
   static func dockMenu(commands: AppCommands, littleArkts: LittleArktMenus?) -> NSMenu {
     let menu = NSMenu(title: "Dock")
     let rows = littleArkts?.dockItems() ?? []

@@ -45,8 +45,7 @@ public final class LittleArktMenus: NSObject {
     for item in menu.items where item.tag == Self.sectionTag { menu.removeItem(item) }
     let open = windows()
     guard !open.isEmpty else { return }
-    let heading = NSMenuItem(title: LittleArktCopy.windowMenuHeading, action: nil, keyEquivalent: "")
-    heading.isEnabled = false
+    let heading = NSMenuItem.sectionHeader(title: LittleArktCopy.windowMenuHeading)
     let separator = NSMenuItem.separator()
     let section = [heading] + open.map { row(for: $0, marksKey: true) } + [separator]
     var index = menu.items.firstIndex { $0.action == #selector(NSApplication.arrangeInFront(_:)) } ?? menu.numberOfItems

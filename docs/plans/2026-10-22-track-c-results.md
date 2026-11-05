@@ -2804,21 +2804,49 @@ Tests (written first: the new GUI case failed on the audible background tab, the
 - Opt-Cmd-click on a link (exactly Option and Command): `ShellEngineHost.decideLinkActivation` cancels it before
   Peek routing, and a new Little Arkt window opens on the URL one turn later.
 - Opt-Cmd-click on a Today tab's row: the page moves into a new Little Arkt window (`moveTab`, no reload) from
-  whichever window has it, else a new page opens on its URL; the row then leaves the sidebar the way a closed Today
-  tab does. Pinned tabs and Favorites are not moved; for them the click is a plain click.
+  whichever window has it, else a new page opens on its URL. The row then leaves the sidebar without an Archive entry
+  (`SidebarSource.removeNode`, new); the page is archived when its Little Arkt window closes. Every window that was
+  left on that row's handoff placeholder moves on to the next tab (unless another window shows it) or clears its card,
+  and any window drops a placeholder whose row is gone, whatever removed it.
+- Opt-Cmd-click on a pinned tab's row or a Favorite's tile opens its page in a new Little Arkt window and keeps the pin
+  or Favorite where it is, as a Peek does (decided on #356; docs/design/little-arkt.md updated).
 - Settings > Links: "Open Little Arkt when clicking on links with ⌥⌘ held"
   (`optionCommandClickLittleArcEntryPointEnabled`), on by default. It covers both clicks.
 - Space chooser: "Open in New Window" between the Spaces and Copy Link. The window fades out, then the page moves into
-  a new browser window on the Space Open in names. No flight, because the target window is not on screen yet.
+  a new browser window on the Space Open in names. No flight, because the target window is not on screen yet. If the
+  new window cannot take the page, it closes again.
+- The Window menu heading is `NSMenuItem.sectionHeader(title:)`.
 
 ### Deviations and follow-ups
 
 - Engine build Dock menu: Chromium's `AppController` stays `NSApp.delegate` and answers `applicationDockMenu:`, so
-  the Dock menu above is the FakeEngine build's only. The Engine build needs an embedder seam that forwards
-  `applicationDockMenu:` to the shell.
-- A Today row moved into Little Arkt goes through the app's archive path (the only row removal the window has), so it
-  appears in the Archive while its page lives on in the Little Arkt window.
+  the Dock menu above is the FakeEngine build's only. #658 asks for the embedder seam. From the code, the Window
+  menu's section should work in the Engine build: Arkt installs its own `windowsMenu` with `AppCommands` as delegate,
+  and Chromium binds its menu bridges by tag, which that menu has none of. This is not checked at runtime.
 - The Dock menu has no XCUITest handle (it belongs to the Dock process); its rows are covered in ShellKitGUITests.
+
+### Review changes
+
+The two-window placeholder fix, removal without the Archive, pinned tabs and Favorites, closing the empty window
+after a failed Open in New Window, and the section header. Tests:
+
+- `LittleArktMenusTests` grew to 22. The new cases cover:
+  - two windows with the page live in the other one;
+  - a placeholder whose row goes;
+  - a pinned tab, a Favorite, and a plain click on a Favorite;
+  - Open in New Window with the full motion, and with a failure.
+- `SidebarSourceContractTests.removeNodeRemovesTheRowAndEmitsStructure` runs on both sources.
+
+Each new behavior was broken on purpose once, and its test failed:
+
+- Without the follow-ups in `ShellWindowSet.moveToLittleArkt`, the two-window case failed (the clicking window stayed on the placeholder).
+- Without `dropPlaceholderOfRemovedRow` in the sidebar observation, `testAPlaceholderGoesWithItsRow` failed.
+- Archiving instead of removing failed the Today tab case ("removed, not archived").
+- A no-op `ModelSidebarSource.removeNode` failed the contract test for `.model`.
+- Not opening pinned tabs and Favorites failed both cases (no Little Arkt window).
+- Dropping the `performClose` after a failed Open in New Window failed its case (2 windows, not 1).
+- A plain heading item failed the Window menu case.
+- Committing Open in New Window without the fade failed the full-motion case.
 
 ### Tests
 

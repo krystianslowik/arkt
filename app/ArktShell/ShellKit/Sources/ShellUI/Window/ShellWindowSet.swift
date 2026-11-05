@@ -251,8 +251,10 @@ public final class ShellWindowSet {
     return little
   }
 
-  /// The window's Today row `node` leaves for Little Arkt: the page moves from whichever window has it, else a new
-  /// page opens on `url`. False when its close is held behind a leave-site prompt (it stays).
+  /// The Today row `node` leaves for Little Arkt: the page moves from whichever window has it, else a new page opens
+  /// on `url`. The row then leaves the sidebar without an Archive entry (the page is archived when its Little Arkt
+  /// window closes), and every window that was left on the row's handoff placeholder moves on. False when its close
+  /// is held behind a leave-site prompt (it stays).
   private func moveToLittleArkt(_ node: NodeID, url: URL) -> Bool {
     switch releaseLiveTab(of: node, for: nil) {
     case .held:
@@ -262,6 +264,9 @@ public final class ShellWindowSet {
     case .notLive:
       openLittleArkt(url: url)
     }
+    let followUps = controllers.compactMap { $0.afterRowLeaves(node) }
+    sidebar.removeNode(node)
+    followUps.forEach { $0() }
     return true
   }
 
@@ -288,7 +293,12 @@ public final class ShellWindowSet {
     }
     little.onOpenInNewWindow = { [weak self] tab, dialog in             // the chooser's Open in New Window (#356)
       guard let self else { return false }
-      return self.openWindow(opensFirstTab: false).receiveMovedTab(tab, in: nil, dialog: dialog)
+      let opened = self.openWindow(opensFirstTab: false)
+      guard opened.receiveMovedTab(tab, in: nil, dialog: dialog) else {
+        opened.window?.performClose(nil)                               // no empty window left behind
+        return false
+      }
+      return true
     }
     little.flightDestination = { [weak self] in self?.primary }        // #352: an open main window only
     little.onResize = { [weak self] size in self?.littleArktSize = size }

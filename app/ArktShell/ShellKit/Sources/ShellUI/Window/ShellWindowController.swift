@@ -308,6 +308,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       switch change {
       case .structure, .spaceRemoved:
         self?.closeEngineTabsOfRemovedNodes()
+        self?.dropPlaceholderOfRemovedRow()
         self?.tabSwitcher.sourceDidChange()
       case .node, .spaceAdded, .spaceMoved, .spaceChanged: break
       }
@@ -610,7 +611,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   /// The tab to show after `node` leaves: the first tab of the nearest sibling below, else above. With no such sibling
   /// inside a split or folder, the container's siblings are tried; never another section.
-  private func successor(of node: NodeID) -> NodeID? {
+  func successor(of node: NodeID) -> NodeID? {
     var current = node
     for _ in 0..<64 {                       // depth guard against a malformed source
       guard let location = sidebar.parent(of: current) else { return nil }
@@ -631,6 +632,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// change delivery, so it must not mutate the sidebar (closing a tab does not). The row is already gone (auto-archive,
   /// Delete Space, an import merge), so nothing could show a leave-site prompt for it: these closes skip
   /// `beforeunload` and never hold, and no live tab outlives its row (week-3 Decision 11).
+  /// The handoff placeholder's row is gone (#356): the card shows nothing rather than "Move here" for a row that no
+  /// longer exists.
+  private func dropPlaceholderOfRemovedRow() {
+    guard let node = handoffPlaceholder?.node, sidebar.node(node) == nil else { return }
+    dropHandoffPlaceholder()
+  }
+
   private func closeEngineTabsOfRemovedNodes() {
     for (node, tab) in tabsByNode where sidebar.node(node) == nil { engine.closeTab(tab, mode: .skipUnloadHandlers) }
   }

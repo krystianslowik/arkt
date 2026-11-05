@@ -143,6 +143,7 @@ public final class SidebarController {
     self.profile = profile
     self.view = SidebarContainerView(source: source, profile: profile, topBarHeight: topBarHeight)
     view.favorites.onActivate = { [weak self] id in self?.activate(node: id) }
+    view.favorites.onOpenInLittleArkt = { [weak self] id in self?.onOpenInLittleArkt?(id) ?? false }
     view.favorites.faviconProvider = { [weak self] id in self?.favicons[id] }
     view.favorites.onClose = { [weak self] id in self?.onClose?(id) }
     view.favorites.onMenuAction = { [weak self] action in self?.onMenuAction?(action) }
