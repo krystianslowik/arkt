@@ -46,7 +46,9 @@ public final class TabSwitcherView: NSView {
   /// One row view per possible row, plus `ghost`, which shows a closed row while it fades.
   public private(set) var rowViews: [TabSwitcherRowView] = []
   public private(set) var rowCount = 0
-  private let ghost = TabSwitcherRowView(frame: .zero)
+  let ghost = TabSwitcherRowView(frame: .zero)
+  /// Bumped on every ghost fade; a fade's completion hides the ghost only if no fade came after it.
+  private var ghostGeneration = 0
   /// Clips the rows to the panel, so a row sliding up from below the new bottom edge enters from under it.
   private let rowsClip = FlippedClipView(frame: .zero)
   private let surface = CALayer()
@@ -55,13 +57,20 @@ public final class TabSwitcherView: NSView {
   private(set) var flavor: ThemeFlavor = .light
 
   private lazy var highlightDriver = SpringDriver(reduceMotion: { [weak self] in self?.reduceMotion() ?? true })
-  private lazy var collapseDriver = SpringDriver(reduceMotion: { [weak self] in self?.reduceMotion() ?? true })
+  /// The clock of the row slides; tests freeze it and step the drivers by hand.
+  var collapseClock: @MainActor () -> CFTimeInterval = { CACurrentMediaTime() }
+  /// One slide per row slot, in points from the slot, so a second W retargets each row from its own presented offset
+  /// and velocity.
+  private(set) lazy var collapseDrivers: [SpringDriver] = (0..<TabSwitcherSession.maximumRows).map { _ in
+    SpringDriver(now: { [weak self] in self?.collapseClock() ?? CACurrentMediaTime() },
+                 reduceMotion: { [weak self] in self?.reduceMotion() ?? true })
+  }
   /// Where the highlight is heading, in points from the first row.
   public private(set) var highlightOffset: CGFloat = 0
   /// The value the highlight shows now (also mid-flight).
   private var presentedHighlightOffset: CGFloat = 0
   public var isHighlightMoving: Bool { highlightDriver.isRunning }
-  public var isCollapsing: Bool { collapseDriver.isRunning }
+  public var isCollapsing: Bool { collapseDrivers.contains { $0.isRunning } }
   /// Bumped on every show; a fade's completion hides the panel only if no show came after it.
   private var showGeneration = 0
   public private(set) var isFadingOut = false
@@ -123,7 +132,7 @@ public final class TabSwitcherView: NSView {
     isFadingOut = false
     layer?.removeAnimation(forKey: Self.fadeKey)
     highlightDriver.stop()
-    collapseDriver.stop()
+    stopCollapse()
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     layer?.opacity = 1
@@ -142,7 +151,7 @@ public final class TabSwitcherView: NSView {
   /// fade takes over.
   func dismiss(animated: Bool) {
     highlightDriver.stop()
-    collapseDriver.stop()
+    stopCollapse()
     guard animated, !isHidden, let layer else {
       layer?.removeAnimation(forKey: Self.fadeKey)
       isFadingOut = false
@@ -203,51 +212,76 @@ public final class TabSwitcherView: NSView {
   // MARK: Closing a row
 
   /// The row at `index` closed and `rows` are the ones left. The panel takes its new height at once (W is a key
-  /// press); the closed row fades where it was while the rows below it slide up into place (`firmFast`). Reduce
-  /// Motion: no slide, the closed row fades out while the rows that moved fade in.
+  /// press); the closed row fades where it was while the rows below it slide up into place (`firmFast`). A W during a
+  /// running slide continues every row from where it is on screen, with its velocity. Reduce Motion: no slide, the
+  /// closed row fades out while the rows that moved fade in.
   func collapse(closed: TabSwitcherRow, at index: Int, rows: [TabSwitcherRow], highlight: Int, frame: NSRect) {
-    collapseDriver.stop()
+    let presented = stopCollapse()                  // offset and velocity per old slot, before `fill` resets them
     let animates = window != nil
+    let slides = animates && !reduceMotion()
+    // Slot `k` now shows the row that was in slot `k` above the closed one and in slot `k + 1` below it.
+    let starts = (0..<rows.count).map { slot -> (offset: CGFloat, velocity: Double) in
+      guard slides else { return (0, 0) }
+      let old = slot < index ? slot : slot + 1
+      let state = presented[old]
+      return (CGFloat(old - slot) * Self.rowHeight + CGFloat(state.value), state.velocity)
+    }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     self.frame = frame
     fill(rows)
     layoutChrome()
     ghost.configure(closed, flavor: flavor)
-    ghost.frame = rowFrame(index)
+    var ghostFrame = rowFrame(index)
+    if slides { ghostFrame.origin.y += CGFloat(presented[index].value) }   // where the closed row was on screen
+    ghost.frame = ghostFrame
     ghost.isHidden = !animates
     ghost.layer?.opacity = 0
-    let moved = Array(rowViews[index..<rowCount])
-    let slides = animates && !reduceMotion()
-    if slides {                                     // where they were, until the first spring frame
-      for row in moved { row.layer?.transform = CATransform3DMakeTranslation(0, Self.rowHeight, 0) }
+    for (slot, start) in starts.enumerated() where start.offset != 0 {   // where they are, until the first frame
+      rowViews[slot].layer?.transform = CATransform3DMakeTranslation(0, start.offset, 0)
     }
     CATransaction.commit()
     setHighlight(index: highlight, animated: animates)
     guard animates else { return }
     fadeOut(ghost)
     guard slides else {
-      for row in moved { fadeIn(row) }
+      for row in rowViews[index..<rowCount] { fadeIn(row) }
       return
     }
-    collapseDriver.animate(in: self, from: 0, to: 1, initialVelocity: 0,
-                           parameters: SpringPreset.firmFast.parameters) { progress in
-      CATransaction.begin()
-      CATransaction.setDisableActions(true)
-      let offset = Self.rowHeight * CGFloat(1 - progress)
-      for row in moved { row.layer?.transform = CATransform3DMakeTranslation(0, offset, 0) }
-      CATransaction.commit()
+    for (slot, start) in starts.enumerated() where start.offset != 0 || start.velocity != 0 {
+      let row = rowViews[slot]
+      collapseDrivers[slot].animate(in: self, from: Double(start.offset), to: 0, initialVelocity: start.velocity,
+                                    parameters: SpringPreset.firmFast.parameters) { [weak row] offset in
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        row?.layer?.transform = CATransform3DMakeTranslation(0, CGFloat(offset), 0)
+        CATransaction.commit()
+      }
     }
   }
 
+  /// Stops every row slide. Returns each slot's presented offset (points below its slot) and velocity; `(0, 0)` for
+  /// a slot at rest.
+  @discardableResult
+  private func stopCollapse() -> [(value: Double, velocity: Double)] {
+    collapseDrivers.map { $0.stop() ?? (0, 0) }
+  }
+
   private func fadeOut(_ view: NSView) {
+    ghostGeneration += 1
+    let generation = ghostGeneration
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = 1
     fade.toValue = 0
     fade.duration = SpringPreset.firmFast.parameters.response
     fade.timingFunction = Self.easeOut
     CATransaction.begin()
-    CATransaction.setCompletionBlock { [weak view] in MainActor.assumeIsolated { view?.isHidden = true } }
+    CATransaction.setCompletionBlock { [weak self, weak view] in
+      MainActor.assumeIsolated {                    // a fade replaced by a later W's keeps the ghost up
+        guard let self, self.ghostGeneration == generation else { return }
+        view?.isHidden = true
+      }
+    }
     view.layer?.add(fade, forKey: "tabSwitcher.closeFade")
     CATransaction.commit()
   }
