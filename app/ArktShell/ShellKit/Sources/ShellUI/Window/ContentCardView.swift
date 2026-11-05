@@ -65,6 +65,15 @@ public final class ContentCardView: NSView {
   public var borderEmphasis: CGFloat = 1 {
     didSet { if borderEmphasis != oldValue { needsDisplay = true } }
   }
+  /// The focused pane of a shown split; a single card never is. Under Increase Contrast it draws `paneFocusRing`.
+  public var isFocusedSplitPane = false {
+    didSet { if isFocusedSplitPane != oldValue { needsDisplay = true } }
+  }
+  /// Increase Contrast (#640): the focused split pane draws a 2 pt ink ring outside the card, where a 1 pt edge is too
+  /// weak to tell which pane has focus. Drawn as a layer border around the card, so the page never moves or shrinks.
+  public let paneFocusRing = CALayer()
+  /// Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
   /// The pane close (X) of a split pane (#388), above the page at the top trailing corner; nil on the single card.
   public private(set) var closeButton: SplitPaneCloseButton?
   /// A click (or VoiceOver press) on `closeButton`.
@@ -104,10 +113,18 @@ public final class ContentCardView: NSView {
     toolbar.autoresizingMask = []
     clipView.addSubview(toolbar)
     applyBorderWidth()
+    paneFocusRing.cornerRadius = metrics.cardCornerRadius + ShellTokens.splitPaneFocusRingWidth
+    paneFocusRing.cornerCurve = .continuous
+    paneFocusRing.borderWidth = ShellTokens.splitPaneFocusRingWidth
+    paneFocusRing.isHidden = true
+    layer?.addSublayer(paneFocusRing)
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityIdentifier(AXID.Content.card)
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { needsDisplay = true }
 
   /// Where the page goes in `clipView`: everything below the Toolbar when it shows.
   private var contentFrame: CGRect { split.contentFrame }
@@ -210,6 +227,8 @@ public final class ContentCardView: NSView {
     layoutZoomPill()
     layoutStatusPill()
     layoutToast()
+    let ring = ShellTokens.splitPaneFocusRingWidth
+    paneFocusRing.frame = bounds.insetBy(dx: -ring, dy: -ring)
     // An explicit shadow path avoids an offscreen pass to derive the shadow shape from content alpha.
     layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: metrics.cardCornerRadius,
                                cornerHeight: metrics.cardCornerRadius, transform: nil)
@@ -227,6 +246,11 @@ public final class ContentCardView: NSView {
     border.alpha *= Double(borderEmphasis)
     clip.borderColor = border.cgColor
     applyBorderWidth()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    paneFocusRing.borderColor = ShellTokens.splitPaneFocusRing.resolve(flavor).cgColor
+    paneFocusRing.isHidden = !(isFocusedSplitPane && increaseContrast())
+    CATransaction.commit()
   }
 
   public override func viewDidChangeEffectiveAppearance() {

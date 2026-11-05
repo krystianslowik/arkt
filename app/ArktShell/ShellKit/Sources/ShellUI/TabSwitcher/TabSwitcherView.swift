@@ -42,6 +42,8 @@ public final class TabSwitcherView: NSView {
   var reduceTransparency: @MainActor () -> Bool = {
     NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
   }
+  /// Increase Contrast (#640): the highlight's 1 pt edge takes `increasedContrastEdge`. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
 
   /// One row view per possible row, plus `ghost`, which shows a closed row while it fades.
   public private(set) var rowViews: [TabSwitcherRowView] = []
@@ -95,7 +97,6 @@ public final class TabSwitcherView: NSView {
     addSubview(rowsClip)
     highlightLayer.cornerRadius = Self.rowCornerRadius
     highlightLayer.cornerCurve = .continuous
-    highlightLayer.borderWidth = 1
     rowsClip.layer?.addSublayer(highlightLayer)
     ghost.isHidden = true
     rowsClip.addSubview(ghost)
@@ -112,6 +113,14 @@ public final class TabSwitcherView: NSView {
     setAccessibilityIdentifier(AXID.TabSwitcher.panel)
     setAccessibilityModal(true)
     applyColors()
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
+  }
+
+  @objc private func displayOptionsChanged(_ note: Notification) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    applyColors()
+    CATransaction.commit()
   }
 
   @available(*, unavailable)
@@ -361,7 +370,8 @@ public final class TabSwitcherView: NSView {
       drop.shadowOffset = CGSize(width: 0, height: shadow.offsetY)        // the layer is flipped: y points down
     }
     highlightLayer.backgroundColor = ShellTokens.sidebarItemHovered.resolve(flavor).cgColor
-    highlightLayer.borderColor = ShellTokens.sidebarDivider.resolve(flavor).cgColor
+    IncreasedContrast.setEdge(on: highlightLayer, increased: increaseContrast(), flavor: flavor, otherwiseWidth: 1,
+                              color: ShellTokens.sidebarDivider.resolve(flavor))
   }
 }
 

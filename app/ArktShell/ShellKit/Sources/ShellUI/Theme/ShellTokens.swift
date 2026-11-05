@@ -158,6 +158,17 @@ public enum ShellTokens {
   public static let focusRing = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.85),
                                           dark: .srgb(hex: 0xFAF9F5, alpha: 0.85))
   public static let focusRingWidth: CGFloat = 3
+  // Increase Contrast (#640, design/increase-contrast/README.md): fills stay as they are; each filled state of the
+  // main window's chrome gets a 1 pt edge, drawn as a layer border so nothing changes size.
+  /// The 1 pt edge under Increase Contrast. The one value for the whole shell: Settings, the Archive, the dialogs and
+  /// the toasts forward to it.
+  public static let increasedContrastEdge = TokenPair(light: .black(0.20), dark: .white(0.20))
+  public static let increasedContrastEdgeWidth: CGFloat = 1
+  /// The focused Split View pane's ring under Increase Contrast, outside the card: the ink tone, stronger in dark,
+  /// where a 1 pt edge at 20 % is too weak to tell which pane has focus.
+  public static let splitPaneFocusRing = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.50),
+                                                   dark: .srgb(hex: 0xFAF9F5, alpha: 0.60))
+  public static let splitPaneFocusRingWidth: CGFloat = 2
   // Space theme background (C6).
   /// Texture overlay alpha at noiseFactor 1: the texture multiplies the gradient by `mix(1, texel, alpha)` with alpha
   /// the noiseFactor itself (parity estimate, PARITY(NEEDS-RUNTIME-CHECK)); each texture's strength is in its texels
