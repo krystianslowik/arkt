@@ -323,9 +323,8 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
 
   public func selectedText(of id: TabID) -> String? { entries[id]?.selectedText }
 
-  /// A new document ends the page's find, its hovered link and its selection.
+  /// A new load ends the page's find and its hovered link. The selection stays until the new document commits.
   private func endFindAndHover(_ id: TabID, _ entry: Entry) {
-    entry.selectedText = nil
     entry.findText = nil
     entry.findEpoch += 1
     if entry.hoveredLink != nil {
@@ -592,6 +591,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
 
   private func didCommit(_ id: TabID) {
     guard let entry = entries[id] else { return }
+    // The old document's selection goes with it; the new document's script reports its own (#404). Not at the load's
+    // start: the old page is still shown then, and a cancelled load (a download, a 204) keeps it.
+    entry.selectedText = nil
     let host = entry.webView.url?.host()
     guard host != entry.committedHost else { return }
     entry.committedHost = host

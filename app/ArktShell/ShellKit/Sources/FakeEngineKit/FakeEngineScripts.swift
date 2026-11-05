@@ -41,19 +41,26 @@ enum FakeEngineScripts {
   static let selectionHandler = "arktSelection"
 
   /// Posts the main frame's selected text on every selection change, or null when nothing is selected, so the engine
-  /// can answer `selectedText(of:)` without a round trip to the page.
+  /// can answer `selectedText(of:)` without a round trip to the page. Each document posts its first state once
+  /// (`current` starts undefined), so a report the old document queued before the commit is overwritten.
   static let selection = """
     (function () {
       if (window.__arktSelection) { return; }
       window.__arktSelection = true;
-      var current = null;
-      document.addEventListener('selectionchange', function () {
+      var current;
+      function report() {
         var text = String(window.getSelection() || '');
         var next = text.length ? text : null;
         if (next === current) { return; }
         current = next;
         window.webkit.messageHandlers.\(selectionHandler).postMessage(next);
-      });
+      }
+      document.addEventListener('selectionchange', report);
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', report);
+      } else {
+        report();
+      }
     })();
     """
 

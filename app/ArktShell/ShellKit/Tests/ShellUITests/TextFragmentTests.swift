@@ -13,7 +13,15 @@ struct TextFragmentTests {
   }
 
   @Test func whitespaceIsCollapsedAndTrimmed() {
-    #expect(link("https://example.com/a", "  quick\n\tbrown   fox ") == "https://example.com/a#:~:text=quick%20brown%20fox")
+    #expect(link("https://example.com/a", "  quick\tbrown   fox \n") == "https://example.com/a#:~:text=quick%20brown%20fox")
+  }
+
+  /// A term cannot cross a block boundary, so a selection over two blocks is a start in the first and an end in the
+  /// last.
+  @Test func aSelectionOverSeveralBlocksBecomesAStartAndAnEnd() {
+    #expect(link("https://example.com/a", "Heading\nquick brown fox") == "https://example.com/a#:~:text=Heading,quick%20brown%20fox")
+    #expect(link("https://example.com/a", "one two three four five\n\nsix seven eight nine ten")
+              == "https://example.com/a#:~:text=one%20two%20three%20four,seven%20eight%20nine%20ten")
   }
 
   /// The directive's own separators and the percent sign are encoded, so the text cannot split the directive.

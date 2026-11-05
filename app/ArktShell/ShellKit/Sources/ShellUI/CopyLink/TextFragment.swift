@@ -2,9 +2,10 @@ import Foundation
 
 /// The link to selected text that Copy URL offers (BH-193, #404): the page's URL with a text directive
 /// (`#:~:text=`, the URL Fragment Text Directives spec), which Chromium and Safari scroll to and highlight. Arc's
-/// generator is unpublished ([S] gives the offer string only), so the shape is ours: a selection of up to
-/// `wholeWordLimit` words is quoted whole; a longer one becomes `text=start,end` from its first and last
-/// `rangeWords` words, which keeps the link short and still finds the passage.
+/// generator is unpublished ([S] gives the offer string only), so the shape is ours: a one-line selection of up to
+/// `wholeWordLimit` words is quoted whole; a longer one, or one over several lines (blocks), becomes
+/// `text=start,end` from its first and last `rangeWords` words, which keeps the link short and still finds the
+/// passage.
 public enum TextFragment {
   /// Selections with at most this many words are quoted whole.
   public static let wholeWordLimit = 8
@@ -15,15 +16,22 @@ public enum TextFragment {
   /// fragment stays; an existing directive is replaced.
   public static func link(to text: String, in url: URL) -> URL? {
     guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else { return nil }
-    let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
-    guard !words.isEmpty else { return nil }
+    let lines = text.split(whereSeparator: \.isNewline)
+      .map { $0.split(whereSeparator: \.isWhitespace).map(String.init) }
+      .filter { !$0.isEmpty }
+    guard let first = lines.first, let last = lines.last else { return nil }
+    let words = lines.flatMap { $0 }
     let directive: String
-    if words.count <= wholeWordLimit {
+    if lines.count == 1, words.count <= wholeWordLimit {
       directive = encode(words.joined(separator: " "))
+    } else if lines.count == 1 {
+      directive = encode(words.prefix(rangeWords).joined(separator: " ")) + ","
+        + encode(words.suffix(rangeWords).joined(separator: " "))
     } else {
-      let start = words.prefix(rangeWords).joined(separator: " ")
-      let end = words.suffix(rangeWords).joined(separator: " ")
-      directive = encode(start) + "," + encode(end)
+      // A single term cannot match across blocks (a line break in the selection), so a selection over several
+      // starts in the first line and ends in the last.
+      directive = encode(first.prefix(rangeWords).joined(separator: " ")) + ","
+        + encode(last.suffix(rangeWords).joined(separator: " "))
     }
     var base = url.absoluteString
     var fragment = ""

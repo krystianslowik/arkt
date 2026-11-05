@@ -15,7 +15,7 @@ public final class CopyLinkEducation {
   /// The manual copy that brings the tip [I]: Arc's threshold is unpublished.
   public static let manualCopyThreshold = 3
 
-  /// The tip. The key matches the Edit menu's Copy URL (MainMenu, pinned by `MainMenuKeyEquivalentTests`).
+  /// The tip. The key must match the Edit menu's Copy URL (`MainMenuKeyEquivalentTests.testTheCopyURLTipNamesTheMenusKey`).
   public static let toast = Toast(text: "Copy links faster by pressing \u{21E7}\u{2318}C",
                                   announcement: "Copy links faster by pressing Shift-Command-C", isPolite: true)
 
