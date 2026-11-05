@@ -351,6 +351,165 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     }
   }
 
+  // MARK: Press, show menu and value (#607)
+
+  private static let press = #selector(NSAccessibilityProtocol.accessibilityPerformPress)
+  private static let showMenu = #selector(NSAccessibilityProtocol.accessibilityPerformShowMenu)
+
+  func testPressActivatesATabRowAndTogglesAFolderRow() throws {
+    let fixture = try makeFixture()
+    let element = fixture.element
+    let today = fixture.sidebar.children(of: .today(fixture.space))
+    var activated: [NodeID] = []
+    fixture.outlineController.onActivate = { activated.append($0) }
+    let rows = try proxyRows(element)
+    let tabRow = rows[fixture.outlineController.row(for: today[1])]
+    XCTAssertTrue(tabRow.isAccessibilitySelectorAllowed(Self.press))
+    XCTAssertTrue(tabRow.accessibilityPerformPress())
+    XCTAssertEqual(activated, [today[1]], "a press activates the row as a click does")
+
+    let folderID = try folder(fixture)
+    let folderRow = rows[fixture.outlineController.row(for: folderID)]
+    XCTAssertTrue(folderRow.accessibilityPerformPress())
+    XCTAssertEqual(shown(try proxyRows(element)), Self.personalExpanded.filter { $0.level == 0 },
+                   "a press closes an open folder")
+    let reopened = try proxyRows(element)[fixture.outlineController.row(for: folderID)]
+    XCTAssertTrue(reopened.accessibilityPerformPress())
+    XCTAssertEqual(shown(try proxyRows(element)), Self.personalExpanded, "and opens a closed one")
+    XCTAssertEqual(activated, [today[1]], "a folder press activates nothing")
+
+    let divider = try proxyRows(element)[fixture.outlineController.dividerRow]
+    XCTAssertFalse(divider.isAccessibilitySelectorAllowed(Self.press))
+    XCTAssertFalse(divider.isAccessibilitySelectorAllowed(Self.showMenu))
+    XCTAssertFalse(divider.accessibilityPerformPress(), "the divider does nothing")
+  }
+
+  func testShowMenuPresentsTheRowsContextMenu() throws {
+    let fixture = try makeFixture()
+    let controller = fixture.outlineController
+    var presented: [(titles: [String], row: Int)] = []
+    controller.presentAccessibilityMenu = { menu, row in presented.append((menu.items.map(\.title), row)) }
+    let rows = try proxyRows(fixture.element)
+    let today = fixture.sidebar.children(of: .today(fixture.space))
+    let tabRow = controller.row(for: today[0])
+    let folderRow = controller.row(for: try folder(fixture))
+    let expectedTab = try XCTUnwrap(controller.menu(forRow: tabRow)).items.map(\.title)
+    let expectedFolder = try XCTUnwrap(controller.menu(forRow: folderRow)).items.map(\.title)
+
+    XCTAssertTrue(rows[tabRow].isAccessibilitySelectorAllowed(Self.showMenu))
+    XCTAssertTrue(rows[tabRow].accessibilityPerformShowMenu())
+    XCTAssertTrue(rows[folderRow].accessibilityPerformShowMenu())
+    XCTAssertFalse(rows[controller.dividerRow].accessibilityPerformShowMenu())
+    XCTAssertEqual(presented.map(\.row), [tabRow, folderRow])
+    XCTAssertEqual(presented.first?.titles, expectedTab, "the same menu a right-click on the row shows")
+    XCTAssertEqual(presented.last?.titles, expectedFolder)
+    XCTAssertFalse(expectedTab.isEmpty)
+  }
+
+  func testValueSaysTheSectionAndTheState() throws {
+    let fixture = try makeFixture()
+    let controller = fixture.outlineController
+    let pinned = fixture.sidebar.children(of: .pinned(fixture.space))
+    let today = fixture.sidebar.children(of: .today(fixture.space))
+    let folderID = try folder(fixture)
+    let inFolder = fixture.sidebar.children(of: .folder(folderID))[0]
+    var sound: [NodeID: TabAudio] = [pinned[0]: .playing, pinned[1]: .muted]
+    var closing: Set<NodeID> = []
+    controller.audioProvider = { sound[$0] ?? .silent }
+    controller.closingProvider = { closing.contains($0) }
+    fixture.controller.activate(node: today[0])
+
+    func value(_ id: NodeID) throws -> String? {
+      try proxyRows(fixture.element)[controller.row(for: id)].accessibilityValue() as? String
+    }
+    XCTAssertEqual(try value(pinned[0]), "Pinned, playing audio")
+    XCTAssertEqual(try value(pinned[1]), "Pinned, muted")
+    XCTAssertEqual(try value(folderID), "Pinned")
+    XCTAssertEqual(try value(inFolder), "Pinned", "a row in a folder is in the folder's section")
+    XCTAssertEqual(try value(today[0]), "Today, current")
+    XCTAssertEqual(try value(today[1]), "Today")
+
+    sound[today[0]] = .playing
+    closing.insert(today[0])
+    XCTAssertEqual(try value(today[0]), "Today, current, playing audio, closing")
+    sound = [:]
+    closing = []
+    fixture.controller.activate(node: today[1])
+    XCTAssertEqual(try value(today[0]), "Today")
+    XCTAssertEqual(try value(today[1]), "Today, current")
+  }
+
+  func testStateAndSoundChangesPostAValueChange() throws {
+    let fixture = try makeFixture()
+    let controller = fixture.outlineController
+    let proxies = fixture.outline.axProxyRows
+    let today = fixture.sidebar.children(of: .today(fixture.space))
+    _ = try proxyRows(fixture.element)
+    proxies.postedNotificationsForTesting = []
+
+    fixture.controller.activate(node: today[1])
+    let row = controller.row(for: today[1])
+    XCTAssertTrue(proxies.postedNotificationsForTesting?.contains { $0.0 == .valueChanged && $0.1 == row } ?? false,
+                  "a row that became current tells clients its value changed")
+
+    proxies.postedNotificationsForTesting = []
+    controller.audioChanged(node: today[2])
+    let audioRow = controller.row(for: today[2])
+    XCTAssertTrue(proxies.postedNotificationsForTesting?.contains { $0.0 == .valueChanged && $0.1 == audioRow }
+                  ?? false, "a sound change tells clients the value changed")
+  }
+
+  // MARK: Favorite tiles (#607)
+
+  func testPressAndShowMenuOnAFavoriteTile() throws {
+    let fixture = try makeFixture()
+    let grid = fixture.controller.view.favorites
+    grid.collectionView.layoutSubtreeIfNeeded()
+    let favorites = fixture.sidebar.children(of: .favorites(profile: "default"))
+    let id = try XCTUnwrap(favorites.first)
+    let tile = try XCTUnwrap(grid.tile(for: id))
+    var activated: [NodeID] = []
+    grid.onActivate = { activated.append($0) }
+    var presented: [(titles: [String], tile: NSView)] = []
+    grid.presentAccessibilityMenu = { menu, view in presented.append((menu.items.map(\.title), view)) }
+
+    XCTAssertTrue(tile.isAccessibilitySelectorAllowed(Self.press))
+    XCTAssertTrue(tile.isAccessibilitySelectorAllowed(Self.showMenu))
+    XCTAssertTrue(tile.accessibilityPerformPress())
+    XCTAssertEqual(activated, [id], "a press activates the Favorite as a click does")
+
+    XCTAssertTrue(tile.accessibilityPerformShowMenu())
+    let expected = try XCTUnwrap(grid.contextMenu(for: id)).items.map(\.title)
+    XCTAssertEqual(presented.first?.titles, expected, "the same menu a right-click on the tile shows")
+    XCTAssertTrue(presented.first?.tile === tile)
+    XCTAssertFalse(expected.isEmpty)
+  }
+
+  func testAFavoriteTileReportsItselfSelectedWhileCurrent() throws {
+    let fixture = try makeFixture()
+    let grid = fixture.controller.view.favorites
+    let favorites = fixture.sidebar.children(of: .favorites(profile: "default"))
+    fixture.controller.activate(node: favorites[1])
+    grid.collectionView.layoutSubtreeIfNeeded()
+    XCTAssertEqual(try XCTUnwrap(grid.tile(for: favorites[1])).isAccessibilitySelected(), true)
+    XCTAssertEqual(try XCTUnwrap(grid.tile(for: favorites[0])).isAccessibilitySelected(), false)
+    fixture.controller.activate(node: favorites[0])
+    grid.collectionView.layoutSubtreeIfNeeded()
+    XCTAssertEqual(try XCTUnwrap(grid.tile(for: favorites[1])).isAccessibilitySelected(), false)
+    XCTAssertEqual(try XCTUnwrap(grid.tile(for: favorites[0])).isAccessibilitySelected(), true)
+  }
+
+  func testAReusedTileForgetsItsPressAndMenu() throws {
+    let tile = FavoriteTileView(frame: NSRect(x: 0, y: 0, width: 52, height: 46))
+    var calls = 0
+    tile.onAccessibilityPress = { calls += 1 }
+    tile.onAccessibilityShowMenu = { calls += 10 }
+    tile.prepareForReuse()
+    XCTAssertFalse(tile.accessibilityPerformPress())
+    XCTAssertFalse(tile.accessibilityPerformShowMenu())
+    XCTAssertEqual(calls, 0)
+  }
+
   // MARK: Cells
 
   func testTheCellHangsOffTheProxy() throws {
