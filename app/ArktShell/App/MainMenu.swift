@@ -64,6 +64,7 @@ enum MainMenu {
     main.addItem(holder(for: spacesMenu()))                                            // #387, built in ShellUI
     main.addItem(submenu(title: TabsMenu.title, items: TabsMenu.items()))               // #103, built in ShellUI
     windowItems(commands: commands).forEach { windows.addItem($0) }
+    windows.delegate = commands                                                        // #356: Little Arkt's section
     // Onboarding spec, section 12: the first Help item, no shortcut.
     help.addItem(item("Welcome to Arkt", #selector(AppCommands.showWelcome(_:)), "", [], target: commands))
     main.addItem(holder(for: windows))
@@ -239,6 +240,21 @@ enum MainMenu {
       .separator(),
       item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:)), "", [], target: NSApp),
     ]
+  }
+
+  /// The Dock menu (#356, BH-139, GS-041; docs/design/little-arkt.md, Copy): the Little Arkt windows by page title,
+  /// Hide All / Show All and Close Little Arkt Windows, then New Window and New Little Arkt Window. FakeEngine build
+  /// only: in the Engine build Chromium's `AppController` answers `applicationDockMenu:` until an embedder seam
+  /// forwards it (#658).
+  static func dockMenu(commands: AppCommands, littleArkts: LittleArktMenus?) -> NSMenu {
+    let menu = NSMenu(title: "Dock")
+    let rows = littleArkts?.dockItems() ?? []
+    rows.forEach { menu.addItem($0) }
+    if !rows.isEmpty { menu.addItem(.separator()) }
+    menu.addItem(item("New Window", #selector(AppCommands.newWindow(_:)), "", [], target: commands))
+    menu.addItem(item(LittleArktLookup.menuTitle, #selector(AppCommands.newLittleArktWindow(_:)), "n",
+                      [.command, .option], target: commands))
+    return menu
   }
 
   /// Hidden, with an empty submenu: Chromium's BookmarkMenuBridge takes it over (W3-8, condition 1).

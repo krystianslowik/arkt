@@ -89,3 +89,66 @@ extension ShellWindowController: LittleArktFlightDestination {
     currentSpace.flatMap { sidebar.space($0) }
   }
 }
+
+// MARK: - Opt-Cmd-click into Little Arkt (#356, BH-132, GS-028)
+
+extension ShellWindowController {
+  /// A link activated with Option and Command held, while the setting is on: the engine drops it and a new Little
+  /// Arkt window opens on its URL after the call returns (the engine is never called from inside its own decision).
+  func opensLinkInLittleArkt(_ activation: EngineLinkActivation) -> Bool {
+    guard let open = onOpenLinkInLittleArkt,
+          LittleArktRouting.opensInLittleArkt(activation, enabled: opensLittleArktOnOptionCommandClick()) else {
+      return false
+    }
+    let url = activation.url
+    DispatchQueue.main.async { open(url) }
+    return true
+  }
+
+  /// Opt-Cmd-click on a tab's row or tile (BH-132; docs/design/little-arkt.md, When a Little Arkt window opens):
+  /// - a Today tab's page moves into a new Little Arkt window (no reload when it is loaded) and the row leaves the
+  ///   sidebar without an Archive entry (the window set does both);
+  /// - a pinned tab or a Favorite opens its page in a new Little Arkt window and keeps its place, as a Peek does.
+  /// False when nothing happened (the setting is off); the click is then a plain click.
+  func moveToLittleArkt(_ node: NodeID) -> Bool {
+    guard opensLittleArktOnOptionCommandClick(), case .tab(_, let url, _)? = sidebar.node(node) else { return false }
+    let pageURL = tabsByNode[node].flatMap { engine.snapshot(of: $0)?.url } ?? url
+    switch sidebar.section(containing: node) {
+    case .today?:
+      return onMoveToLittleArkt?(node, pageURL) ?? false
+    case .pinned?, .favorites?:
+      guard let open = onOpenLinkInLittleArkt else { return false }
+      open(pageURL)
+      return true
+    default:
+      return false
+    }
+  }
+
+  /// `node` is about to leave the sidebar while this window shows its handoff placeholder (its page went to another
+  /// window): what to do once it is gone. The next tab is picked now, while the row is still in place, as a closed
+  /// current tab's is (`archive(_:heldCurrent:)`); it is shown unless another window shows it by then. Nil when this
+  /// window does not show that placeholder.
+  func afterRowLeaves(_ node: NodeID) -> (@MainActor () -> Void)? {
+    guard currentTab == nil, let placeholder = handoffPlaceholder, placeholder.node == node,
+          rootView.card.contentView === placeholder else { return nil }
+    let next = sidebar.spaceID(containing: node) == currentSpace ? successor(of: node) : nil
+    return { [weak self] in
+      // The removal itself already dropped the placeholder (`dropPlaceholderOfRemovedRow`); a tab picked meanwhile
+      // stays.
+      guard let self, self.currentTab == nil else { return }
+      if let next, self.sidebar.node(next) != nil, !(self.otherWindowsVisibleNodes?() ?? []).contains(next) {
+        self.activate(node: next)
+      } else {
+        self.dropHandoffPlaceholder()
+      }
+    }
+  }
+
+  /// The card stops showing the handoff placeholder, whose row is gone; it shows nothing until a tab is picked.
+  func dropHandoffPlaceholder() {
+    guard let placeholder = handoffPlaceholder, rootView.card.contentView === placeholder else { return }
+    rootView.card.setContent(nil)
+    refreshAddress()
+  }
+}

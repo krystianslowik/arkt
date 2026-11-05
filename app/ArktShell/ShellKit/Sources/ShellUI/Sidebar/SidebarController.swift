@@ -35,6 +35,8 @@ public final class SidebarController {
   public var onConvertSplit: (@MainActor (NodeID) -> Void)?
   public var onDuplicateSplit: (@MainActor (NodeID) -> Void)?
   public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
+  /// Opt-Cmd-click on a tab of every Space page (BH-132, #356), forwarded from `SidebarOutlineController`.
+  public var onOpenInLittleArkt: (@MainActor (NodeID) -> Bool)?
   /// A tab row's drag of every Space page started and ended (S7), forwarded from `SidebarOutlineController`.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   public var onNodeDragEnded: (@MainActor () -> Void)?
@@ -153,6 +155,7 @@ public final class SidebarController {
     self.profile = profile
     self.view = SidebarContainerView(source: source, profile: profile, topBarHeight: topBarHeight)
     view.favorites.onActivate = { [weak self] id in self?.activate(node: id) }
+    view.favorites.onOpenInLittleArkt = { [weak self] id in self?.onOpenInLittleArkt?(id) ?? false }
     view.favorites.faviconProvider = { [weak self] id in self?.favicons[id] }
     view.favorites.onClose = { [weak self] id in self?.onClose?(id) }
     view.favorites.onMenuAction = { [weak self] action in self?.onMenuAction?(action) }
@@ -476,6 +479,7 @@ public final class SidebarController {
     page.outlineController.onConvertSplit = { [weak self] node in self?.onConvertSplit?(node) }
     page.outlineController.onDuplicateSplit = { [weak self] node in self?.onDuplicateSplit?(node) }
     page.outlineController.onDuplicateIntoSplit = { [weak self] node in self?.onDuplicateIntoSplit?(node) }
+    page.outlineController.onOpenInLittleArkt = { [weak self] node in self?.onOpenInLittleArkt?(node) ?? false }
     page.outlineController.onMoveToFavorites = { [weak self] node in self?.onMoveToFavorites?(node) }
     page.outlineController.onPinToggle = { [weak self] node in self?.onPinToggle?(node) }
     page.outlineController.onResetPinned = { [weak self] node in self?.onResetPinned?(node) }
