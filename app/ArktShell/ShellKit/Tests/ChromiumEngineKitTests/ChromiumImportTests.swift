@@ -97,6 +97,30 @@ struct ChromiumImportTests {
       visitTransitions: [1, 10, 0])]])
   }
 
+  @Test func aHistoryBatchTheStoreNeverConfirmedComesBackFailedWithNothingWritten() async {
+    let engine = ChromiumEngine(facade: facade)
+    facade.importAnswer = (
+      written: 0, skipped: 1, failed: 2, failureReason: "no answer from the history store: 2\n")
+    let entry = ImportedHistoryEntry(
+      url: "https://example.com/", title: "Example", visitCount: 3, typedCount: 0, lastVisit: Date(timeIntervalSince1970: 3_000),
+      visits: (0..<3).map { HistoryVisit(time: Date(timeIntervalSince1970: 2_000 + Double($0)), transition: .link) })
+    let result = await engine.importHistory([entry], after: nil)
+
+    #expect(result == ImportWriteResult(
+      written: 0, skipped: 1, failed: 2, failureReason: "no answer from the history store: 2\n"))
+    #expect(result.latestVisit == nil)
+  }
+
+  @Test func aHistoryAnswerDeliveredTwiceResumesTheCallerOnce() async {
+    let engine = ChromiumEngine(facade: facade)
+    facade.importHistoryAnswersTwice = true
+    let result = await engine.importHistory([], after: nil)
+    #expect(result == ImportWriteResult())
+    // Let the second delivery run; a second resume would trap.
+    await Task.yield()
+    await Task.yield()
+  }
+
   @Test func noWatermarkReachesTheFacadeAsNil() async {
     let engine = ChromiumEngine(facade: facade)
     _ = await engine.importHistory([], after: nil)
