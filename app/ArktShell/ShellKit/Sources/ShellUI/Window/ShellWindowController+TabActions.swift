@@ -42,7 +42,6 @@ extension ShellWindowController {
     case .pasteURLAsNewTab(let location): pasteURLAsNewTab(in: location)
     case .newTab: newTab(nil)
     case .clearToday(let space): clearToday(space)
-    case .clearTodayControl(let space): clearTodayWithMotion(space)
     case .toggleMute(let id): toggleMute(id)
     }
   }
@@ -113,7 +112,7 @@ extension ShellWindowController {
   /// Clear Today Tabs (BH-075): the Today rows of the Space, minus the rows whose page plays media (BH-076) and the
   /// rows any window shows (#429); a Today folder goes to the Archive whole. The folders and rows come back together, by Undo or Cmd-Z.
   func clearToday(_ space: SpaceID) {
-    archiveToday(todayRows(of: space, scope: .all))
+    clearTodayRows(of: space, scope: .all)
   }
 
   /// Archives `rows`, the top-level Today rows a Clear took: a folder goes whole, the rest row by row, as one undo

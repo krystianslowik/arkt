@@ -977,6 +977,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// cancelled prompt keeps it open. Without one (no tab was ever shown) the window closes as before. The shown tabs
   /// are stamped once the first page closes, not here: a cancelled prompt leaves the stored sidebar as it was.
   public func windowShouldClose(_ sender: NSWindow) -> Bool {
+    settlePendingClear()                             // #413: a Clear mid-exit archives before the session is saved
     guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
     let open = Array(tabsByNode.values)
     saveSession()                                    // #116: before the tabs close
@@ -990,6 +991,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The shown tabs, every pane of a split, stop being visible (decision 10). The command bar's display link retains
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
+    settlePendingClear()                             // #413: a window closed without `windowShouldClose`
     isClosed = true
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()

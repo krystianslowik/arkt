@@ -37,12 +37,13 @@ extension ShellWindowController {
     clearToday(space)
   }
 
-  /// The Clear control above Today (#413, design/clear-today-tabs): the same rows as Clear Today Tabs, which collapse
-  /// upward together on one spring before they go to the Archive (Reduce Motion: they fade in place). The model
-  /// changes when the motion ends; a row that left Today meanwhile is skipped. The menu items and Shift-Cmd-K clear at
-  /// once, as other keyboard and menu actions do.
-  func clearTodayWithMotion(_ space: SpaceID) {
-    let rows = todayRows(of: space, scope: .all)
+  /// Every Clear (#413, design/clear-today-tabs): the control above Today, File > Clear Today Tabs, Shift-Cmd-K and
+  /// the bottom bar's two items. While the sidebar is on screen the rows `scope` takes collapse upward together on one
+  /// spring before they go to the Archive (Reduce Motion: they fade in place); otherwise they go at once. The model
+  /// changes when the motion ends, and only for the rows the Clear rules still take then (a row activated, shown in
+  /// another window or playing media meanwhile stays). A Clear while one runs is ignored.
+  func clearTodayRows(of space: SpaceID, scope: TodayClearPolicy.Scope) {
+    let rows = todayRows(of: space, scope: scope)
     guard !rows.isEmpty else { return }
     guard let outline = sidebarController.outline(containing: rows[0]) else {
       archiveToday(rows)
@@ -50,13 +51,23 @@ extension ShellWindowController {
     }
     outline.runTodayExit(rows) { [weak self] in
       guard let self else { return }
-      let still = Set(self.sidebar.children(of: .today(space)))
+      let still = Set(self.todayRows(of: space, scope: scope))
       let remaining = rows.filter(still.contains)
       if !remaining.isEmpty { self.archiveToday(remaining) }
     }
   }
 
-  /// Runs an Undo (`body`); rows the Clear control archived come back on the reverse of its spring (#413).
+  /// Ends a Clear's exit now, so its rows are archived before the window closes, the app quits, the window is
+  /// minimized or an Undo reads the stack. Every Space of the window: a page a Space switch hid has settled already.
+  public func settlePendingClear() {
+    for space in sidebar.spaceOrder {
+      guard let first = sidebar.children(of: .today(space)).first,
+            let outline = sidebarController.outline(containing: first) else { continue }
+      outline.todayClear.settleNow()
+    }
+  }
+
+  /// Runs an Undo (`body`); rows a Clear archived come back on the reverse of its spring (#413).
   func withTodayReturnMotion(_ body: () -> Bool) -> Bool {
     guard let outline = sidebarController.currentPage?.outlineController else { return body() }
     return outline.returningClearedRows(body)
@@ -75,9 +86,7 @@ extension ShellWindowController {
     guard Self.holdsSelection(sidebar.children(of: .today(space)), selected, tabs: { self.tabs(in: $0) }) else {
       return
     }
-    let rows = todayRows(of: space, scope: .unselected)
-    guard !rows.isEmpty else { return }
-    archiveToday(rows)
+    clearTodayRows(of: space, scope: .unselected)
   }
 
   /// True when a Clear would take a row: the menu bar item's enabled rule.

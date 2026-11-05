@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Motion
 
 /// Favicon (16 pt at x 10), title (14 pt medium at x 34), the audio button of a page that plays or is muted (#364)
@@ -280,6 +281,16 @@ public final class SidebarDividerView: NSView {
   public let clearButton = TodayClearButton()
   /// The control was pressed.
   var onClear: (@MainActor () -> Void)?
+  /// The control took or lost the keyboard focus.
+  var onFocusChange: (@MainActor () -> Void)? {
+    get { clearButton.onFocusChange }
+    set { clearButton.onFocusChange = newValue }
+  }
+  /// Tab or Shift-Tab (false: back to the rows) or Esc (true: back to the page) on the focused control.
+  var onKeyboardLeave: (@MainActor (_ escape: Bool) -> Void)? {
+    get { clearButton.onKeyboardLeave }
+    set { clearButton.onKeyboardLeave = newValue }
+  }
   private(set) var isClearShown = false
 
   public var flavor: ThemeFlavor = .light {
@@ -384,6 +395,10 @@ public final class TodayClearButton: NSButton {
   var flavor: ThemeFlavor = .light { didSet { refresh() } }
   private(set) var isHovered = false { didSet { if isHovered != oldValue { refresh() } } }
   private var hoverArea: NSTrackingArea?
+  /// Tab from a focused sidebar row reaches it (#413); while it has the focus it is drawn with the system ring.
+  private(set) var hasKeyboardFocus = false
+  var onFocusChange: (@MainActor () -> Void)?
+  var onKeyboardLeave: (@MainActor (_ escape: Bool) -> Void)?
 
   public override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -397,8 +412,48 @@ public final class TodayClearButton: NSButton {
     setAccessibilityLabel("Clear Today tabs")
     setAccessibilityHelp("Moves the tabs under Today to the Archive")
     setAccessibilityIdentifier(AXID.Sidebar.clearToday)
+    focusRingType = .exterior
     refresh()
   }
+
+  /// Reachable with Tab from the sidebar's focused row whatever the system's keyboard navigation setting: the
+  /// sidebar runs its own keyboard focus (Ctrl-Space, BH-019).
+  public override var acceptsFirstResponder: Bool { isEnabled }
+  public override var canBecomeKeyView: Bool { isEnabled }
+
+  public override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became {
+      hasKeyboardFocus = true
+      onFocusChange?()
+    }
+    return became
+  }
+
+  public override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned, hasKeyboardFocus {
+      hasKeyboardFocus = false
+      onFocusChange?()
+    }
+    return resigned
+  }
+
+  /// Return and Space press it; Tab and Shift-Tab go back to the rows, Esc to the page.
+  public override func keyDown(with event: NSEvent) {
+    switch Int(event.keyCode) {
+    case kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space: performClick(nil)
+    case kVK_Tab: onKeyboardLeave?(false)
+    case kVK_Escape: onKeyboardLeave?(true)
+    default: super.keyDown(with: event)
+    }
+  }
+
+  public override func drawFocusRingMask() {
+    NSBezierPath(roundedRect: bounds, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius).fill()
+  }
+
+  public override var focusRingMaskBounds: NSRect { bounds }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

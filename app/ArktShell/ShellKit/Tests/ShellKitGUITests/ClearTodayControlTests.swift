@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Archive
 import CoreBridge
 import EngineAPI
@@ -21,16 +22,26 @@ final class ClearTodayControlTests: XCTestCase {
     let source: ModelSidebarSource
     let controller: ShellWindowController
     let space: UUID
-    /// Today `[t0, t1, t2, t3]`; t3 is the current tab, so it stays (#429) below the rows that go.
+    /// Today `[t0, t1, t2, t3]`; t3 is the current tab, so it stays (#429) below the rows that go. With `split`, a
+    /// two-pane split comes first: `[split, t0, t1, t2, t3]`.
     let today: [UUID]
+    var split: UUID?
+    var panes: [UUID] = []
     var archived: [ArchivedItem] = []
     var archiveCalls = 0
     var clock: CFTimeInterval = 1000
 
-    init() throws {
+    init(split withSplit: Bool = false) throws {
       var sidebar = SidebarModel.Sidebar()
       let space = sidebar.addSpace(title: "Work")
       _ = try sidebar.addTab(url: URL(string: "https://example.com/p")!, title: "Pinned", in: .pinned(space))
+      if withSplit {
+        let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(space))
+        panes = try ["l", "r"].map {
+          try sidebar.addTab(url: URL(string: "https://example.com/\($0)")!, title: $0, in: .split(split))
+        }
+        self.split = split
+      }
       today = try (0..<4).map {
         try sidebar.addTab(url: URL(string: "https://example.com/t\($0)")!, title: "T\($0)", in: .today(space))
       }
@@ -81,6 +92,18 @@ final class ClearTodayControlTests: XCTestCase {
     func style(_ node: UUID) throws -> FolderMotionLayout.RowStyle { try outline().rowStyle(for: node) }
 
     var todayNow: [UUID] { source.children(of: .today(space)) }
+
+    /// A Clear from the control, then frames until it is `seconds` in.
+    func clearAndAdvance(by seconds: CFTimeInterval) throws {
+      try divider().clearButton.performClick(nil)
+      try advance(by: seconds)
+    }
+  }
+
+  private func key(_ keyCode: Int) throws -> NSEvent {
+    let source = CGEventSource(stateID: .privateState)
+    let event = try XCTUnwrap(CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true))
+    return try XCTUnwrap(NSEvent(cgEvent: event))
   }
 
   override func setUp() async throws {
@@ -274,7 +297,170 @@ final class ClearTodayControlTests: XCTestCase {
     harness.controller.activate(node: harness.today[3])
     let outline = try harness.outline()
     outline.todayClear.reduceMotion = { false }
-    outline.perform(.clearTodayControl(harness.space))
+    outline.perform(.clearToday(harness.space))
     XCTAssertEqual(harness.todayNow, [harness.today[3]])
+  }
+
+  // MARK: Every entry point (orchestrator decision on #413)
+
+  func testTheMenuItemAndShortcutRunTheSameExitWhileTheSidebarIsOnScreen() throws {
+    let harness = try Harness()
+    defer { harness.controller.close() }
+    try harness.show()
+    harness.controller.clearTodayTabs(nil)
+    XCTAssertTrue(try harness.outline().todayClear.isRunning)
+    XCTAssertEqual(harness.todayNow, harness.today)
+    try harness.advance(by: 2)
+    XCTAssertEqual(harness.todayNow, [harness.today[3]])
+  }
+
+  // MARK: Ending early
+
+  func testClosingTheWindowMidExitLeavesTheRowsArchived() throws {
+    let harness = try Harness()
+    try harness.show()
+    try harness.clearAndAdvance(by: 0.06)
+    harness.controller.window?.performClose(nil)
+    XCTAssertEqual(harness.todayNow, [harness.today[3]])
+    XCTAssertEqual(harness.archived.count, 3)
+  }
+
+  func testQuittingMidExitLeavesTheRowsArchived() throws {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let today = try (0..<3).map {
+      try sidebar.addTab(url: URL(string: "https://example.com/q\($0)")!, title: "Q\($0)", in: .today(space))
+    }
+    let source = ModelSidebarSource(sidebar: sidebar, now: { ClearTodayControlTests.now })
+    let set = ShellWindowSet(engine: InMemoryEngine(), sidebar: source)
+    set.configure = { controller in
+      controller.onArchive = { ids in _ = source.archive(ids, reason: .manual, at: ClearTodayControlTests.now) }
+    }
+    let controller = set.openWindow(opensFirstTab: false)
+    defer { controller.window?.orderOut(nil) }
+    controller.showWindow(nil)
+    controller.activate(node: today[2])
+    let motion = try XCTUnwrap(controller.sidebarController.currentPage?.outlineController.todayClear)
+    var clock: CFTimeInterval = 1000
+    motion.now = { clock }
+    motion.drivesFramesItself = false
+    motion.reduceMotion = { false }
+    controller.clearTodayTabs(nil)
+    clock += 0.06
+    motion.presentFrame()
+    XCTAssertTrue(motion.isRunning)
+
+    set.saveSessionsForTermination()
+    XCTAssertEqual(source.children(of: .today(space)), [today[2]])
+  }
+
+  func testMinimizingMidExitLeavesTheRowsArchived() throws {
+    let harness = try Harness()
+    defer { harness.controller.close() }
+    try harness.show()
+    try harness.clearAndAdvance(by: 0.06)
+    harness.controller.windowDidMiniaturize(Notification(name: NSWindow.didMiniaturizeNotification))
+    XCTAssertEqual(harness.todayNow, [harness.today[3]])
+  }
+
+  func testCmdZMidExitUndoesTheClearOnTheReturnSpring() throws {
+    let harness = try Harness()
+    defer { harness.controller.close() }
+    try harness.show()
+    try harness.clearAndAdvance(by: 0.06)
+
+    XCTAssertTrue(harness.controller.reopenClosed())
+    XCTAssertEqual(harness.todayNow, harness.today)
+    let motion = try harness.outline().todayClear
+    XCTAssertEqual(motion.direction, .returning)
+    XCTAssertEqual(try harness.style(harness.today[0]).alpha, 0, "they come back from collapsed")
+    try harness.advance(by: 2)
+    for node in harness.today { XCTAssertEqual(try harness.style(node), .rest) }
+  }
+
+  // MARK: The Clear rules at settle
+
+  func testARowActivatedMidExitStaysAndStaysCurrent() throws {
+    let harness = try Harness()
+    defer { harness.controller.close() }
+    try harness.show()
+    try harness.clearAndAdvance(by: 0.06)
+
+    let outline = try harness.outline()
+    outline.handleClick(row: outline.row(for: harness.today[0]), modifiers: [])
+    XCTAssertEqual(harness.controller.currentNode, harness.today[3], "clicks on the rows are ignored mid-exit")
+    XCTAssertNil(outline.outlineView(outline.outlineView, pasteboardWriterForItem:
+                                       try XCTUnwrap(outline.outlineView.item(atRow: outline.row(for: harness.today[1])))),
+                 "no drag starts mid-exit")
+
+    harness.controller.activate(node: harness.today[1])
+    try harness.advance(by: 2)
+    XCTAssertTrue(harness.todayNow.contains(harness.today[1]), "a row shown meanwhile stays")
+    XCTAssertEqual(harness.controller.currentNode, harness.today[1])
+    XCTAssertFalse(harness.todayNow.contains(harness.today[0]))
+  }
+
+  // MARK: Containers
+
+  func testAnExpandedSplitLeavesWithItsPaneRows() throws {
+    let harness = try Harness(split: true)
+    defer { harness.controller.close() }
+    try harness.show()
+    let outline = try harness.outline()
+    let split = try XCTUnwrap(harness.split)
+    let paneRows = harness.panes.map(outline.row(for:))
+    XCTAssertTrue(paneRows.allSatisfy { $0 >= 0 }, "the split shows its panes")
+    let leavingRows = [outline.row(for: split)] + paneRows + harness.today[0..<3].map(outline.row(for:))
+    let gap = leavingRows.reduce(CGFloat(0)) { $0 + outline.outlineView.rect(ofRow: $1).height }
+
+    try harness.clearAndAdvance(by: 0.06)
+    let gone = 1 - (try harness.style(split)).alpha
+    XCTAssertGreaterThan(gone, 0)
+    for pane in harness.panes {
+      XCTAssertEqual(try harness.style(pane).alpha, 1 - gone, accuracy: 1e-9, "the panes fade with their split")
+    }
+    XCTAssertEqual(try harness.style(harness.today[3]).offsetY, -gone * gap, accuracy: 0.01,
+                   "the panes' height counts toward the gap")
+
+    try harness.advance(by: 2)
+    XCTAssertEqual(harness.todayNow, [harness.today[3]])
+  }
+
+  // MARK: Keyboard
+
+  func testTabFromAFocusedRowReachesTheControlAndReturnPressesIt() throws {
+    let harness = try Harness()
+    defer { harness.controller.close() }
+    try harness.show()
+    let outline = try harness.outline()
+    let view = outline.outlineView
+    harness.controller.revealCurrentTab(nil)
+    XCTAssertTrue(harness.controller.window?.firstResponder === view)
+
+    view.keyDown(with: try key(kVK_Tab))
+    let button = try harness.divider().clearButton
+    XCTAssertTrue(harness.controller.window?.firstResponder === button, "Tab reached the control")
+    XCTAssertEqual(button.alphaValue, 1, "drawn while it has the keyboard focus")
+
+    button.keyDown(with: try key(kVK_Tab))
+    XCTAssertTrue(harness.controller.window?.firstResponder === view, "Tab goes back to the rows")
+    XCTAssertEqual(view.keyboardFocusRow, outline.dividerRow + 1)
+    XCTAssertEqual(button.alphaValue, 0)
+
+    view.keyDown(with: try key(kVK_Tab))
+    button.keyDown(with: try key(kVK_Return))
+    XCTAssertTrue(outline.todayClear.isRunning, "Return pressed it")
+  }
+
+  // MARK: Hover
+
+  func testAHiddenPageForgetsTheHover() throws {
+    let harness = try Harness()
+    defer { harness.controller.close() }
+    try harness.show()
+    let page = try XCTUnwrap(harness.controller.sidebarController.currentPage)
+    page.outlineController.setSidebarHovered(true)
+    page.isHidden = true
+    XCTAssertFalse(page.outlineController.isSidebarHovered)
   }
 }

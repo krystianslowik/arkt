@@ -300,6 +300,23 @@ public final class SpacePageView: NSView, NSTextFieldDelegate, SpacePagerPage {
   public override func viewDidHide() {
     super.viewDidHide()
     outlineController.todayClear.settleNow()
+    outlineController.setSidebarHovered(false)       // a hidden page gets no exit event
+  }
+
+  /// A page coming back on screen reads the pointer, which may have entered while it was hidden.
+  public override func viewDidUnhide() {
+    super.viewDidUnhide()
+    resyncSidebarHover()
+  }
+
+  /// Sets the Clear control's hover state from where the pointer is now.
+  func resyncSidebarHover() {
+    guard let window, !isHiddenOrHasHiddenAncestor else {
+      outlineController.setSidebarHovered(false)
+      return
+    }
+    let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    outlineController.setSidebarHovered(visibleRect.contains(point))
   }
 
   public override func updateTrackingAreas() {

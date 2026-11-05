@@ -55,4 +55,18 @@ struct TodayClearLayoutTests {
     #expect(half[2] == FolderMotionLayout.RowStyle(offsetY: 0, alpha: 0.5))
     #expect(half[3] == .rest)
   }
+
+  @Test func `a leaving folder's shown rows fade with it and their heights close the gap`() {
+    // Rows: 0 a leaving folder (41), 1 and 2 its open tabs (41, 30), 3 a kept row below.
+    let block = FolderMotionLayout.Block(rows: [(0, 41), (1, 41), (2, 30)])
+    let styles = (0..<4).map { row in
+      var style = FolderMotionLayout.RowStyle.rest
+      TodayClearLayout.apply(to: &style, atRow: row, block: block, gone: 0.5, moves: true)
+      return style
+    }
+    #expect(styles[1].alpha == 0.5)
+    #expect(styles[2].alpha == 0.5)
+    #expect(styles[2].offsetY == -0.5 * 82 - 3)
+    #expect(styles[3] == FolderMotionLayout.RowStyle(offsetY: -0.5 * 112, alpha: 1))
+  }
 }
