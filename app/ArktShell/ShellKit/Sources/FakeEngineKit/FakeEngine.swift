@@ -12,11 +12,12 @@ import EngineAPI
 /// (rule 22) selects with `window.find` and counts in page script; the hovered link (rule 23) comes from a script
 /// that posts `mouseover` and `mouseout` of links. Tab state (#576): a web content process exit is a crash and the zoom
 /// is `pageZoom`; HTML fullscreen is never reported (WebKit's element fullscreen stays off) and there is no session to
-/// recover.
+/// recover. Page info (#582): camera and microphone per site, applied to WebKit's media capture requests
+/// (`FakeSitePermissions`); no site data counts, no reload infobar (no infobars at all) and no site settings page.
 /// Nothing outside this file may import WebKit, and the import is `internal`, so the compiler
 /// rejects any WebKit type in the public surface (EngineAPI types and NSView only).
 @MainActor
-public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
+public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, EngineSiteSettings {
   /// What `importCookies` and `importPasswords` received, deduped as the engine does (#512). No profile is written.
   public private(set) var imports = ImportRecording()
 
@@ -55,6 +56,25 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     var selectedText: String?
     init(webView: WKWebView, navigation: NavigationObserver, snapshot: TabSnapshot) {
       self.webView = webView; self.navigation = navigation; self.snapshot = snapshot
+    }
+  }
+
+  /// Answers WebKit's camera and microphone requests from the site's settings (#582). WKWebView holds its UI delegate
+  /// weakly; the engine keeps this one alive for every tab.
+  private final class MediaCaptureDecider: NSObject, WKUIDelegate {
+    weak var engine: FakeEngine?
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void) {
+      let port = origin.port == 0 ? "" : ":\(origin.port)"
+      let key = "\(origin.protocol)://\(origin.host.lowercased())\(port)"
+      let camera = type == .camera || type == .cameraAndMicrophone
+      let microphone = type == .microphone || type == .cameraAndMicrophone
+      switch engine?.sitePermissions.mediaDecision(origin: key, camera: camera, microphone: microphone) ?? .ask {
+      case .allow: decisionHandler(.grant)
+      case .block: decisionHandler(.deny)
+      case .ask: decisionHandler(.prompt)
+      }
     }
   }
 
@@ -113,6 +133,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
 
   private var entries: [TabID: Entry] = [:]
   private let hoverBridge = LinkHoverBridge()
+  private let mediaCapture = MediaCaptureDecider()
+  /// Camera and microphone per site (#582).
+  var sitePermissions = FakeSitePermissions()
   let hub = EngineEventHub()
   public private(set) var windowIDs: [EngineWindowID] = []
   private var hosts: [EngineWindowID: any EngineWindowHosting] = [:]
@@ -151,6 +174,7 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     // Appended to WebKit's own platform and engine tokens, so only the Safari part is ours to set.
     configuration.applicationNameForUserAgent = SafariUserAgent.applicationName()
     hoverBridge.engine = self
+    mediaCapture.engine = self
     configuration.userContentController.add(hoverBridge, name: FakeEngineScripts.targetURLHandler)
     configuration.userContentController.addUserScript(
       WKUserScript(source: FakeEngineScripts.hover, injectionTime: .atDocumentStart, forMainFrameOnly: false))
@@ -181,6 +205,7 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     navigation.onDownload = { [weak self] download in self?.adoptDownload(download) }
     navigation.onTerminate = { [weak self] in self?.webContentProcessTerminated(id) }
     webView.navigationDelegate = navigation
+    webView.uiDelegate = mediaCapture
     let entry = Entry(webView: webView, navigation: navigation, snapshot: TabSnapshot(id: id, window: window))
     entries[id] = entry
     tabIDs.append(id)
@@ -241,6 +266,7 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
     entry.navigation.onCommit = nil
     entry.navigation.onTerminate = nil
     entry.webView.navigationDelegate = nil
+    entry.webView.uiDelegate = nil
     entry.webView.stopLoading()
     entry.webView.removeFromSuperview()
     tabIDs.removeAll { $0 == id }
@@ -582,6 +608,27 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads {
       web.evaluateJavaScript(script) { _, _ in done.resume() }
     }
   }
+
+  // MARK: - Page info (#582)
+
+  public var siteSettings: (any EngineSiteSettings)? { self }
+
+  public func pageInfo(of tab: TabID) -> PageInfo? {
+    guard let web = entries[tab]?.webView else { return nil }
+    return sitePermissions.pageInfo(tab: tab, url: web.url, hasOnlySecureContent: web.hasOnlySecureContent)
+  }
+
+  public func sitesWithPermissions() -> [SitePermissions] { sitePermissions.sites() }
+
+  /// WebKit asks again on the page's next request, so no reload is needed.
+  public func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String) {
+    _ = sitePermissions.set(kind, to: setting, forOrigin: origin)
+  }
+
+  public func resetPermissions(forOrigin origin: String) { _ = sitePermissions.reset(forOrigin: origin) }
+
+  /// The development engine has no site settings page.
+  public func openSiteSettings(forOrigin origin: String, from tab: TabID) {}
 
   // MARK: - Tab state (#576)
 

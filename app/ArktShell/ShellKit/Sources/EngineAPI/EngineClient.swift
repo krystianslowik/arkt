@@ -302,6 +302,12 @@ public protocol EngineClient: AnyObject {
   /// The crashed-session prompt's state; nil for an engine that keeps no session. Default: nil.
   var sessionRecovery: (any EngineSessionRecovery)? { get }
 
+  // MARK: Page info (#582, EnginePageInfo.swift)
+
+  /// Page info and per-site permissions; nil for an engine that offers neither, so the shell shows no page info
+  /// panel. Default: nil.
+  var siteSettings: (any EngineSiteSettings)? { get }
+
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it
   /// arrives after the call that caused it returns. During queued delivery `snapshot(of:)`
