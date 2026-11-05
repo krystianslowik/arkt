@@ -72,6 +72,14 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public internal(set) var revealedDownloads: [DownloadID] = []
   /// The crashed-session prompt's state (#576, InMemoryEngine+TabState.swift).
   public let crashedSession = InMemorySessionRecovery()
+  /// Page info (#582, InMemoryEngine+PageInfo.swift): each origin's permission exceptions, the connections and site
+  /// data tests set, and each `openSiteSettings` call.
+  var siteExceptions: [String: [SitePermissionKind: PermissionSetting]] = [:]
+  var connectionOverrides: [TabID: (connection: PageConnection, certificate: CertificateSummary?)] = [:]
+  var siteDataByOrigin: [String: SiteData?] = [:]
+  /// Tabs whose page info changed a setting since their panel last closed: each gets the reload infobar on close.
+  var pendingReloads: Set<TabID> = []
+  public internal(set) var openedSiteSettings: [(origin: String, tab: TabID)] = []
 
   /// Builds hosts for `openEngineWindow(_:)`, as the app's provider does for a real engine.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -362,7 +370,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
 
   /// The infobars of each tab in the order the engine shows them. Infobars belong to the tab: they stay while it is
   /// hidden or moved to another window.
-  private var infobars: [TabID: [Infobar]] = [:]
+  var infobars: [TabID: [Infobar]] = [:]
   /// What the shell did on infobars, in order: what the engine's delegates would have been told. A link keeps the
   /// infobar (a delegate whose `LinkClicked` returns false); the other actions remove it.
   public private(set) var infobarActions: [(id: InfobarID, action: InfobarAction)] = []
@@ -392,10 +400,13 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public func act(on infobar: InfobarID, action: InfobarAction) {
     guard infobars.values.contains(where: { $0.contains { $0.id == infobar } }) else { return }
     infobarActions.append((infobar, action))
+    let reloads = action == .ok && infobars.values.joined().first { $0.id == infobar }?.kind == .reload
+    let tab = infobars.first(where: { $0.value.contains { $0.id == infobar } })?.key
     switch action {
     case .link, .messageLink: break
     case .ok, .cancel, .close: removeInfobar(infobar)
     }
+    if reloads, let tab { reload(tab) }          // the reload infobar's Reload (#582), as Chromium's delegate does
   }
 
   /// The tab's infobars go with it, reported before its `.tabClosed`.
@@ -789,6 +800,8 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     views[id] = nil
     history[id] = nil
     heldCloses[id] = nil
+    connectionOverrides[id] = nil
+    pendingReloads.remove(id)
     selections[id] = nil
     hub.emit(.tabClosed(id, reason: reason))
     if let successor { setActive(successor) }
