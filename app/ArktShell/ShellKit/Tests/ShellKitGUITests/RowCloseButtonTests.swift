@@ -290,6 +290,7 @@ final class RowCloseButtonTests: XCTestCase {
     let pointer = HoverPointerStub(window: try XCTUnwrap(outline.window))
     pointer.move(toCenterOf: row)
     outline.hoverPointerLookup = pointer.lookup
+    outline.hoverResyncEnqueue = pointer.enqueue
     var rows: [SidebarRowView] = []
     outline.enumerateAvailableRowViews { rowView, _ in
       if let rowView = rowView as? SidebarRowView { rows.append(rowView) }
@@ -298,7 +299,8 @@ final class RowCloseButtonTests: XCTestCase {
 
     for rowView in rows { rowView.updateTrackingAreas() }
     XCTAssertEqual(pointer.windowServerQueries, 0, "coalesced to the next turn")
-    drainMainQueue()
+    XCTAssertEqual(pointer.pendingTurns.count, 1, "one resync for all rows")
+    pointer.runNextTurn()
 
     XCTAssertEqual(pointer.windowServerQueries, 1)
     XCTAssertTrue(row.isHovered)
