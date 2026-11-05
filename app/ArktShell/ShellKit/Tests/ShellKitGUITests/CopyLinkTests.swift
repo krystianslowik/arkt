@@ -170,6 +170,44 @@ final class CopyLinkTests: XCTestCase {
     harness.controller.close()
   }
 
+  // MARK: Edit menu validation (#564)
+
+  /// A selection holding only a split row leaves nothing to copy (split rows are skipped), so the three copy items
+  /// are disabled even though a tab is current; Paste URL as New Tab stays enabled. Folder rows can be neither current
+  /// nor selected, so the split row is the non-tab row a user can actually leave selected.
+  func testCopyItemsAreDisabledWhenOnlyANonTabRowIsSelected() throws {
+    var world = Self.makeWorld(["https://example.com/a"])
+    let split = world.sidebar.addSplit(in: .today(world.space))
+    world.sidebar.addTab(url: URL(string: "https://example.com/left")!, title: "Left", in: .split(split))
+    world.sidebar.addTab(url: URL(string: "https://example.com/right")!, title: "Right", in: .split(split))
+    let board = pasteboard("CopyLinkTests.validation")
+    board.clearContents()
+    let harness = Harness(world.sidebar, pasteboard: board)
+    harness.activate(world.tabs[0])
+    func item(_ action: Selector) -> NSMenuItem { NSMenuItem(title: "", action: action, keyEquivalent: "") }
+    let copyActions = [#selector(ShellWindowController.copyCurrentURL(_:)),
+                       #selector(ShellWindowController.copyCurrentURLAsMarkdown(_:)),
+                       #selector(ShellWindowController.copyCurrentURLAsQuote(_:))]
+
+    for action in copyActions {
+      XCTAssertTrue(harness.controller.validateMenuItem(item(action)), "the current tab enables \(action)")
+    }
+
+    try harness.click(split, .command)                       // the current tab and the split are selected
+    try harness.click(world.tabs[0], .command)               // the tab leaves the selection, it stays current
+    XCTAssertEqual(harness.controller.sidebarController.selectedNodes, [split], "only the split row is selected")
+    XCTAssertEqual(harness.controller.currentNode, world.tabs[0], "the tab is still current")
+
+    for action in copyActions {
+      XCTAssertFalse(harness.controller.validateMenuItem(item(action)), "a split-only selection disables \(action)")
+    }
+    XCTAssertTrue(harness.controller.validateMenuItem(item(#selector(ShellWindowController.pasteURLAsNewTab(_:)))))
+
+    harness.controller.copyCurrentURL(nil)
+    XCTAssertNil(harness.clipboard, "nothing was copied")
+    harness.controller.close()
+  }
+
   // MARK: Paste URL as New Tab (KB-016)
 
   func testPasteURLAsNewTabOpensTheClipboardURL() throws {
