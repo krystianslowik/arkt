@@ -26,9 +26,10 @@ extension ShellWindowController {
   public func reopenClosed() -> Bool {
     defer { toasts.dismiss(PeekController.closedToast) }
     if peek.reverseClose() { return true }
+    settlePendingClear()                             // #413: Cmd-Z mid-exit undoes that Clear, on the return spring
     while let item = reopenStack.pop() {
       if case .batch(let batch) = item { dismissUndoToast(of: batch.id) }
-      if reopen(item) { return true }
+      if withTodayReturnMotion({ reopen(item) }) { return true }
     }
     return false
   }
@@ -47,7 +48,7 @@ extension ShellWindowController {
   func undo(batch id: UUID) -> Bool {
     guard let batch = reopenStack.remove(batch: id) else { return false }
     dismissUndoToast(of: id)
-    return reopen(.batch(batch))
+    return withTodayReturnMotion { reopen(.batch(batch)) }
   }
 
   private func dismissUndoToast(of id: UUID) {

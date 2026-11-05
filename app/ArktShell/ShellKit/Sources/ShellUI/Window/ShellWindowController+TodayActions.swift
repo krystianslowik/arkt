@@ -37,6 +37,42 @@ extension ShellWindowController {
     clearToday(space)
   }
 
+  /// Every Clear (#413, design/clear-today-tabs): the control above Today, File > Clear Today Tabs, Shift-Cmd-K and
+  /// the bottom bar's two items. While the sidebar is on screen the rows `scope` takes collapse upward together on one
+  /// spring before they go to the Archive (Reduce Motion: they fade in place); otherwise they go at once. The model
+  /// changes when the motion ends, and only for the rows the Clear rules still take then (a row activated, shown in
+  /// another window or playing media meanwhile stays). A Clear while one runs is ignored.
+  func clearTodayRows(of space: SpaceID, scope: TodayClearPolicy.Scope) {
+    let rows = todayRows(of: space, scope: scope)
+    guard !rows.isEmpty else { return }
+    guard let outline = sidebarController.outline(containing: rows[0]) else {
+      archiveToday(rows)
+      return
+    }
+    outline.runTodayExit(rows) { [weak self] in
+      guard let self else { return }
+      let still = Set(self.todayRows(of: space, scope: scope))
+      let remaining = rows.filter(still.contains)
+      if !remaining.isEmpty { self.archiveToday(remaining) }
+    }
+  }
+
+  /// Ends a Clear's exit now, so its rows are archived before the window closes, the app quits, the window is
+  /// minimized or an Undo reads the stack. Every Space of the window: a page a Space switch hid has settled already.
+  public func settlePendingClear() {
+    for space in sidebar.spaceOrder {
+      guard let first = sidebar.children(of: .today(space)).first,
+            let outline = sidebarController.outline(containing: first) else { continue }
+      outline.todayClear.settleNow()
+    }
+  }
+
+  /// Runs an Undo (`body`); rows a Clear archived come back on the reverse of its spring (#413).
+  func withTodayReturnMotion(_ body: () -> Bool) -> Bool {
+    guard let outline = sidebarController.currentPage?.outlineController else { return body() }
+    return outline.returningClearedRows(body)
+  }
+
   /// The bottom bar's Clear unselected Today tabs (BH-078): the Today rows with nothing selected go, the selected
   /// ones stay; with no selected Today row the action does nothing.
   @objc public func clearUnselectedTodayTabs(_ sender: Any?) {
@@ -50,9 +86,7 @@ extension ShellWindowController {
     guard Self.holdsSelection(sidebar.children(of: .today(space)), selected, tabs: { self.tabs(in: $0) }) else {
       return
     }
-    let rows = todayRows(of: space, scope: .unselected)
-    guard !rows.isEmpty else { return }
-    archiveToday(rows)
+    clearTodayRows(of: space, scope: .unselected)
   }
 
   /// True when a Clear would take a row: the menu bar item's enabled rule.

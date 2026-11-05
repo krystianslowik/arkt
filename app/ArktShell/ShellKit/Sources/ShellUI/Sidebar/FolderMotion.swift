@@ -15,6 +15,8 @@ enum FolderMotionLayout {
     /// The selection fill's layer opacity: 1 at rest, 0 when the old selection has faded for Little Arkt's arrival
     /// (#455). The row's text, favicon and hover X are not faded.
     var selectionAlpha: CGFloat = 1
+    /// Vertical scale about the row's top edge: a row Clear archives shrinks toward its top as it leaves (#413).
+    var scaleY: CGFloat = 1
 
     static let rest = RowStyle(offsetY: 0, alpha: 1)
   }

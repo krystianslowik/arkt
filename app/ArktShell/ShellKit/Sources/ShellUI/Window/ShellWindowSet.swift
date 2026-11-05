@@ -216,6 +216,7 @@ public final class ShellWindowSet {
   /// while shutting down cannot overwrite it.
   public func saveSessionsForTermination() {
     for controller in controllers {
+      controller.settlePendingClear()                // #413: a Clear mid-exit is saved archived
       controller.saveSession()
       controller.savesSession = false
     }
