@@ -265,6 +265,12 @@ public final class SplitContainerView: NSView {
     for (index, card) in cards.enumerated() {
       let drawn = reflow != nil && index < frames.panes.count ? frames.panes[index] : nil
       SplitReflow.present(card, in: drawn, cornerRadius: metrics.cardCornerRadius)
+      // A growing pane is cropped at its trailing edge: its close button moves in with that edge (layer only).
+      if let layer = card.closeButton?.layer {
+        let shift = drawn.map { closeButtonShift(drawn: $0, real: card.frame) } ?? 0
+        let transform = CATransform3DMakeTranslation(shift, 0, 0)
+        if !CATransform3DEqualToTransform(layer.transform, transform) { layer.transform = transform }
+      }
     }
     for (divider, frame) in zip(dividerViews, frames.dividers) where divider.frame != frame { divider.frame = frame }
     CATransaction.commit()
@@ -370,41 +376,55 @@ public final class SplitContainerView: NSView {
 
   /// The pane a mouse-down at `point` (in this view) focuses: nil outside every pane and on a shown close button,
   /// whose click closes its pane instead of focusing it first.
-  /// While a reflow runs, the panes are hit where they are drawn (#602), not at their real frames.
+  /// The pane a mouse-down at `point` (in this view) focuses: nil outside every pane and on a shown close button. While
+  /// a reflow runs, the panes are hit where they are drawn (#602), not at their real frames.
   public func paneIndex(forMouseDownAt point: CGPoint) -> Int? {
-    let drawn = presentedPaneFrames
-    guard let index = paneCards.indices.first(where: { !paneCards[$0].isHidden && drawn[$0].contains(point) }) else {
-      return nil
-    }
-    let card = paneCards[index]
-    let real = realPoint(point, inPane: index, drawn: drawn[index])
-    if let button = card.closeButton, button.isRevealed, !button.isHidden,
-       button.bounds.contains(button.convert(real, from: self)) {
-      return nil
-    }
+    guard let index = drawnPaneIndex(at: point), !isOnShownCloseButton(point, pane: index) else { return nil }
     return index
   }
 
-  /// `point` (in this view) drawn on pane `index` at `drawn`, moved to where it falls on the card's real frame.
-  private func realPoint(_ point: CGPoint, inPane index: Int, drawn: CGRect) -> CGPoint {
-    let card = paneCards[index]
-    let move = SplitReflow.translation(drawing: drawn, in: card.frame, flipped: isFlipped)
-    return CGPoint(x: point.x - move.m41, y: point.y - move.m42)
+  /// The shown pane drawn under `point` (in this view).
+  private func drawnPaneIndex(at point: CGPoint) -> Int? {
+    let drawn = presentedPaneFrames
+    return paneCards.indices.first { !paneCards[$0].isHidden && drawn[$0].contains(point) }
   }
 
-  /// While a reflow runs (#602) the cards are drawn away from their real frames: a click goes to the card drawn under
-  /// it, at the matching point of its real frame, so the close button and the page take the clicks they show.
-  /// Dividers and the toast are where they are drawn already.
+  /// How far a pane's close button is moved in from the real trailing edge to the drawn one: the drawn width minus
+  /// the real width (0 at rest and for a shrinking pane, which is drawn at its real size).
+  private func closeButtonShift(drawn: CGRect, real: CGRect) -> CGFloat { min(0, drawn.width - real.width) }
+
+  /// Whether `point` (in this view) is on pane `index`'s close button, shown and where it is drawn.
+  private func isOnShownCloseButton(_ point: CGPoint, pane index: Int) -> Bool {
+    let card = paneCards[index]
+    guard let button = card.closeButton, button.isRevealed, !button.isHidden else { return false }
+    let drawn = presentedPaneFrames[index]
+    let move = SplitReflow.translation(drawing: drawn, in: card.frame, flipped: isFlipped)
+    let shift = reflow == nil ? 0 : closeButtonShift(drawn: drawn, real: card.frame)
+    let real = CGPoint(x: point.x - move.m41 - shift, y: point.y - move.m42)
+    return button.bounds.contains(button.convert(real, from: self))
+  }
+
+  /// While a reflow runs (#602) the cards are drawn away from their real frames, and AppKit would hand a click to a
+  /// view at the real frame's coordinates (it maps event locations without layer transforms). So this view takes
+  /// every mouse-down on a drawn pane itself (`mouseDown`); dividers and the toast are hit where they are drawn.
   public override func hitTest(_ point: NSPoint) -> NSView? {
     guard reflow != nil, !isHidden else { return super.hitTest(point) }
     let local = superview.map { convert(point, from: $0) } ?? point
     if let toastView, !toastView.isHidden, toastView.frame.contains(local) { return super.hitTest(point) }
     if dividers.contains(where: { !$0.isHidden && $0.frame.contains(local) }) { return super.hitTest(point) }
-    let drawn = presentedPaneFrames
-    guard let index = paneCards.indices.first(where: { !paneCards[$0].isHidden && drawn[$0].contains(local) }) else {
-      return super.hitTest(point)
+    return drawnPaneIndex(at: local) != nil ? self : super.hitTest(point)
+  }
+
+  /// A mouse-down on a drawn pane mid-reflow: a click on its shown close button closes that pane; anywhere else it
+  /// focuses the pane. The page does not get the click: its view would place it by its real frame.
+  public override func mouseDown(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    guard reflow != nil, let index = drawnPaneIndex(at: point) else { return super.mouseDown(with: event) }
+    if isOnShownCloseButton(point, pane: index) {
+      onCloseRequest?(index)
+    } else if index != focusedIndex {
+      onFocusRequest?(index)
     }
-    return paneCards[index].hitTest(realPoint(local, inPane: index, drawn: drawn[index])) ?? self
   }
 
   // MARK: Building blocks

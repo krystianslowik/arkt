@@ -371,36 +371,132 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertEqual(container.dividers[0].frame, NSRect(x: 500, y: 0, width: 10, height: 600))
   }
 
-  /// Mid-flight a click lands on what is drawn under it: the close button of a pane drawn away from its real frame
-  /// closes that pane. Pane c shrinks while it moves right (a pane is added before it), so its X is in view.
-  func testClickOnADrawnCloseButtonMidFlightClosesThatPane() throws {
-    let container = makeContainer(reduceMotion: false)
+  /// A page that records the mouse-downs it gets.
+  private final class ClickRecordingPage: NSView {
+    private(set) var mouseDowns = 0
+    override func mouseDown(with event: NSEvent) { mouseDowns += 1 }
+  }
+
+  /// Clicks at `point` (in `view`'s coordinates) the way the pointer does: the mouse-up is queued first, so a control
+  /// that tracks the mouse (the close button) finds it, and if nothing tracked it, it is sent after the mouse-down.
+  /// A key window gets the events through `sendEvent`; the test runner's app is usually not active (and must not be
+  /// activated over the user's apps), so otherwise the mouse-down goes where a key window sends it: to the view its
+  /// content view hit-tests at the location.
+  private func click(at point: NSPoint, in view: NSView) throws {
+    let window = try XCTUnwrap(view.window)
+    let location = view.convert(point, to: nil)
+    func event(_ type: NSEvent.EventType) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+    NSApp.postEvent(try event(.leftMouseUp), atStart: false)
+    let down = try event(.leftMouseDown)
+    if window.isKeyWindow {
+      window.sendEvent(down)
+    } else {
+      let content = try XCTUnwrap(window.contentView)
+      let target = try XCTUnwrap(content.hitTest(content.superview?.convert(location, from: nil) ?? location))
+      target.mouseDown(with: down)
+    }
+    if let up = NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast, inMode: .default, dequeue: true) {
+      window.sendEvent(up)
+    }
+  }
+
+  /// A key window on screen with the container mid-reflow on a frozen clock, for clicks sent through the window.
+  private func makeClickableContainer() -> SplitContainerView {
+    let container = makeContainer(onScreen: true, reduceMotion: false)
+    container.window?.makeKeyAndOrderFront(nil)
     container.reflowClock = { 100 }
     container.reflowDriver.drivesDisplayLink = false
-    let (a, b, c) = (page(), page(), page())
-    show(container, [a, c])
-    var requests: [Int] = []
-    container.onCloseRequest = { requests.append($0) }
+    return container
+  }
 
-    show(container, [a, b, c], animated: true)
-    container.reflowDriver.tick(at: 100.06)
-    XCTAssertTrue(container.isReflowing)
-    let card = container.paneCards[2]
+  /// Shows pane `index`'s close button (as a hover does) and returns where it is drawn, in the container.
+  private func drawnCloseButtonCenter(_ container: SplitContainerView, pane index: Int) throws -> NSPoint {
+    let card = container.paneCards[index]
     let button = try XCTUnwrap(card.closeButton)
     button.reducesMotion = { true }
     try hover(card, entered: true)
-    let drawn = try onScreen(card)
-    XCTAssertNotEqual(drawn.minX, card.frame.minX, "drawn away from its real frame")
-    let move = try XCTUnwrap(card.layer).transform
+    XCTAssertTrue(button.isRevealed)
     let real = card.convert(NSPoint(x: button.frame.midX, y: button.frame.midY), to: container)
-    let shown = NSPoint(x: real.x + move.m41, y: real.y + move.m42)
-    XCTAssertTrue(drawn.contains(shown), "the X is in view")
+    let cardMove = try XCTUnwrap(card.layer).transform
+    let buttonMove = try XCTUnwrap(button.layer).transform
+    XCTAssertEqual(buttonMove.m42, 0)
+    return NSPoint(x: real.x + cardMove.m41 + buttonMove.m41, y: real.y + cardMove.m42)
+  }
 
-    let hit = container.hitTest(container.convert(shown, to: container.superview))
-    XCTAssertTrue(hit === button, "hit \(String(describing: hit))")
-    XCTAssertNil(container.paneIndex(forMouseDownAt: shown), "a click on the X focuses no pane")
-    try XCTUnwrap(hit as? NSButton).performClick(nil)
+  /// Mid-flight, a click on a close button where it is drawn closes that pane, though AppKit would place the click by
+  /// the card's real frame. Pane c shrinks while it moves right (a pane is added before it), so its X moves with it.
+  func testClickOnADrawnCloseButtonMidFlightClosesThatPane() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, c])
+    var requests: [Int] = []
+    container.onCloseRequest = { requests.append($0) }
+    show(container, [a, b, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    let drawn = try onScreen(container.paneCards[2])
+    XCTAssertNotEqual(drawn.minX, container.paneCards[2].frame.minX, "drawn away from its real frame")
+    let x = try drawnCloseButtonCenter(container, pane: 2)
+    XCTAssertTrue(drawn.contains(x), "the X is in view")
+    XCTAssertNil(container.paneIndex(forMouseDownAt: x), "a click on the X focuses no pane")
+
+    try click(at: x, in: container)
+
     XCTAssertEqual(requests, [2])
+    XCTAssertEqual(c.mouseDowns, 0)
+  }
+
+  /// A growing pane is cropped at its trailing edge; its close button moves in with that edge (its layer only), so it
+  /// stays in view and clickable mid-flight.
+  func testCloseButtonOfAGrowingPaneStaysInViewAndClickableMidFlight() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, b, c])
+    var requests: [Int] = []
+    container.onCloseRequest = { requests.append($0) }
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    for index in 0..<2 {
+      let card = container.paneCards[index]
+      let drawn = try onScreen(card)
+      XCTAssertLessThan(drawn.width, card.frame.width, "pane \(index) is growing")
+      let x = try drawnCloseButtonCenter(container, pane: index)
+      XCTAssertTrue(drawn.contains(x), "pane \(index)'s X is in view")
+      XCTAssertEqual(drawn.maxX - x.x, card.frame.maxX - card.convert(
+        NSPoint(x: try XCTUnwrap(card.closeButton).frame.midX, y: 0), to: container).x, accuracy: 1e-6,
+        "same inset from the drawn trailing edge as at rest")
+    }
+
+    try click(at: try drawnCloseButtonCenter(container, pane: 1), in: container)
+
+    XCTAssertEqual(requests, [1])
+    container.reflowDriver.tick(at: 105)
+    for card in container.paneCards {
+      XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(card.closeButton?.layer).transform), "at rest")
+    }
+  }
+
+  /// Mid-flight, a click elsewhere on a drawn pane focuses that pane and does not reach its page, whose view would
+  /// place the click by its real frame.
+  func testClickOnADrawnPaneMidFlightFocusesItWithoutReachingThePage() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, b, c])
+    var focusRequests: [Int] = []
+    container.onFocusRequest = { focusRequests.append($0) }
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    let drawn = try onScreen(container.paneCards[1])
+
+    try click(at: NSPoint(x: drawn.minX + 20, y: drawn.midY), in: container)
+
+    XCTAssertEqual(focusRequests, [1])
+    XCTAssertEqual(c.mouseDowns, 0)
+    XCTAssertEqual(a.mouseDowns, 0)
   }
 
   /// #602: each reflow is measured on its own pacing session, "split-reflow", ended when it settles.
