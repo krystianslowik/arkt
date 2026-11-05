@@ -40,6 +40,11 @@ public final class SidebarOverlayView: NSView {
   }
   /// The overlay is out, or heading out.
   public private(set) var isRevealed = false
+  /// Something anchored to the revealed sidebar is open (the Edit Pin popover, #363): the pointer leaving does not
+  /// take the overlay away. Letting go checks again, so an abandoned overlay then goes back as usual.
+  public var isHeldOpen = false {
+    didSet { if oldValue, !isHeldOpen { pointerLeft() } }
+  }
   public var isAnimating: Bool { driver.isRunning }
   /// Pacing of the last finished reveal or conceal.
   public private(set) var lastPacing: FrameStats?
@@ -181,7 +186,7 @@ public final class SidebarOverlayView: NSView {
   public func pointerEntered() { if isRevealed { cancelPending() } }
 
   private func concealIfAbandoned() {
-    guard !isDocked, isRevealed, !pointerIsInside() else { return }
+    guard !isDocked, isRevealed, !isHeldOpen, !pointerIsInside() else { return }
     if mouseButtonsDown() {
       schedule(after: .milliseconds(100)) { [weak self] in self?.concealIfAbandoned() }
       return
