@@ -4,7 +4,8 @@ import XCTest
 
 /// Stands in for the pointer and the window server in hover resync tests: the pointer sits at `pointInWindow` of
 /// one window, which is frontmost there unless `coveringWindowNumber` names another window. Counts window-server
-/// queries. Independent of key-window state and of whether the test window is on screen.
+/// queries and holds the resync a host coalesces to the next main-queue turn until the test runs it. Independent of
+/// key-window state and of whether the test window is on screen.
 @MainActor
 final class HoverPointerStub {
   let window: NSWindow
@@ -12,6 +13,8 @@ final class HoverPointerStub {
   var isVisible = true
   var coveringWindowNumber: Int?
   private(set) var windowServerQueries = 0
+  /// Resyncs the host scheduled for the next main-queue turn; `runNextTurn()` runs them instead of the main queue.
+  private(set) var pendingTurns: [@MainActor () -> Void] = []
 
   init(window: NSWindow, pointInWindow: NSPoint = .zero) {
     self.window = window
@@ -28,18 +31,29 @@ final class HoverPointerStub {
       })
   }
 
+  /// Install as the host's `hoverResyncEnqueue`: the coalesced resync waits here, not on the main queue.
+  var enqueue: @MainActor (@escaping @MainActor () -> Void) -> Void {
+    { [unowned self] work in pendingTurns.append(work) }
+  }
+
+  /// Runs what the host scheduled for the next main-queue turn.
+  func runNextTurn() {
+    let turns = pendingTurns
+    pendingTurns = []
+    for turn in turns { turn() }
+  }
+
+  /// Runs main run-loop passes without waiting until the host has a resync pending, at most `maxPasses` of them:
+  /// bounded by passes, never by wall time.
+  func runLoopUntilResyncIsPending(maxPasses: Int = 20) -> Bool {
+    for _ in 0..<maxPasses where pendingTurns.isEmpty {
+      RunLoop.main.run(mode: .default, before: .distantPast)
+    }
+    return !pendingTurns.isEmpty
+  }
+
   /// Places the pointer at the center of `view`.
   func move(toCenterOf view: NSView) {
     pointInWindow = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
-  }
-}
-
-extension XCTestCase {
-  /// Lets the main queue run everything enqueued so far (a coalesced hover resync runs one turn later).
-  @MainActor
-  func drainMainQueue() {
-    let drained = expectation(description: "main queue drained")
-    DispatchQueue.main.async { drained.fulfill() }
-    wait(for: [drained], timeout: 2)
   }
 }

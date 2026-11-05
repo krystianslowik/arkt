@@ -261,12 +261,16 @@ final class FavoriteTileCloseTests: XCTestCase {
     // this point falls on the second one.
     pointer.pointInWindow = middle.convert(NSPoint(x: middle.bounds.maxX - 6, y: middle.bounds.midY), to: nil)
     harness.grid.hoverPointerLookup = pointer.lookup
+    harness.grid.hoverResyncEnqueue = pointer.enqueue
     harness.grid.resyncHoverWithPointer()
     XCTAssertTrue(middle.isHovered)
 
     harness.source.mutate { $0.remove(world.favorites[0]) }
     harness.grid.collectionView.layoutSubtreeIfNeeded()
-    drainMainQueue()
+    // AppKit updates the moved tiles' tracking areas on a later run-loop pass; each tile then asks the grid.
+    XCTAssertTrue(pointer.runLoopUntilResyncIsPending(), "the shifted tiles ask for a resync")
+    XCTAssertEqual(pointer.pendingTurns.count, 1, "coalesced into one resync on the next turn")
+    pointer.runNextTurn()
 
     XCTAssertEqual(harness.grid.nodeIDs, [world.favorites[1], world.favorites[2]])
     XCTAssertFalse(try harness.tile(world.favorites[1]).isHovered, "moved out from under the pointer")

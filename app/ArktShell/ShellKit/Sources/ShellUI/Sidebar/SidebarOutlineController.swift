@@ -52,6 +52,11 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     get { hoverResync.lookup }
     set { hoverResync.lookup = newValue }
   }
+  /// How a coalesced hover resync waits for the next main-queue turn; tests run it by hand.
+  var hoverResyncEnqueue: @MainActor (@escaping @MainActor () -> Void) -> Void {
+    get { hoverResync.enqueue }
+    set { hoverResync.enqueue = newValue }
+  }
 
   /// Rows ask on every tracking-area update (a scroll updates all of them); one lookup serves them all.
   func setNeedsHoverResync() { hoverResync.setNeeded() }
