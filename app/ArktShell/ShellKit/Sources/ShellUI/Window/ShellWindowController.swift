@@ -81,6 +81,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public private(set) var isClosed = false
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
+  /// The Extensions panel the button opens (#595); nil with the button.
+  public internal(set) var extensionsPanel: ExtensionsPanelController?
+  /// Manage Extensions... in the Extensions panel: the app opens Settings, Extensions.
+  public var onManageExtensions: (@MainActor () -> Void)?
   /// Window > Downloads (Cmd-Shift-J) and Show All History (Cmd-Y) open the Library on a section (#132); set by
   /// `DownloadsCenter.attach(to:)`. While nil the engine's own commands run.
   public var onShowLibrary: (@MainActor (LibrarySection) -> Void)?
