@@ -13,6 +13,7 @@ final class PageInfoPanelTests: XCTestCase {
   private var engine: InMemoryEngine!
   private var controller: ShellWindowController!
   private var setting: ToolbarSetting!
+  private var sidebar: StubSidebar!
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -31,7 +32,8 @@ final class PageInfoPanelTests: XCTestCase {
   private func makeController(reduceMotion: Bool = true) {
     engine = InMemoryEngine()
     setting = .ephemeral()
-    controller = ShellWindowController(engine: engine, sidebar: StubSidebar.sample(), toolbarSetting: setting)
+    sidebar = StubSidebar.sample()
+    controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: setting)
     controller.window?.setFrame(NSRect(x: 100, y: 100, width: 1200, height: 800), display: false)
     controller.showWindow(nil)
     controller.window?.contentView?.layoutSubtreeIfNeeded()
@@ -340,7 +342,9 @@ final class PageInfoPanelTests: XCTestCase {
 
     pressGlyph()
     XCTAssertTrue(panel.isShown)
-    controller.pageInfo.pageDidChange(currentTab: TabID())
+    let other = try XCTUnwrap(sidebar.children(of: .today(sidebar.spaceOrder[0])).last)
+    controller.activate(node: other)
+    XCTAssertNotEqual(controller.currentTab, tab)
     XCTAssertFalse(panel.isShown, "another tab closes it")
   }
 
