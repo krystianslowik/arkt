@@ -199,14 +199,14 @@ struct ShellTokensContrastTests {
   }
 
   @Test func probeReadsP3ThroughP3Luminance() {
-    // P3 #F29BBB (the sample Personal Space's end stop): Y = 0.4694 with the P3 matrix; read as sRGB it would be
-    // 0.4369.
-    let pink = ShellContrastProbe.toSRGB(.p3(hex: 0xF29BBB, alpha: 1))
-    #expect(abs(Contrast.relativeLuminance(pink) - 0.4694) < 1e-3)
+    // P3 #DDB4D2 (the sample Personal Space's end stop): Y = 0.5324 with the P3 matrix; the sRGB matrix on the same
+    // components gives 0.5267.
+    let pink = ShellContrastProbe.toSRGB(.p3(hex: 0xDDB4D2, alpha: 1))
+    #expect(abs(Contrast.relativeLuminance(pink) - 0.5324) < 1e-3)
   }
 
-  /// `Contrast` linearizes negative components wrongly (a P3 color far outside sRGB); above 1 is fine (the pink end
-  /// stop reaches 1.003 red), so the measured surfaces must convert without negative components.
+  /// `Contrast` linearizes negative components wrongly (a P3 color far outside sRGB); above 1 is fine (a P3 color
+  /// outside sRGB can reach it), so the measured surfaces must convert without negative components.
   @Test(arguments: flavors)
   func everyFlavorHasShippedSurfacesWithoutNegativeSRGB(flavor: ThemeFlavor) {
     let surfaces = ShellContrastProbe.themeSurfaces(flavor).map(ShellContrastProbe.toSRGB)

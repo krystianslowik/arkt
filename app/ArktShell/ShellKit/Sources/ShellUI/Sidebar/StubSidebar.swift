@@ -499,7 +499,7 @@ extension StubSidebar {
 }
 
 extension StubSidebar {
-  /// Three Spaces (Arc-like palettes; Personal and Dev with grain), six shared favorites, per Space pinned tabs plus
+  /// Three Spaces (our own palette; Personal and Dev with grain), six shared favorites, per Space pinned tabs plus
   /// one folder with two tabs, and Today tabs (Work also holds a two-pane split). Titles are invented.
   public static func sample() -> StubSidebar {
     let s = StubSidebar()
@@ -515,12 +515,12 @@ extension StubSidebar {
     for (link, title) in favorites { s.addTab(url: url(link), title: title, in: .favorites(profile: "default")) }
 
     let personal = s.addSpace(title: "Personal", theme: SpaceThemeInfo(
-      baseColors: [.p3(hex: 0xF2EAE4, alpha: 1), .p3(hex: 0xF29BBB, alpha: 1)], texture: "grain", noiseFactor: 0.5,
+      baseColors: [.p3(hex: 0xF7EEF3, alpha: 1), .p3(hex: 0xDDB4D2, alpha: 1)], texture: "grain", noiseFactor: 0.5,
       isDark: false))
     let work = s.addSpace(title: "Work", theme: SpaceThemeInfo(
-      baseColors: [.p3(hex: 0xE0F2FB, alpha: 1), .p3(hex: 0xC5C6E2, alpha: 1)], isDark: false))
+      baseColors: [.p3(hex: 0xEEF1F4, alpha: 1), .p3(hex: 0xB0C4DA, alpha: 1)], isDark: false))
     let dev = s.addSpace(title: "Dev", theme: SpaceThemeInfo(
-      baseColors: [.p3(hex: 0x2D4468, alpha: 1), .p3(hex: 0x120F2E, alpha: 1)], texture: "grain", noiseFactor: 1,
+      baseColors: [.p3(hex: 0x3C3B72, alpha: 1), .p3(hex: 0x1D1838, alpha: 1)], texture: "grain", noiseFactor: 1,
       isDark: true))
 
     // Personal

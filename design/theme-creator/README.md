@@ -138,7 +138,7 @@ screen refers to them.
 | Event | Pattern | When | Rate limit |
 |---|---|---|---|
 | Slider detent | `.generic` | Texture amount or Opacity reaches or crosses 0, 50 or 100 % | Once per crossing; re-armed after the value moves 3 % away from that stop |
-| Preset hue | `.alignment` | The dragged dot's hue crosses the hue of a preset family (computed at launch from `SpaceThemeCatalog.families`: the HSL hue of each family's second light stop, today Paper 37, Dune 45, Sage 107, Mist 238, Indigo 250, Blossom 338) | Once per crossing; re-armed after 6 degrees; skipped when the hue jumps more than 30 degrees in one event (a fast fling) |
+| Preset hue | `.alignment` | The dragged dot's hue crosses the hue of a preset family (computed at launch from `SpaceThemeCatalog.families`: the HSL hue of each family's second light stop, today Paper 37, Dune 45, Sage 107, Mist 211, Indigo 250, Blossom 316) | Once per crossing; re-armed after 6 degrees; skipped when the hue jumps more than 30 degrees in one event (a fast fling) |
 | Tone limit | `.levelChange` | A dot arrives at the pad's top or bottom limit | Once per arrival; re-armed after the dot moves 4 pt away from the limit |
 | Texture step | `.alignment` | The selected texture swatch changes | Once per change |
 

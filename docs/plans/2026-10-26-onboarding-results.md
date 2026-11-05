@@ -30,7 +30,7 @@ Split chosen: PR 1 is the whole flow with a no-particle stage behind the `Onboar
 |---|---|
 | `brandHairlineContrast` light, graphite at 45 % (spec) | 2.73:1 on porcelain, below 3:1; shipped at 50 %: 3.13:1 |
 | `brandTextSecondaryContrast` | 9.99:1 light, 12.58:1 dark (the spec lists 10.1 / 12.9; the hex values are kept) |
-| Blossom light end stop #F29BBB (sRGB) | `secondaryText` light 4.496:1 and `sidebarForeground` light 2.98:1 at 0.64 / 0.48; raised to 0.65 / 0.49 |
+| Earlier Blossom light end stop (sRGB) | `secondaryText` light 4.496:1 and `sidebarForeground` light 2.98:1 at 0.64 / 0.48; raised to 0.65 / 0.49 |
 | Mark samples at 140 px (alpha > 200, saturation > 70) | within 300 of the spec's 6,622 (`BrandMarkArtworkTests`) |
 
 ## PR 2: the Metal particle field
