@@ -171,9 +171,11 @@ public final class DialogAlert {
 // MARK: - Anchored panel
 
 /// A non-activating child panel whose top-leading corner sits 12 pt inside `anchor` (the content card or the focused
-/// pane), so the prompt points at the page that asked. It never takes focus from the page unless clicked; Escape
-/// answers Cancel only while it is key. In: scale 0.97 and 4 pt from above to rest on `firmFast` from its top-leading
-/// corner, opacity over 0.16 s; out: 0.10 s fade, instant when the keyboard answered (Reduce Motion: fades only).
+/// pane), or hangs from its top edge, so the prompt points at the page that asked. It never takes focus from the page
+/// unless clicked; Escape answers Cancel only while it is key. In: scale 0.97 and 4 pt from above to rest on
+/// `firmFast` from its top-leading corner, opacity over 0.16 s; out: 0.10 s fade, instant when the keyboard answered
+/// (Reduce Motion: fades only). A page's dialog also dims the page under it (`pageDimStyle`, #693): the dim fades in
+/// and out with the panel and never moves.
 @MainActor
 public final class DialogPanel {
   public static let anchorInset: CGFloat = 12
@@ -182,8 +184,8 @@ public final class DialogPanel {
   public enum Attachment: Equatable, Sendable {
     /// Its top-leading corner `anchorInset` inside the anchor, all corners rounded.
     case inset
-    /// Hung from the anchor's top edge, `anchorInset` from its leading edge, only the bottom corners rounded: a
-    /// page's leave-site prompt (#584, design/extensions `surf-dialog`).
+    /// Hung from the anchor's top edge, `anchorInset` from its leading edge, only the bottom corners rounded: every
+    /// page dialog (#584, #693, design/extensions `surf-dialog`).
     case topEdge
   }
 
@@ -209,6 +211,11 @@ public final class DialogPanel {
   private var entranceEnds: TimeInterval = 0
   /// The last answer came from a key (Return, Escape): the panel leaves at once.
   private var keyboardAnswer = false
+  /// The dim the panel lays over its page while it is up: the card's corner radius, and whether the dim's top corners
+  /// round (no infobar row above it). Nil for none (a permission prompt). Set before `show`.
+  var pageDimStyle: (cornerRadius: CGFloat, roundsTop: Bool)?
+  /// The dim over the page while the panel is up (#693).
+  private(set) var pageDim: PageDimView?
 
   public init(content: DialogContent, attachment: Attachment = .inset) {
     self.attachment = attachment
@@ -275,7 +282,10 @@ public final class DialogPanel {
   /// Moves the panel to `anchor` (screen coordinates) again, when the page it points at moved or resized.
   public func reposition(anchoredTo anchor: NSRect) {
     anchorIsUsable = !anchor.isEmpty
-    if anchorIsUsable { panel.setFrame(frame(anchoredTo: anchor), display: true) }
+    if anchorIsUsable {
+      panel.setFrame(frame(anchoredTo: anchor), display: true)
+      if let parent = panel.parent { pageDim?.place(in: parent, screenFrame: anchor) }
+    }
     updateVisibility()
   }
 
@@ -307,6 +317,13 @@ public final class DialogPanel {
     panel.orderFront(nil)
     let step = DialogMotion.panelIn(reduceMotion: reduceMotion())
     entranceEnds = clock() + (reduceMotion() ? 0 : step.fadeDuration)
+    if let style = pageDimStyle, anchorIsUsable {
+      // Opacity only, with the panel's fade, under Reduce Motion too: the dim says the page waits, it never moves.
+      let dim = pageDim ?? PageDimView(cornerRadius: style.cornerRadius, roundsTop: style.roundsTop)
+      dim.place(in: parent, screenFrame: anchor)
+      dim.fade(from: 0, to: 1, duration: step.fadeDuration)
+      pageDim = dim
+    }
     updateVisibility()
     if takesFocus {
       panel.makeKey()
@@ -335,14 +352,17 @@ public final class DialogPanel {
     layer.add(DialogAlert.spring(spring, from: start), forKey: "dialogTransform")
   }
 
-  /// Takes the panel down: a 0.10 s fade, or at once when `keyboard` (or Reduce Motion).
+  /// Takes the panel and its page dim down: a 0.10 s fade, or at once when `keyboard` (or Reduce Motion).
   public func close(keyboard: Bool) {
     let duration = DialogMotion.panelOut(keyboard: keyboard, reduceMotion: reduceMotion())
     guard duration > 0, let layer = container.layer else { return remove() }
     CATransaction.begin()
-    // The window, not `self`: the owner lets go of this object at the answer, and the fade must still take it down.
+    // The window and the dim, not `self`: the owner lets go of this object at the answer, and the fade must still
+    // take them down.
     let window = panel
-    CATransaction.setCompletionBlock { MainActor.assumeIsolated { Self.remove(window) } }
+    let dim = pageDim
+    CATransaction.setCompletionBlock { MainActor.assumeIsolated { Self.remove(window, dim: dim) } }
+    dim?.fade(from: dim?.layer?.presentation()?.opacity ?? 1, to: 0, duration: duration)
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = layer.presentation()?.opacity ?? 1
     fade.toValue = 0
@@ -353,9 +373,10 @@ public final class DialogPanel {
     CATransaction.commit()
   }
 
-  private func remove() { Self.remove(panel) }
+  private func remove() { Self.remove(panel, dim: pageDim) }
 
-  private static func remove(_ window: NSPanel) {
+  private static func remove(_ window: NSPanel, dim: PageDimView?) {
+    dim?.removeFromSuperview()
     window.parent?.removeChildWindow(window)
     window.orderOut(nil)
   }

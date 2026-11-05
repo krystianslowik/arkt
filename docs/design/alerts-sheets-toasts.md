@@ -99,7 +99,10 @@ Escape is Cancel, so a stray Return never deletes anything.
 2. **Anchored panel** (child `NSPanel`, non-activating): permission prompts. Top-leading corner 12 pt inside the
    content card (or the focused split pane), so the prompt points at the page that asked. Never steals focus from a
    text field on the page unless the user clicks it; Escape dismisses it without choosing (the
-   engine's own panel does the same), and only while the panel is key.
+   engine's own panel does the same), and only while the panel is key. A page's JavaScript dialogs (alert, confirm,
+   prompt, leave site) use the same panel hung from the card's top edge, below any infobar rows, with the page dimmed
+   under it while it is up (#693, design/extensions `surf-dialog`); the dim fades in and out with the panel and goes
+   whenever the panel goes.
 3. **App-modal alert** (`NSApp.runModal(for:)` on a centered panel): launch failure before any window exists. Icon is
    the plain app icon at 56 pt, no badge, with the brand clear space kept (decision 5); the title stacks under the
    icon, as in system alerts. Runs from the same run-loop callout `askAfterLaunchFailure` uses

@@ -22,6 +22,12 @@ struct AlertTokensTests {
     #expect(AlertTokens.destructiveText.dark == .srgb(hex: 0xFFAAA2))
   }
 
+  /// The dim over a page under its dialog (#693): the prototype's `.dim2`, black 10 % light and 28 % dark.
+  @Test func thePageDimIsTheDesignedPair() {
+    #expect(AlertTokens.pageDim.light == .black(0.10))
+    #expect(AlertTokens.pageDim.dark == .black(0.28))
+  }
+
   @Test func theDefaultThemeKeepsThePlainSurface() {
     #expect(AlertTokens.toastSurface(theme: nil) == ShellTokens.toastSurface.light)
     let white = SpaceThemeInfo(baseColors: [.white(1)], isDark: false)

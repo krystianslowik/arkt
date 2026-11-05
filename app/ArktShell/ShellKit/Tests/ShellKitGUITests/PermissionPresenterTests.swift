@@ -60,6 +60,7 @@ final class PermissionPresenterTests: XCTestCase {
     XCTAssertTrue(window.childWindows?.contains(panel.panel) == true)
     let anchor = window.convertToScreen(page.convert(page.bounds, to: nil))
     XCTAssertEqual(panel.panel.frame, panel.frame(anchoredTo: anchor))
+    XCTAssertNil(panel.pageDim, "a permission prompt leaves the page undimmed (#693)")
     XCTAssertEqual(panel.content.title, "example.com wants to")
     XCTAssertEqual(panel.content.listItems, ["Know your location"])
     XCTAssertEqual(panel.view.primaryButton.title, "Allow while visiting the site")

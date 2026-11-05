@@ -95,6 +95,9 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
     let anchor = try XCTUnwrap(page.window).convertToScreen(page.convert(page.bounds, to: nil))
     XCTAssertEqual(panel.panel.frame.maxY, anchor.maxY, accuracy: 0.5, "on the page's top edge")
     XCTAssertEqual(panel.panel.frame.minX, anchor.minX + DialogPanel.anchorInset, accuracy: 0.5)
+    let dim = try XCTUnwrap(panel.pageDim, "the page dims under the prompt (#693)")
+    let dimFrame = try XCTUnwrap(dim.window).convertToScreen(dim.convert(dim.bounds, to: nil))
+    XCTAssertEqual(dimFrame, anchor, "the dim covers the page")
   }
 
   func testStayKeepsTheLittleArktWindowAndItsPage() throws {

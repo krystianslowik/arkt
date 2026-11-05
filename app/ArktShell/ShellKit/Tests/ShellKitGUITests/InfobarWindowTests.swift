@@ -80,8 +80,11 @@ final class InfobarWindowTests: XCTestCase {
 
     let strip = try XCTUnwrap(controller.infobarStrips.strip(for: tab))
     let panel = try XCTUnwrap(controller.javaScriptDialogs.panel(for: tab))
-    XCTAssertLessThanOrEqual(panel.panel.frame.maxY, strip.panel.frame.minY - DialogPanel.anchorInset + 0.5,
-                             "the dialog starts 12 pt under the strip, not over it")
+    XCTAssertEqual(panel.panel.frame.maxY, strip.panel.frame.minY, accuracy: 0.5,
+                   "the dialog hangs from the page's top edge under the strip, not over it")
+    let dim = try XCTUnwrap(panel.pageDim)
+    let dimFrame = try XCTUnwrap(dim.window).convertToScreen(dim.convert(dim.bounds, to: nil))
+    XCTAssertLessThanOrEqual(dimFrame.maxY, strip.panel.frame.minY + 0.5, "the dim leaves the rows clear")
   }
 
   func testAClosingWindowTakesItsStripsDown() throws {
