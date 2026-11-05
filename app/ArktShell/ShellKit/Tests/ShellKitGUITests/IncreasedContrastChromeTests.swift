@@ -169,7 +169,10 @@ final class IncreasedContrastChromeTests: XCTestCase {
     card.increaseContrast = { [unowned self] in increased }
     host(card, size: NSSize(width: 400, height: 300))
     let surface = try XCTUnwrap(card.surface.layer)
-    XCTAssertLessThan(surface.borderWidth, 1)
+    // One physical pixel: 0.5 pt on a 2x display, 1 pt on a 1x one (CI), so the color tells the two edges apart.
+    let scale = try XCTUnwrap(card.window).backingScaleFactor
+    XCTAssertEqual(surface.borderWidth, 1 / scale)
+    XCTAssertEqual(surface.borderColor, ShellTokens.cardBorder.light.cgColor)
     setIncreased(true, redrawing: card)
     assertEdge(surface, .light)
   }
