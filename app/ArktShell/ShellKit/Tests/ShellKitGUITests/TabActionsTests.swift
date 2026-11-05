@@ -382,7 +382,7 @@ final class TabActionsTests: XCTestCase {
     let outline = try harness.outline()
     try harness.click(world.today[1], .command)
     outline.focusKeyboard(on: try harness.row(world.today[2]))
-    XCTAssertFalse(outline.outlineView.keyboardFocusRing.isHidden)
+    XCTAssertTrue(outline.outlineView.keyboardFocusRing.isFocused)
     XCTAssertEqual(outline.selectedNodes, [world.today[0], world.today[1]], "focus does not change the selection")
     harness.controller.close()
   }

@@ -238,9 +238,9 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
       updateKeyboardFocusRing()
     }
   }
-  /// The ring on the focused row: the system focus ring's color (`NSColor.keyboardFocusIndicatorColor`, which follows
-  /// the user's accent color) and width, never mustard. Drawn here because a table view ignores a row-sized focus
-  /// ring mask (it rings the whole table or nothing). Inset into the row fill so the clip view never cuts it.
+  /// The ring on the focused row: `ShellTokens.focusRing` in the Space's text tone (#642). Drawn here because a table
+  /// view ignores a row-sized focus ring mask (it rings the whole table or nothing). Inset into the row fill so the
+  /// clip view never cuts it.
   let keyboardFocusRing = KeyboardFocusRingView(frame: .zero)
   /// Whether Up and Down may stop on a row (the divider may not).
   var isKeyboardFocusable: @MainActor (Int) -> Bool = { _ in true }
@@ -261,12 +261,12 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// Places the ring on the focused row (or hides it), above the rows.
   func updateKeyboardFocusRing() {
     guard let row = keyboardFocusRow, row < numberOfRows else {
-      keyboardFocusRing.isHidden = true
+      keyboardFocusRing.setFocused(false)
       return
     }
     if keyboardFocusRing.superview !== self { addSubview(keyboardFocusRing, positioned: .above, relativeTo: nil) }
     keyboardFocusRing.frame = keyboardFocusRect(row)
-    keyboardFocusRing.isHidden = false
+    keyboardFocusRing.setFocused(true)
     keyboardFocusRing.needsDisplay = true
   }
 
@@ -580,8 +580,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Keyboard focus left the outline through Return or Esc; the window gives focus back to the page.
   public var onKeyboardFocusExit: (@MainActor () -> Void)?
 
-  /// Ctrl-Space: keyboard focus on `row` with the system focus ring (BH-019). The window makes the outline first
-  /// responder.
+  /// Ctrl-Space: keyboard focus on `row` with `ShellTokens.focusRing` (BH-019, #642). The window makes the outline
+  /// first responder.
   public func focusKeyboard(on row: Int) {
     outlineView.keyboardFocusRow = row
   }
@@ -1794,56 +1794,5 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       handler(self)?(id)
       return true
     }
-  }
-}
-
-/// The keyboard focus ring on a sidebar row (BH-019): a 3 pt stroke in the system focus ring color, following the
-/// row fill's rounded shape. Not hit-testable and not an accessibility element.
-@MainActor
-final class KeyboardFocusRingView: NSView {
-  static let lineWidth: CGFloat = 3
-  var cornerRadius = SidebarMetrics.rowCornerRadius { didSet { needsDisplay = true } }
-  let ring = CAShapeLayer()
-
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    wantsLayer = true
-    isHidden = true
-    ring.fillColor = nil
-    ring.lineWidth = Self.lineWidth
-    layer?.addSublayer(ring)
-    setAccessibilityElement(false)
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-  override var wantsUpdateLayer: Bool { true }
-  override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-  /// Resolved here so it follows the accent color and the appearance.
-  var strokeColor: CGColor {
-    var color = NSColor.keyboardFocusIndicatorColor.cgColor
-    effectiveAppearance.performAsCurrentDrawingAppearance {
-      color = NSColor.keyboardFocusIndicatorColor.withAlphaComponent(1).cgColor
-    }
-    return color
-  }
-
-  override func updateLayer() {
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    let inset = Self.lineWidth / 2
-    let rect = bounds.insetBy(dx: inset, dy: inset)
-    let radius = max(cornerRadius - inset, 0)
-    ring.frame = bounds
-    ring.path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
-    ring.strokeColor = strokeColor
-    CATransaction.commit()
-  }
-
-  override func layout() {
-    super.layout()
-    needsDisplay = true
   }
 }

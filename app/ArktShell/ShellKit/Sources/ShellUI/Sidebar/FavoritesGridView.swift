@@ -8,13 +8,12 @@ public final class FavoriteTileView: NSView {
   /// Shown while the tile is hovered and has a close action (its page is loaded). Target and action are set by the
   /// grid; hidden (so neither hit-tested nor in the accessibility tree) otherwise.
   public let closeButton = HoverCloseButton()
-  /// The Ctrl-Space cursor, in the same system color as outline-row focus (#343).
+  /// The Ctrl-Space cursor (#343): the same `ShellTokens.focusRing` ring as outline-row focus (#642).
   let keyboardFocusRing = KeyboardFocusRingView(frame: .zero)
   var isKeyboardFocused = false {
     didSet {
       guard isKeyboardFocused != oldValue else { return }
-      keyboardFocusRing.isHidden = !isKeyboardFocused
-      keyboardFocusRing.needsDisplay = true
+      keyboardFocusRing.setFocused(isKeyboardFocused)
     }
   }
   public var flavor: ThemeFlavor = .light {
