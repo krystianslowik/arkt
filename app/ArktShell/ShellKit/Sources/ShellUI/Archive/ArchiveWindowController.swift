@@ -59,10 +59,9 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   private var matching: Int?
   private var unreadable = 0
   private var failed = false
-  /// Stored favicon bytes by id; an image is made the first time its row is shown (`favicon(_:)`), never for a
-  /// whole page at once.
-  private var faviconData: [UUID: Data] = [:]
+  /// Favicons by id, decoded off the main actor when their bytes arrive (#605); rows show their letter until then.
   private var favicons: [UUID: NSImage] = [:]
+  private let faviconLoader = FaviconImageLoader<UUID>()
   private var requestedFavicons: Set<UUID> = []
   private var searchTask: Task<Void, Never>?
   /// Bumped by every load that replaces the list (search, filter, reload), so an older auto-load landing late is
@@ -462,13 +461,27 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
       guard let self else { return }
       let loaded = await self.dataSource.favicons(for: wanted)
       guard !loaded.isEmpty else { return }
-      self.faviconData.merge(loaded) { _, new in new }
-      let visible = self.tableView.rows(in: self.tableView.visibleRect)
-      guard visible.length > 0 else { return }
-      self.tableView.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<visible.location + visible.length),
-                                columnIndexes: [0])
+      self.faviconLoader.load(loaded) { [weak self] images in self?.applyFavicons(images) }
     }
   }
+
+  /// Stores decoded favicons, then reloads only the visible rows.
+  private func applyFavicons(_ images: [UUID: NSImage?]) {
+    for (id, image) in images { favicons[id] = image }
+    let visible = tableView.rows(in: tableView.visibleRect)
+    guard visible.length > 0 else { return }
+    tableView.reloadData(forRowIndexes: IndexSet(integersIn: visible.location..<visible.location + visible.length),
+                         columnIndexes: [0])
+  }
+
+  /// Tests: how favicons are decoded (production: off the main actor).
+  var faviconDecoder: FaviconDecoder {
+    get { faviconLoader.decoder }
+    set { faviconLoader.decoder = newValue }
+  }
+
+  /// Tests: returns once every favicon requested so far is decoded and shown.
+  func settleFaviconDecodes() async { await faviconLoader.settle() }
 
   // MARK: Restore
 
@@ -527,7 +540,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
   private func clearArchive() async {
     let cleared = await dataSource.clearArchive()
     favicons = [:]
-    faviconData = [:]
+    faviconLoader.cancelAll()
     requestedFavicons = []
     await reload()
     toasts.show(cleared ? Toast(text: "The Archive has been cleared.")
@@ -603,13 +616,8 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     }
   }
 
-  /// The favicon image of `id`, made from its stored bytes on first use.
-  private func favicon(_ id: UUID) -> NSImage? {
-    if let image = favicons[id] { return image }
-    guard let data = faviconData.removeValue(forKey: id), let image = NSImage(data: data) else { return nil }
-    favicons[id] = image
-    return image
-  }
+  /// The decoded favicon of `id`; nil until its bytes are decoded, or when there are none.
+  private func favicon(_ id: UUID) -> NSImage? { favicons[id] }
 
   private func rowCell(in tableView: NSTableView) -> ArchiveRowCellView {
     tableView.makeView(withIdentifier: ArchiveRowCellView.identifier, owner: self) as? ArchiveRowCellView

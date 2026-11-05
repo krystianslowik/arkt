@@ -101,6 +101,18 @@ public final class SidebarController {
   /// Decoded favicons by node; kept while the node exists in the source (its engine tab may close and reopen),
   /// dropped when the node leaves it (`.structure` and `.spaceRemoved` changes, `deactivate(node:)`).
   private(set) var favicons: [NodeID: NSImage] = [:]
+  /// Decodes favicon bytes off the main actor (#605), so no row decodes its image at first draw.
+  private let faviconLoader = FaviconImageLoader<NodeID>()
+  /// Tests: how favicons are decoded (production: off the main actor).
+  var faviconDecoder: FaviconDecoder {
+    get { faviconLoader.decoder }
+    set { faviconLoader.decoder = newValue }
+  }
+  /// Tests: the decoded-image cache (production: shared by the whole process).
+  var faviconImageCache: NSCache<NSData, NSImage> {
+    get { faviconLoader.decoded }
+    set { faviconLoader.decoded = newValue }
+  }
   /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page; pages the
   /// window creates without an activation (the other panes of a split) are added through `markLoaded(node:)`, and
   /// the window calls `deactivate(node:)` when any page closes; nodes that leave the source are dropped like
@@ -653,7 +665,10 @@ public final class SidebarController {
   public func deactivate(node: NodeID) {
     setClosing(node, false)
     setAudio(.silent, for: node)
-    if source.node(node) == nil { favicons[node] = nil }
+    if source.node(node) == nil {
+      faviconLoader.cancel(node)
+      favicons[node] = nil
+    }
     favoriteLoadOrder.removeAll { $0 == node }
     let wasLoaded = loadedNodes.remove(node) != nil
     guard node == current || node == previous else {
@@ -742,31 +757,48 @@ public final class SidebarController {
 
   // MARK: Updates
 
-  /// Caches a favicon (nil = back to the letter placeholder) and refreshes only that row or tile.
+  /// Sets a favicon (nil = back to the letter placeholder at once) and refreshes only that row or tile. The bytes are
+  /// decoded off the main actor; until they are, the row keeps what it shows (its old favicon or the letter), so a
+  /// new favicon replaces the old one without a flash. Bytes that are not an image show the letter.
   public func setFavicon(_ data: Data?, for node: NodeID) {
-    favicons[node] = data.flatMap(NSImage.init(data:))
+    guard let data else {
+      faviconLoader.cancel(node)
+      guard favicons.removeValue(forKey: node) != nil else { return }
+      reloadFavicon(of: node)
+      return
+    }
+    setFavicons([node: data])
+  }
+
+  /// Sets a batch of favicons (for example the ones loaded after launch or an import): decoded off the main actor in
+  /// one job, then each affected row or tile refreshes once. Ids the source does not know are ignored.
+  public func setFavicons(_ batch: [NodeID: Data]) {
+    let known = batch.filter { source.node($0.key) != nil }
+    guard !known.isEmpty else { return }
+    faviconLoader.load(known) { [weak self] images in self?.applyFavicons(images) }
+  }
+
+  /// Stores decoded favicons of nodes still in the source and refreshes the ones that changed.
+  private func applyFavicons(_ images: [NodeID: NSImage?]) {
+    for (node, image) in images where source.node(node) != nil && favicons[node] !== image {
+      favicons[node] = image
+      reloadFavicon(of: node)
+    }
+  }
+
+  private func reloadFavicon(of node: NodeID) {
     for page in pages.values { page.outlineController.reload(node: node) }
     view.favorites.reload(node: node)
   }
 
-  /// Caches a batch of favicons (for example the ones loaded after launch), then refreshes each affected row or tile
-  /// once. Ids the source does not know are ignored.
-  public func setFavicons(_ batch: [NodeID: Data]) {
-    var changed: [NodeID] = []
-    for (node, data) in batch where source.node(node) != nil {
-      favicons[node] = NSImage(data: data)
-      changed.append(node)
-    }
-    for node in changed {
-      for page in pages.values { page.outlineController.reload(node: node) }
-      view.favorites.reload(node: node)
-    }
-  }
+  /// Tests: returns once every favicon set so far is decoded and shown.
+  func settleFaviconDecodes() async { await faviconLoader.settle() }
 
   /// Drops cached favicons and loaded state of nodes that left the source. O(cached favicons + loaded nodes), on
   /// structure and Space changes only.
   private func pruneRemovedNodes() {
     for node in favicons.keys where source.node(node) == nil { favicons[node] = nil }
+    faviconLoader.cancel { source.node($0) == nil }
     loadedNodes = loadedNodes.filter { source.node($0) != nil }
     audio = audio.filter { source.node($0.key) != nil }
     favoriteLoadOrder = favoriteLoadOrder.filter { source.node($0) != nil }
