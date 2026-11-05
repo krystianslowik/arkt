@@ -13,6 +13,7 @@ import EngineAPI
 /// meanwhile is never taken for one of them.
 @MainActor
 public final class ShellWindowSet {
+  public enum WindowKind { case regular, blank, incognito }
   /// The host an engine window was created with (`ChromiumEngine.host(of:)`); nil for a window this engine does not
   /// list.
   public typealias HostLookup = @MainActor (EngineWindowID) -> (any EngineWindowHosting)?
@@ -142,7 +143,9 @@ public final class ShellWindowSet {
   }
 
   private func presentPendingRecovery() {
-    guard recoveryWindow == nil, let model = pendingRecovery, let window = primary else { return }
+    let eligible = controllers.filter { !$0.isPrivateWindow }
+    let window = primary.flatMap { candidate in eligible.first { $0 === candidate } } ?? eligible.first
+    guard recoveryWindow == nil, let model = pendingRecovery, let window else { return }
     switch model.presentation {
     case .none:
       pendingRecovery = nil
@@ -161,10 +164,10 @@ public final class ShellWindowSet {
   /// passes false, so the new window gets its engine window with the first tab the user picks (decision 4) and no
   /// row is shown in two windows. A window without a first tab opens on the Space of the most recently main window.
   @discardableResult
-  public func openWindow(opensFirstTab: Bool = true) -> ShellWindowController {
+  public func openWindow(opensFirstTab: Bool = true, kind: WindowKind = .regular) -> ShellWindowController {
     let opener = primary
     let anchor = opener?.window
-    let controller = make(opensFirstTab: opensFirstTab, origin: .shell)
+    let controller = make(opensFirstTab: opensFirstTab, origin: .shell, kind: kind)
     // New Window opens on the Space the window it was pressed in shows (BH-170); a launch window opens a tab of the
     // first Space instead.
     if !opensFirstTab, let space = opener?.currentSpace { controller.sidebarController.showSpace(space) }
@@ -448,7 +451,7 @@ public final class ShellWindowSet {
 
   // MARK: Building
 
-  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin) -> ShellWindowController {
+  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin, kind: WindowKind = .regular) -> ShellWindowController {
     // #116: the first main window the shell opens restores the saved frame, Space and tabs and keeps them saved;
     // when it closes, the next one takes over saving (without restoring again).
     let isRestored = SessionWindowPolicy.takesSession(origin, ownerIsAlive: sessionWindow.map { !$0.isClosed } ?? false)
@@ -458,6 +461,11 @@ public final class ShellWindowSet {
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
                                            restoring: session, savesSession: isRestored,
                                            commandBarSettings: commandBarSettings, opensFirstTab: opensFirstTab)
+    switch kind {
+    case .regular: break
+    case .blank: controller.makeBlank()
+    case .incognito: controller.makeIncognito()
+    }
     controller.copyLinkEducation = copyLinkEducation
     if isRestored { sessionWindow = controller }
     if let session, controller.applySavedFrame(session, screens: screens()) { restoredFrameWindow = controller }
@@ -476,6 +484,12 @@ public final class ShellWindowSet {
     windows.append(controller)
     controller.onRecoveryWindowClosed = { [weak self, weak controller] in
       guard let self, self.recoveryWindow === controller else { return }
+      self.recoveryWindow = nil
+      self.presentPendingRecovery()
+    }
+    controller.onBecomingPrivate = { [weak self, weak controller] in
+      guard let self, let controller, self.recoveryWindow === controller else { return }
+      controller.rootView.subviews.filter { $0 is RestorePagesView }.forEach { $0.removeFromSuperview() }
       self.recoveryWindow = nil
       self.presentPendingRecovery()
     }

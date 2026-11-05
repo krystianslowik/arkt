@@ -80,6 +80,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// links); the app builds a new window instead (#241: Dock reopen).
   public private(set) var isClosed = false
   public var onRecoveryWindowClosed: (@MainActor () -> Void)?
+  var onBecomingPrivate: (@MainActor () -> Void)?
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
   /// Window > Downloads (Cmd-Shift-J) and Show All History (Cmd-Y) open the Library on a section (#132); set by

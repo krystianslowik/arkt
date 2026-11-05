@@ -136,6 +136,83 @@ final class RestorePagesWindowTests: XCTestCase {
     XCTAssertEqual(window.toasts.current, databaseNotice)
   }
 
+  func testPrivatePrimaryDoesNotReceiveTransferredOffer() throws {
+    _ = NSApplication.shared
+    for mode in [ShellWindowSet.WindowKind.blank, .incognito] {
+      let engine = InMemoryEngine()
+      engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+      engine.crashedSession.simulateCrashedExit()
+      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      let owner = set.openWindow()
+      owner.window?.isReleasedWhenClosed = false
+      set.beginSessionRecovery(engine.crashedSession)
+      let regular = set.openWindow()
+      regular.window?.isReleasedWhenClosed = false
+      let privateWindow = set.openWindow(opensFirstTab: false, kind: mode)
+      privateWindow.window?.isReleasedWhenClosed = false
+      defer { owner.close(); regular.close(); privateWindow.close() }
+      let privateNSWindow = try XCTUnwrap(privateWindow.window)
+      NotificationCenter.default.post(name: NSWindow.didBecomeMainNotification, object: privateNSWindow)
+      XCTAssertTrue(set.primary === privateWindow)
+      owner.close()
+      XCTAssertEqual(regular.rootView.subviews.filter { $0 is RestorePagesView }.count, 1)
+      XCTAssertFalse(privateWindow.rootView.subviews.contains { $0 is RestorePagesView })
+      XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    }
+  }
+
+  func testOfferWaitsThroughPrivateCreationAndOwnerClose() throws {
+    _ = NSApplication.shared
+    for mode in [ShellWindowSet.WindowKind.blank, .incognito] {
+      let engine = InMemoryEngine()
+      engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+      engine.crashedSession.simulateCrashedExit()
+      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      set.beginSessionRecovery(engine.crashedSession)
+      var privateHadOfferDuringConfiguration = false
+      set.configure = { window in
+        privateHadOfferDuringConfiguration = window.rootView.subviews.contains { $0 is RestorePagesView }
+      }
+      let privateWindow = set.openWindow(opensFirstTab: false, kind: mode)
+      privateWindow.window?.isReleasedWhenClosed = false
+      XCTAssertFalse(privateHadOfferDuringConfiguration)
+      XCTAssertFalse(privateWindow.rootView.subviews.contains { $0 is RestorePagesView })
+      let owner = set.openWindow()
+      owner.window?.isReleasedWhenClosed = false
+      XCTAssertEqual(owner.rootView.subviews.filter { $0 is RestorePagesView }.count, 1)
+      owner.close()
+      XCTAssertEqual(engine.crashedSession.dismissals, 0)
+      XCTAssertFalse(privateWindow.rootView.subviews.contains { $0 is RestorePagesView })
+      let later = set.openWindow()
+      later.window?.isReleasedWhenClosed = false
+      defer { owner.close(); privateWindow.close(); later.close() }
+      let panel = try XCTUnwrap(later.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+      panel.dismissPressed()
+      XCTAssertEqual(engine.crashedSession.dismissals, 1)
+    }
+  }
+
+  func testChangingOwnerToPrivateTransfersOffer() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let owner = set.openWindow()
+    owner.window?.isReleasedWhenClosed = false
+    let other = set.openWindow()
+    other.window?.isReleasedWhenClosed = false
+    defer { owner.close(); other.close() }
+    let ownerWindow = try XCTUnwrap(owner.window)
+    NotificationCenter.default.post(name: NSWindow.didBecomeMainNotification, object: ownerWindow)
+    set.beginSessionRecovery(engine.crashedSession)
+    XCTAssertEqual(owner.rootView.subviews.filter { $0 is RestorePagesView }.count, 1)
+    owner.makeIncognito()
+    XCTAssertFalse(owner.rootView.subviews.contains { $0 is RestorePagesView })
+    XCTAssertEqual(other.rootView.subviews.filter { $0 is RestorePagesView }.count, 1)
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+  }
+
   func testReturnAndEscapeRouteToTheirActions() throws {
     _ = NSApplication.shared
     for (key, code, restores) in [("\r", UInt16(36), true), ("\u{1b}", UInt16(53), false)] {

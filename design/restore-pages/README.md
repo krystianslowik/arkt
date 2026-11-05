@@ -73,3 +73,8 @@ sidebar pages must not be persisted or returned. A restore request supplies ever
 all of them unrestored. A rejected request keeps the offer and crash unacknowledged for retry or dismissal. The shell
 acknowledges once after acceptance, dismissal, or an empty offer. Crash-only legacy providers have no page capability.
 The Chromium implementation and killed-process validation remain with #577; this contract does not implement them.
+
+The decision is hosted only by an ordinary regular window, never a Blank, Incognito, Little Arkt or Peek window.
+Its unanswered model stays with the window set if no eligible host exists and moves to a regular window when one
+becomes available. Closing or changing the host to a private mode does not acknowledge the crash. Private window
+creation establishes its final mode before the window set considers recovery presentation.

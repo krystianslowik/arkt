@@ -4,23 +4,24 @@ import EngineAPI
 extension ShellWindowController {
   /// File > New Blank Window (Ctrl-Cmd-N, BH-170): this window, with no sidebar items. The shared sidebar stays.
   public func makeBlank() {
+    keepVisitsOutOfTheSharedSidebar()
     savesSession = false
     sidebarController.present(.blank)
-    keepVisitsOutOfTheSharedSidebar()
   }
 
   /// File > New Incognito Window (Cmd-Shift-N, BH-174): the same window, plus the sidebar label. A visit here is not
   /// written to the shared sidebar, which is what a relaunch restores.
   public func makeIncognito() {
+    keepVisitsOutOfTheSharedSidebar()
     savesSession = false
     sidebarController.present(.incognito)
-    keepVisitsOutOfTheSharedSidebar()
   }
 
   /// Command bar and Paste and Go would add a Today tab on the shared sidebar. These windows load the page in a tab
   /// of their own instead, one without a row. A tab the engine opens here (`engineDidCreateTab`) is one too (#559).
   private func keepVisitsOutOfTheSharedSidebar() {
     isPrivateWindow = true
+    onBecomingPrivate?()
     commandBar.onOpen = { [weak self] url, _ in self?.openPrivately(url) }
     sidebarController.onPasteAndGo = { [weak self] url in self?.openPrivately(url) }
   }
