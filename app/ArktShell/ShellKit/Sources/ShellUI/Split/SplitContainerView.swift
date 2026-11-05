@@ -114,7 +114,7 @@ public final class SplitContainerView: NSView {
   /// `animated` (a pane closed by its X, #388): every page still shown moves from where it is on screen to its new
   /// frame on one interruptible spring; a reflow still running hands over its position and speed. The model state
   /// (`paneCount`, `liveFactors`, the cards' pages) and the cards' real frames change at once; only the cards' layer
-  /// transforms move (#602). Reduce Motion sets the frames at once under a short crossfade.
+  /// translations and masks move (#602). Reduce Motion sets the frames at once under a short crossfade.
   public func show(panes: [NSView?], axis: SplitAxis, factors: [Double], animated: Bool = false) {
     cancelDrag()
     let onScreen = animated ? framesOnScreen() : [:]
@@ -160,15 +160,18 @@ public final class SplitContainerView: NSView {
     return frames
   }
 
-  /// Where each shown pane is drawn: its layout frame, or while a reflow runs, its way there.
+  /// Where each shown pane is drawn: its layout frame, or while a reflow runs, the part of it shown on its way there.
   var presentedPaneFrames: [CGRect] { paneCount > 0 ? presented(targetFrames()).panes : [] }
 
-  /// `targets` as drawn: unchanged at rest; while a reflow runs, each pane on its way and the gaps between.
+  /// `targets` as drawn: unchanged at rest; while a reflow runs, each pane on its way (`SplitReflow.drawnFrame`) and
+  /// the gaps between.
   private func presented(_ targets: SplitFrames) -> SplitFrames {
     guard let reflow else { return targets }
     var frames = targets
     frames.panes = zip(targets.panes, reflow.from).map { target, from in
-      from.map { SplitReflow.frame(from: $0, to: target, progress: reflow.progress, scale: backingScale) } ?? target
+      guard let from else { return target }
+      let spring = SplitReflow.frame(from: from, to: target, progress: reflow.progress, scale: backingScale)
+      return SplitReflow.drawnFrame(presenting: spring, in: target, flipped: isFlipped)
     }
     frames.dividers = SplitReflow.dividers(between: frames.panes, axis: axis)
     return frames
@@ -249,9 +252,9 @@ public final class SplitContainerView: NSView {
   }
 
   /// The layout's frames. While a reflow runs (#602), the cards keep their layout frames, so each page is resized
-  /// once, when the reflow starts, and a layer transform draws each card on its way there; per spring frame only the
-  /// transforms change. The dividers are empty hit areas (no layer content, no page), so they follow the visible
-  /// gaps by frame and stay clickable mid-flight.
+  /// once, when the reflow starts; per spring frame only each card's layer translation and rounded mask change
+  /// (`SplitReflow.present`), nothing is scaled. The dividers are empty hit areas (no layer content, no page), so
+  /// they follow the visible gaps by frame and stay clickable mid-flight.
   private func applyFrames() {
     guard paneCount > 0 else { return }
     let targets = targetFrames()
@@ -260,11 +263,8 @@ public final class SplitContainerView: NSView {
     CATransaction.setDisableActions(true)
     for (card, frame) in zip(cards, targets.panes) where card.frame != frame { card.frame = frame }
     for (index, card) in cards.enumerated() {
-      guard let layer = card.layer else { continue }
-      let transform = reflow != nil && index < frames.panes.count
-        ? SplitReflow.transform(presenting: frames.panes[index], in: targets.panes[index])
-        : CATransform3DIdentity
-      if !CATransform3DEqualToTransform(layer.transform, transform) { layer.transform = transform }
+      let drawn = reflow != nil && index < frames.panes.count ? frames.panes[index] : nil
+      SplitReflow.present(card, in: drawn, cornerRadius: metrics.cardCornerRadius)
     }
     for (divider, frame) in zip(dividerViews, frames.dividers) where divider.frame != frame { divider.frame = frame }
     CATransaction.commit()
@@ -304,7 +304,7 @@ public final class SplitContainerView: NSView {
 
   func beginDividerDrag(_ index: Int) {
     guard draggingIndex == nil, dividers.indices.contains(index) else { return }
-    endReflow()
+    if endReflow() != nil { applyFrames() }          // the panes go to rest at once, even if the pointer never moves
     draggingIndex = index
     factorsAtDragStart = liveFactors
     pacerSession = pacer.begin("split-divider", in: self)
@@ -370,13 +370,41 @@ public final class SplitContainerView: NSView {
 
   /// The pane a mouse-down at `point` (in this view) focuses: nil outside every pane and on a shown close button,
   /// whose click closes its pane instead of focusing it first.
+  /// While a reflow runs, the panes are hit where they are drawn (#602), not at their real frames.
   public func paneIndex(forMouseDownAt point: CGPoint) -> Int? {
-    guard let index = paneCards.firstIndex(where: { !$0.isHidden && $0.frame.contains(point) }) else { return nil }
-    if let button = paneCards[index].closeButton, button.isRevealed, !button.isHidden,
-       button.bounds.contains(button.convert(point, from: self)) {
+    let drawn = presentedPaneFrames
+    guard let index = paneCards.indices.first(where: { !paneCards[$0].isHidden && drawn[$0].contains(point) }) else {
+      return nil
+    }
+    let card = paneCards[index]
+    let real = realPoint(point, inPane: index, drawn: drawn[index])
+    if let button = card.closeButton, button.isRevealed, !button.isHidden,
+       button.bounds.contains(button.convert(real, from: self)) {
       return nil
     }
     return index
+  }
+
+  /// `point` (in this view) drawn on pane `index` at `drawn`, moved to where it falls on the card's real frame.
+  private func realPoint(_ point: CGPoint, inPane index: Int, drawn: CGRect) -> CGPoint {
+    let card = paneCards[index]
+    let move = SplitReflow.translation(drawing: drawn, in: card.frame, flipped: isFlipped)
+    return CGPoint(x: point.x - move.m41, y: point.y - move.m42)
+  }
+
+  /// While a reflow runs (#602) the cards are drawn away from their real frames: a click goes to the card drawn under
+  /// it, at the matching point of its real frame, so the close button and the page take the clicks they show.
+  /// Dividers and the toast are where they are drawn already.
+  public override func hitTest(_ point: NSPoint) -> NSView? {
+    guard reflow != nil, !isHidden else { return super.hitTest(point) }
+    let local = superview.map { convert(point, from: $0) } ?? point
+    if let toastView, !toastView.isHidden, toastView.frame.contains(local) { return super.hitTest(point) }
+    if dividers.contains(where: { !$0.isHidden && $0.frame.contains(local) }) { return super.hitTest(point) }
+    let drawn = presentedPaneFrames
+    guard let index = paneCards.indices.first(where: { !paneCards[$0].isHidden && drawn[$0].contains(local) }) else {
+      return super.hitTest(point)
+    }
+    return paneCards[index].hitTest(realPoint(local, inPane: index, drawn: drawn[index])) ?? self
   }
 
   // MARK: Building blocks

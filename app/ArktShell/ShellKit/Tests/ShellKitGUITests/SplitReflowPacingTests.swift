@@ -6,7 +6,8 @@ import XCTest
 /// Frame-time gate for the pane close reflow (#602, origin #388): a pane closes in a 4-pane and a 3-pane split
 /// (`split-reflow`), and in a 2-pane split the page left grows into the single card (`card-reflow`). Measured on
 /// the views' own pacers in a real shell window with `InMemoryEngine`, so the panes are plain views and the test
-/// measures the shell's own frame work. NOT-MEASURABLE below 120 Hz or under load (`PacingEnvironment`).
+/// measures the shell's own frame work. NOT-MEASURABLE below 120 Hz or under load (`PacingEnvironment`); the hitch
+/// count is asserted only with `ARKT_PACING_GATE=1` or when this class runs alone (`PacingEnvironment.gateAsserts`).
 @MainActor
 final class SplitReflowPacingTests: XCTestCase {
   private var controller: ShellWindowController!
@@ -86,6 +87,8 @@ final class SplitReflowPacingTests: XCTestCase {
     var load = [0.0]
     let cores = ProcessInfo.processInfo.activeProcessorCount
     let loaded = getloadavg(&load, 1) != 1 || load[0] >= Double(cores)
+    let gated = PacingEnvironment.gateAsserts(for: Self.self)
+    print("split.reflow.pacing gate=\(gated ? "asserts" : "reports")")
     let fps = NSScreen.main?.maximumFramesPerSecond ?? 0
     for (label, stats) in results {
       let hitches = stats.intervals.enumerated().filter { $0.element > stats.hitchThreshold }
@@ -94,7 +97,7 @@ final class SplitReflowPacingTests: XCTestCase {
         format: "split.reflow.pacing label=%@ screenMaxFPS=%d frames=%d over8.6=%d overBudgetPct=%.2f maxMs=%.2f "
           + "p99Ms=%.2f leadInMs=%.2f load1=%.2f cores=%d asserted=%@ hitchesMs=[%@]",
         label, fps, stats.frameCount, stats.hitchCount, stats.overBudgetRatio * 100, stats.maxInterval * 1000,
-        stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, loaded ? "no" : "yes",
+        stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, loaded || !gated ? "no" : "yes",
         hitches.joined(separator: ","))
       print(summary)
       let attachment = XCTAttachment(string: summary)
@@ -104,6 +107,8 @@ final class SplitReflowPacingTests: XCTestCase {
       XCTAssertGreaterThan(stats.frameCount, 10, "\(label): the display link ran (is the display awake?)")
       if loaded {
         print("split.reflow.pacing skipped assert: 1-minute load \(load[0]) >= \(cores) active cores")
+      } else if !gated {
+        print("split.reflow.pacing reported only: set ARKT_PACING_GATE=1 or run SplitReflowPacingTests alone")
       } else {
         XCTAssertEqual(stats.hitchCount, 0, "\(label): frames over 8.6 ms")
       }

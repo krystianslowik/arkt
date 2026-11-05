@@ -183,24 +183,21 @@ public final class ShellRootView: NSView {
     if let stats = cardPacer.end(session: cardPacerSession) { lastCardPacing = stats }
   }
 
-  /// Where the card is drawn: its layout frame, or while it reflows, its way there from the pane.
+  /// Where the card is drawn: its layout frame, or while it reflows, the part of it shown on its way there.
   var presentedCardFrame: CGRect {
     guard let cardReflow else { return cardTarget }
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-    return SplitReflow.frame(from: cardReflow.from, to: cardTarget, progress: cardReflow.progress, scale: scale)
+    let spring = SplitReflow.frame(from: cardReflow.from, to: cardTarget, progress: cardReflow.progress, scale: scale)
+    return SplitReflow.drawnFrame(presenting: spring, in: cardTarget, flipped: isFlipped)
   }
 
-  /// The card keeps its layout frame, so its page is resized once; while it reflows, a layer transform draws it on
-  /// its way there and is all that changes per spring frame (#602).
+  /// The card keeps its layout frame, so its page is resized once; while it reflows, its layer translation and
+  /// rounded mask draw it on its way there and are all that changes per spring frame (#602).
   private func applyCardFrame() {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     if card.frame != cardTarget { card.frame = cardTarget }
-    let transform = cardReflow == nil ? CATransform3DIdentity
-      : SplitReflow.transform(presenting: presentedCardFrame, in: cardTarget)
-    if let layer = card.layer, !CATransform3DEqualToTransform(layer.transform, transform) {
-      layer.transform = transform
-    }
+    SplitReflow.present(card, in: cardReflow == nil ? nil : presentedCardFrame, cornerRadius: metrics.cardCornerRadius)
     CATransaction.commit()
   }
 

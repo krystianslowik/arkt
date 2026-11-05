@@ -66,8 +66,30 @@ final class SplitPaneCloseTests: XCTestCase {
     return view
   }
 
-  /// Where a card's layer is drawn (its real frame under its transform), in its superview's coordinates.
-  private func onScreen(_ card: ContentCardView) throws -> CGRect { try XCTUnwrap(card.layer).frame }
+  /// Where a card is drawn, in its superview's coordinates: its layer's bounds, or while it moves the rounded mask that
+  /// crops it, through its translation (#602).
+  private func onScreen(_ card: ContentCardView) throws -> CGRect {
+    let layer = try XCTUnwrap(card.layer)
+    let transform = layer.transform
+    XCTAssertTrue(transform.m11 == 1 && transform.m22 == 1 && transform.m33 == 1, "never scaled")
+    let superview = try XCTUnwrap(card.superview)
+    let drawn = card.convert(layer.mask?.frame ?? card.bounds, to: superview)
+      .offsetBy(dx: transform.m41, dy: transform.m42)
+    if let superlayer = layer.superlayer {                 // in a window on screen: Core Animation agrees
+      assertEqual(layer.convert(layer.mask?.frame ?? layer.bounds, to: superlayer), drawn, "layer space")
+    }
+    return drawn
+  }
+
+  /// At rest: no translation and no mask left on any shown card, drawn at its real frame.
+  private func assertAtRest(_ cards: [ContentCardView], file: StaticString = #filePath, line: UInt = #line) throws {
+    for card in cards {
+      let layer = try XCTUnwrap(card.layer)
+      XCTAssertTrue(CATransform3DIsIdentity(layer.transform), "transform left", file: file, line: line)
+      XCTAssertNil(layer.mask, "mask left", file: file, line: line)
+      assertEqual(try onScreen(card), card.frame, "drawn at its frame", file: file, line: line)
+    }
+  }
 
   private func assertEqual(_ a: CGRect, _ b: CGRect, _ message: String = "",
                            file: StaticString = #filePath, line: UInt = #line) {
@@ -292,10 +314,8 @@ final class SplitPaneCloseTests: XCTestCase {
     container.reflowDriver.tick(at: 105)
 
     XCTAssertFalse(container.isReflowing)
-    for (card, target) in zip(container.paneCards, targets) {
-      XCTAssertEqual(card.frame, target)
-      XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(card.layer).transform))
-    }
+    XCTAssertEqual(container.paneCards.map(\.frame), targets)
+    try assertAtRest(container.paneCards)
     XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized at rest either")
   }
 
@@ -327,7 +347,60 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized per frame")
     container.reflowDriver.tick(at: 105)
     XCTAssertFalse(container.isReflowing)
-    for card in container.paneCards { assertEqual(try onScreen(card), card.frame) }
+    try assertAtRest(container.paneCards)
+  }
+
+  /// A divider drag that takes over a reflow puts every card at rest at once, even when the pointer never moves.
+  func testDividerDragWithoutAMoveLeavesNoReflowBehind() throws {
+    let container = makeContainer(reduceMotion: false)
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (page(), page(), page())
+    show(container, [a, b, c])
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.04)
+    XCTAssertNotNil(container.paneCards[1].layer?.mask, "moving")
+
+    container.dividers[0].beginDrag()
+    container.dividers[0].endDrag()
+
+    XCTAssertFalse(container.isReflowing)
+    XCTAssertEqual(container.paneCards.map(\.frame),
+                   [NSRect(x: 0, y: 0, width: 500, height: 600), NSRect(x: 510, y: 0, width: 500, height: 600)])
+    try assertAtRest(container.paneCards)
+    XCTAssertEqual(container.dividers[0].frame, NSRect(x: 500, y: 0, width: 10, height: 600))
+  }
+
+  /// Mid-flight a click lands on what is drawn under it: the close button of a pane drawn away from its real frame
+  /// closes that pane. Pane c shrinks while it moves right (a pane is added before it), so its X is in view.
+  func testClickOnADrawnCloseButtonMidFlightClosesThatPane() throws {
+    let container = makeContainer(reduceMotion: false)
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (page(), page(), page())
+    show(container, [a, c])
+    var requests: [Int] = []
+    container.onCloseRequest = { requests.append($0) }
+
+    show(container, [a, b, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    let card = container.paneCards[2]
+    let button = try XCTUnwrap(card.closeButton)
+    button.reducesMotion = { true }
+    try hover(card, entered: true)
+    let drawn = try onScreen(card)
+    XCTAssertNotEqual(drawn.minX, card.frame.minX, "drawn away from its real frame")
+    let move = try XCTUnwrap(card.layer).transform
+    let real = card.convert(NSPoint(x: button.frame.midX, y: button.frame.midY), to: container)
+    let shown = NSPoint(x: real.x + move.m41, y: real.y + move.m42)
+    XCTAssertTrue(drawn.contains(shown), "the X is in view")
+
+    let hit = container.hitTest(container.convert(shown, to: container.superview))
+    XCTAssertTrue(hit === button, "hit \(String(describing: hit))")
+    XCTAssertNil(container.paneIndex(forMouseDownAt: shown), "a click on the X focuses no pane")
+    try XCTUnwrap(hit as? NSButton).performClick(nil)
+    XCTAssertEqual(requests, [2])
   }
 
   /// #602: each reflow is measured on its own pacing session, "split-reflow", ended when it settles.
@@ -602,11 +675,39 @@ final class SplitPaneCloseTests: XCTestCase {
     root.cardReflowDriver.tick(at: 105)
 
     XCTAssertFalse(root.isCardReflowing)
-    XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(root.card.layer).transform))
-    assertEqual(try onScreen(root.card), target)
+    try assertAtRest([root.card])
+    XCTAssertEqual(root.card.frame, target)
     XCTAssertFalse(root.cardPacer.isRunning)
     XCTAssertNotNil(root.lastCardPacing)
     XCTAssertEqual(page.sizeChanges, sizeChanges)
+  }
+
+  /// A close during a running reflow grows the card from where the last pane is drawn, not from its real frame.
+  func testCardGrowsFromTheDrawnPaneWhenTheSplitEndsMidReflow() throws {
+    let world = try Self.makeWorld(panes: 3)
+    let harness = Harness(world.sidebar, reduceMotion: false)
+    harness.controller.window?.orderFrontRegardless()
+    let root = harness.controller.rootView
+    harness.split.reflowClock = { 100 }
+    harness.split.reflowDriver.drivesDisplayLink = false
+    root.cardReflowClock = { 100 }
+    root.cardReflowDriver.drivesDisplayLink = false
+    harness.controller.activate(node: world.panes[0])
+
+    try harness.clickClose(2)
+    waitUntil("the split shrinks to 2 panes") { harness.split.paneCount == 2 }
+    harness.split.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(harness.split.isReflowing)
+    let paneDrawn = root.convert(harness.split.presentedPaneFrames[0], from: harness.split)
+    let paneReal = root.convert(harness.split.paneCards[0].frame, from: harness.split)
+    XCTAssertNotEqual(paneDrawn, paneReal, "pane 0 is drawn on its way")
+
+    try harness.clickClose(1)
+    waitUntil("the split ends") { !root.showsSplit }
+
+    XCTAssertTrue(root.isCardReflowing)
+    assertEqual(try onScreen(root.card), paneDrawn, "the card starts where the pane was drawn")
+    harness.controller.close()
   }
 
   /// With motion on, the panes left after a close reflow on the spring; Cmd-W (a keyboard close) does not.
