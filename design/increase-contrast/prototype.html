@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Increase Contrast</title>
+<!--
+  Increase Contrast for the main window's chrome (#640), picked direction A (edges only) with a 2 pt ink ring for
+  Split View pane focus. Single file, no network, synthetic data.
+  Hash: #sheet (setting off and on side by side), #off-window, #on-window, [&dark][&shot]
+  1 CSS px = 1 pt. The edge is ShellTokens.increasedContrastEdge (black 20 % light, white 20 % dark).
+-->
+<style>
+:root {
+  /* BrandTokens */
+  --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
+  --graphite: #202321; --porcelain: #FAF9F5;
+  --surface: #FAF9F5;                 /* surfaceBrand */
+  --sys-focus: rgba(0,103,244,0.50);  /* system keyboard focus color */
+  /* ShellTokens */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);         /* primaryText */
+  --text-2: rgba(0,0,0,0.66);                                    /* secondaryText */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);         /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* sidebarItemHovered */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);      /* sidebarDivider */
+  --fg: rgba(0,0,0,0.49);                                        /* sidebarForeground */
+  --card-border: rgba(0,0,0,0.10);                               /* cardBorder */
+  --row-cur: rgba(255,255,255,0.85);                             /* tabCurrent */
+  --edge-ic: rgba(0,0,0,0.20);                                   /* increasedContrastEdge */
+  --theme-a: #DCE8F7; --theme-b: #BFD3EE;                        /* sample Space theme (blue) */
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
+  --page: #FFFFFF; --page-text: rgba(0,0,0,0.78); --page-muted: rgba(0,0,0,0.08); --page-link: #1A5FD0; --desktop: #C9CDD2;
+  --win-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --firm-fast: cubic-bezier(0.2, 1, 0.4, 1);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #202321; --sys-focus: rgba(26,145,255,0.55); --fg: rgba(255,255,255,0.57);
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20); --edge-ic: rgba(255,255,255,0.20);
+  --theme-a: #2E3A4C; --theme-b: #1F2734;
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
+  --page: #1E1F22; --page-text: rgba(255,255,255,0.80); --page-muted: rgba(255,255,255,0.08); --page-link: #7FB1FF; --desktop: #2C3036;
+  --win-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--desktop); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color: var(--text); -webkit-font-smoothing: antialiased; display: grid; place-items: center; padding: 40px; overflow: hidden; }
+button, input { font: inherit; color: inherit; }
+svg { display: block; flex: none; }
+.win { width: 1000px; height: 640px; border-radius: 12px; position: relative; overflow: hidden; flex: none;
+  background: linear-gradient(165deg, var(--theme-a), var(--theme-b)); box-shadow: var(--win-shadow); }
+.win.small { width: 720px; height: 520px; }
+.lights { position: absolute; left: 14px; top: 16px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.sidebar { position: absolute; left: 0; top: 0; bottom: 0; width: 220px; padding: 44px 10px 10px; }
+.urlpill { height: 34px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; gap: 7px; padding: 0 10px; color: var(--text-2); margin-bottom: 10px; white-space: nowrap; overflow: hidden; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+.tile { height: 44px; border-radius: 10px; background: var(--fill); display: grid; place-items: center; position: relative; }
+.tile.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.tile.hov { background: var(--fill-hover); }
+.ic { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; color: #fff; font: 700 9.5px/1 -apple-system, sans-serif; flex: none; }
+.tile .ic { width: 20px; height: 20px; border-radius: 5px; font-size: 11px; }
+.stitle { font-size: 11px; font-weight: 600; color: var(--text-2); padding: 6px 9px 4px; }
+.srow { height: 34px; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 0 9px; white-space: nowrap; overflow: hidden; color: var(--text); position: relative; }
+.srow span { overflow: hidden; text-overflow: ellipsis; }
+.srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.srow.hov { background: var(--fill-hover); }
+.sdiv { height: 1px; background: var(--divider); margin: 8px 9px; }
+.card { position: absolute; left: 220px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; overflow: hidden; background: var(--page);
+  box-shadow: 0 0 0 1px var(--card-border), 0 1px 4px rgba(0,0,0,0.10); }
+.cards { position: absolute; left: 220px; top: 10px; right: 10px; bottom: 10px; display: flex; gap: 8px; }
+.cards .card { position: relative; inset: auto; flex: 1; left: auto; top: auto; right: auto; bottom: auto; }
+.page { position: absolute; inset: 0; padding: 56px 0 0; overflow: hidden; color: var(--page-text); }
+.page .col { width: 78%; max-width: 560px; margin: 0 auto; }
+.page h1 { font-size: 26px; line-height: 1.15; letter-spacing: -0.01em; margin: 0 0 14px; font-weight: 650; }
+.page p { font-size: 15px; line-height: 1.6; margin: 0 0 14px; }
+.page a { color: var(--page-link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+.skel { height: 12px; border-radius: 6px; background: var(--page-muted); margin: 0 0 12px; }
+.btn { all: unset; box-sizing: border-box; height: 28px; padding: 0 14px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; background: var(--fill-hover); color: var(--text); white-space: nowrap; }
+.btn.quiet { background: transparent; color: var(--text-2); font-weight: 500; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.nav { position: fixed; left: 12px; top: 8px; z-index: 50; display: flex; gap: 5px; flex-wrap: wrap; font-size: 11px; max-width: calc(100vw - 24px); }
+.nav a { color: var(--text); text-decoration: none; background: var(--surface); padding: 2px 8px; border-radius: 10px; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.15); }
+.nav a.on { background: var(--graphite); color: var(--porcelain); }
+.shot .nav { display: none; }
+.cap { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 11px; color: var(--text-2); }
+.shot .cap { display: none; }
+
+body { --edge: transparent; --ov-edge: rgba(0,0,0,0.12); --cmd-sel: rgba(32,35,33,0.07); --pane-ring: var(--fill-hover); --pane-w: 2.5px; }
+:root[data-theme="dark"] body { --ov-edge: rgba(255,255,255,0.20); --cmd-sel: rgba(250,249,245,0.10); }
+.o-on { --edge: rgba(0,0,0,0.20); --ov-edge: rgba(0,0,0,0.20); --pane-ring: rgba(32,35,33,0.50); --pane-w: 2px; }
+:root[data-theme="dark"] .o-on { --edge: rgba(255,255,255,0.20); --ov-edge: rgba(255,255,255,0.20); --pane-ring: rgba(250,249,245,0.60); }
+.srow.cur, .srow.hov, .tile, .urlpill, .chip, .sel, .sw-sel { box-shadow: inset 0 0 0 1px var(--edge) !important; }
+.srow.cur { box-shadow: inset 0 0 0 1px var(--edge), 0 1px 2px rgba(0,0,0,0.08) !important; }
+.ov { background: var(--surface); border-radius: 12px; box-shadow: 0 0 0 1px var(--ov-edge), 0 18px 48px rgba(0,0,0,0.22); }
+.sel { background: var(--cmd-sel); border-radius: 8px; }
+.pane-focus { box-shadow: 0 0 0 1px var(--card-border), 0 0 0 calc(1px + var(--pane-w)) var(--pane-ring) !important; }
+.find { position: absolute; top: 12px; right: 12px; height: 36px; width: 300px; border-radius: 18px; display: flex; align-items: center; gap: 8px; padding: 0 12px; z-index: 4; }
+.find .q { flex: 1; } .find .n { color: var(--text-2); font-size: 12px; }
+/* Sheet */
+.sheet { display: grid; grid-template-columns: 170px repeat(2, 300px); gap: 10px; }
+.sheet .hdr { font-weight: 600; padding: 4px 0 2px; } .sheet .hdr small { display: block; font-weight: 400; color: var(--text-2); }
+.sheet .lab { color: var(--text-2); font-size: 12px; align-self: center; }
+.cell { background: linear-gradient(165deg, var(--theme-a), var(--theme-b)); border-radius: 10px; padding: 10px; min-height: 54px; display: flex; flex-direction: column; justify-content: center; }
+.cell.plain { background: var(--surface); box-shadow: 0 0 0 0.5px var(--card-border); }
+.cell .srow { width: 100%; }
+.mini-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.sws { display: flex; gap: 8px; } .sw-tile { width: 56px; height: 42px; border-radius: 8px; background: var(--fill); display: grid; place-items: center; }
+.sw-sel { background: var(--row-cur); }
+.mpane { display: flex; gap: 6px; height: 40px; } .mpane div { flex: 1; border-radius: 6px; background: var(--page); box-shadow: 0 0 0 1px var(--card-border); }
+.peek { height: 36px; border-radius: 10px; background: var(--page); box-shadow: 0 0 0 1px var(--ov-edge), 0 10px 26px rgba(0,0,0,0.2); }
+</style>
+</head>
+<body>
+<div id="nav" class="nav"></div>
+<div id="stage"></div>
+<script>
+// Shared prototype scaffold. Hash: #<dir>-<state>[&dark][&rm][&shot]. Each page defines STATES and VIEWS.
+const SITES = {
+  mail: ['M', '#3A6FD8'], cal: ['C', '#2E9E6A'], docs: ['D', '#7A55C9'], design: ['F', '#D2553D'],
+  notes: ['N', '#5F6B78'], field: ['G', '#B7791F'], tracker: ['T', '#3C8D93'], news: ['R', '#9A4E8C'],
+  shop: ['S', '#C2410C'], wiki: ['W', '#4B5563']
+};
+const ic = (k, cls = '') => { const [l, c] = SITES[k] || ['?', '#777']; return `<i class="ic ${cls}" style="background:${c}">${l}</i>`; };
+const G = {
+  lock: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="10" height="7" rx="1.8"/><path d="M5.3 7V5a2.7 2.7 0 0 1 5.4 0v2"/></svg>',
+  warn: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2 1.8 13.2h12.4z"/><path d="M8 6.5v3.2M8 11.6v.1"/></svg>',
+  chev: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 3 5 5-5 5"/></svg>',
+  updown: '<svg width="8" height="10" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m1.5 4.5 2.5-2.5 2.5 2.5M1.5 7.5 4 10l2.5-2.5"/></svg>',
+  back: '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m10 3-5 5 5 5"/></svg>',
+  ext: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5"/></svg>',
+  page: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 1.8h5.2L12.5 5v9.2H4z"/><path d="M9 1.8V5h3.5"/></svg>'
+};
+function sidebar(o = {}) {
+  const fav = o.fav || {};
+  const rows = o.rows || [
+    { k: 'docs', t: 'Quarterly planning notes and the very long title of a shared document', cur: true },
+    { k: 'field', t: 'Field guide: North ridge trail conditions' },
+    { k: 'news', t: 'Morning briefing' },
+    { k: 'wiki', t: 'Glossary of terms' }
+  ];
+  const pinned = o.pinned || [
+    { k: 'tracker', t: 'Release tracker' },
+    { k: 'notes', t: 'Team notes' }
+  ];
+  const r = x => `<div class="srow ${x.cur ? 'cur' : ''} ${x.hov ? 'hov' : ''} ${x.cls || ''}" ${x.id ? `id="${x.id}"` : ''}>${ic(x.k)}<span>${x.t}</span>${x.extra || ''}</div>`;
+  return `<div class="lights"><i></i><i></i><i></i></div>
+  <div class="sidebar">
+    <div class="urlpill ${o.urlCls || ''}" id="urlpill">${o.url || '<span>fieldguide.example/trails/north-ridge</span>'}</div>
+    <div class="favs">${['mail', 'cal', 'docs', 'design'].map(k => `<div class="tile ${fav[k] || ''}" id="fav-${k}">${ic(k)}${o.favExtra?.[k] || ''}</div>`).join('')}</div>
+    ${pinned.map(r).join('')}
+    <div class="sdiv"></div>
+    ${rows.map(r).join('')}
+  </div>`;
+}
+function article(o = {}) {
+  return `<div class="page"><div class="col">
+    <h1>${o.title || 'North ridge trail conditions'}</h1>
+    <p>${o.p || 'The upper switchbacks are clear after the weekend thaw. Expect mud below the tree line and loose rock on the last two hundred meters. The <a id="lnk">winter access notes</a> list the gates that stay closed until spring.'}</p>
+    <p>Water is available at the second hut. Carry a layer for the saddle; the wind there is stronger than the forecast suggests, and the descent on the east side is steeper than the map shows.</p>
+    <p>Parking at the lower lot fills by nine on weekends. The shuttle runs every forty minutes from the village square.</p>
+  </div></div>`;
+}
+function skeleton() {
+  return `<div class="page"><div class="col"><div class="skel" style="width:60%;height:22px;margin-bottom:22px"></div>
+  ${[100, 94, 98, 70, 0, 100, 88, 96, 52].map(w => w ? `<div class="skel" style="width:${w}%"></div>` : '<div style="height:14px"></div>').join('')}</div></div>`;
+}
+function boot() {
+  const parse = () => {
+    const [head, ...flags] = location.hash.slice(1).split('&');
+    return { key: head || Object.keys(VIEWS)[0], dark: flags.includes('dark'), rm: flags.includes('rm'), shot: flags.includes('shot') };
+  };
+  const draw = () => {
+    const s = parse();
+    document.documentElement.dataset.theme = s.dark ? 'dark' : 'light';
+    document.body.classList.toggle('rm', s.rm);
+    document.body.classList.toggle('shot', s.shot);
+    const keys = Object.keys(VIEWS);
+    const key = VIEWS[s.key] ? s.key : keys[0];
+    document.body.dataset.view = key;
+    const flags = (s.dark ? '&dark' : '') + (s.rm ? '&rm' : '');
+    document.getElementById('nav').innerHTML = keys.map(k => `<a href="#${k}${flags}" class="${k === key ? 'on' : ''}">${k}</a>`).join('') +
+      `<a href="#${key}${s.dark ? '' : '&dark'}${s.rm ? '&rm' : ''}">${s.dark ? 'light' : 'dark'}</a><a href="#${key}${s.dark ? '&dark' : ''}${s.rm ? '' : '&rm'}">${s.rm ? 'motion' : 'reduce motion'}</a>`;
+    document.getElementById('stage').innerHTML = VIEWS[key](s);
+  };
+  addEventListener('hashchange', draw);
+  draw();
+}
+
+// SIZE: 1080,900
+// SHOTS: sheet off-window on-window
+const OPTS = [['off', 'Setting off', 'the shell as it is today'], ['on', 'Increase Contrast', '1 pt edge, fills unchanged; 2 pt ink ring on the focused pane']];
+function cells(o) {
+  const w = c => `<div class="cell o-${o} ${c[1] || ''}">${c[0]}</div>`;
+  return [
+    [`<div class="srow cur">${ic('field')}<span>Current tab</span></div>`],
+    [`<div class="srow hov">${ic('news')}<span>Hovered tab</span></div>`],
+    [`<div class="mini-tiles"><div class="tile cur" style="height:38px">${ic('mail')}</div><div class="tile hov" style="height:38px">${ic('cal')}</div><div class="tile" style="height:38px">${ic('docs')}</div><div class="tile" style="height:38px">${ic('design')}</div></div>`],
+    [`<div class="urlpill" style="margin:0"><span>fieldguide.example</span></div>`],
+    [`<div class="sel" style="padding:7px 9px;display:flex;gap:8px;align-items:center">${ic('wiki')}<span>Glossary of terms</span><span style="margin-left:auto;color:var(--text-2);font-size:12px">Switch to tab</span></div>`, 'plain'],
+    [`<div class="sws"><div class="sw-tile sw-sel">${ic('field')}</div><div class="sw-tile">${ic('news')}</div><div class="sw-tile">${ic('wiki')}</div></div>`],
+    [`<div class="peek"></div>`],
+    [`<div class="ov" style="height:34px;border-radius:17px;display:flex;align-items:center;padding:0 12px;font-size:12px;color:var(--text-2)">trail&nbsp;&nbsp;&nbsp;3 of 12</div>`, 'plain'],
+    [`<div class="mpane"><div></div><div class="pane-focus"></div></div>`]
+  ].map(w);
+}
+function sheet() {
+  const labels = ['Sidebar row, current', 'Sidebar row, hover', 'Favorites tiles', 'URL bar', 'Command bar selection', 'Tab switcher selection', 'Peek card edge', 'Find bar edge', 'Split pane focus'];
+  const cols = OPTS.map(([o]) => cells(o));
+  let html = `<div></div>${OPTS.map(([, t, s]) => `<div class="hdr">${t}<small>${s}</small></div>`).join('')}`;
+  labels.forEach((l, i) => { html += `<div class="lab">${l}</div>${cols.map(c => c[i]).join('')}`; });
+  return `<div class="sheet">${html}</div>`;
+}
+function windowView(o) {
+  return `<div class="o-${o}" style="display:contents"><div class="win o-${o}">${sidebar({ fav: { mail: 'cur', cal: 'hov' }, rows: [
+    { k: 'docs', t: 'Quarterly planning notes and the very long title of a shared document' },
+    { k: 'field', t: 'Field guide: North ridge trail conditions', cur: true }, { k: 'news', t: 'Morning briefing', hov: true }, { k: 'wiki', t: 'Glossary of terms' }] })}
+    <div class="cards"><div class="card">${article({ title: 'Glossary of terms', p: 'Entries are sorted by the first significant word.' })}</div>
+    <div class="card pane-focus"><div class="find ov"><span class="q">trail</span><span class="n">3 of 12</span></div>${article()}</div></div></div></div>`;
+}
+const VIEWS = { sheet };
+for (const [o] of OPTS) VIEWS[`${o}-window`] = () => windowView(o);
+boot();
+</script>
+</body>
+</html>

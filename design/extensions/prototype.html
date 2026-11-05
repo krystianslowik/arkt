@@ -9,6 +9,7 @@
     A  pinned icons in a strip under the address, compact install sheet
     B  pinned tiles in the favorites grid, detailed install sheet with "Show in sidebar"
     C  one Extensions button with a panel (pin, order, manage), install as a panel anchored to it
+  Added for #590 (C panel and B sheet picked): c-empty | c-none-pinned | c-small | toast-pin | shortcuts-record
   States: a|b|c-pinned | a|b|c-reorder | a|b|c-install | a|b|c-install-long | menu | menu-unpinned | shortcuts | shortcuts-conflict |
           surf-crashed | surf-dialog | surf-restore | surf-pageinfo | surf-zoom | surf-sharing
   Single file, no network, synthetic data only. 1 CSS px = 1 pt. Colors are the ShellTokens / BrandTokens values already
@@ -548,6 +549,25 @@ body { display: flex; justify-content: center; align-items: center; }
 .proto button[aria-pressed="true"] { background: #E9B520; color: #202321; }
 .proto span { padding: 0 6px; opacity: 0.8; }
 :root[data-shot] .proto { display: none; }
+
+/* ---------- Missing states for C + B (#590) ---------- */
+.stage .win.small { left: 180px; top: 110px; width: 640px; height: 420px; }
+.win.small .sidebar { width: 150px; } .win.small .card { left: 150px; } .win.small .toast-host { left: 150px; }
+.win.small .favs i { height: 30px; } .win.small .urlpill { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; line-height: 34px; }
+.win.small .srow.newtab ~ .srow:not(.cur) { display: none; }
+.xp.fit { display: flex; flex-direction: column; top: 40px; }
+.xp.fit .xscroll { flex: 1; min-height: 0; overflow: hidden; -webkit-mask-image: linear-gradient(#000 calc(100% - 36px), transparent); mask-image: linear-gradient(#000 calc(100% - 36px), transparent); }
+.xempty { padding: 26px 22px 18px; text-align: center; display: grid; justify-items: center; }
+.xempty .eico { width: 44px; height: 44px; border-radius: 12px; background: var(--fill); display: grid; place-items: center; color: var(--fg); }
+.xempty .eico svg { width: 22px; height: 22px; }
+.xempty .t { font-weight: 600; font-size: 14px; margin-top: 12px; }
+.xempty .c { font-size: 12.5px; color: var(--text-2); line-height: 1.45; margin: 4px 0 16px; max-width: 250px; }
+.pinhint { margin: 2px 6px 4px; padding: 10px 12px; border-radius: 9px; box-shadow: inset 0 0 0 1px var(--divider); display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--text-2); line-height: 1.4; }
+.pinhint .g { color: var(--fg); flex: none; display: grid; }
+.toast .xt.sm { width: 18px; height: 18px; border-radius: 5px; font-size: 9px; }
+.scopecap { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+.mi .ck { width: 12px; display: inline-block; }
+.mcap { padding: 2px 12px 4px 36px; font-size: 11.5px; opacity: 0.6; white-space: normal; max-width: 250px; line-height: 1.35; }
 </style>
 </head>
 <body>
@@ -767,6 +787,37 @@ const settingsX = conflict => () => desk(browser({ dim: true }) + `<div style="p
 
 /* ----- Remaining surfaces ----- */
 const infobar = (g, m, b) => `<div class="infobars"><div class="infobar pre" role="alert"><span class="ic">${g}</span><span class="m">${m}</span><button class="btn small">${b}</button></div></div>`;
+
+/* ---------- Missing states for C + B (#590) ---------- */
+const small = html => html.replace('class="win', 'class="win small');
+const panelEmpty = () => `<div class="pnl xp pre" role="dialog" aria-label="Extensions"><div class="xempty">
+  <div class="eico">${G.puzzle}</div><div class="t">No extensions yet</div>
+  <div class="c">Extensions from the Chrome Web Store work here. Add one and it shows up in this list.</div>
+  <button class="btn primary">Browse the Web Store</button></div>
+  <div class="foot2"><button class="quiet" style="color:var(--text)">Manage Extensions&hellip;</button><span class="sp"></span></div></div>`;
+const ALL = [X.quiet, X.clips, X.pass, X.lumen, X.sort, X.long];
+const panelNonePinned = () => `<div class="pnl xp pre" role="dialog" aria-label="Extensions">
+  <div class="ph2">Pinned</div><div class="pinhint"><span class="g">${G.pin}</span><span>Pin the ones you use most. They stay at the top, and <b style="font-weight:600;color:var(--text)">&#8984;E</b> opens each in turn.</span></div>
+  <div class="ph2">Not pinned</div>${ALL.map(x => xrow(x, false)).join('')}
+  <div class="foot2"><button class="quiet" style="color:var(--text)">Manage Extensions&hellip;</button><span class="sp"></span></div></div>`;
+const panelSmall = () => `<div class="pnl xp fit pre" style="width:300px" role="dialog" aria-label="Extensions"><div class="xscroll">
+  <div class="ph2">Pinned</div>${[X.quiet, X.clips, X.pass, X.lumen].map(x => xrow(x, true)).join('')}
+  <div class="ph2">Not pinned</div>${xrow(X.sort, false)}${xrow(X.long, false)}</div>
+  <div class="foot2"><button class="quiet" style="color:var(--text)">Manage&hellip;</button><span class="sp"></span><span class="keycap"><b>&#8984;</b><b>E</b></span></div></div>`;
+const toastX = (x, msg, act) => `<div class="toast-host"><div class="toast pre" role="status">${xt(Object.assign({}, x, { badge: '', dot: false }), 'sm')}<span class="t">${msg}</span><button class="act">${act}</button><button class="x" aria-label="Dismiss">${G.x}</button></div></div>`;
+const recBody = () => `<div class="search">${G.search}<span class="ph">Search by name or shortcut</span></div>
+  <div class="section"><h2>Extension Shortcuts</h2><div class="group">
+    ${xhead(X.quiet)}${cmdRow('Open Quiet Reader', 'The main action', ['&#8997;', '&#8679;', 'Q'])}
+    <div class="row cap2"><div class="lbl"><div>Toggle reading view</div><div class="cap">Switch the page to a calm layout</div></div><span class="rec">&#8963;&#8679;R<i class="caret"></i></span>${pop('In Arkt')}</div>
+    ${xhead(X.clips)}${cmdRow('Clip this page', 'Works even when Arkt is in the background', ['&#8963;', '&#8679;', 'K'], 'All Apps')}${cmdRow('Open clip list', 'Not set', null)}
+  </div></div>`;
+const scopeMenu = `<div class="menu" role="menu" style="left:716px;top:322px;min-width:260px">
+  <div class="mi" role="menuitemradio" aria-checked="true"><span class="ck">&#10003;</span>In Arkt</div>
+  <div class="mcap">Only while Arkt is the active app.</div>
+  <div class="mi hov" role="menuitemradio" aria-checked="false"><span class="ck"></span>All Apps</div>
+  <div class="mcap">Also when another app is in front. Some shortcuts are taken by macOS and cannot be used here.</div></div>`;
+const settingsRec = () => desk(browser({ dim: true }) + `<div style="position:absolute;left:160px;top:36px;z-index:6">${settingsFrame('Shortcuts', recBody(), 568)}</div>` + scopeMenu);
+
 const STATES = {
   /* A: strip under the address, compact sheet */
   'a-pinned': () => browser({ afterUrl: stripA() }),
@@ -787,6 +838,13 @@ const STATES = {
   'menu': () => browser({ afterUrl: stripA(), over: ctx(true, { style: 'left:14px;top:112px' }) }),
   'menu-unpinned': () => browser({ right: puzC(true), over: panelC() + ctx(false, { name: 'Link Sorter', style: 'left:300px;top:408px' }) }),
   'shortcuts': settingsX(false), 'shortcuts-conflict': settingsX(true),
+  /* Missing states for C + B (#590) */
+  'c-empty': () => browser({ right: puzC(true), over: panelEmpty() }),
+  'c-none-pinned': () => browser({ right: puzC(true), over: panelNonePinned() }),
+  'c-small': () => small(browser({ right: puzC(true), over: panelSmall() })),
+  'toast-pin': () => browser({ right: puzC(false), over: toastX(X.quiet, '“Quiet Reader” added', 'Pin') }),
+  'shortcuts-record': settingsRec,
+
   /* Shared: the other Views surfaces (#122) */
   'surf-crashed': () => browser({ pageHtml: `<div class="sad" role="alert"><div class="eico">${G.face}</div><div class="t">This page quit unexpectedly</div><div class="c">Something went wrong while showing fieldguide.example. Your other tabs are not affected.</div><div class="acts"><button class="btn primary">Reload</button><button class="link">Close Tab</button></div></div>` }),
   'surf-dialog': () => browser({ panel: dimCard + `<div class="pnl pre" style="left:210px;top:0;width:380px;border-radius:0 0 14px 14px" role="alertdialog" aria-label="Page dialog">${dlg({ w: 380, title: 'fieldguide.example says', paras: [['Name this collection.']],
