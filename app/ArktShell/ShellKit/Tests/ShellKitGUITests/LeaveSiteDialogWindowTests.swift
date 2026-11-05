@@ -14,6 +14,17 @@ import XCTest
 final class LeaveSiteDialogWindowTests: XCTestCase {
   private var sets: [ShellWindowSet] = []
   private let popupURL = URL(string: "arkt-test://page/Draft")!
+  /// The input protection's clock, in seconds. Starts past the protection, so presses count unless a test rewinds.
+  private var now: TimeInterval = 0
+
+  /// Hands the clock to `presenter` and treats its panels as on screen, so the protection runs on `now` only.
+  private func drive(_ presenter: JavaScriptDialogPresenter) {
+    presenter.clock = { [unowned self] in now }
+    presenter.isOnScreen = { true }
+  }
+
+  /// Moves the clock past the input protection of a panel that just appeared.
+  private func pastProtection() { now += DialogContent.leaveSiteInputProtection + 0.01 }
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -39,6 +50,7 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
       little.drivesDisplayLink = false
       little.snapshotSource = { _ in nil }
       little.javaScriptDialogs.reduceMotion = { true }
+      self.drive(little.javaScriptDialogs)
     }
     engine.windowHostProvider = { [weak set] request in
       guard let set else { preconditionFailure("the set outlives the test") }
@@ -49,6 +61,7 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
     main.window?.setFrame(NSRect(x: 100, y: 100, width: 1100, height: 800), display: false)
     main.window?.contentView?.layoutSubtreeIfNeeded()
     main.javaScriptDialogs.reduceMotion = { true }
+    drive(main.javaScriptDialogs)
     return (set, engine, main)
   }
 
@@ -90,6 +103,7 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
     engine.holdClose(tab)
     little.closeTab(nil)
 
+    pastProtection()
     try XCTUnwrap(little.javaScriptDialogs.panel(for: tab)).view.primaryButton.performClick(nil)
     little.finishMotion()
 
@@ -99,6 +113,23 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
     XCTAssertFalse(little.isClosed)
     XCTAssertNil(little.javaScriptDialogs.panel(for: tab))
     XCTAssertNil(little.javaScriptDialogs.pending[tab])
+  }
+
+  func testAPressRightAfterThePromptAppearsCannotLeave() throws {
+    let (set, engine, _) = try makeSet()
+    let (little, id, tab) = try openPopup(engine, set)
+    engine.holdClose(tab)
+    little.closeTab(nil)
+    let panel = try XCTUnwrap(little.javaScriptDialogs.panel(for: tab))
+
+    now += DialogContent.leaveSiteInputProtection - 0.01                  // a click already on its way
+    try XCTUnwrap(panel.view.secondaryButton).performClick(nil)
+    XCTAssertTrue(engine.dialogAnswers.isEmpty, "Leave is held right after the prompt appears")
+    XCTAssertTrue(engine.windowIDs.contains(id))
+
+    now += 0.02
+    try XCTUnwrap(panel.view.secondaryButton).performClick(nil)
+    XCTAssertEqual(engine.dialogAnswers.map(\.accepted), [true], "a deliberate Leave after it counts")
   }
 
   func testEscapeStaysToo() throws {
@@ -119,6 +150,7 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
     engine.holdClose(tab)
     little.closeTab(nil)
 
+    pastProtection()
     try XCTUnwrap(little.javaScriptDialogs.panel(for: tab)?.view.secondaryButton).performClick(nil)
     little.finishMotion()
 
@@ -139,6 +171,7 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
 
     let panel = try XCTUnwrap(main.javaScriptDialogs.panel(for: tab), "the prompt is up over the page")
     XCTAssertEqual(panel.attachment, .topEdge)
+    pastProtection()
     panel.view.primaryButton.performClick(nil)
 
     XCTAssertFalse(main.isWindowCloseRequested, "staying cancels the window close")
@@ -154,6 +187,7 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
     engine.holdClose(tab)
     engine.engineCloseWindow(window, reason: .appQuit)
 
+    pastProtection()
     try XCTUnwrap(main.javaScriptDialogs.panel(for: tab)).view.primaryButton.performClick(nil)
 
     XCTAssertEqual(recorder.events(for: tab).last, .closeCancelled(tab))
@@ -168,6 +202,7 @@ final class LeaveSiteDialogWindowTests: XCTestCase {
     engine.holdClose(tab)
     main.window?.performClose(nil)
 
+    pastProtection()
     try XCTUnwrap(main.javaScriptDialogs.panel(for: tab)?.view.secondaryButton).performClick(nil)
 
     XCTAssertFalse(engine.windowIDs.contains(window))

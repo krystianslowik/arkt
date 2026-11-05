@@ -74,6 +74,14 @@ struct JavaScriptDialogContentTests {
     #expect(content.input == nil)
     #expect(content.escapeAnswersCancel)
     #expect(!content.escapeDismisses)
+    #expect(content.inputProtection == DialogContent.leaveSiteInputProtection)
+    #expect(DialogContent.leaveSiteInputProtection > 0 && DialogContent.leaveSiteInputProtection < 0.5)
+  }
+
+  @Test func onlyTheLeaveSitePromptHasInputProtection() {
+    for kind in [JavaScriptDialog.Kind.alert, .confirm, .prompt] {
+      #expect(DialogContent.javaScriptDialog(dialog(kind)).inputProtection == 0, "\(kind)")
+    }
   }
 
   @Test func leaveSiteLeavesOnlyOnLeave() {

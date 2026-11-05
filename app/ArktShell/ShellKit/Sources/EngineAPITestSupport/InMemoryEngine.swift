@@ -236,8 +236,10 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   /// (true) or Stay (false) for a leave-site prompt.
   public private(set) var dialogAnswers: [(id: DialogID, accepted: Bool, userInput: String?)] = []
   /// A held close raises a `.beforeUnload` dialog for the shell to draw (#584), as Chromium will once the engine
-  /// reports it (#585). Off by default: the close is then held with `isClosing` alone, as Chromium keeping its own
-  /// leave-site dialog, and only `answerDialog` ends it.
+  /// reports it (#585). A window close or a quit holding several tabs prompts one tab at a time: the held tab is
+  /// activated first (the shown tab, if it holds), and the next one is activated and prompted only after Leave.
+  /// Off by default: the close is then held with `isClosing` alone, as Chromium keeping its own leave-site dialog,
+  /// and only `answerDialog` ends it.
   public var reportsLeaveSiteDialogs = false
 
   /// Test driver: the page raises an `alert()`, `confirm()` or `prompt()`. Ends the tab's pending dialog first.
@@ -499,6 +501,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     let holding = tabs.filter { snapshots[$0]?.wouldHoldClose == true }
     guard holding.isEmpty else {
       for tab in holding { hold(tab, .window(id, reason)) }
+      promptNextHeldTab(in: id)
       return
     }
     finishWindowClose(id, reason: reason)
@@ -642,7 +645,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
       hub.emit(.closeCancelled(id))
     case (.window(let window, let reason), true):
       let waiting = heldCloses.values.contains { if case .window(window, _) = $0 { true } else { false } }
-      if !waiting { finishWindowClose(window, reason: reason) }
+      if waiting { promptNextHeldTab(in: window) } else { finishWindowClose(window, reason: reason) }
     case (.window(let window, _), false):
       for tab in tabs(in: window) where snapshots[tab]?.isClosing == true {
         heldCloses[tab] = nil
@@ -737,10 +740,24 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     _ = showPermission(of: id)
   }
 
+  /// Holds the tab's close. A tab's own close prompts at once; a window's close prompts its tabs one at a time
+  /// (`promptNextHeldTab`).
   private func hold(_ id: TabID, _ close: HeldClose) {
     heldCloses[id] = close
     snapshots[id]?.isClosing = true
-    raiseLeaveSiteDialog(in: id)
+    if case .tab = close { raiseLeaveSiteDialog(in: id) }
+  }
+
+  /// Prompts the next tab whose window close is held and not yet answered, as Chromium does: one prompt at a time,
+  /// on a shown tab. The window's active tab goes first when it holds; another is activated before its prompt.
+  private func promptNextHeldTab(in window: EngineWindowID) {
+    guard reportsLeaveSiteDialogs else { return }
+    let held = tabs(in: window).filter { if case .window(window, _)? = heldCloses[$0] { true } else { false } }
+    guard !held.contains(where: { pendingDialogs[$0]?.kind == .beforeUnload }) else { return }
+    let active = activeTabs[window]
+    guard let next = held.first(where: { $0 == active }) ?? held.first else { return }
+    setActive(next)
+    raiseLeaveSiteDialog(in: next)
   }
 
   /// Removes the tab and reports it. A window's active tab is replaced by its right neighbour, else its left one,

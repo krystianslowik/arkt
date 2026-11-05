@@ -19,13 +19,19 @@ extension DialogContent {
                   bodyMaxHeight: 240)
   }
 
+  /// How long after a leave-site prompt appears that presses and Return are ignored, so a click that was already on
+  /// its way (a second click on the close button, a click in the page right after Cmd-W) cannot hit Leave. Escape is
+  /// not held: it stays, which is always safe.
+  public static let leaveSiteInputProtection: TimeInterval = 0.3
+
   /// The leave-site prompt (#584): Stay is the mustard primary and takes Return, Leave the neutral pill beside it.
   /// Escape stays too: closing the prompt must never close the page. The titles are the engine's; "Stay" stands in
   /// only for an engine that sends no decline title.
   private static func leaveSite(_ dialog: JavaScriptDialog, width: CGFloat) -> DialogContent {
     DialogContent(title: dialog.title, paragraphs: dialog.message.isEmpty ? [] : [.init(dialog.message)],
                   primaryTitle: dialog.cancelTitle ?? "Stay", secondaryTitle: dialog.acceptTitle, cancelTitle: nil,
-                  defaultButton: .primary, escapeAnswersCancel: true, width: width, bodyMaxHeight: 240)
+                  defaultButton: .primary, escapeAnswersCancel: true, width: width, bodyMaxHeight: 240,
+                  inputProtection: leaveSiteInputProtection)
   }
 }
 
@@ -60,6 +66,10 @@ public final class JavaScriptDialogPresenter {
   public private(set) var pending: [TabID: JavaScriptDialog] = [:]
   /// Reduce Motion, handed to each panel at its entrance. Tests set it.
   var reduceMotion: (@MainActor () -> Bool)?
+  /// The clock of a leave-site prompt's input protection, handed to each panel. Tests set it.
+  var clock: (@MainActor () -> TimeInterval)?
+  /// Whether a panel's window is really visible (not occluded), handed to each panel. Tests set it.
+  var isOnScreen: (@MainActor () -> Bool)?
 
   /// `anchor` returns the view of a tab that is on screen in a window, nil for one that is not.
   public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> Anchor?,
@@ -131,6 +141,8 @@ public final class JavaScriptDialogPresenter {
     host.place(tab, maxWidth: 420) { width in
       let panel = DialogPanel(content: .javaScriptDialog(dialog, width: width), attachment: dialog.panelAttachment)
       if let reduceMotion { panel.reduceMotion = reduceMotion }
+      if let clock { panel.clock = clock }
+      if let isOnScreen { panel.isOnScreen = isOnScreen }
       panel.onAnswer = { [weak self, weak panel] answer in
         self?.answered(tab, dialog, answer, input: panel?.inputText)
       }

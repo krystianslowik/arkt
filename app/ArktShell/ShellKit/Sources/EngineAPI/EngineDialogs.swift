@@ -14,10 +14,15 @@ public struct JavaScriptDialog: Equatable, Sendable, Identifiable {
   public enum Kind: Equatable, Sendable {
     case alert, confirm, prompt
     /// The page's `beforeunload` handler holds a close or a navigation (#584). `acceptTitle` is Leave and
-    /// `cancelTitle` is Stay. Answering `accepted: true` lets the close go on (`.tabClosed`, or the window's close);
-    /// `accepted: false` cancels it (`.closeCancelled` for every tab the close held, so a held window close or quit
-    /// stops). An engine that keeps its own leave-site dialog reports none of these: the close is then held with
-    /// `isClosing` alone (contract rule 16).
+    /// `cancelTitle` is Stay. For a held close, `accepted: true` lets the close go on (`.tabClosed`, or the window's
+    /// close); `accepted: false` cancels it (`.closeCancelled` for every tab the close held, so a held window close
+    /// or quit stops). For a held navigation (reload, navigating away), Stay reports nothing after `.dialogEnded` and
+    /// Leave lets the navigation proceed.
+    ///
+    /// The engine raises leave-site prompts one tab at a time and only on a shown tab: a window close or a quit that
+    /// several tabs hold activates the next held tab before its prompt, and raises it only after the previous one
+    /// was answered Leave. An engine that keeps its own leave-site dialog reports none of these: the close is then
+    /// held with `isClosing` alone (contract rule 16).
     case beforeUnload
   }
 

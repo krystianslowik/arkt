@@ -80,7 +80,7 @@ enum ScriptedHarness {
       showPage: { _, _ in },
       raiseDialog: { engine, id, kind, message, defaultText in
         let (chromium, tab) = try parts(engine, id)
-        tab.raiseDialog(ArktDialogKind(kind), message: message, defaultText: defaultText)
+        tab.raiseDialog(try ArktDialogKind(kind), message: message, defaultText: defaultText)
         try await delivered(chromium)
       },
       raisePermission: { engine, id, kinds in
@@ -182,12 +182,13 @@ extension ArktPermissionKind {
 }
 
 extension ArktDialogKind {
-  init(_ kind: JavaScriptDialog.Kind) {
+  /// Throws for a leave-site prompt: the facade has no such kind until #585.
+  init(_ kind: JavaScriptDialog.Kind) throws {
     switch kind {
     case .alert: self = .alert
     case .confirm: self = .confirm
     case .prompt: self = .prompt
-    case .beforeUnload: preconditionFailure("the facade has no leave-site dialog kind yet (#585)")
+    case .beforeUnload: throw ScriptedHarness.HarnessError("the facade has no leave-site dialog kind yet (#585)")
     }
   }
 }

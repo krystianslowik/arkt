@@ -270,9 +270,11 @@ public protocol EngineClient: AnyObject {
   func stopFinding(_ id: TabID, action: FindStopAction)
   /// Answers a pending JavaScript dialog (#400, contract rule 19): `accepted` is OK (true) or Cancel (false); `userInput`
   /// is a prompt's text; for a leave-site prompt (`.beforeUnload`, #584) true is Leave and false is Stay. Reported with
-  /// one `.dialogEnded`, before the `.tabClosed` or `.closeCancelled` a leave-site answer brings. A no-op for a dialog
-  /// that already ended, so a click that races the engine's own end does nothing. Default: a no-op, for an engine
-  /// that raises no dialogs.
+  /// one `.dialogEnded`, before the `.tabClosed` or `.closeCancelled` a leave-site answer to a held close brings; for a
+  /// held navigation, Stay reports nothing more and Leave lets the navigation proceed. Leave on one tab of a window
+  /// close or quit that several tabs hold makes the engine activate and prompt the next one (one prompt at a time, on
+  /// a shown tab). A no-op for a dialog that already ended, so a click that races the engine's own end does nothing.
+  /// Default: a no-op, for an engine that raises no dialogs.
   func respond(to dialog: DialogID, accepted: Bool, userInput: String?)
   /// Answers a pending permission request (#400, contract rule 20). Reported with one `.permissionEnded`. A no-op for a
   /// request that already ended or was answered, so a click that races the engine's own end does nothing. Default: a

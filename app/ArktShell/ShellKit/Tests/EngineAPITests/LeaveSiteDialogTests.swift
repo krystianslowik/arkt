@@ -73,21 +73,56 @@ struct LeaveSiteDialogTests {
     #expect(engine.tabIDs.contains(tab))
   }
 
-  @Test func stayInAHeldWindowCloseKeepsTheWindowAndEndsEveryPrompt() throws {
+  @Test func aHeldWindowClosePromptsOneTabAtATimeShownTabFirst() throws {
     let (engine, window, tab, recorder) = make()
     let other = engine.createTab(url: URL(string: "arkt-test://page/Other")!, in: window)
     engine.holdClose(other)
     engine.closeWindow(window)
-    let first = try #require(requested(recorder, tab).first)
+
+    let first = try #require(requested(recorder, tab).first, "the shown tab is prompted first")
+    #expect(requested(recorder, other).isEmpty, "one prompt at a time")
+    #expect(engine.snapshot(of: other)?.isClosing == true)
+    #expect(engine.activeTab(in: window) == tab)
+
+    engine.respond(to: first.id, accepted: true, userInput: nil)        // Leave on the first
+
+    let second = try #require(requested(recorder, other).first, "the next held tab is prompted after Leave")
+    #expect(engine.activeTab(in: window) == other, "on the tab it activated first")
+    let events = recorder.events(for: other)
+    let activated = try #require(events.firstIndex(of: .activeTabChanged(other)))
+    let raised = try #require(events.firstIndex(of: .dialogRequested(second)))
+    #expect(activated < raised, "activated before its prompt")
+    #expect(engine.windowIDs.contains(window), "the window waits on the second prompt")
+
+    engine.respond(to: second.id, accepted: true, userInput: nil)
+    #expect(!engine.windowIDs.contains(window))
+    #expect(recorder.windowEvents.last == .windowClosed(window, reason: .userClose))
+  }
+
+  @Test func stayOnTheSecondPromptKeepsTheWindowAndEveryTab() throws {
+    let (engine, window, tab, recorder) = make()
+    let other = engine.createTab(url: URL(string: "arkt-test://page/Other")!, in: window)
+    engine.holdClose(other)
+    engine.closeWindow(window)
+    engine.respond(to: try #require(requested(recorder, tab).first).id, accepted: true, userInput: nil)
     let second = try #require(requested(recorder, other).first)
 
-    engine.respond(to: first.id, accepted: false, userInput: nil)
+    engine.respond(to: second.id, accepted: false, userInput: nil)     // Stay
 
-    #expect(recorder.events(for: tab).contains(.closeCancelled(tab)))
-    #expect(recorder.events(for: other).contains(.dialogEnded(other, second.id)))
-    #expect(recorder.events(for: other).last == .closeCancelled(other))
+    #expect(Array(recorder.events(for: other).suffix(2)) == [.dialogEnded(other, second.id), .closeCancelled(other)])
+    #expect(recorder.events(for: tab).last == .closeCancelled(tab))
     #expect(engine.windowIDs.contains(window))
+    #expect(engine.tabIDs.contains(tab) && engine.tabIDs.contains(other))
     #expect(!recorder.windowEvents.contains { if case .windowClosed = $0 { true } else { false } })
+  }
+
+  @Test func aHeldBackgroundTabIsActivatedBeforeItsWindowClosePrompt() throws {
+    let (engine, window, tab, recorder) = make()
+    let shown = engine.createTab(url: URL(string: "arkt-test://page/Shown")!, in: window)
+    engine.activateTab(shown)                                          // the held tab is in the background
+    engine.closeWindow(window)
+    #expect(engine.activeTab(in: window) == tab)
+    #expect(requested(recorder, tab).count == 1)
   }
 
   @Test func stayDuringAQuitCancelsTheQuitsWindowClose() throws {
