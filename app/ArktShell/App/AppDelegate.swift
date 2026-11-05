@@ -126,6 +126,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     composition.session?.openFromOtherApp(urls)
   }
 
+  /// The Dock menu (#356): the Little Arkt windows and their actions, New Window and New Little Arkt Window.
+  func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+    MainMenu.dockMenu(commands: composition.commands, littleArkts: composition.session?.windows.littleArktMenus)
+  }
+
   /// Closing the last window keeps the app running, as the engine build does (Chromium's keep-alive) and as macOS
   /// apps do (maintainer decision on #241); Quit is the way out.
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

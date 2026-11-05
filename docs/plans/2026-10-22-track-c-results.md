@@ -2804,3 +2804,95 @@ BH-138, KB-080, BH-137. A Little Arkt page now goes to the Archive under the Lit
 Product decisions (maintainer, 2026-11-05): Cmd-Shift-T in a main window reopens that window's own closes first, then the last Little Arkt (no recency merge across windows); idle closes show no toast; a reopened popup comes back as a normal Little Arkt.
 
 Tests (written first): CoreBridge `ArchiveCoordinatorTests` + `AutoArchiveTimerTests` 69 passed after merging main with #448 (10 new, one for a threshold change applied live, including a take-back after more than 50 other archives and one after a restore from the Archive). `LittleArktArchiveTests` (new) 18 run, 0 failures, 10 consecutive runs; `LittleArktLayoutTests` 12 passed (3 new; a frame partly off screen moves fully in); `MainMenuInventoryTests` 16 and `MainMenuKeyEquivalentTests` 8 (the router target); `LittleArktWindowTests` 14, `LittleArktFlightTests` 39 (2 skipped), `LittleArktDialogTests` 17, `ReopenClosedTests` 14, `SplitPaneReopenTests` 8, all 0 failures. ShellKit unit (`swift test -j 2 --skip ShellKitGUITests`): 1975 Swift Testing tests passed, 0 failures (1159 + 38 + 60 + 9 + 183 + 49 + 327 + 125 + 25). App `xcodebuild` Debug: BUILD SUCCEEDED. ArktCore and engine not run: no change there. Deliberate break: replacing the `.closeCancelled` clear with `break` fails `testACancelledLeaveSitePromptForgetsTheClose` ("a close the user cancelled is not archived later"); restored. `InMemoryEngine.engineEndWindow(_:reason:)` is a new test driver: the engine ends a window with a prompt up (a quit).
+
+## Little Arkt: Dock menu, Window menu and Opt-Cmd-click (#356) (2026-11-05)
+
+### What changed
+
+- `LittleArktMenus` (ShellUI, owned by `ShellWindowSet`): the Dock menu's rows (page titles, Hide All / Show All
+  Little Arkt Windows, Close Little Arkt Windows) and the Window menu's "Little Arkt" section above Bring All to Front.
+  A row brings its window forward, also from hidden. Little Arkt windows are excluded from AppKit's own window list,
+  so they are not listed twice. Rows show the page title, then the host, at most 60 characters.
+- Dock menu: `AppDelegate.applicationDockMenu` builds it with `MainMenu.dockMenu`, adding New Window and New Little
+  Arkt Window (Opt-Cmd-N). The Window menu's delegate is `AppCommands`, which rebuilds the section when it opens.
+- Opt-Cmd-click on a link (exactly Option and Command): `ShellEngineHost.decideLinkActivation` cancels it before
+  Peek routing, and a new Little Arkt window opens on the URL one turn later.
+- Opt-Cmd-click on a Today tab's row: the page moves into a new Little Arkt window (`moveTab`, no reload) from
+  whichever window has it, else a new page opens on its URL. The row then leaves the sidebar without an Archive entry
+  (`SidebarSource.removeNode`, new); the page is archived when its Little Arkt window closes. Every window that was
+  left on that row's handoff placeholder moves on to the next tab (unless another window shows it) or clears its card,
+  and any window drops a placeholder whose row is gone, whatever removed it.
+- Opt-Cmd-click on a pinned tab's row or a Favorite's tile opens its page in a new Little Arkt window and keeps the pin
+  or Favorite where it is, as a Peek does (decided on #356; docs/design/little-arkt.md updated).
+- Settings > Links: "Open Little Arkt when clicking on links with ⌥⌘ held"
+  (`optionCommandClickLittleArcEntryPointEnabled`), on by default. It covers both clicks.
+- Space chooser: "Open in New Window" between the Spaces and Copy Link. The window fades out, then the page moves into
+  a new browser window on the Space Open in names. No flight, because the target window is not on screen yet. If the
+  new window cannot take the page, it closes again.
+- The Window menu heading is `NSMenuItem.sectionHeader(title:)`.
+
+### Deviations and follow-ups
+
+- Engine build Dock menu: Chromium's `AppController` stays `NSApp.delegate` and answers `applicationDockMenu:`, so
+  the Dock menu above is the FakeEngine build's only. #658 asks for the embedder seam. From the code, the Window
+  menu's section should work in the Engine build: Arkt installs its own `windowsMenu` with `AppCommands` as delegate,
+  and Chromium binds its menu bridges by tag, which that menu has none of. This is not checked at runtime.
+- The Dock menu has no XCUITest handle (it belongs to the Dock process); its rows are covered in ShellKitGUITests.
+
+### Review changes
+
+The two-window placeholder fix, removal without the Archive, pinned tabs and Favorites, closing the empty window
+after a failed Open in New Window, and the section header. Tests:
+
+- `LittleArktMenusTests` grew to 22. The new cases cover:
+  - two windows with the page live in the other one;
+  - a placeholder whose row goes;
+  - a pinned tab, a Favorite, and a plain click on a Favorite;
+  - Open in New Window with the full motion, and with a failure.
+- `SidebarSourceContractTests.removeNodeRemovesTheRowAndEmitsStructure` runs on both sources.
+
+Each new behavior was broken on purpose once, and its test failed:
+
+- Without the follow-ups in `ShellWindowSet.moveToLittleArkt`, the two-window case failed (the clicking window stayed on the placeholder).
+- Without `dropPlaceholderOfRemovedRow` in the sidebar observation, `testAPlaceholderGoesWithItsRow` failed.
+- Archiving instead of removing failed the Today tab case ("removed, not archived").
+- A no-op `ModelSidebarSource.removeNode` failed the contract test for `.model`.
+- Not opening pinned tabs and Favorites failed both cases (no Little Arkt window).
+- Dropping the `performClose` after a failed Open in New Window failed its case (2 windows, not 1).
+- A plain heading item failed the Window menu case.
+- Committing Open in New Window without the fade failed the full-motion case.
+
+### After #355 merged
+
+- `openLittleArkt(url:frame:)` keeps #355's `frame` and falls back to `nextLittleArktFrame()`.
+- Close Little Arkt Windows goes through `requestClose`, so a hidden window records its page for the Archive and
+  Cmd-Shift-T the same way Cmd-W does. A new `withMotion: false` skips the close motion for a window that is not on
+  screen, and #355's rules for dropping the record are unchanged.
+- File > Reopen Closed Tab keeps #355's `ReopenClosedRouter` target. The Window menu keeps `AppCommands` as its
+  delegate.
+- Test: `LittleArktArchiveTests.testCloseLittleArktWindowsArchivesHiddenWindowsAndTheyCanBeReopened` (one hidden
+  window and one shown, both archived and both reopenable).
+- Deliberate break: the old `closeFromMenu` body (`phase = .closing`, then asking the engine without
+  `requestClose`) fails it: one archive entry instead of two, and the hidden window cannot be reopened.
+- Runs:
+  - `--filter 'ShellUITests|CoreBridgeTests'`: 1199 and 341 tests passed.
+  - GUI `--filter 'LittleArkt|MainMenu|Archive|Reopen|SidebarClick|Handoff|Favorites|ToastView|ShellWindowSet|Settings'`: 380 run, 5 skipped, 0 failures.
+  - Debug app `xcodebuild -scheme ArktShell -configuration Debug -jobs 2`: BUILD SUCCEEDED.
+
+### Tests
+
+Written first. Each failed to compile before the code existed.
+
+- `LittleArktClickRoutingTests` (ShellUITests, 7): the modifier rule, the setting default, the copy and the menu row
+  titles. `swift test --filter ShellUITests`: 1162 tests in 140 suites passed.
+- `LittleArktMenusTests` (ShellKitGUITests, 15): Opt-Cmd-click on a link, with the setting off and with other
+  modifiers; Opt-Cmd-click on a loaded and an unloaded Today tab and with the setting off; Open in New Window and the
+  chooser's items; the Dock rows, Hide All / Show All, a row from hidden, Close All with a hidden window; the Window
+  menu section, replaced not doubled, and removed with the last window. 15 run, 0 failures, five runs in a row.
+- `MainMenuKeyEquivalentTests`: two new cases (the Dock menu's last items, the Window menu's delegate). Its class, with
+  the other Little Arkt, Settings, Peek, Handoff, TabActions and sidebar classes (`--filter
+  'MainMenuKeyEquivalentTests|LittleArkt|Settings|SidebarClick|TabActions|Peek|Handoff|SidebarOutline|SplitSidebar'`):
+  315 run, 6 skipped, 0 failures.
+- `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
+  The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
+  the real pointer and keyboard, and the Mac was in use.

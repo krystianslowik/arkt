@@ -106,6 +106,7 @@ extension SettingsWindowController {
         row(PeekLinkCopy.crossSite, PeekLinkCopy.crossSiteNote, [crossSite]),
         row(PeekLinkCopy.shiftClick, nil, [shift]),
         littleArktLookupRow(),                     // #354
+        littleArktClickRow(),                      // #356
       ]),
       section("Downloads", downloadRows(), note: Self.downloadsNote),        // #132
       section("Updates", [

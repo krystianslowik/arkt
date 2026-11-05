@@ -277,6 +277,11 @@ public final class ModelSidebarSource: SidebarSource {
     }
   }
 
+  /// Removes the node without an Archive entry (`Sidebar.removePane`, which is `remove` for a node outside a split).
+  public func removeNode(_ id: UUID) {
+    mutate { $0.removePane(id) }
+  }
+
   // MARK: - Archive
 
   /// Archives nodes through `Archiver` and returns the entries in the order of `ids`; all of them leave the value in

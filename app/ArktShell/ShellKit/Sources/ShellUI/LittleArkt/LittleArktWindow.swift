@@ -22,6 +22,7 @@ final class LittleArktWindow: NSWindow {
     backgroundColor = .clear
     isMovableByWindowBackground = false              // the top bar and the frame drag the window
     tabbingMode = .disallowed
+    isExcludedFromWindowsMenu = true                 // the Window menu lists it under Little Arkt's heading (#356)
     isReleasedWhenClosed = false
     minSize = LittleArktLayout.minimumSize
     animationBehavior = .none                        // the content's own springs are the motion
