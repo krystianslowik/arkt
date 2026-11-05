@@ -18,6 +18,7 @@ final class AppCommands: NSObject {
   @objc func clearArchive(_ sender: Any?) {}
   @objc func showWelcome(_ sender: Any?) {}
   let undoRouter = ReopenUndoRouter()
+  let reopenRouter = ReopenClosedRouter(windows: { nil })
 }
 
 /// `CommandBarPanel.sendEvent` takes Cmd-Return and Opt-Return before anything else in the panel (KB-085). That
@@ -298,6 +299,13 @@ final class MainMenuInventoryTests: XCTestCase {
     XCTAssertEqual(undo.action, #selector(ReopenUndoRouter.undo(_:)))
     XCTAssertEqual(undo.keyEquivalent, "z")
     XCTAssertEqual(undo.keyEquivalentModifierMask, .command)
+  }
+
+  /// File > Reopen Closed Tab goes to its router, so it works with no key window too (#355).
+  func testReopenClosedTabTargetsItsRouter() throws {
+    let reopen = try item("Reopen Closed Tab")
+    XCTAssertTrue(reopen.target === commands.reopenRouter)
+    XCTAssertEqual(reopen.action, #selector(ShellWindowController.reopenClosedTab(_:)))
   }
 
   /// AppController answers these at the end of the responder chain with Chromium's behaviour.

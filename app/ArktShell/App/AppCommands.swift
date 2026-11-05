@@ -10,6 +10,8 @@ final class AppCommands: NSObject {
   /// Edit > Undo's target (menu targets are weak): Cmd-Z reopens a closed tab or Peek unless text is being edited
   /// (#346, KB-011).
   let undoRouter = ReopenUndoRouter()
+  /// File > Reopen Closed Tab's target: the key window's reopen, else the last closed Little Arkt window (#355).
+  private(set) lazy var reopenRouter = ReopenClosedRouter { [weak self] in self?.session?.windows }
 
   private var session: AppSession? { composition?.session }
 

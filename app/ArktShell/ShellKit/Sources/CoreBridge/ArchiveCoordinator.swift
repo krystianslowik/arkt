@@ -86,6 +86,9 @@ public final class ArchiveCoordinator {
   /// The latest archived entries, oldest first, for Reopen Closed Tab (#110, BH-074): a reopen puts a row back from
   /// here without reading the store.
   private var recent: [ArchivedItem] = []
+  /// Little Arkt entries this run archived and has not taken out of the archive since (#355): Reopen Closed Tab on a
+  /// Little Arkt window takes its entry back by id, however many other items were archived meanwhile.
+  private var littleArktIDs: Set<NodeID> = []
   /// How many archived entries `restoreRecent` can bring back. [I]
   nonisolated public static let recentLimit = 50
   /// Ids this coordinator may have left in the store: sent in an add, or named by a remove that failed. A
@@ -185,6 +188,7 @@ public final class ArchiveCoordinator {
   /// and queues its removal from the store, unless it was pending and never sent (see the type comment).
   private func withdraw(_ id: NodeID) {
     restoredIDs.insert(id)
+    littleArktIDs.remove(id)                                // a restored Little Arkt page is a row now
     recent.removeAll { $0.id == id }
     let wasPending = dropUnsentAdds(of: id)
     // Queued whenever a store call may have written the entry: a failed add may still have landed, and an extra
@@ -206,18 +210,17 @@ public final class ArchiveCoordinator {
     let date = now()
     let item = ArchivedItem(reason: reason, archivedAt: date, source: .littleArc,
                             snapshot: NodeSnapshot(kind: .tab(TabItem(url: url, title: title)), createdAt: date))
+    littleArktIDs.insert(item.id)
     enqueue([item])
     return item
   }
 
   /// Reopen Closed Tab on a Little Arkt window: the page comes back in a window, not as a row, so its entry leaves
-  /// the archive without a sidebar insert. False when `id` is not a Little Arkt entry among the latest `recentLimit`
-  /// archives, or was restored or taken back since.
+  /// the archive without a sidebar insert. False when `id` is not a Little Arkt entry this run archived, or it was
+  /// restored from the Archive (the page is a Today row now) or taken back since: the caller then does not reopen it.
   @discardableResult
   public func takeBackLittleArkt(_ id: NodeID) -> Bool {
-    guard !restoredIDs.contains(id), let item = recent.last(where: { $0.id == id }), item.source == .littleArc else {
-      return false
-    }
+    guard littleArktIDs.remove(id) != nil, !restoredIDs.contains(id) else { return false }
     withdraw(id)
     return true
   }

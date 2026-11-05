@@ -127,7 +127,7 @@ final class AppSession {
     windows.onLittleArktArchive = { [weak archive] closed in
       archive?.archiveLittleArkt(url: closed.url, title: closed.title, reason: closed.isIdle ? .auto : .manual).id
     }
-    windows.onLittleArktTakeBack = { [weak archive] id in archive?.takeBackLittleArkt(id) }
+    windows.onLittleArktTakeBack = { [weak archive] id in archive?.takeBackLittleArkt(id) ?? false }
     // Downloads (#132): the Library button, popover and window, for an engine that has downloads.
     windows.downloads = DownloadsCenter(engine: engine, settings: settings)
     windows.downloads?.onChangeLocation = { [weak self] in self?.showSettings(pane: .general) }
@@ -257,7 +257,7 @@ final class AppSession {
     // #355, BH-137: idle Little Arkt windows close and archive after "Archive Little Arkts after:" (the archive
     // settings' Little Arkt threshold, 6 hours by default; its Settings row is #448).
     autoArchive.littleArkts = { [weak self] in
-      (self?.windows.littleArktIdleCandidates ?? []).map {
+      (self?.windows.littleArktIdleCandidates() ?? []).map {
         LittleArcWindowActivity(id: $0.id, lastActiveAt: $0.lastActiveAt)
       }
     }

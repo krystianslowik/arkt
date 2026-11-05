@@ -812,6 +812,36 @@ struct ArchiveCoordinatorTests {
     #expect(!harness.coordinator.takeBackLittleArkt(UUID()))
   }
 
+  @Test func aLittleArktEntryIsTakenBackAfterManyOtherArchives() async throws {
+    let harness = try Harness(todayTabs: ArchiveCoordinator.recentLimit + 5)
+    let item = harness.coordinator.archiveLittleArkt(url: Self.url, title: "Little", reason: .manual)
+    for id in harness.today { harness.coordinator.archive([id], reason: .manual) }   // past the reopen limit
+    await harness.drain()
+
+    #expect(harness.coordinator.takeBackLittleArkt(item.id))
+
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id]])
+    #expect(harness.source.sidebar.nodes[item.id] == nil)
+  }
+
+  @Test func aLittleArktEntryRestoredFromTheArchiveIsNotTakenBack() async throws {
+    let harness = try Harness(todayTabs: 0)
+    let item = harness.coordinator.archiveLittleArkt(url: Self.url, title: "Little", reason: .manual)
+    await harness.drain()
+    _ = try #require(try harness.coordinator.restore(item, fallbackSpace: harness.space))
+    #expect(harness.source.children(of: .today(harness.space)) == [item.id], "the page is a Today row now")
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id]])
+
+    #expect(!harness.coordinator.takeBackLittleArkt(item.id), "no reopen of a page that is already a row")
+
+    harness.coordinator.archive([item.id], reason: .manual)          // the row closed again: a Today entry
+    #expect(!harness.coordinator.takeBackLittleArkt(item.id), "a Today entry is never taken back as a window")
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id]])
+  }
+
   @Test func takingBackAnUnsentLittleArktEntryOnlyDropsItFromTheOutbox() async throws {
     let harness = try Harness(todayTabs: 0)
     await harness.store.holdAdds()

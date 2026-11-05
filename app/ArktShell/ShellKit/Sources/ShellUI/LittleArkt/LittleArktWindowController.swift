@@ -70,9 +70,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// The Open in flight while it runs, through its crossfade.
   private(set) var flight: LittleArktFlight?
   private var snapshotTask: Task<Void, Never>?
-  /// The page and frame a close the user (or the idle timer) asked for, captured at the request: the engine has
-  /// closed the tab by the time it reports the window closed. Archived when that close ends; forgotten when a
-  /// leave-site prompt cancels it.
+  /// The page and frame a close the user (or the idle timer) asked for, captured by `requestClose` because the engine
+  /// has closed the tab by the time it reports the window closed. Archived (`onArchiveClose`) when the window closes
+  /// with `.userClose`; forgotten when a leave-site prompt cancels the close, when Open in moves the page, and when
+  /// the window closes for any other reason (a quit, an extension).
   private var requestedClose: LittleArktClosedWindow?
   /// The last time the user was in the window: it opened, became key or stopped being key. A page that navigates on
   /// its own (a refresh, a polling dashboard) does not count.
@@ -169,7 +170,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     lastActiveAt = now()
     tabObservation = engine.observe(window: id) { [weak self] event in self?.handle(event) }
     windowObservation = engine.observeWindows { [weak self] event in
-      guard let self, event.windowID == self.engineWindow, case .windowClosed = event else { return }
+      guard let self, event.windowID == self.engineWindow, case .windowClosed(_, let reason) = event else { return }
+      // Only the close that was asked for archives: a quit or an extension ending the window while a leave-site
+      // prompt is up does not.
+      if reason != .userClose { self.requestedClose = nil }
       self.engineWindowClosed()
     }
     if let active = engine.activeTab(in: id) { mount(active) }
@@ -350,6 +354,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// this window fades out (0.12 s), then the tab moves.
   func openIn(space: SpaceID? = nil) {
     guard phase == .open, let tab = shownTab else { return }
+    requestedClose = nil                                    // the page moves on: a close held at a prompt is gone
     if beginFlight(tab, space: space) { return }
     carriedDialog = javaScriptDialogs.release(tab)          // the panel goes at once; the main window shows it
     phase = .handingOff
@@ -394,6 +399,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// main window's sidebar at once (drawn by the flight); the page moves at rest. False when the flight does not
   /// apply: no open main window, one the user cannot see, Reduce Motion, or a row the sidebar refuses.
   private func beginFlight(_ tab: TabID, space: SpaceID?) -> Bool {
+    requestedClose = nil
     guard let destination = flightDestination(), let mainWindow = destination.flightWindow else { return false }
     var conditions = mainWindowConditions(mainWindow)
     conditions.reduceMotion = conditions.reduceMotion || reduceMotion()
@@ -588,12 +594,13 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     lastActiveAt = now()
   }
 
-  /// Whether the idle timer may close the window now: open, and its page neither playing sound (BH-076) nor asking
-  /// before it leaves (retried on the next pass).
-  var mayCloseForIdle: Bool {
-    guard phase == .open, engineWindow != nil else { return false }
-    guard let shownTab, let page = engine.snapshot(of: shownTab) else { return true }
-    return !page.isAudible && !page.wouldHoldClose
+  /// Open and showing its page: the idle timer may consider it.
+  var isOpenForIdle: Bool { phase == .open && engineWindow != nil }
+
+  /// The page plays sound (BH-076) or would ask before it leaves: the idle timer leaves the window open.
+  var pageKeepsWindowOpen: Bool {
+    guard let shownTab, let page = engine.snapshot(of: shownTab) else { return false }
+    return page.isAudible || page.wouldHoldClose
   }
 
   public func windowDidEndLiveResize(_ notification: Notification) {

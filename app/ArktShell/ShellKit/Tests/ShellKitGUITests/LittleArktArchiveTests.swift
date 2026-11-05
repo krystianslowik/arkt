@@ -16,12 +16,17 @@ final class LittleArktArchiveTests: XCTestCase {
   private var clock = Date(timeIntervalSinceReferenceDate: 900_000_000)
   private var archived: [LittleArktClosedWindow] = []
   private var takenBack: [UUID] = []
+  /// Archive entries the take-back refuses (restored from the Archive meanwhile).
+  private var restoredEntries: Set<UUID> = []
+  private var archiveIDs: [UUID] = []
 
   override func setUp() async throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
     archived = []
     takenBack = []
+    restoredEntries = []
+    archiveIDs = []
   }
 
   override func tearDown() async throws {
@@ -43,9 +48,15 @@ final class LittleArktArchiveTests: XCTestCase {
     set.littleArktIsInUse = { _ in false }
     set.onLittleArktArchive = { [unowned self] page in
       self.archived.append(page)
-      return UUID()
+      let id = UUID()
+      self.archiveIDs.append(id)
+      return id
     }
-    set.onLittleArktTakeBack = { [unowned self] id in self.takenBack.append(id) }
+    set.onLittleArktTakeBack = { [unowned self] id in
+      guard !self.restoredEntries.contains(id) else { return false }
+      self.takenBack.append(id)
+      return true
+    }
     engine.windowHostProvider = { [weak set] request in
       guard let set else { preconditionFailure("the set outlives the test") }
       return set.host(for: request)
@@ -145,6 +156,38 @@ final class LittleArktArchiveTests: XCTestCase {
     XCTAssertTrue(archived.isEmpty, "a close the user cancelled is not archived later")
   }
 
+  func testAQuitWhileALeaveSitePromptIsUpArchivesNothing() throws {
+    let (set, engine) = try makeSet()
+    let (little, id, tab) = try openPopup(engine, set)
+    engine.holdClose(tab)
+    little.closeTab(nil)                                    // the prompt is up
+
+    engine.engineEndWindow(id, reason: .appQuit)
+    little.finishMotion()
+
+    XCTAssertTrue(little.isClosed)
+    XCTAssertTrue(archived.isEmpty, "the quit closed it, not the user's Cmd-W")
+    XCTAssertFalse(set.canReopenClosedLittleArkt)
+  }
+
+  func testOpenInWhileALeaveSitePromptIsUpArchivesNothing() throws {
+    let (set, engine) = try makeSet()
+    let (little, id, tab) = try openPopup(engine, set)
+    engine.holdClose(tab)
+    little.closeTab(nil)                                    // the prompt is up
+
+    little.openIn()                                         // Open in instead: the Cmd-W is no longer the intent
+    little.finishMotion()                                   // the engine does not move a closing tab: it stays here
+    little.finishMotion()
+    XCTAssertTrue(engine.answerDialog(tab, accept: true))   // the prompt resolves and the window goes
+    little.finishMotion()
+
+    XCTAssertFalse(engine.windowIDs.contains(id))
+    XCTAssertTrue(little.isClosed)
+    XCTAssertTrue(archived.isEmpty, "Open in replaced the close; nothing goes to the Archive")
+    XCTAssertFalse(set.canReopenClosedLittleArkt)
+  }
+
   // MARK: Idle (BH-137)
 
   func testIdleWindowsAreCandidatesFromTheirLastActivity() throws {
@@ -152,12 +195,12 @@ final class LittleArktArchiveTests: XCTestCase {
     let start = clock
     let (little, _, _) = try openPopup(engine, set)
 
-    XCTAssertEqual(set.littleArktIdleCandidates.map(\.id), [little.id])
-    XCTAssertEqual(set.littleArktIdleCandidates.first?.lastActiveAt, start)
+    XCTAssertEqual(set.littleArktIdleCandidates().map(\.id), [little.id])
+    XCTAssertEqual(set.littleArktIdleCandidates().first?.lastActiveAt, start)
 
     clock = start.addingTimeInterval(3600)
     little.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification))
-    XCTAssertEqual(set.littleArktIdleCandidates.first?.lastActiveAt, start.addingTimeInterval(3600),
+    XCTAssertEqual(set.littleArktIdleCandidates().first?.lastActiveAt, start.addingTimeInterval(3600),
                    "leaving the window counts as activity")
   }
 
@@ -171,8 +214,24 @@ final class LittleArktArchiveTests: XCTestCase {
     engine.setAudible(audibleTab, true)
     engine.holdClose(holdingTab)
 
-    XCTAssertEqual(set.littleArktIdleCandidates.map(\.id), [idle.id])
+    XCTAssertEqual(set.littleArktIdleCandidates().map(\.id), [idle.id])
     _ = (audible, holding)
+  }
+
+  func testIdleTimeStartsAgainWhenAPageStopsPlaying() throws {  // not closed the moment the sound ends
+    let (set, engine) = try makeSet()
+    let start = clock
+    let (little, _, tab) = try openPopup(engine, set)
+    engine.setAudible(tab, true)
+    clock = start.addingTimeInterval(7 * 3600)
+    XCTAssertTrue(set.littleArktIdleCandidates().isEmpty)
+
+    engine.setAudible(tab, false)
+    clock = start.addingTimeInterval(7 * 3600 + 60)
+
+    XCTAssertEqual(set.littleArktIdleCandidates().map(\.id), [little.id])
+    XCTAssertEqual(set.littleArktIdleCandidates().first?.lastActiveAt, start.addingTimeInterval(7 * 3600),
+                   "the last pass that saw it playing")
   }
 
   func testClosingIdleWindowsArchivesThemAsIdle() throws {
@@ -249,5 +308,60 @@ final class LittleArktArchiveTests: XCTestCase {
 
     XCTAssertEqual(set.littleArkts.count, 1)
     XCTAssertFalse(set.canReopenClosedLittleArkt)
+  }
+
+  func testReopenSkipsAWindowWhoseEntryWasRestoredFromTheArchive() throws {
+    let (set, engine) = try makeSet()
+    let (first, _, _) = try openPopup(engine, set)
+    let (second, _, _) = try openPopup(engine, set)
+    let firstFrame = CGRect(x: 100, y: 100, width: 400, height: 500)
+    first.window.setFrame(firstFrame, display: false)
+    first.closeTab(nil)
+    first.finishMotion()
+    second.closeTab(nil)
+    second.finishMotion()
+    restoredEntries = [archiveIDs[1]]                       // the second page is a Today row now
+
+    let reopened = try XCTUnwrap(set.reopenClosedLittleArkt())
+
+    XCTAssertEqual(reopened.window.frame, firstFrame, "the earlier window came back instead")
+    XCTAssertEqual(takenBack, [archiveIDs[0]])
+    XCTAssertFalse(set.canReopenClosedLittleArkt)
+  }
+
+  // MARK: Reopen with no key window (the app's router)
+
+  func testTheRouterReopensTheLastLittleArktWhenNoWindowTakesTheAction() throws {
+    let (set, engine) = try makeSet()
+    let (little, _, _) = try openPopup(engine, set)
+    let router = ReopenClosedRouter(windows: { set }, responder: { _ in nil })
+    let item = NSMenuItem(title: "Reopen Closed Tab", action: #selector(ShellWindowController.reopenClosedTab(_:)),
+                          keyEquivalent: "t")
+    XCTAssertFalse(router.validateMenuItem(item))
+    little.closeTab(nil)
+    little.finishMotion()
+    XCTAssertTrue(set.littleArkts.isEmpty, "no window left")
+    XCTAssertTrue(router.validateMenuItem(item))
+
+    router.reopenClosedTab(item)
+
+    XCTAssertEqual(set.littleArkts.count, 1)
+    XCTAssertFalse(router.validateMenuItem(item))
+  }
+
+  func testTheRouterLeavesTheActionToTheWindowThatTakesIt() throws {
+    let (set, engine) = try makeSet()
+    let (closing, _, _) = try openPopup(engine, set)
+    let (key, _, _) = try openPopup(engine, set)
+    var asked = 0
+    key.onReopenClosed = { asked += 1 }
+    let router = ReopenClosedRouter(windows: { set }, responder: { _ in key })
+    closing.closeTab(nil)
+    closing.finishMotion()
+
+    router.reopenClosedTab(nil)
+
+    XCTAssertEqual(asked, 1, "the key Little Arkt window handled it")
+    XCTAssertEqual(set.littleArkts.count, 1)
   }
 }

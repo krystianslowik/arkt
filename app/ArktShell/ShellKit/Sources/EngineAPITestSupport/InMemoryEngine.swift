@@ -526,6 +526,14 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     closeWindow(id, reason: reason)
   }
 
+  /// Test driver: the engine ends the window at once with `reason`, unload processing skipped and any leave-site
+  /// prompt in it left unanswered (Chromium quitting while a prompt is up).
+  public func engineEndWindow(_ id: EngineWindowID, reason: WindowCloseReason) {
+    guard windowIDs.contains(id) else { return }
+    for tab in tabs(in: id) { heldCloses[tab] = nil }
+    finishWindowClose(id, reason: reason)
+  }
+
   /// Test driver: the engine activates the tab (an extension's `chrome.tabs.update`).
   public func engineActivate(_ id: TabID) { setActive(id) }
 
