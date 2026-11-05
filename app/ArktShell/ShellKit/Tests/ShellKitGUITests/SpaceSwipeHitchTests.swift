@@ -402,4 +402,78 @@ final class SpaceSwipeHitchTests: XCTestCase {
     print(String(format: "spaceswipe.summary rounds=%d hitches=%d load1=%.2f", rounds, hitches.count, load[0]))
     XCTAssertLessThan(worst, FrameStats().designBudget, "a Space switch pass took a whole 120 Hz frame of main-thread CPU")
   }
+
+  // MARK: Imported profile (#605)
+
+  /// A distinct favicon per index (as after an import: every site its own icon), `pixels` square, with enough detail
+  /// that its PNG does not shrink to a few bytes.
+  static func importedFaviconPNG(_ index: Int, pixels: Int) -> Data {
+    let space = CGColorSpace(name: CGColorSpace.sRGB)!
+    let context = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    let hue = CGFloat(index % 97) / 97
+    context.setFillColor(NSColor(hue: hue, saturation: 0.7, brightness: 0.9, alpha: 1).cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: pixels, height: pixels))
+    var seed = UInt64(index) &* 6_364_136_223_846_793_005 &+ 1
+    for _ in 0..<(pixels / 2) {
+      seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+      let x = CGFloat(seed >> 40 & 0xFF) / 255 * CGFloat(pixels)
+      let y = CGFloat(seed >> 24 & 0xFF) / 255 * CGFloat(pixels)
+      let r = CGFloat(seed >> 16 & 0x0F) / 15 * CGFloat(pixels) / 4 + 1
+      let dot = NSColor(hue: CGFloat(seed & 0xFF) / 255, saturation: 0.8, brightness: 0.6, alpha: 0.8)
+      context.setFillColor(dot.cgColor)
+      context.fillEllipse(in: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r))
+    }
+    let data = NSMutableData()
+    let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
+    CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+    CGImageDestinationFinalize(destination)
+    return data as Data
+  }
+
+  /// The sample sidebar with an imported Space of `tabs` Today tabs (each with its own favicon) right after Personal,
+  /// shown in a fresh window with every favicon handed to the sidebar the way the app does after an import.
+  private func showImportedProfile(tabs: Int, pixels: Int) async {
+    controller.close()
+    sidebar = StubSidebar.sample()
+    let imported = sidebar.addSpace(title: "Imported", after: sidebar.spaceOrder[0])
+    var favicons: [NodeID: Data] = [:]
+    for index in 0..<tabs {
+      let node = sidebar.addTab(url: URL(string: "https://site\(index).example/page")!,
+                                title: "Imported tab \(index) with a fairly long page title", in: .today(imported))
+      if pixels > 0 { favicons[node] = Self.importedFaviconPNG(index, pixels: pixels) }
+    }
+    controller = ShellWindowController(engine: InMemoryEngine(), sidebar: sidebar)
+    controller.showWindow(nil)
+    controller.window?.contentView?.layoutSubtreeIfNeeded()
+    controller.sidebarController.setFavicons(favicons)
+    await controller.sidebarController.settleFaviconDecodes()
+  }
+
+  /// #605: the first swipe into a Space of 300 imported tabs draws every visible favicon for the first time inside
+  /// the swipe's frames. Main-thread CPU of each pass from the first frame on stays under one 120 Hz frame; the pass
+  /// that begins the gesture (before any frame, where the page is first shown and laid out) is reported. Before the
+  /// fix the favicons were `NSImage(data:)`, decoded lazily on the main thread at first draw.
+  func testFirstSwipeIntoAnImportedSpaceStaysUnderOneFrameOfMainThreadCPU() async throws {
+    try PacingEnvironment.skipIfScreenBelow120Hz(fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
+    let pixels = Int(ProcessInfo.processInfo.environment["ARKT_IMPORTED_FAVICON_PIXELS"] ?? "") ?? 256
+    await showImportedProfile(tabs: 300, pixels: pixels)
+    let cold = await swipe(delta: -9)
+    XCTAssertEqual(controller.pager.index, 1, "the swipe landed on the imported Space")
+    _ = await swipe(delta: 9)
+    let warm = await swipe(delta: -9)
+    /// Passes from the swipe's first frame on, and the ones before it.
+    func split(_ passes: [Pass]) -> (begin: [Pass], frames: [Pass]) {
+      let first = passes.firstIndex { $0.frame == 0 } ?? passes.count
+      return (Array(passes[..<first]), Array(passes[first...]))
+    }
+    func worst(_ passes: [Pass]) -> Double { (passes.map(\.cpu).max() ?? 0) * 1000 }
+    func frame0(_ passes: [Pass]) -> Double { (passes.filter { $0.frame == 0 }.map(\.cpu).max() ?? 0) * 1000 }
+    print(String(format: "importedswipe.cost pixels=%d coldBeginMs=%.2f coldFramesMaxMs=%.2f coldFrame0Ms=%.2f "
+                 + "warmBeginMs=%.2f warmFramesMaxMs=%.2f warmFrame0Ms=%.2f", pixels, worst(split(cold).begin),
+                 worst(split(cold).frames), frame0(cold), worst(split(warm).begin), worst(split(warm).frames),
+                 frame0(warm)))
+    XCTAssertLessThan(worst(split(cold).frames) / 1000, FrameStats().designBudget,
+                      "a frame of the first swipe into the imported Space took a whole 120 Hz frame of main-thread CPU")
+  }
 }
