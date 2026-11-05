@@ -35,7 +35,7 @@ struct PageInfoModelTests {
   }
 
   @Test(arguments: [
-    (PageConnection.secure, "Connection is secure", "lock", "Secure", false),
+    (PageConnection.secure, "Connection is secure", "lock", nil, false),
     (.notSecure, "Not secure: this site has no encrypted connection", "exclamationmark.triangle", "Not secure", true),
     (.notFullySecure, "Not fully secure: parts of this page are not encrypted", "exclamationmark.triangle",
      "Not fully secure", true),
@@ -44,7 +44,7 @@ struct PageInfoModelTests {
     (.flagged, "Dangerous: this site may try to steal your information", "exclamationmark.triangle", "Dangerous", true),
   ])
   func connectionWordsGlyphAndSpokenState(_ connection: PageConnection, _ text: String, _ symbol: String,
-                                          _ spoken: String, _ warning: Bool) throws {
+                                          _ spoken: String?, _ warning: Bool) throws {
     let model = try #require(PageInfoModel(info(connection)))
     #expect(model.connectionText == text)
     #expect(model.connectionSymbol == symbol)
@@ -58,7 +58,7 @@ struct PageInfoModelTests {
     let model = try #require(PageInfoModel(info(.secure), isReadOnly: true))
     #expect(model.isReadOnly)
     #expect(!model.canResetPermissions, "nothing can be reset")
-    #expect(model.readOnlyNote == "Site settings cannot be changed in a private window.")
+    #expect(model.readOnlyNote == "Site settings can't be changed in this window.")
     #expect(try #require(PageInfoModel(info(.secure))).readOnlyNote == nil)
     #expect(model.contentHeight == (try #require(PageInfoModel(info(.secure)))).contentHeight
             + PageInfoMetrics.readOnlyNoteHeight)
@@ -72,7 +72,7 @@ struct PageInfoModelTests {
     #expect(model.connectionText == "Local file on this Mac")
     #expect(model.connectionSymbol == "doc")
     #expect(model.note == "Local files have no site settings.")
-    #expect(model.siteDescription == "Local file")
+    #expect(model.siteDescription == nil, "VoiceOver reads the file name alone")
     #expect(PageInfoModel.pill(for: file)?.symbol == "doc")
     #expect(model.rows.isEmpty)
     #expect(!model.canResetPermissions)

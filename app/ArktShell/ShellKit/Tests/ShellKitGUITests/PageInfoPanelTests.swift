@@ -307,7 +307,7 @@ final class PageInfoPanelTests: XCTestCase {
     pressGlyph()
     let view = try XCTUnwrap(view)
     XCTAssertFalse(view.readOnlyLabel.isHidden)
-    XCTAssertEqual(view.readOnlyLabel.stringValue, "Site settings cannot be changed in a private window.")
+    XCTAssertEqual(view.readOnlyLabel.stringValue, "Site settings can't be changed in this window.")
     XCTAssertTrue(view.popUps.allSatisfy { !$0.isEnabled }, "the pop-ups are off")
     XCTAssertFalse(view.resetButton.isEnabled)
     XCTAssertTrue(engine.sitesWithPermissions().isEmpty)
@@ -420,7 +420,7 @@ final class PageInfoPanelTests: XCTestCase {
 
   func testVoiceOverReadsTheSecurityStateBeforeTheAddress() throws {
     try open("https://fieldguide.example/")
-    XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, "Secure, fieldguide.example")
+    XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, "fieldguide.example", "a secure page: the address")
     try open("http://old-mirror.fieldguide.example/")
     XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, "Not secure, old-mirror.fieldguide.example")
     try open("chrome://settings/")

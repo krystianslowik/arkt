@@ -88,8 +88,9 @@ struct PageInfoModel: Equatable {
   var state: State
   var connectionText: String
   var connectionSymbol: String
-  /// The security state in a word or two, for VoiceOver on the address pill ("Not secure, example.com").
-  var siteDescription: String
+  /// The security state in a word or two, for VoiceOver on the address pill ("Not secure, example.com"). Nil for a
+  /// secure page and a local file: VoiceOver then reads the address alone.
+  var siteDescription: String?
   /// Anything but a secure connection: the line keeps the primary text color with a warning glyph (never red).
   var connectionIsWarning: Bool
   var note: String?
@@ -103,7 +104,7 @@ struct PageInfoModel: Equatable {
   var favicon: Data?
 
   var accessibilityLabel: String { "Site controls for \(host)" }
-  var readOnlyNote: String? { isReadOnly ? "Site settings cannot be changed in a private window." : nil }
+  var readOnlyNote: String? { isReadOnly ? "Site settings can't be changed in this window." : nil }
 
   init?(_ info: PageInfo, locale: Locale = .current, isReadOnly: Bool = false, favicon: Data? = nil) {
     tab = info.tab
@@ -124,14 +125,14 @@ struct PageInfoModel: Equatable {
       state = .localFile
       connectionText = "Local file on this Mac"
       connectionSymbol = "doc"
-      siteDescription = "Local file"
+      siteDescription = nil
       connectionIsWarning = false
       note = "Local files have no site settings."
       return
     case .secure:
       connectionText = "Connection is secure"
       connectionSymbol = "lock"
-      siteDescription = "Secure"
+      siteDescription = nil
       connectionIsWarning = false
     case .notSecure:
       connectionText = "Not secure: this site has no encrypted connection"
@@ -154,7 +155,7 @@ struct PageInfoModel: Equatable {
 
   /// The address pill's glyph and its spoken security state for a page: nil for a page of the browser itself, whose
   /// pill stays inert.
-  static func pill(for info: PageInfo?) -> (symbol: String, description: String)? {
+  static func pill(for info: PageInfo?) -> (symbol: String, description: String?)? {
     guard let info, let model = PageInfoModel(info) else { return nil }
     return (model.connectionSymbol, model.siteDescription)
   }
