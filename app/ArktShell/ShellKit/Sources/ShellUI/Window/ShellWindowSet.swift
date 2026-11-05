@@ -28,6 +28,8 @@ public final class ShellWindowSet {
   /// The connected screens a saved frame is placed on; tests replace it.
   public var screens: @MainActor () -> [ScreenGeometry] = { ScreenGeometry.current() }
   public let commandBarSettings: CommandBarSettings
+  /// The one-off Copy URL tip's state (BH-196, #404), shared by every window; the app sets its stored one.
+  public var copyLinkEducation: CopyLinkEducation = .ephemeral()
   /// The app's hooks on a new window (archive, stamps, favicons, import); runs before the window is shown.
   public var configure: (@MainActor (ShellWindowController) -> Void)?
   /// The app's Downloads (#132): every window this set builds gets its Library button and popover. Nil for an engine
@@ -304,6 +306,7 @@ public final class ShellWindowSet {
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
                                            restoring: session, savesSession: isRestored,
                                            commandBarSettings: commandBarSettings, opensFirstTab: opensFirstTab)
+    controller.copyLinkEducation = copyLinkEducation
     if isRestored { sessionWindow = controller }
     if let session, controller.applySavedFrame(session, screens: screens()) { restoredFrameWindow = controller }
     controller.onNewWindow = { [weak self] in self?.openWindow(opensFirstTab: false) }

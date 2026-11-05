@@ -358,6 +358,21 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     hub.emit(.infobarsChanged(tab, []))
   }
 
+  // MARK: - Selection (#404, BH-193)
+
+  /// The page selection per tab, set by `setSelectedText`; a new document drops it.
+  private var selections: [TabID: String] = [:]
+
+  public func selectedText(of id: TabID) -> String? {
+    snapshots[id] == nil ? nil : selections[id]
+  }
+
+  /// Test driver: the user selected `text` in the tab's page; nil or empty clears the selection.
+  public func setSelectedText(_ id: TabID, _ text: String?) {
+    guard snapshots[id] != nil else { return }
+    selections[id] = text.flatMap { $0.isEmpty ? nil : $0 }
+  }
+
   // MARK: - Page images (#370, #352, contract rule 18)
 
   /// The size of an in-memory page's frame: a 600 x 360 pt page at 2x.
@@ -624,6 +639,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     endDialog(of: id)       // Chromium closes the dialog when a navigation starts
     withdrawPermission(in: id)      // and drops the site's ask
     endFindAndHover(of: id)         // and the page's find and hover go with the old document
+    selections[id] = nil            // and its selection
     snapshots[id]?.url = url
     if let title, !title.isEmpty { snapshots[id]?.title = title }
     snapshots[id]?.isLoading = true
@@ -697,6 +713,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     views[id] = nil
     history[id] = nil
     heldCloses[id] = nil
+    selections[id] = nil
     hub.emit(.tabClosed(id, reason: reason))
     if let successor { setActive(successor) }
   }

@@ -1,19 +1,41 @@
 import AppKit
+import EngineAPI
 
 /// The copy-link actions of the Edit menu (#118): Copy URL (KB-013, BH-191), Copy URL as Markdown (KB-014), Copy URL
 /// as Quote (KB-015) and Paste URL as New Tab (KB-016). The URLs copied are tracker-stripped by `TrackerStripping`;
-/// the toasts use BH-191's strings.
+/// the toasts use BH-191's strings. With text selected on the page, Copy URL offers a link to that text (BH-193,
+/// #404), and the shortcuts' use is recorded for the one-off tip (BH-196).
 extension ShellWindowController {
   // MARK: Copy URL (KB-013, BH-191)
 
   /// Cmd-Shift-C: the current tab's clean URL, or every selected tab's (one per line, BH-191) with a multi-selection.
+  /// One page with text selected: the URL is copied all the same, and the toast offers the link to the text instead.
   @objc public func copyCurrentURL(_ sender: Any?) {
     let targets = copyTargets()
     guard !targets.isEmpty else { return }
+    copyLinkEducation.recordShortcutUse()
     let cleaned = targets.map { TrackerStripping.clean($0.url) }
     write(cleaned.map(\.url.absoluteString).joined(separator: "\n"))
+    if targets.count == 1, let tab = targets[0].tab, let selection = engine.selectedText(of: tab),
+       let link = TextFragment.link(to: selection, in: cleaned[0].url) {
+      offerTextLink(link)
+      return
+    }
     let stripped = cleaned.contains { $0.stripped }
     toasts.show(Toast(text: Self.copyToastText(stripped: stripped, count: targets.count)))
+  }
+
+  /// BH-193: the [S] offer. The action's title and its confirmation are [I] (Arc's are not documented).
+  static let textLinkOffer = Toast(text: "Share a link directly to this text instead?", glyph: "link",
+                                   actionTitle: "Copy Link to Text")
+  static let textLinkCopied = Toast(text: "Copied Link to Text", glyph: "link")
+
+  private func offerTextLink(_ link: URL) {
+    toasts.show(Self.textLinkOffer) { [weak self] in
+      guard let self else { return }
+      self.write(link.absoluteString)
+      self.toasts.show(Self.textLinkCopied)
+    }
   }
 
   /// BH-191's strings: the clean-link toast for a copy that dropped a tracker, the [S] "Copied Current URL" for one
@@ -32,6 +54,7 @@ extension ShellWindowController {
   @objc public func copyCurrentURLAsMarkdown(_ sender: Any?) {
     let targets = copyTargets()
     guard !targets.isEmpty else { return }
+    copyLinkEducation.recordShortcutUse()
     write(targets.map { target in
       let url = TrackerStripping.clean(target.url).url.absoluteString
       return LinkFormat.markdown(title: target.title, url: url)
@@ -44,6 +67,7 @@ extension ShellWindowController {
   @objc public func copyCurrentURLAsQuote(_ sender: Any?) {
     let targets = copyTargets()
     guard !targets.isEmpty else { return }
+    copyLinkEducation.recordShortcutUse()
     write(targets.map { target in
       let url = TrackerStripping.clean(target.url).url.absoluteString
       return LinkFormat.quote(title: target.title, url: url)
@@ -81,20 +105,21 @@ extension ShellWindowController {
   /// What the copy actions take: an open Peek's page first (KB-013 works "in Peek"), else the selected tab rows
   /// (BH-191's multi-selection), else the current tab. Folder and split rows are skipped: their panes are not rows of
   /// their own in the selection.
-  private func copyTargets() -> [(url: URL, title: String)] {
+  private func copyTargets() -> [(url: URL, title: String, tab: TabID?)] {
     if peek.isOpen, let session = peek.session {
       let snapshot = engine.snapshot(of: session.tab)
       let title = (snapshot?.title).flatMap { $0.isEmpty ? nil : $0 } ?? (session.url.host() ?? "")
-      return [(snapshot?.url ?? session.url, title)]
+      return [(snapshot?.url ?? session.url, title, session.tab)]
     }
     let selected = sidebarController.selectedNodes
     let nodes = selected.isEmpty ? (currentNode.map { [$0] } ?? []) : selected
     return nodes.compactMap { node in
       guard case .tab(_, let nodeURL, let nodeTitle)? = sidebar.node(node) else { return nil }
-      let snapshot = tabsByNode[node].flatMap { engine.snapshot(of: $0) }
+      let tab = tabsByNode[node]
+      let snapshot = tab.flatMap { engine.snapshot(of: $0) }
       let url = snapshot?.url ?? nodeURL
       let title = (snapshot?.title).flatMap { $0.isEmpty ? nil : $0 } ?? nodeTitle
-      return (url, title)
+      return (url, title, tab)
     }
   }
 
