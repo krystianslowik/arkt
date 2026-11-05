@@ -71,6 +71,19 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
   }
 
   /// #118 (KB-013 to KB-016): the copy-link items sit in the Edit menu with Arc's keys.
+  /// BH-196 (#404): the one-off tip names Copy URL's key as the menu binds it.
+  func testTheCopyURLTipNamesTheMenusKey() throws {
+    let item = try XCTUnwrap(allItems().first { $0.action == #selector(ShellWindowController.copyCurrentURL(_:)) })
+    let flags = item.keyEquivalentModifierMask
+    var keys = ""
+    if flags.contains(.control) { keys += "\u{2303}" }
+    if flags.contains(.option) { keys += "\u{2325}" }
+    if flags.contains(.shift) { keys += "\u{21E7}" }
+    if flags.contains(.command) { keys += "\u{2318}" }
+    keys += item.keyEquivalent.uppercased()
+    XCTAssertEqual(CopyLinkEducation.toast.text, "Copy links faster by pressing \(keys)")
+  }
+
   func testCopyLinkItemsSitInTheEditMenuWithArcsKeys() throws {
     _ = NSApplication.shared
     let edit = try XCTUnwrap(MainMenu.make(commands: AppCommands()).menu.items.first { $0.title == "Edit" }?.submenu)

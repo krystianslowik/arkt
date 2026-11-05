@@ -27,8 +27,31 @@ public struct SettingsServices {
     ?? FileManager.default.temporaryDirectory
   /// The same action as Window > Show Library; the row is disabled while nil (#132).
   public var openLibrary: (@MainActor () -> Void)?
+  /// Settings > Spaces and Profiles > Archive (#448); both rows stay planned while nil.
+  public var archiveRows: SettingsArchiveRows?
 
   public init() {}
+}
+
+/// The two Archive rows' values as the pop-ups' titles ("12 hours", "Never"; `SettingsWindowController
+/// .archiveAfterTitles`). The app maps them to the stored thresholds; ShellUI needs no core module.
+@MainActor
+public struct SettingsArchiveRows {
+  /// "Archive Today tabs after": the Default profile's value until a profile detail pane exists (#448 decision).
+  public var tabsAfter: @MainActor () -> String
+  public var setTabsAfter: @MainActor (String) -> Void
+  /// "Archive Little Arkt windows after": one value for the app (BH-137).
+  public var littleArktAfter: @MainActor () -> String
+  public var setLittleArktAfter: @MainActor (String) -> Void
+
+  public init(tabsAfter: @escaping @MainActor () -> String, setTabsAfter: @escaping @MainActor (String) -> Void,
+              littleArktAfter: @escaping @MainActor () -> String,
+              setLittleArktAfter: @escaping @MainActor (String) -> Void) {
+    self.tabsAfter = tabsAfter
+    self.setTabsAfter = setTabsAfter
+    self.littleArktAfter = littleArktAfter
+    self.setLittleArktAfter = setLittleArktAfter
+  }
 }
 
 /// One Space as Settings > Spaces and Profiles lists it: its theme swatch, name, counts and profile.
