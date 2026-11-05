@@ -299,6 +299,37 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized at rest either")
   }
 
+  /// #602, stacked panes in the smallest window a split allows: the same, top to bottom.
+  func testStackedReflowMovesOnlyLayersPerFrame() throws {
+    let height = SplitLayout.minimumPaneLength * 3 + 20
+    let container = makeContainer(width: 400, reduceMotion: false)
+    container.setFrameSize(NSSize(width: 400, height: height))
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (countingPage(), countingPage(), countingPage())
+    container.show(panes: [a, b, c], axis: .stacked, factors: [1, 1, 1].map { $0 / 3 })
+    container.layoutSubtreeIfNeeded()
+
+    container.show(panes: [a, c], axis: .stacked, factors: [0.5, 0.5], animated: true)
+    container.layoutSubtreeIfNeeded()
+
+    XCTAssertTrue(container.isReflowing)
+    let targets = container.paneCards.map(\.frame)
+    let sizeChanges = [a.sizeChanges, c.sizeChanges]
+    for time in [100.02, 100.05, 100.08] {
+      container.reflowDriver.tick(at: time)
+      XCTAssertEqual(container.paneCards.map(\.frame), targets, "no frame change at \(time)")
+      for (card, presented) in zip(container.paneCards, container.presentedPaneFrames) {
+        assertEqual(try onScreen(card), presented, "at \(time)")
+      }
+      XCTAssertNotEqual(container.presentedPaneFrames, targets, "still moving at \(time)")
+    }
+    XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized per frame")
+    container.reflowDriver.tick(at: 105)
+    XCTAssertFalse(container.isReflowing)
+    for card in container.paneCards { assertEqual(try onScreen(card), card.frame) }
+  }
+
   /// #602: each reflow is measured on its own pacing session, "split-reflow", ended when it settles.
   func testReflowIsMeasuredAsASplitReflowPacingSession() throws {
     let container = makeContainer(onScreen: true, reduceMotion: false)
