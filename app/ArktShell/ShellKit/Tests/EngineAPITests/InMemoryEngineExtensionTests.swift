@@ -228,7 +228,8 @@ struct InMemoryEngineExtensionTests {
     let engine = InMemoryEngine()
     engine.setExtensionCommands([
       ExtensionCommand(id: ExtensionCommandID(extensionID: "a", name: "open"), extensionName: "A",
-                       description: "Open A", shortcut: ExtensionShortcut(key: "e", modifiers: [.command, .shift])),
+                       description: "Open A",
+                       shortcut: ExtensionShortcut(key: .letter(.e), modifiers: [.command, .shift])),
       ExtensionCommand(id: ExtensionCommandID(extensionID: "b", name: "save"), extensionName: "B",
                        description: "Save page"),
     ])
@@ -246,7 +247,7 @@ struct InMemoryEngineExtensionTests {
     var events: [EngineExtensionEvent] = []
     let token = engine.observeExtensions { events.append($0) }
     let save = ExtensionCommandID(extensionID: "b", name: "save")
-    let shortcut = ExtensionShortcut(key: "s", modifiers: [.command, .option])
+    let shortcut = ExtensionShortcut(key: .letter(.s), modifiers: [.command, .option])
     #expect(engine.setExtensionCommandShortcut(save, to: shortcut, scope: .global, replacingConflict: false)
             == .applied)
     let command = engine.extensionCommands.first { $0.id == save }
@@ -269,7 +270,7 @@ struct InMemoryEngineExtensionTests {
     let token = engine.observeExtensions { events.append($0) }
     let open = ExtensionCommandID(extensionID: "a", name: "open")
     let save = ExtensionCommandID(extensionID: "b", name: "save")
-    let taken = ExtensionShortcut(key: "E", modifiers: [.shift, .command])
+    let taken = ExtensionShortcut(key: .letter(.e), modifiers: [.shift, .command])
     #expect(engine.setExtensionCommandShortcut(save, to: taken, scope: .inApp, replacingConflict: false)
             == .conflict(with: open))
     #expect(engine.extensionCommands.first { $0.id == save }?.shortcut == nil)
@@ -290,7 +291,7 @@ struct InMemoryEngineExtensionTests {
     let token = engine.observeExtensions { events.append($0) }
     let open = ExtensionCommandID(extensionID: "a", name: "open")
     let save = ExtensionCommandID(extensionID: "b", name: "save")
-    let taken = ExtensionShortcut(key: "e", modifiers: [.command, .shift])
+    let taken = ExtensionShortcut(key: .letter(.e), modifiers: [.command, .shift])
     #expect(engine.setExtensionCommandShortcut(save, to: taken, scope: .inApp, replacingConflict: true) == .applied)
     #expect(engine.extensionCommands.first { $0.id == save }?.shortcut == taken)
     #expect(engine.extensionCommands.first { $0.id == open }?.shortcut == nil)
@@ -305,9 +306,71 @@ struct InMemoryEngineExtensionTests {
             == .unknownCommand)
   }
 
-  @Test func shortcutsCompareByKeyIgnoringCase() {
-    #expect(ExtensionShortcut(key: "E", modifiers: .command) == ExtensionShortcut(key: "e", modifiers: .command))
-    #expect(ExtensionShortcut(key: "e", modifiers: .command) != ExtensionShortcut(key: "e", modifiers: .control))
+  @Test func shortcutKeysAreTheUnshiftedBaseKey() throws {
+    // Cmd-Shift-2: key code kVK_ANSI_2 (0x13) types "@" on a US layout; the shortcut is still 2 with Shift.
+    let fromKeyCode = ExtensionShortcut(key: try #require(.init(keyCode: 0x13)), modifiers: [.command, .shift])
+    let fromCharacter = ExtensionShortcut(key: try #require(.init(character: "2")), modifiers: [.command, .shift])
+    #expect(fromKeyCode == fromCharacter)
+    #expect(fromKeyCode.key == .digit(.two))
+    #expect(ExtensionShortcut.Key(character: "@") == nil)
+    #expect(ExtensionShortcut.Key(character: "E") == .letter(.e))
+    #expect(ExtensionShortcut.Key(keyCode: 0x0E) == .letter(.e))
+    #expect(ExtensionShortcut.Key(keyCode: 0x7E) == .up)
+    #expect(ExtensionShortcut.Key(keyCode: 0x7A) == .function(1))
+    #expect(ExtensionShortcut.Key(keyCode: 0x5A) == .function(20))
+    #expect(ExtensionShortcut.Key(keyCode: 0x35) == nil)  // Escape
+    #expect(ExtensionShortcut(key: .letter(.e), modifiers: .command)
+            != ExtensionShortcut(key: .letter(.e), modifiers: .control))
+  }
+
+  @Test func forbiddenShortcutsAreRejectedWithoutAChange() {
+    let engine = commandsEngine()
+    var events: [EngineExtensionEvent] = []
+    let token = engine.observeExtensions { events.append($0) }
+    let save = ExtensionCommandID(extensionID: "b", name: "save")
+    func set(_ key: ExtensionShortcut.Key, _ modifiers: ExtensionShortcut.Modifiers,
+             _ scope: ExtensionCommandScope = .inApp) -> ExtensionShortcutResult {
+      engine.setExtensionCommandShortcut(save, to: ExtensionShortcut(key: key, modifiers: modifiers), scope: scope,
+                                         replacingConflict: false)
+    }
+    #expect(set(.letter(.k), []) == .rejected(.notAllowed))
+    #expect(set(.letter(.k), .shift) == .rejected(.notAllowed))
+    #expect(set(.letter(.k), [.control, .option]) == .rejected(.notAllowed))
+    #expect(set(.mediaPlayPause, .command) == .rejected(.notAllowed))
+    #expect(set(.function(24), .command) == .rejected(.noKeyCode))
+    engine.heldGlobalShortcuts = [ExtensionShortcut(key: .letter(.k), modifiers: [.command, .option])]
+    #expect(set(.letter(.k), [.command, .option], .global) == .rejected(.globalShortcutTaken))
+    #expect(engine.extensionCommands.first { $0.id == save }?.shortcut == nil)
+    #expect(events.isEmpty)
+
+    #expect(set(.mediaPlayPause, []) == .applied)
+    #expect(set(.letter(.k), [.command, .option]) == .applied)
+    token.cancel()
+  }
+
+  @Test func scopeAloneChangesWithNoShortcut() {
+    let engine = commandsEngine()
+    var events: [EngineExtensionEvent] = []
+    let token = engine.observeExtensions { events.append($0) }
+    let save = ExtensionCommandID(extensionID: "b", name: "save")
+    #expect(engine.setExtensionCommandShortcut(save, to: nil, scope: .global, replacingConflict: false) == .applied)
+    let command = engine.extensionCommands.first { $0.id == save }
+    #expect(command?.shortcut == nil && command?.scope == .global)
+    #expect(events == [.commandsChanged])
+    token.cancel()
+  }
+
+  @Test func replacingWithTheCommandsOwnShortcutChangesNothing() {
+    let engine = commandsEngine()
+    let before = engine.extensionCommands
+    var events: [EngineExtensionEvent] = []
+    let token = engine.observeExtensions { events.append($0) }
+    let open = ExtensionCommandID(extensionID: "a", name: "open")
+    let own = ExtensionShortcut(key: .letter(.e), modifiers: [.command, .shift])
+    #expect(engine.setExtensionCommandShortcut(open, to: own, scope: .inApp, replacingConflict: true) == .applied)
+    #expect(engine.extensionCommands == before)
+    #expect(events.isEmpty)
+    token.cancel()
   }
 
   // MARK: - Install events
@@ -328,6 +391,30 @@ struct InMemoryEngineExtensionTests {
     #expect(events == [.installed(info), .installed(other)])
     #expect(engine.pinnedExtensionIDs == ["b"])
     token.cancel()
+  }
+
+  @Test func installAddsTheActionBeforeReportingInstalled() {
+    let engine = InMemoryEngine()
+    let first = engine.createWindow(host: StubWindowHost())
+    let second = engine.createWindow(host: StubWindowHost())
+    var log: [String] = []
+    let windows = engine.observeWindows {
+      if case .extensionActionsChanged(let window) = $0 { log.append(window == first ? "first" : "second") }
+    }
+    let extensions = engine.observeExtensions { if case .installed = $0 { log.append("installed") } }
+    let info = InstalledExtension(id: "n", name: "New")
+    engine.installExtension(info, action: action("n", "New"), pinned: true)
+    #expect(log == ["first", "second", "installed"])
+    #expect(pinned(engine, first) == ["n"] && pinned(engine, second) == ["n"])
+    windows.cancel(); extensions.cancel()
+  }
+
+  @Test func pinningAnExtensionTheEngineNeverSawDoesNothing() {
+    let (engine, _) = engineWithActions()
+    let recorder = EventRecorder(engine)
+    engine.setExtensionPinned("never-seen", pinned: true)
+    #expect(engine.pinnedExtensionIDs.isEmpty)
+    #expect(recorder.windowEvents.isEmpty)
   }
 
   @Test func extensionEventsShareTheEngineQueue() {

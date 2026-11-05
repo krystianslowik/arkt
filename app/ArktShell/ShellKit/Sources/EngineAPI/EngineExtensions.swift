@@ -54,10 +54,11 @@ public protocol EngineExtensions: AnyObject {
   func performExtensionContextCommand(_ command: EngineMenuCommand, forAction id: String, in window: EngineWindowID)
   /// Every extension command of the profile, grouped by extension. Default: none.
   var extensionCommands: [ExtensionCommand] { get }
-  /// Sets (nil clears) a command's shortcut and its scope. The engine checks only the other extension commands, in
-  /// either scope: with `replacingConflict` false a taken shortcut returns `.conflict` and changes nothing; with true
-  /// the other command loses it. Conflicts with Arkt's own shortcuts are the shell's to check first. One
-  /// `.commandsChanged` when something changed. Default: `.unknownCommand`.
+  /// Sets (nil clears) a command's shortcut and its scope. A shortcut Chrome forbids returns `.rejected` and changes
+  /// nothing. The engine checks only the other extension commands, in either scope: with `replacingConflict` false a
+  /// taken shortcut returns `.conflict` and changes nothing; with true the other command loses it. Conflicts with
+  /// Arkt's own shortcuts are the shell's to check first. One `.commandsChanged` when something changed. Default:
+  /// `.unknownCommand`.
   func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
                                    scope: ExtensionCommandScope, replacingConflict: Bool) -> ExtensionShortcutResult
   /// Profile-wide extension events, through the same FIFO as `observe`. Default: none are delivered.
@@ -138,8 +139,9 @@ public enum ExtensionCommandScope: Equatable, Sendable {
   case global
 }
 
-/// A keyboard shortcut: one key and its modifiers. The key is stored lowercased, so Cmd-Shift-E and Cmd-Shift-e are
-/// the same shortcut.
+/// A keyboard shortcut: one key and its modifiers, as Chromium stores a command's accelerator (a layout-independent
+/// `ui::KeyboardCode` and modifiers). The key is the unshifted base key: Cmd-Shift-2 is `.digit(.two)` with
+/// `[.command, .shift]`, never "@".
 public struct ExtensionShortcut: Hashable, Sendable {
   public struct Modifiers: OptionSet, Hashable, Sendable {
     public let rawValue: UInt8
@@ -150,12 +152,86 @@ public struct ExtensionShortcut: Hashable, Sendable {
     public static let shift = Modifiers(rawValue: 1 << 3)
   }
 
-  /// The key as `NSEvent.charactersIgnoringModifiers` gives it, lowercased.
-  public let key: String
+  public enum Letter: String, CaseIterable, Hashable, Sendable {
+    case a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z
+  }
+
+  public enum Digit: Int, CaseIterable, Hashable, Sendable {
+    case zero, one, two, three, four, five, six, seven, eight, nine
+  }
+
+  /// The keys a `chrome.commands` shortcut can name (Chromium's `ParseImpl` in `extensions/common/command.cc`), plus
+  /// F-keys.
+  public enum Key: Hashable, Sendable {
+    case letter(Letter)
+    case digit(Digit)
+    case comma, period
+    case up, down, left, right
+    case home, end, pageUp, pageDown, space, insert, delete
+    /// F1 to F20, the function keys a Mac keyboard reports. Any other number has no key code.
+    case function(Int)
+    case mediaNextTrack, mediaPreviousTrack, mediaPlayPause, mediaStop
+
+    /// Media keys take no modifiers; every other key needs Command, Option or Control.
+    public var isMedia: Bool {
+      switch self {
+      case .mediaNextTrack, .mediaPreviousTrack, .mediaPlayPause, .mediaStop: true
+      default: false
+      }
+    }
+
+    /// The key from its unshifted base character as the keyboard layout gives it
+    /// (`NSEvent.characters(byApplyingModifiers: [])`): a letter of either case, a digit, comma, period or space. Use
+    /// it for letters, so a non-ANSI layout records the letter printed on the key. Nil for anything else.
+    public init?(character: Character) {
+      let text = String(character).lowercased()
+      if let letter = Letter(rawValue: text) { self = .letter(letter); return }
+      if let value = Int(text), let digit = Digit(rawValue: value) { self = .digit(digit); return }
+      switch text {
+      case ",": self = .comma
+      case ".": self = .period
+      case " ": self = .space
+      default: return nil
+      }
+    }
+
+    /// The key from a macOS virtual key code (`NSEvent.keyCode`, Carbon's `kVK_*`), which Shift and the layout do not
+    /// change. Letters, digits, comma and period by their ANSI position; named keys and F1 to F20 on any layout. Nil
+    /// for any other code. Media keys arrive as system-defined events, not key codes.
+    public init?(keyCode: UInt16) {
+      if let key = Self.byKeyCode[keyCode] { self = key } else { return nil }
+    }
+
+    private static let byKeyCode: [UInt16: Key] = {
+      var map: [UInt16: Key] = [:]
+      let letters: [(UInt16, Letter)] = [
+        (0x00, .a), (0x01, .s), (0x02, .d), (0x03, .f), (0x04, .h), (0x05, .g), (0x06, .z), (0x07, .x), (0x08, .c),
+        (0x09, .v), (0x0B, .b), (0x0C, .q), (0x0D, .w), (0x0E, .e), (0x0F, .r), (0x10, .y), (0x11, .t), (0x1F, .o),
+        (0x20, .u), (0x22, .i), (0x23, .p), (0x25, .l), (0x26, .j), (0x28, .k), (0x2D, .n), (0x2E, .m),
+      ]
+      for (code, letter) in letters { map[code] = .letter(letter) }
+      let digits: [(UInt16, Digit)] = [
+        (0x12, .one), (0x13, .two), (0x14, .three), (0x15, .four), (0x17, .five), (0x16, .six), (0x1A, .seven),
+        (0x1C, .eight), (0x19, .nine), (0x1D, .zero),
+      ]
+      for (code, digit) in digits { map[code] = .digit(digit) }
+      let named: [(UInt16, Key)] = [
+        (0x2B, .comma), (0x2F, .period), (0x31, .space), (0x7E, .up), (0x7D, .down), (0x7B, .left), (0x7C, .right),
+        (0x73, .home), (0x77, .end), (0x74, .pageUp), (0x79, .pageDown), (0x72, .insert), (0x75, .delete),
+      ]
+      for (code, key) in named { map[code] = key }
+      let functions: [UInt16] = [0x7A, 0x78, 0x63, 0x76, 0x60, 0x61, 0x62, 0x64, 0x65, 0x6D, 0x67, 0x6F, 0x69, 0x6B,
+                                 0x71, 0x6A, 0x40, 0x4F, 0x50, 0x5A]
+      for (index, code) in functions.enumerated() { map[code] = .function(index + 1) }
+      return map
+    }()
+  }
+
+  public let key: Key
   public let modifiers: Modifiers
 
-  public init(key: String, modifiers: Modifiers) {
-    self.key = key.lowercased(); self.modifiers = modifiers
+  public init(key: Key, modifiers: Modifiers) {
+    self.key = key; self.modifiers = modifiers
   }
 }
 
@@ -183,8 +259,21 @@ public enum ExtensionShortcutResult: Equatable, Sendable {
   /// Another extension command has the shortcut; nothing changed. The shell asks (Use or Keep Existing) and calls
   /// again with `replacingConflict: true` for Use.
   case conflict(with: ExtensionCommandID)
+  /// The engine refuses the shortcut; nothing changed.
+  case rejected(ExtensionShortcutRejection)
   /// No such command (the extension went away).
   case unknownCommand
+}
+
+/// Why the engine refused a shortcut (`ExtensionShortcutResult.rejected`).
+public enum ExtensionShortcutRejection: Equatable, Sendable {
+  /// The key has no `ui::KeyboardCode` (an F-key number past F20).
+  case noKeyCode
+  /// A combination Chrome forbids: a non-media key without Command, Option or Control, Control with Option, or a media
+  /// key with modifiers.
+  case notAllowed
+  /// A global shortcut another application or the system already holds.
+  case globalShortcutTaken
 }
 
 // MARK: - Install events (#591)
@@ -201,8 +290,10 @@ public struct InstalledExtension: Equatable, Sendable {
 /// Profile-wide extension events (`EngineExtensions.observeExtensions`), in the same FIFO as tab and window events.
 /// Action list changes stay on the window stream (`EngineWindowEvent.extensionActionsChanged`).
 public enum EngineExtensionEvent: Equatable, Sendable {
-  /// An extension was installed, in place of Chromium's post-install text. Its actions, and its pin when it is pinned
-  /// on install, follow as `.extensionActionsChanged`.
+  /// An extension was installed, in place of Chromium's post-install text. Its order against the
+  /// `.extensionActionsChanged` that lists its action (and its pin, when it pins on install) is not guaranteed: in
+  /// Chromium `OnExtensionLoaded` adds the action before `OnExtensionInstalled` fires. `OnExtensionInstalled` also
+  /// fires for an update (`is_update`); the engine filters those out and reports only first installs.
   case installed(InstalledExtension)
   /// `extensionCommands` changed: a shortcut or scope set, an extension with commands added or removed.
   case commandsChanged

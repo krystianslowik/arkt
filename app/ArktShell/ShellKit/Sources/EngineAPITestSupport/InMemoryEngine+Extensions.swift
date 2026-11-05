@@ -8,7 +8,7 @@ extension InMemoryEngine {
   // MARK: - Pin state and order
 
   public func setExtensionPinned(_ extensionID: String, pinned: Bool) {
-    guard pinnedExtensionIDs.contains(extensionID) != pinned else { return }
+    guard knownExtensionIDs.contains(extensionID), pinnedExtensionIDs.contains(extensionID) != pinned else { return }
     if pinned { pinnedExtensionIDs.append(extensionID) } else { pinnedExtensionIDs.removeAll { $0 == extensionID } }
     announceActions(of: extensionID)
   }
@@ -36,8 +36,8 @@ extension InMemoryEngine {
   /// A driver action marked `isPinned` pins its extension the first time the engine sees that extension, as a
   /// profile's stored pins would; after that the profile's pin state wins.
   func seedPins(from list: [ExtensionAction]) {
-    for action in list where !seededPinExtensions.contains(action.extensionID) {
-      seededPinExtensions.insert(action.extensionID)
+    for action in list where !knownExtensionIDs.contains(action.extensionID) {
+      knownExtensionIDs.insert(action.extensionID)
       if action.isPinned, !pinnedExtensionIDs.contains(action.extensionID) {
         pinnedExtensionIDs.append(action.extensionID)
       }
@@ -120,6 +120,7 @@ extension InMemoryEngine {
                                           scope: ExtensionCommandScope,
                                           replacingConflict: Bool) -> ExtensionShortcutResult {
     guard let index = extensionCommands.firstIndex(where: { $0.id == id }) else { return .unknownCommand }
+    if let shortcut, let rejection = rejection(of: shortcut, scope: scope) { return .rejected(rejection) }
     let holder = shortcut.flatMap { key in
       extensionCommands.firstIndex { $0.id != id && $0.shortcut == key }
     }
@@ -132,6 +133,20 @@ extension InMemoryEngine {
     extensionCommands = commands
     hub.emit(EngineExtensionEvent.commandsChanged)
     return .applied
+  }
+
+  /// Chrome's rules for a command shortcut (`extensions/common/command.cc`), and global shortcuts held elsewhere.
+  private func rejection(of shortcut: ExtensionShortcut, scope: ExtensionCommandScope) -> ExtensionShortcutRejection? {
+    if case .function(let number) = shortcut.key, !(1...20).contains(number) { return .noKeyCode }
+    let modifiers = shortcut.modifiers
+    if shortcut.key.isMedia {
+      if !modifiers.isEmpty { return .notAllowed }
+    } else {
+      if modifiers.isDisjoint(with: [.command, .option, .control]) { return .notAllowed }
+      if modifiers.isSuperset(of: [.control, .option]) { return .notAllowed }
+    }
+    if scope == .global, heldGlobalShortcuts.contains(shortcut) { return .globalShortcutTaken }
+    return nil
   }
 
   public func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation {
@@ -147,12 +162,19 @@ extension InMemoryEngine {
     hub.emit(EngineExtensionEvent.commandsChanged)
   }
 
-  /// Test driver: an extension finished installing (#592). Reports `.installed`, then, with `pinned`, pins it as
-  /// `setExtensionPinned` does. Whether new extensions pin by default is the shell's product decision, not the
-  /// engine's (#590, question 2).
-  public func installExtension(_ info: InstalledExtension, pinned: Bool = false) {
-    seededPinExtensions.insert(info.id)
+  /// Test driver: an extension finished installing (#592), in Chromium's order: its `action` joins every window's list
+  /// (pinned at the end of the order with `pinned`), `.extensionActionsChanged` for each window that lists it, then
+  /// `.installed`. Whether new extensions pin by default is the shell's product decision, not the engine's (#590,
+  /// question 2).
+  public func installExtension(_ info: InstalledExtension, action: ExtensionAction? = nil, pinned: Bool = false) {
+    knownExtensionIDs.insert(info.id)
+    if pinned, !pinnedExtensionIDs.contains(info.id) { pinnedExtensionIDs.append(info.id) }
+    if let action {
+      for window in windowIDs where actions[window]?.contains(where: { $0.id == action.id }) != true {
+        actions[window, default: []].append(action)
+      }
+    }
+    if action != nil || pinned { announceActions(of: info.id) }
     hub.emit(EngineExtensionEvent.installed(info))
-    if pinned { setExtensionPinned(info.id, pinned: true) }
   }
 }

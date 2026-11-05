@@ -75,9 +75,12 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   /// Extension pins, commands and context commands (#591; `InMemoryEngine+Extensions.swift`). Pins are profile-wide:
   /// one order for every window, kept when windows close.
   public internal(set) var pinnedExtensionIDs: [String] = []
-  /// Extensions whose driver-supplied `isPinned` already seeded `pinnedExtensionIDs`.
-  var seededPinExtensions: Set<String> = []
+  /// Extensions the engine has seen, through `setExtensionActions` or `installExtension`. Only these can be pinned; a
+  /// driver action's `isPinned` seeds the pin the first time its extension is seen.
+  var knownExtensionIDs: Set<String> = []
   public internal(set) var extensionCommands: [ExtensionCommand] = []
+  /// Global shortcuts another application or the system holds: `.global` with one of these is rejected.
+  public var heldGlobalShortcuts: Set<ExtensionShortcut> = []
   /// Context menu commands run through `performExtensionContextCommand`, in order.
   public internal(set) var performedExtensionContextCommands: [(command: EngineMenuCommand, actionID: String,
                                                                 window: EngineWindowID)] = []
