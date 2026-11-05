@@ -191,7 +191,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private(set) lazy var infobarStrips = makeInfobarPresenter()
   /// The find bar's state and engine calls, and its view over the card (#134); see `+Find`.
   private(set) lazy var findBar = makeFindBar()
+  /// The zoom pill's state and its view over the card (#579); see `+Zoom`.
+  private(set) lazy var zoomPill = makeZoomPill()
   private(set) lazy var statusPill = makeStatusPillPresenter()
+  /// The crashed tab view over a page whose process went away (#578).
+  private(set) lazy var crashedTabs = makeCrashedTabPresenter()
+  /// The page info panel below the address pill (#582); see `+PageInfo`.
+  public private(set) lazy var pageInfo = makePageInfoPanel()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
@@ -243,6 +249,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     root.onSidebarStateChange = { [weak self] in
       self?.saveSidebarState()
       self?.extensionsPanel?.sidebarDidChange(isVisible: self?.isSidebarVisible ?? false)   // #595
+      self?.pageInfo.sidebarDidChange()                                              // #582
     }
     root.onLayout = { [weak self] in
       self?.javaScriptDialogs.layoutDidFinish()                                      // #400
@@ -454,6 +461,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     for bar in [urlBar, toolbar.urlBar] {
       bar.onPress = { [weak self] in self?.openLocation(nil) }                        // same as Cmd-L, KB-002
       bar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
+      bar.onPressSiteGlyph = { [weak self, weak bar] in if let bar { self?.toggleSiteControls(from: bar) } }  // #582
     }
     wireToolbarActions(toolbar) { [weak self] in self?.toolbarTab }
     toolbarSetting.addObserver(self)
@@ -544,6 +552,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     urlBar.url = url
     rootView.card.toolbar.urlBar.url = url
     refreshToolbarHistory()
+    refreshPageInfo()                                                                // #582
   }
 
   /// The tab the Toolbar's Back, Forward and Reload act on and show the history of: the current tab, which in a split
@@ -796,7 +805,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     permissionPrompts.refresh()
     infobarStrips.refresh()
     refreshFindBar()
+    refreshZoomPill()
     statusPill.refresh()
+    refreshCrashedTabs()                                            // #578
   }
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -829,6 +840,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       return
     case .targetURLChanged:
       statusPill.handle(event)                                      // #114: a Peek's page has no row, so before the map
+      return
+    case .tabCrashed(let tab, _):
+      refreshCrashedTabs(crashed: tab)                              // #578: before the map, as a private page has no row
+      return
+    case .tabRecovered:
+      refreshCrashedTabs()
+      return
+    case .pageInfoChanged(let tab):
+      if tab == currentTab { refreshPageInfo() }                    // #582: before the map, as a private page has no row
       return
     default:
       break
@@ -874,8 +894,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
       break                                                         // routed above, before the row lookup (#114)
-    case .tabCrashed, .tabRecovered, .zoomChanged, .tabFullscreenChanged:
-      break                                                         // no shell surface yet (#578, #579, #581)
+    case .tabCrashed, .tabRecovered, .pageInfoChanged:
+      break                                                         // routed above, before the row lookup (#578, #582)
+    case .zoomChanged:
+      zoomPill.handle(event)                                        // #579
+    case .tabFullscreenChanged:
+      break                                                         // no shell surface yet (#581)
     }
   }
 
@@ -889,6 +913,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   ///   stays unloaded as after Cmd-W.
   private func tabDidClose(_ tab: TabID, node: NodeID, reason: CloseReason) {
     findBar.forget(tab)                                     // #134
+    zoomPill.forget(tab)                                    // #579
     tabsByNode[node] = nil
     nodeByTab[tab] = nil
     let wasCurrent = currentTab == tab
@@ -973,6 +998,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// cancelled prompt keeps it open. Without one (no tab was ever shown) the window closes as before. The shown tabs
   /// are stamped once the first page closes, not here: a cancelled prompt leaves the stored sidebar as it was.
   public func windowShouldClose(_ sender: NSWindow) -> Bool {
+    settlePendingClear()                             // #413: a Clear mid-exit archives before the session is saved
     guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
     let open = Array(tabsByNode.values)
     saveSession()                                    // #116: before the tabs close
@@ -986,6 +1012,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The shown tabs, every pane of a split, stop being visible (decision 10). The command bar's display link retains
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
+    settlePendingClear()                             // #413: a window closed without `windowShouldClose`
     isClosed = true
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()

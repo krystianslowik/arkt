@@ -174,6 +174,12 @@ public enum EngineEvent: Equatable, Sendable {
   /// screen. A navigation or a crash leaves it.
   case tabFullscreenChanged(TabID, isFullscreen: Bool)
 
+  // MARK: Page info (#582, EnginePageInfo.swift)
+
+  /// What `EngineSiteSettings.pageInfo(of:)` reports for the tab changed: a permission of its site was set or reset,
+  /// the connection's state changed without a navigation (mixed content appeared), or the site data count arrived.
+  case pageInfoChanged(TabID)
+
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id, _), .urlChanged(let id, _), .titleChanged(let id, _),
@@ -182,7 +188,8 @@ public enum EngineEvent: Equatable, Sendable {
          .dialogEnded(let id, _), .permissionEnded(let id, _), .infobarsChanged(let id, _),
          .findResult(let id, _, _, _, _), .targetURLChanged(let id, _):
       return id
-    case .tabCrashed(let id, _), .tabRecovered(let id), .zoomChanged(let id, _, _), .tabFullscreenChanged(let id, _):
+    case .tabCrashed(let id, _), .tabRecovered(let id), .zoomChanged(let id, _, _), .tabFullscreenChanged(let id, _),
+         .pageInfoChanged(let id):
       return id
     case .dialogRequested(let dialog):
       return dialog.tab
@@ -269,8 +276,12 @@ public protocol EngineClient: AnyObject {
   /// running find the same way (`.clear`, nothing reported), so the shell closes its find bar when it moves a tab.
   func stopFinding(_ id: TabID, action: FindStopAction)
   /// Answers a pending JavaScript dialog (#400, contract rule 19): `accepted` is OK (true) or Cancel (false); `userInput`
-  /// is a prompt's text. Reported with one `.dialogEnded`. A no-op for a dialog that already ended, so a click that
-  /// races the engine's own end does nothing. Default: a no-op, for an engine that raises no dialogs.
+  /// is a prompt's text; for a leave-site prompt (`.beforeUnload`, #584) true is Leave and false is Stay. Reported with
+  /// one `.dialogEnded`, before the `.tabClosed` or `.closeCancelled` a leave-site answer to a held close brings; for a
+  /// held navigation, Stay reports nothing more and Leave lets the navigation proceed. Leave on one tab of a window
+  /// close or quit that several tabs hold makes the engine activate and prompt the next one (one prompt at a time, on
+  /// a shown tab). A no-op for a dialog that already ended, so a click that races the engine's own end does nothing.
+  /// Default: a no-op, for an engine that raises no dialogs.
   func respond(to dialog: DialogID, accepted: Bool, userInput: String?)
   /// Answers a pending permission request (#400, contract rule 20). Reported with one `.permissionEnded`. A no-op for a
   /// request that already ended or was answered, so a click that races the engine's own end does nothing. Default: a
@@ -301,6 +312,12 @@ public protocol EngineClient: AnyObject {
   func resetZoom(_ id: TabID)
   /// The crashed-session prompt's state; nil for an engine that keeps no session. Default: nil.
   var sessionRecovery: (any EngineSessionRecovery)? { get }
+
+  // MARK: Page info (#582, EnginePageInfo.swift)
+
+  /// Page info and per-site permissions; nil for an engine that offers neither, so the shell shows no page info
+  /// panel. Default: nil.
+  var siteSettings: (any EngineSiteSettings)? { get }
 
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it

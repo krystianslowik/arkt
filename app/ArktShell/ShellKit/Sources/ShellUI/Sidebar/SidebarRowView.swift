@@ -32,7 +32,7 @@ public final class SidebarRowView: NSTableRowView {
       needsDisplay = true
       CATransaction.begin()
       CATransaction.setDisableActions(true)
-      backgroundLayer.backgroundColor = displayedFill?.cgColor
+      applyFill()
       CATransaction.commit()
     }
   }
@@ -60,6 +60,9 @@ public final class SidebarRowView: NSTableRowView {
     return shown.background(flavor)
   }
 
+  /// Increase Contrast (#640): every filled state also draws the 1 pt edge. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
+
   private var hoverArea: NSTrackingArea?
 
   public override init(frame frameRect: NSRect) {
@@ -71,7 +74,10 @@ public final class SidebarRowView: NSTableRowView {
     backgroundLayer.cornerCurve = .continuous
     backgroundLayer.shadowRadius = 2
     backgroundLayer.shadowOffset = CGSize(width: 0, height: -1)
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { needsDisplay = true }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -83,13 +89,20 @@ public final class SidebarRowView: NSTableRowView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     backgroundLayer.frame = bounds.insetBy(dx: 0, dy: SidebarMetrics.rowBackgroundInsetY)
-    backgroundLayer.backgroundColor = displayedFill?.cgColor
+    applyFill()
     let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
     let showsShadow = isInteractive && state == .current && shadow.alpha > 0
     backgroundLayer.shadowColor = shadow.cgColor
     backgroundLayer.shadowOpacity = showsShadow ? 1 : 0
     updateShadowPath()
     CATransaction.commit()
+  }
+
+  /// The fill and, under Increase Contrast, its edge: only a filled state is edged.
+  private func applyFill() {
+    let fill = displayedFill
+    backgroundLayer.backgroundColor = fill?.cgColor
+    IncreasedContrast.setEdge(on: backgroundLayer, increased: fill != nil && increaseContrast(), flavor: flavor)
   }
 
   public override func layout() {

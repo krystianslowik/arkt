@@ -3,28 +3,51 @@ import EngineAPI
 
 // A page's `alert()`, `confirm()` and `prompt()` in the shell's dialog system (#400, docs/design/alerts-sheets-toasts.md
 // section 3.3): the engine reports the request with Chromium's own strings, and the shell draws it as the anchored
-// panel over the page that asked.
+// panel over the page that asked. A page's leave-site prompt (`beforeunload`, #584) is the same panel attached to the
+// card's top edge, with Stay as the primary (design/extensions, `surf-dialog`).
 
 extension DialogContent {
   /// The dialog for a page's request. The title, message and button titles are the engine's. OK is the Return default;
   /// Escape answers Cancel, which for an alert (OK only) is its one answer. The body scrolls past `bodyMaxHeight`,
   /// since Chromium allows 24 lines of 80 characters.
   public static func javaScriptDialog(_ dialog: JavaScriptDialog, width: CGFloat = 420) -> DialogContent {
-    DialogContent(title: dialog.title, paragraphs: dialog.message.isEmpty ? [] : [.init(dialog.message)],
+    if dialog.kind == .beforeUnload { return leaveSite(dialog, width: width) }
+    return DialogContent(title: dialog.title, paragraphs: dialog.message.isEmpty ? [] : [.init(dialog.message)],
                   primaryTitle: dialog.acceptTitle, cancelTitle: dialog.cancelTitle, defaultButton: .primary,
                   width: width,
                   input: dialog.defaultPromptText.map { .init(text: $0, accessibilityLabel: "Response") },
                   bodyMaxHeight: 240)
+  }
+
+  /// How long after a leave-site prompt appears that presses and Return are ignored, so a click that was already on
+  /// its way (a second click on the close button, a click in the page right after Cmd-W) cannot hit Leave. Escape is
+  /// not held: it stays, which is always safe.
+  public static let leaveSiteInputProtection: TimeInterval = 0.3
+
+  /// The leave-site prompt (#584): Stay is the mustard primary and takes Return, Leave the neutral pill beside it.
+  /// Escape stays too: closing the prompt must never close the page. The titles are the engine's; "Stay" stands in
+  /// only for an engine that sends no decline title.
+  private static func leaveSite(_ dialog: JavaScriptDialog, width: CGFloat) -> DialogContent {
+    DialogContent(title: dialog.title, paragraphs: dialog.message.isEmpty ? [] : [.init(dialog.message)],
+                  primaryTitle: dialog.cancelTitle ?? "Stay", secondaryTitle: dialog.acceptTitle, cancelTitle: nil,
+                  defaultButton: .primary, escapeAnswersCancel: true, width: width, bodyMaxHeight: 240,
+                  inputProtection: leaveSiteInputProtection)
   }
 }
 
 extension JavaScriptDialog {
   /// What the page's call returns for `answer`: an alert's one answer is OK (also Escape); a confirm's Cancel is false;
   /// a prompt's text goes with OK only.
+  /// A leave-site prompt leaves only on Leave (the secondary answer); Stay and Escape keep the page.
   func response(for answer: DialogContent.Answer, input: String?) -> (accepted: Bool, userInput: String?) {
+    if kind == .beforeUnload { return (answer == .secondary, nil) }
     let accepted = kind == .alert || answer != .cancel
     return (accepted, accepted && kind == .prompt ? input : nil)
   }
+
+  /// Where the dialog's panel sits on the page: a leave-site prompt hangs from the card's top edge (#584), the others
+  /// sit inset from its top-leading corner.
+  var panelAttachment: DialogPanel.Attachment { kind == .beforeUnload ? .topEdge : .inset }
 }
 
 /// Shows each pending JavaScript dialog of the tabs the window shows, one per tab, and answers the engine. A dialog
@@ -43,6 +66,10 @@ public final class JavaScriptDialogPresenter {
   public private(set) var pending: [TabID: JavaScriptDialog] = [:]
   /// Reduce Motion, handed to each panel at its entrance. Tests set it.
   var reduceMotion: (@MainActor () -> Bool)?
+  /// The clock of a leave-site prompt's input protection, handed to each panel. Tests set it.
+  var clock: (@MainActor () -> TimeInterval)?
+  /// Whether a panel's window is really visible (not occluded), handed to each panel. Tests set it.
+  var isOnScreen: (@MainActor () -> Bool)?
 
   /// `anchor` returns the view of a tab that is on screen in a window, nil for one that is not.
   public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> Anchor?,
@@ -112,8 +139,10 @@ public final class JavaScriptDialogPresenter {
   private func present(_ tab: TabID) {
     guard let dialog = pending[tab] else { return }
     host.place(tab, maxWidth: 420) { width in
-      let panel = DialogPanel(content: .javaScriptDialog(dialog, width: width))
+      let panel = DialogPanel(content: .javaScriptDialog(dialog, width: width), attachment: dialog.panelAttachment)
       if let reduceMotion { panel.reduceMotion = reduceMotion }
+      if let clock { panel.clock = clock }
+      if let isOnScreen { panel.isOnScreen = isOnScreen }
       panel.onAnswer = { [weak self, weak panel] answer in
         self?.answered(tab, dialog, answer, input: panel?.inputText)
       }

@@ -54,6 +54,8 @@ public final class ShellWindowSet {
   private var mainOrder: [ObjectIdentifier] = []
   private var mainObservers: [ObjectIdentifier: any NSObjectProtocol] = [:]
   private var windowObservation: EngineObservation?
+  /// The post-install toast (#594), on the primary window; nil for an engine without extensions.
+  private var extensionInstallToasts: ExtensionInstallToasts?
   /// Little Arkt windows (#314), the frontmost last.
   private var littleArktWindows: [LittleArktWindowController] = []
   /// The size new Little Arkt windows get: the last one the user set (BH-142), for this session.
@@ -94,6 +96,9 @@ public final class ShellWindowSet {
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
       self?.windowOpened(id)
+    }
+    if let extensions = engine as? any EngineExtensions {
+      extensionInstallToasts = ExtensionInstallToasts(extensions: extensions) { [weak self] in self?.primary?.toasts }
     }
   }
 
@@ -211,6 +216,7 @@ public final class ShellWindowSet {
   /// while shutting down cannot overwrite it.
   public func saveSessionsForTermination() {
     for controller in controllers {
+      controller.settlePendingClear()                // #413: a Clear mid-exit is saved archived
       controller.saveSession()
       controller.savesSession = false
     }

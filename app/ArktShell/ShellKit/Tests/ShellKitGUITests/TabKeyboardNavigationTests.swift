@@ -198,11 +198,12 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertTrue(controller.window?.firstResponder === outline)
     XCTAssertEqual(outline.keyboardFocusRow, row)
     let ring = outline.keyboardFocusRing
-    XCTAssertFalse(ring.isHidden)
+    XCTAssertTrue(ring.isFocused, "shown while the window is key (DragHintFocusRingTests)")
     XCTAssertTrue(ring.superview === outline)
     XCTAssertEqual(ring.frame, outline.keyboardFocusRect(row))
     ring.updateLayer()
-    XCTAssertEqual(ring.ring.strokeColor, ring.strokeColor, "the system focus ring color")
+    XCTAssertEqual(ring.ring.strokeColor, ShellTokens.focusRing.resolve(page.outlineController.flavor).cgColor,
+                   "the ink ring in the Space's text tone (#642)")
     XCTAssertEqual(ring.ring.lineWidth, KeyboardFocusRingView.lineWidth)
   }
 
@@ -272,8 +273,8 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertNotNil(outline.keyboardFocusRow)
   }
 
-  /// #343: a Favorite current puts the system keyboard-focus ring on its tile, not on an unrelated outline row.
-  func testCtrlSpaceFocusesTheCurrentFavoriteTileWithTheSystemRing() throws {
+  /// #343: a Favorite current puts the keyboard focus ring on its tile, not on an unrelated outline row.
+  func testCtrlSpaceFocusesTheCurrentFavoriteTileWithTheFocusRing() throws {
     controller.activate(node: favorites[0])
     controller.revealCurrentTab(nil)
 
@@ -281,10 +282,10 @@ final class TabKeyboardNavigationTests: XCTestCase {
     let tile = try XCTUnwrap(grid.tile(for: favorites[0]))
     XCTAssertTrue(controller.window?.firstResponder === grid.collectionView)
     XCTAssertEqual(grid.keyboardFocusID, favorites[0])
-    XCTAssertFalse(tile.keyboardFocusRing.isHidden)
+    XCTAssertTrue(tile.keyboardFocusRing.isFocused)
     XCTAssertEqual(tile.keyboardFocusRing.frame, tile.bounds)
     tile.keyboardFocusRing.updateLayer()
-    XCTAssertEqual(tile.keyboardFocusRing.ring.strokeColor, tile.keyboardFocusRing.strokeColor)
+    XCTAssertEqual(tile.keyboardFocusRing.ring.strokeColor, ShellTokens.focusRing.resolve(grid.flavor).cgColor)
     XCTAssertEqual(tile.keyboardFocusRing.ring.lineWidth, KeyboardFocusRingView.lineWidth)
     XCTAssertNil(outline.keyboardFocusRow)
   }
@@ -360,7 +361,7 @@ final class TabKeyboardNavigationTests: XCTestCase {
 
     XCTAssertTrue(controller.window?.firstResponder === outline)
     XCTAssertEqual(outline.keyboardFocusRow, row)
-    XCTAssertFalse(outline.keyboardFocusRing.isHidden)
+    XCTAssertTrue(outline.keyboardFocusRing.isFocused)
   }
 
   /// #343 / design VoiceOver: a moved tile cursor reports its destination, and announcement text uses that

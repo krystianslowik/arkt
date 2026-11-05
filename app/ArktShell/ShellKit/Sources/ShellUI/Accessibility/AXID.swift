@@ -117,6 +117,8 @@ public enum AXID {
     /// Label: joined pane titles. Selected: any pane of the split is `current`.
     public static let rowSplit = "sidebar.row.split"
     public static let divider = "sidebar.divider"
+    /// The Clear control on the divider above Today (#413). Label "Clear Today tabs"; present while not drawn.
+    public static let clearToday = "sidebar.clearToday"
     /// Present only while the row's close button is shown. Label: tooltip.
     public static let rowClose = "sidebar.row.close"
     /// A row's audio button (#364): mutes or unmutes the page.
@@ -137,7 +139,8 @@ public enum AXID {
 
   /// Command bar panel, field, results table and result rows (group U4c).
   public enum CommandBar {
-    /// On the panel's content view (`CommandBarView`). Value: `open` while shown, `closed` while hidden and inert.
+    /// On the panel's content view (`CommandBarView`). Present while shown; absent while hidden and inert. No value
+    /// (#608: VoiceOver read the old "open" / "closed" one aloud).
     public static let root = "commandBar"
     public static let field = "commandBar.field"
     public static let results = "commandBar.results"
@@ -162,8 +165,6 @@ public enum AXID {
     public static let preview = "commandBar.preview"
     public static let previewSplit = "commandBar.preview.split"
     public static let previewPrimary = "commandBar.preview.primary"
-    public static let open = "open"
-    public static let closed = "closed"
   }
 
   /// Archive window, table, rows, search, filters, buttons and footer (group U4c, #111).

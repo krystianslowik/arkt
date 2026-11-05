@@ -313,6 +313,24 @@ final class TabSwitcherTests: XCTestCase {
     XCTAssertFalse(panel.rowViews[0].isAccessibilitySelected())
   }
 
+  /// Every highlight move speaks the highlighted row's label (#608), interrupting the previous one so a run of
+  /// Ctrl-Tab presses lands on the last row. Posted app-wide through the `announce` seam.
+  func testEachMoveAnnouncesTheHighlightedRow() throws {
+    var spoken: [(text: String, priority: NSAccessibilityPriorityLevel)] = []
+    switcher.announce = { spoken.append(($0, $1)) }
+    view([tabs[0], tabs[1], tabs[2], tabs[3]])
+    try ctrlTab()
+    XCTAssertEqual(spoken.map(\.text), ["Recent tabs, 3 tabs", "Tab 2, Work, 1 of 3"])
+    send(try key(kVK_Tab, .maskControl))
+    XCTAssertEqual(spoken.last?.text, "Tab 1, Work, 2 of 3")
+    XCTAssertEqual(spoken.last?.priority, .high)
+    send(try key(kVK_Tab, [.maskControl, .maskShift]))
+    XCTAssertEqual(spoken.last?.text, "Tab 2, Work, 1 of 3")
+    send(try key(kVK_ANSI_Grave, .maskControl))
+    XCTAssertEqual(spoken.last?.text, "Tab 0, Work, 3 of 3", "backwards wraps to the last row")
+    XCTAssertEqual(spoken.count, 5)
+  }
+
   // MARK: Motion
 
   /// Reduce Motion: the highlight jumps.

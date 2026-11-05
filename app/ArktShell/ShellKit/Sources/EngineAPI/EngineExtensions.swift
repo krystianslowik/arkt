@@ -278,13 +278,23 @@ public enum ExtensionShortcutRejection: Equatable, Sendable {
 
 // MARK: - Install events (#591)
 
+/// What installed an extension: the user (the Web Store's install sheet) or a browser import's batch
+/// (`EngineImporting.installExtensionResults`), which has its own summary and shows no per-extension toast (#594).
+public enum ExtensionInstallSource: Equatable, Sendable {
+  case user
+  case browserImport
+}
+
 /// An extension the profile just installed (#592, #594 post-install toast).
 public struct InstalledExtension: Equatable, Sendable {
   public var id: String
   public var name: String
   /// The extension's icon, PNG.
   public var iconPNG: Data?
-  public init(id: String, name: String, iconPNG: Data? = nil) { self.id = id; self.name = name; self.iconPNG = iconPNG }
+  public var source: ExtensionInstallSource
+  public init(id: String, name: String, iconPNG: Data? = nil, source: ExtensionInstallSource = .user) {
+    self.id = id; self.name = name; self.iconPNG = iconPNG; self.source = source
+  }
 }
 
 /// Profile-wide extension events (`EngineExtensions.observeExtensions`), in the same FIFO as tab and window events.

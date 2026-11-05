@@ -184,7 +184,8 @@ Transparency**: the popover is already opaque.
 - Popover surface: a new pair, porcelain `#FAF9F5` in light (`surfaceBrand`) and `#262927` in dark.
 - Brand colors: [`design/brand/tokens/brand-tokens.json`](../brand/tokens/brand-tokens.json). The pad's top end is
   porcelain; its bottom end `#121214` is new and belongs with the theme code, not the brand.
-- Focus and selection: the system focus ring and `controlAccentColor` for the selected texture swatch.
+- Focus and selection: the system focus ring and `controlAccentColor` for the selected texture swatch. These stay
+  until the theme creator moves to `ShellTokens.focusRing` (#642 follow-up).
 - Springs: `Motion/SpringPreset`.
 - Contrast: `Contrast.ratio` and the probe in `ShellTokensContrastTests`.
 

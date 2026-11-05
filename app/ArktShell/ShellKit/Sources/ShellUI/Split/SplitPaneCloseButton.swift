@@ -7,7 +7,8 @@ import Motion
 /// Never `isHidden` while its pane has a page, so VoiceOver and Full Keyboard Access always reach it; while not shown
 /// it is transparent and takes no clicks (`hitTest` passes them to the page). The surface follows the Peek controls:
 /// `toastSurface` fill, `cardBorder` hairline, `secondaryText` glyph that turns `primaryText` on hover. The focus ring
-/// is the system ring, drawn around the circle. PARITY(NEEDS-RUNTIME-CHECK RT-37): Arc's exact chrome is unmeasured.
+/// is `ShellTokens.focusRing` around the circle (#642). PARITY(NEEDS-RUNTIME-CHECK RT-37): Arc's exact chrome is
+/// unmeasured.
 @MainActor
 public final class SplitPaneCloseButton: NSButton {
   /// Circle diameter: the Toolbar's button height, so it sits centered in the Toolbar strip when that shows.
@@ -23,6 +24,8 @@ public final class SplitPaneCloseButton: NSButton {
   var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   /// Keyboard focus came or went; the card combines it with the hover.
   var onFocusChange: (@MainActor (Bool) -> Void)?
+  /// Shown while the button has keyboard focus.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: Self.size / 2)
   private var hovering = false { didSet { if hovering != oldValue { refreshColors() } } }
   private var hoverArea: NSTrackingArea?
   private var generation = 0
@@ -36,7 +39,7 @@ public final class SplitPaneCloseButton: NSButton {
     title = ""
     let configuration = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
     image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?.withSymbolConfiguration(configuration)
-    focusRingType = .default
+    focusRingType = .none
     autoresizingMask = []
     wantsLayer = true
     layer?.cornerRadius = Self.size / 2
@@ -93,22 +96,21 @@ public final class SplitPaneCloseButton: NSButton {
 
   public override func becomeFirstResponder() -> Bool {
     let became = super.becomeFirstResponder()
-    if became { onFocusChange?(true) }
+    if became {
+      keyboardFocusRing.setFocused(true)
+      onFocusChange?(true)
+    }
     return became
   }
 
   public override func resignFirstResponder() -> Bool {
     let resigned = super.resignFirstResponder()
-    if resigned { onFocusChange?(false) }
+    if resigned {
+      keyboardFocusRing.setFocused(false)
+      onFocusChange?(false)
+    }
     return resigned
   }
-
-  /// The system focus ring follows the circle, not the glyph.
-  public override func drawFocusRingMask() {
-    NSBezierPath(ovalIn: bounds).fill()
-  }
-
-  public override var focusRingMaskBounds: NSRect { bounds }
 
   // MARK: Hover and colors
 
