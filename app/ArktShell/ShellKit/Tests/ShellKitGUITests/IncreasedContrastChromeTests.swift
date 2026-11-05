@@ -87,6 +87,23 @@ final class IncreasedContrastChromeTests: XCTestCase {
     assertEdge(row.backgroundLayer, .dark)
   }
 
+  func testAHoveredRowKeepsTheEdgeWhenPressed() {
+    let row = SidebarRowView(frame: .zero)
+    row.increaseContrast = { [unowned self] in increased }
+    row.state = .previous
+    host(row, size: NSSize(width: 240, height: SidebarMetrics.rowPitch))
+    setIncreased(true, redrawing: row)
+    row.isHovered = true
+    row.displayIfNeeded()
+    assertEdge(row.backgroundLayer, .light)
+
+    row.isPressed = true
+    XCTAssertEqual(row.displayedFill, ShellTokens.tabPressed.light)
+    assertEdge(row.backgroundLayer, .light)
+    row.displayIfNeeded()
+    assertEdge(row.backgroundLayer, .light)
+  }
+
   func testEveryFavoriteTileIsEdged() {
     let tile = FavoriteTileView(frame: .zero)
     tile.increaseContrast = { [unowned self] in increased }
@@ -103,6 +120,8 @@ final class IncreasedContrastChromeTests: XCTestCase {
     host(pill, size: NSSize(width: 200, height: SidebarMetrics.urlBarHeight))
     setIncreased(true, redrawing: pill)
     assertEdge(try XCTUnwrap(pill.layer), .light)
+    setIncreased(false, redrawing: pill)
+    XCTAssertEqual(pill.layer?.borderWidth, 0)
 
     let toolbar = URLBarView(style: .full)
     toolbar.increaseContrast = { true }
