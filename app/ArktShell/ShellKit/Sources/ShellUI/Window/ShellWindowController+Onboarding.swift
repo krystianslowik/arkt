@@ -48,6 +48,7 @@ extension ShellWindowController {
   }
 
   public func windowDidMiniaturize(_ notification: Notification) {
+    settlePendingClear()                             // #413: no frames while minimized
     onboarding?.windowVisibilityChanged(false)
   }
 }

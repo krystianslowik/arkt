@@ -27,6 +27,17 @@ struct MotionCurveTests {
     #expect(points == [0.23, 1, 0.32, 1])
   }
 
+  @Test func `the curve's value runs from 0 to 1 and matches the CSS curve between`() {
+    let curve = MotionCurve.systemEaseOut
+    #expect(curve.value(at: 0) == 0)
+    #expect(curve.value(at: 1) == 1)
+    #expect(curve.value(at: -0.5) == 0)
+    #expect(curve.value(at: 1.5) == 1)
+    #expect(abs(curve.value(at: 0.25) - 0.378138) < 1e-4)
+    #expect(abs(curve.value(at: 0.5) - 0.684643) < 1e-4)
+    #expect(abs(MotionCurve.strongEaseOut.value(at: 0.5) - 0.965983) < 1e-4)
+  }
+
   @Test func `the fade scale runs quick, standard, slow`() {
     #expect(FadeDuration.quick == 0.1)
     #expect(FadeDuration.standard == 0.15)
