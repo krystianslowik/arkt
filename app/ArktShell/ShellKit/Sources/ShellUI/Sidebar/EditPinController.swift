@@ -221,21 +221,29 @@ final class EditPinController: NSObject, NSTextFieldDelegate {
     }
   }
 
-  /// Shows or hides the invalid address line: the popover grows by the line and the line fades in, announced to
-  /// VoiceOver; with Reduce Motion the popover takes its new height at once and the line still fades.
+  /// Shows or hides the invalid address line. Appearing, the popover grows by the line (0.15 s, at once with Reduce
+  /// Motion) and the line fades in over 0.15 s, announced to VoiceOver. It leaves at once on the next edit.
   private func showError(_ shown: Bool) {
     guard view.errorLine.isHidden == shown else { return }
     let height = EditPinMetrics.height(showingError: shown)
     var frame = view.frame
-    if let host = view.superview, !host.isFlipped { frame.origin.y = frame.maxY - height }
+    if let host = view.superview, !host.isFlipped { frame.origin.y = frame.maxY - height }   // the top stays put
     frame.size.height = height
     view.setErrorShown(shown)
-    view.frame = frame
+    if shown, let duration = EditPinMotion.errorResizeDuration(reducesMotion: reducesMotion()) {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = duration
+        context.timingFunction = MotionCurve.strongEaseOut.timingFunction
+        context.allowsImplicitAnimation = true
+        view.animator().frame = frame
+      }
+    } else {
+      view.frame = frame
+    }
     view.layoutSubtreeIfNeeded()
     guard shown else { return }
-    if !reducesMotion(), let layer = view.errorLine.layer {
-      layer.add(Self.fade(duration: EditPinMotion.errorDuration, curve: .strongEaseOut), forKey: "editPin.error")
-    }
+    view.errorLine.layer?.add(Self.fade(duration: EditPinMotion.errorDuration, curve: .strongEaseOut),
+                              forKey: EditPinMotion.errorFadeKey)
     announce(EditPinForm.invalidAddressMessage, .high)
   }
 

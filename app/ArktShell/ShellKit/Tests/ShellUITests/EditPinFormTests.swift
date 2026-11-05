@@ -109,4 +109,12 @@ struct EditPinFormTests {
     form.useCurrentPage()
     #expect(form.submit() == .save(name: nil, url: internalPage))
   }
+
+  /// The popover grows by the invalid address line over 0.15 s; with Reduce Motion it takes its height at once.
+  @Test func theErrorLineGrowsThePopoverOnlyWithoutReduceMotion() {
+    #expect(EditPinMotion.errorResizeDuration(reducesMotion: false) == 0.15)
+    #expect(EditPinMotion.errorResizeDuration(reducesMotion: true) == nil)
+    #expect(EditPinMetrics.height(showingError: true) - EditPinMetrics.height(showingError: false)
+              == EditPinMetrics.errorGap + EditPinMetrics.errorHeight)
+  }
 }

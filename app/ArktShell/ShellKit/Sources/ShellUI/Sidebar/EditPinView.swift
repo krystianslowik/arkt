@@ -48,9 +48,16 @@ enum EditPinMotion {
   static let reducedOpenDuration: CFTimeInterval = 0.15
   static let closeDuration: CFTimeInterval = FadeDuration.standard
   static let errorDuration: CFTimeInterval = FadeDuration.standard
+  static let errorFadeKey = "editPin.errorFade"
   static let openScaleKey = "editPin.openScale"
   static let openFadeKey = "editPin.openFade"
   static let closeKey = "editPin.close"
+
+  /// How long the popover takes to grow by the invalid address line: 0.15 s, or nil (at once) with Reduce Motion,
+  /// where only the line's fade remains.
+  static func errorResizeDuration(reducesMotion: Bool) -> CFTimeInterval? {
+    reducesMotion ? nil : errorDuration
+  }
 }
 
 /// Where the popover's arrow sits: on its leading edge at `y` from the top (a pinned row), or on its top edge at `x`

@@ -112,6 +112,13 @@ final class EditPinTests: XCTestCase {
       return editor.selectedRange() == NSRange(location: 0, length: (editor.string as NSString).length)
     }
 
+    func key(_ code: UInt16, _ characters: String) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+        windowNumber: controller.window?.windowNumber ?? 0, context: nil, characters: characters,
+        charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+    }
+
     func click(at point: NSPoint, in view: NSView) throws {
       for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
         NSApp.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(
@@ -212,6 +219,29 @@ final class EditPinTests: XCTestCase {
     } else {
       XCTFail("the pin is a tab")
     }
+    harness.controller.close()
+  }
+
+  /// Real Return and Escape key events through the window, with a field holding the keyboard: Return saves,
+  /// Escape closes without storing.
+  func testReturnAndEscapeThroughTheWindow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p0)
+    var popover = try harness.popover()
+    try harness.type("example.com/escaped", into: popover.urlField)
+    window.sendEvent(try harness.key(53, "\u{1b}"))
+    XCTAssertNil(harness.editPin, "Escape closes")
+    XCTAssertEqual(harness.tabURL(world.p0), Self.url("p0"))
+
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p0)
+    popover = try harness.popover()
+    try harness.type("example.com/returned", into: popover.urlField)
+    window.sendEvent(try harness.key(36, "\r"))
+    XCTAssertNil(harness.editPin, "Return saves")
+    XCTAssertEqual(harness.tabURL(world.p0), Self.url("returned"))
     harness.controller.close()
   }
 
@@ -413,5 +443,28 @@ final class EditPinTests: XCTestCase {
     let fade = try XCTUnwrap(stillLayer.animation(forKey: EditPinMotion.openFadeKey) as? CABasicAnimation)
     XCTAssertEqual(fade.duration, EditPinMotion.reducedOpenDuration, accuracy: 0.001)
     still.controller.close()
+  }
+
+  /// The invalid address line fades in over 0.15 s with and without Reduce Motion; only the growth of the popover
+  /// is dropped with Reduce Motion (`EditPinMotion.errorResizeDuration`).
+  func testTheErrorLineFadesInWithAndWithoutReduceMotion() throws {
+    let world = try Self.makeWorld()
+    for reduces in [false, true] {
+      let harness = Harness(world.sidebar, reducesMotion: reduces)
+      try harness.choose("Edit Pinned URL\u{2026}", on: world.p0)
+      let popover = try harness.popover()
+      let top = harness.root.isFlipped ? popover.frame.minY : popover.frame.maxY
+      try harness.type("not an address", into: popover.urlField)
+      popover.saveButton.performClick(nil)
+      let fade = try XCTUnwrap(popover.errorLine.layer?.animation(forKey: EditPinMotion.errorFadeKey)
+                                 as? CABasicAnimation, "the line fades in (Reduce Motion \(reduces))")
+      XCTAssertEqual(fade.duration, EditPinMotion.errorDuration, accuracy: 0.001)
+      if reduces {
+        XCTAssertEqual(popover.frame.height, EditPinMetrics.height(showingError: true), "at once")
+        XCTAssertEqual(harness.root.isFlipped ? popover.frame.minY : popover.frame.maxY, top, accuracy: 0.5,
+                       "the popover grows downward; its top and arrow stay")
+      }
+      harness.controller.close()
+    }
   }
 }
