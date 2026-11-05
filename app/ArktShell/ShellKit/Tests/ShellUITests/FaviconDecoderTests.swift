@@ -145,11 +145,19 @@ struct FaviconDecoderTests {
   /// decoder, are realized bitmaps. An image read from its file (`NSImage(data:)`, `CGImageSourceCreateImageAtIndex`)
   /// stays tied to its image source and reports the file's type; ImageIO decodes it at first draw, on the main thread.
   /// A realized bitmap has no source type.
+  ///
+  /// Not covered here: dropping `kCGImageSourceShouldCacheImmediately` from `decodeNow`. The thumbnail is a realized
+  /// bitmap without it on the macOS this was written on, so neither this check nor the `ARKT_FAVICON_GATE` timing run
+  /// fails when it is removed; the option stays as a request ImageIO is free to need on a later release.
   @Test(arguments: [64, 256])
   func theLoaderHandsOutBitmapsThatDrawWithoutDecoding(pixels: Int) async throws {
     let data = FaviconFixtures.png(pixels, pixels: pixels)
+    // Controls: both lazy paths stay tied to their source, so the check below tells them apart.
     let lazy = try #require(NSImage(data: data)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
-    #expect(lazy.utType != nil, "control: the lazy image is tied to its source, so the check below tells them apart")
+    #expect(lazy.utType != nil, "control: NSImage(data:) is decoded at first draw")
+    let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+    let fromSource = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+    #expect(fromSource.utType != nil, "control: CGImageSourceCreateImageAtIndex is decoded at first draw")
     let loader = FaviconImageLoader<Int>(decoder: .offMain, cache: NSCache())
     var applied: NSImage?
     loader.load([1: data]) { applied = $0[1] ?? nil }
