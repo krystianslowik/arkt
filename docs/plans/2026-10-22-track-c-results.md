@@ -2862,6 +2862,23 @@ Each new behavior was broken on purpose once, and its test failed:
 - A plain heading item failed the Window menu case.
 - Committing Open in New Window without the fade failed the full-motion case.
 
+### After #355 merged
+
+- `openLittleArkt(url:frame:)` keeps #355's `frame` and falls back to `nextLittleArktFrame()`.
+- Close Little Arkt Windows goes through `requestClose`, so a hidden window records its page for the Archive and
+  Cmd-Shift-T the same way Cmd-W does. A new `withMotion: false` skips the close motion for a window that is not on
+  screen, and #355's rules for dropping the record are unchanged.
+- File > Reopen Closed Tab keeps #355's `ReopenClosedRouter` target. The Window menu keeps `AppCommands` as its
+  delegate.
+- Test: `LittleArktArchiveTests.testCloseLittleArktWindowsArchivesHiddenWindowsAndTheyCanBeReopened` (one hidden
+  window and one shown, both archived and both reopenable).
+- Deliberate break: the old `closeFromMenu` body (`phase = .closing`, then asking the engine without
+  `requestClose`) fails it: one archive entry instead of two, and the hidden window cannot be reopened.
+- Runs:
+  - `--filter 'ShellUITests|CoreBridgeTests'`: 1199 and 341 tests passed.
+  - GUI `--filter 'LittleArkt|MainMenu|Archive|Reopen|SidebarClick|Handoff|Favorites|ToastView|ShellWindowSet|Settings'`: 380 run, 5 skipped, 0 failures.
+  - Debug app `xcodebuild -scheme ArktShell -configuration Debug -jobs 2`: BUILD SUCCEEDED.
+
 ### Tests
 
 Written first. Each failed to compile before the code existed.

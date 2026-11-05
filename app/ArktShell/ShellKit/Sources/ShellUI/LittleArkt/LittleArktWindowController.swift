@@ -334,7 +334,9 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   /// Scale 0.97 and fade (`firmFast`), then the engine closes the window. A page that would ask before leaving
   /// (`beforeunload`) is asked at once, without the motion, so its prompt is never on an invisible window.
-  func requestClose(idle: Bool = false) {
+  /// `withMotion` false asks the engine at once (a hidden window, Close Little Arkt Windows); the page is recorded for
+  /// the Archive and Cmd-Shift-T either way.
+  func requestClose(idle: Bool = false, withMotion: Bool = true) {
     if phase == .flying {
       flight?.abort(.closeRequested)                          // the page lands now, never stranded in a hidden window
       if phase == .handedOff { return }                       // the engine closes the emptied window
@@ -348,6 +350,11 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       return
     }
     phase = .closing
+    guard withMotion else {
+      engineHost.onCloseRequested?()                          // an in-process engine may close at once
+      if engineClosed || engineWindow == nil { finishClose() }
+      return
+    }
     run(.close) { [weak self] _ in
       guard let self else { return }
       if !self.engineClosed { self.engineHost.onCloseRequested?() }   // an in-process engine may close at once
@@ -370,23 +377,15 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     NSApp.activate()
   }
 
-  /// Close Little Arkt Windows: a window on screen closes as Cmd-W closes it. A hidden one closes without the motion
-  /// (it would run where nobody sees it), unless its page asks before leaving: then it comes forward first, so the
-  /// prompt is never on a hidden window.
+  /// Close Little Arkt Windows: the same close as Cmd-W, so the page goes to the Archive and Cmd-Shift-T brings it
+  /// back (#355). A hidden window closes without the motion (it would run where nobody sees it), unless its page asks
+  /// before leaving: then it comes forward first, so the prompt is never on a hidden window.
   func closeFromMenu() {
     guard phase == .open, engineWindow != nil else { return }
-    if window.isVisible {
-      requestClose()
-      return
-    }
-    if let shownTab, engine.snapshot(of: shownTab)?.wouldHoldClose == true {
+    if !window.isVisible, let shownTab, engine.snapshot(of: shownTab)?.wouldHoldClose == true {
       window.orderFront(nil)
-      requestClose()
-      return
     }
-    phase = .closing
-    engineHost.onCloseRequested?()                          // an in-process engine may close at once
-    if engineClosed || engineWindow == nil { finishClose() }
+    requestClose(withMotion: window.isVisible)
   }
 
   // MARK: Open in (Cmd-O, KB-076)
