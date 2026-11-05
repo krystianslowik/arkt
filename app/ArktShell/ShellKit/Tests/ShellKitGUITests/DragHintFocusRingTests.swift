@@ -85,26 +85,104 @@ final class DragHintFocusRingTests: XCTestCase {
     XCTAssertNil(ring.hitTest(NSPoint(x: 1, y: 1)))
   }
 
-  /// Every Settings control and the split close button: keyboard focus shows the token ring, losing it hides it, and
-  /// the system ring is off.
-  func testSettingsControlsAndTheSplitCloseButtonDrawTheTokenRing() {
+  /// A window whose key status the test sets, and announces the way AppKit does: a test runner process may never
+  /// become active, so a real window cannot be relied on to turn key.
+  private final class KeyStubWindow: NSWindow {
+    var stubKey = true
+    override var isKeyWindow: Bool { stubKey }
+    func setKey(_ key: Bool) {
+      stubKey = key
+      NotificationCenter.default.post(name: key ? NSWindow.didBecomeKeyNotification : NSWindow.didResignKeyNotification,
+                                      object: self)
+    }
+  }
+
+  private var windows: [NSWindow] = []
+
+  override func tearDown() async throws {
+    for window in windows { window.close() }
+    windows = []
+  }
+
+  private func makeWindow() -> KeyStubWindow {
+    let window = KeyStubWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+                               backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    windows.append(window)
+    return window
+  }
+
+  /// Like the system ring, the token ring shows only while its window is key.
+  func testTheRingShowsOnlyWhileTheWindowIsKey() {
+    let window = makeWindow()
+    let control = NSView(frame: NSRect(x: 20, y: 20, width: 60, height: 24))
+    window.contentView?.addSubview(control)
+    let ring = KeyboardFocusRingView.attach(outside: control, radius: 12)
+
+    ring.setFocused(true)
+    XCTAssertFalse(ring.isHidden, "focused in a key window")
+    window.setKey(false)
+    XCTAssertTrue(ring.isHidden, "the window resigned key")
+    XCTAssertTrue(ring.isFocused, "focus itself stays")
+    window.setKey(true)
+    XCTAssertFalse(ring.isHidden, "the window became key again")
+    ring.setFocused(false)
+    XCTAssertTrue(ring.isHidden)
+
+    window.setKey(false)
+    ring.setFocused(true)
+    XCTAssertTrue(ring.isHidden, "focus in a window that is not key draws nothing")
+  }
+
+  /// A ring drawn outside its control is raised above the control's neighbors while shown (Settings' pane items are
+  /// 2 pt apart, the ring 3 pt wide).
+  func testAShownOutsideRingRaisesItsControlAboveItsNeighbors() {
+    let window = makeWindow()
+    let control = NSView(frame: NSRect(x: 20, y: 20, width: 60, height: 24))
+    control.wantsLayer = true
+    window.contentView?.addSubview(control)
+    let ring = KeyboardFocusRingView.attach(outside: control, radius: 12)
+    ring.setFocused(true)
+    XCTAssertEqual(control.layer?.zPosition, 1)
+    ring.setFocused(false)
+    XCTAssertEqual(control.layer?.zPosition, 0)
+  }
+
+  /// Every Settings and Archive button and the split close button, focused through the window: keyboard focus shows
+  /// the token ring, losing it hides it, and the system ring is off.
+  func testEveryButtonInAKeyboardWalkDrawsTheTokenRing() throws {
+    let window = makeWindow()
     let item = SettingsPaneItemView(pane: SettingsPane.allCases[0])
     let toggle = SettingsSwitch(frame: .zero)
     let popUp = SettingsPopUpButton(items: ["One", "Two"], selected: "One")
     let addRow = SettingsAddRowButton(title: "Add Route...")
     let close = SplitPaneCloseButton(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
-    let cases: [(String, NSView, () -> KeyboardFocusRingView)] = [
-      ("pane item", item, { item.keyboardFocusRing }), ("switch", toggle, { toggle.keyboardFocusRing }),
-      ("pop-up", popUp, { popUp.keyboardFocusRing }), ("add row", addRow, { addRow.keyboardFocusRing }),
-      ("split close", close, { close.keyboardFocusRing }),
+    let pill = ArchivePillButton(style: .neutral, title: "Got It")
+    let link = ArchiveLinkButton(style: .secondary, title: "Clear Filters")
+    let filter = ArchiveFilterButton(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
+    let cases: [(String, NSView, KeyboardFocusRingView)] = [
+      ("pane item", item, item.keyboardFocusRing), ("switch", toggle, toggle.keyboardFocusRing),
+      ("pop-up", popUp, popUp.keyboardFocusRing), ("add row", addRow, addRow.keyboardFocusRing),
+      ("split close", close, close.keyboardFocusRing), ("pill", pill, pill.keyboardFocusRing),
+      ("link", link, link.keyboardFocusRing), ("filter", filter, filter.keyboardFocusRing),
     ]
     for (name, control, ring) in cases {
+      control.frame.size = NSSize(width: max(control.frame.width, 40), height: max(control.frame.height, 20))
+      window.contentView?.addSubview(control)
       XCTAssertEqual(control.focusRingType, .none, "\(name): not the system ring")
-      XCTAssertTrue(control.becomeFirstResponder(), name)
-      XCTAssertFalse(ring().isHidden, "\(name): shown with keyboard focus")
-      XCTAssertTrue(ring().superview === control, name)
-      XCTAssertTrue(control.resignFirstResponder(), name)
-      XCTAssertTrue(ring().isHidden, "\(name): hidden without it")
+      XCTAssertTrue(ring.isHidden, "\(name): hidden at rest")
+      // Buttons take first responder only with Full Keyboard Access on, a user setting; without it the window's
+      // responder call is made directly.
+      let throughWindow = window.makeFirstResponder(control)
+      if !throughWindow {
+        XCTAssertFalse(NSApp.isFullKeyboardAccessEnabled, "\(name) refused focus with Full Keyboard Access on")
+        XCTAssertTrue(control.becomeFirstResponder(), name)
+      }
+      XCTAssertFalse(ring.isHidden, "\(name): shown with keyboard focus")
+      XCTAssertTrue(ring.superview === control, name)
+      XCTAssertEqual(ring.frame, control.bounds.insetBy(dx: -3, dy: -3), "\(name): outside the control")
+      XCTAssertTrue(throughWindow ? window.makeFirstResponder(nil) : control.resignFirstResponder(), name)
+      XCTAssertTrue(ring.isHidden, "\(name): hidden without it")
     }
   }
 }

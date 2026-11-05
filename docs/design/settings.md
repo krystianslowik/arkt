@@ -26,8 +26,9 @@ rows that are sidebar rows. What lifts it above a stock preferences sheet:
   knob in dark), so twenty switches never compete with the one primary.
 - **Space color carries meaning.** A Space row leads with its theme swatch (the theme's own gradient); the Appearance
   preview is drawn in the Work Space's theme.
-- **One focus ring.** Settings' own controls draw `ShellTokens.focusRing` (graphite in light, porcelain in dark, at
-  85 %, 3 pt, #642); text fields keep the system ring. Mustard is a fill only: never text, never a stroke.
+- **One focus ring.** Every button in the keyboard walk (pane items, switches, pop-ups, add rows and the Archive's
+  pills, links and filter button) draws `ShellTokens.focusRing` (graphite in light, porcelain in dark, at 85 %, 3 pt, #642). Only text fields (the shortcut
+  search field, the shortcut recorder) keep the system focus ring. Mustard is a fill only: never text, never a stroke.
 
 Type is SF Pro (the system font), on purpose. Sizes: window title 13 semibold, pane labels 11 medium, section titles
 12 semibold, row labels 13 medium, captions and notes 12 regular, buttons 13 semibold (12 small).
@@ -165,7 +166,7 @@ in `docs/design/alerts-sheets-toasts.md` (destructive button: "Clear Data" / "Re
 | Search field | 32 high, radius 9, `sidebarItemBackground`, magnifier 14 pt `sidebarForeground`, 14 below | the Archive search field |
 | Default capsule | 24 high, radius 12, `sidebarItemHovered`, check 12 pt and "Default" 12 semibold `primaryText` | |
 | Empty state | 44 pt tile radius 12 `sidebarItemBackground` with a 22 pt glyph, title 15 semibold, detail 12 `secondaryText` max 320 wide, primary pill 16 below | the Archive's empty states |
-| Focus ring | `ShellTokens.focusRing` (`BrandTokens.focusRing` at 85 %), 3 pt outside the control, following its radius (`KeyboardFocusRingView`, #642); never mustard | `ShellTokens.focusRing` |
+| Focus ring | `ShellTokens.focusRing` (`BrandTokens.focusRing` at 85 %), 3 pt outside the control, following its radius, raised above its neighbors while shown (`KeyboardFocusRingView`, #642); text fields: the system focus ring; never mustard | `ShellTokens.focusRing` |
 
 New tokens (to add to `ShellUI/Theme`, with contrast tests next to `BrandTokensTests`):
 

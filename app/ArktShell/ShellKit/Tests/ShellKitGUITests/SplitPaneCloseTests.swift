@@ -162,7 +162,7 @@ final class SplitPaneCloseTests: XCTestCase {
     let button = try XCTUnwrap(container.paneCards[0].closeButton)
     XCTAssertTrue(button.becomeFirstResponder())
     XCTAssertTrue(button.isRevealed)
-    XCTAssertFalse(button.keyboardFocusRing.isHidden, "the ShellTokens.focusRing ring (#642)")
+    XCTAssertTrue(button.keyboardFocusRing.isFocused, "the ShellTokens.focusRing ring (#642)")
     XCTAssertTrue(button.resignFirstResponder())
     XCTAssertFalse(button.isRevealed)
     XCTAssertTrue(button.keyboardFocusRing.isHidden)

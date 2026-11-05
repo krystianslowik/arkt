@@ -24,7 +24,8 @@ with a leading glyph, a sentence and one small neutral pill. The rules:
 - **Lists are recessed fields**, as in the Archive, not hairline-ruled blocks.
 - **Space color carries meaning.** Delete Space shows the Space's own theme swatch; toasts take their surface from the
   Space's theme.
-- **Focus is the system's** focus ring. Mustard is a fill only: never text, never a stroke.
+- **One focus ring.** Pills and links draw `ShellTokens.focusRing` (graphite in light, porcelain in dark, at 85 %, 3 pt, #642); text fields keep the system
+  focus ring. Mustard is a fill only: never text, never a stroke.
 
 Everything an engine draws (extension sheets, permission panel, infobars) uses the same values, copied into the
 engine as the existing comments already do.
@@ -83,7 +84,7 @@ enable delay, width (default 420), stacked buttons, neutral primary, Escape dism
 | Sheet corners | bottom corners 14, as the Archive's Clear Archive sheet | |
 | Panel corners | 12 (was 10) | change, see section 6 |
 | Alert corners | 14 | |
-| Focus ring | the system focus ring (`NSColor.keyboardFocusIndicatorColor`), never mustard | AppKit |
+| Focus ring | pills and links: `ShellTokens.focusRing`, 3 pt outside the control (`KeyboardFocusRingView`, #642); text fields: the system focus ring; never mustard | `ShellTokens.focusRing` |
 | Shadow | `overlayShadow`: 0.5 pt edge black 0.12 (dark white 0.20), 18 / 48 blur black 0.22 (dark 0.55), 3 / 10 black 0.10 | new AlertTokens.overlayShadow |
 
 Button order: trailing edge holds the answer that continues; the cancel answer is to its left; a third answer (Allow

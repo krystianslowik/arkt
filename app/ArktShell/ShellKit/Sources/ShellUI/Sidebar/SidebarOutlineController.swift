@@ -261,12 +261,12 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   /// Places the ring on the focused row (or hides it), above the rows.
   func updateKeyboardFocusRing() {
     guard let row = keyboardFocusRow, row < numberOfRows else {
-      keyboardFocusRing.isHidden = true
+      keyboardFocusRing.setFocused(false)
       return
     }
     if keyboardFocusRing.superview !== self { addSubview(keyboardFocusRing, positioned: .above, relativeTo: nil) }
     keyboardFocusRing.frame = keyboardFocusRect(row)
-    keyboardFocusRing.isHidden = false
+    keyboardFocusRing.setFocused(true)
     keyboardFocusRing.needsDisplay = true
   }
 
@@ -580,8 +580,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Keyboard focus left the outline through Return or Esc; the window gives focus back to the page.
   public var onKeyboardFocusExit: (@MainActor () -> Void)?
 
-  /// Ctrl-Space: keyboard focus on `row` with the system focus ring (BH-019). The window makes the outline first
-  /// responder.
+  /// Ctrl-Space: keyboard focus on `row` with `ShellTokens.focusRing` (BH-019, #642). The window makes the outline
+  /// first responder.
   public func focusKeyboard(on row: Int) {
     outlineView.keyboardFocusRow = row
   }

@@ -8,13 +8,19 @@ import AppKit
 ///
 /// Sidebar rows and Favorite tiles draw it inside their own fill (`frame` is the fill, so the clip view never cuts
 /// it). Controls draw it outside themselves with `attach(outside:radius:)`, toggled by their first responder state:
-/// AppKit's ring shows only for keyboard focus, and so does this one. It appears at once, as the system ring does.
-/// Not hit-testable and not an accessibility element.
+/// AppKit's ring shows only for keyboard focus, and so does this one. Like the system ring it shows only while its
+/// window is key, and it appears and goes at once. Not hit-testable and not an accessibility element.
 @MainActor
 final class KeyboardFocusRingView: NSView {
   static let lineWidth = ShellTokens.focusRingWidth
   var cornerRadius = SidebarMetrics.rowCornerRadius { didSet { needsDisplay = true } }
   let ring = CAShapeLayer()
+  /// The owner has keyboard focus. The ring shows while this is true and the window is key.
+  private(set) var isFocused = false
+  /// Drawn outside its host (`attach(outside:radius:)`): the host is raised above its siblings while focused, so a
+  /// neighbor closer than the ring's width (Settings' pane items, 2 pt apart) never covers it.
+  private var raisesHost = false
+  private weak var observedWindow: NSWindow?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -35,16 +41,49 @@ final class KeyboardFocusRingView: NSView {
   static func attach(outside host: NSView, radius: CGFloat) -> KeyboardFocusRingView {
     let ring = KeyboardFocusRingView(frame: host.bounds.insetBy(dx: -lineWidth, dy: -lineWidth))
     ring.cornerRadius = radius + lineWidth
+    ring.raisesHost = true
     ring.autoresizingMask = [.width, .height]
     host.addSubview(ring, positioned: .above, relativeTo: nil)
     return ring
   }
 
-  /// Shows the ring for keyboard focus, hides it otherwise.
+  /// Keyboard focus came or went.
   func setFocused(_ focused: Bool) {
-    isHidden = !focused
+    isFocused = focused
+    refreshVisibility()
+  }
+
+  private func refreshVisibility() {
+    let shown = isFocused && window?.isKeyWindow == true
+    if raisesHost { superview?.layer?.zPosition = shown ? 1 : 0 }
+    guard isHidden == shown else { return }
+    isHidden = !shown
     needsDisplay = true
   }
+
+  override func viewWillMove(toWindow newWindow: NSWindow?) {
+    super.viewWillMove(toWindow: newWindow)
+    guard let observedWindow, observedWindow !== newWindow else { return }
+    let center = NotificationCenter.default
+    center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: observedWindow)
+    center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: observedWindow)
+    self.observedWindow = nil
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if let window, window !== observedWindow {
+      let center = NotificationCenter.default
+      center.addObserver(self, selector: #selector(windowKeyChanged(_:)), name: NSWindow.didBecomeKeyNotification,
+                         object: window)
+      center.addObserver(self, selector: #selector(windowKeyChanged(_:)), name: NSWindow.didResignKeyNotification,
+                         object: window)
+      observedWindow = window
+    }
+    refreshVisibility()
+  }
+
+  @objc private func windowKeyChanged(_ notification: Notification) { refreshVisibility() }
 
   override var wantsUpdateLayer: Bool { true }
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
