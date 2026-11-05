@@ -76,10 +76,14 @@ public final class FavoriteTileView: NSView {
     return (isHovered ? ShellTokens.sidebarItemHovered : ShellTokens.sidebarItemBackground).resolve(flavor)
   }
 
+  /// Increase Contrast (#640): every tile is filled, so every tile draws the 1 pt edge. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
+
   public override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
     fillLayer.cornerRadius = FavoritesLayout.tileCornerRadius
     fillLayer.cornerCurve = .continuous
     fillLayer.shadowRadius = 2
@@ -114,6 +118,7 @@ public final class FavoriteTileView: NSView {
     fillLayer.cornerRadius = FavoritesLayout.tileCornerRadius
     fillLayer.cornerCurve = .continuous
     fillLayer.backgroundColor = displayedFill.cgColor
+    IncreasedContrast.setEdge(on: fillLayer, increased: increaseContrast(), flavor: flavor)
     let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
     fillLayer.shadowColor = shadow.cgColor
     fillLayer.shadowRadius = 2
@@ -123,6 +128,8 @@ public final class FavoriteTileView: NSView {
     fillLayer.opacity = Float(isCurrent ? selectionAlpha : 1)
     CATransaction.commit()
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { needsDisplay = true }
 
   /// Only the fill fades. The favicon is a subview of this view, so it keeps the view's opacity.
   private func applyFillOpacity() {

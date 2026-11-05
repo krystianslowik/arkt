@@ -15,8 +15,8 @@ public enum SettingsTokens {
   /// `surfaceBrand` opaque instead.
   public static let toolbarMaterial = TokenPair(light: BrandTokens.Palette.porcelain.atAlpha(0.82),
                                                 dark: BrandTokens.Palette.graphite.atAlpha(0.80))
-  /// Group, pop-up and search field edges under Increase Contrast.
-  public static let separatorIncreasedContrast = TokenPair(light: .black(0.20), dark: .white(0.20))
+  /// Group, pop-up and search field edges under Increase Contrast: the shell's.
+  public static let separatorIncreasedContrast = ShellTokens.increasedContrastEdge
   /// A disabled control's opacity (decision 4: rows for features not built yet).
   public static let disabledControlAlpha: CGFloat = 0.42
 }

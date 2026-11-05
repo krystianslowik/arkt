@@ -262,6 +262,8 @@ public final class PeekCardView: NSView {
   var flavor: ThemeFlavor = .light { didSet { refreshColors() } }
   var onEscape: (@MainActor () -> Void)?
   var onCancel: (@MainActor () -> Bool)?
+  /// Increase Contrast (#640): the card's hairline becomes the 1 pt edge. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
   private let radius = ShellMetrics.standard.cardCornerRadius
 
   public override init(frame frameRect: NSRect) {
@@ -287,7 +289,10 @@ public final class PeekCardView: NSView {
     setAccessibilityLabel("Peek")
     setAccessibilityIdentifier(AXID.Peek.card)
     refreshColors()
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { refreshColors() }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -375,8 +380,14 @@ public final class PeekCardView: NSView {
                                     : -shadow.contactOffsetY)
     }
     surface.layer?.backgroundColor = ShellTokens.toolbarSurface.resolve(flavor).cgColor
-    surface.layer?.borderColor = ShellTokens.cardBorder.resolve(flavor).cgColor
-    surface.layer?.borderWidth = 1 / (window?.backingScaleFactor ?? 2)
+    if let layer = surface.layer {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      IncreasedContrast.setEdge(on: layer, increased: increaseContrast(), flavor: flavor,
+                                otherwiseWidth: 1 / (window?.backingScaleFactor ?? 2),
+                                color: ShellTokens.cardBorder.resolve(flavor))
+      CATransaction.commit()
+    }
   }
 
   public override func viewDidMoveToWindow() {

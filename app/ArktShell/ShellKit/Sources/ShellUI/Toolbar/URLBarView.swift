@@ -55,6 +55,8 @@ public final class URLBarView: NSView {
     didSet { if isHovered != oldValue { needsDisplay = true } }
   }
   private var hoverArea: NSTrackingArea?
+  /// Increase Contrast (#640): the sidebar pill draws the 1 pt edge. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
 
   public init(style: Style) {
     self.style = style
@@ -77,7 +79,10 @@ public final class URLBarView: NSView {
     setAccessibilityHelp("Opens the command bar with this address")
     setAccessibilityValue("")
     applyColors()
+    if showsPill { IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:))) }
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { needsDisplay = true }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -106,6 +111,7 @@ public final class URLBarView: NSView {
     layer.cornerRadius = SidebarMetrics.urlBarCornerRadius
     let token = isHovered ? ShellTokens.sidebarItemHovered : ShellTokens.sidebarItemBackground
     layer.backgroundColor = token.resolve(flavor).cgColor
+    IncreasedContrast.setEdge(on: layer, increased: increaseContrast(), flavor: flavor)
   }
 
   public override func layout() {
