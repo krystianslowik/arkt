@@ -177,7 +177,18 @@ public final class DialogAlert {
 @MainActor
 public final class DialogPanel {
   public static let anchorInset: CGFloat = 12
+
+  /// Where the panel sits on its anchor.
+  public enum Attachment: Equatable, Sendable {
+    /// Its top-leading corner `anchorInset` inside the anchor, all corners rounded.
+    case inset
+    /// Hung from the anchor's top edge, `anchorInset` from its leading edge, only the bottom corners rounded: a
+    /// page's leave-site prompt (#584, design/extensions `surf-dialog`).
+    case topEdge
+  }
+
   public let panel: NSPanel
+  public let attachment: Attachment
   let view: DialogSheetView
   let container: NSView
   public var onAnswer: (@MainActor (DialogContent.Answer) -> Void)?
@@ -199,7 +210,8 @@ public final class DialogPanel {
   /// The last answer came from a key (Return, Escape): the panel leaves at once.
   private var keyboardAnswer = false
 
-  public init(content: DialogContent) {
+  public init(content: DialogContent, attachment: Attachment = .inset) {
+    self.attachment = attachment
     view = DialogSheetView(content: content, insets: .panel)
     let height = view.layoutContent(width: content.width)
     let size = NSSize(width: content.width, height: height)
@@ -215,6 +227,9 @@ public final class DialogPanel {
     container.wantsLayer = true
     container.layer?.cornerRadius = DialogMetrics.panelCornerRadius
     container.layer?.cornerCurve = .continuous
+    if attachment == .topEdge {
+      container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]   // the bottom ones (not flipped)
+    }
     container.layer?.masksToBounds = true
     container.layer?.borderWidth = 0.5
     view.frame = container.bounds
@@ -233,11 +248,12 @@ public final class DialogPanel {
 
   public var content: DialogContent { view.content }
 
-  /// The panel's frame for `anchor` (screen coordinates): top-leading corner `anchorInset` inside it.
+  /// The panel's frame for `anchor` (screen coordinates): top-leading corner `anchorInset` inside it, or on its top
+  /// edge for `.topEdge`.
   public func frame(anchoredTo anchor: NSRect) -> NSRect {
     let size = panel.frame.size
-    return NSRect(x: anchor.minX + Self.anchorInset, y: anchor.maxY - Self.anchorInset - size.height,
-                  width: size.width, height: size.height)
+    let top = attachment == .topEdge ? anchor.maxY : anchor.maxY - Self.anchorInset
+    return NSRect(x: anchor.minX + Self.anchorInset, y: top - size.height, width: size.width, height: size.height)
   }
 
   /// The text in the prompt's field; nil when the content has none.

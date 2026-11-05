@@ -8,6 +8,10 @@ final class CommandBarSelectionIndicator: NSView {
   private let fill = CALayer()
   private let tick = CALayer()
   private var flavor: ThemeFlavor = .dark
+  /// Increase Contrast (#640): the fill's hairline becomes the 1 pt edge. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting } {
+    didSet { applyColors() }
+  }
 
   override var isFlipped: Bool { true }
 
@@ -18,14 +22,16 @@ final class CommandBarSelectionIndicator: NSView {
     layer?.addSublayer(tick)
     fill.cornerRadius = CommandBarGeometry.selectedRowRadius
     fill.cornerCurve = .continuous
-    fill.borderWidth = 0.5
     tick.cornerRadius = CommandBarGeometry.tickWidth
     tick.cornerCurve = .continuous
     tick.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]   // a rounded trailing edge only
     isHidden = true
     applyColors()
     setAccessibilityElement(false)
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { applyColors() }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -38,9 +44,14 @@ final class CommandBarSelectionIndicator: NSView {
     set { flavor = newValue; applyColors() }
   }
 
+  /// The fill's 0.5 pt hairline, or the 1 pt edge under Increase Contrast.
   private func applyColors() {
     fill.backgroundColor = ShellTokens.commandBarSelectedRow.resolve(flavor).cgColor
-    fill.borderColor = ShellTokens.commandBarDivider.resolve(flavor).cgColor
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    IncreasedContrast.setEdge(on: fill, increased: increaseContrast(), flavor: flavor, otherwiseWidth: 0.5,
+                              color: ShellTokens.commandBarDivider.resolve(flavor))
+    CATransaction.commit()
     tick.backgroundColor = ShellTokens.commandBarTick.resolve(flavor).cgColor
   }
 

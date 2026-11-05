@@ -13,9 +13,8 @@ public enum ArchiveTokens {
   /// Destructive titles (Clear Archive, the confirmation's Clear Archive button). The alerts design's
   /// `AlertTokens.destructiveText`: 6.20:1 on porcelain, 8.71:1 on graphite.
   public static let destructiveText = TokenPair(light: .srgb(hex: 0xB3261E), dark: .srgb(hex: 0xFFAAA2))
-  /// The 1 pt edge of the search field, chips and list field under Increase Contrast
-  /// (`SettingsTokens.separatorIncreasedContrast` in the settings design).
-  public static let increasedContrastEdge = TokenPair(light: .black(0.20), dark: .white(0.20))
+  /// The 1 pt edge of the search field, chips and list field under Increase Contrast: the shell's.
+  public static let increasedContrastEdge = ShellTokens.increasedContrastEdge
 
   /// A Space chip's opaque fill over `surface`.
   public static func chipFill(_ color: RGBA, over surface: RGBA) -> RGBA {

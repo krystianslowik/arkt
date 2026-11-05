@@ -288,6 +288,7 @@ public final class SplitContainerView: NSView {
     for (index, card) in cards.enumerated() {
       let focused = index == focusedIndex
       card.borderEmphasis = focused ? 1 : 0.5
+      card.isFocusedSplitPane = focused
       card.setAccessibilitySelected(focused)
     }
   }
