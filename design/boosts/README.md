@@ -17,30 +17,32 @@ Not picked: B (inspector beside the page, kept only as the Code pane) and C (tra
 - **Page color**: 8 swatches, 24 pt circles, gap 8: Site colors (none), paper, sage, sky, lilac, rose, sand, night. The
   chosen one has a 2 pt ring in the text color, 4 pt outside the swatch (never mustard).
 - **Font**: 4 cells (Site, Sans, Serif, Mono), 48 pt tall, radius 9, each showing "Aa" in its face; the chosen cell
-  uses the current-row fill with a 1.5 pt text-color edge.
+  uses the current-row fill with a 1.5 pt text-color edge (porcelain in dark).
 - **Hidden**: one 30 pt row per hidden element (eye-off glyph, label, Show). Under it: **Hide an Element...** (neutral
   pill) and **Code...** (quiet).
 - **Footer**: Delete Boost (quiet, red title) and **Done** (primary). Changes apply at once; Done only closes.
 
 ## Tokens
 
-A Boost page color is the page's own color: it is the same in light and dark appearance, and the page text follows
-it (graphite on the six light colors, porcelain on Night).
+Boost page colors follow the appearance: each has a light and a dark value, and the page text follows the appearance
+(graphite on the light values, porcelain on the dark values and on Night). The swatches in the panel show the value
+for the current appearance.
 
-| Token | Value | Use |
-|---|---|---|
-| `BoostTokens.pageColorPaper` | `#F4ECDA` | page background |
-| `BoostTokens.pageColorSage` | `#DCE7DA` | page background |
-| `BoostTokens.pageColorSky` | `#DCE6F2` | page background |
-| `BoostTokens.pageColorLilac` | `#E6DEF0` | page background |
-| `BoostTokens.pageColorRose` | `#F2DEDE` | page background |
-| `BoostTokens.pageColorSand` | `#E9E1D2` | page background |
-| `BoostTokens.pageColorNight` | `#202321` | page background |
-| `BoostTokens.pageTextOnLight` | `#202321` (graphite); secondary text 64 % | text on Paper, Sage, Sky, Lilac, Rose, Sand |
-| `BoostTokens.pageTextOnNight` | `#FAF9F5` (porcelain); secondary text 68 % | text on Night |
+| Token | Light | Dark | Use |
+|---|---|---|---|
+| `BoostTokens.pageColorPaper` | `#F4ECDA` | `#2B2620` | page background |
+| `BoostTokens.pageColorSage` | `#DCE7DA` | `#232B25` | page background |
+| `BoostTokens.pageColorSky` | `#DCE6F2` | `#222831` | page background |
+| `BoostTokens.pageColorLilac` | `#E6DEF0` | `#2A2530` | page background |
+| `BoostTokens.pageColorRose` | `#F2DEDE` | `#2F2526` | page background |
+| `BoostTokens.pageColorSand` | `#E9E1D2` | `#2A2721` | page background |
+| `BoostTokens.pageColorNight` | `#202321` | `#202321` | page background |
+| `BoostTokens.pageText` | `#202321` (graphite); secondary 64 % | `#FAF9F5` (porcelain); secondary 68 % | text on Paper, Sage, Sky, Lilac, Rose, Sand |
+| `BoostTokens.pageTextOnNight` | `#FAF9F5` (porcelain); secondary 68 % | `#FAF9F5` (porcelain); secondary 68 % | text on Night |
 
 "Site colors" (the first swatch) removes the color and keeps the site's own. A swatch has a 0.5 pt inner edge (black
-18 % in light, white 28 % in dark) so Night stays visible on the dark panel.
+18 % in light, white 28 % in dark) so the dark values and Night stay visible on the dark panel. The selected font cell
+has a 1.5 pt edge in the text color: graphite in light, porcelain `#FAF9F5` in dark.
 
 ## Hiding an element (`picker`)
 
@@ -64,7 +66,7 @@ the header and the footer with Done stay.
 ## Managing Boosts (`manage`)
 
 The Library window (title "Library") uses the shared rail documented in `design/library-history/README.md`, "Library
-window rail": Downloads, History, Spaces, Boosts, in that order. Captures is not in the rail while the capture
+window rail": Downloads, History, Spaces, Boosts, in that order. Boosts uses the brush glyph, the same as the panel header. Captures is not in the rail while the capture
 destination question on #646 is open. The search field reads "Search Boosts". The Boosts section: one 56 pt row per site (32 pt site tile, host, a one-line summary, an on/off
 switch, a more menu). Long hosts truncate; rows that are off are dimmed. The footer reads "Boosts change how a site
 looks on this Mac. Each one runs only on its own site."

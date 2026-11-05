@@ -637,6 +637,7 @@ body { display: flex; justify-content: center; align-items: center; }
 /* Smallest window: the panel caps its height to the window; its middle scrolls with a faded edge, the footer stays */
 .bx-scroll { flex: 1; min-height: 0; overflow: hidden; -webkit-mask-image: linear-gradient(#000 calc(100% - 28px), transparent); mask-image: linear-gradient(#000 calc(100% - 28px), transparent); }
 :root[data-theme="dark"] .sw i { box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.28); }
+:root[data-theme="dark"] .segf span.on { box-shadow: 0 0 0 1.5px #FAF9F5; }
 
 </style>
 </head>
@@ -834,19 +835,20 @@ function browser(o = {}) {
 /* ---------- This surface ---------- */
 /* ---------- Boosts (#645) ---------- */
 document.head.insertAdjacentHTML('beforeend', `<style>
-:root { --boost-paper: #F4ECDA; --boost-text-light: #202321; --boost-text-night: #FAF9F5; }
-/* A Boost page color is the page's own color: the same in light and dark appearance. Text follows the color. */
-.site.onlight { --text: var(--boost-text-light); --text-2: rgba(32,35,33,0.64); --page-ink: rgba(32,35,33,0.10); --page-ink-2: rgba(32,35,33,0.18); --divider: rgba(32,35,33,0.10); }
-.site.onnight { --text: var(--boost-text-night); --text-2: rgba(250,249,245,0.68); --page-ink: rgba(250,249,245,0.10); --page-ink-2: rgba(250,249,245,0.20); --divider: rgba(250,249,245,0.10); }
+:root { --bc-paper: #F4ECDA; --bc-sage: #DCE7DA; --bc-sky: #DCE6F2; --bc-lilac: #E6DEF0; --bc-rose: #F2DEDE; --bc-sand: #E9E1D2; --bc-night: #202321; }
+:root[data-theme="dark"] { --bc-paper: #2B2620; --bc-sage: #232B25; --bc-sky: #222831; --bc-lilac: #2A2530; --bc-rose: #2F2526; --bc-sand: #2A2721; }
+/* Boost page colors follow the appearance (BoostTokens.pageColor*, light and dark values). Text follows the color. */
+.site.tinted { --text: #202321; --text-2: rgba(32,35,33,0.64); --page-ink: rgba(32,35,33,0.10); --page-ink-2: rgba(32,35,33,0.18); --divider: rgba(32,35,33,0.10); }
+:root[data-theme="dark"] .site.tinted, .site.onnight { --text: #FAF9F5; --text-2: rgba(250,249,245,0.68); --page-ink: rgba(250,249,245,0.10); --page-ink-2: rgba(250,249,245,0.20); --divider: rgba(250,249,245,0.10); }
 </style>`);
-const SW = [['none', ''], ['paper', '#F4ECDA'], ['sage', '#DCE7DA'], ['sky', '#DCE6F2'], ['lilac', '#E6DEF0'], ['rose', '#F2DEDE'], ['sand', '#E9E1D2'], ['night', '#202321']];
+const SW = [['none', ''], ['paper', 'var(--bc-paper)'], ['sage', 'var(--bc-sage)'], ['sky', 'var(--bc-sky)'], ['lilac', 'var(--bc-lilac)'], ['rose', 'var(--bc-rose)'], ['sand', 'var(--bc-sand)'], ['night', 'var(--bc-night)']];
 const swatches = (on = 1, n = 8) => `<div class="sw" role="radiogroup" aria-label="Page color">${SW.slice(0, n).map(([nm, c], i) => `<i class="${nm === 'none' ? 'none' : ''}${i === on ? ' on' : ''}" style="${c ? 'background:' + c : ''}" role="radio" aria-checked="${i === on}" aria-label="${nm === 'none' ? 'Site colors' : nm}"></i>`).join('')}</div>`;
 const fonts = (on = 2) => `<div class="segf" role="radiogroup" aria-label="Font">${[['Aa', 'Site', 'inherit'], ['Aa', 'Sans', '-apple-system,sans-serif'], ['Aa', 'Serif', 'ui-serif,Georgia,serif'], ['Aa', 'Mono', 'ui-monospace,Menlo,monospace']].map(([a, n, f], i) => `<span class="${i === on ? 'on' : ''}" role="radio" aria-checked="${i === on}"><b style="font-family:${f}">${a}</b>${n}</span>`).join('')}</div>`;
 const tgl = (on = true, label = 'Boost on') => `<button class="tg" role="switch" aria-checked="${on}" aria-label="${label}"><i></i></button>`;
 
 function site(o = {}) {
-  const st = `${o.tint ? '--sbg:var(--boost-paper);' : ''}${o.serif ? '--sfont:ui-serif,Georgia,serif;' : ''}${o.right ? 'right:' + o.right + 'px;' : ''}`;
-  return `<div class="site${o.tint ? ' onlight' : ''}" style="${st}">
+  const st = `${o.tint ? '--sbg:var(--bc-paper);' : ''}${o.serif ? '--sfont:ui-serif,Georgia,serif;' : ''}${o.right ? 'right:' + o.right + 'px;' : ''}`;
+  return `<div class="site${o.tint ? ' tinted' : ''}" style="${st}">
     <div class="top"><span class="logo">Field Guide</span><span>Lichens</span><span>Mosses</span><span>Maps</span><span>Subscribe</span></div>
     ${o.hidePromo ? '' : `<div class="promo${o.pick ? ' picked' : ''}"><b>Get the weekly field notes</b><span style="color:var(--text-2)">Join 80,000 readers. No spam, ever.</span><span class="x">Sign up</span></div>`}
     <div class="art"><div>
