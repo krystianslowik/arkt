@@ -76,7 +76,9 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   /// data tests set, and each `openSiteSettings` call.
   var siteExceptions: [String: [SitePermissionKind: PermissionSetting]] = [:]
   var connectionOverrides: [TabID: (connection: PageConnection, certificate: CertificateSummary?)] = [:]
-  var siteDataByOrigin: [String: SiteData] = [:]
+  var siteDataByOrigin: [String: SiteData?] = [:]
+  /// Tabs whose page info changed a setting since their panel last closed: each gets the reload infobar on close.
+  var pendingReloads: Set<TabID> = []
   public internal(set) var openedSiteSettings: [(origin: String, tab: TabID)] = []
 
   /// Builds hosts for `openEngineWindow(_:)`, as the app's provider does for a real engine.
@@ -754,6 +756,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     history[id] = nil
     heldCloses[id] = nil
     connectionOverrides[id] = nil
+    pendingReloads.remove(id)
     selections[id] = nil
     hub.emit(.tabClosed(id, reason: reason))
     if let successor { setActive(successor) }

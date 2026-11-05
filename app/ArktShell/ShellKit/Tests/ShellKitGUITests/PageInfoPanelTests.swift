@@ -203,7 +203,7 @@ final class PageInfoPanelTests: XCTestCase {
       (.popups, .allow), (.sound, .block), (.javascript, .block), (.automaticDownloads, .block), (.clipboard, .allow),
       (.midiDevices, .allow),
     ]
-    for (kind, value) in six { engine.setPermission(kind, to: value, forOrigin: site) }
+    for (kind, value) in six { engine.setPermission(kind, to: value, forOrigin: site, from: TabID()) }
     pressGlyph()
     XCTAssertEqual(view?.rows.count, 10)
     XCTAssertEqual(view?.listScrolls, false, "ten rows fit under 552 pt")
@@ -212,7 +212,7 @@ final class PageInfoPanelTests: XCTestCase {
     let more: [SitePermissionKind] = [.usbDevices, .serialPorts, .hidDevices, .bluetoothDevices, .fileEditing,
                                       .localFonts]
     for kind in more {
-      engine.setPermission(kind, to: .block, forOrigin: site)
+      engine.setPermission(kind, to: .block, forOrigin: site, from: TabID())
     }
     pressGlyph()
     let view = try XCTUnwrap(view)
@@ -233,7 +233,7 @@ final class PageInfoPanelTests: XCTestCase {
     XCTAssertEqual(view.connectionLabel.stringValue, "Local file on this Mac")
     XCTAssertFalse(view.noteLabel.isHidden)
     XCTAssertEqual(view.noteLabel.stringValue,
-                   "Local files have no site settings. Permissions apply to this file only while it is open.")
+                   "Local files have no site settings.")
     XCTAssertTrue(view.scrollView.isHidden && view.resetButton.isHidden && view.siteSettingsButton.isHidden)
     XCTAssertLessThan(try XCTUnwrap(panel.panel).frame.height, 200)
   }
@@ -244,7 +244,7 @@ final class PageInfoPanelTests: XCTestCase {
     try open("https://fieldguide.example/")
     for kind in SitePermissionKind.allCases.dropFirst(4).prefix(10) {
       let target: PermissionSetting = kind == .popups || kind == .insecureContent ? .allow : .block
-      engine.setPermission(kind, to: target, forOrigin: "https://fieldguide.example")
+      engine.setPermission(kind, to: target, forOrigin: "https://fieldguide.example", from: TabID())
     }
     pressGlyph()
     let window = try XCTUnwrap(panel.panel)
@@ -265,16 +265,58 @@ final class PageInfoPanelTests: XCTestCase {
     XCTAssertTrue(panel.isShown, "the panel stays up")
     XCTAssertEqual(try row(.camera).popUp.titleOfSelectedItem, "Block")
     XCTAssertTrue(view?.resetButton.isEnabled == true)
-    XCTAssertEqual(engine.infobars(of: tab).map(\.kind), [.reload], "the engine's reload infobar")
+    XCTAssertTrue(engine.infobars(of: tab).isEmpty, "no reload infobar while the panel is open")
 
     try choose("Allow", in: .microphone)
-    XCTAssertEqual(engine.infobars(of: tab).count, 1, "one reload infobar")
+    panel.hide(keyboard: false)
+    XCTAssertEqual(engine.infobars(of: tab).map(\.kind), [.reload], "the reload infobar when the panel closes")
+  }
+
+  func testClosingWithoutAChangeRaisesNoInfobar() throws {
+    let tab = try open("https://fieldguide.example/")
+    pressGlyph()
+    try XCTUnwrap(panel.panel).cancelOperation(nil)
+    XCTAssertTrue(engine.infobars(of: tab).isEmpty)
+  }
+
+  func testAnOpenPanelFollowsTheEnginesAnnouncements() throws {
+    try open("https://fieldguide.example/")
+    engine.setSiteData(nil, forOrigin: "https://fieldguide.example")
+    pressGlyph()
+    let view = try XCTUnwrap(view)
+    XCTAssertEqual(view.siteDataRow.summary.stringValue, "", "still counting")
+
+    engine.setSiteData(SiteData(cookies: 0, bytes: 0), forOrigin: "https://fieldguide.example")
+    XCTAssertEqual(view.siteDataRow.summary.stringValue, "None", "the count arrived")
+
+    engine.setPermission(.camera, to: .block, forOrigin: "https://fieldguide.example", from: TabID())
+    XCTAssertEqual(try row(.camera).popUp.titleOfSelectedItem, "Block", "a change made elsewhere")
+
+    let tab = try XCTUnwrap(controller.currentTab)
+    engine.setConnection(tab, .notFullySecure)
+    XCTAssertEqual(view.connectionLabel.stringValue, "Not fully secure: parts of this page are not encrypted")
+    XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, "Not fully secure, fieldguide.example")
+  }
+
+  func testPrivateWindowShowsThePanelReadOnly() throws {
+    controller.makeIncognito()
+    controller.openPrivately(try XCTUnwrap(URL(string: "https://fieldguide.example/")))
+    let tab = try XCTUnwrap(controller.currentTab)
+    engine.finishLoad(tab, title: "Page")
+    XCTAssertEqual(controller.urlBar.siteSymbol, "lock")
+    pressGlyph()
+    let view = try XCTUnwrap(view)
+    XCTAssertFalse(view.readOnlyLabel.isHidden)
+    XCTAssertEqual(view.readOnlyLabel.stringValue, "Site settings cannot be changed in a private window.")
+    XCTAssertTrue(view.popUps.allSatisfy { !$0.isEnabled }, "the pop-ups are off")
+    XCTAssertFalse(view.resetButton.isEnabled)
+    XCTAssertTrue(engine.sitesWithPermissions().isEmpty)
   }
 
   func testResetPermissionsPutsEveryPermissionBack() throws {
     let tab = try open("https://fieldguide.example/")
-    engine.setPermission(.location, to: .block, forOrigin: "https://fieldguide.example")
-    engine.setPermission(.popups, to: .allow, forOrigin: "https://fieldguide.example")
+    engine.setPermission(.location, to: .block, forOrigin: "https://fieldguide.example", from: TabID())
+    engine.setPermission(.popups, to: .allow, forOrigin: "https://fieldguide.example", from: TabID())
     pressGlyph()
     XCTAssertEqual(view?.rows.count, 5)
     let reset = try XCTUnwrap(view?.resetButton)
@@ -346,6 +388,44 @@ final class PageInfoPanelTests: XCTestCase {
     controller.activate(node: other)
     XCTAssertNotEqual(controller.currentTab, tab)
     XCTAssertFalse(panel.isShown, "another tab closes it")
+  }
+
+  func testLosingMainOrTheAppGoingToTheBackgroundClosesIt() throws {
+    try open("https://fieldguide.example/")
+    pressGlyph()
+    panel.parentDidResignMain()
+    XCTAssertFalse(panel.isShown)
+    pressGlyph()
+    panel.appDidResignActive()
+    XCTAssertFalse(panel.isShown)
+  }
+
+  func testTheBadgeShowsTheFavicon() throws {
+    let tab = try open("https://fieldguide.example/")
+    pressGlyph()
+    XCTAssertFalse(try XCTUnwrap(view).showsFavicon, "the site glyph without a favicon")
+    panel.hide(keyboard: true)
+    let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+      NSColor.systemOrange.setFill()
+      rect.fill()
+      return true
+    }
+    let png = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation))?
+      .representation(using: .png, properties: [:]))
+    engine.navigate(tab, to: try XCTUnwrap(URL(string: "https://fieldguide.example/again")))
+    engine.finishLoad(tab, title: "Page", favicon: png)
+    pressGlyph()
+    XCTAssertTrue(try XCTUnwrap(view).showsFavicon)
+  }
+
+  func testVoiceOverReadsTheSecurityStateBeforeTheAddress() throws {
+    try open("https://fieldguide.example/")
+    XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, "Secure, fieldguide.example")
+    try open("http://old-mirror.fieldguide.example/")
+    XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, "Not secure, old-mirror.fieldguide.example")
+    try open("chrome://settings/")
+    XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, controller.urlBar.displayedText,
+                   "the address alone without a glyph")
   }
 
   func testSidebarChangeAndFullScreenCloseIt() throws {

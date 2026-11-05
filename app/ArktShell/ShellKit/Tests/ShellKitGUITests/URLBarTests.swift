@@ -53,7 +53,7 @@ final class URLBarTests: XCTestCase {
     engine.navigate(tab, to: next)
     XCTAssertEqual(controller.urlBar.displayedText, "example.org")
     XCTAssertEqual(controller.rootView.card.toolbar.urlBar.displayedText, next.absoluteString)
-    XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, "example.org")
+    XCTAssertEqual(controller.urlBar.accessibilityValue() as? String, "Secure, example.org", "state first (#582)")
   }
 
   func testURLChangesOfAnotherTabLeaveTheURLBarAlone() throws {
@@ -342,7 +342,7 @@ final class URLBarTests: XCTestCase {
     setting.showsFullURL = false
     XCTAssertEqual(first.rootView.card.toolbar.urlBar.style, .host)
     XCTAssertEqual(first.rootView.card.toolbar.urlBar.displayedText, "example.org")
-    XCTAssertEqual(first.rootView.card.toolbar.urlBar.accessibilityValue() as? String, "example.org")
+    XCTAssertEqual(first.rootView.card.toolbar.urlBar.accessibilityValue() as? String, "Secure, example.org")
     XCTAssertEqual(second.rootView.card.toolbar.urlBar.style, .host, "shared across windows")
 
     first.activate(node: pane0)
@@ -389,7 +389,7 @@ final class URLBarTests: XCTestCase {
     XCTAssertTrue(bar.isAccessibilityElement())
     XCTAssertEqual(bar.accessibilityRole(), .button)
     XCTAssertEqual(bar.accessibilityLabel(), "Address")
-    XCTAssertEqual(bar.accessibilityValue() as? String, bar.displayedText)
+    XCTAssertEqual(bar.accessibilityValue() as? String, "Secure, " + bar.displayedText, "state first (#582)")
     XCTAssertNotNil(bar.accessibilityHelp())
     let toolbar = controller.rootView.card.toolbar
     XCTAssertEqual(toolbar.backButton.accessibilityLabel(), "Back")

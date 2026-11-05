@@ -842,6 +842,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .tabRecovered:
       refreshCrashedTabs()
       return
+    case .pageInfoChanged(let tab):
+      if tab == currentTab { refreshPageInfo() }                    // #582: before the map, as a private page has no row
+      return
     default:
       break
     }
@@ -886,8 +889,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
       break                                                         // routed above, before the row lookup (#114)
-    case .tabCrashed, .tabRecovered:
-      break                                                         // routed above, before the row lookup (#578)
+    case .tabCrashed, .tabRecovered, .pageInfoChanged:
+      break                                                         // routed above, before the row lookup (#578, #582)
     case .zoomChanged:
       zoomPill.handle(event)                                        // #579
     case .tabFullscreenChanged:

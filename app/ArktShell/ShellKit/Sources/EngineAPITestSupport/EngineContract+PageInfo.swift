@@ -54,7 +54,10 @@ extension EngineContract {
     let permission = try requireValue(info.permissions.first { $0.isDefault }, "a permission at its default")
     let other = try requireValue(permission.options.first { $0 != permission.setting }, "another setting")
 
-    site.setPermission(permission.kind, to: other, forOrigin: info.origin)
+    let recorder = EventRecorder(engine)
+    site.setPermission(permission.kind, to: other, forOrigin: info.origin, from: a)
+    try await wait("the announcement of the change on \(a)") { recorder.events(for: a).contains(.pageInfoChanged(a)) }
+    try require(!recorder.events(for: b).contains(.pageInfoChanged(b)), "another site's tab hears nothing")
 
     let changed = site.pageInfo(of: a)?.permissions.first { $0.kind == permission.kind }
     try require(changed?.setting == other && changed?.isDefault == false, "the change is read back at once")
@@ -64,7 +67,7 @@ extension EngineContract {
     try require(listed?.permissions.contains { $0.kind == permission.kind && $0.setting == other } == true,
                 "the per-site list carries the change")
 
-    site.resetPermissions(forOrigin: info.origin)
+    site.resetPermissions(forOrigin: info.origin, from: a)
 
     let reset = site.pageInfo(of: a)?.permissions.first { $0.kind == permission.kind }
     try require(reset == nil || (reset?.isDefault == true && reset?.setting == permission.setting),
@@ -81,12 +84,26 @@ extension EngineContract {
     let changes = info.permissions.compactMap { p in p.options.first { $0 != p.setting }.map { (p.kind, $0) } }
     try require(changes.count >= 2, "two permissions to change")
 
-    site.setPermission(changes[0].0, to: changes[0].1, forOrigin: info.origin)
-    site.setPermission(changes[1].0, to: changes[1].1, forOrigin: info.origin)
+    site.pageInfoDidClose(tab: b)                     // nothing changed there
+    site.setPermission(changes[0].0, to: changes[0].1, forOrigin: info.origin, from: a)
+    site.setPermission(changes[1].0, to: changes[1].1, forOrigin: info.origin, from: a)
+    try await wait("both announcements on \(a)") {
+      recorder.events(for: a).filter { $0 == .pageInfoChanged(a) }.count >= 2
+    }
+    try require(reloadInfobars(recorder, a).isEmpty, "no reload infobar while the panel is open")
+
+    site.pageInfoDidClose(tab: a)
     try await wait("the reload infobar on \(a)") { !reloadInfobars(recorder, a).isEmpty }
+    site.pageInfoDidClose(tab: a)                     // a second close with no change raises nothing more
+    try await settleEvents(engine)
 
     try require(reloadInfobars(recorder, a).count == 1, "one reload infobar however many changes")
     try require(reloadInfobars(recorder, a).first?.ok != nil, "the reload infobar has a Reload button")
-    try require(reloadInfobars(recorder, b).isEmpty, "another site's tab gets no reload infobar")
+    try require(reloadInfobars(recorder, b).isEmpty, "another tab gets no reload infobar")
+  }
+
+  /// Lets an engine that delivers one main-actor turn later report what it still holds.
+  private static func settleEvents(_ engine: any EngineClient) async throws {
+    for _ in 0..<3 { await Task.yield() }
   }
 }

@@ -7,6 +7,8 @@ extension ShellWindowController {
   func makePageInfoPanel() -> PageInfoPanelController {
     let panel = PageInfoPanelController { [weak self] in self?.engine.siteSettings }
     panel.onReturnFocus = { [weak self] in self?.returnFocusToPage() }
+    panel.isReadOnly = { [weak self] in self?.isPrivateWindow ?? false }          // until #557
+    panel.favicon = { [weak self] tab in self?.engine.snapshot(of: tab)?.faviconData }
     return panel
   }
 
@@ -14,9 +16,11 @@ extension ShellWindowController {
   /// While a Peek shows its own address, or for a page of the browser itself, the pills stay inert.
   func refreshPageInfo() {
     let info = peek.addressOverride == nil ? currentTab.flatMap { engine.siteSettings?.pageInfo(of: $0) } : nil
-    let symbol = PageInfoModel.pillSymbol(for: info)
-    urlBar.siteSymbol = symbol
-    rootView.card.toolbar.urlBar.siteSymbol = symbol
+    let pill = PageInfoModel.pill(for: info)
+    for bar in [urlBar, rootView.card.toolbar.urlBar] {
+      bar.siteDescription = pill?.description
+      bar.siteSymbol = pill?.symbol
+    }
     pageInfo.pageDidChange(currentTab: info == nil ? nil : currentTab)
   }
 

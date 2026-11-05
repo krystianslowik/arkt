@@ -43,6 +43,7 @@ public final class URLBarView: NSView {
       guard siteSymbol != oldValue else { return }
       siteGlyph.image = siteSymbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
       siteGlyph.isHidden = siteGlyph.image == nil
+      refreshAccessibilityValue()
       setAccessibilityCustomActions(siteGlyph.isHidden ? nil : [
         NSAccessibilityCustomAction(name: "Show Site Controls") { [weak self] in
           MainActor.assumeIsolated { self?.onPressSiteGlyph?() }
@@ -51,6 +52,11 @@ public final class URLBarView: NSView {
       ])
       needsLayout = true
     }
+  }
+  /// The page's security state in a word or two ("Not secure"), read by VoiceOver before the address while the glyph
+  /// shows; set it with `siteSymbol`.
+  public var siteDescription: String? {
+    didSet { if siteDescription != oldValue { refreshAccessibilityValue() } }
   }
   /// A click on the site glyph, or VoiceOver's Show Site Controls: the page info panel.
   public var onPressSiteGlyph: (@MainActor () -> Void)?
@@ -121,7 +127,15 @@ public final class URLBarView: NSView {
     label.stringValue = text
     if !siteGlyph.isHidden { needsLayout = true }      // the Toolbar's glyph sits just before the text
     toolTip = url?.absoluteString
-    setAccessibilityValue(text)
+    refreshAccessibilityValue()
+  }
+
+  /// "Not secure, example.com" while the site glyph shows; the address alone otherwise.
+  private func refreshAccessibilityValue() {
+    let value = siteGlyph.isHidden ? displayedText : [siteDescription, displayedText]
+      .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: ", ")
+    guard (accessibilityValue() as? String) != value else { return }
+    setAccessibilityValue(value)
     NSAccessibility.post(element: self, notification: .valueChanged)
   }
 

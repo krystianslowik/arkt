@@ -6,21 +6,29 @@ import Foundation
 // until its engine partner, #583, lands) offers no panel and the address pill stays as it is.
 //
 // Every call is keyed by the site's origin as the engine names it (`PageInfo.origin`), never by a URL the shell
-// parses: the engine decides what a site is (Chromium keys content settings by origin pattern).
+// parses: the engine decides what a site is (Chromium keys content settings by origin pattern). The calls that change
+// a setting also name the tab they come from, so the engine changes that tab's profile (an Incognito tab's settings
+// are not the normal profile's). `EngineEvent.pageInfoChanged` announces a change of a tab's page info.
 
 /// How the page reached the browser, folded to what the panel tells apart.
 ///
-/// Chromium's `security_state::SecurityLevel` and URL scheme map as: `SECURE` and `SECURE_WITH_POLICY_INSTALLED_CERT`
-/// to `secure`; `NONE` and `WARNING` on `http:` to `notSecure`; `DANGEROUS` (a certificate error, Safe Browsing) to
-/// `dangerous`; `file:` to `localFile`; `chrome:`, `chrome-extension:`, `about:`, `devtools:` and the new tab page to
-/// `internalPage`.
+/// Chromium's `security_state::SecurityLevel`, `VisibleSecurityState` and URL scheme map as: `SECURE` and
+/// `SECURE_WITH_POLICY_INSTALLED_CERT` to `secure`; `NONE` or `WARNING` on `http:` to `notSecure`; `NONE` or `WARNING`
+/// on `https:` with mixed content (`displayed_mixed_content`, `contained_mixed_form`) to `notFullySecure`; `DANGEROUS`
+/// with a certificate error (`cert_status` has an error) to `certificateError`; `DANGEROUS` from Safe Browsing
+/// (`malicious_content_status` set) to `flagged`; `file:` to `localFile`; `chrome:`, `chrome-extension:`, `about:`,
+/// `devtools:` and the new tab page to `internalPage`.
 public enum PageConnection: Equatable, Sendable {
   /// An encrypted connection with a valid certificate.
   case secure
-  /// No encryption (`http:`) or encryption with a problem the browser only warns about.
+  /// No encryption (plain `http:`).
   case notSecure
-  /// A certificate error or a page the browser flagged as dangerous.
-  case dangerous
+  /// An encrypted page with parts that are not encrypted (mixed content).
+  case notFullySecure
+  /// The certificate is not valid (expired, wrong host, untrusted issuer).
+  case certificateError
+  /// Safe Browsing flagged the site (phishing, malware, unwanted software).
+  case flagged
   /// A file on this Mac: it has no site settings.
   case localFile
   /// A page of the browser itself: there is no page info to show.
@@ -157,7 +165,7 @@ public struct PageInfo: Equatable, Sendable {
   /// Whether the page has site settings at all (false for a local file and an internal page).
   public var hasSiteSettings: Bool {
     switch connection {
-    case .secure, .notSecure, .dangerous: true
+    case .secure, .notSecure, .notFullySecure, .certificateError, .flagged: true
     case .localFile, .internalPage: false
     }
   }
@@ -178,19 +186,24 @@ public struct SitePermissions: Equatable, Sendable, Identifiable {
 }
 
 /// The engine's page info and per-site permissions. Changes apply at once: the next `pageInfo(of:)` and
-/// `sitesWithPermissions()` read the new values. A change that needs a reload to reach a page raises the reload
-/// infobar (`InfobarKind.reload`) once on each tab showing that site.
+/// `sitesWithPermissions()` read the new values. The reload a change needs is offered when the panel closes
+/// (`pageInfoDidClose(tab:)`), as Chromium's page info does.
 @MainActor
 public protocol EngineSiteSettings: AnyObject {
   /// The page info of the tab's current page; nil for an unknown or closed tab, or a tab without a page.
   func pageInfo(of tab: TabID) -> PageInfo?
-  /// Every site with a permission that is not at the default, sorted by host.
+  /// Every site of the normal profile with a permission that is not at the default, sorted by host.
   func sitesWithPermissions() -> [SitePermissions]
-  /// Sets one permission of the site. A setting the permission does not offer, or the one it already has, changes
-  /// nothing and raises nothing.
-  func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String)
-  /// Puts every permission of the site back to the default. Cookies and site data stay.
-  func resetPermissions(forOrigin origin: String)
+  /// Sets one permission of the site in the profile of `tab`. A setting the permission does not offer, or the one it
+  /// already has, changes nothing and announces nothing; a change is announced with `.pageInfoChanged` on every tab of
+  /// the site in that profile.
+  func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String,
+                     from tab: TabID)
+  /// Puts every permission of the site in the profile of `tab` back to the default. Cookies and site data stay.
+  func resetPermissions(forOrigin origin: String, from tab: TabID)
+  /// The page info panel of `tab` closed. If a setting of its site changed while it was open, the engine raises the
+  /// reload infobar (`InfobarKind.reload`) once, on that tab; otherwise nothing happens.
+  func pageInfoDidClose(tab: TabID)
   /// Opens the browser's settings for the site next to `tab` (Chromium: `chrome://settings/content/siteDetails`).
   func openSiteSettings(forOrigin origin: String, from tab: TabID)
 }

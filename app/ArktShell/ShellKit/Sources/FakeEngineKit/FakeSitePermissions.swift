@@ -12,9 +12,18 @@ struct FakeSitePermissions {
   static func title(_ kind: SitePermissionKind) -> String { kind == .camera ? "Camera" : "Microphone" }
 
   static func origin(of url: URL) -> String? {
-    guard let scheme = url.scheme?.lowercased(), let host = url.host(percentEncoded: false)?.lowercased(),
-          !host.isEmpty else { return nil }
-    return url.port.map { "\(scheme)://\(host):\($0)" } ?? "\(scheme)://\(host)"
+    guard let scheme = url.scheme, let host = url.host(percentEncoded: false) else { return nil }
+    return origin(scheme: scheme, host: host, port: url.port)
+  }
+
+  /// `scheme://host[:port]`, lowercased, without the scheme's default port (443 for `https:`, 80 for `http:`).
+  static func origin(scheme: String, host: String, port: Int?) -> String? {
+    let scheme = scheme.lowercased()
+    let host = host.lowercased()
+    guard !host.isEmpty else { return nil }
+    let defaultPort = ["https": 443, "http": 80][scheme]
+    guard let port, port != defaultPort else { return "\(scheme)://\(host)" }
+    return "\(scheme)://\(host):\(port)"
   }
 
   private static func host(ofOrigin origin: String) -> String {
@@ -27,8 +36,9 @@ struct FakeSitePermissions {
     return SitePermission(kind: kind, title: Self.title(kind), setting: exception ?? .ask, isDefault: exception == nil)
   }
 
-  /// `https:` with only secure content is secure; `file:` a local file; a page without a host (`about:`, `data:`)
-  /// internal; anything else not secure. Nil without a URL.
+  /// `https:` is secure, or not fully secure with mixed content; `file:` a local file; a page without a host
+  /// (`about:`, `data:`) internal; anything else not secure. WebKit reports no certificate error or Safe Browsing
+  /// state through public API. Nil without a URL.
   func pageInfo(tab: TabID, url: URL?, hasOnlySecureContent: Bool) -> PageInfo? {
     guard let url, let scheme = url.scheme?.lowercased() else { return nil }
     if scheme == "file" {
@@ -37,7 +47,7 @@ struct FakeSitePermissions {
     guard let origin = Self.origin(of: url) else {
       return PageInfo(tab: tab, origin: url.absoluteString, host: url.absoluteString, connection: .internalPage)
     }
-    let connection: PageConnection = scheme == "https" && hasOnlySecureContent ? .secure : .notSecure
+    let connection: PageConnection = scheme != "https" ? .notSecure : hasOnlySecureContent ? .secure : .notFullySecure
     return PageInfo(tab: tab, origin: origin, host: Self.host(ofOrigin: origin), connection: connection,
                     permissions: Self.kinds.map { permission($0, origin: origin) })
   }

@@ -3,7 +3,8 @@ import Foundation
 
 // Page info and per-site permissions (#582). The connection follows the scheme (`https:` secure, `file:` a local
 // file, the browser's own schemes internal, any other site not secure) unless a test sets it; permissions are kept per
-// origin as exceptions to the defaults below, as Chromium's content settings map keeps them. Titles are this engine's
+// origin as exceptions to the defaults below, as Chromium's content settings map keeps them. One profile: the tab a
+// change comes from only decides where the reload infobar goes when its panel closes. Titles are this engine's
 // stand-ins for the engine's strings.
 extension InMemoryEngine: EngineSiteSettings {
   public var siteSettings: (any EngineSiteSettings)? { self }
@@ -89,8 +90,9 @@ extension InMemoryEngine: EngineSiteSettings {
     let changed = SitePermissionKind.allCases.filter {
       !Self.commonPermissions.contains($0) && siteExceptions[origin]?[$0] != nil
     }
+    let siteData: SiteData? = if let entry = siteDataByOrigin[origin] { entry } else { SiteData.none }
     return PageInfo(tab: tab, origin: origin, host: Self.host(ofOrigin: origin), connection: connection,
-                    certificate: override?.certificate, siteData: siteDataByOrigin[origin] ?? SiteData.none,
+                    certificate: override?.certificate, siteData: siteData,
                     permissions: (Self.commonPermissions + changed).map { permission($0, origin: origin) })
   }
 
@@ -102,27 +104,39 @@ extension InMemoryEngine: EngineSiteSettings {
     }.sorted { $0.host < $1.host }
   }
 
-  public func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String) {
+  public func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String,
+                            from tab: TabID) {
     guard Self.options(kind).contains(setting), permission(kind, origin: origin).setting != setting else { return }
     siteExceptions[origin, default: [:]][kind] = setting == Self.defaultSetting(kind) ? nil : setting
     if siteExceptions[origin]?.isEmpty == true { siteExceptions[origin] = nil }
-    raiseReloadInfobars(forOrigin: origin)
+    changed(origin, from: tab)
   }
 
-  public func resetPermissions(forOrigin origin: String) {
+  public func resetPermissions(forOrigin origin: String, from tab: TabID) {
     guard siteExceptions.removeValue(forKey: origin) != nil else { return }
-    raiseReloadInfobars(forOrigin: origin)
+    changed(origin, from: tab)
+  }
+
+  public func pageInfoDidClose(tab: TabID) {
+    guard pendingReloads.remove(tab) != nil, snapshots[tab] != nil,
+          infobars[tab]?.contains(where: { $0.kind == .reload }) != true else { return }
+    _ = raiseInfobar(in: tab, message: Self.reloadMessage, kind: .reload, okTitle: "Reload", cancelTitle: nil)
   }
 
   public func openSiteSettings(forOrigin origin: String, from tab: TabID) {
     openedSiteSettings.append((origin, tab))
   }
 
-  /// The reload infobar on every tab showing the site, unless one is already up there.
-  private func raiseReloadInfobars(forOrigin origin: String) {
+  /// A setting of the site changed from `tab`: its panel offers a reload when it closes, and every tab of the site
+  /// hears of it.
+  private func changed(_ origin: String, from tab: TabID) {
+    if snapshots[tab] != nil { pendingReloads.insert(tab) }
+    announce(origin)
+  }
+
+  private func announce(_ origin: String) {
     for tab in tabIDs where snapshots[tab]?.url.flatMap(Self.origin(of:)) == origin {
-      guard infobars[tab]?.contains(where: { $0.kind == .reload }) != true else { continue }
-      _ = raiseInfobar(in: tab, message: Self.reloadMessage, kind: .reload, okTitle: "Reload", cancelTitle: nil)
+      hub.emit(.pageInfoChanged(tab))
     }
   }
 
@@ -131,11 +145,13 @@ extension InMemoryEngine: EngineSiteSettings {
   /// Test hook: the tab's connection as the engine would report it (a certificate error, a flagged page).
   public func setConnection(_ tab: TabID, _ connection: PageConnection, certificate: CertificateSummary? = nil) {
     connectionOverrides[tab] = (connection, certificate)
+    if snapshots[tab] != nil { hub.emit(.pageInfoChanged(tab)) }
   }
 
-  /// Test hook: what the site keeps on this Mac.
-  public func setSiteData(_ data: SiteData, forOrigin origin: String) {
-    siteDataByOrigin[origin] = data
+  /// Test hook: what the site keeps on this Mac; nil while the engine is still counting.
+  public func setSiteData(_ data: SiteData?, forOrigin origin: String) {
+    siteDataByOrigin[origin] = .some(data)
+    announce(origin)
   }
 
   /// The tab's reported infobars, in order.

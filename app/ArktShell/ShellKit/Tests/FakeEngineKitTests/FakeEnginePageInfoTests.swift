@@ -20,7 +20,7 @@ struct FakeEnginePageInfoTests {
 
   @Test func connectionFollowsTheSchemeAndSecureContent() {
     #expect(info("https://fieldguide.example/")?.connection == .secure)
-    #expect(info("https://fieldguide.example/", secure: false)?.connection == .notSecure)
+    #expect(info("https://fieldguide.example/", secure: false)?.connection == .notFullySecure, "mixed content")
     #expect(info("http://fieldguide.example/")?.connection == .notSecure)
     #expect(info("file:///tmp/trail-notes.html")?.connection == .localFile)
     #expect(info("file:///tmp/trail-notes.html")?.host == "trail-notes.html")
@@ -61,6 +61,13 @@ struct FakeEnginePageInfoTests {
     #expect(table.sites().isEmpty)
   }
 
+  @Test func defaultPortsAreLeftOutOfTheOrigin() {
+    #expect(FakeSitePermissions.origin(of: URL(string: "https://alpha.example:443/a")!) == "https://alpha.example")
+    #expect(FakeSitePermissions.origin(of: URL(string: "http://alpha.example:80/")!) == "http://alpha.example")
+    #expect(FakeSitePermissions.origin(of: URL(string: "https://alpha.example:8443/")!) == "https://alpha.example:8443")
+    #expect(FakeSitePermissions.origin(scheme: "HTTPS", host: "Alpha.Example", port: 443) == "https://alpha.example")
+  }
+
   @Test func mediaCaptureDecisionFollowsTheSetting() {
     var table = FakeSitePermissions()
     let origin = "https://alpha.example"
@@ -77,9 +84,10 @@ struct FakeEnginePageInfoTests {
     let site = try #require(engine.siteSettings)
     let blank = engine.createTab(url: nil, in: engine.createWindow(host: StubWindowHost()))
     #expect(site.pageInfo(of: blank) == nil, "a tab without a page")
-    site.setPermission(.camera, to: .block, forOrigin: "https://alpha.example")
+    site.setPermission(.camera, to: .block, forOrigin: "https://alpha.example", from: blank)
     #expect(site.sitesWithPermissions().map(\.origin) == ["https://alpha.example"])
-    site.resetPermissions(forOrigin: "https://alpha.example")
+    site.resetPermissions(forOrigin: "https://alpha.example", from: blank)
+    site.pageInfoDidClose(tab: blank)
     #expect(site.sitesWithPermissions().isEmpty)
     engine.closeTab(blank)
   }

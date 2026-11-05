@@ -66,11 +66,16 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void) {
-      let port = origin.port == 0 ? "" : ":\(origin.port)"
-      let key = "\(origin.protocol)://\(origin.host.lowercased())\(port)"
+      // The top-level page decides, whichever frame asks; the requesting origin only stands in without a page URL.
+      let port = origin.port == 0 ? nil : origin.port
+      guard let engine, let key = engine.topLevelOrigin(of: webView)
+              ?? FakeSitePermissions.origin(scheme: origin.protocol, host: origin.host, port: port) else {
+        decisionHandler(.prompt)
+        return
+      }
       let camera = type == .camera || type == .cameraAndMicrophone
       let microphone = type == .microphone || type == .cameraAndMicrophone
-      switch engine?.sitePermissions.mediaDecision(origin: key, camera: camera, microphone: microphone) ?? .ask {
+      switch engine.sitePermissions.mediaDecision(origin: key, camera: camera, microphone: microphone) {
       case .allow: decisionHandler(.grant)
       case .block: decisionHandler(.deny)
       case .ask: decisionHandler(.prompt)
@@ -217,6 +222,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     entry.observations = [
       webView.observe(\.url, options: [.new]) { [weak self] web, _ in
         MainActor.assumeIsolated { self?.update(id) { $0.url = web.url } event: { .urlChanged(id, web.url) } }
+      },
+      webView.observe(\.hasOnlySecureContent, options: [.new]) { [weak self] _, _ in
+        MainActor.assumeIsolated { self?.hub.emit(.pageInfoChanged(id)) }     // mixed content came or went (#582)
       },
       webView.observe(\.title, options: [.new]) { [weak self] web, _ in
         MainActor.assumeIsolated {
@@ -620,12 +628,28 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
 
   public func sitesWithPermissions() -> [SitePermissions] { sitePermissions.sites() }
 
-  /// WebKit asks again on the page's next request, so no reload is needed.
-  public func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String) {
-    _ = sitePermissions.set(kind, to: setting, forOrigin: origin)
+  /// One profile (the non-persistent data store), so `tab` changes nothing here. WebKit asks again on the page's next
+  /// request, so no reload is needed and closing the panel raises nothing.
+  public func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String,
+                            from tab: TabID) {
+    if sitePermissions.set(kind, to: setting, forOrigin: origin) { announcePageInfo(forOrigin: origin) }
   }
 
-  public func resetPermissions(forOrigin origin: String) { _ = sitePermissions.reset(forOrigin: origin) }
+  public func resetPermissions(forOrigin origin: String, from tab: TabID) {
+    if sitePermissions.reset(forOrigin: origin) { announcePageInfo(forOrigin: origin) }
+  }
+
+  public func pageInfoDidClose(tab: TabID) {}
+
+  private func announcePageInfo(forOrigin origin: String) {
+    for tab in tabIDs where entries[tab]?.webView.url.flatMap(FakeSitePermissions.origin(of:)) == origin {
+      hub.emit(.pageInfoChanged(tab))
+    }
+  }
+
+  /// The top-level page's origin, which a frame's camera or microphone request is decided by (as Chromium decides
+  /// by the embedding origin).
+  func topLevelOrigin(of webView: WKWebView) -> String? { webView.url.flatMap(FakeSitePermissions.origin(of:)) }
 
   /// The development engine has no site settings page.
   public func openSiteSettings(forOrigin origin: String, from tab: TabID) {}

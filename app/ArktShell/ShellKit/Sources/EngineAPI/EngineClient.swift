@@ -174,6 +174,12 @@ public enum EngineEvent: Equatable, Sendable {
   /// screen. A navigation or a crash leaves it.
   case tabFullscreenChanged(TabID, isFullscreen: Bool)
 
+  // MARK: Page info (#582, EnginePageInfo.swift)
+
+  /// What `EngineSiteSettings.pageInfo(of:)` reports for the tab changed: a permission of its site was set or reset,
+  /// the connection's state changed without a navigation (mixed content appeared), or the site data count arrived.
+  case pageInfoChanged(TabID)
+
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id, _), .urlChanged(let id, _), .titleChanged(let id, _),
@@ -182,7 +188,8 @@ public enum EngineEvent: Equatable, Sendable {
          .dialogEnded(let id, _), .permissionEnded(let id, _), .infobarsChanged(let id, _),
          .findResult(let id, _, _, _, _), .targetURLChanged(let id, _):
       return id
-    case .tabCrashed(let id, _), .tabRecovered(let id), .zoomChanged(let id, _, _), .tabFullscreenChanged(let id, _):
+    case .tabCrashed(let id, _), .tabRecovered(let id), .zoomChanged(let id, _, _), .tabFullscreenChanged(let id, _),
+         .pageInfoChanged(let id):
       return id
     case .dialogRequested(let dialog):
       return dialog.tab

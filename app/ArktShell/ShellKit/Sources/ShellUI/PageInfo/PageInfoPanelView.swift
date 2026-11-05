@@ -21,6 +21,7 @@ final class PageInfoPanelView: NSView {
   private let list = FlippedView()
   let siteDataRow = PageInfoDataRow()
   private let permissionsTitle = NSTextField(labelWithString: "Permissions")
+  let readOnlyLabel = NSTextField(labelWithString: "")
   private(set) var rows: [PageInfoPermissionRow] = []
   private var dividers: [NSView] = []
   private let footerDivider = NSView()
@@ -68,6 +69,9 @@ final class PageInfoPanelView: NSView {
     list.addSubview(siteDataRow)
     permissionsTitle.font = .systemFont(ofSize: 11, weight: .semibold)
     list.addSubview(permissionsTitle)
+    readOnlyLabel.font = .systemFont(ofSize: 11)
+    readOnlyLabel.lineBreakMode = .byTruncatingTail
+    list.addSubview(readOnlyLabel)
 
     footerDivider.wantsLayer = true
     addSubview(footerDivider)
@@ -100,8 +104,11 @@ final class PageInfoPanelView: NSView {
     hostLabel.toolTip = model.host
     connectionLabel.stringValue = model.connectionText
     connectionGlyph.image = NSImage(systemSymbolName: model.connectionSymbol, accessibilityDescription: nil)
-    badgeGlyph.image = NSImage(systemSymbolName: model.state == .localFile ? "doc" : "globe",
-                               accessibilityDescription: nil)
+    // The page's favicon when it has one; else the site glyph.
+    let favicon = model.favicon.flatMap(NSImage.init(data:))
+    badgeGlyph.image = favicon ?? NSImage(systemSymbolName: model.state == .localFile ? "doc" : "globe",
+                                          accessibilityDescription: nil)
+    showsFavicon = favicon != nil
     noteLabel.stringValue = model.note ?? ""
     let isSite = model.state == .site
     noteLabel.isHidden = isSite
@@ -110,7 +117,10 @@ final class PageInfoPanelView: NSView {
     siteDataRow.button.setAccessibilityValue(model.siteDataText)
     resetButton.isEnabled = model.canResetPermissions
     permissionsTitle.isHidden = model.rows.isEmpty
+    readOnlyLabel.stringValue = model.readOnlyNote ?? ""
+    readOnlyLabel.isHidden = model.readOnlyNote == nil || model.rows.isEmpty
     rebuildRows(model.rows)
+    for popUp in popUps { popUp.isEnabled = !model.isReadOnly }
     restyle()
     needsLayout = true
     layoutSubtreeIfNeeded()
@@ -142,7 +152,13 @@ final class PageInfoPanelView: NSView {
   var popUps: [NSPopUpButton] { rows.map(\.popUp) }
 
   /// The first control, for the focus when the panel opens.
-  var firstControl: NSView? { model?.state == .site ? (popUps.first ?? siteDataRow.button) : nil }
+  var firstControl: NSView? {
+    guard model?.state == .site else { return nil }
+    return popUps.first { $0.isEnabled } ?? siteDataRow.button
+  }
+
+  /// The badge shows the page's favicon in its own colors rather than a tinted glyph.
+  private(set) var showsFavicon = false
 
   // MARK: Layout
 
@@ -165,7 +181,8 @@ final class PageInfoPanelView: NSView {
     let m = PageInfoMetrics.self
     let data = 1 + 2 * m.sectionPadding + m.rowHeight
     let list = CGFloat(rows.count) * m.rowHeight
-    let permissions = rows.isEmpty ? 0 : 1 + m.sectionTitleHeight + list + m.sectionPadding
+    let readOnly = readOnlyLabel.isHidden ? 0 : m.readOnlyNoteHeight
+    let permissions = rows.isEmpty ? 0 : 1 + m.sectionTitleHeight + readOnly + list + m.sectionPadding
     return data + permissions
   }
 
@@ -186,7 +203,7 @@ final class PageInfoPanelView: NSView {
     let width = bounds.width
     let header = headerHeight(width: width)
     badge.frame = NSRect(x: m.sideInset, y: m.headerTop, width: m.badge, height: m.badge)
-    badgeGlyph.frame = badge.bounds.insetBy(dx: 7, dy: 7)
+    badgeGlyph.frame = badge.bounds.insetBy(dx: showsFavicon ? 6 : 7, dy: showsFavicon ? 6 : 7)
     let textX = badge.frame.maxX + m.headerTextGap
     let textWidth = max(0, width - textX - m.sideInset)
     hostLabel.frame = NSRect(x: textX, y: m.headerTop - 1, width: textWidth, height: 17)
@@ -202,8 +219,8 @@ final class PageInfoPanelView: NSView {
     let buttonY = footerTop + ((m.footerHeight - buttonHeight) / 2).rounded()
     resetButton.sizeToFit()
     siteSettingsButton.sizeToFit()
-    resetButton.frame = NSRect(x: m.sideInset, y: buttonY, width: resetButton.frame.width, height: buttonHeight)
-    siteSettingsButton.frame = NSRect(x: width - m.sideInset - siteSettingsButton.frame.width, y: buttonY,
+    resetButton.frame = NSRect(x: m.footerInset, y: buttonY, width: resetButton.frame.width, height: buttonHeight)
+    siteSettingsButton.frame = NSRect(x: width - m.footerInset - siteSettingsButton.frame.width, y: buttonY,
                                       width: siteSettingsButton.frame.width, height: buttonHeight)
 
     scrollView.frame = NSRect(x: 0, y: header, width: width, height: max(0, footerTop - 1 - header))
@@ -221,6 +238,10 @@ final class PageInfoPanelView: NSView {
       y += 1
       permissionsTitle.frame = NSRect(x: m.sideInset, y: y + 8, width: width - 2 * m.sideInset, height: 14)
       y += m.sectionTitleHeight
+      if !readOnlyLabel.isHidden {
+        readOnlyLabel.frame = NSRect(x: m.sideInset, y: y, width: width - 2 * m.sideInset, height: 15)
+        y += m.readOnlyNoteHeight
+      }
       for row in rows {
         row.frame = NSRect(x: 0, y: y, width: width, height: m.rowHeight)
         y += m.rowHeight
@@ -263,17 +284,19 @@ final class PageInfoPanelView: NSView {
     let secondary = ShellTokens.secondaryText.resolve(flavor).nsColor()
     let glyph = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
     badge.layer?.backgroundColor = ShellTokens.sidebarItemBackground.resolve(flavor).cgColor
-    badgeGlyph.contentTintColor = glyph
+    badgeGlyph.contentTintColor = showsFavicon ? nil : glyph
     hostLabel.textColor = primary
     let warning = model?.connectionIsWarning == true
     connectionLabel.textColor = warning ? primary : secondary          // never red
     connectionGlyph.contentTintColor = warning ? primary : secondary
     noteLabel.textColor = secondary
     permissionsTitle.textColor = secondary
+    readOnlyLabel.textColor = secondary
     let divider = ShellTokens.sidebarDivider.resolve(flavor).cgColor
     for view in dividers + [footerDivider] { view.layer?.backgroundColor = divider }
+    // Quiet buttons: secondary text, fainter while off.
     for button in [resetButton, siteSettingsButton] {
-      let color = button.isEnabled ? primary : secondary
+      let color = button.isEnabled ? secondary : secondary.withAlphaComponent(0.45)
       button.attributedTitle = NSAttributedString(string: button.title, attributes: [
         .foregroundColor: color, .font: button.font ?? .systemFont(ofSize: 13),
       ])
@@ -407,8 +430,10 @@ final class PageInfoPermissionRow: NSView {
     super.layout()
     let m = PageInfoMetrics.self
     glyph.frame = NSRect(x: m.sideInset, y: (bounds.height - m.glyph) / 2, width: m.glyph, height: m.glyph)
-    popUp.sizeToFit()
-    let popUpWidth = max(64, popUp.frame.width + 6)
+    // Compact, as drawn: the selected title and the arrows, trailing; it grows when the choice does.
+    let selected = (popUp.titleOfSelectedItem ?? "") as NSString
+    let titleWidth = selected.size(withAttributes: [.font: popUp.font ?? .systemFont(ofSize: 12)]).width
+    let popUpWidth = ceil(titleWidth) + 32
     popUp.frame = NSRect(x: bounds.width - m.sideInset - popUpWidth, y: (bounds.height - m.popUpHeight) / 2,
                          width: popUpWidth, height: m.popUpHeight)
     let textX = glyph.frame.maxX + m.glyphGap

@@ -30,6 +30,9 @@ enum PageInfoMetrics {
   static let sectionPadding: CGFloat = 6
   static let sectionTitleHeight: CGFloat = 24
   static let footerHeight: CGFloat = 44
+  /// The footer's quiet buttons sit this far in from the panel's edges.
+  static let footerInset: CGFloat = 22
+  static let readOnlyNoteHeight: CGFloat = 22
   static let noteBottom: CGFloat = 14
   /// The scrolling list's faded bottom edge.
   static let fade: CGFloat = 12
@@ -85,24 +88,35 @@ struct PageInfoModel: Equatable {
   var state: State
   var connectionText: String
   var connectionSymbol: String
-  /// Not secure or dangerous: the line keeps the primary text color with a warning glyph (never red).
+  /// The security state in a word or two, for VoiceOver on the address pill ("Not secure, example.com").
+  var siteDescription: String
+  /// Anything but a secure connection: the line keeps the primary text color with a warning glyph (never red).
   var connectionIsWarning: Bool
   var note: String?
   var siteDataText: String
   var rows: [Row]
   var canResetPermissions: Bool
+  /// A private window (Incognito, Blank): its settings are not the normal profile's and cannot be changed here yet
+  /// (#557), so the pop-ups and Reset Permissions are off and `readOnlyNote` says why.
+  var isReadOnly: Bool
+  /// The page's favicon (PNG or ICO data) for the header badge; nil shows the site glyph.
+  var favicon: Data?
 
   var accessibilityLabel: String { "Site controls for \(host)" }
+  var readOnlyNote: String? { isReadOnly ? "Site settings cannot be changed in a private window." : nil }
 
-  init?(_ info: PageInfo, locale: Locale = .current) {
+  init?(_ info: PageInfo, locale: Locale = .current, isReadOnly: Bool = false, favicon: Data? = nil) {
     tab = info.tab
     origin = info.origin
     host = info.host
-    connectionIsWarning = false
+    connectionIsWarning = true
     note = nil
     siteDataText = ""
     rows = []
     canResetPermissions = false
+    self.isReadOnly = isReadOnly
+    self.favicon = favicon
+    connectionSymbol = "exclamationmark.triangle"
     switch info.connection {
     case .internalPage:
       return nil
@@ -110,30 +124,39 @@ struct PageInfoModel: Equatable {
       state = .localFile
       connectionText = "Local file on this Mac"
       connectionSymbol = "doc"
-      note = "Local files have no site settings. Permissions apply to this file only while it is open."
+      siteDescription = "Local file"
+      connectionIsWarning = false
+      note = "Local files have no site settings."
       return
     case .secure:
       connectionText = "Connection is secure"
       connectionSymbol = "lock"
+      siteDescription = "Secure"
+      connectionIsWarning = false
     case .notSecure:
       connectionText = "Not secure: this site has no encrypted connection"
-      connectionSymbol = "exclamationmark.triangle"
-      connectionIsWarning = true
-    case .dangerous:
+      siteDescription = "Not secure"
+    case .notFullySecure:
+      connectionText = "Not fully secure: parts of this page are not encrypted"
+      siteDescription = "Not fully secure"
+    case .certificateError:
       connectionText = "Not secure: this site's connection is not private"
-      connectionSymbol = "exclamationmark.triangle"
-      connectionIsWarning = true
+      siteDescription = "Not secure"
+    case .flagged:
+      connectionText = "Dangerous: this site may try to steal your information"
+      siteDescription = "Dangerous"
     }
     state = .site
     siteDataText = info.siteData.map { Self.siteDataText($0, locale: locale) } ?? ""
     rows = info.permissions.map(Row.init)
-    canResetPermissions = info.permissions.contains { !$0.isDefault }
+    canResetPermissions = !isReadOnly && info.permissions.contains { !$0.isDefault }
   }
 
-  /// The address pill's glyph for a page: nil for a page of the browser itself, whose pill stays inert.
-  static func pillSymbol(for info: PageInfo?) -> String? {
+  /// The address pill's glyph and its spoken security state for a page: nil for a page of the browser itself, whose
+  /// pill stays inert.
+  static func pill(for info: PageInfo?) -> (symbol: String, description: String)? {
     guard let info, let model = PageInfoModel(info) else { return nil }
-    return model.connectionSymbol
+    return (model.connectionSymbol, model.siteDescription)
   }
 
   // MARK: Words
@@ -213,7 +236,8 @@ struct PageInfoModel: Equatable {
     case .site:
       let dataSection = 1 + 2 * m.sectionPadding + m.rowHeight
       let list = CGFloat(rows.count) * m.rowHeight
-      let permissions = rows.isEmpty ? 0 : 1 + m.sectionTitleHeight + list + m.sectionPadding
+      let readOnly = isReadOnly && !rows.isEmpty ? m.readOnlyNoteHeight : 0
+      let permissions = rows.isEmpty ? 0 : 1 + m.sectionTitleHeight + readOnly + list + m.sectionPadding
       return m.headerHeight + dataSection + permissions + 1 + m.footerHeight
     }
   }

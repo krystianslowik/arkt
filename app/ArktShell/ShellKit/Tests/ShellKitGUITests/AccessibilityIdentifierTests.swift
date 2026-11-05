@@ -134,7 +134,8 @@ final class AccessibilityIdentifierTests: XCTestCase {
 
     let urlBar = try element(AXID.Toolbar.urlBar, in: controller)
     XCTAssertEqual(urlBar.accessibilityRole(), .button)
-    XCTAssertEqual(urlBar.accessibilityValue() as? String, controller.rootView.card.toolbar.urlBar.displayedText)
+    XCTAssertEqual(urlBar.accessibilityValue() as? String,
+                   "Secure, " + controller.rootView.card.toolbar.urlBar.displayedText)      // #582: state first
     XCTAssertTrue((urlBar.accessibilityValue() as? String)?.contains("second.example/page") == true, "the full address")
     controller.close()
   }
@@ -184,8 +185,9 @@ final class AccessibilityIdentifierTests: XCTestCase {
     let controller = makeController(sidebar)
     let urlBar = try element(AXID.Sidebar.urlBar, in: controller)
     XCTAssertEqual(urlBar.accessibilityRole(), .button)
+    // The security state comes first (#582); the in-memory page is https.
     XCTAssertEqual(urlBar.accessibilityValue() as? String,
-                   controller.rootView.sidebarContainer.urlBar.displayedText)
+                   "Secure, " + controller.rootView.sidebarContainer.urlBar.displayedText)
 
     let newTab = try element(AXID.Sidebar.newTab, in: controller)
     XCTAssertEqual(newTab.accessibilityRole(), .button)

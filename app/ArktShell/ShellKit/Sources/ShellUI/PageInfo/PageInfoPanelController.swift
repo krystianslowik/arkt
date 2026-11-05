@@ -5,10 +5,13 @@ import EngineAPI
 /// direction A it grows into, #651): a 330 pt panel anchored below the address pill, opened from the pill's site glyph
 /// (or VoiceOver's Show Site Controls). Height follows the content up to 552 pt and the room below the pill; then the
 /// list scrolls with a faded edge. Esc closes it and gives the keyboard back to the window; a mouse down in the browser
-/// window outside the panel closes it, as do a resize to full screen, the sidebar hiding, another tab or another site.
+/// window outside the panel closes it, as do full screen, the sidebar hiding, another tab or another site, the window
+/// no longer being the main window, and the app going to the background.
 ///
-/// Every change goes to the engine (`EngineSiteSettings`) at once and the panel shows what the engine reads back; a
-/// change that needs a reload raises the engine's reload infobar on the page, the panel stays up.
+/// Every change goes to the engine (`EngineSiteSettings`) at once, from the panel's tab, and the panel shows what the
+/// engine reads back (also on `.pageInfoChanged`, through `pageDidChange`). Closing tells the engine
+/// (`pageInfoDidClose(tab:)`), which raises its reload infobar on the page if a change needs one. In a private window
+/// the panel is read-only (#557).
 @MainActor
 public final class PageInfoPanelController: NSObject {
   private let siteSettings: @MainActor () -> (any EngineSiteSettings)?
@@ -26,6 +29,10 @@ public final class PageInfoPanelController: NSObject {
   var increaseContrast: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
   /// Where focus goes back to after Esc: the window's page.
   var onReturnFocus: (@MainActor () -> Void)?
+  /// Whether the window is private (Incognito, Blank): the panel is then read-only.
+  var isReadOnly: @MainActor () -> Bool = { false }
+  /// The favicon of a tab's page, for the header badge.
+  var favicon: @MainActor (TabID) -> Data? = { _ in nil }
 
   public var isShown: Bool { panel?.isVisible == true }
 
@@ -41,7 +48,7 @@ public final class PageInfoPanelController: NSObject {
   }
 
   private func model(for tab: TabID) -> PageInfoModel? {
-    siteSettings()?.pageInfo(of: tab).flatMap { PageInfoModel($0) }
+    siteSettings()?.pageInfo(of: tab).flatMap { PageInfoModel($0, isReadOnly: isReadOnly(), favicon: favicon(tab)) }
   }
 
   // MARK: Opening
@@ -107,10 +114,12 @@ public final class PageInfoPanelController: NSObject {
     if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
     for observer in windowObservers { NotificationCenter.default.removeObserver(observer) }
     windowObservers = []
+    let closedTab = tab
     panel = nil
     contentView = nil
     tab = nil
     origin = nil
+    if let closedTab { siteSettings()?.pageInfoDidClose(tab: closedTab) }   // the reload infobar, if a change needs it
     // The panel took the keyboard when it opened; the browser window gets it back.
     if window.isKeyWindow, let parent = window.parent, parent.isVisible { parent.makeKey() }
     let leave = { @MainActor in
@@ -144,6 +153,11 @@ public final class PageInfoPanelController: NSObject {
   /// The sidebar was hidden, shown or resized: the pill moved or went, so the panel closes.
   public func sidebarDidChange() { hide(keyboard: false) }
 
+  /// Another window became the main window, or the app went to the background: the panel belongs to this window's
+  /// page in front, so it closes.
+  func parentDidResignMain() { hide(keyboard: false) }
+  func appDidResignActive() { hide(keyboard: false) }
+
   /// The window enters full screen: its frame and the sidebar move, so the panel closes.
   func windowWillEnterFullScreen() { hide(keyboard: false) }
 
@@ -162,13 +176,13 @@ public final class PageInfoPanelController: NSObject {
 
   private func wire(_ view: PageInfoPanelView) {
     view.onSetPermission = { [weak self] kind, setting in
-      guard let self, let origin = self.origin else { return }
-      self.siteSettings()?.setPermission(kind, to: setting, forOrigin: origin)
+      guard let self, let origin = self.origin, let tab = self.tab, !self.isReadOnly() else { return }
+      self.siteSettings()?.setPermission(kind, to: setting, forOrigin: origin, from: tab)
       self.reread()
     }
     view.onResetPermissions = { [weak self] in
-      guard let self, let origin = self.origin else { return }
-      self.siteSettings()?.resetPermissions(forOrigin: origin)
+      guard let self, let origin = self.origin, let tab = self.tab, !self.isReadOnly() else { return }
+      self.siteSettings()?.resetPermissions(forOrigin: origin, from: tab)
       self.reread()
     }
     // Site Settings... and, until #651 brings the data sheet, Cookies and site data: the engine's settings for the
@@ -221,6 +235,13 @@ public final class PageInfoPanelController: NSObject {
       },
       center.addObserver(forName: NSWindow.willCloseNotification, object: parent, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.hide(keyboard: false) }
+      },
+      center.addObserver(forName: NSWindow.didResignMainNotification, object: parent, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.parentDidResignMain() }
+      },
+      center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil,
+                         queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.appDidResignActive() }
       },
     ]
   }
