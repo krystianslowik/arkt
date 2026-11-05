@@ -1,4 +1,5 @@
 import CoreGraphics
+import QuartzCore
 import Testing
 @testable import ShellUI
 
@@ -43,6 +44,38 @@ struct SplitReflowTests {
   @Test func dividersFillTheGapsBetweenStackedPanes() {
     let panes = [CGRect(x: 0, y: 310, width: 800, height: 300), CGRect(x: 0, y: 0, width: 800, height: 300)]
     #expect(SplitReflow.dividers(between: panes, axis: .stacked) == [CGRect(x: 0, y: 300, width: 800, height: 10)])
+  }
+
+  // MARK: Drawing a card in flight (#602)
+
+  /// A growing pane is drawn at the spring's frame: its real frame is already the larger target, cropped.
+  @Test func drawnFrameOfAGrowingPaneIsTheSpringFrame() {
+    let real = CGRect(x: 0, y: 0, width: 500, height: 600)
+    let spring = CGRect(x: 0, y: 0, width: 416.5, height: 600)
+    #expect(SplitReflow.drawnFrame(presenting: spring, in: real, flipped: false) == spring)
+    #expect(SplitReflow.drawnFrame(presenting: spring, in: real, flipped: true) == spring)
+  }
+
+  /// A shrinking pane has nothing beyond its real (target) size: it is drawn at that size from the spring frame's
+  /// top leading corner, so the Toolbar stays in view. Unflipped, the top is `maxY`.
+  @Test func drawnFrameOfAShrinkingPaneKeepsItsTopLeadingCorner() {
+    let real = CGRect(x: 680, y: 0, width: 330, height: 280)
+    let spring = CGRect(x: 600, y: 20, width: 410, height: 300)
+    #expect(SplitReflow.drawnFrame(presenting: spring, in: real, flipped: false)
+              == CGRect(x: 600, y: 40, width: 330, height: 280))
+    #expect(SplitReflow.drawnFrame(presenting: spring, in: real, flipped: true)
+              == CGRect(x: 600, y: 20, width: 330, height: 280))
+  }
+
+  /// Only a translation, never a scale: the top leading corners meet.
+  @Test func translationMovesTheTopLeadingCornerOnly() {
+    let real = CGRect(x: 510, y: 0, width: 500, height: 600)
+    let drawn = CGRect(x: 600, y: 100, width: 410, height: 500)
+    let unflipped = CATransform3DGetAffineTransform(SplitReflow.translation(drawing: drawn, in: real, flipped: false))
+    #expect(unflipped == CGAffineTransform(translationX: 90, y: 0))       // maxY 600 meets maxY 600
+    let flipped = CATransform3DGetAffineTransform(SplitReflow.translation(drawing: drawn, in: real, flipped: true))
+    #expect(flipped == CGAffineTransform(translationX: 90, y: 100))       // minY 0 to minY 100
+    #expect(CATransform3DIsIdentity(SplitReflow.translation(drawing: real, in: real, flipped: false)))
   }
 
   // MARK: Distance and interruption
