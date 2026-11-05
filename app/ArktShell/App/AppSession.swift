@@ -95,10 +95,13 @@ final class AppSession {
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
-    self.windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
-                                  sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
-                                  sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
-                                  commandBarSettings: commandBarSettings, hostLookup: hostLookup)
+    let windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
+                                 sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
+                                 sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
+                                 commandBarSettings: commandBarSettings, hostLookup: hostLookup)
+    // BH-196: the one-off Copy URL tip remembers what it showed (#404).
+    windows.copyLinkEducation = CopyLinkEducation(defaults: AppEnvironment.userDefaults)
+    self.windows = windows
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
     self.archiveStore = archiveStore
