@@ -138,7 +138,7 @@ secondary line. Engine strings stay Chromium's (`IDS_*`), so translations keep w
 | Kind | Glyph (SF Symbol) | Lifetime | Action |
 |---|---|---|---|
 | Undo | archivebox | 6 s | Undo (Cmd-Z also undoes; the pill carries no key hint) |
-| Notice with action | arrow.counterclockwise (restore), pin (BH-055), link (BH-191) | 4 s | View / none |
+| Notice with action | arrow.counterclockwise (restore), pin (BH-055), link (BH-191), rectangle.stack (private page cap, #668) | 4 s | View / Close Oldest / none |
 | Error | exclamationmark.circle | 4 s | none, or Try Again when a retry exists |
 | Persistent (recovery) | exclamationmark.shield | until dismissed or replaced | Show Files + dismiss (xmark) |
 
@@ -172,6 +172,7 @@ does today; a transient toast over a persistent one hides it only while it is up
 | Restore failed | Couldn't restore from the Archive. |
 | Import failed | Couldn't import browser data. |
 | Recovery | the four `RecoveryNotice` texts, unchanged; action Show Files |
+| Private page cap (Blank and Incognito windows, #668) | This window has 20 pages open, the most it keeps.; action Close Oldest (`design/private-pages`). When every page is shown or playing sound: This window has 20 pages open. Close one to open another. (no action) |
 
 Counts and Space titles only, never a tab title or URL (the `ToastText` rule). The restore toast drops "Click to
 view." when the View button is shown: the button says it. PARITY(NEEDS-RUNTIME-CHECK BH-086): Arc's toast is
