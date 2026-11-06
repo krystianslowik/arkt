@@ -513,7 +513,18 @@ final class ImportCheckbox: NSView {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var isFlipped: Bool { true }
-  override var acceptsFirstResponder: Bool { isEnabled }
+  /// Tab reaches it; a click toggles it without taking focus, so the focus ring shows only for the keyboard.
+  override var acceptsFirstResponder: Bool {
+    isEnabled && Self.acceptsFocus(during: NSApp.currentEvent?.type)
+  }
+
+  /// Never while a mouse down is being handled: the window asks on mouse down, and it says no.
+  static func acceptsFocus(during event: NSEvent.EventType?) -> Bool {
+    switch event {
+    case .leftMouseDown?, .rightMouseDown?, .otherMouseDown?: false
+    default: true
+    }
+  }
   override var canBecomeKeyView: Bool { isEnabled && !isHidden }
   override var mouseDownCanMoveWindow: Bool { false }
   override var wantsUpdateLayer: Bool { true }

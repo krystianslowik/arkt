@@ -134,11 +134,18 @@ final class LittleArktTopBar: WindowDragView {
     needsDisplay = true
   }
 
-  /// The target Space's theme as a 10 pt swatch with 3 pt corners and a hairline (the prototype's `.sw`).
+  /// Clear space before the swatch: the cell draws a leading image flush with the segment's edge, where the focus ring
+  /// (3 pt, inside the segment) would cover it (#687).
+  static let swatchLeadingInset: CGFloat = 5
+
+  /// The target Space's theme as a 10 pt swatch with 3 pt corners and a hairline (the prototype's `.sw`), after
+  /// `swatchLeadingInset` of clear space.
   static func swatchImage(_ colors: [RGBA]) -> NSImage {
-    let size = NSSize(width: 10, height: 10)
-    return NSImage(size: size, flipped: false) { rect in
-      let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.25, dy: 0.25), xRadius: 3, yRadius: 3)
+    let inset = swatchLeadingInset
+    let size = NSSize(width: inset + 10, height: 10)
+    return NSImage(size: size, flipped: false) { _ in
+      let swatch = NSRect(x: inset, y: 0, width: 10, height: 10)
+      let path = NSBezierPath(roundedRect: swatch.insetBy(dx: 0.25, dy: 0.25), xRadius: 3, yRadius: 3)
       let stops = colors.count == 1 ? [colors[0], colors[0]] : colors
       NSGradient(colors: stops.map { NSColor(cgColor: $0.cgColor) ?? .clear })?.draw(in: path, angle: -45)
       NSColor.black.withAlphaComponent(0.25).setStroke()

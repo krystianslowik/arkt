@@ -12,6 +12,9 @@ import AppKit
 /// the theme creator's knob, swatch and colour dot), toggled by their first responder state:
 /// AppKit's ring shows only for keyboard focus, and so does this one. Like the system ring it shows only while its
 /// window is key, and it appears and goes at once. Not hit-testable and not an accessibility element.
+/// While shown, a ring that reaches past its host turns the host's clipping off (a corner radius on the host's layer
+/// turns AppKit's `clipsToBounds` on), overriding the host's own `clipsToBounds` or `masksToBounds`; hiding the ring
+/// turns it back on.
 @MainActor
 final class KeyboardFocusRingView: NSView {
   static let lineWidth = ShellTokens.focusRingWidth
@@ -28,6 +31,8 @@ final class KeyboardFocusRingView: NSView {
   /// over overlays it does not own (the split close button under the find bar and the zoom pill).
   private var raisesHost = false
   private weak var observedWindow: NSWindow?
+  /// This ring turned its host's clipping off while shown; it turns it back on when it hides.
+  private var unclippedHost = false
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -82,8 +87,15 @@ final class KeyboardFocusRingView: NSView {
     let shown = isFocused && window?.isKeyWindow == true
     if raisesHost { superview?.layer?.zPosition = shown ? 1 : 0 }
     // A host whose layer has a corner radius clips its subviews (AppKit turns `clipsToBounds` on with it), which would
-    // cut a ring drawn outside it down to nothing: a ring that reaches past its host unclips it.
-    if shown, let host = superview, host.clipsToBounds, !host.bounds.contains(frame) { host.clipsToBounds = false }
+    // cut a ring drawn outside it down to nothing: while shown, a ring that reaches past its host unclips it. This
+    // overrides a host's own `clipsToBounds` or `masksToBounds` for that time; hiding the ring restores the clipping.
+    if shown, let host = superview, host.clipsToBounds, !host.bounds.contains(frame) {
+      host.clipsToBounds = false
+      unclippedHost = true
+    } else if !shown, unclippedHost {
+      superview?.clipsToBounds = true
+      unclippedHost = false
+    }
     guard isHidden == shown else { return }
     isHidden = !shown
     needsDisplay = true

@@ -121,6 +121,22 @@ final class InkFocusRingTests: XCTestCase {
     XCTAssertTrue(rounded.clipsToBounds, "nothing changes while the ring is hidden")
     ring.setFocused(true)
     XCTAssertFalse(rounded.clipsToBounds, "a shown outside ring unclips its host")
+    ring.setFocused(false)
+    XCTAssertTrue(rounded.clipsToBounds, "hiding the ring restores the host's clipping")
+    XCTAssertEqual(rounded.layer?.masksToBounds, true)
+    ring.setFocused(true)
+    XCTAssertFalse(rounded.clipsToBounds, "shown again, unclipped again")
+    window.setKey(false)
+    XCTAssertTrue(rounded.clipsToBounds, "hidden by the window resigning key, clipped again")
+    window.setKey(true)
+    ring.setFocused(false)
+
+    let unrounded = NSView(frame: NSRect(x: 60, y: 60, width: 40, height: 24))
+    window.contentView?.addSubview(unrounded)
+    let plainRing = KeyboardFocusRingView.attach(outside: unrounded, radius: 4)
+    plainRing.setFocused(true)
+    plainRing.setFocused(false)
+    XCTAssertFalse(unrounded.clipsToBounds, "a host that did not clip is not made to clip")
 
     let inside = NSView(frame: NSRect(x: 100, y: 20, width: 40, height: 24))
     inside.wantsLayer = true
@@ -147,6 +163,51 @@ final class InkFocusRingTests: XCTestCase {
     XCTAssertFalse(close.keyboardFocusRing.isHidden)
     XCTAssertFalse(close.clipsToBounds, "the split close button's ring is not cut off")
     unfocus(close, in: window, throughWindow: throughWindow, "split close")
+  }
+
+  /// The "Open in" segment's Space swatch stays clear of the 3 pt ring drawn inside the segment.
+  func testTheOpenSegmentSwatchClearsTheInsideRing() throws {
+    let window = makeWindow()
+    let bar = LittleArktTopBar(frame: NSRect(x: 0, y: 0, width: 480, height: 40))
+    bar.configure(host: "example.com", fullURL: "https://example.com/", secure: true, openLabel: "Open in Studio",
+                  openHelp: "", accent: true, swatch: [.srgb(hex: 0x3366CC), .srgb(hex: 0xC8743A)])
+    window.contentView?.addSubview(bar)
+    bar.layoutSubtreeIfNeeded()
+    let button = bar.openButton
+    let image = try XCTUnwrap(button.image)
+    let imageRect = try XCTUnwrap(button.cell?.imageRect(forBounds: button.bounds))
+    // The first column of the image that draws anything, measured from its pixels.
+    let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(image.size.width * 2),
+                                             pixelsHigh: Int(image.size.height * 2), bitsPerSample: 8,
+                                             samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+    rep.size = image.size
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    image.draw(in: NSRect(origin: .zero, size: image.size))
+    NSGraphicsContext.restoreGraphicsState()
+    let firstColumn = try XCTUnwrap((0..<rep.pixelsWide).first { x in
+      (0..<rep.pixelsHigh).contains { y in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.01 }
+    })
+    let swatchX = imageRect.minX + CGFloat(firstColumn) / 2 * imageRect.width / image.size.width
+    XCTAssertGreaterThanOrEqual(swatchX, 3, "the swatch starts \(swatchX) pt in; the ring covers the first 3")
+  }
+
+  /// A click toggles the import checkbox without focusing it, so the ring shows only for the keyboard.
+  func testAClickDoesNotFocusTheImportCheckbox() {
+    for event in [NSEvent.EventType.leftMouseDown, .rightMouseDown, .otherMouseDown] {
+      XCTAssertFalse(ImportCheckbox.acceptsFocus(during: event), "\(event)")
+    }
+    for event in [nil, NSEvent.EventType.keyDown, .leftMouseUp] as [NSEvent.EventType?] {
+      XCTAssertTrue(ImportCheckbox.acceptsFocus(during: event), "\(String(describing: event))")
+    }
+    let window = makeWindow()
+    let checkbox = ImportCheckbox(style: ImportViewStyle.sheet(for: window.contentView!, reduceMotion: true))
+    checkbox.frame = NSRect(x: 20, y: 20, width: 18, height: 18)
+    window.contentView?.addSubview(checkbox)
+    XCTAssertTrue(checkbox.acceptsFirstResponder, "the keyboard reaches it")
+    XCTAssertTrue(window.makeFirstResponder(checkbox))
+    XCTAssertFalse(checkbox.keyboardFocusRing.isHidden)
   }
 
   /// The rail items are 2 pt apart, the ring 3 pt wide: a focused item draws above its neighbors.
