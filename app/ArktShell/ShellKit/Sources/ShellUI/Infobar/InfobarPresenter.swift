@@ -23,13 +23,11 @@ public final class InfobarPresenter {
   var reduceMotion: (@MainActor () -> Bool)?
   /// The corner radius of the page card at the top of a tab's page view; the strip's top corners follow it.
   var cornerRadius: @MainActor (NSView) -> CGFloat = { InfobarPresenter.cardCornerRadius(of: $0) }
-  private let anchor: @MainActor (TabID) -> NSView?
 
   /// `anchor` returns the view of a tab that is on screen in this window, nil for one that is not.
   public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> NSView?,
               windowIsVisible: @escaping @MainActor (NSWindow) -> Bool = { $0.isVisible }) {
     self.engine = engine
-    self.anchor = anchor
     host = AnchoredPanelHost(anchor: anchor, windowIsVisible: windowIsVisible)
     host.refresh = { [weak self] in self?.refresh() }
   }
@@ -108,8 +106,8 @@ public final class InfobarPresenter {
       if let reduceMotion { panel.reduceMotion = reduceMotion }
       panel.onAction = { [weak self] infobar, action in self?.engine.act(on: infobar.id, action: action) }
       return panel
-    } show: { [weak self] panel, window, frame in
-      let radius = self.flatMap { presenter in presenter.anchor(tab).map { presenter.cornerRadius($0) } } ?? 0
+    } show: { [weak self] panel, window, page, frame in
+      let radius = self?.cornerRadius(page) ?? 0
       panel.show(over: window, anchoredTo: frame, topCornerRadius: radius)
     }
   }

@@ -173,6 +173,23 @@ final class JavaScriptDialogWindowTests: XCTestCase {
     XCTAssertTrue(isDrawn(overlay, over: dim), "the Peek card")
   }
 
+  /// Another tab takes the page's place while its dialog is up: the page is already off screen, so its dim goes at once
+  /// with no fade over the tab now shown, and nothing waits for it (#708).
+  func testSwitchingTabsWithADialogUpTakesTheDimDownAtOnce() throws {
+    let (tab, page, dim) = try dimmedPage()
+    let panel = try XCTUnwrap(controller.javaScriptDialogs.panel(for: tab))
+    XCTAssertEqual(panel.dimExitDuration, PageDimView.exitDuration, "the real exit fade, not the test seam")
+
+    controller.activate(node: second)
+
+    XCTAssertNil(controller.javaScriptDialogs.panel(for: tab), "the panel went down")
+    XCTAssertTrue(page.window == nil || page.isHiddenOrHasHiddenAncestor, "the page left the screen")
+    XCTAssertNil(dim.superview, "gone at once, not fading over the other tab")
+    XCTAssertNil(dim.layer?.animation(forKey: PageDimView.fadeKey), "no fade")
+    XCTAssertEqual(dim.layer?.opacity, 0)
+    XCTAssertNil(PageDimView.existing(over: page), "nothing left over the page")
+  }
+
   /// Under the Toolbar the dim starts at the page's top, below the Toolbar, with square corners: the card's clip
   /// view rounds the card, not the dim.
   func testTheDimsTopEdgeIsSquareUnderTheToolbar() throws {

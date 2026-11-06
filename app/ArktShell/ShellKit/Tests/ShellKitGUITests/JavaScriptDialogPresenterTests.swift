@@ -617,4 +617,66 @@ final class JavaScriptDialogPresenterTests: XCTestCase {
     XCTAssertEqual(try screenFrame(of: dim), below, "a second row arrived")
     XCTAssertTrue(try pageDim() === dim)
   }
+
+  // MARK: Remaining dim gaps (#708)
+
+  /// The dim covers the page view the host placed the panel on: the presenter takes it from the host instead of asking
+  /// the anchor closure a second time, which could answer differently.
+  func testTheDimCoversThePageTheHostPlacedThePanelOn() throws {
+    var asks = 0
+    presenter = JavaScriptDialogPresenter(engine: engine, anchor: { [unowned self] _ in
+      asks += 1
+      return page
+    }, windowIsVisible: { _ in true })
+    presenter.reduceMotion = { true }
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Once"))
+    XCTAssertTrue(try pageDim().page === page)
+    XCTAssertEqual(asks, 1, "one placement asks the anchor once")
+  }
+
+  /// A real appearance change of the window redraws the dim in the new appearance's color when Core Animation next
+  /// commits, with no direct `updateLayer()` call. (`needsDisplay` cannot show it: an `updateLayer` view reports
+  /// false, and its layer's flag stays set until the commit.)
+  func testAWindowAppearanceChangeRedrawsTheDim() throws {
+    window.appearance = NSAppearance(named: .aqua)
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Appearance"))
+    let dim = try pageDim()
+    CATransaction.flush()
+    XCTAssertEqual(dim.layer?.backgroundColor, AlertTokens.pageDim.resolve(.light).cgColor)
+
+    for (name, flavor) in [(NSAppearance.Name.darkAqua, ThemeFlavor.dark), (.aqua, .light)] {
+      window.appearance = NSAppearance(named: name)
+      CATransaction.flush()
+      XCTAssertEqual(dim.layer?.backgroundColor, AlertTokens.pageDim.resolve(flavor).cgColor, "\(flavor)")
+    }
+  }
+
+  /// Minimising the window takes the panel down unanswered and fades the dim out; the dialog stays pending and comes
+  /// back over one dim when the window does. The window state is injected and the notifications are the ones AppKit
+  /// posts, so nothing waits on the Dock animation.
+  func testMinimisingTheWindowFadesTheDimAndTheWindowComingBackDimsAgain() throws {
+    let id = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .confirm, message: "Minimise"))
+    let panel = try XCTUnwrap(presenter.panel(for: tab))
+    let dim = try pageDim()
+
+    windowVisible = false                                       // what `isVisible` reads while minimised
+    NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+
+    XCTAssertNil(presenter.panel(for: tab), "the panel went down with the window")
+    XCTAssertNil(panel.panel.parent)
+    XCTAssertNil(panel.pageDim)
+    assertLeaving(dim, "minimise")
+    XCTAssertEqual(presenter.pending[tab]?.id, id, "still pending")
+    XCTAssertTrue(engine.dialogAnswers.isEmpty, "no answer")
+
+    windowVisible = true
+    NotificationCenter.default.post(name: NSWindow.didDeminiaturizeNotification, object: window)
+
+    XCTAssertNotNil(presenter.panel(for: tab), "the dialog is back")
+    XCTAssertTrue(try pageDim() === dim, "the leaving dim is taken back")
+    XCTAssertFalse(dim.isLeaving)
+    XCTAssertEqual(dim.layer?.opacity, 1)
+    XCTAssertEqual(page.subviews.filter { $0 is PageDimView }.count, 1, "one dim")
+    XCTAssertTrue(engine.dialogAnswers.isEmpty)
+  }
 }
