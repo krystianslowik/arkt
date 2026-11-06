@@ -208,6 +208,7 @@ final class CrashedPeekTests: XCTestCase {
     try focusPeekPage(peek)
     engine.crash(source, status: .crashed)
     engine.crash(peek, status: .crashed)
+    XCTAssertNotNil(try peekView(), "the Peek shows its view when Esc comes")
 
     window.sendEvent(try Self.key(53, in: window))
     controller.peek.animator.settleNow()

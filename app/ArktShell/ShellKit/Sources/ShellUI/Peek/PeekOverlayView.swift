@@ -340,6 +340,7 @@ public final class PeekCardView: NSView {
     contact.frame = bounds
     surface.frame = bounds
     page?.frame = surface.bounds
+    pageOverlayView?.frame = surface.bounds
     updateShadowPaths(CGRect(origin: .zero, size: frame.size))
   }
 
