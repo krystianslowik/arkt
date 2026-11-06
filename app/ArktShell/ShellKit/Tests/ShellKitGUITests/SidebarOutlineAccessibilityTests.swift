@@ -325,6 +325,49 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     XCTAssertTrue(reloaded.contains(.valueChanged), "a row reload posts valueChanged (Closing)")
   }
 
+  /// #717: a children reload lists the item's children again, so another item may now sit at a row while the row
+  /// count stays. The proxies are rebuilt and clients told, like any other structural change; a plain reload of the
+  /// same item keeps them (`testARowReloadKeepsTheProxyElements`).
+  func testAChildrenReloadRebuildsTheProxyElements() throws {
+    let fixture = try makeFixture()
+    let proxies = fixture.outline.axProxyRows
+    let folderItem = try XCTUnwrap(fixture.outline.item(atRow: fixture.outlineController.row(for: try folder(fixture))))
+
+    proxies.postedNotificationsForTesting = []
+    let before = try proxyRows(fixture.element)
+    fixture.outline.reloadItem(folderItem, reloadChildren: false)
+    let kept = try proxyRows(fixture.element)
+    XCTAssertTrue(zip(before, kept).allSatisfy { $0 === $1 }, "control: a plain reload keeps the proxy elements")
+    XCTAssertFalse((proxies.postedNotificationsForTesting ?? []).contains { $0.0 == .rowCountChanged },
+                   "control: a plain reload posts no rowCountChanged")
+
+    let generation = fixture.outline.rowsGeneration
+    fixture.outline.reloadItem(folderItem, reloadChildren: true)
+    let rebuilt = try proxyRows(fixture.element)
+    XCTAssertEqual(rebuilt.count, before.count, "the row count did not change")
+    XCTAssertTrue(zip(before, rebuilt).allSatisfy { $0 !== $1 }, "a children reload rebuilds the proxy elements")
+    XCTAssertTrue((proxies.postedNotificationsForTesting ?? []).contains { $0.0 == .rowCountChanged && $0.1 == nil },
+                  "a children reload posts rowCountChanged on the outline")
+    XCTAssertNotEqual(fixture.outline.rowsGeneration, generation, "a children reload moves the rows generation")
+  }
+
+  /// #717: `reloadItem(nil)` reloads the root with its children, so it rebuilds the proxies and moves the rows
+  /// generation too.
+  func testReloadingTheRootRebuildsTheProxyElements() throws {
+    let fixture = try makeFixture()
+    let proxies = fixture.outline.axProxyRows
+    proxies.postedNotificationsForTesting = []
+    let before = try proxyRows(fixture.element)
+    let generation = fixture.outline.rowsGeneration
+
+    fixture.outline.reloadItem(nil)
+
+    XCTAssertTrue(zip(before, try proxyRows(fixture.element)).allSatisfy { $0 !== $1 },
+                  "a root reload rebuilds the proxy elements")
+    XCTAssertTrue((proxies.postedNotificationsForTesting ?? []).contains { $0.0 == .rowCountChanged && $0.1 == nil })
+    XCTAssertNotEqual(fixture.outline.rowsGeneration, generation)
+  }
+
   /// #297: a built page realizes only the rows near its visible rect; the rest are realized as they scroll in.
   func testBuildingAPageRealizesOnlyRowsNearTheVisibleRect() throws {
     let sidebar = StubSidebar()

@@ -114,11 +114,16 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   // asked, so the element a VoiceOver user is on survives it. The title/value notification comes from
   // `SidebarOutlineController.reload(node:)`, which knows the row.
 
-  /// A reload with `reloadChildren` lists the item's children again, which may put other items at its rows, so it
-  /// moves `rowsGeneration` (the folder motion captures again, #673). A plain reload of the item keeps its rows.
+  /// A reload with `reloadChildren` lists the item's children again, which may put other items at its rows even when
+  /// the row count stays: it moves `rowsGeneration` (the folder motion captures again, #673), rebuilds the proxies and
+  /// posts `rowCountChanged`, like the structural changes below (#717). `reloadItem(nil)` arrives here with
+  /// `reloadChildren: true`, so a root reload does the same. A plain reload of the item keeps its rows and proxies.
   public override func reloadItem(_ item: Any?, reloadChildren: Bool) {
     super.reloadItem(item, reloadChildren: reloadChildren)
-    if reloadChildren { rowsGeneration &+= 1 }
+    guard reloadChildren else { return }
+    rowsGeneration &+= 1
+    axProxyRows.invalidate()
+    axProxyRows.post(.rowCountChanged)
   }
 
   public override func expandItem(_ item: Any?) {
@@ -1486,7 +1491,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.enumerateAvailableRowViews { rowView, row in
       styled += 1
       let id = self.nodeID(atRow: row)
-      self.applyStyle(self.motionStyle(atRow: row), raised: id.map(raised.contains) ?? false, to: rowView)
+      self.applyStyle(self.motionStyle(atRow: row, rows: rows), raised: id.map(raised.contains) ?? false, to: rowView)
     }
     lastMotionFrameRowsStyled = styled
   }
@@ -1545,10 +1550,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     return captured
   }
 
-  /// `row`'s style in the current frame, from the captured rows alone.
-  private func motionStyle(atRow row: Int) -> FolderMotionLayout.RowStyle {
+  /// `row`'s style in the current frame, from the captured rows alone. A frame passes the rows it read once
+  /// (`presentFolderMotion`); a row added outside a frame reads them itself.
+  private func motionStyle(atRow row: Int, rows: MotionRows? = nil) -> FolderMotionLayout.RowStyle {
     guard row >= 0, !motionFrame.isAtRest else { return .rest }
-    let rows = currentMotionRows()
+    let rows = rows ?? currentMotionRows()
     var moving: [(block: FolderMotionLayout.Block, progress: Double)] = []
     for (folder, value) in motionFrame.progress {
       if let block = rows.blocks[folder] { moving.append((block, value)) }
