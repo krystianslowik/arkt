@@ -1536,8 +1536,8 @@ public protocol SidebarSource: AnyObject {
 ```
 `Sidebar/StubSidebar.swift`: `final class StubSidebar: SidebarSource` with dictionaries
 `spaces`, `nodes`, `childOrder: [SidebarLocation: [NodeID]]`, and `static func sample() -> StubSidebar`:
-3 Spaces ("Personal": light, warm stops `#F2EAE4 -> #F29BBB`; "Work": light, cool `#E0F2FB -> #C5C6E2`; "Dev": dark,
-`#2D4468 -> #120F2E`; colors from the public palettes in design-system doc 1.7), 6 favorites
+3 Spaces ("Personal": light, warm; "Work": light, cool; "Dev": dark; two-stop gradients from our own palette, see
+`StubSidebar.sample()`), 6 favorites
 (`https://example.com`, `https://www.wikipedia.org`, `https://news.ycombinator.com`, `https://github.com`,
 `https://developer.apple.com`, `https://www.swift.org`), per Space 2-3 pinned tabs plus one folder with 2 tabs, and
 2-4 Today tabs. All titles invented. `updateTab` calls `onChange` with the node's parent location.

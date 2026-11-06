@@ -221,11 +221,11 @@ first and the default. Each stop pair must pass `ShellTokensContrastTests` befor
 | Family | Light | Dark |
 |---|---|---|
 | Dune (default) | #F7EED2 to #EBD592 | #3D3420 to #1E1A10 |
-| Mist | #E0F2FB to #C5C6E2 | #3A4158 to #1C2030 |
+| Mist | #EEF1F4 to #B0C4DA | #3A4158 to #1C2030 |
 | Paper | #F4F1EA to #E4DDD2 | #3A3631 to #211F1C |
 | Sage | #E6EDE3 to #C4D3C0 | #2F3B33 to #171E1A |
-| Blossom | #F2EAE4 to #F29BBB | #4A2A3A to #1F1520 |
-| Indigo | #E4E2F4 to #C9C3E8 | #2D4468 to #120F2E |
+| Blossom | #F7EEF3 to #DDB4D2 | #4A2A3A to #1F1520 |
+| Indigo | #E4E2F4 to #C9C3E8 | #3C3B72 to #1D1838 |
 
 ## 6. Steps
 

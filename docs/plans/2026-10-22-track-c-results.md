@@ -530,16 +530,16 @@ Worst case, before and after:
 
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
-| `secondaryText` | light | 0.50: 3.16:1 | 0.64: 4.55:1 | hovered URL bar over the pink stop `#F29BBB` |
-| `secondaryText` | dark | 0.50: 2.91:1 | 0.76: 4.53:1 | hovered URL bar over the Dev stop `#2D4468` |
-| `sidebarForeground` | light | 0.30: 1.92:1 | 0.48: 3.00:1 | close X on a hovered row over `#F29BBB` |
-| `sidebarForeground` | dark | 0.45: 2.45:1 | 0.57: 3.00:1 | close X on `tabCurrent` over `#2D4468` |
+| `secondaryText` | light | 0.50: 3.16:1 | 0.64: 4.55:1 | hovered URL bar over the earlier sample Personal end stop |
+| `secondaryText` | dark | 0.50: 2.91:1 | 0.76: 4.53:1 | hovered URL bar over the earlier sample Dev start stop |
+| `sidebarForeground` | light | 0.30: 1.92:1 | 0.48: 3.00:1 | close X on a hovered row over the earlier sample Personal end stop |
+| `sidebarForeground` | dark | 0.45: 2.45:1 | 0.57: 3.00:1 | close X on `tabCurrent` over the earlier sample Dev start stop |
 
 One step lower (0.63, 0.75, 0.47, 0.56) fails each case, so these are the smallest passing values at 0.01. The
 order primary > secondary > sidebar foreground holds in both modes and is asserted. Arc parity: both tokens are
 now darker (light) and brighter (dark) than Arc's levels.
 
-Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over `#2D4468`, below 4.5 (fixed in
+Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over the earlier sample Dev start stop, below 4.5 (fixed in
 #146, below).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 334 tests (327 plus 7 new), XCTest 181 tests
@@ -554,7 +554,7 @@ with the same probe as #72: 4.5:1 over every shipped Space theme surface, bare a
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
 | `primaryText` | light | 0.90: 6.83:1 | unchanged | |
-| `primaryText` | dark | 0.80: 4.27:1 | 0.84: 4.52:1 | `tabCurrent` over the Dev stop `#2D4468` |
+| `primaryText` | dark | 0.80: 4.27:1 | 0.84: 4.52:1 | `tabCurrent` over the earlier sample Dev start stop |
 
 0.83 gives 4.46:1, so 0.84 is the smallest passing level at 0.01. The fix raises the text level instead of lowering
 `tabCurrent` dark (0.17 would also pass) because it changes one token, keeps the current row clearly brighter than
@@ -563,7 +563,7 @@ primary > secondary (0.76) > sidebar foreground (0.57) still holds. Arc parity: 
 Arc's 0.80.
 
 Not covered: the letter tile shown for rows without a favicon draws `primaryText` on `sidebarItemHovered` on top of
-the row fill. In dark mode on `tabCurrent` over `#2D4468` that nested fill stays below 4.5:1 even at white 1.0
+the row fill. In dark mode on `tabCurrent` over the earlier sample Dev start stop that nested fill stays below 4.5:1 even at white 1.0
 (about 4.1:1), so it needs a change to the tile itself rather than the text level (fixed in #153, below).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 338 tests, XCTest 182 tests (GUI included), 0
@@ -580,14 +580,14 @@ stands in for the site's favicon and is read as an initial), so the test asserts
 | Mode | Tile fill | Before | After | Worst surface |
 |---|---|---|---|---|
 | light | P3 `#0E0F10` at 0.10 | 5.78:1 | unchanged | |
-| dark | P3 `#FAFBFF` at 0.15, now P3 `#0E0F10` at 0.15 | 3.40:1 | 5.43:1 | `tabCurrent` over the Dev stop `#2D4468` |
+| dark | P3 `#FAFBFF` at 0.15, now P3 `#0E0F10` at 0.15 | 3.40:1 | 5.43:1 | `tabCurrent` over the earlier sample Dev start stop |
 
 The fix is a new token, `ShellTokens.letterTileFill`: light keeps the shipped value (the same as
 `sidebarItemHovered` light), dark now darkens the surface instead of lightening it, so both flavors draw the tile
 as the palette's dark ink at a low level. `primaryText` is unchanged. Alternatives measured and dropped: white 1.0
 ink on the old tile reaches 4.09:1; a fainter light tile makes it worse (`#FAFBFF` at 0.05: 4.10:1); no fill
 passes with no headroom (4.52:1) and loses the tile shape. Black at 0.12 (5.36:1) is equivalent; `#0E0F10` matches
-the light tile. On the darkest shipped dark stop (`#120F2E`, bare row) the dark tile is barely visible; the letter
+the light tile. On the darkest shipped dark stop (the earlier sample Dev end stop, bare row) the dark tile is barely visible; the letter
 still reads there, which is what the tile is for.
 
 Fill and ink depend on the flavor only, so the bitmap cache key (`letter-<letter>-<flavor>@<size>x<scale>`) is
@@ -1683,7 +1683,7 @@ factor. `secondaryText` light fell to 4.49:1 (hovered URL bar over the Personal 
 
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
-| `secondaryText` | light | 0.65: 4.49:1 | 0.66: 4.60:1 | hovered URL bar over `#F29BBB` darkened by grain at 0.5 |
+| `secondaryText` | light | 0.65: 4.49:1 | 0.66: 4.60:1 | hovered URL bar over the earlier sample Personal end stop darkened by grain at 0.5 |
 
 ### Deferred
 
