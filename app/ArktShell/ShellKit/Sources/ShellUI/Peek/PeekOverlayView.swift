@@ -310,6 +310,21 @@ public final class PeekCardView: NSView {
     surface.addSubview(view)
   }
 
+  /// Covers the page inside `surface` while set: the crashed tab view of the Peek's page (#683).
+  private(set) var pageOverlayView: NSView?
+
+  /// Installs `view` over the page, inside the rounded surface, or removes the current one when nil.
+  func setPageOverlay(_ view: NSView?) {
+    if pageOverlayView === view { return }
+    pageOverlayView?.removeFromSuperview()
+    pageOverlayView = view
+    guard let view else { return }
+    view.translatesAutoresizingMaskIntoConstraints = true
+    view.autoresizingMask = [.width, .height]
+    view.frame = surface.bounds
+    surface.addSubview(view, positioned: .above, relativeTo: nil)
+  }
+
   /// Lets go of the page (it moves into a content card or a pane) and returns it.
   @discardableResult
   func unmount() -> NSView? {
@@ -325,6 +340,7 @@ public final class PeekCardView: NSView {
     contact.frame = bounds
     surface.frame = bounds
     page?.frame = surface.bounds
+    pageOverlayView?.frame = surface.bounds
     updateShadowPaths(CGRect(origin: .zero, size: frame.size))
   }
 
