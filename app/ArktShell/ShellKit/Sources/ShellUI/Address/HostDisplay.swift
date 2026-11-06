@@ -31,8 +31,8 @@ import Foundation
 ///    Chromium's `IDNSpoofChecker::GetSimilarTopDomain`, a few characters are read more than one way (dotless i as i
 ///    or l, thorn as b or p, U+0153 as ce or oe, U+0142 as l or t, U+04CF as l), each reading giving a skeleton, for
 ///    at most five such characters in a host of at most 32 characters. The top domains and the skeleton pieces are
-///    precomputed in `SpoofCheck+TopDomains.swift`; a host with a character no top domain's skeleton can hold (Han and
-///    most other non-Latin text) is ruled out in one pass.
+///    precomputed in `SpoofCheck+TopDomains.swift`; a label with a character no top domain's skeleton holds (Han and
+///    most other non-Latin text) ends the comparison, and only the labels after it are checked.
 ///
 /// The joiners U+200C and U+200D always stay encoded, as in Chromium: it converts with UTS #46 transitional
 /// processing, which refuses them in every context, even after a virama (Sinhala "Sri" with a joiner,
