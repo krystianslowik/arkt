@@ -218,6 +218,7 @@ struct HostDisplayTests {
     ("https://xn--mnchen-3ya.de/plan", "https://m\u{00FC}nchen.de/plan"),
     ("https://xn--mnchen-3ya.de:8443/a?b=xn--mnchen-3ya#xn--c", "https://m\u{00FC}nchen.de:8443/a?b=xn--mnchen-3ya#xn--c"),
     ("https://user:pw@xn--mnchen-3ya.de/", "https://user:pw@m\u{00FC}nchen.de/"),
+    ("https://xn--mnchen-3ya.de/a%20b?q=%C3%BC#%20", "https://m\u{00FC}nchen.de/a%20b?q=%C3%BC#%20"),
     ("https://xn--pple-43d.com/login", "https://xn--pple-43d.com/login"),
     ("https://%D0%B0pple.com/x", "https://xn--pple-43d.com/x"),
     ("https://WWW.Example.COM/Path", "https://WWW.Example.COM/Path"),
