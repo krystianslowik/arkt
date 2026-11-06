@@ -12,10 +12,16 @@ public final class SidebarBannerCenter {
     self.model = model
   }
 
-  /// Gives `controller`'s sidebar the banner, showing the current notice without motion.
+  /// Gives `controller`'s sidebar the banner, showing the current notice without motion. The window's attachment
+  /// goes when the window closes.
   public func attach(to controller: ShellWindowController) {
     attachments.removeAll { $0.controller == nil || $0.controller?.isClosed == true }
-    attachments.append(SidebarBannerAttachment(model: model, controller: controller))
+    let attachment = SidebarBannerAttachment(model: model, controller: controller)
+    attachment.onWindowClose = { [weak self, weak attachment] in
+      self?.attachments.removeAll { $0 === attachment || $0.controller == nil }
+    }
+    attachments.append(attachment)
+    model.windowAttached()
   }
 
   /// The attachment of `controller` (tests).
@@ -29,8 +35,11 @@ public final class SidebarBannerCenter {
 final class SidebarBannerAttachment {
   weak var controller: ShellWindowController?
   let popover = SidebarBannerPopover()
+  /// The window is closing: the center lets go of this attachment.
+  var onWindowClose: (@MainActor () -> Void)?
   private let model: SidebarBannerModel
   private var observation: SidebarBannerObservation?
+  private var closeObserver: (any NSObjectProtocol)?
 
   init(model: SidebarBannerModel, controller: ShellWindowController) {
     self.model = model
@@ -45,10 +54,30 @@ final class SidebarBannerAttachment {
     popover.onDismiss = { [weak model] in model?.dismiss() }
     container.setBanner(model.current, animated: false, reduceMotion: model.reduceMotion())
     observation = model.addObserver { [weak self] notice in self?.show(notice) }
+    closeObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.willCloseNotification, object: controller.window, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.windowWillClose() }
+    }
+  }
+
+  isolated deinit {
+    if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+  }
+
+  /// Stops following the model (a closed window never updates its banner again) and tells the center.
+  private func windowWillClose() {
+    observation?.cancel()
+    observation = nil
+    popover.hide()
+    if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+    closeObserver = nil
+    onWindowClose?()
   }
 
   private func show(_ notice: SidebarNotice?) {
-    guard let container = controller?.sidebarController.view else { return }
+    guard let controller, !controller.isClosed else { return }
+    let container = controller.sidebarController.view
     if popover.notice != notice { popover.hide() }
     container.setBanner(notice, animated: true, reduceMotion: model.reduceMotion())
   }

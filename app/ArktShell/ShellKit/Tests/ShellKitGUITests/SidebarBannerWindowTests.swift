@@ -33,7 +33,7 @@ final class SidebarBannerWindowTests: XCTestCase {
   @MainActor
   private struct Harness {
     let controller: ShellWindowController
-    let source: FakeSidebarNoticeSource
+    let source: ManualSidebarNoticeSource
     let model: SidebarBannerModel
     let center: SidebarBannerCenter
     var container: SidebarContainerView { controller.sidebarController.view }
@@ -41,12 +41,28 @@ final class SidebarBannerWindowTests: XCTestCase {
     var attachment: SidebarBannerAttachment? { center.attachment(of: controller) }
   }
 
-  private func makeHarness(_ notices: [SidebarNotice] = [], reduceMotion: Bool = false) -> Harness {
-    let source = FakeSidebarNoticeSource(notices: notices)
+  /// One Space whose Today holds `tabs` rows, then a Space with two: with 30 the first page's rows run past the
+  /// window's bottom, so they reach the banner's fade.
+  private static func sidebar(tabs: Int) -> (StubSidebar, SpaceID, SpaceID) {
+    let stub = StubSidebar()
+    let first = stub.addSpace(title: "Long")
+    let second = stub.addSpace(title: "Short")
+    for index in 0..<tabs {
+      _ = stub.addTab(url: URL(string: "https://example.com/\(index)")!, title: "Tab \(index)", in: .today(first))
+    }
+    for index in 0..<2 {
+      _ = stub.addTab(url: URL(string: "https://example.org/\(index)")!, title: "Short \(index)", in: .today(second))
+    }
+    return (stub, first, second)
+  }
+
+  private func makeHarness(_ notices: [SidebarNotice] = [], reduceMotion: Bool = false,
+                           sidebar: StubSidebar = SidebarBannerWindowTests.sidebar(tabs: 30).0) -> Harness {
+    let source = ManualSidebarNoticeSource(notices: notices)
     let model = SidebarBannerModel(source: source, dismissals: .ephemeral()) { _, _ in }
     model.reduceMotion = { reduceMotion }
     let center = SidebarBannerCenter(model: model)
-    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: sidebar)
     controllers.append(controller)
     controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1080, height: 720), display: false)
     center.attach(to: controller)
@@ -99,6 +115,72 @@ final class SidebarBannerWindowTests: XCTestCase {
     XCTAssertEqual(harness.banner.closeButton.accessibilityLabel(), "Dismiss notice")
     XCTAssertFalse(harness.banner.closeButton.isHidden, "Dismiss stays reachable without a pointer")
     XCTAssertFalse(harness.banner.row.isAccessibilityElement(), "an update row is not a button")
+  }
+
+  /// The views the window's key view loop visits from its content view, in order (one lap).
+  private func keyViewLoop(_ window: NSWindow) -> [NSView] {
+    window.recalculateKeyViewLoop()
+    guard let start = window.contentView else { return [] }
+    var loop: [NSView] = []
+    var view = start.nextKeyView
+    while let current = view, current !== start, !loop.contains(where: { $0 === current }), loop.count < 500 {
+      loop.append(current)
+      view = current.nextKeyView
+    }
+    return loop
+  }
+
+  /// Restart and the close button are in the window's key view loop and take keyboard focus; Tab reaches them with
+  /// Full Keyboard Access on. The close button shows while it has focus, and hides again when focus leaves.
+  func testAnUpdatesControlsAreInTheKeyViewLoopAndTheCloseShowsWithFocus() throws {
+    let harness = makeHarness([Self.update], reduceMotion: true)
+    let window = try XCTUnwrap(harness.controller.window)
+    let banner = harness.banner
+    let loop = keyViewLoop(window)
+    XCTAssertTrue(loop.contains { $0 === banner.restartButton }, "Restart is in the key view loop")
+    XCTAssertTrue(loop.contains { $0 === banner.closeButton }, "the close button is in the key view loop")
+    XCTAssertTrue(banner.restartButton.acceptsFirstResponder)
+    XCTAssertTrue(banner.closeButton.acceptsFirstResponder)
+    XCTAssertFalse(banner.closeButton.isShown, "hidden at rest")
+    let close = NSPoint(x: banner.closeButton.frame.midX, y: banner.closeButton.frame.midY)
+    if NSApp.isFullKeyboardAccessEnabled {
+      XCTAssertTrue(banner.closeButton.canBecomeKeyView)
+      XCTAssertTrue(banner.restartButton.canBecomeKeyView)
+      XCTAssertTrue(window.makeFirstResponder(banner.closeButton))
+    } else {
+      // Without Full Keyboard Access (the CI runners) buttons refuse Tab, as everywhere in macOS; the responder
+      // call is made directly.
+      XCTAssertTrue(banner.closeButton.becomeFirstResponder())
+    }
+    XCTAssertTrue(banner.closeButton.isShown, "keyboard focus shows the close button")
+    XCTAssertTrue(banner.hitTest(banner.convert(close, to: harness.container)) === banner.closeButton)
+    XCTAssertFalse(banner.closeButton.keyboardFocusRing.isHidden && window.isKeyWindow, "the ring shows with focus")
+    if NSApp.isFullKeyboardAccessEnabled {
+      XCTAssertTrue(window.makeFirstResponder(nil))
+    } else {
+      XCTAssertTrue(banner.closeButton.resignFirstResponder())
+    }
+    XCTAssertFalse(banner.closeButton.isShown, "hidden again without focus or hover")
+  }
+
+  /// An announcement's row is a button in the key view loop; Space opens its popover.
+  func testAnAnnouncementsRowIsInTheKeyViewLoopAndSpaceOpensThePopover() throws {
+    let harness = makeHarness([Self.announcement], reduceMotion: true)
+    let window = try XCTUnwrap(harness.controller.window)
+    let row = harness.banner.row
+    let loop = keyViewLoop(window)
+    XCTAssertTrue(loop.contains { $0 === row }, "the row is in the key view loop")
+    XCTAssertTrue(loop.contains { $0 === harness.banner.closeButton })
+    XCTAssertTrue(row.acceptsFirstResponder)
+    XCTAssertEqual(row.canBecomeKeyView, NSApp.isFullKeyboardAccessEnabled, "Tab reaches it as it reaches buttons")
+    XCTAssertTrue(window.makeFirstResponder(row))
+    XCTAssertFalse(row.keyboardFocusRing.isHidden && window.isKeyWindow)
+    let space = try XCTUnwrap(NSEvent.keyEvent(
+      with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+      context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49))
+    row.keyDown(with: space)
+    XCTAssertEqual(harness.attachment?.popover.isShown, true)
+    harness.attachment?.popover.hide()
   }
 
   func testRestartGoesToTheSource() {
@@ -244,6 +326,24 @@ final class SidebarBannerWindowTests: XCTestCase {
     XCTAssertNil(harness.model.current)
   }
 
+  /// The pill is styled for the popover's flavor from its first frame, not light first and dark on the next pass.
+  func testTheDarkPopoversPillIsDarkFromTheStart() throws {
+    let harness = makeHarness([Self.announcement], reduceMotion: true)
+    let popover = SidebarBannerPopover()
+    popover.reduceMotion = { true }
+    popover.show(Self.announcement, beside: harness.banner.row, flavor: .dark, takesKey: false)
+    defer { popover.hide() }
+    let pill = try XCTUnwrap(popover.contentView?.actionButton)
+    let dark = ShellTokens.primaryText.resolve(.dark)
+    XCTAssertEqual(pill.displayedTitleColor, dark)
+    let drawn = try XCTUnwrap(pill.drawnTitleColor?.usingColorSpace(.sRGB))
+    let expected = try XCTUnwrap(dark.nsColor().usingColorSpace(.sRGB))
+    XCTAssertEqual(drawn.redComponent, expected.redComponent, accuracy: 0.01, "drawn dark, not light")
+    XCTAssertEqual(drawn.greenComponent, expected.greenComponent, accuracy: 0.01)
+    XCTAssertEqual(drawn.blueComponent, expected.blueComponent, accuracy: 0.01)
+    XCTAssertTrue(popover.contentView?.appearance?.name == .darkAqua, "the content carries the flavor itself")
+  }
+
   func testThePopoversActionGoesToTheSource() throws {
     let harness = makeHarness([Self.announcement], reduceMotion: true)
     let attachment = try XCTUnwrap(harness.attachment)
@@ -276,6 +376,17 @@ final class SidebarBannerWindowTests: XCTestCase {
     XCTAssertEqual(harness.banner.row.alphaValue, 1)
   }
 
+  /// A closed window's attachment goes at once and stops following the model.
+  func testAClosedWindowIsLetGo() throws {
+    let harness = makeHarness([Self.update])
+    XCTAssertNotNil(harness.attachment)
+    harness.controller.close()
+    XCTAssertNil(harness.center.attachment(of: harness.controller), "let go when the window closes")
+    let bannerNotice = harness.banner.notice
+    harness.source.notices = [Self.announcement]
+    XCTAssertEqual(harness.banner.notice, bannerNotice, "a closed window's banner is not updated")
+  }
+
   func testEveryWindowShowsTheNotice() {
     let harness = makeHarness([Self.update])
     let second = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
@@ -284,6 +395,68 @@ final class SidebarBannerWindowTests: XCTestCase {
     XCTAssertEqual(second.sidebarController.view.banner.notice, Self.update)
     harness.source.notices = []
     XCTAssertTrue(second.sidebarController.view.banner.alphaValue == 0 || second.sidebarController.view.banner.isHidden)
+  }
+
+  // MARK: The fade mask only while it shows something
+
+  /// Rows that end above the fade need no mask: none at rest, so scrolling and swipes pay no offscreen pass.
+  func testRowsThatEndAboveTheFadeGetNoMask() {
+    let harness = makeHarness([Self.update], sidebar: Self.sidebar(tabs: 2).0)
+    XCTAssertFalse(harness.container.bannerRowsReachFade)
+    XCTAssertNil(harness.container.pager.layer?.mask, "no mask while the rows end above the fade")
+    XCTAssertEqual(harness.container.pager.frame.maxY, rowFrame(harness).minY, accuracy: 0.5, "the rows make room")
+  }
+
+  /// The mask comes when rows grow into the fade and goes when they shrink out of it.
+  func testTheMaskFollowsTheRowsReachingTheFade() throws {
+    let (stub, first, _) = Self.sidebar(tabs: 2)
+    let harness = makeHarness([Self.update], sidebar: stub)
+    XCTAssertNil(harness.container.pager.layer?.mask)
+    var added: [NodeID] = []
+    for index in 0..<30 {
+      added.append(stub.addTab(url: URL(string: "https://example.net/\(index)")!, title: "More \(index)",
+                               in: .today(first)))
+    }
+    harness.controller.rootView.layoutSubtreeIfNeeded()
+    XCTAssertTrue(harness.container.bannerRowsReachFade)
+    XCTAssertTrue(harness.container.pager.layer?.mask === harness.container.bannerSlot.fade, "on once rows reach it")
+    for id in added { stub.removeNode(id) }
+    harness.controller.rootView.layoutSubtreeIfNeeded()
+    XCTAssertNil(harness.container.pager.layer?.mask, "off again once they end above it")
+  }
+
+  /// A swipe toward a page whose rows reach the fade turns the mask on as that page comes into view, and off again
+  /// when the strip rests on a page that does not need it.
+  func testTheMaskFollowsThePagesInView() throws {
+    let harness = makeHarness([Self.update], reduceMotion: true)
+    let container = harness.container
+    let pager = container.pager
+    XCTAssertTrue(pager.layer?.mask === container.bannerSlot.fade, "the long page is in view")
+    pager.setPositionForTesting(1)
+    container.bannerPagerMoved(to: 1)
+    XCTAssertNil(pager.layer?.mask, "the short page alone needs none")
+    pager.setPositionForTesting(0.5)
+    container.bannerPagerMoved(to: 0.5)
+    XCTAssertTrue(pager.layer?.mask === container.bannerSlot.fade, "on while the long page is half in view")
+  }
+
+  /// A layout during the arrival (a window resize) turns the mask's motion toward its new resting frame instead of
+  /// letting it finish at the old one and jump.
+  func testALayoutDuringTheMotionRetargetsTheMask() throws {
+    let harness = makeHarness()
+    harness.source.notices = [Self.update]
+    let fade = harness.container.bannerSlot.fade
+    XCTAssertNotNil(fade.animation(forKey: "banner.bounds"))
+    let window = try XCTUnwrap(harness.controller.window)
+    window.setFrame(NSRect(x: 0, y: 0, width: 1080, height: 620), display: false)
+    harness.controller.rootView.layoutSubtreeIfNeeded()
+    let bounds = try XCTUnwrap(fade.animation(forKey: "banner.bounds") as? CABasicAnimation)
+    let target = try XCTUnwrap(bounds.toValue as? NSRect)
+    XCTAssertEqual(target.height, harness.container.bannerFadeFrame.height, accuracy: 0.5, "heads to the new frame")
+    XCTAssertEqual(fade.frame, harness.container.bannerFadeFrame)
+    harness.container.finishBannerMotionForTesting()
+    XCTAssertEqual(harness.container.pager.frame.maxY, rowFrame(harness).minY, accuracy: 0.5)
+    XCTAssertEqual(fade.frame.height, harness.container.pager.bounds.height)
   }
 
   /// The banner's bottom edge in window coordinates (y up), through its layer, so a transform counts.

@@ -176,6 +176,12 @@ final class ArchivePillButton: NSButton {
   /// The drawn title, the key included (tests).
   var displayedTitleText: String { displayedTitle.string }
 
+  /// The title color the label layer holds now, not the one the appearance would give (tests).
+  var drawnTitleColor: NSColor? {
+    guard let text = label.string as? NSAttributedString, text.length > 0 else { return nil }
+    return text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+  }
+
   override var intrinsicContentSize: NSSize {
     let width = ceil(displayedTitle.size().width) + 2 * metrics.padding
     return NSSize(width: max(width, metrics.minWidth ?? pillHeight * 2), height: pillHeight)

@@ -31,7 +31,7 @@ final class SidebarBannerScreenshotTests: XCTestCase {
                       at: nil)
     }
     let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: stub)
-    let source = FakeSidebarNoticeSource(notices: [notice])
+    let source = ManualSidebarNoticeSource(notices: [notice])
     let model = SidebarBannerModel(source: source, dismissals: .ephemeral()) { _, _ in }
     model.reduceMotion = { true }
     let center = SidebarBannerCenter(model: model)

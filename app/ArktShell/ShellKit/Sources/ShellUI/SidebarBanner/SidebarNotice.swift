@@ -48,7 +48,7 @@ public struct SidebarNotice: Equatable, Sendable, Identifiable {
 }
 
 /// Where sidebar notices come from. The updater (#126) and the announcement feed plug in here; until then the app
-/// uses `FakeSidebarNoticeSource`. `notices` is in priority order; the banner shows the first one not dismissed.
+/// uses `ManualSidebarNoticeSource`. `notices` is in priority order; the banner shows the first one not dismissed.
 @MainActor
 public protocol SidebarNoticeSource: AnyObject {
   var notices: [SidebarNotice] { get }
@@ -61,7 +61,7 @@ public protocol SidebarNoticeSource: AnyObject {
 
 /// A notice source driven by hand: tests, and the app's test driver until the updater (#126) exists.
 @MainActor
-public final class FakeSidebarNoticeSource: SidebarNoticeSource {
+public final class ManualSidebarNoticeSource: SidebarNoticeSource {
   public var notices: [SidebarNotice] { didSet { onChange?() } }
   public var onChange: (@MainActor () -> Void)?
   /// Every notice whose action was chosen, in order.
@@ -122,7 +122,7 @@ public final class SidebarBannerObservation {
 
 /// The banner's state, one per app and shared by every window: the source's first notice that was not dismissed.
 /// Dismissing stores the id; an announcement's action retires it too, while an update stays until the source
-/// withdraws it. VoiceOver hears each notice once, however many windows show it.
+/// withdraws it. VoiceOver hears each notice once, however many windows show it, and only once a window shows it.
 @MainActor
 public final class SidebarBannerModel {
   public let source: any SidebarNoticeSource
@@ -133,6 +133,8 @@ public final class SidebarBannerModel {
 
   private let announce: AXAnnouncement.Poster
   private var announced: Set<String> = []
+  /// A window shows the banner (`windowAttached()`); until then nothing is announced.
+  private var hasWindow = false
   private var observers: [Int: @MainActor (SidebarNotice?) -> Void] = [:]
   private var nextObserver = 0
 
@@ -157,6 +159,14 @@ public final class SidebarBannerModel {
     return SidebarBannerObservation { [weak self] in self?.observers[key] = nil }
   }
 
+  /// A window now shows the banner. The first call announces the notice already showing; later notices are announced
+  /// as they come.
+  public func windowAttached() {
+    guard !hasWindow else { return }
+    hasWindow = true
+    announceIfNew(current)
+  }
+
   /// The close button or the popover's Dismiss: the notice goes and does not come back.
   public func dismiss() {
     guard let current else { return }
@@ -176,10 +186,13 @@ public final class SidebarBannerModel {
     let next = source.notices.first { !dismissals.contains($0.id) }
     guard next != current else { return }
     current = next
-    if let next, announced.insert(next.id).inserted {
-      // A status region: polite, it never interrupts what VoiceOver is reading.
-      announce(next.spokenText, .medium)
-    }
+    announceIfNew(next)
     for handler in observers.values { handler(next) }
+  }
+
+  private func announceIfNew(_ notice: SidebarNotice?) {
+    guard hasWindow, let notice, announced.insert(notice.id).inserted else { return }
+    // A status region: polite, it never interrupts what VoiceOver is reading.
+    announce(notice.spokenText, .medium)
   }
 }

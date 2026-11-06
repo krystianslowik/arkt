@@ -94,7 +94,7 @@ enum AppEnvironment {
   /// Debug build asked for a sample notice. Choosing a notice's action withdraws it.
   @MainActor
   static func sidebarNoticeSource() -> any SidebarNoticeSource {
-    let source = FakeSidebarNoticeSource()
+    let source = ManualSidebarNoticeSource()
     #if DEBUG
     source.notices = sampleSidebarNotices
     #endif

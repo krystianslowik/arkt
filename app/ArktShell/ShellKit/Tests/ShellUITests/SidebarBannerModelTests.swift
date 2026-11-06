@@ -20,23 +20,23 @@ struct SidebarBannerModelTests {
     var words: [String] = []
   }
 
-  private func model(_ source: FakeSidebarNoticeSource, dismissals: SidebarNoticeDismissals = .ephemeral(),
+  private func model(_ source: ManualSidebarNoticeSource, dismissals: SidebarNoticeDismissals = .ephemeral(),
                      spoken: Spoken = Spoken()) -> SidebarBannerModel {
     SidebarBannerModel(source: source, dismissals: dismissals) { text, _ in spoken.words.append(text) }
   }
 
   @Test func showsNothingWithoutANotice() {
-    let model = model(FakeSidebarNoticeSource())
+    let model = model(ManualSidebarNoticeSource())
     #expect(model.current == nil)
   }
 
   @Test func showsTheSourcesFirstNotice() {
-    let source = FakeSidebarNoticeSource(notices: [Self.update, Self.announcement])
+    let source = ManualSidebarNoticeSource(notices: [Self.update, Self.announcement])
     #expect(model(source).current == Self.update)
   }
 
   @Test func followsTheSourceAndTellsObservers() {
-    let source = FakeSidebarNoticeSource()
+    let source = ManualSidebarNoticeSource()
     let model = model(source)
     var seen: [SidebarNotice?] = []
     let observation = model.addObserver { seen.append($0) }
@@ -50,7 +50,7 @@ struct SidebarBannerModelTests {
 
   @Test func dismissingShowsTheNextNoticeAndStoresTheID() throws {
     let store = try defaults()
-    let source = FakeSidebarNoticeSource(notices: [Self.update, Self.announcement])
+    let source = ManualSidebarNoticeSource(notices: [Self.update, Self.announcement])
     let model = model(source, dismissals: SidebarNoticeDismissals(defaults: store))
     model.dismiss()
     #expect(model.current == Self.announcement)
@@ -59,12 +59,12 @@ struct SidebarBannerModelTests {
 
   @Test func aDismissedNoticeNeverComesBackForTheSameVersion() throws {
     let store = try defaults()
-    model(FakeSidebarNoticeSource(notices: [Self.update]), dismissals: SidebarNoticeDismissals(defaults: store))
+    model(ManualSidebarNoticeSource(notices: [Self.update]), dismissals: SidebarNoticeDismissals(defaults: store))
       .dismiss()
-    let relaunched = model(FakeSidebarNoticeSource(notices: [Self.update]),
+    let relaunched = model(ManualSidebarNoticeSource(notices: [Self.update]),
                            dismissals: SidebarNoticeDismissals(defaults: store))
     #expect(relaunched.current == nil)
-    let next = model(FakeSidebarNoticeSource(notices: [.update(version: "1.4.3")]),
+    let next = model(ManualSidebarNoticeSource(notices: [.update(version: "1.4.3")]),
                      dismissals: SidebarNoticeDismissals(defaults: store))
     #expect(next.current?.id == "update-1.4.3", "a newer version is a new notice")
   }
@@ -87,7 +87,7 @@ struct SidebarBannerModelTests {
   }
 
   @Test func restartGoesToTheSourceAndKeepsTheNotice() {
-    let source = FakeSidebarNoticeSource(notices: [Self.update])
+    let source = ManualSidebarNoticeSource(notices: [Self.update])
     let model = model(source)
     model.performAction()
     #expect(source.performed == [Self.update])
@@ -95,7 +95,7 @@ struct SidebarBannerModelTests {
   }
 
   @Test func anAnnouncementsActionGoesToTheSourceAndRetiresIt() {
-    let source = FakeSidebarNoticeSource(notices: [Self.announcement])
+    let source = ManualSidebarNoticeSource(notices: [Self.announcement])
     let model = model(source)
     model.performAction()
     #expect(source.performed == [Self.announcement])
@@ -104,14 +104,32 @@ struct SidebarBannerModelTests {
 
   @Test func voiceOverHearsEachNoticeOnce() {
     let spoken = Spoken()
-    let source = FakeSidebarNoticeSource(notices: [Self.update])
+    let source = ManualSidebarNoticeSource(notices: [Self.update])
     let model = model(source, spoken: spoken)
+    model.windowAttached()
     source.notices = [Self.update]                    // the same notice again
     source.notices = []
     source.notices = [Self.update]                    // back after a gap: still the same notice
     source.notices = [Self.announcement]
     #expect(spoken.words == ["Update ready. Restart", Self.announcement.title])
     _ = model
+  }
+
+  /// Nothing is announced before a window shows the banner; the first window announces the notice it shows, and
+  /// later windows do not repeat it.
+  @Test func voiceOverWaitsForTheFirstWindow() {
+    let spoken = Spoken()
+    let source = ManualSidebarNoticeSource(notices: [Self.update])
+    let model = model(source, spoken: spoken)
+    #expect(spoken.words.isEmpty, "no window yet")
+    source.notices = [Self.announcement]
+    #expect(spoken.words.isEmpty)
+    model.windowAttached()
+    #expect(spoken.words == [Self.announcement.title])
+    model.windowAttached()
+    #expect(spoken.words == [Self.announcement.title], "a second window does not repeat it")
+    source.notices = [Self.update]
+    #expect(spoken.words == [Self.announcement.title, "Update ready. Restart"])
   }
 
   @Test func theUpdateNoticeReadsAsDesigned() {

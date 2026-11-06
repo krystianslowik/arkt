@@ -7,7 +7,9 @@ import Motion
 /// corner.
 ///
 /// The view's frame is the row's outset by the close button's overhang at the top and leading edges, so the button
-/// stays inside the view; only the row (and the close button while shown) take clicks. Nothing here takes focus.
+/// stays inside the view; only the row (and the close button while shown) take clicks. Nothing here takes focus on its
+/// own; with Full Keyboard Access, Tab reaches the close button, Restart and an announcement's row, and the close
+/// button shows while it has keyboard focus.
 @MainActor
 public final class SidebarBannerView: NSView {
   /// The glyphs (SF Symbols): an update's arrow, an announcement's spark, its chevron.
@@ -60,13 +62,13 @@ public final class SidebarBannerView: NSView {
     }
     restartButton.setAccessibilityLabel("Restart to update")
     restartButton.setAccessibilityIdentifierWithCell(AXID.SidebarBanner.restart)
-    restartButton.refusesFirstResponder = true
     restartButton.target = self
     restartButton.action = #selector(restartPressed(_:))
     closeButton.setAccessibilityLabel("Dismiss notice")
     closeButton.setAccessibilityIdentifierWithCell(AXID.SidebarBanner.dismiss)
     closeButton.target = self
     closeButton.action = #selector(dismissPressed(_:))
+    closeButton.onFocusChange = { [weak self] in self?.refreshCloseButton() }
     row.onPress = { [weak self] in self?.rowPressed() }
     row.pill = restartButton
     for view in [glyph, label, restartButton, chevron] as [NSView] { row.addSubview(view) }
@@ -154,7 +156,7 @@ public final class SidebarBannerView: NSView {
   public override func hitTest(_ point: NSPoint) -> NSView? {
     guard !isHidden, notice != nil, alphaValue > 0 else { return nil }
     let local = convert(point, from: superview)
-    if isHovered, closeButton.frame.contains(local) { return closeButton }
+    if closeButton.isShown, closeButton.frame.contains(local) { return closeButton }
     guard row.frame.contains(local) else { return nil }
     // The close button overlaps the row's corner but takes clicks only while shown.
     return row.hitTest(convert(local, to: row.superview)) ?? row
@@ -176,7 +178,14 @@ public final class SidebarBannerView: NSView {
   func setHovered(_ hovered: Bool) {
     guard hovered != isHovered else { return }
     isHovered = hovered
-    closeButton.setShown(hovered, animated: window != nil && !reduceMotion())
+    refreshCloseButton()
+  }
+
+  /// The close button shows while the pointer is over the banner or the button has keyboard focus.
+  private func refreshCloseButton() {
+    let shown = isHovered || closeButton.hasKeyboardFocus
+    guard shown != closeButton.isShown else { return }
+    closeButton.setShown(shown, animated: window != nil && !reduceMotion())
   }
 
   // MARK: Motion
@@ -234,9 +243,12 @@ public final class SidebarBannerView: NSView {
     CATransaction.commit()
   }
 
-  /// Hides at once (no window, or a reset).
+  /// Hides at once (no window, or a reset). Keyboard focus inside the banner goes back to the window.
   func hideNow() {
     motionGeneration &+= 1
+    if let window, let responder = window.firstResponder as? NSView, responder.isDescendant(of: self) {
+      window.makeFirstResponder(nil)
+    }
     setHovered(false)
     layer?.removeAllAnimations()
     alphaValue = 1
@@ -274,6 +286,9 @@ final class SidebarBannerRowView: NSView {
       setAccessibilityIdentifier(isAnnouncement ? AXID.SidebarBanner.open : nil)
     }
   }
+  /// `ShellTokens.focusRing` around the row while it has keyboard focus.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                         radius: SidebarBannerMetrics.cornerRadius)
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -288,6 +303,32 @@ final class SidebarBannerRowView: NSView {
 
   override var isFlipped: Bool { true }
   override var mouseDownCanMoveWindow: Bool { false }
+
+  // An announcement's row is a button: Tab reaches it with Full Keyboard Access, like every button in macOS, and
+  // Space or Return opens the popover. A click never gives it focus.
+  override var acceptsFirstResponder: Bool { isAnnouncement }
+  override var canBecomeKeyView: Bool {
+    isAnnouncement && !isHiddenOrHasHiddenAncestor && NSApp.isFullKeyboardAccessEnabled
+  }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
+
+  override func keyDown(with event: NSEvent) {
+    switch event.charactersIgnoringModifiers {
+    case " ", "\r", "\u{3}": onPress?()
+    default: super.keyDown(with: event)
+    }
+  }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
     guard let hit = super.hitTest(point) else { return nil }
@@ -310,14 +351,20 @@ final class SidebarBannerRowView: NSView {
 }
 
 /// The 18 pt close button over the row's top leading corner: the brand surface with the overlay shadow, an X in
-/// `secondaryText`. Invisible and not hit-tested until the banner is hovered, yet always in the accessibility tree,
-/// so VoiceOver can dismiss without a pointer.
+/// `secondaryText`. Invisible and not hit-tested until the banner is hovered or the button has keyboard focus (Tab with
+/// Full Keyboard Access), yet always in the accessibility tree, so VoiceOver can dismiss without a pointer.
 @MainActor
 final class SidebarBannerCloseButton: NSButton {
   /// A full fade's length (the rows' X).
   static let fadeDuration = SidebarMetrics.closeButtonFadeDuration
   var flavor: ThemeFlavor = .light { didSet { restyle() } }
   private(set) var isShown = false
+  /// Keyboard focus came or went (the banner shows the button while it has it).
+  var onFocusChange: (@MainActor () -> Void)?
+  private(set) var hasKeyboardFocus = false
+  /// `ShellTokens.focusRing` around the disc while it has keyboard focus.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                         radius: SidebarBannerMetrics.closeSize / 2)
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -325,7 +372,7 @@ final class SidebarBannerCloseButton: NSButton {
     bezelStyle = .regularSquare
     imagePosition = .imageOnly
     imageScaling = .scaleNone
-    refusesFirstResponder = true
+    focusRingType = .none
     wantsLayer = true
     layer?.masksToBounds = false
     layer?.cornerRadius = SidebarBannerMetrics.closeSize / 2
@@ -339,6 +386,24 @@ final class SidebarBannerCloseButton: NSButton {
   override var mouseDownCanMoveWindow: Bool { false }
   override var wantsUpdateLayer: Bool { true }
   override func updateLayer() { restyle() }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { setKeyboardFocus(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { setKeyboardFocus(false) }
+    return resigned
+  }
+
+  private func setKeyboardFocus(_ focused: Bool) {
+    hasKeyboardFocus = focused
+    keyboardFocusRing.setFocused(focused)
+    onFocusChange?()
+  }
 
   private func restyle() {
     guard let layer else { return }

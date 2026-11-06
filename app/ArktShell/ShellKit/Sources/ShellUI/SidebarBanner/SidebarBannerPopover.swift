@@ -41,7 +41,7 @@ final class SidebarBannerPopover: NSObject {
     window.backgroundColor = .clear
     window.hasShadow = true
     window.becomesKeyOnlyIfNeeded = true
-    window.appearance = NSAppearance(named: flavor == .dark ? .darkAqua : .aqua)
+    window.appearance = SidebarBannerPopoverView.appearance(for: flavor)
     window.setAccessibilitySubrole(.dialog)
     window.setAccessibilityLabel("What's new")
     window.setAccessibilityIdentifier(AXID.SidebarBanner.popover)
@@ -140,6 +140,9 @@ final class SidebarBannerPopoverView: NSView {
     bodyLabel = NSTextField(wrappingLabelWithString: notice.body)
     actionButton = notice.actionTitle.map { ArchivePillButton(style: .neutral, title: $0, metrics: .infobar) }
     super.init(frame: .zero)
+    // The flavor before any subview joins: the pill restyles for it as it is added, before the panel exists or draws,
+    // never once in the app's appearance on screen and again in the panel's.
+    appearance = Self.appearance(for: flavor)
     titleLabel.font = .systemFont(ofSize: SidebarBannerMetrics.popoverTitleSize, weight: .semibold)
     titleLabel.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     bodyLabel.font = .systemFont(ofSize: SidebarBannerMetrics.popoverBodySize)
@@ -170,6 +173,10 @@ final class SidebarBannerPopoverView: NSView {
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  static func appearance(for flavor: ThemeFlavor) -> NSAppearance? {
+    NSAppearance(named: flavor == .dark ? .darkAqua : .aqua)
+  }
 
   override var isFlipped: Bool { true }
 
