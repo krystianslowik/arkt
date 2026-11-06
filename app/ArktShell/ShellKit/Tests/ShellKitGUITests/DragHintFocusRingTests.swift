@@ -27,11 +27,12 @@ final class DragHintFocusRingTests: XCTestCase {
 
   // MARK: Drag hint
 
-  func testSidebarDropHighlightAndLineUseTheDragHint() {
+  func testSidebarDropSlotHighlightAndLineUseTheDragHint() {
     for flavor in Self.flavors {
       let canvas = SidebarDropCanvas(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
       host(canvas, flavor)
       canvas.applyColors()
+      assertHint(canvas.slot, flavor)
       assertHint(canvas.highlight, flavor)
       XCTAssertEqual(canvas.line.backgroundColor, ShellTokens.dragHintEdge.resolve(flavor).cgColor,
                      "\(flavor) insert line")

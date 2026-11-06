@@ -3,6 +3,7 @@ import Archive
 @testable import CoreBridge
 import EngineAPI
 import EngineAPITestSupport
+import Motion
 import SidebarModel
 import XCTest
 @testable import ShellUI
@@ -521,6 +522,9 @@ final class SidebarDragDropTests: XCTestCase {
     let after = cell.convert(cell.bounds, to: root)
     let down = root.isGeometryFlipped ? after.minY - before.minY : before.minY - after.minY
     XCTAssertEqual(down, SidebarMetrics.rowPitch, accuracy: 0.5)
+    // A row view that clipped to its bounds would hide its content shifted a full pitch: the gap's rows vanished.
+    XCTAssertFalse(rowView.clipsToBounds, "a shifted row's content stays visible")
+    XCTAssertFalse(try XCTUnwrap(rowView.layer).masksToBounds, "a shifted row's content stays visible")
 
     rowView.prepareForReuse()
     XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(rowView.layer).sublayerTransform),
@@ -583,6 +587,199 @@ final class SidebarDragDropTests: XCTestCase {
     XCTAssertTrue(drop.preview.isHighlightShown)
     XCTAssertFalse(drop.preview.isIndicatorShown)
     XCTAssertEqual(drop.preview.offset(ofRow: try harness.row(world.today[0]), at: harness.motionTime + 2), 0)
+  }
+
+  // MARK: Drop slot (#686)
+
+  /// The slot's rect in outline coordinates, read back from its layer.
+  private func slotRect(_ preview: SidebarDropPreview) -> CGRect {
+    preview.canvasView.viewRect(of: preview.slotLayer)
+  }
+
+  /// design/drag-hint-focus-ring: while rows make room, the open gap shows a 30 pt slot, radius 9, the row width,
+  /// in the drag hint fill with a 1 pt edge. The 2 pt line is not drawn.
+  func testTheOpenGapShowsTheSlot() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    let gapRow = try harness.row(world.today[1])
+    drop.update(at: try harness.point(world.today[1], y: 0.1), payload: harness.payload([world.today[0]]))
+    drop.preview.tick(at: harness.motionTime + 2)
+    let preview = drop.preview
+    XCTAssertEqual(preview.indicatorStyle, .slot)
+    XCTAssertTrue(preview.isIndicatorShown)
+    XCTAssertEqual(preview.slotLayer.opacity, 1)
+    XCTAssertEqual(preview.indicatorLayer.opacity, 0, "no insert line while the gap is open")
+    let slot = preview.slotLayer
+    XCTAssertEqual(slot.cornerRadius, 9)
+    XCTAssertEqual(slot.cornerCurve, .continuous)
+    XCTAssertEqual(slot.borderWidth, 1)
+    let row = try harness.outline().outlineView.rect(ofRow: gapRow)
+    let rect = slotRect(preview)
+    XCTAssertEqual(rect.height, 30, accuracy: 0.01)
+    XCTAssertEqual(rect.minX, row.minX, accuracy: 0.01, "a top-level target: no indent")
+    XCTAssertEqual(rect.width, row.width, accuracy: 0.01, "the row width")
+    XCTAssertEqual(rect.midY, row.minY + SidebarMetrics.rowPitch / 2, accuracy: 0.01, "centered in the gap")
+    XCTAssertEqual(rect.midY, preview.indicatorY, accuracy: 0.01)
+  }
+
+  /// The slot takes the row width at the target's indent.
+  func testTheSlotStartsAtTheTargetsIndent() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    let gapRow = try harness.row(world.today[1])
+    let target = try XCTUnwrap(drop.update(at: try harness.point(world.today[1], y: 0.1),
+                                           payload: harness.payload([world.today[0]])))
+    guard case .insert(let location, let index, let row, _) = target else { return XCTFail("\(target)") }
+    drop.preview.show(.insert(location: location, index: index, gapBeforeRow: row, level: 2),
+                      at: harness.motionTime)
+    let full = try harness.outline().outlineView.rect(ofRow: gapRow)
+    let rect = slotRect(drop.preview)
+    XCTAssertEqual(rect.minX, full.minX + 2 * SidebarMetrics.indentationPerLevel, accuracy: 0.01)
+    XCTAssertEqual(rect.maxX, full.maxX, accuracy: 0.01)
+  }
+
+  /// The slot rides the gap's spring: moving to another gap travels from where the slot is, and a second move
+  /// mid-flight retargets from the current place without a jump.
+  func testTheSlotFollowsTheGapAndRetargetsFromWhereItIs() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    let payload = harness.payload([world.today[0]])
+    let outline = try harness.outline().outlineView
+    drop.update(at: try harness.point(world.today[1], y: 0.1), payload: payload)
+    harness.motionTime += 2
+    drop.preview.tick(at: harness.motionTime)
+    let first = drop.preview.indicatorY
+    XCTAssertEqual(slotRect(drop.preview).midY, first, accuracy: 0.01)
+
+    // The next gap down, pointed at where its row is shown (the rows below the gap are shifted by one pitch).
+    let next = try harness.row(world.today[2])
+    let shown = NSPoint(x: try harness.point(row: next, y: 0.1).x,
+                        y: outline.rect(ofRow: next).minY + SidebarMetrics.rowPitch + 2)
+    drop.update(at: shown, payload: payload)
+    XCTAssertEqual(drop.preview.indicatorY, first, accuracy: 0.01, "starts where it is")
+    let goal = outline.rect(ofRow: next).minY + SidebarMetrics.rowPitch / 2
+    XCTAssertGreaterThan(goal, first + 1)
+    harness.motionTime += 0.03
+    drop.preview.tick(at: harness.motionTime)
+    let mid = drop.preview.indicatorY
+    XCTAssertGreaterThan(mid, first)
+    XCTAssertLessThan(mid, goal)
+    XCTAssertEqual(slotRect(drop.preview).midY, mid, accuracy: 0.01, "the layer is where the spring is")
+
+    // Interrupted: back to the first gap from the middle of the move.
+    drop.update(at: try harness.point(world.today[1], y: 0.1), payload: payload)
+    XCTAssertEqual(drop.preview.indicatorY, mid, accuracy: 0.01, "retargets from where it is")
+    drop.preview.tick(at: harness.motionTime + 2)
+    XCTAssertEqual(drop.preview.indicatorY, first, accuracy: 0.01)
+  }
+
+  /// A fresh slot opens with the gap: frame by frame, it stays inside the opening, never over the row above's
+  /// background or the next row's, whether the drag comes from outside, from a folder target or from a split target.
+  func testAFreshSlotOpensWithTheGapAndNeverCoversARow() throws {
+    let world = try Self.makeWorld()
+    let inset = SidebarMetrics.rowBackgroundInsetY
+    for before in ["outside", "folder", "split"] {
+      let harness = Harness(world.sidebar)
+      let drop = try harness.drop()
+      let payload = harness.payload([world.today[0]])
+      let outline = try harness.outline().outlineView
+      switch before {
+      case "folder": drop.update(at: try harness.point(world.folder, y: 0.5), payload: payload)
+      case "split": drop.update(at: try harness.point(world.today[2], y: 0.5, x: 0.8), payload: payload)
+      default: break
+      }
+      harness.motionTime += 0.02
+      drop.preview.tick(at: harness.motionTime)
+      let gapRow = try harness.row(world.today[1])
+      drop.update(at: try harness.point(world.today[1], y: 0.1), payload: payload)
+      let above = outline.rect(ofRow: gapRow - 1).maxY - inset
+      for frame in 0...24 {
+        let t = harness.motionTime + Double(frame) / 120
+        drop.preview.tick(at: t)
+        let slot = slotRect(drop.preview)
+        let next = outline.rect(ofRow: gapRow).minY + CGFloat(drop.preview.offset(ofRow: gapRow, at: t)) + inset
+        XCTAssertLessThanOrEqual(slot.maxY, next + 0.01, "\(before), frame \(frame): over the next row")
+        XCTAssertGreaterThanOrEqual(slot.minY, above - 0.01, "\(before), frame \(frame): over the row above")
+        XCTAssertLessThanOrEqual(slot.height, SidebarDropCanvas.slotHeight + 0.01)
+      }
+      drop.preview.tick(at: harness.motionTime + 2)
+      XCTAssertEqual(slotRect(drop.preview).height, SidebarDropCanvas.slotHeight, accuracy: 0.01, before)
+      XCTAssertEqual(drop.preview.indicatorY, outline.rect(ofRow: gapRow).minY + SidebarMetrics.rowPitch / 2,
+                     accuracy: 0.01, before)
+    }
+  }
+
+  /// The slot's colors are set without an implicit animation: the first slot after launch or a theme change shows
+  /// its fill at once under the 0.12 s fade, not easing in over Core Animation's default 0.25 s.
+  func testTheSlotColorsDoNotAnimate() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    let payload = harness.payload([world.today[0]])
+    let point = try harness.point(world.today[1], y: 0.1)
+    drop.update(at: point, payload: payload)
+    drop.exit()
+    CATransaction.flush()                                             // the slot is on screen, as after a launch
+    for appearance in [NSAppearance.Name.darkAqua, .aqua] {           // the Space's text tone flips between drags
+      drop.preview.canvasView.appearance = NSAppearance(named: appearance)
+      drop.preview.slotLayer.removeAllAnimations()
+      drop.update(at: point, payload: payload)
+      XCTAssertEqual(drop.preview.slotLayer.animationKeys() ?? [], ["fade"], "\(appearance.rawValue)")
+      drop.exit()
+      CATransaction.flush()
+    }
+  }
+
+  /// Reduce Motion variant, the boundary line: no gap opens, so no slot is drawn over the rows; the `dragHintEdge`
+  /// line marks the row boundary instead.
+  func testReduceMotionDrawsTheBoundaryLineInsteadOfTheSlot() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar, reduceMotion: true)
+    let drop = try harness.drop()
+    let gapRow = try harness.row(world.today[1])
+    drop.update(at: try harness.point(world.today[1], y: 0.1), payload: harness.payload([world.today[0]]))
+    let preview = drop.preview
+    XCTAssertEqual(preview.indicatorStyle, .boundaryLine)
+    XCTAssertTrue(preview.isIndicatorShown)
+    XCTAssertEqual(preview.slotLayer.opacity, 0, "no slot over the rows")
+    XCTAssertEqual(preview.indicatorLayer.opacity, 1)
+    let line = preview.canvasView.viewRect(of: preview.indicatorLayer)
+    XCTAssertEqual(line.height, SidebarDropCanvas.lineHeight, accuracy: 0.01)
+    XCTAssertEqual(line.midY, try harness.outline().outlineView.rect(ofRow: gapRow).minY, accuracy: 0.5)
+    XCTAssertEqual(preview.offset(ofRow: gapRow, at: harness.motionTime + 0.05), 0)
+  }
+
+  private func controlPoints(_ function: CAMediaTimingFunction?) -> [Float] {
+    guard let function else { return [] }
+    var points: [Float] = []
+    for index in 1...2 {
+      var point = [Float](repeating: 0, count: 2)
+      function.getControlPoint(at: index, values: &point)
+      points += point
+    }
+    return points
+  }
+
+  /// Both variants fade in over 0.12 s ease-out, as the line did before.
+  func testTheIndicatorFadesInTheSameWithAndWithoutReduceMotion() throws {
+    for reduce in [false, true] {
+      let world = try Self.makeWorld()
+      let harness = Harness(world.sidebar, reduceMotion: reduce)
+      let drop = try harness.drop()
+      drop.update(at: try harness.point(world.today[1], y: 0.1), payload: harness.payload([world.today[0]]))
+      let layer = reduce ? drop.preview.indicatorLayer : drop.preview.slotLayer
+      let fade = try XCTUnwrap(layer.animation(forKey: "fade") as? CABasicAnimation, "reduce \(reduce)")
+      XCTAssertEqual(fade.duration, SidebarDropMotion.indicatorFade, "reduce \(reduce)")
+      XCTAssertEqual(fade.duration, 0.12)
+      XCTAssertEqual(fade.toValue as? Float, 1)
+      XCTAssertEqual(controlPoints(fade.timingFunction), controlPoints(MotionCurve.strongEaseOut.timingFunction),
+                     "reduce \(reduce): the shared ease-out")
+      drop.exit()
+      XCTAssertFalse(drop.preview.isIndicatorShown, "reduce \(reduce)")
+    }
   }
 
   /// Design section 5's frame budget: one preview frame (target, springs, row transforms) stays far under a 120 Hz

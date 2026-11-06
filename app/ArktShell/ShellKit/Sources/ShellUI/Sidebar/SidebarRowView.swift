@@ -70,6 +70,7 @@ public final class SidebarRowView: NSTableRowView {
     identifier = Self.reuseIdentifier
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
+    clipsToBounds = false            // the drop gap moves the content a full row down (SidebarDropPreview)
     backgroundLayer.cornerRadius = SidebarMetrics.rowCornerRadius
     backgroundLayer.cornerCurve = .continuous
     backgroundLayer.shadowRadius = 2
