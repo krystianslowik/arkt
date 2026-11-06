@@ -207,16 +207,33 @@ public final class ShellWindowSet {
   /// a reused normal window. Every page the engine puts in it is a private page, and it never saves the session.
   private func makePrivate(_ presentation: SidebarPresentation,
                            for request: EngineWindowRequest) -> any EngineWindowHosting {
-    let anchor = primary?.window
+    let controller = makePrivateWindow(presentation, bounds: request.bounds, near: primary?.window)
+    awaitingAdoption.append(controller)
+    return controller.engineHost
+  }
+
+  /// A link a blank or incognito window would open in Little Arkt (Opt-Cmd-click, #710): a new private window of the
+  /// opener's kind shows it instead, as an engine popup of that window would (#669). The window makes its own engine
+  /// window and page, so it is not awaiting adoption.
+  @discardableResult
+  func openPrivateWindow(_ url: URL, like opener: ShellWindowController) -> ShellWindowController {
+    let controller = makePrivateWindow(opener.sidebarController.presentation, bounds: nil, near: opener.window)
+    controller.showWindow(nil)
+    controller.openPrivately(url)
+    return controller
+  }
+
+  /// A blank or incognito window, built as an engine-requested one so it never takes over saving the session.
+  private func makePrivateWindow(_ presentation: SidebarPresentation, bounds: CGRect?,
+                                 near anchor: NSWindow?) -> ShellWindowController {
     let controller = make(opensFirstTab: false, origin: .engineRequested)
     if presentation == .blank { controller.makeBlank() } else { controller.makeIncognito() }
-    if let bounds = request.bounds {
+    if let bounds {
       controller.window?.setFrame(bounds, display: false)
     } else {
       place(controller, near: anchor)
     }
-    awaitingAdoption.append(controller)
-    return controller.engineHost
+    return controller
   }
 
   private func targetSpace(for request: EngineWindowRequest) -> SpaceID? {
@@ -465,7 +482,14 @@ public final class ShellWindowSet {
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
     }
     controller.onDragOutToNewWindow = { [weak self] node, point in self?.openWindow(showing: node, at: point) }
-    controller.onOpenLinkInLittleArkt = { [weak self] url in self?.openLittleArkt(url: url) }               // #356
+    controller.onOpenLinkInLittleArkt = { [weak self, weak controller] url in                               // #356
+      guard let self else { return }
+      if let controller, controller.isPrivateWindow {
+        self.openPrivateWindow(url, like: controller)                     // #710: never Little Arkt from here
+      } else {
+        self.openLittleArkt(url: url)
+      }
+    }
     controller.onMoveToLittleArkt = { [weak self] node, url in self?.moveToLittleArkt(node, url: url) ?? false }
     controller.reopenLittleArkt = { [weak self] in self?.reopenClosedLittleArkt() }      // #355
     controller.canReopenLittleArkt = { [weak self] in self?.canReopenClosedLittleArkt ?? false }

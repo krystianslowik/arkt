@@ -95,6 +95,7 @@ extension ShellWindowController: LittleArktFlightDestination {
 extension ShellWindowController {
   /// A link activated with Option and Command held, while the setting is on: the engine drops it and a new Little
   /// Arkt window opens on its URL after the call returns (the engine is never called from inside its own decision).
+  /// From a blank or incognito window, a private window of the same kind opens instead (#710).
   func opensLinkInLittleArkt(_ activation: EngineLinkActivation) -> Bool {
     guard let open = onOpenLinkInLittleArkt,
           LittleArktRouting.opensInLittleArkt(activation, enabled: opensLittleArktOnOptionCommandClick()) else {
