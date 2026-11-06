@@ -216,8 +216,9 @@ public final class ShellWindowSet {
   /// opener's kind shows it instead, as an engine popup of that window would (#669). The window makes its own engine
   /// window and page, so it is not awaiting adoption.
   @discardableResult
-  func openPrivateWindow(_ url: URL, like opener: ShellWindowController) -> ShellWindowController {
-    let controller = makePrivateWindow(opener.sidebarController.presentation, bounds: nil, near: opener.window)
+  func openPrivateWindow(_ url: URL, as presentation: SidebarPresentation,
+                         near anchor: NSWindow?) -> ShellWindowController {
+    let controller = makePrivateWindow(presentation, bounds: nil, near: anchor)
     controller.showWindow(nil)
     controller.openPrivately(url)
     return controller
@@ -482,10 +483,10 @@ public final class ShellWindowSet {
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
     }
     controller.onDragOutToNewWindow = { [weak self] node, point in self?.openWindow(showing: node, at: point) }
-    controller.onOpenLinkInLittleArkt = { [weak self, weak controller] url in                               // #356
+    controller.onOpenLinkInLittleArkt = { [weak self, weak controller] url, privateKind in                  // #356
       guard let self else { return }
-      if let controller, controller.isPrivateWindow {
-        self.openPrivateWindow(url, like: controller)                     // #710: never Little Arkt from here
+      if let privateKind {                        // #710: decided at the click, so a closed opener still fails closed
+        self.openPrivateWindow(url, as: privateKind, near: controller?.window)
       } else {
         self.openLittleArkt(url: url)
       }

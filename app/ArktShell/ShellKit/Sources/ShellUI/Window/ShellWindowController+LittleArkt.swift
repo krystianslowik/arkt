@@ -102,9 +102,13 @@ extension ShellWindowController {
       return false
     }
     let url = activation.url
-    DispatchQueue.main.async { open(url) }
+    let kind = privateKind                       // #710: read now, so the hop cannot lose it with the window
+    DispatchQueue.main.async { open(url, kind) }
     return true
   }
+
+  /// This window's kind when it is a blank or incognito window; nil for a normal one.
+  private var privateKind: SidebarPresentation? { isPrivateWindow ? sidebarController.presentation : nil }
 
   /// Opt-Cmd-click on a tab's row or tile (BH-132; docs/design/little-arkt.md, When a Little Arkt window opens):
   /// - a Today tab's page moves into a new Little Arkt window (no reload when it is loaded) and the row leaves the
@@ -119,7 +123,7 @@ extension ShellWindowController {
       return onMoveToLittleArkt?(node, pageURL) ?? false
     case .pinned?, .favorites?:
       guard let open = onOpenLinkInLittleArkt else { return false }
-      open(pageURL)
+      open(pageURL, privateKind)
       return true
     default:
       return false

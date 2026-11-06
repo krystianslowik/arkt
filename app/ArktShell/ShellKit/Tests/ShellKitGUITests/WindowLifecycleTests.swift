@@ -660,6 +660,49 @@ final class WindowLifecycleTests: XCTestCase {
     XCTAssertEqual(f.source.sidebar, before)
   }
 
+  /// #710: the window's kind is read at the click, not one main-queue hop later. An incognito window that closes and
+  /// goes away before the hop still gets its link opened in an incognito window, never in Little Arkt.
+  func testOptionCommandClickFromAPrivateWindowThatGoesAwayStaysPrivate() async throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let link = EngineWorld.url("linked")
+    weak var gone: ShellWindowController?
+    var decision: EngineLinkDecision?
+
+    autoreleasepool {
+      let opener = f.set.openWindow(opensFirstTab: false)
+      opener.makeIncognito()
+      opener.commandBar.show(.newTab)
+      opener.commandBar.setQueryForTesting("private-opener.example")
+      opener.commandBar.commit()
+      guard let page = opener.currentTab else { return XCTFail("the opener shows its page") }
+      decision = f.engine.simulateLinkActivation(in: page, url: link, modifiers: [.command, .option],
+                                                 disposition: .newBackgroundTab)
+      opener.window?.performClose(nil)
+      gone = opener
+    }
+    XCTAssertTrue(f.set.controllers.isEmpty, "the closed opener left the set")
+    XCTAssertNil(gone, "the opener is gone before the hop")
+
+    XCTAssertEqual(decision, .cancel)
+    await until("a window shows the link") {
+      !f.set.littleArkts.isEmpty || f.set.controllers.contains { $0.currentTab != nil }
+    }
+    XCTAssertTrue(f.set.littleArkts.isEmpty, "not a Little Arkt window")
+    let window = try XCTUnwrap(f.set.controllers.first)
+    XCTAssertTrue(window.isPrivateWindow)
+    XCTAssertEqual(window.sidebarController.presentation, .incognito)
+    XCTAssertFalse(window.savesSession)
+    let shown = try XCTUnwrap(window.currentTab)
+    XCTAssertEqual(f.engine.snapshot(of: shown)?.url, link)
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+    window.window?.performClose(nil)
+    for little in f.set.littleArkts { little.window.orderOut(nil) }
+  }
+
   /// #710 control: in a normal window, Opt-Cmd-click on a link still opens it in a Little Arkt window, and no new
   /// browser window.
   func testOptionCommandClickInANormalWindowStillOpensLittleArkt() async throws {
@@ -692,6 +735,7 @@ final class WindowLifecycleTests: XCTestCase {
       if condition() { return }
       await Task.yield()
     }
+    if condition() { return }
     XCTFail("never reached: \(what)", file: file, line: line)
   }
 
