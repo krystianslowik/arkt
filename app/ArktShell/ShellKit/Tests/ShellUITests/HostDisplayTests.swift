@@ -132,6 +132,131 @@ struct HostDisplayTests {
     #expect(HostDisplay.text(forHost: unicode) == encoded, "\(unicode) from the engine")
   }
 
+  // MARK: Look-alikes of top domains (#731)
+
+  /// A host whose skeleton, diacritics removed, matches a top domain it is not stays encoded, even when every label
+  /// passes the other checks.
+  @Test(arguments: [
+    "l\u{0131}nked\u{0131}n.com",            // dotless i for i
+    "googl\u{00E9}.com",                      // a diacritic removed
+    "paypa\u{0131}.com",                      // dotless i for l
+    "www.l\u{0131}nked\u{0131}n.com",         // a subdomain of the look-alike
+    "\u{4E2D}\u{6587}.l\u{0131}nked\u{0131}n.com",                         // ...under a Han label
+    "\u{00E0}mazon.com",                      // a diacritic on the first letter
+    "wikip\u{00E9}dia.org",
+  ])
+  func aLookAlikeOfATopDomainStaysEncoded(unicode: String) {
+    let encoded = ace(unicode)
+    #expect(HostDisplay.text(forHost: encoded) == encoded, "\(unicode)")
+    #expect(HostDisplay.text(forHost: unicode) == encoded, "\(unicode) from the engine")
+  }
+
+  /// The issue's example, spelled out.
+  @Test func theDotlessILinkedInLookAlikeStaysEncoded() {
+    #expect(HostDisplay.text(forHost: "xn--lnkedn-p9ae.com") == "xn--lnkedn-p9ae.com")
+    #expect(HostDisplay.text(forHost: "xn--lnkedn-p9ae.com.") == "xn--lnkedn-p9ae.com.")
+  }
+
+  /// An internationalized subdomain of a top domain is that domain's own host: it shows in Unicode.
+  @Test func aUnicodeSubdomainOfATopDomainShowsInUnicode() {
+    #expect(HostDisplay.text(forHost: "xn--mnchen-3ya.wikipedia.org") == "m\u{00FC}nchen.wikipedia.org")
+    let turkish = "\u{0131}\u{015F}\u{0131}k.google.com"
+    #expect(HostDisplay.text(forHost: ace(turkish)) == turkish)
+  }
+
+  /// Real hosts with a dotless i, which Turkish and Azerbaijani use, still show in Unicode.
+  @Test(arguments: [
+    "\u{0131}\u{015F}\u{0131}k.com.tr",
+    "k\u{0131}rm\u{0131}z\u{0131}.com.tr",
+    "\u{00E7}\u{0131}nar.tr",
+  ])
+  func aRealHostWithADotlessIShowsInUnicode(unicode: String) {
+    #expect(HostDisplay.text(forHost: ace(unicode)) == unicode)
+  }
+
+  /// The skeletons in the generated table are the ones the runtime builds for each top domain, so the table and the
+  /// code cannot drift apart.
+  @Test func everyTopDomainSkeletonIsTheOneTheCheckBuilds() {
+    #expect(SpoofCheck.topDomains.count > 800)
+    for entry in SpoofCheck.topDomains {
+      #expect(SpoofCheck.skeletons(of: Array(entry.domain.unicodeScalars)) == [entry.skeleton], "\(entry.domain)")
+      #expect(SpoofCheck.topDomain(matching: entry.skeleton) == entry.domain, "\(entry.domain)")
+    }
+    let skeletons = SpoofCheck.topDomains.map(\.skeleton)
+    #expect(zip(skeletons, skeletons.dropFirst()).allSatisfy { $0.utf8.lexicographicallyPrecedes($1.utf8) })
+  }
+
+  /// Characters that look like more than one letter give one skeleton per reading, as Chromium's skeleton generator
+  /// does, up to its limits; past them only the first reading is checked.
+  @Test func severalReadingsAreCappedAsInChromium() {
+    func skeletons(_ host: String) -> [String] { SpoofCheck.skeletons(of: Array(host.unicodeScalars)) }
+    #expect(Set(skeletons("paypa\u{0131}.com")) == ["paypai.corn", "paypal.corn"])
+    #expect(skeletons(String(repeating: "\u{0153}", count: 5) + ".com").count == 32)
+    #expect(skeletons(String(repeating: "\u{0153}", count: 6) + ".com").count == 1, "more than five such characters")
+    #expect(skeletons(String(repeating: "a", count: 30) + "\u{0131}.com").count == 1, "a host over 32 characters")
+    #expect(skeletons("\u{4E2D}\u{6587}.com").isEmpty, "Han maps to nothing a top domain holds")
+    #expect(skeletons("\u{4E2D}\u{6587}.l\u{0131}nked\u{0131}n.com") == ["linkedin.corn", "linkedln.corn",
+                                                                       "llnkedin.corn", "llnkedln.corn"],
+            "only the labels after the last one that cannot match")
+    #expect(skeletons("a.b.c.d.e.f.com") == ["d.e.f.corn"], "at most the last four labels")
+  }
+
+  /// A long look-alike is still caught: Chromium skips the check past 32 characters, this rule does not.
+  @Test func aLongHostEndingInALookAlikeStaysEncoded() {
+    let unicode = "login.accounts.secure.l\u{0131}nked\u{0131}n.com"
+    #expect(unicode.unicodeScalars.count > 32)
+    #expect(HostDisplay.text(forHost: ace(unicode)) == ace(unicode))
+  }
+
+  /// Not a gate in the required lane: prints the cost of the worst cases for the pull request, each a host that
+  /// passes every label check, so the top-domain check runs. Set `ARKT_HOST_DISPLAY_GATE=1` to also hold the check
+  /// under 50 microseconds of thread CPU time a call (in an optimized build: `swift test -Xswiftc -O`).
+  @Test func theTopDomainCheckCostIsMeasured() throws {
+    let longLabel = String(repeating: "abcd\u{00E9}", count: 9)
+    let cases: [(name: String, unicode: String)] = [
+      ("five readings in four labels", "\u{0153}\u{0131}.\u{0142}\u{0131}.\u{0153}abcdefghijklmnop.com"),
+      ("four long labels", Array(repeating: longLabel, count: 4).joined(separator: ".") + ".com"),
+      ("Han labels", Array(repeating: String(repeating: "\u{4E2D}", count: 15), count: 4).joined(separator: ".") + ".cn"),
+    ]
+    let calls = 2_000
+    func microseconds(_ body: () -> Void) -> Double {
+      let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+      for _ in 0..<calls { body() }
+      return Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / Double(calls) / 1000
+    }
+    for (name, unicode) in cases {
+      let host = ace(unicode)
+      let scalars = Array(unicode.unicodeScalars)
+      try #require(HostDisplay.text(forHost: host) == unicode, "\(name) passes every check")
+      let text = microseconds { _ = HostDisplay.text(forHost: host) }
+      let check = microseconds { _ = SpoofCheck.similarTopDomain(scalars, encoded: host) }
+      print(String(format: "hostdisplay.topdomain case=\"%@\" scalars=%d skeletons=%d textUs=%.2f checkUs=%.2f",
+                   name, scalars.count, SpoofCheck.skeletons(of: scalars).count, text, check))
+      if ProcessInfo.processInfo.environment["ARKT_HOST_DISPLAY_GATE"] == "1" {
+        #expect(check < 50, "\(name)")
+      }
+    }
+  }
+
+  // MARK: Joiners
+
+  /// Chromium converts with UTS #46 transitional processing, which refuses the joiners U+200C and U+200D even after a
+  /// virama (its own cases `xn--h2by8byc123p.in` and `xn--11b6iy14e.in` stay punycode), so they stay encoded here too.
+  @Test(arguments: [
+    "\u{0DC1}\u{0DCA}\u{200D}\u{0DBB}\u{0DD3}.lk",                         // Sinhala "Sri" with a joiner
+    "\u{0924}\u{094D}\u{200C}\u{0930}\u{093F}.in",                         // Chromium's ZWNJ case
+    "\u{0915}\u{094D}\u{200D}.in",                                         // Chromium's ZWJ case
+  ])
+  func aJoinerKeepsTheHostEncodedAsInChromium(unicode: String) {
+    let encoded = ace(unicode)
+    #expect(HostDisplay.text(forHost: encoded) == encoded, "\(unicode.unicodeScalars.map { String($0.value, radix: 16) })")
+  }
+
+  @Test func theSameSinhalaWordWithoutTheJoinerShowsInUnicode() {
+    let unicode = "\u{0DC1}\u{0DCA}\u{0DBB}\u{0DD3}.lk"
+    #expect(HostDisplay.text(forHost: ace(unicode)) == unicode)
+  }
+
   // MARK: Invisible and bidi characters
 
   @Test(arguments: [

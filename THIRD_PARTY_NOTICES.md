@@ -11,6 +11,13 @@ Chromium's `components/url_formatter/spoof_checks/idn_spoof_checker.cc`. The gen
 `app/ArktShell/ShellKit/Sources/ShellUI/Address/SpoofCheck+AllowedTable.swift` leaves out the code points that the
 same Chromium file removes from its allowed set.
 
+Derived file: `app/ArktShell/ShellKit/Sources/ShellUI/Address/SpoofCheck+TopDomains.swift`. Its top domains are the
+top bucket of Chromium's `components/url_formatter/spoof_checks/top_domains/domains.list`, and its skeleton pieces
+apply the extra mappings, alternative readings and diacritic removal of
+`components/url_formatter/spoof_checks/skeleton_generator.cc` (commit `d999de386734b4eca9a4a18bc4a286b4daa56d67`).
+The top-domain check in `HostDisplay.swift` follows `IDNSpoofChecker::GetSimilarTopDomain` and
+`LookupSkeletonInTopDomains` in `idn_spoof_checker.cc`.
+
 ```
 Copyright 2017 The Chromium Authors
 
@@ -43,8 +50,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Unicode data
 
-Derived file: `app/ArktShell/ShellKit/Sources/ShellUI/Address/SpoofCheck+AllowedTable.swift`, generated from
-`IdentifierStatus.txt` of Unicode Security Mechanisms (UTS #39), version 18.0.0.
+Derived files: `app/ArktShell/ShellKit/Sources/ShellUI/Address/SpoofCheck+AllowedTable.swift`, generated from
+`IdentifierStatus.txt` of Unicode Security Mechanisms (UTS #39), version 18.0.0, and
+`app/ArktShell/ShellKit/Sources/ShellUI/Address/SpoofCheck+TopDomains.swift`, whose skeleton pieces are generated
+from `confusables.txt` of the same standard and version.
 
 ```
 UNICODE LICENSE V3

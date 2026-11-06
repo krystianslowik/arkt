@@ -23,13 +23,32 @@ import Foundation
 /// 7. Whole-script confusables: a label whose letters all come from a script's Latin look-alike set (Cyrillic "аррӏе")
 ///    shows in Unicode only under that script's own TLD or one of the ccTLDs Chromium lists for it.
 ///
+/// Then, for the whole host (#731):
+///
+/// 8. Top domains: when the UTS #39 skeleton of the host, diacritics removed, ends in the skeleton of a top domain
+///    (its last two to four labels), the host stays encoded unless it is that domain or a subdomain of it. So
+///    "lınkedın.com" (dotless i) and "googlé.com" stay encoded, and "münchen.wikipedia.org" shows in Unicode. As in
+///    Chromium's `IDNSpoofChecker::GetSimilarTopDomain`, a few characters are read more than one way (dotless i as i
+///    or l, thorn as b or p, U+0153 as ce or oe, U+0142 as l or t, U+04CF as l), each reading giving a skeleton, for
+///    at most five such characters in a host of at most 32 characters. The top domains and the skeleton pieces are
+///    precomputed in `SpoofCheck+TopDomains.swift`; a host with a character no top domain's skeleton can hold (Han and
+///    most other non-Latin text) is ruled out in one pass.
+///
+/// The joiners U+200C and U+200D always stay encoded, as in Chromium: it converts with UTS #46 transitional
+/// processing, which refuses them in every context, even after a virama (Sinhala "Sri" with a joiner,
+/// `xn--10cl1a0b660p.lk`, stays encoded).
+///
 /// Where this differs from Chromium. Stricter: one failing label keeps the whole host encoded (Chromium decides label
-/// by label); the deviation characters always stay encoded; Allowed punctuation and format characters (U+00B7,
-/// U+0375, U+05F3, U+05F4, U+0F0B, U+30FB, U+200C, U+200D) are refused; scripts outside the table are refused; the
-/// whole-script check runs on every label and has no exception words. Looser: there is no top-domain skeleton check,
-/// so a single-script look-alike that passes the rules above still shows in Unicode (a Latin label with dotless i,
-/// "lınkedın"); the bidi rule is checked per label, not across the domain. The Allowed table comes from Unicode 18.0,
-/// which may be newer than the ICU data a given Chromium release uses.
+/// by label); the deviation characters always stay encoded; Allowed punctuation characters (U+00B7, U+0375, U+05F3,
+/// U+05F4, U+0F0B, U+30FB) are refused; scripts outside the table are refused; the whole-script check runs on every
+/// label and has no exception words; the top-domain check runs on hosts of any length (Chromium builds no skeleton
+/// for a host over 32 characters, so "login.accounts.secure.lınkedın.com" would pass there), uses the first reading
+/// of each character past the limits above, removes diacritics in every host (Chromium only in a host of only Latin,
+/// Greek and Cyrillic) and keeps checking the other readings after one names the host's own top domain. Looser: the
+/// top domains are Chromium's top bucket (835 domains), not its whole list of about 8,500; a character whose skeleton
+/// holds a dot (U+0660, U+06F0) cannot match, so a skeleton's labels are the host's; the bidi rule is checked per
+/// label, not across the domain. The Allowed table and confusables.txt come from Unicode 18.0, which may be newer
+/// than the ICU data a given Chromium release uses.
 public enum HostDisplay {
   /// `host` as the shell shows it: Unicode when it passes the spoof check, the encoded `xn--` form otherwise. The
   /// engine may give either form. A host with no internationalized label is returned exactly as given.
@@ -44,11 +63,15 @@ public enum HostDisplay {
     let labels = parts.map(Label.init)
     let encoded = labels.map(\.encoded).joined(separator: ".")
     let tld = labels.last ?? Label("")
-    let safe = encoded.utf8.count <= 253 && labels.allSatisfy { label in
+    var safe = encoded.utf8.count <= 253 && labels.allSatisfy { label in
       guard !label.encoded.isEmpty, label.encoded.utf8.count <= 63 else { return false }
       guard label.isInternationalized else { return true }
       guard let unicode = label.unicode else { return false }
       return SpoofCheck.isSafe(unicode, tld: tld)
+    }
+    if safe, labels.contains(where: \.isInternationalized) {
+      let unicode = Array(labels.map(\.text).joined(separator: ".").unicodeScalars)
+      safe = SpoofCheck.similarTopDomain(unicode, encoded: encoded) == nil
     }
     let shown = safe ? labels.map(\.text).joined(separator: ".") : encoded
     return fullyQualified ? shown + "." : shown
@@ -346,6 +369,153 @@ enum SpoofCheck {
       let tldIsInScript = tldKinds.contains(.script(entry.script))
       return !tldIsInScript && !entry.tlds.contains(tld.encoded)
     }
+  }
+
+  // MARK: Top domains (#731)
+
+  /// Chromium's skeleton generator limits: the most characters with several readings, the longest host they are
+  /// expanded for, and the most skeletons.
+  static let maxCharactersWithSeveralReadings = 5
+  static let maxHostLengthForSeveralReadings = 32
+  static let maxSkeletons = 128
+  /// The most labels at the end of a host compared with the top domains (Chromium's `kNumberOfLabelsToCheck`).
+  static let labelsToCheck = 4
+
+  /// The top domain `host` (Unicode, lowercased, no trailing dot) looks like but is not, or nil. `encoded` is the
+  /// host's ASCII form, which a top domain or its subdomain equals.
+  static func similarTopDomain(_ host: [Unicode.Scalar], encoded: String) -> String? {
+    var found: String?
+    forEachSkeleton(of: host) { skeleton, labelStarts in
+      guard let domain = topDomain(in: skeleton, labelStarts: labelStarts) else { return true }
+      if encoded == domain || encoded.hasSuffix("." + domain) { return true }
+      found = domain
+      return false
+    }
+    return found
+  }
+
+  /// The skeletons `similarTopDomain` compares: of the host's last labels, at most four, after the last label holding
+  /// a character that no top domain's skeleton holds; one per reading of its characters; none for fewer than two
+  /// labels.
+  static func skeletons(of host: [Unicode.Scalar]) -> [String] {
+    var result: [String] = []
+    forEachSkeleton(of: host) { skeleton, _ in
+      result.append(String(decoding: skeleton, as: UTF8.self))
+      return true
+    }
+    return result
+  }
+
+  /// The top domain whose skeleton is the end of `skeleton`: its last four, three or two labels, longest first.
+  static func topDomain(matching skeleton: String) -> String? {
+    let bytes = Array(skeleton.utf8)
+    var labelStarts = [0]
+    for (offset, byte) in bytes.enumerated() where byte == UInt8(ascii: ".") { labelStarts.append(offset + 1) }
+    if labelStarts.count > labelsToCheck { labelStarts.removeFirst(labelStarts.count - labelsToCheck) }
+    return topDomain(in: bytes, labelStarts: labelStarts)
+  }
+
+  /// Calls `body` with each skeleton of the end of `host` and the offsets where its labels start, until it returns
+  /// false. One buffer is reused for every skeleton.
+  private static func forEachSkeleton(of host: [Unicode.Scalar],
+                                      _ body: (_ skeleton: [UInt8], _ labelStarts: [Int]) -> Bool) {
+    // The readings of each character of the last labels, from the end, up to a label that cannot match.
+    var labels: [[[String]]] = []
+    var end = host.endIndex
+    while labels.count < labelsToCheck, end >= host.startIndex {
+      let start = host[..<end].lastIndex(of: ".").map { $0 + 1 } ?? host.startIndex
+      var label: [[String]] = []
+      label.reserveCapacity(end - start)
+      for scalar in host[start..<end] {
+        guard let readings = skeletonReadings(of: scalar.value) else { break }
+        label.append(readings)
+      }
+      guard label.count == end - start else { break }
+      labels.insert(label, at: 0)
+      end = start - 1
+    }
+    guard labels.count >= 2 else { return }
+
+    // The characters read more than one way, within Chromium's limits; past them each keeps its first reading.
+    var varying: [(label: Int, character: Int)] = []
+    for (labelIndex, label) in labels.enumerated() {
+      for (characterIndex, readings) in label.enumerated() where readings.count > 1 {
+        varying.append((labelIndex, characterIndex))
+      }
+    }
+    if varying.count > maxCharactersWithSeveralReadings || host.count > maxHostLengthForSeveralReadings {
+      varying = []
+    }
+    var chosen = labels.map { [Int](repeating: 0, count: $0.count) }
+    var skeleton: [UInt8] = []
+    skeleton.reserveCapacity(host.count * 2)
+    var labelStarts: [Int] = []
+    for _ in 0..<maxSkeletons {
+      skeleton.removeAll(keepingCapacity: true)
+      labelStarts.removeAll(keepingCapacity: true)
+      for (labelIndex, label) in labels.enumerated() {
+        if labelIndex > 0 { skeleton.append(UInt8(ascii: ".")) }
+        labelStarts.append(skeleton.count)
+        for (characterIndex, readings) in label.enumerated() {
+          skeleton.append(contentsOf: readings[chosen[labelIndex][characterIndex]].utf8)
+        }
+      }
+      guard body(skeleton, labelStarts) else { return }
+      // The next combination of readings, counting through them like an odometer; done when it wraps around.
+      var digit = varying.count - 1
+      while digit >= 0 {
+        let (labelIndex, characterIndex) = varying[digit]
+        chosen[labelIndex][characterIndex] += 1
+        if chosen[labelIndex][characterIndex] < labels[labelIndex][characterIndex].count { break }
+        chosen[labelIndex][characterIndex] = 0
+        digit -= 1
+      }
+      if digit < 0 { return }
+    }
+  }
+
+  /// The top domain whose skeleton is `skeleton` from one of `labelStarts` to its end, trying all but the last start,
+  /// in order: a skeleton of one label never matches.
+  private static func topDomain(in skeleton: [UInt8], labelStarts: [Int]) -> String? {
+    for start in labelStarts.dropLast() {
+      if let domain = topDomain(withSkeleton: skeleton[start...]) { return domain }
+    }
+    return nil
+  }
+
+  /// Binary search of `topDomains`, which is sorted by the skeleton's UTF-8 bytes.
+  private static func topDomain(withSkeleton key: ArraySlice<UInt8>) -> String? {
+    var low = 0
+    var high = topDomains.count - 1
+    while low <= high {
+      let middle = (low + high) / 2
+      let row = topDomains[middle].skeleton.utf8
+      if row.elementsEqual(key) { return topDomains[middle].domain }
+      if row.lexicographicallyPrecedes(key) {
+        low = middle + 1
+      } else {
+        high = middle - 1
+      }
+    }
+    return nil
+  }
+
+  /// The readings of one character from `skeletonPieces`, by binary search.
+  private static func skeletonReadings(of value: UInt32) -> [String]? {
+    var low = 0
+    var high = skeletonPieces.count - 1
+    while low <= high {
+      let middle = (low + high) / 2
+      let row = skeletonPieces[middle]
+      if value < row.scalar {
+        high = middle - 1
+      } else if value > row.scalar {
+        low = middle + 1
+      } else {
+        return row.readings
+      }
+    }
+    return nil
   }
 
   private static func isDigitLookalike(_ label: [Unicode.Scalar]) -> Bool {
