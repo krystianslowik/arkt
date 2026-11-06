@@ -143,6 +143,8 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     XCTAssertEqual(rows[0].isAccessibilityDisclosed(), false, "a tab row discloses nothing")
 
     let firstTab = fixture.sidebar.children(of: .pinned(fixture.space))[0]
+    XCTAssertEqual(rows[0].accessibilityCustomActions()?.count ?? 0, 0, "a pinned row without a page has no close")
+    fixture.controller.activate(node: firstTab)          // its page opens, and with it the close (#601)
     let closeName = try XCTUnwrap(RowCloseAction.resolve(firstTab, in: fixture.sidebar)?.accessibilityName)
     XCTAssertEqual(rows[0].accessibilityCustomActions()?.map(\.name), [closeName], "the row's VoiceOver close")
     XCTAssertEqual(rows[folderRow].accessibilityCustomActions()?.count ?? 0, 0, "a folder has no close")
