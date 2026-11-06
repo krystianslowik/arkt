@@ -147,7 +147,11 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
   private var activeTabs: [EngineWindowID: TabID] = [:]
   private var lastActiveWindow: EngineWindowID?
   private let configuration: WKWebViewConfiguration
-  private let faviconSession = URLSession(configuration: .ephemeral)
+  /// The favicon session; a test swaps in one whose requests a stub answers.
+  var faviconSession = URLSession(configuration: .ephemeral)
+  /// Turns fetched icon bytes into the contract's PNG or ICO. `fetchFavicon` calls it off the main actor; a test swaps
+  /// in one that records the thread it ran on (#725).
+  var faviconConverter: @Sendable (Data) -> Data? = FakeEngine.contractFavicon
   /// Favicon fetches in flight per tab, and the test waits for the last one to finish (#442).
   private var faviconFetches: [TabID: Int] = [:]
   private var faviconFetchWaiters: [TabID: [FaviconFetchWaiter]] = [:]
@@ -842,7 +846,7 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
   /// unchecked; the shell's decoder drops any that are not one. Other raster images ImageIO reads (JPEG, GIF, TIFF)
   /// are scaled down with ImageIO to fit `rasterFaviconPixels`, keeping their aspect ratio. SVG, which ImageIO cannot
   /// read, is drawn by AppKit to fit the same square. Parses untrusted bytes: call it off the main actor
-  /// (`contractFaviconOffMain`).
+  /// (`downloadFavicon` does).
   nonisolated static func contractFavicon(_ data: Data) -> Data? {
     guard data.count <= maxFaviconBytes else { return nil }
     let png: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
@@ -875,9 +879,32 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     return context.makeImage().flatMap(pngData)
   }
 
-  /// `contractFavicon` on the concurrent pool, so parsing and drawing never run on the main actor.
+  /// Downloads the icon at `url` and converts it with `convert`, both on the concurrent pool, so neither the body nor
+  /// the parsing ever runs on the main actor. Nil unless the response is an HTTP 200 image/* within `maxFaviconBytes`:
+  /// a body that announces more is dropped unread, and one without a usable length is read only up to the cap
+  /// (`readFavicon`).
   @concurrent
-  nonisolated static func contractFaviconOffMain(_ data: Data) async -> Data? { contractFavicon(data) }
+  nonisolated static func downloadFavicon(from url: URL, session: URLSession,
+                                          convert: @Sendable (Data) -> Data?) async -> Data? {
+    guard let (bytes, response) = try? await session.bytes(from: url) else { return nil }
+    defer { bytes.task.cancel() }
+    guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+          http.mimeType?.lowercased().hasPrefix("image/") == true,
+          http.expectedContentLength <= Int64(maxFaviconBytes),
+          let data = try? await readFavicon(bytes) else { return nil }
+    return convert(data)
+  }
+
+  /// The bytes of `body`, or nil as soon as it runs past `limit`: at most one byte past the cap is ever read.
+  nonisolated static func readFavicon<Body: AsyncSequence>(_ body: Body, limit: Int = maxFaviconBytes) async throws
+    -> Data? where Body.Element == UInt8 {
+    var data = Data()
+    for try await byte in body {
+      guard data.count < limit else { return nil }
+      data.append(byte)
+    }
+    return data
+  }
 
   nonisolated private static func pngData(_ image: CGImage) -> Data? {
     let data = NSMutableData()
@@ -893,7 +920,6 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     guard let web = entries[id]?.webView, let pageURL = web.url, !pageURL.isFileURL else { return }
     beginFaviconFetch(id)
     let script = "(document.querySelector('link[rel~=\"icon\"]') || {}).href || ''"
-    let session = faviconSession
     web.evaluateJavaScript(script) { [weak self] result, _ in
       MainActor.assumeIsolated {
         let href = (result as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
@@ -901,20 +927,26 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
           self?.finishFaviconFetch(id)
           return
         }
-        Task { @MainActor [weak self] in
-          guard let (data, response) = try? await session.data(from: iconURL),
-                let http = response as? HTTPURLResponse, http.statusCode == 200,
-                http.mimeType?.lowercased().hasPrefix("image/") == true,
-                self?.entries[id]?.snapshot.url == pageURL,
-                let favicon = await FakeEngine.contractFaviconOffMain(data),
-                self?.entries[id]?.snapshot.url == pageURL else {         // the page may have moved on meanwhile
-            self?.finishFaviconFetch(id)
-            return
-          }
-          self?.update(id) { $0.faviconData = favicon } event: { .faviconChanged(id, favicon) }
-          self?.finishFaviconFetch(id)
-        }
+        self?.fetchFavicon(id, from: iconURL, pageURL: pageURL)
       }
+    }
+  }
+
+  /// Fetches and converts the icon at `iconURL` off the main actor (`downloadFavicon`), then gives it to tab `id`
+  /// if the tab still shows `pageURL`. Returns the task so a test can await it without a clock.
+  @discardableResult
+  func fetchFavicon(_ id: TabID, from iconURL: URL, pageURL: URL?) -> Task<Void, Never> {
+    let session = faviconSession
+    let convert = faviconConverter
+    return Task { @MainActor [weak self] in
+      guard self?.entries[id]?.snapshot.url == pageURL,
+            let favicon = await FakeEngine.downloadFavicon(from: iconURL, session: session, convert: convert),
+            self?.entries[id]?.snapshot.url == pageURL else {         // the page may have moved on meanwhile
+        self?.finishFaviconFetch(id)
+        return
+      }
+      self?.update(id) { $0.faviconData = favicon } event: { .faviconChanged(id, favicon) }
+      self?.finishFaviconFetch(id)
     }
   }
 }
