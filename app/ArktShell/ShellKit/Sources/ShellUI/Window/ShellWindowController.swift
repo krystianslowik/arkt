@@ -81,6 +81,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public private(set) var isClosed = false
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
+  /// The Extensions panel the button opens (#595); nil with the button.
+  public internal(set) var extensionsPanel: ExtensionsPanelController?
+  /// Manage Extensions... in the Extensions panel: the app opens Settings, Extensions.
+  public var onManageExtensions: (@MainActor () -> Void)?
   /// Window > Downloads (Cmd-Shift-J) and Show All History (Cmd-Y) open the Library on a section (#132); set by
   /// `DownloadsCenter.attach(to:)`. While nil the engine's own commands run.
   public var onShowLibrary: (@MainActor (LibrarySection) -> Void)?
@@ -108,9 +112,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// the preview closures below read it when a row is selected.
   public var pageThumbnails: PageThumbnails?
   var nodeByTab: [TabID: NodeID] = [:]
-  /// The one page of a blank or incognito window (#487): an engine tab with no sidebar row, so a visit never reaches
-  /// the shared sidebar. Nil in a normal window.
-  var privateTab: TabID?
+  /// A blank or incognito window (#487): its pages have no sidebar rows, so nothing it opens reaches the shared
+  /// sidebar.
+  var isPrivateWindow = false
+  /// The pages of a blank or incognito window (#487, #559): engine tabs with no sidebar row, the command bar's page and
+  /// the ones the engine opened (`target=_blank`, `window.open`). The shown one is last, the one before it is shown
+  /// when it closes. Empty in a normal window.
+  var privateTabs: [TabID] = []
+  /// The private page shown, the one a command-bar visit navigates. Nil when the window shows none.
+  var privateTab: TabID? { privateTabs.last }
   /// Where Copy Link writes and Paste URL as New Tab reads (#105); tests use a private pasteboard.
   var linkPasteboard: NSPasteboard = .general
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
@@ -120,6 +130,16 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A tab dragged out of the sidebar over no window (GS-013): the window set opens a window at the screen point and
   /// shows the tab there, taking its page over (#300). Nil: the drag-out does nothing.
   var onDragOutToNewWindow: (@MainActor (NodeID, NSPoint) -> Void)?
+  /// Opt-Cmd-click into Little Arkt (#356, BH-132): the Settings > Links switch, read on every click (on by default).
+  public var opensLittleArktOnOptionCommandClick: @MainActor () -> Bool = { true }
+  /// Opens a link in a new Little Arkt window (Opt-Cmd-click); set by the window set. Nil: the engine's own click.
+  /// `privateKind` is this window's kind when it is a blank or incognito window, read at the click (#710): the link
+  /// then opens in a private window of that kind, even when this window is gone by the time it opens.
+  var onOpenLinkInLittleArkt: (@MainActor (_ url: URL, _ privateKind: SidebarPresentation?) -> Void)?
+  /// Moves a Today tab's page into a new Little Arkt window (Opt-Cmd-click on its row): the live page from whichever
+  /// window has it, else a new page on `url`. False when it did not (a close held behind a leave-site prompt); the
+  /// row then stays. Set by the window set. Nil: the click activates the tab.
+  var onMoveToLittleArkt: (@MainActor (_ node: NodeID, _ url: URL) -> Bool)?
   /// New Window (Cmd-N, `IDC_NEW_WINDOW`): set by the window set that owns this window. Nil: New Window is disabled.
   public var onNewWindow: (@MainActor () -> Void)?
   /// Today items to archive (the app's ArchiveCoordinator); Cmd-W on a Today tab calls it. Nil: Cmd-W on a Today tab
@@ -130,6 +150,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var onReopenArchived: (@MainActor (NodeID) -> NodeID?)?
   /// Closed tabs and Peeks, most recent on top (#346, #110); see `ShellWindowController+Reopen.swift`.
   var reopenStack = ReopenStack()
+  /// Reopen Closed Tab when this window has nothing of its own to reopen: the last closed Little Arkt window comes
+  /// back (#355). Set by `ShellWindowSet`.
+  var reopenLittleArkt: (@MainActor () -> Void)?
+  var canReopenLittleArkt: @MainActor () -> Bool = { false }
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
   /// The reopen batch the visible undo toast belongs to; nil without one.
@@ -169,11 +193,19 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private(set) lazy var infobarStrips = makeInfobarPresenter()
   /// The find bar's state and engine calls, and its view over the card (#134); see `+Find`.
   private(set) lazy var findBar = makeFindBar()
+  /// The zoom pill's state and its view over the card (#579); see `+Zoom`.
+  private(set) lazy var zoomPill = makeZoomPill()
   private(set) lazy var statusPill = makeStatusPillPresenter()
+  /// The crashed tab view over a page whose process went away (#578).
+  private(set) lazy var crashedTabs = makeCrashedTabPresenter()
+  /// The page info panel below the address pill (#582); see `+PageInfo`.
+  public private(set) lazy var pageInfo = makePageInfoPanel()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
   var pasteboard: NSPasteboard = .general
+  /// The one-off Copy URL tip (BH-196, #404); the window set hands every window the app's stored one.
+  public var copyLinkEducation: CopyLinkEducation = .ephemeral()
   /// Where the sidebar width and hidden state are saved on change (#331).
   let sidebarStateStore: SidebarWindowStateStore
   /// False for a window that is not the one a relaunch restores: its changes must not overwrite the saved state.
@@ -216,7 +248,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.sessionStore = sessionStore
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
-    root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
+    root.onSidebarStateChange = { [weak self] in
+      self?.saveSidebarState()
+      self?.extensionsPanel?.sidebarDidChange(isVisible: self?.isSidebarVisible ?? false)   // #595
+      self?.pageInfo.sidebarDidChange()                                              // #582
+    }
     root.onLayout = { [weak self] in
       self?.javaScriptDialogs.layoutDidFinish()                                      // #400
       self?.permissionPrompts.layoutDidFinish()
@@ -244,6 +280,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     sidebarController.onNewTab = { [weak self] in self?.commandBar.toggle(.newTab) }      // sidebar "+" = Cmd-T
     wireFavorites()                                   // Move To, the sidebar drop and the BH-049 unload
     wireSidebarDrop()                                 // drag and drop on the Space pages (#104)
+    sidebarController.onOpenInLittleArkt = { [weak self] node in self?.moveToLittleArkt(node) ?? false }   // #356
     wirePinned()                                      // pin/unpin, reset, Replace Pin, Separate, the favicon click
     wireTabActions()                                  // the row context menus, multi-selection, empty-area click
     commandBar.onOpen = { [weak self] url, target in
@@ -299,6 +336,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       switch change {
       case .structure, .spaceRemoved:
         self?.closeEngineTabsOfRemovedNodes()
+        self?.dropPlaceholderOfRemovedRow()
         self?.tabSwitcher.sourceDidChange()
       case .node, .spaceAdded, .spaceMoved, .spaceChanged: break
       }
@@ -425,6 +463,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     for bar in [urlBar, toolbar.urlBar] {
       bar.onPress = { [weak self] in self?.openLocation(nil) }                        // same as Cmd-L, KB-002
       bar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
+      bar.onPressSiteGlyph = { [weak self, weak bar] in if let bar { self?.toggleSiteControls(from: bar) } }  // #582
     }
     wireToolbarActions(toolbar) { [weak self] in self?.toolbarTab }
     toolbarSetting.addObserver(self)
@@ -515,6 +554,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     urlBar.url = url
     rootView.card.toolbar.urlBar.url = url
     refreshToolbarHistory()
+    refreshPageInfo()                                                                // #582
   }
 
   /// The tab the Toolbar's Back, Forward and Reload act on and show the history of: the current tab, which in a split
@@ -601,7 +641,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   /// The tab to show after `node` leaves: the first tab of the nearest sibling below, else above. With no such sibling
   /// inside a split or folder, the container's siblings are tried; never another section.
-  private func successor(of node: NodeID) -> NodeID? {
+  func successor(of node: NodeID) -> NodeID? {
     var current = node
     for _ in 0..<64 {                       // depth guard against a malformed source
       guard let location = sidebar.parent(of: current) else { return nil }
@@ -622,6 +662,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// change delivery, so it must not mutate the sidebar (closing a tab does not). The row is already gone (auto-archive,
   /// Delete Space, an import merge), so nothing could show a leave-site prompt for it: these closes skip
   /// `beforeunload` and never hold, and no live tab outlives its row (week-3 Decision 11).
+  /// The handoff placeholder's row is gone (#356): the card shows nothing rather than "Move here" for a row that no
+  /// longer exists.
+  private func dropPlaceholderOfRemovedRow() {
+    guard let node = handoffPlaceholder?.node, sidebar.node(node) == nil else { return }
+    dropHandoffPlaceholder()
+  }
+
   private func closeEngineTabsOfRemovedNodes() {
     for (node, tab) in tabsByNode where sidebar.node(node) == nil { engine.closeTab(tab, mode: .skipUnloadHandlers) }
   }
@@ -636,7 +683,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   /// Cmd-T: new Today tab in the current Space (BH-100). Cmd-L: navigate the current tab (BH-101).
+  /// A blank or incognito window opens it in a private page instead, never a row on the shared sidebar (#559).
   func open(_ url: URL, inNewTab: Bool) {
+    if isPrivateWindow {
+      openPrivately(url, inNewPage: inNewTab)
+      return
+    }
     if inNewTab || currentTab == nil {
       // Cmd-T with no Space creates the Space first, then the tab (decision 3) [I].
       guard let space = sidebarController.currentSpace ?? createSpace() else { return }
@@ -687,7 +739,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       CommandBarAction(id: "nextSpace", title: "Next Space"),
       CommandBarAction(id: "previousSpace", title: "Previous Space"),
       CommandBarAction(id: "toggleToolbar", title: ToolbarSetting.menuTitle(isVisible: toolbarSetting.isVisible)),
-    ]
+    ] + favoriteCommandBarActions()
   }
 
   private func runCommandBarAction(_ id: String) {
@@ -696,6 +748,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case "nextSpace": sidebarController.nextSpace()
     case "previousSpace": sidebarController.previousSpace()
     case "toggleToolbar": toggleToolbar(nil)
+    case Self.favoriteTabActionID, Self.moveToFavoritesActionID: favoriteCurrentTab()
     default: break
     }
   }
@@ -754,7 +807,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     permissionPrompts.refresh()
     infobarStrips.refresh()
     refreshFindBar()
+    refreshZoomPill()
     statusPill.refresh()
+    refreshCrashedTabs()                                            // #578
   }
 
   func replay(_ snapshot: TabSnapshot, into node: NodeID) {
@@ -782,11 +837,22 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .permissionRequested, .permissionEnded:
       permissionPrompts.handle(event)
       return
-    case .infobarsChanged:
-      infobarStrips.handle(event)
+    case .infobarsChanged, .tabFullscreenChanged:
+      infobarStrips.handle(event)                                   // #581: rows hide in HTML fullscreen
+      javaScriptDialogs.refresh()                                   // the panels follow the rows' height
+      permissionPrompts.refresh()
       return
     case .targetURLChanged:
       statusPill.handle(event)                                      // #114: a Peek's page has no row, so before the map
+      return
+    case .tabCrashed(let tab, _):
+      refreshCrashedTabs(crashed: tab)                              // #578: before the map, as a private page has no row
+      return
+    case .tabRecovered:
+      refreshCrashedTabs()
+      return
+    case .pageInfoChanged(let tab):
+      if tab == currentTab { refreshPageInfo() }                    // #582: before the map, as a private page has no row
       return
     default:
       break
@@ -820,7 +886,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .tabClosed(let tab, let reason):
       tabDidClose(tab, node: node, reason: reason)
     case .activeTabChanged(let tab):
-      engineDidActivate(tab, node: node)
+      engineDidActivate(tab) { activate(node: node) }
     case .closeCancelled(let tab):
       closeWasCancelled(tab, node: node)
     case .audibleChanged(let tab, _), .mutedChanged(let tab, _):
@@ -832,6 +898,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
       break                                                         // routed above, before the row lookup (#114)
+    case .tabCrashed, .tabRecovered, .pageInfoChanged:
+      break                                                         // routed above, before the row lookup (#578, #582)
+    case .zoomChanged:
+      zoomPill.handle(event)                                        // #579
+    case .tabFullscreenChanged:
+      break                                                         // routed above, before the row lookup (#581)
     }
   }
 
@@ -845,6 +917,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   ///   stays unloaded as after Cmd-W.
   private func tabDidClose(_ tab: TabID, node: NodeID, reason: CloseReason) {
     findBar.forget(tab)                                     // #134
+    zoomPill.forget(tab)                                    // #579
     tabsByNode[node] = nil
     nodeByTab[tab] = nil
     let wasCurrent = currentTab == tab
@@ -897,9 +970,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   // AppKit resets the standard buttons on each of these.
-  public func windowDidResize(_ notification: Notification) { reapplyTrafficLights() }
+  public func windowDidResize(_ notification: Notification) {
+    reapplyTrafficLights()
+    extensionsPanel?.windowDidResize()
+  }
   public func windowDidEndLiveResize(_ notification: Notification) { reapplyTrafficLights() }
-  public func windowWillEnterFullScreen(_ notification: Notification) { frameBeforeFullScreen = window?.frame }
+  public func windowWillEnterFullScreen(_ notification: Notification) {
+    frameBeforeFullScreen = window?.frame
+    extensionsPanel?.windowWillEnterFullScreen()
+  }
   public func windowWillExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidBecomeKey(_ notification: Notification) {
@@ -923,6 +1002,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// cancelled prompt keeps it open. Without one (no tab was ever shown) the window closes as before. The shown tabs
   /// are stamped once the first page closes, not here: a cancelled prompt leaves the stored sidebar as it was.
   public func windowShouldClose(_ sender: NSWindow) -> Bool {
+    settlePendingClear()                             // #413: a Clear mid-exit archives before the session is saved
     guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
     let open = Array(tabsByNode.values)
     saveSession()                                    // #116: before the tabs close
@@ -936,6 +1016,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The shown tabs, every pane of a split, stop being visible (decision 10). The command bar's display link retains
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
+    settlePendingClear()                             // #413: a window closed without `windowShouldClose`
     isClosed = true
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
@@ -962,7 +1043,7 @@ extension ShellWindowController: NSMenuItemValidation {
     if let enabled = validateSpaceMenuItem(menuItem) { return enabled }
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
     if let enabled = validatePinnedMenuItem(menuItem) { return enabled }
-    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed }
+    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed || canReopenLittleArkt() }
     if menuItem.action == #selector(clearTodayTabs(_:)) { return canClearToday }       // KB-019 (#110)
     if menuItem.action == #selector(toggleToolbar(_:)) {
       menuItem.title = ToolbarSetting.menuTitle(isVisible: isToolbarVisible)

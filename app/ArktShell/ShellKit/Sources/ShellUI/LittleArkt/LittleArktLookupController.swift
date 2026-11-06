@@ -18,6 +18,8 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
 
   public private(set) var isVisible = false
   public private(set) var results: [CommandBarResults.Result] = []
+  /// Speaks a keyboard selection move (the row's label, #608); replaced in tests.
+  var announce: AXAnnouncement.Poster = AXAnnouncement.post
 
   let panel = LittleArktLookupPanel()
   let barView = LittleArktLookupView()
@@ -45,7 +47,7 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
       return AXProxyRowContent(identifier: AXID.LittleArktLookup.row, label: results[row].title,
                                value: results[row].accessibilityCaption)
     }
-    barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
+    barView.onHoverRow = { [weak self] row in self?.select(row, byKeyboard: false) }
     NotificationCenter.default.addObserver(self, selector: #selector(appDidResignActive(_:)),
                                            name: NSApplication.didResignActiveNotification, object: nil)
   }
@@ -177,20 +179,26 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
   private func moveSelection(_ delta: Int) {
     guard let next = CommandBarSelection.step(from: barView.table.selectedRow, by: delta, count: results.count)
     else { return }
-    select(next, scroll: true)
+    select(next, byKeyboard: true)
   }
 
   private func movePage(_ pages: Int) {
     guard let next = CommandBarSelection.page(from: barView.table.selectedRow, by: pages, count: results.count)
     else { return }
-    select(next, scroll: true)
+    select(next, byKeyboard: true)
   }
 
-  /// `scroll` is false for hover: the row under the pointer is already visible.
-  private func select(_ row: Int, scroll: Bool) {
+  /// A keyboard move scrolls the row into view and, since focus stays in the field, speaks it in the command bar's
+  /// words ("title, host, kind, k of n", #608). A hover does neither.
+  private func select(_ row: Int, byKeyboard: Bool) {
     guard row >= 0, row < results.count else { return }
-    if barView.table.selectedRow != row { barView.table.selectRowIndexes([row], byExtendingSelection: false) }
-    if scroll { barView.table.scrollRowToVisible(row) }
+    let changed = barView.table.selectedRow != row
+    if changed { barView.table.selectRowIndexes([row], byExtendingSelection: false) }
+    guard byKeyboard else { return }
+    barView.table.scrollRowToVisible(row)
+    if changed {
+      announce(results[row].accessibilityLabel(position: row + 1, of: results.count), AXAnnouncement.selectionPriority)
+    }
   }
 
   // MARK: Table
@@ -247,7 +255,6 @@ final class LittleArktLookupPanel: NSPanel {
       guard isPresented != oldValue else { return }
       alphaValue = isPresented ? 1 : 0
       ignoresMouseEvents = !isPresented
-      contentView?.setAccessibilityValue(isPresented ? AXID.LittleArktLookup.open : AXID.LittleArktLookup.closed)
     }
   }
 
@@ -281,7 +288,6 @@ final class LittleArktLookupView: NSView {
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityIdentifier(AXID.LittleArktLookup.root)
-    setAccessibilityValue(AXID.LittleArktLookup.closed)
     layer?.cornerRadius = LittleArktGeometry.cornerRadius
     layer?.cornerCurve = .continuous
     layer?.masksToBounds = true

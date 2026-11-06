@@ -118,14 +118,35 @@ final class LittleArktDialogTests: XCTestCase {
       assertNoPanel(in: scene.main, scene, "\(kind): nothing in the main window")
       let card = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
       let anchor = try XCTUnwrap(card.window).convertToScreen(card.convert(card.bounds, to: nil))
-      XCTAssertEqual(panel.panel.frame.maxY, anchor.maxY - DialogPanel.anchorInset, accuracy: 0.5,
-                     "\(kind): 12 pt inside the page's top edge")
+      XCTAssertEqual(panel.panel.frame.maxY, anchor.maxY, accuracy: 0.5, "\(kind): on the page's top edge (#693)")
+      XCTAssertNotNil(panel.pageDim, "\(kind): the small window's page dims too")
 
       panel.view.primaryButton.performClick(nil)
 
       XCTAssertEqual(scene.engine.dialogAnswers.map(\.id), [id], "\(kind): answered once")
       assertLittleHasNothing(scene, "\(kind): answered", windowIsClear: false)
     }
+  }
+
+  func testThePanelFollowsTheInfobarRowsAndHTMLFullscreen() throws {
+    let scene = try makeScene(reduceMotion: true)
+    scene.little.infobarStrips.reduceMotion = { true }
+    _ = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: .alert, message: "Now?"))
+    let panel = try XCTUnwrap(scene.little.javaScriptDialogs.panel(for: scene.tab))
+    let card = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let page = try XCTUnwrap(card.window).convertToScreen(card.convert(card.bounds, to: nil))
+    let top = page.maxY                                     // a page dialog hangs from the top edge (#693)
+
+    scene.engine.raiseInfobar(in: scene.tab, message: "One")
+    XCTAssertEqual(panel.panel.frame.maxY, top - InfobarMetrics.rowHeight, accuracy: 0.5, "below the row (#581)")
+
+    scene.engine.setTabFullscreen(scene.tab, true)
+    XCTAssertNil(scene.little.infobarStrips.strip(for: scene.tab), "no row in HTML fullscreen")
+    XCTAssertEqual(panel.panel.frame.maxY, top, accuracy: 0.5, "at the page's top in HTML fullscreen")
+
+    scene.engine.setTabFullscreen(scene.tab, false)
+    XCTAssertNotNil(scene.little.infobarStrips.strip(for: scene.tab))
+    XCTAssertEqual(panel.panel.frame.maxY, top - InfobarMetrics.rowHeight, accuracy: 0.5, "below the row again")
   }
 
   func testThePanelWidthFollowsTheLittleArktWindow() throws {

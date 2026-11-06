@@ -13,22 +13,17 @@ enum Shell {
 
   static func commandBarField(_ app: XCUIApplication) -> XCUIElement { app.textFields[AXID.CommandBar.field] }
 
-  static func isCommandBarOpen(_ app: XCUIApplication) -> Bool {
-    let bar = commandBar(app)
-    return bar.exists && (bar.value as? String) == AXID.CommandBar.open
-  }
+  /// The hidden panel leaves the accessibility tree (it is inert and reports no children), so the root is present
+  /// exactly while the bar shows. It carries no "open" / "closed" value: VoiceOver would read it (#608).
+  static func isCommandBarOpen(_ app: XCUIApplication) -> Bool { commandBar(app).exists }
 
-  /// A hidden panel may leave the accessibility tree, so "closed" is either an absent root or the `closed` value.
-  static func isCommandBarClosed(_ app: XCUIApplication) -> Bool {
-    let bar = commandBar(app)
-    return !bar.exists || (bar.value as? String) == AXID.CommandBar.closed
-  }
+  static func isCommandBarClosed(_ app: XCUIApplication) -> Bool { !commandBar(app).exists }
 
   @discardableResult
   static func waitForCommandBar(
     _ app: XCUIApplication, open: Bool, file: StaticString = #filePath, line: UInt = #line
   ) -> Bool {
-    Waits.until("command bar \(open ? AXID.CommandBar.open : AXID.CommandBar.closed)", file: file, line: line) {
+    Waits.until("command bar \(open ? "open" : "closed")", file: file, line: line) {
       open ? isCommandBarOpen(app) : isCommandBarClosed(app)
     }
   }

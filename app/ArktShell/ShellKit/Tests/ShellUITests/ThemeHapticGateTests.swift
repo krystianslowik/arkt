@@ -10,7 +10,7 @@ struct ThemeHapticGateTests {
   static func time(_ n: Int) -> Double { Double(n) * 0.2 }
 
   @Test func catalogHuesComeFromTheSecondLightStops() {
-    #expect(ThemeHapticGate.catalogHues.map { $0.rounded() } == [45, 238, 37, 107, 338, 250])
+    #expect(ThemeHapticGate.catalogHues.map { $0.rounded() } == [45, 211, 37, 107, 316, 250])
   }
 
   @Test func sliderDetentsPlayOncePerCrossingAndReArmAfterThreePercent() {

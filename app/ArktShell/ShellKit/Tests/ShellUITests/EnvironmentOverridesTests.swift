@@ -45,6 +45,14 @@ import Testing
     #expect(overrides(["ARKT_APPEARANCE": "Dark"]).appearance == nil)
   }
 
+  /// `ARKT_SIDEBAR_NOTICE=update|announcement` shows a sample sidebar notice (#648) until the updater (#126) exists.
+  @Test func sidebarNoticeOverride() {
+    #expect(overrides(["ARKT_SIDEBAR_NOTICE": "update"]).sidebarNotice == .update)
+    #expect(overrides(["ARKT_SIDEBAR_NOTICE": "announcement"]).sidebarNotice == .announcement)
+    #expect(overrides([:]).sidebarNotice == nil)
+    #expect(overrides(["ARKT_SIDEBAR_NOTICE": "Update"]).sidebarNotice == nil)
+  }
+
   /// A UI-test run never touches the real default browser, whatever it sets.
   @Test func uiTestModeFakesTheDefaultBrowser() {
     #expect(overrides(complete).defaultBrowser == .notDefault)

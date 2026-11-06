@@ -8,7 +8,7 @@ struct ThemeOverlayTests {
   private static let segments = ThemeGradient.segmentsPerPair
 
   private func theme(overlay: [RGBA] = [], dark: Bool = false) -> SpaceThemeInfo {
-    SpaceThemeInfo(baseColors: [.p3(hex: 0xF2EAE4, alpha: 1), .p3(hex: 0xF29BBB, alpha: 1)], overlayColors: overlay,
+    SpaceThemeInfo(baseColors: [.p3(hex: 0xF7EEF3, alpha: 1), .p3(hex: 0xDDB4D2, alpha: 1)], overlayColors: overlay,
                    isDark: dark)
   }
 

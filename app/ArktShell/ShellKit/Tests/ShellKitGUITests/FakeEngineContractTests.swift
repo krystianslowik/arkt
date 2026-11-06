@@ -9,12 +9,18 @@ final class FakeEngineContractTests: XCTestCase {
   var harness: EngineHarness!
   var pages: URL!
   var server: LoopbackServer!
+  /// Holds `/slow.html` in its provisional load until the test opens it (#404).
+  var slowGate: LoopbackServer.Gate!
 
   override func setUp() async throws {
     _ = NSApplication.shared
     pages = FileManager.default.temporaryDirectory.appending(path: "arkt-fake-engine-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: pages, withIntermediateDirectories: true)
-    server = try await LoopbackServer.start(routes: Self.routes)
+    slowGate = LoopbackServer.Gate()
+    var routes = Self.routes
+    routes["/slow.html"] = .init(mime: "text/html", body: Data("<!doctype html><title>Slow</title><p>Slow".utf8),
+                                 gate: slowGate)
+    server = try await LoopbackServer.start(routes: routes)
     harness = EngineHarness.fake(pages: pages, port: server.port)
   }
 
@@ -24,6 +30,7 @@ final class FakeEngineContractTests: XCTestCase {
   override func tearDown() async throws {
     for window in Self.shownWindows { window.close() }
     Self.shownWindows = []
+    slowGate?.open()
     server?.stop()
     if let pages { try? FileManager.default.removeItem(at: pages) }
   }
@@ -137,6 +144,50 @@ final class FakeEngineContractTests: XCTestCase {
     XCTAssertNil(image)
   }
 
+  /// FakeEngine only (#404, BH-193): the page's selection is reported for Copy URL's text link, and a new document
+  /// drops it.
+  func testSelectedTextFollowsThePageSelection() async throws {
+    let engine = FakeEngine()
+    let findPage = try XCTUnwrap(harness.findPage)
+    let id = engine.createTab(url: try findPage(1, try harness.pageURL("Target")))
+    try await harness.settle(engine, id)
+    XCTAssertNil(engine.selectedText(of: id), "nothing is selected yet")
+
+    await engine.runScript("window.getSelection().selectAllChildren(document.querySelector('p'))", in: id)
+    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.selectedText(of: id) != nil }
+    XCTAssertEqual(engine.selectedText(of: id), EngineContract.findWord)
+
+    await engine.runScript("window.getSelection().removeAllRanges()", in: id)
+    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.selectedText(of: id) == nil }
+
+    await engine.runScript("window.getSelection().selectAllChildren(document.querySelector('p'))", in: id)
+    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.selectedText(of: id) != nil }
+
+    // A load that does not commit (a 204) leaves the old page, and its selection, in place.
+    let recorder = EventRecorder(engine)
+    engine.navigate(id, to: try XCTUnwrap(URL(string: "http://127.0.0.1:\(server.port)/no-content")))
+    try await EngineContract.waitUntil(timeout: .seconds(10)) {
+      recorder.events(for: id).contains(.loadingChanged(id, isLoading: false))
+    }
+    await engine.runScript("void 0", in: id)
+    XCTAssertEqual(engine.selectedText(of: id), EngineContract.findWord, "a cancelled load keeps the selection")
+
+    // While the next page is still provisional the old page is live: its selection changes are its own, and the new
+    // document starts with none.
+    engine.navigate(id, to: try XCTUnwrap(URL(string: "http://127.0.0.1:\(server.port)/slow.html")))
+    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.isLoading == true }
+    await engine.runScript("window.getSelection().selectAllChildren(document.getElementById('link'))", in: id)
+    try await EngineContract.waitUntil(timeout: .seconds(10)) {
+      engine.selectedText(of: id) == EngineContract.findLinkText
+    }
+    slowGate.open()
+    try await harness.settle(engine, id)
+    try await EngineContract.waitUntil(timeout: .seconds(10)) { engine.snapshot(of: id)?.title == "Slow" }
+    await engine.runScript("void 0", in: id)
+    XCTAssertNil(engine.selectedText(of: id), "the old page's selection does not stick to the new page")
+    engine.closeTab(id, mode: .skipUnloadHandlers)
+  }
+
   /// Reports a rule without its driver as skipped (not applicable), never as passed.
   private func notApplicable(_ rule: () async throws -> Void) async throws {
     do {
@@ -171,6 +222,19 @@ final class FakeEngineContractTests: XCTestCase {
     XCTAssertFalse(recorder.events(for: id).contains { if case .faviconChanged(_, .some) = $0 { return true }; return false })
   }
 
+  /// FakeEngine only (#675): an SVG favicon, which ImageIO cannot decode, reaches the shell as a PNG (the contract
+  /// promises PNG or ICO), so the row shows the icon instead of the letter.
+  func testAnSVGFaviconArrivesAsPNG() async throws {
+    let engine = FakeEngine()
+    let id = engine.createTab(url: URL(string: "http://127.0.0.1:\(server.port)/svg-icon.html")!)
+    try await harness.settle(engine, id)
+    await engine.waitForFaviconFetch(id)
+    let data = try XCTUnwrap(engine.snapshot(of: id)?.faviconData)
+    XCTAssertEqual(Array(data.prefix(4)), [0x89, 0x50, 0x4E, 0x47], "PNG bytes")
+    let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+    XCTAssertEqual(CGImageSourceGetCount(source), 1)
+  }
+
   /// FakeEngine only: pages see a Safari user agent. No network: a local page reports `navigator.userAgent`
   /// as its title. Without the Safari tokens sites serve WKWebView their legacy pages.
   func testPagesSeeSafariUserAgent() async throws {
@@ -197,6 +261,11 @@ final class FakeEngineContractTests: XCTestCase {
     "/bad-icon.html": .init(mime: "text/html",
                             body: Data("<!doctype html><title>Bad</title><link rel=icon href=/not-an-image><p>x".utf8)),
     "/not-an-image": .init(mime: "text/plain", body: Data("nope".utf8)),
+    "/svg-icon.html": .init(mime: "text/html",
+                            body: Data("<!doctype html><title>SVG</title><link rel=icon href=/icon.svg><p>x".utf8)),
+    "/icon.svg": .init(mime: "image/svg+xml", body: Data(
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='#2a7'/></svg>".utf8)),
+    "/no-content": .init(status: 204, mime: "text/plain", body: Data()),
   ]
 }
 

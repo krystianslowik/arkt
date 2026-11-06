@@ -4,16 +4,18 @@ import Foundation
 /// What the URL bars show for a page URL.
 public enum AddressText {
   /// The sidebar URL bar's compact form: the lowercased host without a leading `www.`; the file name for a
-  /// file URL; the whole string for a URL without a host (`about:blank`); empty without a URL.
+  /// file URL; the whole string for a URL without a host (`about:blank`); empty without a URL. The host is written by
+  /// `HostDisplay` (#697): Unicode when it passes the spoof check, its `xn--` form otherwise.
   public static func host(_ url: URL?) -> String {
     guard let url else { return "" }
     if url.isFileURL { return url.lastPathComponent }
-    guard let host = url.host(percentEncoded: false)?.lowercased(), !host.isEmpty else { return url.absoluteString }
+    guard let host = HostDisplay.host(of: url)?.lowercased(), !host.isEmpty else { return url.absoluteString }
     return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
   }
 
-  /// The Toolbar's full-URL form ("Show full URL when Toolbar is enabled", `toolbarShowFullURLsEnabledPreference`).
-  public static func full(_ url: URL?) -> String { url?.absoluteString ?? "" }
+  /// The Toolbar's full-URL form ("Show full URL when Toolbar is enabled", `toolbarShowFullURLsEnabledPreference`):
+  /// the whole address, its host written by `HostDisplay` as in `host(_:)`.
+  public static func full(_ url: URL?) -> String { url.map(HostDisplay.address) ?? "" }
 }
 
 /// Splits the content card's clip area between the Toolbar and the page. The card is not flipped, so the

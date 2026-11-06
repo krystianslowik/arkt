@@ -28,6 +28,8 @@ public final class ShellWindowSet {
   /// The connected screens a saved frame is placed on; tests replace it.
   public var screens: @MainActor () -> [ScreenGeometry] = { ScreenGeometry.current() }
   public let commandBarSettings: CommandBarSettings
+  /// The one-off Copy URL tip's state (BH-196, #404), shared by every window; the app sets its stored one.
+  public var copyLinkEducation: CopyLinkEducation = .ephemeral()
   /// The app's hooks on a new window (archive, stamps, favicons, import); runs before the window is shown.
   public var configure: (@MainActor (ShellWindowController) -> Void)?
   /// The app's Downloads (#132): every window this set builds gets its Library button and popover. Nil for an engine
@@ -35,6 +37,8 @@ public final class ShellWindowSet {
   public var downloads: DownloadsCenter? {
     didSet { downloads?.primaryWindow = { [weak self] in self?.primary } }
   }
+  /// The sidebar banner (#648): every window this set builds shows its notice. Nil: no banner.
+  public var sidebarBanner: SidebarBannerCenter?
 
   private let hostLookup: HostLookup?
   private var windows: [ShellWindowController] = []
@@ -52,6 +56,8 @@ public final class ShellWindowSet {
   private var mainOrder: [ObjectIdentifier] = []
   private var mainObservers: [ObjectIdentifier: any NSObjectProtocol] = [:]
   private var windowObservation: EngineObservation?
+  /// The post-install toast (#594), on the primary window; nil for an engine without extensions.
+  private var extensionInstallToasts: ExtensionInstallToasts?
   /// Little Arkt windows (#314), the frontmost last.
   private var littleArktWindows: [LittleArktWindowController] = []
   /// The size new Little Arkt windows get: the last one the user set (BH-142), for this session.
@@ -60,6 +66,21 @@ public final class ShellWindowSet {
   public var littleArktReduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   /// Runs on each new Little Arkt window before it appears (tests step its motion by hand).
   var littleArktConfigure: (@MainActor (LittleArktWindowController) -> Void)?
+  /// A Little Arkt window the user or the idle timer closed (#355): the app archives its page under the Little Arkt
+  /// source and returns the entry's id, which Reopen Closed Tab takes back.
+  public var onLittleArktArchive: (@MainActor (LittleArktClosedWindow) -> UUID?)?
+  /// Reopen Closed Tab is about to bring a Little Arkt window back: its Archive entry goes. False when the entry
+  /// cannot come back as a window (the user restored it from the Archive, so the page is a row now): that window is
+  /// skipped.
+  public var onLittleArktTakeBack: (@MainActor (UUID) -> Bool)?
+  /// The clock of Little Arkt activity (tests set it).
+  public var littleArktNow: @MainActor () -> Date = { Date() }
+  /// Whether the user is in a Little Arkt window now: the key window of the active app. The idle timer never closes it.
+  var littleArktIsInUse: @MainActor (LittleArktWindowController) -> Bool = { NSApp.isActive && $0.window.isKeyWindow }
+  /// Closed Little Arkt windows for Reopen Closed Tab, the most recent last.
+  private var closedLittleArkts: [(closed: LittleArktClosedWindow, archiveID: UUID?)] = []
+  /// How many closed Little Arkt windows Reopen Closed Tab can bring back. [I]
+  static let closedLittleArktLimit = 50
 
   /// `hostLookup` is needed only for an engine that asks for windows of its own (a host provider); FakeEngine never
   /// does.
@@ -77,6 +98,9 @@ public final class ShellWindowSet {
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
       self?.windowOpened(id)
+    }
+    if let extensions = engine as? any EngineExtensions {
+      extensionInstallToasts = ExtensionInstallToasts(extensions: extensions) { [weak self] in self?.primary?.toasts }
     }
   }
 
@@ -145,8 +169,10 @@ public final class ShellWindowSet {
 
   /// The engine's host provider (`EngineWindowHostProvider`). A Dock reopen reuses an open window that has no engine
   /// window yet (no tab was shown, so the engine counts no window); every other request gets a new window in the
-  /// opener's Space, else the primary window's, with the requested frame.
+  /// opener's Space, else the primary window's, with the requested frame. A request for a page of a blank or
+  /// incognito window, or one the engine keeps off the record, gets a private window instead (#669).
   public func host(for request: EngineWindowRequest) -> any EngineWindowHosting {
+    if let presentation = privatePresentation(for: request) { return makePrivate(presentation, for: request) }
     if LittleArktRouting.opensInLittleArkt(request) { return makeLittleArkt(for: request).engineHost }
     if request.kind == .reopen, let reusable = controllers.first(where: { candidate in
       candidate.engineWindow == nil && !awaitingAdoption.contains { $0 === candidate }
@@ -165,6 +191,50 @@ public final class ShellWindowSet {
     }
     awaitingAdoption.append(controller)
     return controller.engineHost
+  }
+
+  /// How a window built for `request` is drawn when it must stay private (#669): as its opener when that is a blank
+  /// or incognito window, else incognito when the engine keeps it off the record. Nil for a normal window.
+  private func privatePresentation(for request: EngineWindowRequest) -> SidebarPresentation? {
+    if let opener = request.openerWindow,
+       let source = controllers.first(where: { $0.engineWindow == opener }), source.isPrivateWindow {
+      return source.sidebarController.presentation
+    }
+    return request.isOffTheRecord ? .incognito : nil
+  }
+
+  /// A blank or incognito window for an engine request (#669), never Little Arkt (its Open in writes a row) and never
+  /// a reused normal window. Every page the engine puts in it is a private page, and it never saves the session.
+  private func makePrivate(_ presentation: SidebarPresentation,
+                           for request: EngineWindowRequest) -> any EngineWindowHosting {
+    let controller = makePrivateWindow(presentation, bounds: request.bounds, near: primary?.window)
+    awaitingAdoption.append(controller)
+    return controller.engineHost
+  }
+
+  /// A link a blank or incognito window would open in Little Arkt (Opt-Cmd-click, #710): a new private window of the
+  /// opener's kind shows it instead, as an engine popup of that window would (#669). The window makes its own engine
+  /// window and page, so it is not awaiting adoption.
+  @discardableResult
+  func openPrivateWindow(_ url: URL, as presentation: SidebarPresentation,
+                         near anchor: NSWindow?) -> ShellWindowController {
+    let controller = makePrivateWindow(presentation, bounds: nil, near: anchor)
+    controller.showWindow(nil)
+    controller.openPrivately(url)
+    return controller
+  }
+
+  /// A blank or incognito window, built as an engine-requested one so it never takes over saving the session.
+  private func makePrivateWindow(_ presentation: SidebarPresentation, bounds: CGRect?,
+                                 near anchor: NSWindow?) -> ShellWindowController {
+    let controller = make(opensFirstTab: false, origin: .engineRequested)
+    if presentation == .blank { controller.makeBlank() } else { controller.makeIncognito() }
+    if let bounds {
+      controller.window?.setFrame(bounds, display: false)
+    } else {
+      place(controller, near: anchor)
+    }
+    return controller
   }
 
   private func targetSpace(for request: EngineWindowRequest) -> SpaceID? {
@@ -194,6 +264,7 @@ public final class ShellWindowSet {
   /// while shutting down cannot overwrite it.
   public func saveSessionsForTermination() {
     for controller in controllers {
+      controller.settlePendingClear()                // #413: a Clear mid-exit is saved archived
       controller.saveSession()
       controller.savesSession = false
     }
@@ -205,6 +276,9 @@ public final class ShellWindowSet {
   }
 
   // MARK: Little Arkt (#314)
+
+  /// The Dock menu's and the Window menu's Little Arkt rows (#356); their items target it.
+  public private(set) lazy var littleArktMenus = LittleArktMenus(windows: { [weak self] in self?.littleArkts ?? [] })
 
   /// The open Little Arkt windows, the frontmost last.
   public var littleArkts: [LittleArktWindowController] {
@@ -225,17 +299,53 @@ public final class ShellWindowSet {
 
   /// The quick lookup bar's result (#354, KB-044): a new Little Arkt window on `url`. The shell builds it rather than
   /// the engine, so it creates the engine window itself and adopts it; placement and wiring are the engine's own
-  /// windows' (`makeLittleArkt`).
+  /// windows' (`makeLittleArkt`). `frame` places it there instead (Reopen Closed Tab).
   @discardableResult
-  public func openLittleArkt(url: URL) -> LittleArktWindowController {
-    let screen = NSScreen.main ?? NSScreen.screens.first
-    let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: LittleArktLayout.defaultSize)
-    let frame = LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
-    let little = makeLittleArkt(isPopup: false, frame: frame)
+  public func openLittleArkt(url: URL, frame: CGRect? = nil) -> LittleArktWindowController {
+    let little = makeLittleArkt(isPopup: false, frame: frame ?? nextLittleArktFrame())
     let id = engine.createWindow(host: little.engineHost)
     little.adopt(engineWindow: id)              // no-op when the engine announced and adopted it already
     engine.createTab(url: url, in: id)
     return little
+  }
+
+  /// Opt-Cmd-click on a Today tab (#356, BH-132): a new Little Arkt window takes `tab`, a page another window let go
+  /// of, with its history and state (`moveTab`, no reload); its pending dialog comes with it.
+  @discardableResult
+  func openLittleArkt(moving tab: TabID, dialog: JavaScriptDialog?) -> LittleArktWindowController {
+    let little = makeLittleArkt(isPopup: false, frame: nextLittleArktFrame())
+    let id = engine.createWindow(host: little.engineHost)
+    little.adopt(engineWindow: id)
+    if let dialog { little.javaScriptDialogs.adopt(dialog) }
+    engine.moveTab(tab, to: id)
+    little.showMovedTab(tab)                    // when the engine's activation did not mount it already
+    return little
+  }
+
+  /// The Today row `node` leaves for Little Arkt: the page moves from whichever window has it, else a new page opens
+  /// on `url`. The row then leaves the sidebar without an Archive entry (the page is archived when its Little Arkt
+  /// window closes), and every window that was left on the row's handoff placeholder moves on. False when its close
+  /// is held behind a leave-site prompt (it stays).
+  private func moveToLittleArkt(_ node: NodeID, url: URL) -> Bool {
+    switch releaseLiveTab(of: node, for: nil) {
+    case .held:
+      return false
+    case .released(let tab, let dialog):
+      openLittleArkt(moving: tab, dialog: dialog)
+    case .notLive:
+      openLittleArkt(url: url)
+    }
+    let followUps = controllers.compactMap { $0.afterRowLeaves(node) }
+    sidebar.removeNode(node)
+    followUps.forEach { $0() }
+    return true
+  }
+
+  /// The remembered size at the top-right, cascaded from the frontmost Little Arkt window.
+  private func nextLittleArktFrame() -> CGRect {
+    let screen = NSScreen.main ?? NSScreen.screens.first
+    let visible = screen?.visibleFrame ?? CGRect(origin: .zero, size: LittleArktLayout.defaultSize)
+    return LittleArktLayout.placement(size: littleArktSize, frontmost: littleArkts.last?.window.frame, in: visible)
   }
 
   /// Places, wires and records a Little Arkt window; shared by the engine's requests and the lookup's result.
@@ -252,12 +362,73 @@ public final class ShellWindowSet {
       let target = self.primary ?? self.openWindow(opensFirstTab: false)
       return target.receiveMovedTab(tab, in: space, dialog: dialog)
     }
+    little.onOpenInNewWindow = { [weak self] tab, dialog in             // the chooser's Open in New Window (#356)
+      guard let self else { return false }
+      let opened = self.openWindow(opensFirstTab: false)
+      guard opened.receiveMovedTab(tab, in: nil, dialog: dialog) else {
+        opened.window?.performClose(nil)                               // no empty window left behind
+        return false
+      }
+      return true
+    }
     little.flightDestination = { [weak self] in self?.primary }        // #352: an open main window only
     little.onResize = { [weak self] size in self?.littleArktSize = size }
     little.onClosed = { [weak self] closed in self?.littleArktWindows.removeAll { $0 === closed } }
+    little.onArchiveClose = { [weak self] closed in self?.littleArktClosed(closed) }
+    little.onReopenClosed = { [weak self] in self?.reopenClosedLittleArkt() }
+    little.canReopenClosed = { [weak self] in self?.canReopenClosedLittleArkt ?? false }
+    little.now = { [weak self] in self?.littleArktNow() ?? Date() }
     littleArktWindows.append(little)
     littleArktConfigure?(little)
     return little
+  }
+
+  // MARK: Little Arkt archive and reopen (#355)
+
+  private func littleArktClosed(_ closed: LittleArktClosedWindow) {
+    let archiveID = onLittleArktArchive?(closed)
+    closedLittleArkts.append((closed, archiveID))
+    if closedLittleArkts.count > Self.closedLittleArktLimit {
+      closedLittleArkts.removeFirst(closedLittleArkts.count - Self.closedLittleArktLimit)
+    }
+  }
+
+  /// A Little Arkt window the user or the idle timer closed can come back.
+  public var canReopenClosedLittleArkt: Bool { !closedLittleArkts.isEmpty }
+
+  /// Reopen Closed Tab (Cmd-Shift-T): the last closed Little Arkt window comes back on its page and its Archive entry
+  /// goes. It opens at its last frame, moved onto a screen when that frame is on none now (a display was removed).
+  /// A window whose entry the user restored from the Archive is skipped. Nil when none can come back.
+  @discardableResult
+  public func reopenClosedLittleArkt() -> LittleArktWindowController? {
+    while let last = closedLittleArkts.popLast() {
+      if let archiveID = last.archiveID, let takeBack = onLittleArktTakeBack, !takeBack(archiveID) { continue }
+      let frame = LittleArktLayout.frame(reopening: last.closed.frame, on: screens())
+      return openLittleArkt(url: last.closed.url, frame: frame)
+    }
+    return nil
+  }
+
+  /// The open Little Arkt windows the idle timer may close (BH-137), with the last time the user was in each. A window
+  /// the user is in, a page playing sound (BH-076) and a page that would ask before leaving count as active now: they
+  /// are left out, and their idle time starts again when that ends.
+  public func littleArktIdleCandidates() -> [(id: UUID, lastActiveAt: Date)] {
+    littleArkts.compactMap { little in
+      guard little.isOpenForIdle else { return nil }
+      if littleArktIsInUse(little) || little.pageKeepsWindowOpen {
+        little.touch()
+        return nil
+      }
+      return (little.id, little.lastActiveAt)
+    }
+  }
+
+  /// The idle timer's pass picked these windows: each closes as a user close would, archived as idle.
+  public func closeIdleLittleArkts(_ ids: [UUID]) {
+    let ids = Set(ids)
+    for little in littleArkts where ids.contains(little.id) && little.isOpenForIdle && !little.pageKeepsWindowOpen {
+      little.closeForIdle()
+    }
   }
 
   // MARK: Tab Handoff (#300, BH-066)
@@ -304,6 +475,7 @@ public final class ShellWindowSet {
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
                                            restoring: session, savesSession: isRestored,
                                            commandBarSettings: commandBarSettings, opensFirstTab: opensFirstTab)
+    controller.copyLinkEducation = copyLinkEducation
     if isRestored { sessionWindow = controller }
     if let session, controller.applySavedFrame(session, screens: screens()) { restoredFrameWindow = controller }
     controller.onNewWindow = { [weak self] in self?.openWindow(opensFirstTab: false) }
@@ -311,6 +483,17 @@ public final class ShellWindowSet {
       self?.releaseLiveTab(of: node, for: controller) ?? .notLive
     }
     controller.onDragOutToNewWindow = { [weak self] node, point in self?.openWindow(showing: node, at: point) }
+    controller.onOpenLinkInLittleArkt = { [weak self, weak controller] url, privateKind in                  // #356
+      guard let self else { return }
+      if let privateKind {                        // #710: decided at the click, so a closed opener still fails closed
+        self.openPrivateWindow(url, as: privateKind, near: controller?.window)
+      } else {
+        self.openLittleArkt(url: url)
+      }
+    }
+    controller.onMoveToLittleArkt = { [weak self] node, url in self?.moveToLittleArkt(node, url: url) ?? false }
+    controller.reopenLittleArkt = { [weak self] in self?.reopenClosedLittleArkt() }      // #355
+    controller.canReopenLittleArkt = { [weak self] in self?.canReopenClosedLittleArkt ?? false }
     controller.otherWindowsVisibleNodes = { [weak self, weak controller] in
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }
@@ -318,6 +501,7 @@ public final class ShellWindowSet {
     trackMain(controller)
     configure?(controller)
     downloads?.attach(to: controller)
+    sidebarBanner?.attach(to: controller)
     // #331: the session's first window is the one a relaunch restores; it opens on the saved sidebar state. Later
     // windows (New Window, a Dock reopen) keep the defaults.
     if !adoptedSavedSidebarState {

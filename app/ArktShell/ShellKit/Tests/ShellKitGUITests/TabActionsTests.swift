@@ -382,7 +382,7 @@ final class TabActionsTests: XCTestCase {
     let outline = try harness.outline()
     try harness.click(world.today[1], .command)
     outline.focusKeyboard(on: try harness.row(world.today[2]))
-    XCTAssertFalse(outline.outlineView.keyboardFocusRing.isHidden)
+    XCTAssertTrue(outline.outlineView.keyboardFocusRing.isFocused)
     XCTAssertEqual(outline.selectedNodes, [world.today[0], world.today[1]], "focus does not change the selection")
     harness.controller.close()
   }
@@ -731,6 +731,7 @@ final class TabActionsTests: XCTestCase {
     XCTAssertTrue(menu.items[1].isEnabled)
 
     menu.performActionForItem(at: 0)
+    harness.controller.settlePendingClear()           // the exit runs on screen (#413)
     XCTAssertEqual(harness.children(.today(world.work)), [world.today[0]], "the shown tab stays (#429)")
     menu.delegate?.menuNeedsUpdate?(menu)
     XCTAssertFalse(menu.items[0].isEnabled, "only the shown tab is left")
@@ -750,6 +751,7 @@ final class TabActionsTests: XCTestCase {
     menu.delegate?.menuNeedsUpdate?(menu)
     XCTAssertTrue(menu.items[1].isEnabled)
     menu.performActionForItem(at: 1)
+    harness.controller.settlePendingClear()           // the exit runs on screen (#413)
 
     XCTAssertEqual(harness.children(.today(world.work)), [world.today[0], world.split])
     XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 3 tabs")
@@ -774,6 +776,7 @@ final class TabActionsTests: XCTestCase {
     let menu = try XCTUnwrap(harness.controller.sidebarController.view.archiveButton.menu)
     menu.delegate?.menuNeedsUpdate?(menu)
     menu.performActionForItem(at: 1)
+    harness.controller.settlePendingClear()           // the exit runs on screen (#413)
 
     XCTAssertEqual(harness.children(.today(world.work)), [world.today[0], world.today[2]])
     XCTAssertEqual(harness.current, world.today[0])
@@ -793,6 +796,7 @@ final class TabActionsTests: XCTestCase {
     let menu = try XCTUnwrap(harness.controller.sidebarController.view.archiveButton.menu)
     menu.delegate?.menuNeedsUpdate?(menu)
     menu.performActionForItem(at: 1)
+    harness.controller.settlePendingClear()           // the exit runs on screen (#413)
 
     XCTAssertEqual(harness.children(.today(world.work)), [world.split, world.today[3]])
     XCTAssertEqual(harness.children(.split(world.split)), world.panes)
@@ -814,6 +818,7 @@ final class TabActionsTests: XCTestCase {
     let menu = try XCTUnwrap(harness.controller.sidebarController.view.archiveButton.menu)
     menu.delegate?.menuNeedsUpdate?(menu)
     menu.performActionForItem(at: 1)
+    harness.controller.settlePendingClear()           // the exit runs on screen (#413)
 
     XCTAssertEqual(harness.children(.today(world.work)), [world.today[0], folder])
     XCTAssertEqual(harness.children(.folder(folder)), [inside])
@@ -867,6 +872,7 @@ final class TabActionsTests: XCTestCase {
     harness.controller.activate(node: world.today[0])
 
     harness.controller.clearTodayTabs(nil)
+    harness.controller.settlePendingClear()           // the exit runs on screen (#413)
 
     XCTAssertEqual(harness.children(.today(world.work)), [world.today[0]])
     XCTAssertEqual(harness.controller.toasts.current?.text, "Archived 6 tabs")
@@ -956,8 +962,8 @@ final class TabActionsTests: XCTestCase {
                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     let menu = try XCTUnwrap(grid.collectionView.menu(for: event), "the tile has a menu")
     XCTAssertEqual(menu.items.filter { !$0.isAlternate }.map(\.title),
-                   ["Rename", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL", "", "Copy Link", "",
-                    "Remove from Favorites", "Close and Keep Favorite"])
+                   ["Rename\u{2026}", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
+                    "Copy Link", "", "Remove from Favorites", "Close and Keep Favorite"])
 
     menu.performActionForItem(at: menu.indexOfItem(withTitle: "Remove from Favorites"))
 

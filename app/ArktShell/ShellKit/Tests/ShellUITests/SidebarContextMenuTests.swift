@@ -88,11 +88,13 @@ struct SidebarContextMenuTests {
     let tab = sidebar.addTab(url: url, title: "P", in: .pinned(work))
     let menu = entries(.rows([tab]))
     #expect(titles(menu) == ["Rename", "Duplicate", "Unpin Tab", "", "Back to Pinned URL",
-                             "Replace Pin with Current Page", "Separate From Pinned Tab", "Edit Pinned URL", "",
-                             "Move To", "", "Copy Link", "", "Close and Keep Pinned"])
+                             "Replace Pin with Current Page", "Separate From Pinned Tab", "Edit Pinned URL\u{2026}",
+                             "", "Move To", "", "Copy Link", "", "Close and Keep Pinned"])
     #expect(try entry("Close and Keep Pinned", in: menu).action == .archive([tab]))
     #expect(try entry("Close and Keep Pinned", in: menu).keyEquivalent == "w")
-    #expect(try !entry("Edit Pinned URL", in: menu).isEnabled, "not built yet: shown disabled (OQ6)")
+    #expect(try entry("Edit Pinned URL\u{2026}", in: menu).isEnabled, "the Edit Pin popover (#363)")
+    #expect(try entry("Edit Pinned URL\u{2026}", in: menu).action == .editPin(tab, focus: .url))
+    #expect(try entry("Rename", in: menu).action == .rename(tab), "a pinned row keeps its inline rename (#363)")
   }
 
   /// BH-057, BH-060, BH-061: the reset family needs a page that left its pinned URL.
@@ -119,12 +121,17 @@ struct SidebarContextMenuTests {
   @Test func favoriteMenuMatchesTheDesign() throws {
     let favorite = sidebar.addTab(url: url, title: "F", in: .favorites(profile: "default"))
     let menu = entries(.favorite(favorite))
-    #expect(titles(menu) == ["Rename", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL", "", "Copy Link",
-                             "", "Remove from Favorites", "Close and Keep Favorite"])
+    #expect(titles(menu) == ["Rename\u{2026}", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
+                             "Copy Link", "", "Remove from Favorites", "Close and Keep Favorite"])
     #expect(try entry("Remove from Favorites", in: menu).action == .removeFromFavorites(favorite))
     #expect(try entry("Close and Keep Favorite", in: menu).action == .archive([favorite]))
     #expect(try !entry("Back to Pinned URL", in: menu).isEnabled)
-    #expect(try !entry("Rename", in: menu).isEnabled, "a tile shows no title to edit in place")
+    #expect(try entry("Rename\u{2026}", in: menu).action == .editPin(favorite, focus: .name),
+            "a tile shows no title to edit in place: Rename opens the Edit Pin popover on Name (#363)")
+    #expect(try entry("Edit Pinned URL\u{2026}", in: menu).action == .editPin(favorite, focus: .url))
+    #expect(try entry("Rename\u{2026}", in: menu).isEnabled)
+    #expect(try entry("Edit Pinned URL\u{2026}", in: menu).isEnabled)
+    #expect(try !entry("Change Icon", in: menu).isEnabled)
   }
 
   // MARK: 3.4 Folder

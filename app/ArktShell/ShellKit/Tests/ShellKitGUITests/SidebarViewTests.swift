@@ -398,7 +398,7 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertNil(controller.current, "folders toggle in place and never become current")
   }
 
-  func testFaviconReplacesLetterPlaceholder() throws {
+  func testFaviconReplacesLetterPlaceholder() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
     let tab = sidebar.children(of: .today(sidebar.spaceOrder[0]))[0]
@@ -408,6 +408,7 @@ final class SidebarViewTests: XCTestCase {
     }
     let data = try XCTUnwrap(image.tiffRepresentation)
     controller.setFavicon(data, for: tab)
+    await controller.settleFaviconDecodes()
     let updated = try XCTUnwrap(try cell(controller, tab).faviconView.image)
     XCTAssertFalse(updated === placeholder)
     XCTAssertEqual(updated.size, NSSize(width: 4, height: 4))
@@ -733,13 +734,14 @@ final class SidebarReviewTests: XCTestCase {
   }
 
   // E4b: the favicon stays while the node exists (engine tab closed or not); it goes with the node.
-  func testFaviconIsKeptWhileTheNodeExistsAndDroppedWithIt() throws {
+  func testFaviconIsKeptWhileTheNodeExistsAndDroppedWithIt() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
     let today = sidebar.children(of: .today(sidebar.spaceOrder[0]))
     let data = try faviconData()
     controller.setFavicon(data, for: today[0])
     controller.setFavicon(data, for: today[2])
+    await controller.settleFaviconDecodes()
     controller.activate(node: today[0])
     controller.deactivate(node: today[0])
     controller.deactivate(node: today[2])                 // never current
@@ -750,7 +752,7 @@ final class SidebarReviewTests: XCTestCase {
     XCTAssertNotNil(controller.favicons[today[2]])
   }
 
-  func testFaviconsOfARemovedSpaceAreDropped() throws {
+  func testFaviconsOfARemovedSpaceAreDropped() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
     let removed = sidebar.spaceOrder[1]
@@ -758,12 +760,13 @@ final class SidebarReviewTests: XCTestCase {
     let favorite = sidebar.children(of: .favorites(profile: "default"))[0]
     let data = try faviconData()
     controller.setFavicons([tab: data, favorite: data])
+    await controller.settleFaviconDecodes()
     sidebar.removeSpace(removed)                          // emits `.spaceRemoved` only
     XCTAssertNil(controller.favicons[tab])
     XCTAssertNotNil(controller.favicons[favorite])
   }
 
-  func testSetFaviconsDecodesABatchAndShowsIt() throws {
+  func testSetFaviconsDecodesABatchAndShowsIt() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
     let today = sidebar.children(of: .today(sidebar.spaceOrder[0]))
@@ -775,6 +778,7 @@ final class SidebarReviewTests: XCTestCase {
     let placeholder = try cell().faviconView.image
     let data = try faviconData()
     controller.setFavicons([today[0]: data, today[1]: data, NodeID(): data])
+    await controller.settleFaviconDecodes()
     XCTAssertNotNil(controller.favicons[today[0]])
     XCTAssertNotNil(controller.favicons[today[1]])
     XCTAssertEqual(controller.favicons.count, 2, "ids that are not in the source are ignored")

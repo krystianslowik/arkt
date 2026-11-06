@@ -25,4 +25,9 @@ public protocol ArchiveStateStoring: Sendable {
   /// Track D open question 6, decided in Track E: an Arc sidebar import restarts the auto-archive clock.
   func resetAutoArchiveStart(to date: Date) async throws
   func loadArchiveSettings() async throws -> ArchiveSettings
+  /// Reads the stored settings (or the defaults), applies `change` and stores the result, in one transaction; returns
+  /// what was stored. Settings rows change one field each, so a row never overwrites another row's value (#448).
+  func updateArchiveSettings(
+    at date: Date, _ change: @escaping @Sendable (inout ArchiveSettings) -> Void
+  ) async throws -> ArchiveSettings
 }

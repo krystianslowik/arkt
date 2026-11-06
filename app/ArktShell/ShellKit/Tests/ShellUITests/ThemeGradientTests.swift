@@ -8,7 +8,7 @@ import Testing
 /// encoded sRGB/P3 components.
 struct ThemeGradientMathTests {
   private let colors: [RGBA] = [
-    .srgb(hex: 0x1C1C20), .srgb(hex: 0xF2F0EE), .p3(hex: 0x2D4468, alpha: 1), .p3(hex: 0xF29BBB, alpha: 1),
+    .srgb(hex: 0x1C1C20), .srgb(hex: 0xF2F0EE), .p3(hex: 0x3C3B72, alpha: 1), .p3(hex: 0xDDB4D2, alpha: 1),
     RGBA(red: 0.1, green: 0.7, blue: 0.4, alpha: 0.35, space: .displayP3),
     RGBA(red: -0.05, green: 0.5, blue: 1.2, alpha: 1, space: .sRGB),
   ]
@@ -34,7 +34,7 @@ struct ThemeGradientMathTests {
   }
 
   @Test func theEndpointsAreNotMoved() {
-    let a = RGBA.p3(hex: 0xF2EAE4, alpha: 1), b = RGBA.p3(hex: 0xF29BBB, alpha: 1)
+    let a = RGBA.p3(hex: 0xF7EEF3, alpha: 1), b = RGBA.p3(hex: 0xDDB4D2, alpha: 1)
     for (t, expected) in [(0.0, a), (1.0, b)] {
       let got = ThemeGradient.mix(a, b, t)
       #expect(abs(got.red - expected.red) < 1e-6)
@@ -46,7 +46,7 @@ struct ThemeGradientMathTests {
 
   /// OKLab: L, a and b each move linearly between the stops. A component-wise RGB blend would not.
   @Test func theMixIsLinearInOKLab() {
-    let a = RGBA.p3(hex: 0x2D4468, alpha: 1), b = RGBA.p3(hex: 0xF29BBB, alpha: 1)
+    let a = RGBA.p3(hex: 0x3C3B72, alpha: 1), b = RGBA.p3(hex: 0xDDB4D2, alpha: 1)
     let from = ThemeGradient.oklab(a), to = ThemeGradient.oklab(b)
     for t in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
       let lab = ThemeGradient.oklab(ThemeGradient.mix(a, b, t))
@@ -93,8 +93,8 @@ struct ThemeGradientMathTests {
 // MARK: - Stop expansion
 
 struct ThemeGradientExpansionTests {
-  private let stops = [RGBA.p3(hex: 0xF2EAE4, alpha: 1), RGBA.p3(hex: 0xF29BBB, alpha: 1),
-                       RGBA.p3(hex: 0x120F2E, alpha: 1)]
+  private let stops = [RGBA.p3(hex: 0xF7EEF3, alpha: 1), RGBA.p3(hex: 0xDDB4D2, alpha: 1),
+                       RGBA.p3(hex: 0x1D1838, alpha: 1)]
 
   /// `(n - 1) * segments + 1` stops, so the endpoints stay exact and every junction appears once.
   @Test func everyPairIsExpandedIntoEvenSteps() {

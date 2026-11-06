@@ -60,6 +60,7 @@ final class ClearTodayWindowsTests: XCTestCase {
     XCTAssertEqual(first.visibleNodes, [world.today[0]])
     XCTAssertEqual(second.visibleNodes, [world.today[1]])
     first.clearTodayTabs(nil)
+    first.settlePendingClear()                        // the exit runs on screen (#413)
 
     XCTAssertEqual(Set(source.children(of: .today(world.space))), [world.today[0], world.today[1]])
     XCTAssertNotNil(second.engineTab(of: world.today[1]), "the other window keeps its page")
@@ -74,6 +75,7 @@ final class ClearTodayWindowsTests: XCTestCase {
     let before = source.children(of: .today(world.space))
 
     first.clearTodayTabs(nil)
+    first.settlePendingClear()                        // the exit runs on screen (#413)
     XCTAssertEqual(Set(source.children(of: .today(world.space))), [world.today[0], world.today[1]])
     first.toasts.performActionForTesting()
 

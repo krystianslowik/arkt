@@ -29,7 +29,7 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     window.setFrame(NSRect(origin: visible.origin, size: size), display: true)
     bar = CommandBarController(parent: window)
     bar.settings.dismissSearchSuggestionNotice()
-    bar.announce = { [unowned self] in announcements.append($0) }
+    bar.announce = { [unowned self] text, _ in announcements.append(text) }
     bar.dismissFinisher = { $0() }
     bar.barView.selectionMotion.drivesFramesItself = false
     bar.barView.widthMotion.drivesFramesItself = false

@@ -211,6 +211,10 @@ public protocol SidebarSource: AnyObject {
   @discardableResult func duplicateNode(_ id: NodeID) throws -> NodeID
   /// New Folder (KB-040, BH-094): an empty folder at `index` (clamped; nil appends). Emits `.structure`.
   @discardableResult func addFolder(title: String, in location: SidebarLocation, at index: Int?) throws -> NodeID
+  /// Removes `id` and its subtree without archiving it (#356: a Today tab moved into Little Arkt keeps its page, which
+  /// is archived when its Little Arkt window closes). A pane leaves its split as a closed pane does. Emits
+  /// `.structure` for the location it was in; an unknown id changes nothing. Closing a row goes through the Archive.
+  func removeNode(_ id: NodeID)
 
   /// Moves a node to `location` at `index` (measured before removal, clamped). Emits `.structure` for every
   /// location whose child order changed. Throws `SidebarMoveError.favoritesFull` when the destination is a full

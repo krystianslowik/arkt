@@ -10,6 +10,8 @@ final class AppCommands: NSObject {
   /// Edit > Undo's target (menu targets are weak): Cmd-Z reopens a closed tab or Peek unless text is being edited
   /// (#346, KB-011).
   let undoRouter = ReopenUndoRouter()
+  /// File > Reopen Closed Tab's target: the key window's reopen, else the last closed Little Arkt window (#355).
+  private(set) lazy var reopenRouter = ReopenClosedRouter { [weak self] in self?.session?.windows }
 
   private var session: AppSession? { composition?.session }
 
@@ -50,6 +52,13 @@ final class AppCommands: NSObject {
 
   /// Help > Welcome to Arkt (onboarding spec, section 12): the first run again over the frontmost window.
   @objc func showWelcome(_ sender: Any?) { session?.showWelcome() }
+}
+
+/// The Window menu's Little Arkt section (#356): rebuilt each time the menu opens, from the open Little Arkt windows.
+extension AppCommands: NSMenuDelegate {
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    session?.windows.littleArktMenus.updateWindowMenu(menu)
+  }
 }
 
 extension AppCommands: NSMenuItemValidation {

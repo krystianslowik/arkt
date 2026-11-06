@@ -359,6 +359,386 @@ final class WindowLifecycleTests: XCTestCase {
     XCTAssertTrue(f.engine.tabIDs.isEmpty)
   }
 
+  /// #559: a tab the engine opens on its own in a blank or incognito window (a `target=_blank` link, `window.open`,
+  /// `chrome.tabs.create`) becomes one of the window's private pages, not a Today row. A foreground one is shown, a
+  /// background one waits, and closing the shown page shows the one before it. None of it schedules a sidebar save.
+  func testEngineCreatedTabsInPrivateWindowsStayOutOfTheSharedSidebar() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+
+    for incognito in [false, true] {
+      let window = f.set.openWindow(opensFirstTab: false)
+      if incognito { window.makeIncognito() } else { window.makeBlank() }
+      window.commandBar.show(.newTab)
+      window.commandBar.setQueryForTesting("private-visit.example")
+      window.commandBar.commit()
+      let opener = try XCTUnwrap(window.currentTab)
+      let engineWindow = try XCTUnwrap(window.engineWindow)
+
+      let popup = f.engine.engineCreateTab(url: EngineWorld.url("blank-target"), in: engineWindow, opener: opener)
+      XCTAssertEqual(window.currentTab, popup, "a foreground target=_blank page is shown in this window")
+      XCTAssertEqual(window.urlBar.url, EngineWorld.url("blank-target"))
+      XCTAssertEqual(window.privateTabs, [opener, popup])
+      XCTAssertNotNil(f.engine.snapshot(of: opener), "the opener stays open for the page that opened it")
+
+      let background = f.engine.engineCreateTab(url: EngineWorld.url("background"), in: engineWindow,
+                                                opener: popup, active: false)
+      XCTAssertEqual(window.currentTab, popup, "a background page does not take the window")
+      XCTAssertEqual(Set(window.privateTabs), [opener, popup, background])
+
+      f.engine.engineActivate(background)
+      XCTAssertEqual(window.currentTab, background, "an engine activation shows the page")
+      XCTAssertEqual(window.urlBar.url, EngineWorld.url("background"))
+
+      f.engine.engineCloseTab(background)
+      XCTAssertEqual(window.currentTab, popup, "closing the shown page shows the one before it")
+      XCTAssertEqual(f.engine.activeTab(in: engineWindow), popup, "the engine is told which page is shown")
+      f.engine.engineCloseTab(popup)
+      XCTAssertEqual(window.currentTab, opener)
+      XCTAssertEqual(window.privateTabs, [opener])
+
+      let pasted = EngineWorld.url("pasted-after-popup")
+      try XCTUnwrap(window.sidebarController.onPasteAndGo)(pasted)
+      XCTAssertEqual(window.currentTab, opener, "a later visit reuses the shown page")
+      XCTAssertEqual(f.engine.snapshot(of: opener)?.url, pasted)
+
+      XCTAssertEqual(saves, 0, "no engine-created tab schedules a sidebar save")
+      XCTAssertEqual(f.source.sidebar, before, "no engine-created tab reaches the shared sidebar")
+      XCTAssertTrue(window.sidebarController.spaces.isEmpty)
+
+      window.window?.performClose(nil)
+      XCTAssertTrue(window.privateTabs.isEmpty, "closing the window leaves no private page behind")
+    }
+    XCTAssertTrue(f.engine.tabIDs.isEmpty)
+  }
+
+  /// #559: when the shown private page closes, the window shows the page shown before it, not the engine's own pick
+  /// (its next tab in the strip), and tells the engine.
+  func testClosingAPrivatePageShowsThePageShownBeforeItOverTheEnginesPick() throws {
+    let f = try makeFixture()
+    let window = f.set.openWindow(opensFirstTab: false)
+    window.makeIncognito()
+    window.commandBar.show(.newTab)
+    window.commandBar.setQueryForTesting("private-visit.example")
+    window.commandBar.commit()
+    let opener = try XCTUnwrap(window.currentTab)
+    let engineWindow = try XCTUnwrap(window.engineWindow)
+    let popup = f.engine.engineCreateTab(url: EngineWorld.url("popup"), in: engineWindow, opener: opener)
+    let background = f.engine.engineCreateTab(url: EngineWorld.url("background"), in: engineWindow,
+                                              opener: popup, active: false)
+    f.engine.engineActivate(background)
+    f.engine.engineActivate(opener)
+    XCTAssertEqual(window.privateTabs, [popup, background, opener])
+
+    f.engine.engineCloseTab(opener)                       // the engine's pick is its next tab, `popup`
+    XCTAssertEqual(window.currentTab, background, "the page shown before the closed one is shown")
+    XCTAssertEqual(f.engine.activeTab(in: engineWindow), background, "the engine is told the shell's pick")
+    XCTAssertEqual(window.urlBar.url, EngineWorld.url("background"))
+    window.window?.performClose(nil)
+  }
+
+  /// #559: the user cancels a private window's close at a leave-site prompt. The window is not closing any more: a
+  /// page the engine opens afterwards is adopted, and closing it shows the page before it.
+  func testCancelledCloseOfAPrivateWindowKeepsAdoptingEngineTabs() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let window = f.set.openWindow(opensFirstTab: false)
+    window.makeIncognito()
+    window.commandBar.show(.newTab)
+    window.commandBar.setQueryForTesting("private-visit.example")
+    window.commandBar.commit()
+    let page = try XCTUnwrap(window.currentTab)
+    let engineWindow = try XCTUnwrap(window.engineWindow)
+
+    f.engine.holdClose(page)
+    window.window?.performClose(nil)
+    XCTAssertTrue(window.isWindowCloseRequested, "the close waits on the leave-site prompt")
+    XCTAssertTrue(f.engine.answerDialog(page, accept: false))
+    XCTAssertFalse(window.isWindowCloseRequested, "staying on the page cancels the window close")
+    XCTAssertEqual(window.currentTab, page)
+
+    let popup = f.engine.engineCreateTab(url: EngineWorld.url("after-cancel"), in: engineWindow, opener: page)
+    XCTAssertNotNil(f.engine.snapshot(of: popup), "the page is adopted, not closed on creation")
+    XCTAssertEqual(window.currentTab, popup)
+    f.engine.engineCloseTab(popup)
+    XCTAssertEqual(window.currentTab, page, "closing it shows the page before it")
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+  }
+
+  /// #559: Paste URL as New Tab (Cmd-Opt-V) in a blank or incognito window opens a new private page, not a Today row.
+  func testPasteURLAsNewTabInAPrivateWindowOpensAPrivatePage() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let board = NSPasteboard(name: .init("WindowLifecycleTests.paste"))
+    board.clearContents()
+    board.setString("https://example.com/pasted-new-tab", forType: .string)
+
+    for incognito in [false, true] {
+      let window = f.set.openWindow(opensFirstTab: false)
+      if incognito { window.makeIncognito() } else { window.makeBlank() }
+      window.pasteboard = board
+      window.pasteURLAsNewTab(nil)
+      let first = try XCTUnwrap(window.currentTab, "the pasted URL opens in this window")
+      XCTAssertEqual(f.engine.snapshot(of: first)?.url?.absoluteString, "https://example.com/pasted-new-tab")
+
+      window.pasteURLAsNewTab(nil)
+      let second = try XCTUnwrap(window.currentTab)
+      XCTAssertNotEqual(second, first, "as a new page")
+      XCTAssertEqual(window.privateTabs, [first, second])
+
+      XCTAssertEqual(saves, 0, "no paste schedules a sidebar save")
+      XCTAssertEqual(f.source.sidebar, before, "no paste reaches the shared sidebar")
+      XCTAssertTrue(window.sidebarController.spaces.isEmpty)
+      window.window?.performClose(nil)
+    }
+  }
+
+  /// #669: a window the engine opens for a page of a blank or incognito window (a `window.open` popup, which would
+  /// go to Little Arkt, a `window.open` without window features, an extension's `chrome.windows.create`) is a private
+  /// window of the same kind. Its pages, the first one and any the engine opens there later, never reach the shared
+  /// sidebar or schedule a save, and it never takes over an open normal window.
+  func testEngineWindowsOpenedForAPrivatePageStayPrivate() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let spare = f.set.openWindow(opensFirstTab: false)       // a normal window with no engine window yet
+
+    for incognito in [false, true] {
+      let opener = f.set.openWindow(opensFirstTab: false)
+      if incognito { opener.makeIncognito() } else { opener.makeBlank() }
+      opener.commandBar.show(.newTab)
+      opener.commandBar.setQueryForTesting("private-opener.example")
+      opener.commandBar.commit()
+      let openerWindow = try XCTUnwrap(opener.engineWindow)
+
+      let requests: [(String, EngineWindowRequest)] = [
+        ("popup", EngineWindowRequest(kind: .page, openerWindow: openerWindow,
+                                      bounds: CGRect(x: 200, y: 200, width: 480, height: 360),
+                                      profile: EngineProfileID("default"), initialURL: EngineWorld.url("popup"),
+                                      isPopup: true)),
+        ("new window", EngineWindowRequest(kind: .reopen, openerWindow: openerWindow,
+                                           profile: EngineProfileID("default"),
+                                           initialURL: EngineWorld.url("new-window"))),
+        ("extension", EngineWindowRequest(kind: .extension, openerWindow: openerWindow,
+                                          profile: EngineProfileID("default"),
+                                          initialURL: EngineWorld.url("extension"))),
+      ]
+      for (name, request) in requests {
+        let id = try XCTUnwrap(f.engine.openEngineWindow(request), name)
+        XCTAssertTrue(f.set.littleArkts.isEmpty, "\(name): not a Little Arkt window, whose Open in writes a row")
+        XCTAssertNil(spare.engineWindow, "\(name): an open normal window is not taken over")
+        let window = try XCTUnwrap(f.set.controllers.first { $0.engineWindow == id }, name)
+        XCTAssertTrue(window.isPrivateWindow, name)
+        XCTAssertEqual(window.sidebarController.presentation, opener.sidebarController.presentation,
+                       "\(name): the same kind of window as its opener")
+        XCTAssertFalse(window.savesSession, name)
+        let page = try XCTUnwrap(window.currentTab, "\(name): the window shows its page")
+        XCTAssertEqual(window.privateTabs, [page], name)
+        XCTAssertEqual(f.engine.snapshot(of: page)?.url, request.initialURL, name)
+
+        let later = f.engine.engineCreateTab(url: EngineWorld.url("later"), in: id, opener: page)
+        XCTAssertEqual(window.privateTabs, [page, later], "\(name): a later engine tab is a private page too")
+        XCTAssertTrue(window.sidebarController.spaces.isEmpty, name)
+        XCTAssertEqual(saves, 0, "\(name): no save is scheduled")
+        XCTAssertEqual(f.source.sidebar, before, "\(name): the shared sidebar is unchanged")
+        window.window?.performClose(nil)
+      }
+      opener.window?.performClose(nil)
+    }
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+  }
+
+  /// #669: a window the engine marks as off the record is an incognito window even with no opener, and never takes
+  /// over saving the session (a Dock reopen would).
+  func testOffTheRecordEngineWindowIsAnIncognitoWindow() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let request = EngineWindowRequest(kind: .reopen, profile: EngineProfileID("default"),
+                                      initialURL: EngineWorld.url("off-the-record"), isOffTheRecord: true)
+    let id = try XCTUnwrap(f.engine.openEngineWindow(request))
+    let window = try XCTUnwrap(f.set.controllers.first { $0.engineWindow == id })
+    XCTAssertTrue(window.isPrivateWindow)
+    XCTAssertEqual(window.sidebarController.presentation, .incognito)
+    XCTAssertFalse(window.savesSession, "an off-the-record window never saves the session")
+    let page = try XCTUnwrap(window.currentTab)
+    XCTAssertEqual(window.privateTabs, [page])
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+    window.window?.performClose(nil)
+  }
+
+  /// #669: the same requests from a normal window keep their normal routing: a popup goes to Little Arkt and an
+  /// extension window is a normal window.
+  func testEngineWindowsOpenedForANormalPageAreNotPrivate() throws {
+    let f = try makeFixture()
+    let opener = f.set.openWindow()
+    let openerWindow = try XCTUnwrap(opener.engineWindow)
+    let popup = try XCTUnwrap(f.engine.openEngineWindow(EngineWindowRequest(
+      kind: .page, openerWindow: openerWindow, profile: EngineProfileID("default"),
+      initialURL: EngineWorld.url("popup"), isPopup: true)))
+    XCTAssertNotNil(f.set.littleArkts.first { $0.engineWindow == popup })
+    let id = try XCTUnwrap(f.engine.openEngineWindow(EngineWindowRequest(
+      kind: .extension, openerWindow: openerWindow, profile: EngineProfileID("default"),
+      initialURL: EngineWorld.url("extension"))))
+    let window = try XCTUnwrap(f.set.controllers.first { $0.engineWindow == id })
+    XCTAssertFalse(window.isPrivateWindow)
+    XCTAssertEqual(window.sidebarController.presentation, .standard)
+    for little in f.set.littleArkts { little.window.orderOut(nil) }
+  }
+
+  // MARK: Opt-Cmd-click from a private page (#710)
+
+  /// #710: Opt-Cmd-click on a link in a blank or incognito window opens the link in a private window of the same
+  /// kind, as #669 does for the engine's popups, never in Little Arkt (its Open in and its Space chooser use the
+  /// shared sidebar, and closing it writes an Archive entry). Nothing reaches the shared sidebar, the Archive or
+  /// session saving, before or after the new window closes.
+  func testOptionCommandClickInAPrivateWindowOpensAPrivateWindow() async throws {
+    let f = try makeFixture()
+    var saves = 0
+    var archived: [NodeID] = []
+    var littleArchived = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    f.set.configure = { controller in controller.onArchive = { archived += $0 } }
+    f.set.onLittleArktArchive = { _ in
+      littleArchived += 1
+      return UUID()
+    }
+    let before = f.source.sidebar
+    let link = EngineWorld.url("linked")
+
+    for incognito in [false, true] {
+      let opener = f.set.openWindow(opensFirstTab: false)
+      if incognito { opener.makeIncognito() } else { opener.makeBlank() }
+      opener.commandBar.show(.newTab)
+      opener.commandBar.setQueryForTesting("private-opener.example")
+      opener.commandBar.commit()
+      let page = try XCTUnwrap(opener.currentTab)
+      let pageURL = f.engine.snapshot(of: page)?.url
+      let name = incognito ? "incognito" : "blank"
+
+      let decision = f.engine.simulateLinkActivation(in: page, url: link, modifiers: [.command, .option],
+                                                     disposition: .newBackgroundTab)
+
+      XCTAssertEqual(decision, .cancel, "\(name): the engine does not open the link itself")
+      await until("\(name): a window shows the link") {
+        !f.set.littleArkts.isEmpty || f.set.controllers.contains { $0 !== opener && $0.currentTab != nil }
+      }
+      XCTAssertTrue(f.set.littleArkts.isEmpty, "\(name): not a Little Arkt window")
+      XCTAssertEqual(f.set.controllers.count, 2, name)
+      let window = try XCTUnwrap(f.set.controllers.first { $0 !== opener }, name)
+      XCTAssertTrue(window.isPrivateWindow, name)
+      XCTAssertEqual(window.sidebarController.presentation, opener.sidebarController.presentation,
+                     "\(name): the same kind of window as its opener")
+      XCTAssertFalse(window.savesSession, name)
+      let shown = try XCTUnwrap(window.currentTab, name)
+      XCTAssertEqual(window.privateTabs, [shown], name)
+      XCTAssertEqual(f.engine.snapshot(of: shown)?.url, link, name)
+      XCTAssertEqual(opener.currentTab, page, "\(name): the source page stays where it was")
+      XCTAssertEqual(f.engine.snapshot(of: page)?.url, pageURL, "\(name): the source page did not navigate")
+      XCTAssertTrue(window.sidebarController.spaces.isEmpty, name)
+      XCTAssertEqual(saves, 0, "\(name): no save is scheduled")
+      XCTAssertEqual(f.source.sidebar, before, "\(name): the shared sidebar is unchanged")
+
+      window.window?.performClose(nil)
+      opener.window?.performClose(nil)
+      for little in f.set.littleArkts { little.window.performClose(nil) }
+      XCTAssertTrue(archived.isEmpty, "\(name): closing it archives nothing")
+      XCTAssertEqual(littleArchived, 0, "\(name): no Little Arkt Archive entry")
+    }
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+  }
+
+  /// #710: the window's kind is read at the click, not one main-queue hop later. An incognito window that closes and
+  /// goes away before the hop still gets its link opened in an incognito window, never in Little Arkt.
+  func testOptionCommandClickFromAPrivateWindowThatGoesAwayStaysPrivate() async throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let link = EngineWorld.url("linked")
+    weak var gone: ShellWindowController?
+    var decision: EngineLinkDecision?
+
+    autoreleasepool {
+      let opener = f.set.openWindow(opensFirstTab: false)
+      opener.makeIncognito()
+      opener.commandBar.show(.newTab)
+      opener.commandBar.setQueryForTesting("private-opener.example")
+      opener.commandBar.commit()
+      guard let page = opener.currentTab else { return XCTFail("the opener shows its page") }
+      decision = f.engine.simulateLinkActivation(in: page, url: link, modifiers: [.command, .option],
+                                                 disposition: .newBackgroundTab)
+      opener.window?.performClose(nil)
+      gone = opener
+    }
+    XCTAssertTrue(f.set.controllers.isEmpty, "the closed opener left the set")
+    XCTAssertNil(gone, "the opener is gone before the hop")
+
+    XCTAssertEqual(decision, .cancel)
+    await until("a window shows the link") {
+      !f.set.littleArkts.isEmpty || f.set.controllers.contains { $0.currentTab != nil }
+    }
+    XCTAssertTrue(f.set.littleArkts.isEmpty, "not a Little Arkt window")
+    let window = try XCTUnwrap(f.set.controllers.first)
+    XCTAssertTrue(window.isPrivateWindow)
+    XCTAssertEqual(window.sidebarController.presentation, .incognito)
+    XCTAssertFalse(window.savesSession)
+    let shown = try XCTUnwrap(window.currentTab)
+    XCTAssertEqual(f.engine.snapshot(of: shown)?.url, link)
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+    window.window?.performClose(nil)
+    for little in f.set.littleArkts { little.window.orderOut(nil) }
+  }
+
+  /// #710 control: in a normal window, Opt-Cmd-click on a link still opens it in a Little Arkt window, and no new
+  /// browser window.
+  func testOptionCommandClickInANormalWindowStillOpensLittleArkt() async throws {
+    let f = try makeFixture()
+    let opener = f.set.openWindow()
+    let page = try XCTUnwrap(opener.currentTab)
+    let link = EngineWorld.url("linked")
+
+    let decision = f.engine.simulateLinkActivation(in: page, url: link, modifiers: [.command, .option],
+                                                   disposition: .newBackgroundTab)
+
+    XCTAssertEqual(decision, .cancel)
+    await until("a window shows the link") {
+      !f.set.littleArkts.isEmpty || f.set.controllers.count > 1
+    }
+    XCTAssertEqual(f.set.littleArkts.count, 1)
+    let little = try XCTUnwrap(f.set.littleArkts.first)
+    let shown = try XCTUnwrap(little.shownTab)
+    XCTAssertEqual(f.engine.snapshot(of: shown)?.url, link)
+    XCTAssertEqual(f.set.controllers.count, 1, "no new browser window")
+    XCTAssertEqual(opener.currentTab, page)
+    for little in f.set.littleArkts { little.window.orderOut(nil) }
+  }
+
+  /// Takes main-actor turns until `condition` holds; bounded, no clock. The Opt-Cmd-click opens its window one
+  /// main-queue hop after the engine's decision.
+  private func until(_ what: String, turns: Int = 5000, file: StaticString = #filePath, line: UInt = #line,
+                     _ condition: () -> Bool) async {
+    for _ in 0..<turns {
+      if condition() { return }
+      await Task.yield()
+    }
+    if condition() { return }
+    XCTFail("never reached: \(what)", file: file, line: line)
+  }
+
   private func tabURLs(_ sidebar: SidebarModel.Sidebar) -> [String] {
     sidebar.nodes.values.compactMap { node in
       if case .tab(let tab) = node.kind { tab.url.absoluteString } else { nil }

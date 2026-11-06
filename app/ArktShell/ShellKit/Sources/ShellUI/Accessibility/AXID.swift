@@ -45,6 +45,8 @@ public enum AXID {
     public static let footerLink = "dialog.footerLink"
     /// The prompt's text field (a page's `prompt()`); value: the text.
     public static let input = "dialog.input"
+    /// The checkbox (the extension remove sheet's Report abuse); value: checked or not.
+    public static let checkbox = "dialog.checkbox"
   }
 
   /// The browser data import (#514): the sheet and the first run's Hero entry share these.
@@ -88,7 +90,7 @@ public enum AXID {
     /// Value: the displayed host of the shown tab.
     public static let urlBar = "sidebar.urlBar"
     public static let newTab = "sidebar.newTab"
-    /// Shown only for an engine that runs extensions. Enabled: the window has extension actions.
+    /// Shown only for an engine that runs extensions. Opens the Extensions panel (`AXID.Extensions`).
     public static let extensions = "sidebar.extensions"
     public static let spaceDots = "sidebar.spaceDots"
     /// Label: Space title. Selected: current Space.
@@ -106,15 +108,19 @@ public enum AXID {
     public static let spaceCollapsePinned = "sidebar.spaceCollapsePinned"
     /// The current Space page's outline of pinned and Today rows (a proxy element, #269).
     public static let outline = "sidebar.outline"
-    /// Label: row title. Selected: row state is `current`.
+    /// Label: row title. Value: section and state, "Pinned, current, playing audio". Selected: row state is
+    /// `current`. Actions: press (activate), show menu (the context menu).
     public static let rowPinned = "sidebar.row.pinned"
-    /// Label: row title. Selected: row state is `current`.
+    /// Label: row title. Value: section and state, "Today, current". Selected: row state is `current`. Actions:
+    /// press (activate), show menu (the context menu).
     public static let rowToday = "sidebar.row.today"
-    /// Label: folder title.
+    /// Label: folder title. Value: section. Actions: press (open or close), show menu (the context menu).
     public static let rowFolder = "sidebar.row.folder"
     /// Label: joined pane titles. Selected: any pane of the split is `current`.
     public static let rowSplit = "sidebar.row.split"
     public static let divider = "sidebar.divider"
+    /// The Clear control on the divider above Today (#413). Label "Clear Today tabs"; present while not drawn.
+    public static let clearToday = "sidebar.clearToday"
     /// Present only while the row's close button is shown. Label: tooltip.
     public static let rowClose = "sidebar.row.close"
     /// A row's audio button (#364): mutes or unmutes the page.
@@ -124,7 +130,8 @@ public enum AXID {
   /// Favorites grid and tiles at the top of the sidebar (group U4b).
   public enum Favorites {
     public static let grid = "favorites.grid"
-    /// Label: title. Value: `loaded` or `unloaded`.
+    /// Label: title. Value: `loaded` or `unloaded`. Selected: the Favorite is current. Actions: press (activate),
+    /// show menu (the context menu).
     public static let tile = "favorites.tile"
     /// Present only while a loaded tile is hovered.
     public static let tileClose = "favorites.tile.close"
@@ -134,7 +141,8 @@ public enum AXID {
 
   /// Command bar panel, field, results table and result rows (group U4c).
   public enum CommandBar {
-    /// On the panel's content view (`CommandBarView`). Value: `open` while shown, `closed` while hidden and inert.
+    /// On the panel's content view (`CommandBarView`). Present while shown; absent while hidden and inert. No value
+    /// (#608: VoiceOver read the old "open" / "closed" one aloud).
     public static let root = "commandBar"
     public static let field = "commandBar.field"
     public static let results = "commandBar.results"
@@ -159,8 +167,6 @@ public enum AXID {
     public static let preview = "commandBar.preview"
     public static let previewSplit = "commandBar.preview.split"
     public static let previewPrimary = "commandBar.preview.primary"
-    public static let open = "open"
-    public static let closed = "closed"
   }
 
   /// Archive window, table, rows, search, filters, buttons and footer (group U4c, #111).

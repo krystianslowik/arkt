@@ -106,6 +106,7 @@ extension SettingsWindowController {
         row(PeekLinkCopy.crossSite, PeekLinkCopy.crossSiteNote, [crossSite]),
         row(PeekLinkCopy.shiftClick, nil, [shift]),
         littleArktLookupRow(),                     // #354
+        littleArktClickRow(),                      // #356
       ]),
       section("Downloads", downloadRows(), note: Self.downloadsNote),        // #132
       section("Updates", [
@@ -197,7 +198,6 @@ extension SettingsWindowController {
     identify(newProfile.button, .spaces, "newProfile")
     let addRoute = SettingsAddRowView(title: "Add Route...", planned: true)
     identify(addRoute.button, .spaces, "addRoute")
-    let archiveOptions = ["1 hour", "6 hours", "12 hours", "24 hours", "7 days", "30 days", "Never"]
     var blocks: [SettingsBlockView] = []
     if !spaceRows.isEmpty {
       blocks.append(section("Spaces", spaceRows,
@@ -205,12 +205,7 @@ extension SettingsWindowController {
                               + "Choosing a profile for each Space is not available yet."))
     }
     blocks += [
-      section("Archive", [
-        row("Archive Today tabs after", "Tabs you haven\u{2019}t looked at for this long move to the Archive.",
-            [popUp(.spaces, "archiveTodayAfter", archiveOptions, "12 hours")], planned: true),
-        row("Archive Little Arkt windows after", nil,
-            [popUp(.spaces, "archiveLittleArktAfter", archiveOptions, "6 hours")], planned: true),
-      ]),
+      section("Archive", archiveRows()),
       section("Profiles", profiles + [newProfile],
               note: "Each profile keeps its own Favorites, history, cookies, passwords and extensions."),
       section("Link routing", [
@@ -220,6 +215,25 @@ extension SettingsWindowController {
       ]),
     ]
     return blocks
+  }
+
+  /// The pop-ups' titles, shortest first (BH-081; decision on #448: all seven, Never included).
+  public static let archiveAfterTitles = ["1 hour", "6 hours", "12 hours", "24 hours", "7 days", "30 days", "Never"]
+
+  /// "Archive Today tabs after" (the Default profile, BH-080, BH-081) and "Archive Little Arkt windows after"
+  /// (BH-137). Each choice applies at once; planned at the defaults when the app gives no `archiveRows`.
+  private func archiveRows() -> [SettingsBlockView] {
+    let rows = services.archiveRows
+    let tabs = popUp(.spaces, "archiveTodayAfter", Self.archiveAfterTitles, rows?.tabsAfter() ?? "12 hours")
+    tabs.onChange = { title in rows?.setTabsAfter(title) }
+    let littleArkt = popUp(.spaces, "archiveLittleArktAfter", Self.archiveAfterTitles,
+                           rows?.littleArktAfter() ?? "6 hours")
+    littleArkt.onChange = { title in rows?.setLittleArktAfter(title) }
+    return [
+      row("Archive Today tabs after", "Tabs you haven\u{2019}t looked at for this long move to the Archive.", [tabs],
+          planned: rows == nil),
+      row("Archive Little Arkt windows after", nil, [littleArkt], planned: rows == nil),
+    ]
   }
 
   // MARK: Appearance

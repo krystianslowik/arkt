@@ -530,16 +530,16 @@ Worst case, before and after:
 
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
-| `secondaryText` | light | 0.50: 3.16:1 | 0.64: 4.55:1 | hovered URL bar over the pink stop `#F29BBB` |
-| `secondaryText` | dark | 0.50: 2.91:1 | 0.76: 4.53:1 | hovered URL bar over the Dev stop `#2D4468` |
-| `sidebarForeground` | light | 0.30: 1.92:1 | 0.48: 3.00:1 | close X on a hovered row over `#F29BBB` |
-| `sidebarForeground` | dark | 0.45: 2.45:1 | 0.57: 3.00:1 | close X on `tabCurrent` over `#2D4468` |
+| `secondaryText` | light | 0.50: 3.16:1 | 0.64: 4.55:1 | hovered URL bar over the earlier sample Personal end stop |
+| `secondaryText` | dark | 0.50: 2.91:1 | 0.76: 4.53:1 | hovered URL bar over the earlier sample Dev start stop |
+| `sidebarForeground` | light | 0.30: 1.92:1 | 0.48: 3.00:1 | close X on a hovered row over the earlier sample Personal end stop |
+| `sidebarForeground` | dark | 0.45: 2.45:1 | 0.57: 3.00:1 | close X on `tabCurrent` over the earlier sample Dev start stop |
 
 One step lower (0.63, 0.75, 0.47, 0.56) fails each case, so these are the smallest passing values at 0.01. The
 order primary > secondary > sidebar foreground holds in both modes and is asserted. Arc parity: both tokens are
 now darker (light) and brighter (dark) than Arc's levels.
 
-Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over `#2D4468`, below 4.5 (fixed in
+Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over the earlier sample Dev start stop, below 4.5 (fixed in
 #146, below).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 334 tests (327 plus 7 new), XCTest 181 tests
@@ -554,7 +554,7 @@ with the same probe as #72: 4.5:1 over every shipped Space theme surface, bare a
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
 | `primaryText` | light | 0.90: 6.83:1 | unchanged | |
-| `primaryText` | dark | 0.80: 4.27:1 | 0.84: 4.52:1 | `tabCurrent` over the Dev stop `#2D4468` |
+| `primaryText` | dark | 0.80: 4.27:1 | 0.84: 4.52:1 | `tabCurrent` over the earlier sample Dev start stop |
 
 0.83 gives 4.46:1, so 0.84 is the smallest passing level at 0.01. The fix raises the text level instead of lowering
 `tabCurrent` dark (0.17 would also pass) because it changes one token, keeps the current row clearly brighter than
@@ -563,7 +563,7 @@ primary > secondary (0.76) > sidebar foreground (0.57) still holds. Arc parity: 
 Arc's 0.80.
 
 Not covered: the letter tile shown for rows without a favicon draws `primaryText` on `sidebarItemHovered` on top of
-the row fill. In dark mode on `tabCurrent` over `#2D4468` that nested fill stays below 4.5:1 even at white 1.0
+the row fill. In dark mode on `tabCurrent` over the earlier sample Dev start stop that nested fill stays below 4.5:1 even at white 1.0
 (about 4.1:1), so it needs a change to the tile itself rather than the text level (fixed in #153, below).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 338 tests, XCTest 182 tests (GUI included), 0
@@ -580,14 +580,14 @@ stands in for the site's favicon and is read as an initial), so the test asserts
 | Mode | Tile fill | Before | After | Worst surface |
 |---|---|---|---|---|
 | light | P3 `#0E0F10` at 0.10 | 5.78:1 | unchanged | |
-| dark | P3 `#FAFBFF` at 0.15, now P3 `#0E0F10` at 0.15 | 3.40:1 | 5.43:1 | `tabCurrent` over the Dev stop `#2D4468` |
+| dark | P3 `#FAFBFF` at 0.15, now P3 `#0E0F10` at 0.15 | 3.40:1 | 5.43:1 | `tabCurrent` over the earlier sample Dev start stop |
 
 The fix is a new token, `ShellTokens.letterTileFill`: light keeps the shipped value (the same as
 `sidebarItemHovered` light), dark now darkens the surface instead of lightening it, so both flavors draw the tile
 as the palette's dark ink at a low level. `primaryText` is unchanged. Alternatives measured and dropped: white 1.0
 ink on the old tile reaches 4.09:1; a fainter light tile makes it worse (`#FAFBFF` at 0.05: 4.10:1); no fill
 passes with no headroom (4.52:1) and loses the tile shape. Black at 0.12 (5.36:1) is equivalent; `#0E0F10` matches
-the light tile. On the darkest shipped dark stop (`#120F2E`, bare row) the dark tile is barely visible; the letter
+the light tile. On the darkest shipped dark stop (the earlier sample Dev end stop, bare row) the dark tile is barely visible; the letter
 still reads there, which is what the tile is for.
 
 Fill and ink depend on the flavor only, so the bitmap cache key (`letter-<letter>-<flavor>@<size>x<scale>`) is
@@ -1683,7 +1683,7 @@ factor. `secondaryText` light fell to 4.49:1 (hovered URL bar over the Personal 
 
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
-| `secondaryText` | light | 0.65: 4.49:1 | 0.66: 4.60:1 | hovered URL bar over `#F29BBB` darkened by grain at 0.5 |
+| `secondaryText` | light | 0.65: 4.49:1 | 0.66: 4.60:1 | hovered URL bar over the earlier sample Personal end stop darkened by grain at 0.5 |
 
 ### Deferred
 
@@ -2790,3 +2790,109 @@ BH-076's auto-archive half. Clear already leaves a playing row (`pagePlaysMedia`
 `AppSession.startAutoArchive` already reads `windows.autoArchiveExempt`, so that file was not edited. Its comment still says media-playing tabs join once the engine reports audio. The engine reports it, and the exempt set now includes those tabs.
 
 Tests (written first: the new GUI case failed on the audible background tab, the muted page that still plays, and the split, and passed the mute-only and never-loaded cases, before the code): `ShellWindowSetTests` 12 run, 0 failures (the class had 11; the new case is `testAnAudibleBackgroundTabIsExemptFromAutoArchive`). ShellKit unit (`swift test -j 2 --skip ShellKitGUITests`): 1821 Swift Testing tests passed, 0 failures (1095 + 38 + 60 + 7 + 181 + 49 + 257 + 111 + 23). ArktCore not run: no ArktCore change. App build and XCUITest not run: `app/ArktShell/App` and `project.yml` were not touched.
+
+## Little Arkt: archive on close and idle, and Cmd-Shift-T (#355) (2026-11-05)
+
+BH-138, KB-080, BH-137. A Little Arkt page now goes to the Archive under the Little Arkt source.
+
+- `LittleArktWindowController.requestClose` captures the page (URL, title) and the window frame when the user asks to close (close button, Cmd-W) or the idle timer does; the window archives it when the engine reports the window closed with `.userClose`. The capture is dropped when a leave-site prompt is cancelled (`.closeCancelled`), when Open in moves the page, and when the window closes for any other reason (a quit or an extension while a prompt is up). A page that closes its own popup archives nothing. A prompt the user confirms still archives.
+- `ArchiveCoordinator.archiveLittleArkt(url:title:reason:)` queues one tab entry with source `.littleArc` and no section, through the same outbox as every archive; the sidebar does not change. `takeBackLittleArkt(_:)` takes an entry out of the archive without a sidebar insert, by id (not limited to the 50 latest archives). It refuses an entry the user restored from the Archive, so that window is not reopened (no second copy next to the Today row). The store side of `restore` moved into a shared `withdraw`.
+- `AutoArchiveTimer` runs a Little Arkt pass on every tick: `AutoArchivePolicy.littleArcWindowsToArchive` over `ShellWindowSet.littleArktIdleCandidates()`, with `ArchiveSettings.littleArcThreshold` (6 hours by default), loaded with the other archive settings when the timer starts and updated live from the Settings row (#448) through `AutoArchiveTimer.apply(_:)`, from the next tick. A window the user is in (key window of the active app), a page playing sound and a page that would ask before leaving are not candidates; each pass that sees one counts as activity, so its idle time starts again when that ends rather than closing it at once. Activity is otherwise opening, becoming key and resigning key; a page navigating on its own does not count.
+- Idle time is wall-clock time (`Date`), like the Today tabs' auto-archive: a Mac asleep for longer than the threshold closes and archives its idle Little Arkt windows on the first pass after it wakes.
+- Reopen Closed Tab (Cmd-Shift-T): `ShellWindowSet` keeps the last 50 closed Little Arkt windows. File > Reopen Closed Tab now targets `ReopenClosedRouter` (`AppCommands.reopenRouter`): it sends the action to whatever takes it down the responder chain (the key browser window, a key Little Arkt window), and with no window to take it (the only window was a Little Arkt and it closed) reopens the last closed Little Arkt itself. An explicit target, so the Engine build's `AppController` never gets it. A Little Arkt reopens on its page at its last frame, moved fully onto the screen it overlaps most (else the main screen) and shrunk to fit when it is not fully on a screen's visible frame (`LittleArktLayout.frame(reopening:on:)` over `WindowFramePlacement.restoredFrame`). There is no Chromium engine command for reopen.
+
+Product decisions (maintainer, 2026-11-05): Cmd-Shift-T in a main window reopens that window's own closes first, then the last Little Arkt (no recency merge across windows); idle closes show no toast; a reopened popup comes back as a normal Little Arkt.
+
+Tests (written first): CoreBridge `ArchiveCoordinatorTests` + `AutoArchiveTimerTests` 69 passed after merging main with #448 (10 new, one for a threshold change applied live, including a take-back after more than 50 other archives and one after a restore from the Archive). `LittleArktArchiveTests` (new) 18 run, 0 failures, 10 consecutive runs; `LittleArktLayoutTests` 12 passed (3 new; a frame partly off screen moves fully in); `MainMenuInventoryTests` 16 and `MainMenuKeyEquivalentTests` 8 (the router target); `LittleArktWindowTests` 14, `LittleArktFlightTests` 39 (2 skipped), `LittleArktDialogTests` 17, `ReopenClosedTests` 14, `SplitPaneReopenTests` 8, all 0 failures. ShellKit unit (`swift test -j 2 --skip ShellKitGUITests`): 1975 Swift Testing tests passed, 0 failures (1159 + 38 + 60 + 9 + 183 + 49 + 327 + 125 + 25). App `xcodebuild` Debug: BUILD SUCCEEDED. ArktCore and engine not run: no change there. Deliberate break: replacing the `.closeCancelled` clear with `break` fails `testACancelledLeaveSitePromptForgetsTheClose` ("a close the user cancelled is not archived later"); restored. `InMemoryEngine.engineEndWindow(_:reason:)` is a new test driver: the engine ends a window with a prompt up (a quit).
+
+## Little Arkt: Dock menu, Window menu and Opt-Cmd-click (#356) (2026-11-05)
+
+### What changed
+
+- `LittleArktMenus` (ShellUI, owned by `ShellWindowSet`): the Dock menu's rows (page titles, Hide All / Show All
+  Little Arkt Windows, Close Little Arkt Windows) and the Window menu's "Little Arkt" section above Bring All to Front.
+  A row brings its window forward, also from hidden. Little Arkt windows are excluded from AppKit's own window list,
+  so they are not listed twice. Rows show the page title, then the host, at most 60 characters.
+- Dock menu: `AppDelegate.applicationDockMenu` builds it with `MainMenu.dockMenu`, adding New Window and New Little
+  Arkt Window (Opt-Cmd-N). The Window menu's delegate is `AppCommands`, which rebuilds the section when it opens.
+- Opt-Cmd-click on a link (exactly Option and Command): `ShellEngineHost.decideLinkActivation` cancels it before
+  Peek routing, and a new Little Arkt window opens on the URL one turn later.
+- Opt-Cmd-click on a Today tab's row: the page moves into a new Little Arkt window (`moveTab`, no reload) from
+  whichever window has it, else a new page opens on its URL. The row then leaves the sidebar without an Archive entry
+  (`SidebarSource.removeNode`, new); the page is archived when its Little Arkt window closes. Every window that was
+  left on that row's handoff placeholder moves on to the next tab (unless another window shows it) or clears its card,
+  and any window drops a placeholder whose row is gone, whatever removed it.
+- Opt-Cmd-click on a pinned tab's row or a Favorite's tile opens its page in a new Little Arkt window and keeps the pin
+  or Favorite where it is, as a Peek does (decided on #356; docs/design/little-arkt.md updated).
+- Settings > Links: "Open Little Arkt when clicking on links with ⌥⌘ held"
+  (`optionCommandClickLittleArcEntryPointEnabled`), on by default. It covers both clicks.
+- Space chooser: "Open in New Window" between the Spaces and Copy Link. The window fades out, then the page moves into
+  a new browser window on the Space Open in names. No flight, because the target window is not on screen yet. If the
+  new window cannot take the page, it closes again.
+- The Window menu heading is `NSMenuItem.sectionHeader(title:)`.
+
+### Deviations and follow-ups
+
+- Engine build Dock menu: Chromium's `AppController` stays `NSApp.delegate` and answers `applicationDockMenu:`, so
+  the Dock menu above is the FakeEngine build's only. #658 asks for the embedder seam. From the code, the Window
+  menu's section should work in the Engine build: Arkt installs its own `windowsMenu` with `AppCommands` as delegate,
+  and Chromium binds its menu bridges by tag, which that menu has none of. This is not checked at runtime.
+- The Dock menu has no XCUITest handle (it belongs to the Dock process); its rows are covered in ShellKitGUITests.
+
+### Review changes
+
+The two-window placeholder fix, removal without the Archive, pinned tabs and Favorites, closing the empty window
+after a failed Open in New Window, and the section header. Tests:
+
+- `LittleArktMenusTests` grew to 22. The new cases cover:
+  - two windows with the page live in the other one;
+  - a placeholder whose row goes;
+  - a pinned tab, a Favorite, and a plain click on a Favorite;
+  - Open in New Window with the full motion, and with a failure.
+- `SidebarSourceContractTests.removeNodeRemovesTheRowAndEmitsStructure` runs on both sources.
+
+Each new behavior was broken on purpose once, and its test failed:
+
+- Without the follow-ups in `ShellWindowSet.moveToLittleArkt`, the two-window case failed (the clicking window stayed on the placeholder).
+- Without `dropPlaceholderOfRemovedRow` in the sidebar observation, `testAPlaceholderGoesWithItsRow` failed.
+- Archiving instead of removing failed the Today tab case ("removed, not archived").
+- A no-op `ModelSidebarSource.removeNode` failed the contract test for `.model`.
+- Not opening pinned tabs and Favorites failed both cases (no Little Arkt window).
+- Dropping the `performClose` after a failed Open in New Window failed its case (2 windows, not 1).
+- A plain heading item failed the Window menu case.
+- Committing Open in New Window without the fade failed the full-motion case.
+
+### After #355 merged
+
+- `openLittleArkt(url:frame:)` keeps #355's `frame` and falls back to `nextLittleArktFrame()`.
+- Close Little Arkt Windows goes through `requestClose`, so a hidden window records its page for the Archive and
+  Cmd-Shift-T the same way Cmd-W does. A new `withMotion: false` skips the close motion for a window that is not on
+  screen, and #355's rules for dropping the record are unchanged.
+- File > Reopen Closed Tab keeps #355's `ReopenClosedRouter` target. The Window menu keeps `AppCommands` as its
+  delegate.
+- Test: `LittleArktArchiveTests.testCloseLittleArktWindowsArchivesHiddenWindowsAndTheyCanBeReopened` (one hidden
+  window and one shown, both archived and both reopenable).
+- Deliberate break: the old `closeFromMenu` body (`phase = .closing`, then asking the engine without
+  `requestClose`) fails it: one archive entry instead of two, and the hidden window cannot be reopened.
+- Runs:
+  - `--filter 'ShellUITests|CoreBridgeTests'`: 1199 and 341 tests passed.
+  - GUI `--filter 'LittleArkt|MainMenu|Archive|Reopen|SidebarClick|Handoff|Favorites|ToastView|ShellWindowSet|Settings'`: 380 run, 5 skipped, 0 failures.
+  - Debug app `xcodebuild -scheme ArktShell -configuration Debug -jobs 2`: BUILD SUCCEEDED.
+
+### Tests
+
+Written first. Each failed to compile before the code existed.
+
+- `LittleArktClickRoutingTests` (ShellUITests, 7): the modifier rule, the setting default, the copy and the menu row
+  titles. `swift test --filter ShellUITests`: 1162 tests in 140 suites passed.
+- `LittleArktMenusTests` (ShellKitGUITests, 15): Opt-Cmd-click on a link, with the setting off and with other
+  modifiers; Opt-Cmd-click on a loaded and an unloaded Today tab and with the setting off; Open in New Window and the
+  chooser's items; the Dock rows, Hide All / Show All, a row from hidden, Close All with a hidden window; the Window
+  menu section, replaced not doubled, and removed with the last window. 15 run, 0 failures, five runs in a row.
+- `MainMenuKeyEquivalentTests`: two new cases (the Dock menu's last items, the Window menu's delegate). Its class, with
+  the other Little Arkt, Settings, Peek, Handoff, TabActions and sidebar classes (`--filter
+  'MainMenuKeyEquivalentTests|LittleArkt|Settings|SidebarClick|TabActions|Peek|Handoff|SidebarOutline|SplitSidebar'`):
+  315 run, 6 skipped, 0 failures.
+- `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
+  The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
+  the real pointer and keyboard, and the Mac was in use.

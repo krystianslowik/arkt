@@ -262,6 +262,8 @@ public final class PeekCardView: NSView {
   var flavor: ThemeFlavor = .light { didSet { refreshColors() } }
   var onEscape: (@MainActor () -> Void)?
   var onCancel: (@MainActor () -> Bool)?
+  /// Increase Contrast (#640): the card's hairline becomes the 1 pt edge. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
   private let radius = ShellMetrics.standard.cardCornerRadius
 
   public override init(frame frameRect: NSRect) {
@@ -287,7 +289,10 @@ public final class PeekCardView: NSView {
     setAccessibilityLabel("Peek")
     setAccessibilityIdentifier(AXID.Peek.card)
     refreshColors()
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { refreshColors() }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -305,6 +310,21 @@ public final class PeekCardView: NSView {
     surface.addSubview(view)
   }
 
+  /// Covers the page inside `surface` while set: the crashed tab view of the Peek's page (#683).
+  private(set) var pageOverlayView: NSView?
+
+  /// Installs `view` over the page, inside the rounded surface, or removes the current one when nil.
+  func setPageOverlay(_ view: NSView?) {
+    if pageOverlayView === view { return }
+    pageOverlayView?.removeFromSuperview()
+    pageOverlayView = view
+    guard let view else { return }
+    view.translatesAutoresizingMaskIntoConstraints = true
+    view.autoresizingMask = [.width, .height]
+    view.frame = surface.bounds
+    surface.addSubview(view, positioned: .above, relativeTo: nil)
+  }
+
   /// Lets go of the page (it moves into a content card or a pane) and returns it.
   @discardableResult
   func unmount() -> NSView? {
@@ -320,6 +340,7 @@ public final class PeekCardView: NSView {
     contact.frame = bounds
     surface.frame = bounds
     page?.frame = surface.bounds
+    pageOverlayView?.frame = surface.bounds
     updateShadowPaths(CGRect(origin: .zero, size: frame.size))
   }
 
@@ -375,8 +396,14 @@ public final class PeekCardView: NSView {
                                     : -shadow.contactOffsetY)
     }
     surface.layer?.backgroundColor = ShellTokens.toolbarSurface.resolve(flavor).cgColor
-    surface.layer?.borderColor = ShellTokens.cardBorder.resolve(flavor).cgColor
-    surface.layer?.borderWidth = 1 / (window?.backingScaleFactor ?? 2)
+    if let layer = surface.layer {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      IncreasedContrast.setEdge(on: layer, increased: increaseContrast(), flavor: flavor,
+                                otherwiseWidth: 1 / (window?.backingScaleFactor ?? 2),
+                                color: ShellTokens.cardBorder.resolve(flavor))
+      CATransaction.commit()
+    }
   }
 
   public override func viewDidMoveToWindow() {
@@ -450,10 +477,14 @@ final class PeekDragHandleView: NSView {
 
 // MARK: - Controls
 
-/// One of the three 28 pt circles beside the card. Focus ring only from the keyboard; hover brightens the glyph.
+/// One of the three 28 pt circles beside the card. The chrome's ink focus ring around the circle, only from the
+/// keyboard (#687); hover brightens the glyph.
 @MainActor
 public final class PeekControlButton: NSButton {
   var flavor: ThemeFlavor = .light { didSet { refreshColors() } }
+  /// Shown while the button has keyboard focus, in the Peek's tone.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                          radius: PeekLayout.controlSize / 2)
   var opaqueFill = false { didSet { refreshColors() } }
   private var hovering = false { didSet { refreshColors() } }
   private var hoverArea: NSTrackingArea?
@@ -468,8 +499,8 @@ public final class PeekControlButton: NSButton {
     title = ""
     wantsLayer = true
     layer?.cornerRadius = PeekLayout.controlSize / 2
-    // The system focus ring, which AppKit draws only for keyboard focus; mustard is a fill only (hard rule).
-    focusRingType = .default
+    // The ink ring, never the system ring or mustard (a fill only, hard rule).
+    focusRingType = .none
     self.toolTip = toolTip
     setAccessibilityElement(true)
     setAccessibilityRole(.button)
@@ -484,12 +515,17 @@ public final class PeekControlButton: NSButton {
 
   public override var mouseDownCanMoveWindow: Bool { false }
 
-  /// The system focus ring follows the circle, not the glyph.
-  public override func drawFocusRingMask() {
-    NSBezierPath(ovalIn: bounds).fill()
+  public override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
   }
 
-  public override var focusRingMaskBounds: NSRect { bounds }
+  public override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
 
   public override var isEnabled: Bool { didSet { refreshColors() } }
 
@@ -519,5 +555,6 @@ public final class PeekControlButton: NSButton {
     var color = glyph.resolve(flavor)
     if !isEnabled { color.alpha *= 0.45 }
     contentTintColor = color.nsColor()
+    keyboardFocusRing.flavor = flavor
   }
 }

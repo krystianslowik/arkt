@@ -68,16 +68,25 @@ public struct TabSnapshot: Equatable, Sendable {
   public var isAudible: Bool
   /// The tab's sound is muted (`setMuted(_:muted:)`, contract rule 17).
   public var isMuted: Bool
+  // Tab state (#576, EngineTabState.swift).
+  /// Why the page's process went away; nil while the page is alive or after it recovered.
+  public var crash: TabTerminationStatus?
+  /// The page zoom.
+  public var zoom: TabZoom
+  /// An element of the page fills the screen (HTML `requestFullscreen`, not the window's own full screen).
+  public var isTabFullscreen: Bool
 
   public init(id: TabID, url: URL? = nil, title: String = "", faviconData: Data? = nil, isLoading: Bool = false,
               canGoBack: Bool = false, canGoForward: Bool = false, window: EngineWindowID? = nil,
               opener: TabID? = nil, origin: TabOrigin = .client, isActive: Bool = false, isClosing: Bool = false,
-              wouldHoldClose: Bool = false, isAudible: Bool = false, isMuted: Bool = false) {
+              wouldHoldClose: Bool = false, isAudible: Bool = false, isMuted: Bool = false,
+              crash: TabTerminationStatus? = nil, zoom: TabZoom = .default, isTabFullscreen: Bool = false) {
     self.id = id; self.url = url; self.title = title; self.faviconData = faviconData; self.isLoading = isLoading
     self.canGoBack = canGoBack; self.canGoForward = canGoForward
     self.window = window; self.opener = opener; self.origin = origin; self.isActive = isActive
     self.isClosing = isClosing; self.wouldHoldClose = wouldHoldClose
     self.isAudible = isAudible; self.isMuted = isMuted
+    self.crash = crash; self.zoom = zoom; self.isTabFullscreen = isTabFullscreen
   }
 }
 
@@ -149,6 +158,28 @@ public enum EngineEvent: Equatable, Sendable {
   /// for each change as the page sees it, with no delay or smoothing; the shell decides when to show it.
   case targetURLChanged(TabID, URL?)
 
+  // MARK: Tab state (#576, EngineTabState.swift)
+
+  /// The page's process went away (a crash, a kill, out of memory, a failed launch). The tab stays listed; a load in
+  /// progress ends first, and so does HTML fullscreen. Reported once until the tab recovers.
+  case tabCrashed(TabID, TabTerminationStatus)
+  /// A crashed tab has a live page again (a reload or a new navigation). Reported once the reloaded or new page has a
+  /// live process, no later than that navigation's commit; it may follow that load's `.loadingChanged(true)`.
+  case tabRecovered(TabID)
+  /// The page zoom changed: by `zoomIn`, `zoomOut`, `resetZoom` or a zoom command (`userInitiated`), or by the engine
+  /// (a site's saved zoom on navigation, another tab on the same site was zoomed, a changed default; Chromium keeps
+  /// zoom per host). Reported once per change.
+  case zoomChanged(TabID, TabZoom, userInitiated: Bool)
+  /// An element of the page entered or left HTML fullscreen (`requestFullscreen`), as opposed to the window's own full
+  /// screen. A navigation or a crash leaves it.
+  case tabFullscreenChanged(TabID, isFullscreen: Bool)
+
+  // MARK: Page info (#582, EnginePageInfo.swift)
+
+  /// What `EngineSiteSettings.pageInfo(of:)` reports for the tab changed: a permission of its site was set or reset,
+  /// the connection's state changed without a navigation (mixed content appeared), or the site data count arrived.
+  case pageInfoChanged(TabID)
+
   public var tabID: TabID {
     switch self {
     case .tabCreated(let id), .tabClosed(let id, _), .urlChanged(let id, _), .titleChanged(let id, _),
@@ -156,6 +187,9 @@ public enum EngineEvent: Equatable, Sendable {
          .activeTabChanged(let id), .closeCancelled(let id), .audibleChanged(let id, _), .mutedChanged(let id, _),
          .dialogEnded(let id, _), .permissionEnded(let id, _), .infobarsChanged(let id, _),
          .findResult(let id, _, _, _, _), .targetURLChanged(let id, _):
+      return id
+    case .tabCrashed(let id, _), .tabRecovered(let id), .zoomChanged(let id, _, _), .tabFullscreenChanged(let id, _),
+         .pageInfoChanged(let id):
       return id
     case .dialogRequested(let dialog):
       return dialog.tab
@@ -242,8 +276,12 @@ public protocol EngineClient: AnyObject {
   /// running find the same way (`.clear`, nothing reported), so the shell closes its find bar when it moves a tab.
   func stopFinding(_ id: TabID, action: FindStopAction)
   /// Answers a pending JavaScript dialog (#400, contract rule 19): `accepted` is OK (true) or Cancel (false); `userInput`
-  /// is a prompt's text. Reported with one `.dialogEnded`. A no-op for a dialog that already ended, so a click that
-  /// races the engine's own end does nothing. Default: a no-op, for an engine that raises no dialogs.
+  /// is a prompt's text; for a leave-site prompt (`.beforeUnload`, #584) true is Leave and false is Stay. Reported with
+  /// one `.dialogEnded`, before the `.tabClosed` or `.closeCancelled` a leave-site answer to a held close brings; for a
+  /// held navigation, Stay reports nothing more and Leave lets the navigation proceed. Leave on one tab of a window
+  /// close or quit that several tabs hold makes the engine activate and prompt the next one (one prompt at a time, on
+  /// a shown tab). A no-op for a dialog that already ended, so a click that races the engine's own end does nothing.
+  /// Default: a no-op, for an engine that raises no dialogs.
   func respond(to dialog: DialogID, accepted: Bool, userInput: String?)
   /// Answers a pending permission request (#400, contract rule 20). Reported with one `.permissionEnded`. A no-op for a
   /// request that already ended or was answered, so a click that races the engine's own end does nothing. Default: a
@@ -259,6 +297,28 @@ public protocol EngineClient: AnyObject {
   /// tab and for a tab with no frame to copy (not drawn yet, hidden long enough to be evicted, discarded); the tab is
   /// never shown, woken or reloaded for it. Default: nil, for an engine that cannot copy frames.
   func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage?
+  /// The text selected in the tab's main-frame page now (#404, BH-193: Copy URL offers a link to it), whitespace as the
+  /// page reports it; nil for no selection, an unknown or closed tab, and after a new document commits. A read only:
+  /// never focuses, wakes or reloads the tab. Default: nil, for an engine that does not report selections.
+  func selectedText(of id: TabID) -> String?
+
+  // MARK: Tab state (#576, EngineTabState.swift)
+
+  /// Zooms the tab's page one step in, out, or back to the default, as Cmd-+, Cmd-- and Cmd-0 do: one
+  /// `.zoomChanged(userInitiated: true)` per change, nothing at either end of the steps or when already at the
+  /// default. A no-op for an unknown or closed tab. Default: a no-op, for an engine that cannot zoom.
+  func zoomIn(_ id: TabID)
+  func zoomOut(_ id: TabID)
+  func resetZoom(_ id: TabID)
+  /// The crashed-session prompt's state; nil for an engine that keeps no session. Default: nil.
+  var sessionRecovery: (any EngineSessionRecovery)? { get }
+
+  // MARK: Page info (#582, EnginePageInfo.swift)
+
+  /// Page info and per-site permissions; nil for an engine that offers neither, so the shell shows no page info
+  /// panel. Default: nil.
+  var siteSettings: (any EngineSiteSettings)? { get }
+
   /// Ordered, main-thread delivery of every event. Delivery is synchronous, except that an
   /// event emitted from inside a handler is queued behind the event being delivered, so it
   /// arrives after the call that caused it returns. During queued delivery `snapshot(of:)`
@@ -311,6 +371,8 @@ extension EngineClient {
   public func act(on infobar: InfobarID, action: InfobarAction) {}
 
   public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? { nil }
+
+  public func selectedText(of id: TabID) -> String? { nil }
 
   /// Immediate-state engines already expose the latest selection through `activeTab(in:)`.
   public func latestActiveTab(in window: EngineWindowID) -> TabID? { activeTab(in: window) }

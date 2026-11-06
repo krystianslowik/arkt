@@ -16,6 +16,8 @@ public final class AppSettings {
     public static let switchToNinthSidebarItemEnabled = "switchToNinthSidebarItemEnabled"
     /// Arc's key for the system-wide Little Arkt hotkey (BH-131, KB-045).
     public static let globalLittleBrowserHotkeyEnabled = "globalLittleBrowserHotkeyEnabled"
+    /// Arc's key for Opt-Cmd-click into Little Arkt (BH-132, #356).
+    public static let optionCommandClickLittleArcEntryPointEnabled = "optionCommandClickLittleArcEntryPointEnabled"
     /// Settings > Privacy > Send crash reports (#129). The app reads both crash keys straight from the defaults when a
     /// crash is captured, so they are public.
     public static let sendsCrashReports = "crashReportsEnabled"
@@ -90,6 +92,18 @@ public final class AppSettings {
     set {
       guard newValue != opensLittleArktWithHotKey else { return }
       set(newValue, Key.globalLittleBrowserHotkeyEnabled)
+      notifyObservers()
+    }
+  }
+
+  /// Settings > Links: "Open Little Arkt when clicking on links with ⌥⌘ held" (BH-132, GS-028, #356). On by default:
+  /// Arc's default is unknown (RT-23); Arkt's is a design call (docs/design/little-arkt.md, Parity notes). Also gates
+  /// Opt-Cmd-click on a sidebar tab.
+  public var opensLittleArktOnOptionCommandClick: Bool {
+    get { bool(Key.optionCommandClickLittleArcEntryPointEnabled, default: true) }
+    set {
+      guard newValue != opensLittleArktOnOptionCommandClick else { return }
+      set(newValue, Key.optionCommandClickLittleArcEntryPointEnabled)
       notifyObservers()
     }
   }

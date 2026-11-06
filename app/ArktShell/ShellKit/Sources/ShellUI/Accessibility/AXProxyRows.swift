@@ -188,6 +188,31 @@ final class AXProxyRow: NSAccessibilityElement, NSAccessibilityRow {
     let name = action.name
     return onMainThread(source, default: false) { $0.performRowAction(index, name) }
   }
+
+  /// VoiceOver's VO-Space: whatever a click on the row does, as the owner's `performPress` runs it (#607).
+  override func accessibilityPerformPress() -> Bool {
+    let index = self.row
+    return onMainThread(source, default: false) { $0.pressRow(index) }
+  }
+
+  /// VoiceOver's VO-Shift-M: the row's context menu, as the owner's `performShowMenu` shows it (#607).
+  override func accessibilityPerformShowMenu() -> Bool {
+    let index = self.row
+    return onMainThread(source, default: false) { $0.showMenu(ofRow: index) }
+  }
+
+  /// Press and show menu are offered only where they do something: on a row (not the divider) of a table whose
+  /// owner handles them. Every other selector keeps the inherited answer.
+  override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+    let index = self.row
+    if selector == #selector(NSAccessibilityProtocol.accessibilityPerformPress) {
+      return onMainThread(source, default: false) { $0.canPress(index) }
+    }
+    if selector == #selector(NSAccessibilityProtocol.accessibilityPerformShowMenu) {
+      return onMainThread(source, default: false) { $0.canShowMenu(index) }
+    }
+    return super.isAccessibilitySelectorAllowed(selector)
+  }
 }
 
 /// Publishes an `NSTableView`'s rows to accessibility clients through `element`, an `AXProxyTable`. Shared by every
@@ -225,6 +250,11 @@ final class AXProxyRows {
   /// The names of a row's VoiceOver actions, and what performing one does (true: handled).
   var customActionNames: (@MainActor (Int) -> [String])?
   var performCustomAction: (@MainActor (Int, String) -> Bool)?
+
+  /// What a press (VoiceOver's VO-Space) on a row does, and what showing its menu does (true: handled). Nil: the
+  /// rows offer neither action. Never asked for a separator row.
+  var performPress: (@MainActor (Int) -> Bool)?
+  var performShowMenu: (@MainActor (Int) -> Bool)?
 
   /// The table as clients see it: role `role`, identifier `identifier`, one `AXProxyRow` child per row.
   let element: AXProxyTable
@@ -309,6 +339,26 @@ final class AXProxyRows {
   fileprivate func performRowAction(_ row: Int, _ name: String) -> Bool {
     guard let table, row >= 0, row < table.numberOfRows else { return false }
     return performCustomAction?(row, name) ?? false
+  }
+
+  /// A row that can take a press or show a menu: an index the table has, and not a separator.
+  private func isActionableRow(_ row: Int) -> Bool {
+    guard let table, row >= 0, row < table.numberOfRows, let content = content?(row) else { return false }
+    return content.role == .row
+  }
+
+  fileprivate func canPress(_ row: Int) -> Bool { performPress != nil && isActionableRow(row) }
+
+  fileprivate func canShowMenu(_ row: Int) -> Bool { performShowMenu != nil && isActionableRow(row) }
+
+  fileprivate func pressRow(_ row: Int) -> Bool {
+    guard isActionableRow(row), let performPress else { return false }
+    return performPress(row)
+  }
+
+  fileprivate func showMenu(ofRow row: Int) -> Bool {
+    guard isActionableRow(row), let performShowMenu else { return false }
+    return performShowMenu(row)
   }
 
   fileprivate var visibleRowRange: Range<Int> {

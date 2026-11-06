@@ -96,11 +96,9 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public private(set) var filter: CommandBarFilter = .all
   /// Group headers by row (empty state), for the rows on screen.
   private var groupHeaders: [Int: String] = [:]
-  /// Says a filter change aloud ("Tabs, 3 results"); replaced in tests.
-  var announce: @MainActor (String) -> Void = { text in
-    NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
-                         userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
-  }
+  /// Says a filter change ("Tabs, 3 results") and a keyboard selection move (the row's label, #608) aloud; replaced
+  /// in tests.
+  var announce: AXAnnouncement.Poster = AXAnnouncement.post
   /// Test seam for the dismiss fade: when set, it is handed the step that ends the fade (panel and scrim to alpha 0)
   /// instead of the layer animation's completion, so a test ends the fade by hand, with no clock.
   var dismissFinisher: (@MainActor (@escaping @MainActor () -> Void) -> Void)?
@@ -161,7 +159,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
                                label: results[row].accessibilityLabel(position: row + 1, of: results.count),
                                value: results[row].accessibilityCaption)
     }
-    barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
+    barView.onHoverRow = { [weak self] row in self?.select(row, byKeyboard: false) }
     barView.onDismissNotice = { [weak self] in self?.dismissNotice() }
     barView.onEscapeKey = { [weak self] in self?.hide() }
     barView.pills.onSelect = { [weak self] in self?.setFilter($0) }
@@ -561,7 +559,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     reloadResults()
     relayout()
     let count = CommandBarResults.counts(query: barView.field.stringValue, input: lastInput)[newFilter] ?? 0
-    announce("\(newFilter.title), \(count == 1 ? "1 result" : "\(count) results")")
+    announce("\(newFilter.title), \(count == 1 ? "1 result" : "\(count) results")", .high)
   }
 
   /// Cmd-Shift-V: opens the clipboard URL, from any state (a new-tab surface: Cmd-L and the split pane bar never).
@@ -731,7 +729,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     if let content, content != previous {
       let appeared = previous == nil
       barView.previewColumn.setContent(content, flavor: flavor)
-      if appeared { announce("Preview, \(content.title)") }
+      if appeared { announce("Preview, \(content.title)", .high) }
       loadThumbnail(for: content)
     }
     syncWidth(display: false)
@@ -943,26 +941,32 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   private func moveSelection(_ delta: Int) {
     guard let next = CommandBarSelection.step(from: barView.table.selectedRow, by: delta, count: results.count)
     else { return }
-    select(next, scroll: true)
+    select(next, byKeyboard: true)
   }
 
   /// PageUp / PageDown move by the visible row count and stop at the ends [I].
   private func movePage(_ pages: Int) {
     guard let next = CommandBarSelection.page(from: barView.table.selectedRow, by: pages, count: results.count)
     else { return }
-    select(next, scroll: true)
+    select(next, byKeyboard: true)
   }
 
-  /// `scroll` is false for hover: the row under the pointer is already visible.
-  private func select(_ row: Int, scroll: Bool) {
+  /// A keyboard move scrolls the row into view and, since focus stays in the field, speaks the row's label (#608).
+  /// A hover does neither: the row under the pointer is already visible, and VoiceOver follows the pointer itself.
+  private func select(_ row: Int, byKeyboard: Bool) {
     guard row >= 0, row < results.count else { return }
     let changed = barView.table.selectedRow != row
     if changed {
       barView.table.selectRowIndexes([row], byExtendingSelection: false)
       refreshHints()
     }
-    if scroll { barView.table.scrollRowToVisible(row) }
-    if changed { refreshPreview() }
+    if byKeyboard { barView.table.scrollRowToVisible(row) }
+    guard changed else { return }
+    refreshPreview()
+    // After the preview, so a preview appearing on this move does not cut off the row's label.
+    if byKeyboard {
+      announce(results[row].accessibilityLabel(position: row + 1, of: results.count), AXAnnouncement.selectionPriority)
+    }
   }
 
   // MARK: Table

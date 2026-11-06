@@ -109,7 +109,7 @@ extension ShellWindowController {
   }
 
   /// Ctrl-Space (BH-019, KB-036): reveals the current tab and moves keyboard focus to its outline row or Favorite
-  /// tile, drawn with the system focus ring. A hidden sidebar is shown first [I]. Arrows, Return and Esc are RT-13's
+  /// tile, drawn with `ShellTokens.focusRing`. A hidden sidebar is shown first [I]. Arrows, Return and Esc are RT-13's
   /// assumed keys (BH-020, PARITY(NEEDS-RUNTIME-CHECK RT-13)); Up / Down cross the grid / outline boundary (#343).
   @objc public func revealCurrentTab(_ sender: Any?) {
     guard let page = sidebarController.currentPage else { return }

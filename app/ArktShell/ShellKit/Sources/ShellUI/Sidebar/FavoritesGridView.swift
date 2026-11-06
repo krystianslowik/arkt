@@ -8,13 +8,12 @@ public final class FavoriteTileView: NSView {
   /// Shown while the tile is hovered and has a close action (its page is loaded). Target and action are set by the
   /// grid; hidden (so neither hit-tested nor in the accessibility tree) otherwise.
   public let closeButton = HoverCloseButton()
-  /// The Ctrl-Space cursor, in the same system color as outline-row focus (#343).
+  /// The Ctrl-Space cursor (#343): the same `ShellTokens.focusRing` ring as outline-row focus (#642).
   let keyboardFocusRing = KeyboardFocusRingView(frame: .zero)
   var isKeyboardFocused = false {
     didSet {
       guard isKeyboardFocused != oldValue else { return }
-      keyboardFocusRing.isHidden = !isKeyboardFocused
-      keyboardFocusRing.needsDisplay = true
+      keyboardFocusRing.setFocused(isKeyboardFocused)
     }
   }
   public var flavor: ThemeFlavor = .light {
@@ -29,7 +28,17 @@ public final class FavoriteTileView: NSView {
       guard isCurrent != oldValue else { return }
       needsDisplay = true
       applyFillOpacity()
+      postAccessibility(.valueChanged)             // the spoken value says "current" (#607)
     }
+  }
+  /// Whether the Favorite's page is loaded in this window; the grid sets it with the `loaded` / `unloaded` value.
+  var isLoaded = false
+  /// Testing seam: receives every accessibility notification this tile posts. Nil (the default) records nothing.
+  var postedNotificationsForTesting: (@MainActor (NSAccessibility.Notification) -> Void)?
+
+  private func postAccessibility(_ notification: NSAccessibility.Notification) {
+    NSAccessibility.post(element: self, notification: notification)
+    postedNotificationsForTesting?(notification)
   }
   /// The selection fill's layer opacity (#465): Little Arkt's arrival fades it on the flight's room spring. Only
   /// the fill fades; the favicon stays, and the title is this view's accessibility label.
@@ -53,6 +62,10 @@ public final class FavoriteTileView: NSView {
   public internal(set) var nodeID: NodeID?
   /// What the X does; nil (no loaded page) never shows it.
   public private(set) var closeAction: RowCloseAction?
+  /// What VoiceOver's press (VO-Space) and show menu (VO-Shift-M) do on this tile (#607); the grid sets them for the
+  /// Favorite shown and reuse clears them. Nil: the tile offers that action to no one.
+  var onAccessibilityPress: (@MainActor () -> Void)?
+  var onAccessibilityShowMenu: (@MainActor () -> Void)?
   /// Whether the X is shown or fading in (the tile is hovered and there is a close action).
   public private(set) var isCloseButtonShown = false
   private var hoverArea: NSTrackingArea?
@@ -63,10 +76,14 @@ public final class FavoriteTileView: NSView {
     return (isHovered ? ShellTokens.sidebarItemHovered : ShellTokens.sidebarItemBackground).resolve(flavor)
   }
 
+  /// Increase Contrast (#640): every tile is filled, so every tile draws the 1 pt edge. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
+
   public override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
     fillLayer.cornerRadius = FavoritesLayout.tileCornerRadius
     fillLayer.cornerCurve = .continuous
     fillLayer.shadowRadius = 2
@@ -101,6 +118,7 @@ public final class FavoriteTileView: NSView {
     fillLayer.cornerRadius = FavoritesLayout.tileCornerRadius
     fillLayer.cornerCurve = .continuous
     fillLayer.backgroundColor = displayedFill.cgColor
+    IncreasedContrast.setEdge(on: fillLayer, increased: increaseContrast(), flavor: flavor)
     let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
     fillLayer.shadowColor = shadow.cgColor
     fillLayer.shadowRadius = 2
@@ -110,6 +128,8 @@ public final class FavoriteTileView: NSView {
     fillLayer.opacity = Float(isCurrent ? selectionAlpha : 1)
     CATransaction.commit()
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { needsDisplay = true }
 
   /// Only the fill fades. The favicon is a subview of this view, so it keeps the view's opacity.
   private func applyFillOpacity() {
@@ -190,10 +210,44 @@ public final class FavoriteTileView: NSView {
     selectionAlpha = 1
     isKeyboardFocused = false
     nodeID = nil
+    isLoaded = false
     setCloseAction(nil)
     setCloseButtonShown(false, animated: false)        // no fade on a reused tile
     setAccessibilityValue(nil)
     setAccessibilityCustomActions([])
+    onAccessibilityPress = nil
+    onAccessibilityShowMenu = nil
+  }
+
+  /// The current Favorite reports itself selected, as the current sidebar row does (#607).
+  public override func isAccessibilitySelected() -> Bool { isCurrent }
+
+  /// What VoiceOver speaks for the value (#607): the value itself is the `loaded` / `unloaded` token clients and UI
+  /// tests read, and VoiceOver does not speak "selected" on a button. "Favorites, current"; "Favorites, loaded";
+  /// "Favorites" for a Favorite with no page open.
+  public override func accessibilityValueDescription() -> String? {
+    if isCurrent { return "Favorites, current" }
+    return isLoaded ? "Favorites, loaded" : "Favorites"
+  }
+
+  public override func accessibilityPerformPress() -> Bool {
+    guard let onAccessibilityPress else { return false }
+    onAccessibilityPress()
+    return true
+  }
+
+  public override func accessibilityPerformShowMenu() -> Bool {
+    guard let onAccessibilityShowMenu else { return false }
+    onAccessibilityShowMenu()
+    return true
+  }
+
+  public override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+    if selector == #selector(NSAccessibilityProtocol.accessibilityPerformPress) { return onAccessibilityPress != nil }
+    if selector == #selector(NSAccessibilityProtocol.accessibilityPerformShowMenu) {
+      return onAccessibilityShowMenu != nil
+    }
+    return super.isAccessibilitySelectorAllowed(selector)
   }
 
   public override func accessibilityParent() -> Any? {
@@ -222,11 +276,15 @@ public final class FavoriteTileItem: NSCollectionViewItem {
 @MainActor
 final class FavoritesCollectionView: NSCollectionView {
   var onMouseDownBegan: (@MainActor () -> Void)?
-  var onMouseDownEnded: (@MainActor (IndexPath?, NSPoint) -> Void)?
+  var onMouseDownEnded: (@MainActor (IndexPath?, NSPoint, NSEvent.ModifierFlags) -> Void)?
   var onMoveCommand: (@MainActor (_ deltaColumns: Int, _ deltaRows: Int) -> Void)?
   var onKeyboardReturn: (@MainActor () -> Void)?
   var onKeyboardEscape: (@MainActor () -> Void)?
   var onKeyboardFocusResigned: (@MainActor () -> Void)?
+  /// The tile holding the keyboard cursor, and putting it back on a tile (false when the tile is gone), for a popover
+  /// that gives the keyboard back when it closes (#696).
+  var keyboardCursor: (@MainActor () -> NodeID?)?
+  var restoreKeyboardCursor: (@MainActor (NodeID) -> Bool)?
   /// The context menu of the tile at an index path (design 3.3); nil: none.
   var menuProvider: (@MainActor (IndexPath) -> NSMenu?)?
 
@@ -248,7 +306,8 @@ final class FavoritesCollectionView: NSCollectionView {
     let endEvent = NSApp.currentEvent.flatMap {
       $0.type == .leftMouseUp && $0.windowNumber == event.windowNumber ? $0 : nil
     } ?? event
-    onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil))
+    onMouseDownEnded?(downIndexPath, convert(endEvent.locationInWindow, from: nil),
+                      event.modifierFlags.intersection(.deviceIndependentFlagsMask))
   }
 
   override func keyDown(with event: NSEvent) {
@@ -351,6 +410,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   private var lastKeyboardFocusID: NodeID?
 
   public var onActivate: (@MainActor (NodeID) -> Void)?
+  /// Opt-Cmd-click on a tile (#356): true when the window opened the page in Little Arkt.
+  public var onOpenInLittleArkt: (@MainActor (NodeID) -> Bool)?
   /// Return or Esc leaves keyboard navigation; Down below the last tile enters the outline.
   var onKeyboardFocusExit: (@MainActor () -> Void)?
   var onKeyboardFocusBelow: (@MainActor () -> Void)?
@@ -363,6 +424,9 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   public var pageLoadedProvider: (@MainActor (NodeID) -> Bool)?
   /// A Favorite tile's context menu action (design 3.3); the window runs it.
   public var onMenuAction: (@MainActor (SidebarMenuAction) -> Void)?
+  /// Shows the menu of a VoiceOver show-menu on a tile (#607); nil pops it up under the tile. Tests replace it to
+  /// record the menu instead of tracking it.
+  var presentAccessibilityMenu: (@MainActor (NSMenu, FavoriteTileView) -> Void)?
   /// A Favorite tab tile started or ended a drag (#214, S7); the window shows and hides its drop overlay.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   public var onNodeDragEnded: (@MainActor () -> Void)?
@@ -391,6 +455,11 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     get { hoverResync.lookup }
     set { hoverResync.lookup = newValue }
   }
+  /// How a coalesced hover resync waits for the next main-queue turn; tests run it by hand.
+  var hoverResyncEnqueue: @MainActor (@escaping @MainActor () -> Void) -> Void {
+    get { hoverResync.enqueue }
+    set { hoverResync.enqueue = newValue }
+  }
 
   public init(source: any SidebarSource, profile: String) {
     self.source = source
@@ -416,8 +485,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
         self?.isTrackingMouse = true
         self?.didDragInMouseDown = false
       }
-      favoritesCollectionView.onMouseDownEnded = { [weak self] downIndexPath, point in
-        self?.mouseDownEnded(downIndexPath: downIndexPath, at: point)
+      favoritesCollectionView.onMouseDownEnded = { [weak self] downIndexPath, point, modifiers in
+        self?.mouseDownEnded(downIndexPath: downIndexPath, at: point, modifiers: modifiers)
       }
       favoritesCollectionView.menuProvider = { [weak self] indexPath in
         guard let self, let id = self.nodeID(at: indexPath) else { return nil }
@@ -433,6 +502,12 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
         onKeyboardFocusExit?()
       }
       favoritesCollectionView.onKeyboardFocusResigned = { [weak self] in self?.keyboardFocusID = nil }
+      favoritesCollectionView.keyboardCursor = { [weak self] in self?.keyboardFocusID }
+      favoritesCollectionView.restoreKeyboardCursor = { [weak self] id in
+        guard let self, nodeIDs.contains(id) else { return false }
+        keyboardFocusID = id
+        return true
+      }
     }
     collectionView.dataSource = self
     collectionView.delegate = self
@@ -546,12 +621,36 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.setAccessibilityLabel(title)
     tile.nodeID = id
     let isLoaded = pageLoadedProvider?(id) == true
+    tile.isLoaded = isLoaded
     tile.setAccessibilityValue(isLoaded ? AXID.Favorites.loaded : AXID.Favorites.unloaded)
     let action = isLoaded ? RowCloseAction.resolve(id, in: source) : nil
     tile.closeButton.target = self
     tile.closeButton.action = #selector(closeClicked(_:))
     tile.setCloseAction(action)
     tile.setAccessibilityCustomActions(closeAccessibilityActions(for: id, action: action))
+    tile.onAccessibilityPress = { [weak self] in self?.accessibilityPress(id) }
+    tile.onAccessibilityShowMenu = { [weak self, weak tile] in
+      guard let self, let tile else { return }
+      self.accessibilityShowMenu(id, on: tile)
+    }
+  }
+
+  /// VoiceOver's press on a tile: the Favorite activates, as a click on it does (#607).
+  private func accessibilityPress(_ id: NodeID) {
+    guard nodeIDs.contains(id) else { return }
+    keyboardFocusID = nil
+    onActivate?(id)
+  }
+
+  /// VoiceOver's show menu on a tile: the Favorite's right-click menu, under the tile (#607).
+  private func accessibilityShowMenu(_ id: NodeID, on tile: FavoriteTileView) {
+    guard let menu = contextMenu(for: id) else { return }
+    if let presentAccessibilityMenu {
+      presentAccessibilityMenu(menu, tile)
+    } else {
+      let below = NSPoint(x: 0, y: tile.isFlipped ? tile.bounds.maxY : tile.bounds.minY)
+      menu.popUp(positioning: nil, at: below, in: tile)
+    }
   }
 
   // MARK: Close
@@ -625,13 +724,20 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     if let indexPath = indexPaths.first, let id = nodeID(at: indexPath) { onActivate?(id) }
   }
 
-  private func mouseDownEnded(downIndexPath: IndexPath?, at point: NSPoint) {
+  private func mouseDownEnded(downIndexPath: IndexPath?, at point: NSPoint, modifiers: NSEvent.ModifierFlags) {
     isTrackingMouse = false
     collectionView.deselectItems(at: collectionView.selectionIndexPaths)
     guard !didDragInMouseDown, !isDragging,
           let indexPath = downIndexPath,
           collectionView.indexPathForItem(at: point) == indexPath,
           let id = nodeID(at: indexPath) else { return }
+    handleTileClick(id, modifiers: modifiers)
+  }
+
+  /// A click on a tile: Opt-Cmd-click opens the Favorite's page in a new Little Arkt window and leaves the Favorite
+  /// as it is (#356, BH-132) while the window takes it; any other click activates it.
+  func handleTileClick(_ id: NodeID, modifiers: NSEvent.ModifierFlags) {
+    if LittleArktRouting.isLittleArktClick(modifiers), isTab(id), onOpenInLittleArkt?(id) == true { return }
     onActivate?(id)
   }
 

@@ -29,6 +29,8 @@ public final class TabSwitcherController {
   var onCommit: @MainActor (NodeID) -> Void = { _ in }
   /// W: close this tab the way Cmd-W closes it.
   var onClose: @MainActor (NodeID) -> Void = { _ in }
+  /// Speaks the switcher's opening, each highlight move (#608), a closed row and a cancel; replaced in tests.
+  var announce: AXAnnouncement.Poster = AXAnnouncement.post
 
   private var rows: [TabSwitcherRow] = []
   /// The tab current when the switcher opened; if another path changes it, the switcher cancels.
@@ -135,7 +137,7 @@ public final class TabSwitcherController {
               frame: panelFrame(rows: rows.count, in: container.bounds))
     trackPresentation()
     let count = rows.count
-    announce("Recent tabs, \(count) \(count == 1 ? "tab" : "tabs")")
+    announce("Recent tabs, \(count) \(count == 1 ? "tab" : "tabs")", .high)
     announceHighlightedRow()
   }
 
@@ -154,7 +156,7 @@ public final class TabSwitcherController {
     let title = rows.first { $0.node == node }?.title ?? ""
     recent.remove(node)
     removeRow(node)
-    announce("Closed \(title)")
+    announce("Closed \(title)", .high)
     if isOpen { announceHighlightedRow() }
     onClose(node)
   }
@@ -174,7 +176,7 @@ public final class TabSwitcherController {
   func cancel(announce: Bool) {
     guard isOpen else { return }
     close(animated: hasPresented)
-    if announce { self.announce("Cancelled") }
+    if announce { self.announce("Cancelled", .high) }
   }
 
   private func close(animated: Bool) {
@@ -234,14 +236,7 @@ public final class TabSwitcherController {
   private func announceHighlightedRow() {
     guard let session, session.highlight < view.rowViews.count,
           let label = view.rowViews[session.highlight].accessibilityLabel() else { return }
-    announce(label)
-  }
-
-  private func announce(_ text: String) {
-    NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [
-      .announcement: text,
-      .priority: NSAccessibilityPriorityLevel.high.rawValue,
-    ])
+    announce(label, AXAnnouncement.selectionPriority)
   }
 }
 

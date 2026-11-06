@@ -25,6 +25,19 @@ enum PacingEnvironment {
     }
   }
 
+  /// Whether a frame-time gate asserts its hitch count here, or only prints and attaches its numbers. It asserts when
+  /// `ARKT_PACING_GATE=1` is set, or when the selected tests are all in `testClass` (the gate run alone): run inside a
+  /// longer GUI batch, the tests before it leave main-thread work that lands in its frames (#602).
+  static func gateAsserts(for testClass: AnyClass,
+                          environment: [String: String] = ProcessInfo.processInfo.environment,
+                          arguments: [String] = CommandLine.arguments) -> Bool {
+    if environment["ARKT_PACING_GATE"] == "1" { return true }
+    guard let flag = arguments.firstIndex(of: "-XCTest"), arguments.indices.contains(flag + 1) else { return false }
+    let name = String(reflecting: testClass)
+    let selected = arguments[flag + 1].split(separator: ",").map(String.init)
+    return !selected.isEmpty && selected.allSatisfy { $0 == name || $0.hasPrefix(name + "/") }
+  }
+
   /// Why this screen cannot drive the scripted 120 Hz frames, or nil when it can. Only the screen is checked: a test
   /// that measures thread CPU time holds under load, so it must not skip on it.
   static func screenNotMeasurableReason(fps: Int) -> String? {

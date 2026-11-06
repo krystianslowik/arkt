@@ -55,7 +55,7 @@ struct ThemePadTests {
     let white = ThemePad.nearestPoint(to: .white(1))
     #expect(white.tone == ThemePad.minimumTone)
     // A preset's colour lands near its own hue, on the pad colour closest to it.
-    let pinkColor = RGBA.srgb(hex: 0xF29BBB)
+    let pinkColor = RGBA.srgb(hex: 0xDDB4D2)
     let pink = ThemePad.nearestPoint(to: pinkColor)
     #expect(abs(pink.hue - ThemePad.hue(of: pinkColor)) <= ThemePad.nearestHueWindow)
     let atHue = ThemePad.nearestTone(to: pinkColor, hue: ThemePad.hue(of: pinkColor))
@@ -77,7 +77,7 @@ struct ThemePadTests {
   /// The HSL hue of each family's second light stop: the preset hues the haptics mark.
   @Test func presetHuesMatchTheDesign() {
     let hues = SpaceThemeCatalog.families.map { ThemePad.hue(of: $0.light.baseColors[1]).rounded() }
-    #expect(hues == [45, 238, 37, 107, 338, 250])
+    #expect(hues == [45, 211, 37, 107, 316, 250])
   }
 
   /// The second colour springs out 40 degrees of hue away and a quarter of the pad toward the middle.

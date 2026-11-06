@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 // MARK: - Motion
 
@@ -7,7 +8,7 @@ import AppKit
 /// instead of jumping. Nothing uses ease-in.
 @MainActor
 enum OnboardingMotion {
-  static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+  static let easeOut = MotionCurve.strongEaseOut.timingFunction
   static let drawer = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0, 1)
 
   /// Animates `keyPath` of `layer` to `value` from what is on screen now, after `delay` seconds.

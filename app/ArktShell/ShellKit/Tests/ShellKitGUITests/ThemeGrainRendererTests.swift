@@ -27,7 +27,7 @@ final class ThemeGrainRendererTests: XCTestCase {
   }
 
   private func theme(_ texture: String?, _ noise: Double) -> SpaceThemeInfo {
-    SpaceThemeInfo(baseColors: [.p3(hex: 0x2D4468, alpha: 1), .p3(hex: 0x120F2E, alpha: 1)], texture: texture,
+    SpaceThemeInfo(baseColors: [.p3(hex: 0x3C3B72, alpha: 1), .p3(hex: 0x1D1838, alpha: 1)], texture: texture,
                    noiseFactor: noise, isDark: true)
   }
 

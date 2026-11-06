@@ -46,7 +46,6 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
     }
     surfaceLayer.cornerRadius = FindBarLayout.cornerRadius
     surfaceLayer.cornerCurve = .continuous
-    surfaceLayer.borderWidth = 0.5
     layer?.addSublayer(surfaceLayer)
     layer?.addSublayer(separator)
 
@@ -92,7 +91,13 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
     setAccessibilityLabel("Find in page")
     setAccessibilityIdentifier(AXID.Find.root)
     applyColors()
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
+
+  /// Increase Contrast (#640): the 0.5 pt `overlayEdge` becomes the 1 pt edge. Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { applyColors() }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -105,6 +110,7 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
   func refresh() {
     guard let display = presenter?.display else {
       hide()
+      (superview as? ContentCardView)?.layoutZoomPill()         // the zoom pill moves up into the corner (#579)
       return
     }
     let wasHidden = isHidden
@@ -117,6 +123,7 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
     nextButton.isEnabled = !noMatches
     applyColors()
     (superview as? ContentCardView)?.layoutFindBar()
+    (superview as? ContentCardView)?.layoutZoomPill()           // below the bar (#579)
     needsLayout = true
     layoutSubtreeIfNeeded()
     if wasHidden, presenter?.isOpening == true { animateEntrance() }
@@ -200,7 +207,11 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
   private func applyColors() {
     let flavor = ThemeFlavor(appearance: effectiveAppearance)
     surfaceLayer.backgroundColor = BrandTokens.surfaceBrand.resolve(flavor).cgColor
-    surfaceLayer.borderColor = ShellTokens.overlayEdge.resolve(flavor).cgColor
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    IncreasedContrast.setEdge(on: surfaceLayer, increased: increaseContrast(), flavor: flavor, otherwiseWidth: 0.5,
+                              color: ShellTokens.overlayEdge.resolve(flavor))
+    CATransaction.commit()
     for (drop, shadow) in zip(dropLayers, ShellTokens.overlayShadow.drops(flavor)) {
       drop.shadowColor = shadow.color
       drop.shadowOpacity = shadow.opacity

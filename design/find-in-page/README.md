@@ -53,7 +53,7 @@ primary pill (Done).
 | Return, Cmd-G | next match |
 | Shift-Return, Shift-Cmd-G | previous match |
 | Esc | close |
-| Tab, Shift-Tab | field, Previous, Next, close (Done); the system focus ring, never mustard |
+| Tab, Shift-Tab | field, Previous, Next, close (Done); the buttons draw the ink focus ring (`ShellTokens.focusRing`, 3 pt around the disc, #687), the field keeps the system ring; never mustard |
 | Cmd-E | use the selection as the query (system Find convention, if the maintainer wants it; not drawn) |
 
 ## Motion
@@ -100,3 +100,7 @@ field in B and to the count capsule in C. Reduce Transparency changes nothing: e
 |---|---|
 | `prototype.html` | Single-file prototype, no network, live search over a synthetic page |
 | `screens/find-<a\|b\|c>-<default\|nomatch\|long>-<light\|dark>.png` | 18 screenshots at 2x (1080 x 720 window), synthetic text only |
+
+Focus ring (#687): the ink ring of [`design/drag-hint-focus-ring`](../drag-hint-focus-ring/README.md). Screens of these
+controls, focused: [light](../drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-light.png),
+[dark](../drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-dark.png).

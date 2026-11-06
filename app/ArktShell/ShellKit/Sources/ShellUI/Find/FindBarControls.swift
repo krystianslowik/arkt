@@ -53,10 +53,13 @@ final class FindBarField: NSTextField {
 }
 
 /// A round 24 pt glyph button of the find bar (design `.ib`): `secondaryText` glyph that turns `primaryText` on hover
-/// over a `sidebarItemHovered` disc, a 0.94 press, 35 % when it cannot act. The focus ring is the system ring around the
-/// disc.
+/// over a `sidebarItemHovered` disc, a 0.94 press, 35 % when it cannot act. The focus ring is the chrome's ink ring
+/// around the disc (#687).
 @MainActor
 final class FindBarButton: NSButton {
+  /// Shown while the button has keyboard focus.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                          radius: FindBarLayout.buttonSize / 2)
   private var hovering = false { didSet { if hovering != oldValue { refreshColors() } } }
   private var hoverArea: NSTrackingArea?
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -70,7 +73,7 @@ final class FindBarButton: NSButton {
     title = ""
     let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
     image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration)
-    focusRingType = .default
+    focusRingType = .none
     wantsLayer = true
     layer?.cornerRadius = FindBarLayout.buttonSize / 2
     toolTip = label
@@ -121,11 +124,17 @@ final class FindBarButton: NSButton {
 
   // MARK: Focus ring
 
-  override func drawFocusRingMask() {
-    NSBezierPath(ovalIn: bounds).fill()
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
   }
 
-  override var focusRingMaskBounds: NSRect { bounds }
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
 
   // MARK: Hover and colors
 

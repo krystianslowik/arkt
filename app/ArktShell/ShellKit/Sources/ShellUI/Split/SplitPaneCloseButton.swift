@@ -1,4 +1,5 @@
 import AppKit
+import Motion
 
 /// The close (X) at the top trailing corner of a split pane (#388, BH-121 "the X above a pane"): closes that pane the
 /// way Cmd-W closes the focused one. Shown while the pointer is over the pane or the button has keyboard focus.
@@ -6,7 +7,8 @@ import AppKit
 /// Never `isHidden` while its pane has a page, so VoiceOver and Full Keyboard Access always reach it; while not shown
 /// it is transparent and takes no clicks (`hitTest` passes them to the page). The surface follows the Peek controls:
 /// `toastSurface` fill, `cardBorder` hairline, `secondaryText` glyph that turns `primaryText` on hover. The focus ring
-/// is the system ring, drawn around the circle. PARITY(NEEDS-RUNTIME-CHECK RT-37): Arc's exact chrome is unmeasured.
+/// is `ShellTokens.focusRing` around the circle (#642). PARITY(NEEDS-RUNTIME-CHECK RT-37): Arc's exact chrome is
+/// unmeasured.
 @MainActor
 public final class SplitPaneCloseButton: NSButton {
   /// Circle diameter: the Toolbar's button height, so it sits centered in the Toolbar strip when that shows.
@@ -14,7 +16,7 @@ public final class SplitPaneCloseButton: NSButton {
   /// Distance from the card's top and trailing edges while the Toolbar is off (inside the 10 pt corner radius).
   static let inset: CGFloat = 8
   /// Full fade, 0 to 1 or back; an interrupted fade covers only what is left (`HoverCloseFade`).
-  static let fadeDuration = 0.15
+  static let fadeDuration = FadeDuration.standard
 
   /// Shown: visible and clickable. Hover and keyboard focus show it; the pane card decides.
   public private(set) var isRevealed = false
@@ -22,6 +24,8 @@ public final class SplitPaneCloseButton: NSButton {
   var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   /// Keyboard focus came or went; the card combines it with the hover.
   var onFocusChange: (@MainActor (Bool) -> Void)?
+  /// Shown while the button has keyboard focus.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: Self.size / 2)
   private var hovering = false { didSet { if hovering != oldValue { refreshColors() } } }
   private var hoverArea: NSTrackingArea?
   private var generation = 0
@@ -35,7 +39,7 @@ public final class SplitPaneCloseButton: NSButton {
     title = ""
     let configuration = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
     image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?.withSymbolConfiguration(configuration)
-    focusRingType = .default
+    focusRingType = .none
     autoresizingMask = []
     wantsLayer = true
     layer?.cornerRadius = Self.size / 2
@@ -82,7 +86,7 @@ public final class SplitPaneCloseButton: NSButton {
     let start = layer?.presentation().map { CGFloat($0.opacity) } ?? alphaValue
     NSAnimationContext.runAnimationGroup { context in
       context.duration = HoverCloseFade.duration(from: start, to: target, full: Self.fadeDuration)
-      context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)   // strong ease-out
+      context.timingFunction = MotionCurve.strongEaseOut.timingFunction
       context.allowsImplicitAnimation = true
       animator().alphaValue = target
     }
@@ -92,22 +96,21 @@ public final class SplitPaneCloseButton: NSButton {
 
   public override func becomeFirstResponder() -> Bool {
     let became = super.becomeFirstResponder()
-    if became { onFocusChange?(true) }
+    if became {
+      keyboardFocusRing.setFocused(true)
+      onFocusChange?(true)
+    }
     return became
   }
 
   public override func resignFirstResponder() -> Bool {
     let resigned = super.resignFirstResponder()
-    if resigned { onFocusChange?(false) }
+    if resigned {
+      keyboardFocusRing.setFocused(false)
+      onFocusChange?(false)
+    }
     return resigned
   }
-
-  /// The system focus ring follows the circle, not the glyph.
-  public override func drawFocusRingMask() {
-    NSBezierPath(ovalIn: bounds).fill()
-  }
-
-  public override var focusRingMaskBounds: NSRect { bounds }
 
   // MARK: Hover and colors
 

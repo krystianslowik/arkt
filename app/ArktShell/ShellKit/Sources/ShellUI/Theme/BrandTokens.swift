@@ -5,7 +5,7 @@
 /// pair (translucent ones after `composite(_:over:)`), and that `Palette` matches
 /// `design/brand/tokens/brand-tokens.json`.
 ///
-/// Mustard (`accent`) is about 1.8:1 on porcelain: it is a fill, never text or a focus ring on light surfaces. Use
+/// Mustard (`accent`) is about 1.8:1 on porcelain: it is a fill, never text or a focus ring. Use
 /// `accentText` for accent-colored text and `onAccent` for text and glyphs on accent fills.
 ///
 /// Nothing here is wired into a global `AccentColor` or app-wide accent; controls adopt these tokens one at a time.
@@ -38,8 +38,9 @@ public enum BrandTokens {
   public static let foldShadow = TokenPair(light: Palette.foldShadow, dark: Palette.foldShadow)
   /// Branded surfaces such as About and first run.
   public static let surfaceBrand = TokenPair(light: Palette.porcelain, dark: Palette.graphite)
-  /// Keyboard focus ring on branded surfaces. Graphite on light surfaces, where mustard would fail 3:1.
-  public static let focusRing = TokenPair(light: Palette.graphite, dark: Palette.mustard)
+  /// Keyboard focus ring on branded surfaces: graphite on light, porcelain on dark. Never mustard, which is a fill and
+  /// never a stroke (#642). The chrome draws it at 85 % as `ShellTokens.focusRing`.
+  public static let focusRing = TokenPair(light: Palette.graphite, dark: Palette.porcelain)
 
   // MARK: - First run (onboarding spec, section 5)
 

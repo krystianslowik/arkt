@@ -54,9 +54,18 @@ extension NSView {
 @MainActor
 final class HoverResyncScheduler {
   var lookup = HoverPointerLookup.system
+  /// Runs a coalesced resync on the next main-queue turn; tests run it by hand. Replacing it drops a turn the old
+  /// one still holds, so the next request goes through the new one.
+  var enqueue: @MainActor (@escaping @MainActor () -> Void) -> Void = HoverResyncScheduler.nextMainQueueTurn {
+    didSet {
+      generation += 1
+      isScheduled = false
+    }
+  }
   private weak var view: NSView?
   private let sync: (NSPoint?) -> Void
   private var isScheduled = false
+  private var generation = 0
 
   /// `sync` receives the pointer in window coordinates (nil: the pointer is not over this window) and updates every
   /// hover row or tile of the host.
@@ -68,11 +77,16 @@ final class HoverResyncScheduler {
   func setNeeded() {
     guard !isScheduled else { return }
     isScheduled = true
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }
+    let generation = generation
+    enqueue { [weak self] in
+      guard let self, generation == self.generation else { return }
       self.isScheduled = false
       self.resyncNow()
     }
+  }
+
+  private static func nextMainQueueTurn(_ work: @escaping @MainActor () -> Void) {
+    DispatchQueue.main.async { work() }
   }
 
   /// Reads the pointer once and syncs the host; does nothing when the host is not in a visible window.

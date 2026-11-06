@@ -91,6 +91,8 @@ public struct EngineHarness {
   public let leaveLink: EngineTabAction?
   /// Makes the engine's downloads happen (rule 24). Nil: not applicable (an engine with no downloads).
   public let downloads: DownloadDrivers?
+  /// Makes the page process of `id` go away (rule 25, #576): a crash or a kill. Nil: not applicable.
+  public let crashTab: EngineTabAction?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -113,7 +115,8 @@ public struct EngineHarness {
               selectedText: SelectedText? = nil,
               hoverLink: EngineTabAction? = nil,
               leaveLink: EngineTabAction? = nil,
-              downloads: DownloadDrivers? = nil) {
+              downloads: DownloadDrivers? = nil,
+              crashTab: EngineTabAction? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
@@ -126,6 +129,7 @@ public struct EngineHarness {
     self.findPage = findPage; self.selectedText = selectedText
     self.hoverLink = hoverLink; self.leaveLink = leaveLink
     self.downloads = downloads
+    self.crashTab = crashTab
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -175,7 +179,8 @@ public struct EngineHarness {
       selectedText: { engine, id in try inMemory(engine).selectedText(id) },
       hoverLink: { engine, id in try inMemory(engine).hoverLink(id) },
       leaveLink: { engine, id in try inMemory(engine).leaveLink(id) },
-      downloads: .inMemory()
+      downloads: .inMemory(),
+      crashTab: { engine, id in try inMemory(engine).crash(id, status: .crashed) }
     )
   }
 
@@ -269,6 +274,21 @@ public struct EngineHarness {
 ///     deleted and the item removed), and a blocked one cannot be kept; the save preference decides the folder (or
 ///     the chooser's answer in `.ask` mode, and the default folder when the chosen one is missing). A command on an
 ///     unknown id or a state it does not apply to does nothing. Needs `downloads`.
+///
+/// 25. Tab state (#576). `zoomIn` and `zoomOut` report each step with one `.zoomChanged(userInitiated: true)` and
+///     nothing at either end of the steps; `resetZoom` returns to the default zoom once. A tab whose page process goes
+///     away is reported with one `.tabCrashed`, stays listed with `crash` in its snapshot, and a reload recovers it with
+///     one `.tabRecovered`, after the `.tabCrashed` and no later than the reload's `.loadingChanged(false)`. Needs
+///     `crashTab` for the crash checks.
+///
+/// 26. Page info and per-site permissions (#582). A settled page on a site has page info naming its tab, its site
+///     (two hosts are two origins) and its permissions, each listed once with a setting among its options; an unknown
+///     or closed tab has none. `setPermission` and `resetPermissions` change the profile of the tab they come from
+///     and apply at once: the next `pageInfo(of:)` and `sitesWithPermissions()` (the normal profile) read the change,
+///     it is announced with `.pageInfoChanged` on the site's tabs and no other site's, another site keeps its
+///     settings, and reset restores the default. Nothing is raised while the panel is open; `pageInfoDidClose(tab:)`
+///     after changes from that tab raises the reload infobar once, on that tab only. Not applicable to an engine whose
+///     `siteSettings` is nil.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.

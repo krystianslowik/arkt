@@ -46,6 +46,17 @@ public final class DialogSheet: NSWindowController {
     window.makeFirstResponder(view.initialFocus)
   }
 
+  /// Whether the content's checkbox is checked now; read it in `onAnswer`.
+  public var isCheckboxOn: Bool { view.isCheckboxOn }
+
+  /// Closes the sheet without an answer: what it asked about went away. `onAnswer` is not called.
+  public func dismiss() {
+    onAnswer = nil
+    guard let window else { return }
+    window.sheetParent?.endSheet(window)
+    window.orderOut(nil)
+  }
+
   private func finish(_ answer: DialogContent.Answer) {
     guard let window else { return }
     let callback = onAnswer
@@ -171,13 +182,26 @@ public final class DialogAlert {
 // MARK: - Anchored panel
 
 /// A non-activating child panel whose top-leading corner sits 12 pt inside `anchor` (the content card or the focused
-/// pane), so the prompt points at the page that asked. It never takes focus from the page unless clicked; Escape
-/// answers Cancel only while it is key. In: scale 0.97 and 4 pt from above to rest on `firmFast` from its top-leading
-/// corner, opacity over 0.16 s; out: 0.10 s fade, instant when the keyboard answered (Reduce Motion: fades only).
+/// pane), or hangs from its top edge, so the prompt points at the page that asked. It never takes focus from the page
+/// unless clicked; Escape answers Cancel only while it is key. In: scale 0.97 and 4 pt from above to rest on
+/// `firmFast` from its top-leading corner, opacity over 0.16 s; out: 0.10 s fade, instant when the keyboard answered
+/// (Reduce Motion: fades only). A page's dialog also dims the page under it (`dimmedPage`, #693): the dim fades in
+/// with the panel, fades out over 0.10 s whenever the panel goes (even at once), and never moves.
 @MainActor
 public final class DialogPanel {
   public static let anchorInset: CGFloat = 12
+
+  /// Where the panel sits on its anchor.
+  public enum Attachment: Equatable, Sendable {
+    /// Its top-leading corner `anchorInset` inside the anchor, all corners rounded.
+    case inset
+    /// Hung from the anchor's top edge, `anchorInset` from its leading edge, only the bottom corners rounded: every
+    /// page dialog (#584, #693, design/extensions `surf-dialog`).
+    case topEdge
+  }
+
   public let panel: NSPanel
+  public let attachment: Attachment
   let view: DialogSheetView
   let container: NSView
   public var onAnswer: (@MainActor (DialogContent.Answer) -> Void)?
@@ -198,8 +222,15 @@ public final class DialogPanel {
   private var entranceEnds: TimeInterval = 0
   /// The last answer came from a key (Return, Escape): the panel leaves at once.
   private var keyboardAnswer = false
+  /// The page view the panel dims while it is up (#693); nil dims nothing (a permission prompt). Set before `show`.
+  weak var dimmedPage: NSView?
+  /// How long the dim takes to leave when the panel goes. Tests set 0 to end it at once.
+  var dimExitDuration: CFTimeInterval = PageDimView.exitDuration
+  /// The dim over the page while the panel is up (#693).
+  private(set) var pageDim: PageDimView?
 
-  public init(content: DialogContent) {
+  public init(content: DialogContent, attachment: Attachment = .inset) {
+    self.attachment = attachment
     view = DialogSheetView(content: content, insets: .panel)
     let height = view.layoutContent(width: content.width)
     let size = NSSize(width: content.width, height: height)
@@ -215,6 +246,9 @@ public final class DialogPanel {
     container.wantsLayer = true
     container.layer?.cornerRadius = DialogMetrics.panelCornerRadius
     container.layer?.cornerCurve = .continuous
+    if attachment == .topEdge {
+      container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]   // the bottom ones (not flipped)
+    }
     container.layer?.masksToBounds = true
     container.layer?.borderWidth = 0.5
     view.frame = container.bounds
@@ -233,11 +267,12 @@ public final class DialogPanel {
 
   public var content: DialogContent { view.content }
 
-  /// The panel's frame for `anchor` (screen coordinates): top-leading corner `anchorInset` inside it.
+  /// The panel's frame for `anchor` (screen coordinates): top-leading corner `anchorInset` inside it, or on its top
+  /// edge for `.topEdge`.
   public func frame(anchoredTo anchor: NSRect) -> NSRect {
     let size = panel.frame.size
-    return NSRect(x: anchor.minX + Self.anchorInset, y: anchor.maxY - Self.anchorInset - size.height,
-                  width: size.width, height: size.height)
+    let top = attachment == .topEdge ? anchor.maxY : anchor.maxY - Self.anchorInset
+    return NSRect(x: anchor.minX + Self.anchorInset, y: top - size.height, width: size.width, height: size.height)
   }
 
   /// The text in the prompt's field; nil when the content has none.
@@ -259,7 +294,10 @@ public final class DialogPanel {
   /// Moves the panel to `anchor` (screen coordinates) again, when the page it points at moved or resized.
   public func reposition(anchoredTo anchor: NSRect) {
     anchorIsUsable = !anchor.isEmpty
-    if anchorIsUsable { panel.setFrame(frame(anchoredTo: anchor), display: true) }
+    if anchorIsUsable {
+      panel.setFrame(frame(anchoredTo: anchor), display: true)
+      pageDim?.place(screenFrame: anchor)
+    }
     updateVisibility()
   }
 
@@ -291,6 +329,14 @@ public final class DialogPanel {
     panel.orderFront(nil)
     let step = DialogMotion.panelIn(reduceMotion: reduceMotion())
     entranceEnds = clock() + (reduceMotion() ? 0 : step.fadeDuration)
+    if let page = dimmedPage, anchorIsUsable {
+      // Opacity only, with the panel's fade, under Reduce Motion too: the dim says the page waits, it never moves. A
+      // dim still leaving the page (the dialog before this one) comes back instead of a second one.
+      let dim = PageDimView.existing(over: page) ?? PageDimView(page: page)
+      dim.place(screenFrame: anchor)
+      dim.enter(duration: step.fadeDuration)
+      pageDim = dim
+    }
     updateVisibility()
     if takesFocus {
       panel.makeKey()
@@ -319,8 +365,11 @@ public final class DialogPanel {
     layer.add(DialogAlert.spring(spring, from: start), forKey: "dialogTransform")
   }
 
-  /// Takes the panel down: a 0.10 s fade, or at once when `keyboard` (or Reduce Motion).
+  /// Takes the panel down: a 0.10 s fade, or at once when `keyboard` (or Reduce Motion). Its page dim always fades
+  /// out over `dimExitDuration`.
   public func close(keyboard: Bool) {
+    pageDim?.leave(duration: dimExitDuration)
+    pageDim = nil
     let duration = DialogMotion.panelOut(keyboard: keyboard, reduceMotion: reduceMotion())
     guard duration > 0, let layer = container.layer else { return remove() }
     CATransaction.begin()

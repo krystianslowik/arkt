@@ -49,8 +49,11 @@ public final class SettingsSwitch: NSButton {
 
   private let track = CALayer()
   private let onFill = CALayer()
-  private let knob = CALayer()
+  private let knob = ShadowPathLayer()
   fileprivate private(set) var pressing = false
+  /// `ShellTokens.focusRing` around the track while the switch has keyboard focus (#642).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(
+    outside: self, radius: SettingsMetrics.switchSize.height / 2)
 
   public var isOn: Bool { state == .on }
 
@@ -62,7 +65,7 @@ public final class SettingsSwitch: NSButton {
     setButtonType(.switch)
     title = ""
     isBordered = false
-    focusRingType = .default
+    focusRingType = .none
     target = self
     action = #selector(toggled(_:))
     wantsLayer = true
@@ -112,6 +115,18 @@ public final class SettingsSwitch: NSButton {
 
   override public func accessibilityValue() -> Any? { NSNumber(value: isOn ? 1 : 0) }
 
+  override public func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override public func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
+
   fileprivate func setPressed(_ pressed: Bool) {
     guard isEnabled, pressed != pressing else { return }
     pressing = pressed
@@ -157,20 +172,10 @@ public final class SettingsSwitch: NSButton {
 
 }
 
-/// A button cell that draws nothing (layers draw the control) and masks the focus ring to a rounded rectangle.
+/// A button cell that draws nothing: layers draw the control, and `KeyboardFocusRingView` its focus ring.
 @MainActor
 class SettingsBlankCell: NSButtonCell {
-  /// nil: a capsule.
-  var focusRadius: CGFloat?
-
   override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {}
-
-  override func drawFocusRingMask(withFrame cellFrame: NSRect, in controlView: NSView) {
-    let radius = focusRadius ?? cellFrame.height / 2
-    NSBezierPath(roundedRect: cellFrame, xRadius: radius, yRadius: radius).fill()
-  }
-
-  override func focusRingMaskBounds(forFrame cellFrame: NSRect, in controlView: NSView) -> NSRect { cellFrame }
 }
 
 /// Reports the pointer-down highlight to the switch.
@@ -195,18 +200,19 @@ public final class SettingsPopUpButton: NSButton {
   private let body = CALayer()
   private let label = CATextLayer()
   private let chevron = CALayer()
+  /// `ShellTokens.focusRing` around the button while it has keyboard focus (#642).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                         radius: SettingsMetrics.popUpRadius)
 
   init(items: [String], selected: String) {
     self.items = items
     selectedTitle = selected
     super.init(frame: .zero)
-    let cell = SettingsBlankCell()
-    cell.focusRadius = SettingsMetrics.popUpRadius
-    self.cell = cell
+    cell = SettingsBlankCell()
     title = ""
     isBordered = false
     setButtonType(.momentaryChange)
-    focusRingType = .default
+    focusRingType = .none
     wantsLayer = true
     target = self
     action = #selector(pressed(_:))
@@ -228,6 +234,18 @@ public final class SettingsPopUpButton: NSButton {
   override public func updateLayer() { restyle() }
   override public func accessibilityValue() -> Any? { selectedTitle }
 
+  override public func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override public func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
+
   private static let font = NSFont.systemFont(ofSize: 13)
 
   override public var intrinsicContentSize: NSSize {
@@ -246,9 +264,12 @@ public final class SettingsPopUpButton: NSButton {
     menu.popUp(positioning: menu.items.first { $0.state == .on }, at: NSPoint(x: 0, y: bounds.height - 3), in: self)
   }
 
-  @objc private func chose(_ sender: NSMenuItem) {
-    guard sender.title != selectedTitle else { return }
-    selectedTitle = sender.title
+  @objc private func chose(_ sender: NSMenuItem) { select(sender.title) }
+
+  /// Chooses `title` as the menu does: a different title restyles and reports it; the current one does nothing.
+  func select(_ title: String) {
+    guard title != selectedTitle, items.contains(title) else { return }
+    selectedTitle = title
     restyle()
     invalidateIntrinsicContentSize()
     onChange?(selectedTitle)
@@ -302,7 +323,7 @@ final class SettingsSegmentedControl: NSControl {
   let segments: [String]
   private(set) var selectedIndex: Int
   var onChange: (@MainActor (Int) -> Void)?
-  private let plate = CALayer()
+  private let plate = ShadowPathLayer()
   private let labels: [CATextLayer]
   static let segmentSize = NSSize(width: 80, height: 24)
   /// A segment's width: 80 pt, or wider for longer titles (Downloads' "Ask Where to Save").

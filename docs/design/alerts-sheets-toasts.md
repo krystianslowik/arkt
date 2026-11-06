@@ -24,7 +24,8 @@ with a leading glyph, a sentence and one small neutral pill. The rules:
 - **Lists are recessed fields**, as in the Archive, not hairline-ruled blocks.
 - **Space color carries meaning.** Delete Space shows the Space's own theme swatch; toasts take their surface from the
   Space's theme.
-- **Focus is the system's** focus ring. Mustard is a fill only: never text, never a stroke.
+- **One focus ring.** Pills and links draw `ShellTokens.focusRing` (graphite in light, porcelain in dark, at 85 %, 3 pt, #642); text fields keep the system
+  focus ring. Mustard is a fill only: never text, never a stroke.
 
 Everything an engine draws (extension sheets, permission panel, infobars) uses the same values, copied into the
 engine as the existing comments already do.
@@ -43,7 +44,7 @@ engine as the existing comments already do.
 | Auto-archive | toast "Auto archived 3 tabs" | toast / undo | as `toast-undo` |
 | Archive of several tabs (Clear, Archive Below, multi-selection) | no toast today | toast / undo (new) | `toast-undo` |
 | Recovery | persistent toast with Show Files, one line, truncates at 480 pt | toast / persistent, multi-line | `toast-recovery` |
-| Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn) | `ext-install`, `ext-remove` |
+| Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn); Remove from Arkt... in the Extensions panel is the shell's `DialogSheet` (#720) | `ext-install`, `ext-remove` |
 | Permission prompts | shell `DialogPanel` as an anchored panel (#400); the engine's `ArktDialogSheet` stays the fallback while no embedder presents it | dialog / anchored panel | `permission` |
 | Infobars | shell `InfobarPanel` strip, 40 pt per infobar, fade-in 0.14 s (#400); the engine's `ArktInfobarView` rows stay the fallback while no embedder presents them | infobar | `infobar` |
 
@@ -83,7 +84,7 @@ enable delay, width (default 420), stacked buttons, neutral primary, Escape dism
 | Sheet corners | bottom corners 14, as the Archive's Clear Archive sheet | |
 | Panel corners | 12 (was 10) | change, see section 6 |
 | Alert corners | 14 | |
-| Focus ring | the system focus ring (`NSColor.keyboardFocusIndicatorColor`), never mustard | AppKit |
+| Focus ring | pills and links: `ShellTokens.focusRing`, 3 pt outside the control (`KeyboardFocusRingView`, #642); text fields: the system focus ring; never mustard | `ShellTokens.focusRing` |
 | Shadow | `overlayShadow`: 0.5 pt edge black 0.12 (dark white 0.20), 18 / 48 blur black 0.22 (dark 0.55), 3 / 10 black 0.10 | new AlertTokens.overlayShadow |
 
 Button order: trailing edge holds the answer that continues; the cancel answer is to its left; a third answer (Allow
@@ -98,7 +99,11 @@ Escape is Cancel, so a stray Return never deletes anything.
 2. **Anchored panel** (child `NSPanel`, non-activating): permission prompts. Top-leading corner 12 pt inside the
    content card (or the focused split pane), so the prompt points at the page that asked. Never steals focus from a
    text field on the page unless the user clicks it; Escape dismisses it without choosing (the
-   engine's own panel does the same), and only while the panel is key.
+   engine's own panel does the same), and only while the panel is key. A page's JavaScript dialogs (alert, confirm,
+   prompt, leave site) use the same panel hung from the card's top edge, below any infobar rows, with the page dimmed
+   under it while it is up (#693, design/extensions `surf-dialog`). The dim sits directly above the page view, under
+   everything the shell draws over the page; it fades in with the panel and fades out over 0.10 s whenever the panel
+   goes, Reduce Motion included (it never moves).
 3. **App-modal alert** (`NSApp.runModal(for:)` on a centered panel): launch failure before any window exists. Icon is
    the plain app icon at 56 pt, no badge, with the brand clear space kept (decision 5); the title stacks under the
    icon, as in system alerts. Runs from the same run-loop callout `askAfterLaunchFailure` uses

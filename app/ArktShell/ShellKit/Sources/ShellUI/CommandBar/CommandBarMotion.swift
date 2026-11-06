@@ -6,12 +6,7 @@ import QuartzCore
 /// fades in, with no scale; it fades out in 0.1 s. Opacity only. Reduce Motion keeps both: it drops movement, and a
 /// fade is not movement. The selection slide is `CommandBarSelectionMotion`.
 enum CommandBarMotion {
-  struct Curve: Equatable {
-    var c1x: Double, c1y: Double, c2x: Double, c2y: Double
-    init(_ c1x: Double, _ c1y: Double, _ c2x: Double, _ c2y: Double) {
-      self.c1x = c1x; self.c1y = c1y; self.c2x = c2x; self.c2y = c2y
-    }
-  }
+  typealias Curve = MotionCurve
 
   struct Fade: Equatable {
     var fromOpacity: Float
@@ -21,10 +16,10 @@ enum CommandBarMotion {
   }
 
   /// The strong ease-out the rest of the shell's overlays use.
-  static let strongEaseOut = Curve(0.23, 1, 0.32, 1)
+  static let strongEaseOut = MotionCurve.strongEaseOut
 
-  static let appear = Fade(fromOpacity: 0, toOpacity: 1, duration: 0.1, curve: strongEaseOut)
-  static let dismiss = Fade(fromOpacity: 1, toOpacity: 0, duration: 0.1, curve: strongEaseOut)
+  static let appear = Fade(fromOpacity: 0, toOpacity: 1, duration: FadeDuration.quick, curve: strongEaseOut)
+  static let dismiss = Fade(fromOpacity: 1, toOpacity: 0, duration: FadeDuration.quick, curve: strongEaseOut)
 
   static func entrance(reduceMotion: Bool) -> Fade { appear }
   static func exit(reduceMotion: Bool) -> Fade { dismiss }
@@ -35,8 +30,7 @@ enum CommandBarMotion {
     animation.fromValue = fade.fromOpacity
     animation.toValue = fade.toOpacity
     animation.duration = fade.duration
-    animation.timingFunction = CAMediaTimingFunction(controlPoints: Float(fade.curve.c1x), Float(fade.curve.c1y),
-                                                     Float(fade.curve.c2x), Float(fade.curve.c2y))
+    animation.timingFunction = fade.curve.timingFunction
     animation.isRemovedOnCompletion = true
     return animation
   }

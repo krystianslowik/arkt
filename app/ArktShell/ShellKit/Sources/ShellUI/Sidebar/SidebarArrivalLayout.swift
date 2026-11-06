@@ -22,15 +22,25 @@ enum SidebarArrivalLayout {
   static func apply(to styles: inout [FolderMotionLayout.RowStyle], arrivalHeight: CGFloat, arrivalRow: Int,
                     oldSelectionRow: Int = -1, room: Double, appear: Double) {
     guard styles.indices.contains(arrivalRow) else { return }
-    let shown = CGFloat(min(max(appear, 0), 1))
-    styles[arrivalRow].alpha *= shown
-    styles[arrivalRow].scale *= 1 - CGFloat(1 - LittleArktFlightMotion.rowStartScale) * (1 - shown)
-    if styles.indices.contains(oldSelectionRow), oldSelectionRow != arrivalRow {
-      styles[oldSelectionRow].selectionAlpha *= 1 - CGFloat(min(max(room, 0), 1))
+    for row in styles.indices {
+      apply(to: &styles[row], atRow: row, arrivalHeight: arrivalHeight, arrivalRow: arrivalRow,
+            oldSelectionRow: oldSelectionRow, room: room, appear: appear)
     }
-    let missing = CGFloat(room - 1) * arrivalHeight
-    for row in (arrivalRow + 1)..<styles.count {
-      styles[row].offsetY += missing
+  }
+
+  /// Adds the arrival to one row's style (#603): what `apply(to:arrivalHeight:...)` does to `row`, so a frame styles
+  /// only the rows that have views. `arrivalRow` must be a row of the outline.
+  static func apply(to style: inout FolderMotionLayout.RowStyle, atRow row: Int, arrivalHeight: CGFloat,
+                    arrivalRow: Int, oldSelectionRow: Int = -1, room: Double, appear: Double) {
+    if row == arrivalRow {
+      let shown = CGFloat(min(max(appear, 0), 1))
+      style.alpha *= shown
+      style.scale *= 1 - CGFloat(1 - LittleArktFlightMotion.rowStartScale) * (1 - shown)
+    } else if row == oldSelectionRow {
+      style.selectionAlpha *= 1 - CGFloat(min(max(room, 0), 1))
+    }
+    if row > arrivalRow {
+      style.offsetY += CGFloat(room - 1) * arrivalHeight
     }
   }
 }

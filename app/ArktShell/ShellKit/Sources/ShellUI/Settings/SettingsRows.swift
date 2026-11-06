@@ -289,17 +289,19 @@ final class SettingsAddRowButton: NSButton {
   private let titleText: String
   private var hovering = false
   private var tracking: NSTrackingArea?
+  /// `ShellTokens.focusRing` around the row while it has keyboard focus (#642).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                         radius: SettingsMetrics.rowRadius)
 
   init(title: String) {
     titleText = title
     super.init(frame: .zero)
     let cell = SettingsBlankCell()
-    cell.focusRadius = SettingsMetrics.rowRadius
     self.cell = cell
     self.title = ""
     isBordered = false
     setButtonType(.momentaryChange)
-    focusRingType = .default
+    focusRingType = .none
     wantsLayer = true
     layer?.cornerRadius = SettingsMetrics.rowRadius
     layer?.cornerCurve = .continuous
@@ -349,6 +351,18 @@ final class SettingsAddRowButton: NSButton {
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
     needsDisplay = true
+  }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
   }
 }
 

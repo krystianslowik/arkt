@@ -28,9 +28,12 @@ public final class ShellEngineHost: EngineWindowHosting {
     controller?.perform(command, disposition: disposition) ?? false
   }
 
-  /// Peek decides user link clicks (#313); it answers without calling the engine.
+  /// Opt-Cmd-click opens Little Arkt (#356); Peek decides the other user link clicks (#313). Both answer without
+  /// calling the engine.
   public func decideLinkActivation(_ activation: EngineLinkActivation) -> EngineLinkDecision {
-    controller?.peek.decide(activation) ?? .navigate
+    guard let controller else { return .navigate }
+    if controller.opensLinkInLittleArkt(activation) { return .cancel }
+    return controller.peek.decide(activation)
   }
 
   /// An Esc the page did not use closes an open Peek (Esc goes to the page first, decided 2026-10-25).

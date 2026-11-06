@@ -35,6 +35,8 @@ public final class SidebarController {
   public var onConvertSplit: (@MainActor (NodeID) -> Void)?
   public var onDuplicateSplit: (@MainActor (NodeID) -> Void)?
   public var onDuplicateIntoSplit: (@MainActor (NodeID) -> Void)?
+  /// Opt-Cmd-click on a tab of every Space page (BH-132, #356), forwarded from `SidebarOutlineController`.
+  public var onOpenInLittleArkt: (@MainActor (NodeID) -> Bool)?
   /// A tab row's drag of every Space page started and ended (S7), forwarded from `SidebarOutlineController`.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   public var onNodeDragEnded: (@MainActor () -> Void)?
@@ -101,10 +103,22 @@ public final class SidebarController {
   /// Decoded favicons by node; kept while the node exists in the source (its engine tab may close and reopen),
   /// dropped when the node leaves it (`.structure` and `.spaceRemoved` changes, `deactivate(node:)`).
   private(set) var favicons: [NodeID: NSImage] = [:]
+  /// Decodes favicon bytes off the main actor (#605), so no row decodes its image at first draw.
+  private let faviconLoader = FaviconImageLoader<NodeID>()
+  /// Tests: how favicons are decoded (production: off the main actor).
+  var faviconDecoder: FaviconDecoder {
+    get { faviconLoader.decoder }
+    set { faviconLoader.decoder = newValue }
+  }
+  /// Tests: the decoded-image cache (production: shared by the whole process).
+  var faviconImageCache: NSCache<NSData, NSImage> {
+    get { faviconLoader.decoded }
+    set { faviconLoader.decoded = newValue }
+  }
   /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page; pages the
   /// window creates without an activation (the other panes of a split) are added through `markLoaded(node:)`, and
   /// the window calls `deactivate(node:)` when any page closes; nodes that leave the source are dropped like
-  /// favicons. Decides whether a Favorite tile shows its X (#82).
+  /// favicons. Decides whether a Favorite tile (#82) or a pinned row (#601) shows its X.
   private(set) var loadedNodes: Set<NodeID> = []
   /// Loaded Favorites, least to most recently used (BH-049); activations append, closes and removals drop.
   private var favoriteLoadOrder: [NodeID] = []
@@ -134,6 +148,13 @@ public final class SidebarController {
   /// The theme creator's haptics and Reduce Motion. Tests count haptics through an injected performer.
   var makeThemeHaptics: @MainActor () -> ThemeHaptics = { ThemeHaptics() }
   var themeCreatorReducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// The open Edit Pin popover, if any (#363).
+  private(set) var editPin: EditPinController?
+  /// The Edit Pin popover's Reduce Motion and VoiceOver announcements. Tests replace them.
+  var editPinReducesMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  var editPinAnnounce: AXAnnouncement.Poster = { AXAnnouncement.post($0, priority: $1) }
+  /// The Edit Pin popover opened (true) or closed (false). The window holds a hover-revealed sidebar out meanwhile.
+  public var onEditPinChange: (@MainActor (Bool) -> Void)?
 
   public init(source: any SidebarSource, profile: String = "default",
               topBarHeight: CGFloat = ShellMetrics.standard.sidebarTopBarHeight) {
@@ -141,6 +162,7 @@ public final class SidebarController {
     self.profile = profile
     self.view = SidebarContainerView(source: source, profile: profile, topBarHeight: topBarHeight)
     view.favorites.onActivate = { [weak self] id in self?.activate(node: id) }
+    view.favorites.onOpenInLittleArkt = { [weak self] id in self?.onOpenInLittleArkt?(id) ?? false }
     view.favorites.faviconProvider = { [weak self] id in self?.favicons[id] }
     view.favorites.onClose = { [weak self] id in self?.onClose?(id) }
     view.favorites.onMenuAction = { [weak self] action in self?.onMenuAction?(action) }
@@ -313,9 +335,14 @@ public final class SidebarController {
   private func commit(space id: SpaceID, info: SidebarSpaceInfo, index: Int) {
     guard let page = pages[id] else { return }
     let changed = currentSpace != id
-    if changed, let creator = themeCreator, creator.spaceID != id { creator.close(animated: true) }   // #410
+    // A popover leaving with the page does not give the keyboard back to a row on that page (#696).
+    let leaving = changed ? currentSpace.flatMap { pages[$0] } : nil
+    if changed, let creator = themeCreator, creator.spaceID != id {                 // #410
+      creator.close(animated: true, leaving: leaving)
+    }
     if changed, let old = currentSpace { pages[old]?.outlineController.clearSelection() }   // design 6
     if changed { folderPreview.hide(animated: false) }                              // BH-093: the page left
+    if changed { editPin?.close(animated: false, leaving: leaving) }                // #363: its row left
     // The page leaving the screen ends its folder springs, so no closed folder's rows wait there for its return.
     if changed, let old = currentSpace { pages[old]?.outlineController.folderMotion.settleNow() }
     currentSpace = id
@@ -378,6 +405,7 @@ public final class SidebarController {
 
   private func pagerMoved(to position: CGFloat) {
     view.spaceDots.position = position
+    view.bannerPagerMoved()
     // The chrome around the pages takes the flavor of the Space nearest the fingers.
     let nearest = min(max(Int(position.rounded()), 0), max(pagedFlavors.count - 1, 0))
     if pagedFlavors.indices.contains(nearest), pagedFlavors[nearest] != view.flavor {
@@ -464,6 +492,7 @@ public final class SidebarController {
     page.outlineController.onConvertSplit = { [weak self] node in self?.onConvertSplit?(node) }
     page.outlineController.onDuplicateSplit = { [weak self] node in self?.onDuplicateSplit?(node) }
     page.outlineController.onDuplicateIntoSplit = { [weak self] node in self?.onDuplicateIntoSplit?(node) }
+    page.outlineController.onOpenInLittleArkt = { [weak self] node in self?.onOpenInLittleArkt?(node) ?? false }
     page.outlineController.onMoveToFavorites = { [weak self] node in self?.onMoveToFavorites?(node) }
     page.outlineController.onPinToggle = { [weak self] node in self?.onPinToggle?(node) }
     page.outlineController.onResetPinned = { [weak self] node in self?.onResetPinned?(node) }
@@ -511,6 +540,56 @@ public final class SidebarController {
   @discardableResult
   public func beginRename(node: NodeID) -> Bool {
     currentPage?.outlineController.beginRename(node) ?? false
+  }
+
+  // MARK: Edit Pin (#363)
+
+  /// Opens the Edit Pin popover on `node` (design/edit-pin): anchored to its row in the current Space page when it
+  /// is a pinned tab, to its tile when it is a Favorite. `currentPage` is the address the tab shows now, for Use
+  /// Current Page. One at a time: an open popover closes first. False when the node has no row or
+  /// tile on screen.
+  @discardableResult
+  public func openEditPin(node: NodeID, focus: EditPinFocus, currentPage: URL?) -> Bool {
+    editPin?.close(animated: false)
+    guard let host = view.window?.contentView else { return false }
+    host.layoutSubtreeIfNeeded()
+    let kind: EditPinKind
+    let anchor: EditPinController.Anchor
+    switch source.section(containing: node) {
+    case .favorites?:
+      guard let tile = view.favorites.tile(for: node) else { return false }
+      kind = .favorite
+      anchor = .tile(tile.convert(tile.bounds, to: host))
+    case .pinned?:
+      guard let row = editPinRowFrame(node, in: host) else { return false }
+      kind = .pinnedTab
+      anchor = .row(row)
+    default:
+      return false
+    }
+    guard let controller = EditPinController(nodeID: node, kind: kind, focus: focus, currentPage: currentPage,
+                                             source: source, reducesMotion: editPinReducesMotion,
+                                             announce: editPinAnnounce) else { return false }
+    controller.onClose = { [weak self, weak controller] in
+      guard let self, self.editPin === controller else { return }
+      self.editPin = nil
+      self.onEditPinChange?(false)
+    }
+    editPin = controller
+    onEditPinChange?(true)
+    controller.show(in: host, anchor: anchor)
+    return true
+  }
+
+  /// The pinned row's frame in `host`, its trailing edge held to the sidebar's.
+  private func editPinRowFrame(_ node: NodeID, in host: NSView) -> NSRect? {
+    guard let outline = currentPage?.outlineController else { return nil }
+    let row = outline.row(for: node)
+    guard row >= 0 else { return nil }
+    let rect = outline.outlineView.convert(outline.outlineView.rect(ofRow: row), to: host)
+    let sidebar = view.convert(view.bounds, to: host)
+    return NSRect(x: rect.minX, y: rect.minY, width: max(min(rect.maxX, sidebar.maxX) - rect.minX, 0),
+                  height: rect.height)
   }
 
   // MARK: Folders (#109)
@@ -573,6 +652,7 @@ public final class SidebarController {
     if let space, space != currentSpace { showSpace(space) }
     if let space { lastActive[space] = tab }
     let loadedNow = loadedNodes.insert(tab).inserted
+    if loadedNow { loadedChanged(tab) }
     let isFavorite = source.section(containing: tab).map {
       if case .favorites = $0 { true } else { false }
     } ?? false
@@ -624,7 +704,14 @@ public final class SidebarController {
 
   /// The window created `node`'s page without activating it (a background pane of a shown split, #156 review).
   public func markLoaded(node: NodeID) {
-    if loadedNodes.insert(node).inserted { view.favorites.reload(node: node) }
+    guard loadedNodes.insert(node).inserted else { return }
+    view.favorites.reload(node: node)
+    loadedChanged(node)
+  }
+
+  /// A page opened or closed: pinned rows show their X only while they have one (#601).
+  private func loadedChanged(_ node: NodeID) {
+    for page in pages.values { page.outlineController.loadedChanged(node: node) }
   }
 
   /// Rows whose page close is held behind a leave-site prompt (week-3 Decision 11).
@@ -653,9 +740,13 @@ public final class SidebarController {
   public func deactivate(node: NodeID) {
     setClosing(node, false)
     setAudio(.silent, for: node)
-    if source.node(node) == nil { favicons[node] = nil }
+    if source.node(node) == nil {
+      faviconLoader.cancel(node)
+      favicons[node] = nil
+    }
     favoriteLoadOrder.removeAll { $0 == node }
     let wasLoaded = loadedNodes.remove(node) != nil
+    if wasLoaded { loadedChanged(node) }
     guard node == current || node == previous else {
       if wasLoaded { view.favorites.reload(node: node) }   // a background Favorite drops its X
       return
@@ -742,34 +833,52 @@ public final class SidebarController {
 
   // MARK: Updates
 
-  /// Caches a favicon (nil = back to the letter placeholder) and refreshes only that row or tile.
+  /// Sets a favicon (nil = back to the letter placeholder at once) and refreshes only that row or tile. The bytes are
+  /// decoded off the main actor; until they are, the row keeps what it shows (its old favicon or the letter), so a
+  /// new favicon replaces the old one without a flash. Bytes that are not an image show the letter.
   public func setFavicon(_ data: Data?, for node: NodeID) {
-    favicons[node] = data.flatMap(NSImage.init(data:))
+    guard let data else {
+      faviconLoader.cancel(node)
+      guard favicons.removeValue(forKey: node) != nil else { return }
+      reloadFavicon(of: node)
+      return
+    }
+    setFavicons([node: data])
+  }
+
+  /// Sets a batch of favicons (for example the ones loaded after launch or an import): decoded off the main actor in
+  /// one job, then each affected row or tile refreshes once. Ids the source does not know are ignored.
+  public func setFavicons(_ batch: [NodeID: Data]) {
+    let known = batch.filter { source.node($0.key) != nil }
+    guard !known.isEmpty else { return }
+    faviconLoader.load(known) { [weak self] images in self?.applyFavicons(images) }
+  }
+
+  /// Stores decoded favicons of nodes still in the source and refreshes the ones that changed.
+  private func applyFavicons(_ images: [NodeID: NSImage?]) {
+    for (node, image) in images where source.node(node) != nil && favicons[node] !== image {
+      favicons[node] = image
+      reloadFavicon(of: node)
+    }
+  }
+
+  private func reloadFavicon(of node: NodeID) {
     for page in pages.values { page.outlineController.reload(node: node) }
     view.favorites.reload(node: node)
   }
 
-  /// Caches a batch of favicons (for example the ones loaded after launch), then refreshes each affected row or tile
-  /// once. Ids the source does not know are ignored.
-  public func setFavicons(_ batch: [NodeID: Data]) {
-    var changed: [NodeID] = []
-    for (node, data) in batch where source.node(node) != nil {
-      favicons[node] = NSImage(data: data)
-      changed.append(node)
-    }
-    for node in changed {
-      for page in pages.values { page.outlineController.reload(node: node) }
-      view.favorites.reload(node: node)
-    }
-  }
+  /// Tests: returns once every favicon set so far is decoded and shown.
+  func settleFaviconDecodes() async { await faviconLoader.settle() }
 
   /// Drops cached favicons and loaded state of nodes that left the source. O(cached favicons + loaded nodes), on
   /// structure and Space changes only.
   private func pruneRemovedNodes() {
     for node in favicons.keys where source.node(node) == nil { favicons[node] = nil }
+    faviconLoader.cancel { source.node($0) == nil }
     loadedNodes = loadedNodes.filter { source.node($0) != nil }
     audio = audio.filter { source.node($0.key) != nil }
     favoriteLoadOrder = favoriteLoadOrder.filter { source.node($0) != nil }
+    editPin?.sourceDidChange()                                                       // #363: its node went away
   }
 
   private func apply(_ change: SidebarChange) {

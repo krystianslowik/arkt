@@ -241,7 +241,7 @@ final class PinnedTabTests: XCTestCase {
     XCTAssertEqual(try harness.menuTitles(world.today[0]), SplitSidebarTests.todayMenu)
     XCTAssertEqual(try harness.menuTitles(world.p0),
                    ["Rename", "Duplicate", "Unpin Tab", "", "Back to Pinned URL", "Replace Pin with Current Page",
-                    "Separate From Pinned Tab", "Edit Pinned URL", "", "Move To", "", "Copy Link",
+                    "Separate From Pinned Tab", "Edit Pinned URL\u{2026}", "", "Move To", "", "Copy Link",
                     "Copy Link as Markdown", "", "Close and Keep Pinned"])
     XCTAssertEqual(try harness.menuTitles(world.panes[0]), SplitSidebarTests.paneMenu,
                    "a pane row never offers pin items")

@@ -23,7 +23,7 @@ struct ThemeCreatorModelTests {
   /// A theme with colours off the pad opens with the dots at the nearest pad point and stays unchanged until a dot
   /// moves; with more than two colours the dots show the first and last.
   @Test func foreignColoursStayUntilADotMoves() {
-    let foreign = SpaceThemeInfo(baseColors: [.white(1), .srgb(hex: 0x336699), .srgb(hex: 0xF29BBB)], isDark: false)
+    let foreign = SpaceThemeInfo(baseColors: [.white(1), .srgb(hex: 0x336699), .srgb(hex: 0xDDB4D2)], isDark: false)
     var model = ThemeCreatorModel(theme: foreign, isNew: false)
     #expect(model.dots.count == 2)
     #expect(model.theme == foreign)

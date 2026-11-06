@@ -74,7 +74,7 @@ final class LittleArktTopBar: WindowDragView {
     openButton.toolTip = openHelp
     usesAccent = accent
     swatchColors = swatch
-    openButton.image = accent && !swatch.isEmpty ? Self.swatchImage(swatch) : nil
+    openButton.image = accent && !swatch.isEmpty ? Self.swatchImage(swatch, leadingInset: Self.swatchLeadingInset) : nil
     needsDisplay = true
     needsLayout = true
   }
@@ -115,6 +115,9 @@ final class LittleArktTopBar: WindowDragView {
     divider.backgroundColor = line.cgColor
     CATransaction.commit()
     for button in [openButton, chooserButton] {
+      // The ring sits on the segment's fill: on mustard it takes the fill's text tone, graphite (`onAccent`) in both
+      // appearances; on the quiet fill it follows the window.
+      button.keyboardFocusRing.flavor = usesAccent ? .light : nil
       button.textColor = text.littleArktColor
       button.hoverFill = usesAccent ? BrandTokens.accentHighlight.resolve(flavor) : nil
       button.pressedFill = usesAccent ? BrandTokens.accentPressed.resolve(flavor)
@@ -131,11 +134,18 @@ final class LittleArktTopBar: WindowDragView {
     needsDisplay = true
   }
 
-  /// The target Space's theme as a 10 pt swatch with 3 pt corners and a hairline (the prototype's `.sw`).
-  static func swatchImage(_ colors: [RGBA]) -> NSImage {
-    let size = NSSize(width: 10, height: 10)
-    return NSImage(size: size, flipped: false) { rect in
-      let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.25, dy: 0.25), xRadius: 3, yRadius: 3)
+  /// Clear space before the "Open in" segment's swatch: the cell draws a leading image flush with the segment's edge,
+  /// where the focus ring (3 pt, inside the segment) would cover it (#687). The chooser menu's swatches have none.
+  static let swatchLeadingInset: CGFloat = 5
+
+  /// The target Space's theme as a 10 pt swatch with 3 pt corners and a hairline (the prototype's `.sw`), after
+  /// `leadingInset` of clear space.
+  static func swatchImage(_ colors: [RGBA], leadingInset: CGFloat = 0) -> NSImage {
+    let inset = leadingInset
+    let size = NSSize(width: inset + 10, height: 10)
+    return NSImage(size: size, flipped: false) { _ in
+      let swatch = NSRect(x: inset, y: 0, width: 10, height: 10)
+      let path = NSBezierPath(roundedRect: swatch.insetBy(dx: 0.25, dy: 0.25), xRadius: 3, yRadius: 3)
       let stops = colors.count == 1 ? [colors[0], colors[0]] : colors
       NSGradient(colors: stops.map { NSColor(cgColor: $0.cgColor) ?? .clear })?.draw(in: path, angle: -45)
       NSColor.black.withAlphaComponent(0.25).setStroke()
@@ -149,10 +159,13 @@ final class LittleArktTopBar: WindowDragView {
 // MARK: - Controls
 
 /// One segment of the split button: its own hover and pressed fill over the split's background, and a 0.97 press
-/// scale (feedback, `firmFast`).
+/// scale (feedback, `firmFast`). The split clips its segments, so the ink focus ring is drawn inside the segment
+/// (#687).
 @MainActor
 final class LittleArktSegmentButton: NSButton {
   var textColor: NSColor = .labelColor { didSet { applyTitleColor() } }
+  /// Shown while the segment has keyboard focus, on its edge; the bar sets its tone.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(inside: self, radius: 8)
   var hoverFill: RGBA?
   var pressedFill: RGBA?
   private var hovering = false { didSet { refreshFill() } }
@@ -164,23 +177,37 @@ final class LittleArktSegmentButton: NSButton {
     bezelStyle = .shadowlessSquare
     wantsLayer = true
     setButtonType(.momentaryChange)
-    focusRingType = .exterior
+    focusRingType = .none
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var title: String { didSet { applyTitleColor() } }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
+
   override var mouseDownCanMoveWindow: Bool { false }
   /// The window's one action works on the first click, also while another window is key.
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+  /// The glyph takes the text tone even without a title: the chooser segment is its chevron alone (#734).
   private func applyTitleColor() {
+    contentTintColor = textColor
     guard !title.isEmpty else { return }
     attributedTitle = NSAttributedString(string: title, attributes: [
       .font: font ?? .systemFont(ofSize: 12, weight: .semibold), .foregroundColor: textColor,
     ])
-    contentTintColor = textColor
   }
 
   override func updateTrackingAreas() {
@@ -230,10 +257,13 @@ final class LittleArktSegmentButton: NSButton {
   }
 }
 
-/// A 26 pt icon button (Copy Link): `sidebarForeground`, `sidebarItemBackground` on hover.
+/// A 26 pt icon button (Copy Link): `sidebarForeground`, `sidebarItemBackground` on hover, the ink focus ring outside
+/// it (#687).
 @MainActor
 final class LittleArktIconButton: NSButton {
   var hoverFill: RGBA?
+  /// Shown while the button has keyboard focus.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: 7)
   private var tracking: NSTrackingArea?
 
   init(symbol: String, label: String) {
@@ -245,6 +275,7 @@ final class LittleArktIconButton: NSButton {
     image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
       .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
     imagePosition = .imageOnly
+    focusRingType = .none
     setAccessibilityLabel(label)
   }
 
@@ -253,6 +284,18 @@ final class LittleArktIconButton: NSButton {
 
   override var mouseDownCanMoveWindow: Bool { false }
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
 
   override func updateTrackingAreas() {
     super.updateTrackingAreas()

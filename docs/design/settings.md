@@ -26,8 +26,9 @@ rows that are sidebar rows. What lifts it above a stock preferences sheet:
   knob in dark), so twenty switches never compete with the one primary.
 - **Space color carries meaning.** A Space row leads with its theme swatch (the theme's own gradient); the Appearance
   preview is drawn in the Work Space's theme.
-- **Focus is the system's.** Every focus ring, the shortcut recorder included, is the system focus ring
-  (`NSColor.keyboardFocusIndicatorColor`). Mustard is a fill only: never text, never a stroke.
+- **One focus ring.** Every button in the keyboard walk (pane items, switches, pop-ups, add rows and the Archive's
+  pills, links and filter button) draws `ShellTokens.focusRing` (graphite in light, porcelain in dark, at 85 %, 3 pt, #642). Only text fields (the shortcut
+  search field, the shortcut recorder) keep the system focus ring. Mustard is a fill only: never text, never a stroke.
 
 Type is SF Pro (the system font), on purpose. Sizes: window title 13 semibold, pane labels 11 medium, section titles
 12 semibold, row labels 13 medium, captions and notes 12 regular, buttons 13 semibold (12 small).
@@ -45,11 +46,12 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | General | Warn before quitting | toggle | `shouldWarnBeforeQuitting` | off | planned | BH-177, RT-30 |
 | General | Open a Peek window when clicking on links to other sites (note "Only affects Favorites and pinned tabs") | toggle | `modalEnabled` | on | **exists** (#348) | BH-144, BH-056 |
 | General | Open a Peek window when clicking on links with Shift held | toggle | `disableShiftClickToOpenLinksInModal` (inverted) | on | **exists** (#348) | BH-145 |
+| General | Open Little Arkt when clicking on links with ⌥⌘ held (also a sidebar tab) | toggle | `optionCommandClickLittleArcEntryPointEnabled` | on | **exists** (#356) | BH-132, GS-028 |
 | General | Update Arkt automatically | toggle, disabled until the release work (decision 6) | `shouldAutomaticallyUpdate` | off | planned (#128 release) | BH-213 |
 | Spaces | Profile per Space | popup per Space row | model (Space -> profile) | Default | planned | BH-034 |
 | Spaces | Space name, icon, theme | not here: edited in the sidebar header | model | n/a | exists (#287) | BH-038 |
-| Spaces | Archive Today tabs after | popup: 1 hour, 6 hours, 12 hours, 24 hours, 7 days, 30 days, Never | `autoArchiveTimeThresholdsPerProfile` | 12 hours | planned (policy exists, fixed at 12 h) | BH-080, BH-081, BH-083 |
-| Spaces | Archive Little Arkt windows after | popup, same options | `autoArchiveLittleArcTimeThreshold` | 6 hours | planned (#28) | BH-137 |
+| Spaces | Archive Today tabs after | popup: 1 hour, 6 hours, 12 hours, 24 hours, 7 days, 30 days, Never | `autoArchiveTimeThresholdsPerProfile` | 12 hours | **exists** (#448; edits the Default profile until a profile pane exists) | BH-080, BH-081, BH-083 |
+| Spaces | Archive Little Arkt windows after | popup, same options | `autoArchiveLittleArcTimeThreshold` | 6 hours | **exists** (#448; archiving Little Arkt windows is #355) | BH-137 |
 | Spaces | Profiles list, New Profile... | rows with disclosure, button | profiles | Default | planned | BH-034, 2.13 |
 | Spaces | Links from other apps open in | popup: Current Space / Little Arkt | `openExternalLinksInLittleBrowserEnabled` | Little Arkt | planned (#28) | BH-129, BH-156 |
 | Spaces | Link routes ("contains" / "is") | rows, Edit, Add Route... | routes | none | planned | BH-155 |
@@ -164,7 +166,7 @@ in `docs/design/alerts-sheets-toasts.md` (destructive button: "Clear Data" / "Re
 | Search field | 32 high, radius 9, `sidebarItemBackground`, magnifier 14 pt `sidebarForeground`, 14 below | the Archive search field |
 | Default capsule | 24 high, radius 12, `sidebarItemHovered`, check 12 pt and "Default" 12 semibold `primaryText` | |
 | Empty state | 44 pt tile radius 12 `sidebarItemBackground` with a 22 pt glyph, title 15 semibold, detail 12 `secondaryText` max 320 wide, primary pill 16 below | the Archive's empty states |
-| Focus ring | the system focus ring (`focusRingType = .default`, `NSColor.keyboardFocusIndicatorColor`); never mustard, never graphite | AppKit |
+| Focus ring | `ShellTokens.focusRing` (`BrandTokens.focusRing` at 85 %), 3 pt outside the control, following its radius, raised above its neighbors while shown (`KeyboardFocusRingView`, #642); text fields: the system focus ring; never mustard | `ShellTokens.focusRing` |
 
 New tokens (to add to `ShellUI/Theme`, with contrast tests next to `BrandTokensTests`):
 
@@ -176,8 +178,8 @@ New tokens (to add to `ShellUI/Theme`, with contrast tests next to `BrandTokensT
 | `AlertTokens.destructiveText` | sRGB #B3261E (6.20:1 on porcelain) | sRGB #FFAAA2 (8.71:1 on graphite) | destructive links and titles |
 | `SettingsTokens.separatorIncreasedContrast` | black 0.20 | white 0.20 | group edges with Increase Contrast |
 
-`SettingsTokens.groupFill` and `SettingsTokens.tabTileIdle` from the first pass are dropped. `BrandTokens.focusRing`
-is not used by Settings.
+`SettingsTokens.groupFill` and `SettingsTokens.tabTileIdle` from the first pass are dropped. Settings draws
+`BrandTokens.focusRing` at 85 % as `ShellTokens.focusRing` (#642).
 
 Contrast (WCAG 2.x, fills composited over the surface):
 
@@ -222,7 +224,7 @@ Reduce Transparency: the toolbar material becomes opaque `surfaceBrand`; groups 
 Every color above is a `TokenPair`; the prototype's `#<state>&dark` screenshots show the dark side. The window follows
 the system appearance (it belongs to no Space, like the Archive). In dark the surface is graphite, groups recess into
 black 14 %, the selected pane item lifts in white 20 % (`tabCurrent` dark), switches turn porcelain with a graphite
-knob, and the focus ring stays the system's. Mustard appears only as the pane's one primary pill, in both
+knob, and the focus ring turns porcelain. Mustard appears only as the pane's one primary pill, in both
 appearances. Increase Contrast: groups, pop-ups and the search field gain a 1 pt
 `SettingsTokens.separatorIncreasedContrast` edge (light black 0.20, dark white 0.20), and the selected pane item's
 shadow becomes that edge in dark.

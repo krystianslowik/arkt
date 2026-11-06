@@ -26,6 +26,11 @@ extension ShellWindowController {
     sidebarController.onResetPinned = { [weak self] node in self?.resetPinned(node: node) }
     sidebarController.onReplacePin = { [weak self] node in self?.replacePin(node: node) }
     sidebarController.onSeparateFromPinned = { [weak self] node in self?.separateFromPinned(node: node) }
+    // A hover-revealed sidebar stays out while the Edit Pin popover points into it (#363).
+    sidebarController.onEditPinChange = { [weak self] open in
+      self?.rootView.sidebarOverlay.isHeldOpen = open
+      if !open { self?.focusPageIfKeyboardIsFree() }
+    }
     sidebarController.onPinnedFaviconClick = { [weak self] node, modifiers in
       self?.pinnedFaviconClicked(node: node, modifiers: modifiers)
     }
@@ -202,6 +207,22 @@ extension ShellWindowController {
   private func pageTitle(of node: NodeID, fallback url: URL) -> String {
     let live = tabsByNode[node].flatMap { engine.snapshot(of: $0)?.title }
     return live.flatMap { $0.isEmpty ? nil : $0 } ?? (url.host() ?? url.absoluteString)
+  }
+
+  // MARK: Edit Pin (#363)
+
+  /// An in-window popover closed (Edit Pin, the theme creator) and the responder that had the keyboard before it is
+  /// gone, so the window holds it itself: the current tab's page takes it (#696).
+  func focusPageIfKeyboardIsFree() {
+    guard let window, window.firstResponder === window, let tab = currentTab else { return }
+    engine.focusPage(of: tab)
+  }
+
+  /// Edit Pinned URL... on a pinned tab or a Favorite, Rename... on a Favorite: the Edit Pin popover
+  /// (design/edit-pin). Use Current Page fills in the live page's address, the stored one for a tab with no page.
+  func editPin(node: NodeID, focus: EditPinFocus) {
+    let live = tabsByNode[node].flatMap { engine.snapshot(of: $0)?.url }
+    sidebarController.openEditPin(node: node, focus: focus, currentPage: live)
   }
 
   // MARK: Menu validation

@@ -72,7 +72,7 @@ All values in points, on the shell's existing grid (`ShellMetrics.standard`: con
 | Control glyph | 14 pt, `secondaryText`; `primaryText` on hover | |
 | Control order, top to bottom | Close, Open as Tab, Add to Split View | proposed; Arc lists expand, split, close (BH-148), PARITY(NEEDS-RUNTIME-CHECK) |
 | Grabber | 36 x 5, radius 3, 12 above the card's top edge, centered, full opacity at rest; light black 50 % (3.6:1 over a white page under the light scrim, 4.0:1 over plain white), dark white 55 % (6.3:1 over a near-black page under the dark scrim); WCAG 1.4.11 asks 3:1 | proposed `ShellTokens.peekGrabber` |
-| Keyboard focus ring | 2 pt, 2 pt outset | `BrandTokens.focusRing` |
+| Keyboard focus ring | 3 pt, outside the circle (`KeyboardFocusRingView`, #687) | `ShellTokens.focusRing` in the Peek's tone |
 | Toolbar inside Peek (when "Show Toolbar" is on) | the Toolbar strip (32 pt plus 1 pt hairline) at the top of the Peek card | `ContentToolbarView`, BH-151 |
 | "Peek closed" toast | `ToastView`: 36 high, radius 18, 16 above the card bottom | `ShellTokens.toastSurface`, `toastText` |
 
@@ -237,8 +237,8 @@ at 120 ms) at 150.
 | Cmd-L | Edit the Peek's URL in the sidebar URL bar (or the Toolbar); Return navigates the Peek | proposed |
 | Tab, Shift-Tab | Move through the page, then the three controls, then back to the page; focus never leaves the Peek while it is open | proposed |
 
-Keyboard-initiated closes use the fastest preset and travel nowhere. The controls show the focus ring
-(`BrandTokens.focusRing`) only for keyboard focus.
+Keyboard-initiated closes use the fastest preset and travel nowhere. The controls show the ink focus ring
+(`ShellTokens.focusRing`, #687) only for keyboard focus, never the system ring.
 
 ## VoiceOver
 
@@ -325,3 +325,7 @@ Motion keyframes, light and dark: `peek-kf-open-{40,90,160}ms`, `peek-kf-close-{
 `peek-kf-snapback-{80,200}ms`, `peek-kf-reopen-60ms`, `peek-kf-interrupt-150ms`.
 
 Reduce Motion keyframes, light and dark: `peek-rm-open-100ms`, `peek-rm-expand-{90,220}ms`, `peek-rm-close-80ms`.
+
+Focus ring (#687): the ink ring of [`design/drag-hint-focus-ring`](../../design/drag-hint-focus-ring/README.md). Screens of these
+controls, focused: [light](../../design/drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-light.png),
+[dark](../../design/drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-dark.png).

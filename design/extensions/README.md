@@ -2,13 +2,15 @@
 
 The native extension surfaces: the install sheet, pinned actions and their order, the extension context menu and the
 keyboard commands (#121), plus the other Chromium (Views) surfaces that need a native replacement (#122). Three
-directions are drawn for pinned actions and the install surface; the rest is one design. None is built yet. The
-prototype is [`prototype.html`](prototype.html) (open it in a browser; Prev and Next step through every state). States
-by hash, `#<a|b|c>-<pinned|reorder|install|install-long>[&dark][&rm][&shot]`, plus `#menu`, `#menu-unpinned`,
-`#shortcuts`, `#shortcuts-conflict` and `#surf-<crashed|dialog|restore|pageinfo|zoom|sharing>`.
+directions are drawn for pinned actions and the install surface; the rest is one design. Picked: C for pinned actions
+and B for install (#590). The install sheet ships as the engine-drawn sheet (#244, #548), close enough to B; the rest
+is not built yet. The prototype is [`prototype.html`](prototype.html) (open it in a browser; Prev and Next step through
+every state). States by hash, `#<a|b|c>-<pinned|reorder|install|install-long>[&dark][&rm][&shot]`, plus `#menu`,
+`#menu-unpinned`, `#shortcuts`, `#shortcuts-conflict`, `#shortcuts-record`, `#toast-pin`,
+`#c-<empty|none-pinned|small>` and `#surf-<crashed|dialog|restore|pageinfo|zoom|sharing>`.
 
 Everyday chrome: the system font, the shell's tokens, neutral pills. Mustard is a fill and the one primary pill of a
-surface (Add Extension, Reload, OK, Restore, Use shortcut). Extension icons and names are synthetic. Pinned actions
+surface (Add Extension, Reload, OK, Restore, Keep Existing). Extension icons and names are synthetic. Pinned actions
 carry no mustard: a badge is a graphite capsule with porcelain text, "needs attention" is a graphite dot.
 
 ## Directions
@@ -35,15 +37,16 @@ replaces the Views prompt one for one (`ExtensionInstallPrompt` ShowDialogCallba
   Return). Esc cancels. The sheet attaches to the window; it never blocks other windows.
 - **Worst case**: an 85-character name wraps to two lines and ends with an ellipsis; a 50-character publisher
   truncates; six permissions scroll inside the field (150 pt max, faded edge); the buttons never move.
-- **After Add**: a toast on the window, "<name> added", with one quiet action, "Pin" (A and B pin by default, so the
-  action reads "Manage"). This replaces Chromium's "has been added to Chromium. Manage your extensions by clicking
+- **After Add**: a toast on the window, "<name> added", with one quiet action, "Pin": new extensions are not pinned
+  (#590). This replaces Chromium's "has been added to Chromium. Manage your extensions by clicking
   Extensions in the Window menu." (#121 comment, W3-9): the name and the Window-menu wording are gone from the product.
 - **Remove**: the existing sheet in `design/alerts-sheets-toasts` ("Remove "<name>"?", Report abuse, Remove).
 - **Policy and errors**: a blocked or unsupported extension shows the alert style from the same system, one answer.
 
 ## Pinned actions
 
-- **What pins**: extensions with an action. The default for a new extension is pinned (the B switch can turn it off). A
+- **What pins**: extensions with an action. A new extension is not pinned (#590); pin it from the install toast or its row in the Extensions panel (B's "Show in
+  sidebar" switch is not used under C). A
   profile syncs the order with the Space's profile.
 - **Order**: left to right is the pin order. Drag to reorder (A, B: in place; C: by the grip). The menu has Move Left and
   Move Right for the keyboard (disabled at the ends). Cmd-E cycles the pinned extensions in this order (KB-047: hold
@@ -74,8 +77,10 @@ section's first row is "Cycle through pinned extensions", Cmd-E. Each extension 
 icon, then one row per command: title, its description, the shortcut as keycaps, and a scope pop-up ("In Arkt" or "All
 Apps" for global commands). An unset command shows a Set Shortcut pill. Clicking the keycaps records (the field takes
 the system focus ring and reads "Press new shortcut"). A conflict uses the Settings pane's row-shaped notice: a neutral
-exclamation, "Cmd-Shift-E is already used by "Reopen Closed Tab"", **Use Cmd-Shift-E** (the one primary) and a quiet
-**Keep Existing**. Esc cancels recording; Delete clears. A shortcut set here survives updates to the extension.
+exclamation, "Cmd-Shift-E is already used by "Reopen Closed Tab"", **Keep Existing** (the one primary, the default:
+Return keeps the existing shortcut, #590) and a quiet **Use Cmd-Shift-E**. Kept, the extension's command stays
+unassigned until the user sets it in Settings, Shortcuts. Esc cancels recording; Delete clears. A shortcut set here
+survives updates to the extension.
 
 ## The other Views surfaces (#122)
 
@@ -126,16 +131,49 @@ letters in both. The menu uses the system's menu material. Increase Contrast add
 
 ## Open questions for the maintainer
 
-1. Which direction for pinned actions (A, B or C) and for the install sheet (compact, detailed or anchored panel).
-2. Are new extensions pinned by default? (drawn: yes; B has the switch.)
+1. ~~Which direction for pinned actions and for the install sheet?~~ Answered: C for pinned actions, B for install.
+2. ~~Are new extensions pinned by default?~~ Answered 2026-11-05: no; the toast offers Pin.
 3. Does Cmd-E ship (KB-047) or stay deferred? The design is ready either way.
-4. Should "Keep Existing" be the default on a shortcut conflict (drawn: Use is primary because the user asked for it)?
+4. ~~Should "Keep Existing" be the default on a shortcut conflict?~~ Answered 2026-11-06 (#590): yes. Return keeps the
+   existing shortcut; Use is the secondary (`shortcuts-conflict`).
 5. Docked DevTools: confirm it is a known gap for the first release.
-6. Global (All Apps) extension shortcuts: ship in the first release or only "In Arkt"?
+6. ~~Global (All Apps) extension shortcuts?~~ Answered (#590): the Chrome model, In Arkt by default, each shortcut can
+   opt in to All Apps (`shortcuts-record`).
 
 ## Files
 
 | Path | What it is |
 |---|---|
 | `prototype.html` | Single-file prototype, no network, synthetic data |
-| `screens/extensions-<state>-<light\|dark>.png` | 44 screenshots at 2x (1080 x 720 window): `a-`, `b-`, `c-` pinned, reorder, install, install-long; menu, menu-unpinned, shortcuts, shortcuts-conflict; surf-crashed, surf-dialog, surf-restore, surf-pageinfo, surf-zoom, surf-sharing |
+| `screens/extensions-<state>-<light\|dark>.png` | 54 screenshots at 2x (27 light, 27 dark; 1080 x 720 window): `a-`, `b-`, `c-` pinned, reorder, install, install-long; `c-empty`, `c-none-pinned`, `c-small`; menu, menu-unpinned, shortcuts, shortcuts-conflict, shortcuts-record, toast-pin; surf-crashed, surf-dialog, surf-restore, surf-pageinfo, surf-zoom, surf-sharing |
+
+## Picked: C panel and B install sheet, added states (#590)
+
+The pick is C (one Extensions button and a panel) for pinned actions and B (the detailed sheet) for install. These
+states complete it; every older state in the prototype renders as before. Screens:
+`screens/extensions-<state>-<light|dark>.png`, 10 files at 2x.
+
+| State | What it shows |
+|---|---|
+| `c-empty` | zero extensions: puzzle tile, "No extensions yet", one line, **Browse the Web Store** (the panel's one primary), Manage Extensions... |
+| `c-none-pinned` | extensions installed, none pinned: the Pinned group shows a hint row (pin the ones you use most; Cmd-E opens each in turn); all six under Not pinned |
+| `c-small` | smallest window (640 x 420, 150 pt sidebar): the panel caps its height to the window, the list scrolls with a faded edge, the footer stays ("Manage..." plus Cmd-E) |
+| `toast-pin` | after Add Extension in the B sheet: "“Quiet Reader” added" with **Pin** (a quiet action). New extensions are not pinned |
+| `shortcuts-record` | the shortcut recorder (the field shows the keys pressed so far) and the row's scope pop-up open: In Arkt (checked) and All Apps, each with a one-line explanation. Scope is per shortcut |
+
+Notes:
+- The conflict notice from `shortcuts-conflict` applies unchanged to All Apps shortcuts; shortcuts macOS reserves are
+  rejected in the recorder ("Some shortcuts are taken by macOS").
+- Under C there are no sidebar icons, so B's "Show in sidebar" switch is not used; Pin from the toast or the panel row
+  pins an extension in the Extensions panel.
+
+### Answered questions (2026-11-05)
+
+1. Pin new extensions on install by default? **No.** The toast offers Pin (`toast-pin`). This replaces "The default
+   for a new extension is pinned" under Pinned actions and question 2 above.
+2. Is the shipped engine-drawn install sheet (#244, #548) close enough to B? **Yes**, no restyle issue.
+
+### Answered questions (2026-11-06)
+
+1. Default button on a shortcut conflict? **Keep Existing** (Return); Use is the secondary. The extension's command
+   stays unassigned until the user sets it in Settings, Shortcuts. `shortcuts-conflict` is redrawn that way.

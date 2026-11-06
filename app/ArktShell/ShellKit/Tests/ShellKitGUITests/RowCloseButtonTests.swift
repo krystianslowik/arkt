@@ -160,6 +160,87 @@ final class RowCloseButtonTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// #601: a pinned row with no loaded page has nothing to close, so hovering it shows no X, the title keeps the
+  /// full width, and VoiceOver offers no Close action.
+  func testAPinnedRowWithNoLoadedPageHasNoCloseButton() throws {
+    var world = try Self.makeWorld()
+    let idle = try world.sidebar.addTab(url: Self.url("idle"), title: "Idle", in: .pinned(world.space))
+    let harness = Harness(world.sidebar)          // the window opens the first pinned tab, not this one
+    let row = try harness.rowView(idle)
+    let cell = try harness.cell(idle)
+    let restingTitleWidth = cell.titleField.frame.width
+
+    row.isHovered = true
+    cell.layoutSubtreeIfNeeded()
+
+    XCTAssertNil(cell.closeAction)
+    XCTAssertFalse(cell.isCloseButtonShown)
+    XCTAssertTrue(cell.closeButton.isHidden)
+    XCTAssertEqual(cell.titleField.frame.width, restingTitleWidth, "the title keeps the full width")
+    XCTAssertEqual(try harness.proxy(idle).accessibilityCustomActions() ?? [], [])
+    harness.controller.close()
+  }
+
+  /// #601: the X comes with the page. Activating the pinned tab under a hovered row shows its X; closing the page
+  /// takes it away again.
+  func testAPinnedRowShowsTheCloseButtonWhileItsPageIsLoaded() throws {
+    var world = try Self.makeWorld()
+    let idle = try world.sidebar.addTab(url: Self.url("idle"), title: "Idle", in: .pinned(world.space))
+    let harness = Harness(world.sidebar)
+    try harness.rowView(idle).isHovered = true
+    XCTAssertFalse(try harness.cell(idle).isCloseButtonShown)
+
+    harness.controller.activate(node: idle)
+
+    let loaded = try harness.cell(idle)
+    XCTAssertEqual(loaded.closeAction, .closeKeepPinned)
+    XCTAssertTrue(loaded.isCloseButtonShown)
+    XCTAssertFalse(loaded.closeButton.isHidden)
+    XCTAssertEqual(try harness.proxy(idle).accessibilityCustomActions()?.map(\.name), ["Close"])
+
+    try harness.clickClose(idle)
+
+    let closed = try harness.cell(idle)
+    XCTAssertNil(closed.closeAction)
+    XCTAssertFalse(closed.isCloseButtonShown)
+    XCTAssertTrue(closed.closeButton.isHidden)
+    XCTAssertEqual(try harness.proxy(idle).accessibilityCustomActions() ?? [], [])
+    harness.controller.close()
+  }
+
+  /// #601: a page loaded in the background (not current) still gets its X.
+  func testABackgroundPinnedPageKeepsTheCloseButton() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.pinned)
+    harness.controller.activate(node: world.today[0])
+
+    try harness.rowView(world.pinned).isHovered = true
+
+    XCTAssertTrue(try harness.cell(world.pinned).isCloseButtonShown)
+    harness.controller.close()
+  }
+
+  /// #601: a pinned split row shows its X only while one of its panes has a page; a pane row keeps its X either
+  /// way, since taking a pane out of its split works without a page.
+  func testAPinnedSplitRowHasNoCloseButtonUntilAPaneLoads() throws {
+    var world = try Self.makeWorld()
+    let split = try world.sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5],
+                                           in: .pinned(world.space))
+    let panes = try ["pl", "pr"].map { try world.sidebar.addTab(url: Self.url($0), title: $0, in: .split(split)) }
+    let harness = Harness(world.sidebar)
+    try harness.rowView(split).isHovered = true
+    XCTAssertNil(try harness.cell(split).closeAction)
+    XCTAssertFalse(try harness.cell(split).isCloseButtonShown)
+    XCTAssertEqual(try harness.cell(panes[0]).closeAction, .removeFromSplit)
+
+    harness.controller.activate(node: panes[1])
+
+    XCTAssertEqual(try harness.cell(split).closeAction, .closeKeepPinned)
+    XCTAssertTrue(try harness.cell(split).isCloseButtonShown)
+    harness.controller.close()
+  }
+
   /// A reused row or cell starts without the X.
   func testReuseHidesTheCloseButton() throws {
     let world = try Self.makeWorld()
@@ -290,6 +371,7 @@ final class RowCloseButtonTests: XCTestCase {
     let pointer = HoverPointerStub(window: try XCTUnwrap(outline.window))
     pointer.move(toCenterOf: row)
     outline.hoverPointerLookup = pointer.lookup
+    outline.hoverResyncEnqueue = pointer.enqueue
     var rows: [SidebarRowView] = []
     outline.enumerateAvailableRowViews { rowView, _ in
       if let rowView = rowView as? SidebarRowView { rows.append(rowView) }
@@ -298,7 +380,8 @@ final class RowCloseButtonTests: XCTestCase {
 
     for rowView in rows { rowView.updateTrackingAreas() }
     XCTAssertEqual(pointer.windowServerQueries, 0, "coalesced to the next turn")
-    drainMainQueue()
+    XCTAssertEqual(pointer.pendingTurns.count, 1, "one resync for all rows")
+    pointer.runNextTurn()
 
     XCTAssertEqual(pointer.windowServerQueries, 1)
     XCTAssertTrue(row.isHovered)

@@ -18,7 +18,11 @@ final class AppCommands: NSObject {
   @objc func clearArchive(_ sender: Any?) {}
   @objc func showWelcome(_ sender: Any?) {}
   let undoRouter = ReopenUndoRouter()
+  let reopenRouter = ReopenClosedRouter(windows: { nil })
 }
+
+/// The real Window menu takes the commands object as its delegate (the Little Arkt section, #356).
+extension AppCommands: NSMenuDelegate {}
 
 /// `CommandBarPanel.sendEvent` takes Cmd-Return and Opt-Return before anything else in the panel (KB-085). That
 /// hides no menu action only while no menu item binds those keys, so the real main menu is built and checked.
@@ -71,6 +75,19 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
   }
 
   /// #118 (KB-013 to KB-016): the copy-link items sit in the Edit menu with Arc's keys.
+  /// BH-196 (#404): the one-off tip names Copy URL's key as the menu binds it.
+  func testTheCopyURLTipNamesTheMenusKey() throws {
+    let item = try XCTUnwrap(allItems().first { $0.action == #selector(ShellWindowController.copyCurrentURL(_:)) })
+    let flags = item.keyEquivalentModifierMask
+    var keys = ""
+    if flags.contains(.control) { keys += "\u{2303}" }
+    if flags.contains(.option) { keys += "\u{2325}" }
+    if flags.contains(.shift) { keys += "\u{21E7}" }
+    if flags.contains(.command) { keys += "\u{2318}" }
+    keys += item.keyEquivalent.uppercased()
+    XCTAssertEqual(CopyLinkEducation.toast.text, "Copy links faster by pressing \(keys)")
+  }
+
   func testCopyLinkItemsSitInTheEditMenuWithArcsKeys() throws {
     _ = NSApplication.shared
     let edit = try XCTUnwrap(MainMenu.make(commands: AppCommands()).menu.items.first { $0.title == "Edit" }?.submenu)
@@ -300,6 +317,13 @@ final class MainMenuInventoryTests: XCTestCase {
     XCTAssertEqual(undo.keyEquivalentModifierMask, .command)
   }
 
+  /// File > Reopen Closed Tab goes to its router, so it works with no key window too (#355).
+  func testReopenClosedTabTargetsItsRouter() throws {
+    let reopen = try item("Reopen Closed Tab")
+    XCTAssertTrue(reopen.target === commands.reopenRouter)
+    XCTAssertEqual(reopen.action, #selector(ShellWindowController.reopenClosedTab(_:)))
+  }
+
   /// AppController answers these at the end of the responder chain with Chromium's behaviour.
   func testNoNilTargetItemReachesChromiumsAppController() {
     let chromiumOnly: Set<String> = ["showPreferences:", "orderFrontStandardAboutPanel:", "toggleConfirmToQuit:",
@@ -520,5 +544,25 @@ final class MainMenuInventoryTests: XCTestCase {
       menu.items.flatMap { [$0.title] + ($0.submenu.map(walk) ?? []) }
     }
     for title in walk(built.menu) { XCTAssertNil(title.firstMatch(of: word), title) }
+  }
+
+  /// The Dock menu without Little Arkt windows: New Window, then New Little Arkt Window with its key (#356).
+  func testTheDockMenuEndsWithNewWindowAndNewLittleArktWindow() throws {
+    _ = NSApplication.shared
+    let commands = AppCommands()
+    let menu = MainMenu.dockMenu(commands: commands, littleArkts: nil)
+    XCTAssertEqual(menu.items.map(\.title), ["New Window", "New Little Arkt Window"])
+    let little = try XCTUnwrap(menu.items.last)
+    XCTAssertEqual(little.keyEquivalent, "n")
+    XCTAssertEqual(little.keyEquivalentModifierMask, [.command, .option])
+    XCTAssertTrue(menu.items.allSatisfy { $0.target === commands })
+  }
+
+  /// The Window menu's delegate rebuilds its Little Arkt section when it opens (#356).
+  func testTheWindowMenuHasTheCommandsAsItsDelegate() {
+    _ = NSApplication.shared
+    let commands = AppCommands()
+    let built = MainMenu.make(commands: commands)
+    XCTAssertTrue(built.windows.delegate === commands)
   }
 }

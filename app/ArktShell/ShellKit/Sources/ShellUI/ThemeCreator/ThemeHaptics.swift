@@ -23,8 +23,8 @@ public struct ThemeHapticGate: Sendable {
   /// At most one haptic per this interval, in seconds.
   public static let minimumInterval = 0.05
 
-  /// The HSL hue of each theme family's second light stop (`SpaceThemeCatalog.families`): Dune 45, Mist 238,
-  /// Paper 37, Sage 107, Blossom 338, Indigo 250.
+  /// The HSL hue of each theme family's second light stop (`SpaceThemeCatalog.families`): Dune 45, Mist 211,
+  /// Paper 37, Sage 107, Blossom 316, Indigo 250.
   public static let catalogHues: [Double] = SpaceThemeCatalog.families.compactMap { family in
     family.light.baseColors.count > 1 ? ThemePad.hue(of: family.light.baseColors[1]) : nil
   }
