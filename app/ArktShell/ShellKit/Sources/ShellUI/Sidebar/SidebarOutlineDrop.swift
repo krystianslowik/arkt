@@ -161,7 +161,7 @@ public final class SidebarOutlineDrop {
     guard let url = SidebarTextDrop.url(for: text) else { return false }
     let placement = SidebarTextDrop.location(for: target, space: controller.spaceID)
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    return onTextDrop?(url, url.host() ?? trimmed, placement) ?? false
+    return onTextDrop?(url, HostDisplay.host(of: url) ?? trimmed, placement) ?? false
   }
 
   private func endHover(dropped: Bool) {

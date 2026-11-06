@@ -206,7 +206,7 @@ extension ShellWindowController {
   /// The live page's title for a detached copy, before a reset changes it; the URL's host as the fallback.
   private func pageTitle(of node: NodeID, fallback url: URL) -> String {
     let live = tabsByNode[node].flatMap { engine.snapshot(of: $0)?.title }
-    return live.flatMap { $0.isEmpty ? nil : $0 } ?? (url.host() ?? url.absoluteString)
+    return live.flatMap { $0.isEmpty ? nil : $0 } ?? HostDisplay.hostOrAddress(url)
   }
 
   // MARK: Edit Pin (#363)

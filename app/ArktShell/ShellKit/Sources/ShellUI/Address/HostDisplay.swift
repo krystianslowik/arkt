@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// How the shell writes a host (#697): the address bar, the Edit Pin popover's Pinned URL field and page info all
 /// show a host through this one rule, so it reads the same everywhere.
@@ -59,6 +60,26 @@ public enum HostDisplay {
     if isASCII, !host.lowercased().split(separator: ".").contains(where: { $0.hasPrefix("xn--") }) { return host }
     // No host of more than 253 code points can be valid: skip the codec and show it percent-encoded.
     if host.unicodeScalars.count > 253 { return Label.percentEncoded(host.lowercased()) }
+    if let known = checked.withLock({ $0[host] }) { return known }
+    let shown = checkedText(forHost: host)
+    checked.withLock { cache in
+      if cache.count >= checkedLimit { cache.removeAll(keepingCapacity: true) }
+      cache[host] = shown
+    }
+    return shown
+  }
+
+  /// `url`'s host by the rule, else its whole address (`about:blank`, `data:`): what a title, a subtitle or a top bar
+  /// shows for a page with no title of its own.
+  public static func hostOrAddress(_ url: URL) -> String { host(of: url) ?? address(url) }
+
+  /// The answers for the internationalized hosts seen so far, so a list that writes many rows (command bar results,
+  /// folder preview search) decodes and checks each host once. Emptied when full; at most `checkedLimit` entries of
+  /// at most 253 characters each.
+  private static let checked = Mutex<[String: String]>([:])
+  static let checkedLimit = 512
+
+  private static func checkedText(forHost host: String) -> String {
     var parts = host.lowercased().split(separator: ".", omittingEmptySubsequences: false).map(String.init)
     let fullyQualified = parts.count > 1 && parts.last == ""
     if fullyQualified { parts.removeLast() }

@@ -76,7 +76,7 @@ public final class ArchiveCommandBarSearch {
   /// "sheets.example, Work, archived Jun 22" (folders and splits name their kind instead of a host).
   private func subtitle(for item: ArchivedItem) -> String {
     let what: String = switch item.snapshot.kind {
-    case .tab(let tab): tab.url.host() ?? tab.url.absoluteString
+    case .tab(let tab): HostDisplay.hostOrAddress(tab.url)
     case .folder: "Folder"
     case .split: "Split View"
     }

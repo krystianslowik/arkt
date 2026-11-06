@@ -654,7 +654,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   func refreshTopBar() {
     let url = shownTab.flatMap { engine.snapshot(of: $0)?.url }
     let target = targetSpace()
-    topBar.configure(host: LittleArktCopy.host(of: url), fullURL: url?.absoluteString ?? "",
+    topBar.configure(host: LittleArktCopy.host(of: url), fullURL: LittleArktCopy.fullAddress(of: url),
                      secure: url?.scheme == "https",
                      openLabel: LittleArktCopy.openLabel(isPopup: isPopup, spaceName: target?.title),
                      openHelp: LittleArktCopy.openHelp(isPopup: isPopup, spaceName: target?.title),

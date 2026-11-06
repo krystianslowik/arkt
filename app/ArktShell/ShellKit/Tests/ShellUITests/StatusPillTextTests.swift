@@ -37,14 +37,16 @@ struct StatusPillTextTests {
     #expect(v6.rest == ":8080/x")
   }
 
-  /// A host that is punycode is shown as punycode: turning it into Unicode would draw the lookalike the user is
-  /// meant to see through.
-  @Test func punycodeIsShownAsTheEngineGivesIt() throws {
+  /// A look-alike host stays punycode: turning it into Unicode would draw the lookalike the user is meant to see
+  /// through. A real internationalized host shows in Unicode, by the address bar's check (`HostDisplay`, #732; see
+  /// `CheckedHostSurfacesTests`).
+  @Test func aLookalikeHostStaysPunycode() throws {
     let pill = try text("https://xn--pple-43d.example/login")
     #expect(pill.host == "xn--pple-43d.example")
   }
 
-  /// Whatever the URL carries for the host is what shows: no decoding, no case folding, no `www.` trimming.
+  /// Whatever the URL carries for the host is what shows: no percent-decoding, no case folding, no `www.` trimming.
+  /// The two internationalized hosts here are look-alikes, which the check keeps encoded (#732).
   @Test(arguments: [
     "https://xn--80ak6aa92e.com/",
     "https://WWW.Example.ORG/Path",

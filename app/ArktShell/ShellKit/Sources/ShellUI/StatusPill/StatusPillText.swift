@@ -4,9 +4,11 @@ import Foundation
 /// shows"): a quiet prefix (the scheme unless it is https, and any user info), the host in emphasis, and the rest (port,
 /// path, query, fragment) quiet again.
 ///
-/// It reads the URL's own text and never rewrites it: no percent-decoding, no punycode to Unicode, no lowercasing, no
-/// trimming of `www.`. A host that looks like another one must look like it here too, so the user can tell; the user
-/// info stays visible before the host for the same reason (`https://bank.example@evil.example/`). Only characters that
+/// It reads the URL's own text and rewrites only an internationalized host, which it writes as the address bar does
+/// (`HostDisplay`, #732): in Unicode when it passes the spoof check, in its encoded `xn--` form otherwise. Nothing else
+/// changes: no percent-decoding, no lowercasing of a plain host, no trimming of `www.`. A host that looks like another
+/// one must look like it here too, so the user can tell; the user info stays visible before the host for the same
+/// reason (`https://bank.example@evil.example/`). Only characters that
 /// would draw invisibly or reorder the line (controls, format characters such as the bidirectional overrides and the
 /// zero-width ones, line and paragraph separators) are written out as `<U+202E>`, so they cannot hide anything.
 struct StatusPillText: Equatable, Sendable {
@@ -50,7 +52,8 @@ struct StatusPillText: Equatable, Sendable {
       authority = authority[authority.index(after: at)...]
     }
     let (host, port) = Self.split(hostAndPort: authority)
-    self.init(prefix: Self.safe(Self.clipped(prefix)), host: Self.safe(Self.clipped(String(host))),
+    let shown = host.hasPrefix("[") ? String(host) : HostDisplay.text(forHost: String(host))
+    self.init(prefix: Self.safe(Self.clipped(prefix)), host: Self.safe(Self.clipped(shown)),
               rest: Self.safe(Self.clipped(String(port) + String(tail))))
   }
 

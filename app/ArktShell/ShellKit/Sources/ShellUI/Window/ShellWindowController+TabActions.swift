@@ -331,7 +331,7 @@ extension ShellWindowController {
           let url = URLInputParser.url(from: raw.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
     let index: Int? = if case .today = location { 0 } else { nil }
     do {
-      try sidebar.addTab(url: url, title: url.host() ?? url.absoluteString, in: location, at: index)
+      try sidebar.addTab(url: url, title: HostDisplay.hostOrAddress(url), in: location, at: index)
       announceCreation(.tab)                                        // BH-006
     } catch {
       onError?(.addTab, error)

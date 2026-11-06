@@ -104,10 +104,10 @@ extension ShellWindowController {
       guard let page = card.contentView,
             let tab = tabs.first(where: { engine.contentView(for: $0) === page }),
             let snapshot = engine.snapshot(of: tab), snapshot.crash != nil else { continue }
-      placements.append(.init(card: card, tab: tab, host: snapshot.url?.host()))
+      placements.append(.init(card: card, tab: tab, host: snapshot.url.flatMap(HostDisplay.host(of:))))
     }
     if let (card, tab) = peekCard, let snapshot = engine.snapshot(of: tab), snapshot.crash != nil {
-      placements.append(.init(card: card, tab: tab, host: snapshot.url?.host()))
+      placements.append(.init(card: card, tab: tab, host: snapshot.url.flatMap(HostDisplay.host(of:))))
     }
     let made = crashedTabs.apply(cards: cards, placements: placements, crashedNow: crashed)
     // Return is Reload on the current tab's view only (a split may show two), and never while a Peek is open: then

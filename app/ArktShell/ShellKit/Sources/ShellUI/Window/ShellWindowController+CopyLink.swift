@@ -108,7 +108,7 @@ extension ShellWindowController {
   private func copyTargets() -> [(url: URL, title: String, tab: TabID?)] {
     if peek.isOpen, let session = peek.session {
       let snapshot = engine.snapshot(of: session.tab)
-      let title = (snapshot?.title).flatMap { $0.isEmpty ? nil : $0 } ?? (session.url.host() ?? "")
+      let title = (snapshot?.title).flatMap { $0.isEmpty ? nil : $0 } ?? (HostDisplay.host(of: session.url) ?? "")
       return [(snapshot?.url ?? session.url, title, session.tab)]
     }
     let selected = sidebarController.selectedNodes

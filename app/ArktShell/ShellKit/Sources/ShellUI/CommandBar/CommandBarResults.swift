@@ -243,12 +243,13 @@ public enum CommandBarResults {
     let url = URLInputParser.url(from: query)
     if let url {
       // The subtitle shows what the input expands to; when the input is that URL already (Cmd-L), it adds nothing.
-      let subtitle = url.absoluteString == query ? "" : url.absoluteString
+      let subtitle = url.absoluteString == query ? "" : HostDisplay.address(url)
       results.append(Result(kind: .open(url), title: query, subtitle: subtitle, trailingHint: nil, removalID: nil))
     }
 
     let matching = openTabsAll(input).filter { tab in
-      tab.title.localizedStandardContains(query) || (tab.url.host() ?? "").localizedStandardContains(query)
+      tab.title.localizedStandardContains(query) || (tab.url.host() ?? "").localizedStandardContains(query) // not shown
+        || shownHost(of: tab.url, contains: query)
     }
     for tab in matching.prefix(input.isCountingAllMatches ? .max : maxSwitchResults) {
       results.append(tabRow(tab, group: nil, now: input.now))
@@ -256,6 +257,7 @@ public enum CommandBarResults {
 
     let history = input.history.filter { visit in
       visit.title.localizedStandardContains(query) || visit.url.absoluteString.localizedStandardContains(query)
+        || shownHost(of: visit.url, contains: query)
     }
     for visit in history.prefix(input.isCountingAllMatches ? .max : maxHistoryResults) {
       results.append(historyRow(visit, now: input.now))
@@ -317,6 +319,16 @@ public enum CommandBarResults {
 
   private static func openTabsAll(_ input: Input) -> [OpenTab] { input.openTabs }
 
+  /// Whether the host the rows show for `url` (`HostDisplay`, #732) holds `query`, so a host typed in Unicode, or
+  /// without its diacritics, finds it as well as the encoded form the URL itself is matched by. Only a host with an
+  /// `xn--` label can read differently, so every other one costs a substring check; `HostDisplay` keeps the answer per
+  /// host, so each is decoded once however many rows and keystrokes ask.
+  static func shownHost(of url: URL, contains query: String) -> Bool {
+    guard let raw = url.host(), raw.range(of: "xn--", options: .caseInsensitive) != nil, // not shown
+          let shown = HostDisplay.host(of: url), shown != raw else { return false }
+    return shown.localizedStandardContains(query)
+  }
+
   private static func actionRow(_ action: CommandBarAction, group: Group?) -> Result {
     var row = Result(kind: .action(action.id), title: action.title, subtitle: "Action", trailingHint: nil,
                      removalID: nil)
@@ -327,7 +339,7 @@ public enum CommandBarResults {
 
   private static func tabRow(_ tab: OpenTab, group: Group?, now: Date) -> Result {
     var row = Result(kind: .switchTo(tab.node), title: tab.title,
-                     subtitle: tab.url.host() ?? tab.url.absoluteString,
+                     subtitle: HostDisplay.hostOrAddress(tab.url),
                      trailingHint: tab.isSplitPane ? switchToSplitHint : switchHint,
                      removalID: "tab:\(tab.node.uuidString)")
     row.group = group
@@ -335,7 +347,7 @@ public enum CommandBarResults {
       row.timeText = CommandBarRelativeTime.text(from: viewed, to: now)
     }
     row.previewFacts = CommandBarPreviewFacts(
-      rowKind: .openTab, title: tab.title, host: tab.url.host() ?? tab.url.absoluteString,
+      rowKind: .openTab, title: tab.title, host: HostDisplay.hostOrAddress(tab.url),
       spaceTitle: tab.spaceTitle,
       timeText: tab.lastViewed.map { CommandBarRelativeTime.preview(from: $0, to: now) },
       isAlsoOpen: false, url: tab.url, node: tab.node)
@@ -343,9 +355,9 @@ public enum CommandBarResults {
   }
 
   private static func historyRow(_ visit: HistoryVisit, now: Date) -> Result {
-    let host = visit.url.host() ?? visit.url.absoluteString
+    let host = HostDisplay.hostOrAddress(visit.url)
     var row = Result(kind: .history(visit.url), title: visit.title,
-                     subtitle: CommandBarTitleMatch.displayURL(visit.url.absoluteString),
+                     subtitle: CommandBarTitleMatch.displayURL(HostDisplay.address(visit.url)),
                      trailingHint: nil, removalID: "history:\(visit.url.absoluteString)")
     if let visited = visit.visited {
       row.timeText = CommandBarRelativeTime.text(from: visited, to: now)
@@ -367,7 +379,7 @@ public enum CommandBarResults {
     var results: [Result] = []
     // BH-108 / GS-035.
     if let url = input.clipboardURL {
-      var row = Result(kind: .pasteAndGo(url), title: pasteAndGoTitle, subtitle: url.absoluteString,
+      var row = Result(kind: .pasteAndGo(url), title: pasteAndGoTitle, subtitle: HostDisplay.address(url),
                        trailingHint: nil, removalID: nil)
       row.group = .clipboard
       results.append(row)

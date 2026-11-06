@@ -331,7 +331,7 @@ public final class ArchiveListModel: ArchiveListDataSource {
   /// relative date; reason "Closed" (manual) or "Auto archived".
   func row(for item: ArchivedItem) -> ArchiveRow {
     let what: String = switch item.snapshot.kind {
-    case .tab(let tab): tab.url.host() ?? tab.url.absoluteString
+    case .tab(let tab): HostDisplay.hostOrAddress(tab.url)
     case .folder: "Folder"
     case .split: "Split View"
     }

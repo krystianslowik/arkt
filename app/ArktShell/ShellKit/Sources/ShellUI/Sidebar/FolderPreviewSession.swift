@@ -8,8 +8,18 @@ struct FolderPreviewSession {
     var node: NodeID
     var title: String
     var url: URL
-    /// The URL's host, matched by the search as well as the title.
+    /// The URL's host as the engine gives it, matched by the search as well as the title.
     var host: String
+    /// The host as the address bar writes it (`HostDisplay`, #732), matched too, so a host typed in Unicode finds it.
+    var shownHost: String
+
+    init(node: NodeID, title: String, url: URL, host: String, shownHost: String? = nil) {
+      self.node = node
+      self.title = title
+      self.url = url
+      self.host = host
+      self.shownHost = shownHost ?? host
+    }
   }
 
   let folder: NodeID
@@ -74,7 +84,8 @@ struct FolderPreviewSession {
     guard !needle.isEmpty else { return items }
     let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
     return items.filter { $0.title.range(of: needle, options: options) != nil
-      || $0.host.range(of: needle, options: options) != nil }
+      || $0.host.range(of: needle, options: options) != nil
+      || ($0.shownHost != $0.host && $0.shownHost.range(of: needle, options: options) != nil) }
   }
 
   @MainActor
@@ -83,7 +94,8 @@ struct FolderPreviewSession {
     guard depth < 64, let location = source.node(container)?.childLocation else { return }
     for child in source.children(of: location) {
       if case .tab(let id, let url, let title)? = source.node(child) {
-        tabs.append(Item(node: id, title: title, url: url, host: url.host() ?? ""))
+        let host = url.host() ?? "" // not shown
+        tabs.append(Item(node: id, title: title, url: url, host: host, shownHost: HostDisplay.host(of: url) ?? ""))
       } else {
         collectTabs(under: child, in: source, into: &tabs, depth: depth + 1)
       }
