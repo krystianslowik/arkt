@@ -57,6 +57,21 @@ struct EnvironmentOverrides {
     }
   }
 
+  static let sidebarNoticeKey = "ARKT_SIDEBAR_NOTICE"
+
+  /// A sample sidebar notice to show at launch (#648): the banner's test driver until the updater (#126) supplies
+  /// real ones.
+  enum SidebarNotice: Equatable { case update, announcement }
+
+  /// `ARKT_SIDEBAR_NOTICE=update|announcement`; nil: no sample notice.
+  var sidebarNotice: SidebarNotice? {
+    switch value(Self.sidebarNoticeKey) {
+    case "update": .update
+    case "announcement": .announcement
+    default: nil
+    }
+  }
+
   /// The first run is not shown (`ARKT_SKIP_ONBOARDING=1`): UI tests that start from the empty state.
   var skipsOnboarding: Bool { environment[Self.skipOnboardingKey] == "1" }
 

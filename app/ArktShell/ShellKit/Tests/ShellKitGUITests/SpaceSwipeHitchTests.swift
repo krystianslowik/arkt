@@ -364,6 +364,40 @@ final class SpaceSwipeHitchTests: XCTestCase {
     // the machine this budget is for, and its display link ticks too rarely to drive the scripted frames. The
     // screen-only gate is deliberate: thread CPU time is the load-independent number of #24.
     try PacingEnvironment.skipIfScreenBelow120Hz(fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
+    await checkSpaceSwitchPasses()
+  }
+
+  /// #648: the same switches with the sidebar banner shown and Personal's rows running under its fade, so the row
+  /// list is masked while Personal is in view and not on the pages whose rows end above it. Opt-in: it runs only with
+  /// `ARKT_PACING_GATE=1` (the frame-timing lane), never in the required lane, since its swipes wait on the display.
+  func testSpaceSwitchPassesWithTheBannerStayUnderOneFrameOfMainThreadCPU() async throws {
+    guard ProcessInfo.processInfo.environment["ARKT_PACING_GATE"] == "1" else {
+      throw XCTSkip("set ARKT_PACING_GATE=1 to run the banner's Space switch pacing")
+    }
+    try PacingEnvironment.skipIfScreenBelow120Hz(fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
+    controller.close()
+    sidebar = StubSidebar.sample()
+    let personal = sidebar.spaceOrder[0]
+    for index in 0..<40 {
+      _ = sidebar.addTab(url: URL(string: "https://example.com/banner/\(index)")!, title: "Long list tab \(index)",
+                         in: .today(personal))
+    }
+    controller = ShellWindowController(engine: InMemoryEngine(), sidebar: sidebar)
+    let model = SidebarBannerModel(source: ManualSidebarNoticeSource(notices: [.update(version: "1.4.2")]),
+                                   dismissals: .ephemeral()) { _, _ in }
+    model.reduceMotion = { true }
+    let center = SidebarBannerCenter(model: model)
+    center.attach(to: controller)
+    controller.showWindow(nil)
+    controller.window?.contentView?.layoutSubtreeIfNeeded()
+    let container = controller.sidebarController.view
+    XCTAssertFalse(container.banner.isHidden)
+    XCTAssertTrue(container.pager.layer?.mask === container.bannerSlot.fade, "Personal's rows reach the fade")
+    await checkSpaceSwitchPasses(prefix: "banner.")
+    withExtendedLifetime(center) {}
+  }
+
+  private func checkSpaceSwitchPasses(prefix: String = "") async {
     let rounds = Int(ProcessInfo.processInfo.environment["ARKT_SWIPE_ROUNDS"] ?? "") ?? 6
     var hitches: [HitchDetail] = []
     var all: [String: [Pass]] = [:]
@@ -384,7 +418,7 @@ final class SpaceSwipeHitchTests: XCTestCase {
       let cpu = passes.map(\.cpu).sorted()
       let frame0 = passes.filter { $0.frame == 0 }.map(\.cpu).sorted()
       func ms(_ v: [Double], _ q: Double) -> Double { v.isEmpty ? 0 : v[min(v.count - 1, Int(Double(v.count) * q))] * 1000 }
-      print(String(format: "spaceswipe.cost label=%@ passes=%d cpuMedianMs=%.2f cpuP95Ms=%.2f cpuMaxMs=%.2f "
+      print(prefix + String(format: "spaceswipe.cost label=%@ passes=%d cpuMedianMs=%.2f cpuP95Ms=%.2f cpuMaxMs=%.2f "
                    + "over8.3=%d over4=%d frame0MedianMs=%.2f frame0MaxMs=%.2f", label, cpu.count, ms(cpu, 0.5),
                    ms(cpu, 0.95), (cpu.last ?? 0) * 1000, cpu.filter { $0 > 0.0083 }.count,
                    cpu.filter { $0 > 0.004 }.count, ms(frame0, 0.5), (frame0.last ?? 0) * 1000))
@@ -392,14 +426,14 @@ final class SpaceSwipeHitchTests: XCTestCase {
       if !label.contains("flavor") { worst = max(worst, cpu.last ?? 0) }
     }
     for h in hitches {
-      print(String(format: "spaceswipe.hitch label=%@ frame=%d ms=%.2f prevLateMs=%.2f busyMs=%.2f cpuMs=%.2f "
+      print(prefix + String(format: "spaceswipe.hitch label=%@ frame=%d ms=%.2f prevLateMs=%.2f busyMs=%.2f cpuMs=%.2f "
                    + "offCpuMs=%.2f passes=%d", h.label, h.frame, h.interval * 1000, h.previousLate * 1000,
                    (h.longest?.wall ?? 0) * 1000, (h.longest?.cpu ?? 0) * 1000, (h.longest?.offCPU ?? 0) * 1000,
                    h.passes))
     }
     var load = [0.0]
     _ = getloadavg(&load, 1)
-    print(String(format: "spaceswipe.summary rounds=%d hitches=%d load1=%.2f", rounds, hitches.count, load[0]))
+    print(prefix + String(format: "spaceswipe.summary rounds=%d hitches=%d load1=%.2f", rounds, hitches.count, load[0]))
     XCTAssertLessThan(worst, FrameStats().designBudget, "a Space switch pass took a whole 120 Hz frame of main-thread CPU")
   }
 

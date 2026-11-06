@@ -88,6 +88,9 @@ final class ArchivePillButton: NSButton {
     static let infobar = Metrics(height: 24, fontSize: 12, weight: .semibold, padding: 12, minWidth: 0, pressScale: 0.97)
     static let toastAction = Metrics(height: 24, fontSize: 12, weight: .semibold, padding: 12, minWidth: 0,
                                      pressScale: 0.96)
+    /// The sidebar banner's Restart (design/sidebar-banner): 22 high, 12 semibold, padding 10.
+    static let sidebarBanner = Metrics(height: 22, fontSize: 12, weight: .semibold, padding: 10, minWidth: 0,
+                                       pressScale: 0.97)
   }
 
   let style: Style
@@ -172,6 +175,12 @@ final class ArchivePillButton: NSButton {
 
   /// The drawn title, the key included (tests).
   var displayedTitleText: String { displayedTitle.string }
+
+  /// The title color the label layer holds now, not the one the appearance would give (tests).
+  var drawnTitleColor: NSColor? {
+    guard let text = label.string as? NSAttributedString, text.length > 0 else { return nil }
+    return text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+  }
 
   override var intrinsicContentSize: NSSize {
     let width = ceil(displayedTitle.size().width) + 2 * metrics.padding

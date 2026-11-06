@@ -2,6 +2,7 @@ import CoreBridge
 import EngineAPI
 import Foundation
 import Persistence
+import ShellUI
 
 /// Where Arkt keeps its data, where Arc's data would be and which defaults hold app settings. Debug, Profile
 /// (`ARKT_SMOKE_BUILD`) and Engine (`ARKT_TEST_SWITCHES`, development only) builds accept overrides
@@ -89,6 +90,18 @@ enum AppEnvironment {
     return SidebarAutosaver.defaultDelay
   }
 
+  /// The sidebar banner's notice source (#648). The updater (#126) replaces it; until then it is empty, except in a
+  /// Debug build asked for a sample notice. Choosing a notice's action withdraws it.
+  @MainActor
+  static func sidebarNoticeSource() -> any SidebarNoticeSource {
+    let source = ManualSidebarNoticeSource()
+    #if DEBUG
+    source.notices = sampleSidebarNotices
+    #endif
+    source.onPerform = { [weak source] notice in source?.notices.removeAll { $0 == notice } }
+    return source
+  }
+
   #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
   private static var overrides: EnvironmentOverrides {
     EnvironmentOverrides(environment: ProcessInfo.processInfo.environment)
@@ -103,6 +116,20 @@ enum AppEnvironment {
   /// empty. Key names only.
   static func missingUITestOverrides() -> [String] {
     overrides.missingUITestOverrides(bundleIdentifier: Bundle.main.bundleIdentifier)
+  }
+
+  /// The sample sidebar notices `ARKT_SIDEBAR_NOTICE` asks for (#648); empty when unset.
+  static var sampleSidebarNotices: [ShellUI.SidebarNotice] {
+    switch overrides.sidebarNotice {
+    case .update?: [.update(version: "0.0.0-sample")]
+    case .announcement?:
+      [.announcement(id: "sample",
+                     title: "Archived tabs can now be searched by what was on the page, not only the title",
+                     body: "Open the Archive and type a few words you remember. Tabs archived from today on are "
+                       + "searchable right away.",
+                     actionTitle: "Got It")]
+    case nil: []
+    }
   }
 
   /// The end-to-end data smoke phase (E6, Debug builds only), from `ARKT_SMOKE`. Separate from the scripted UI smoke

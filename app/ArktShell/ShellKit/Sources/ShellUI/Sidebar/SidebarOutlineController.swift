@@ -97,7 +97,9 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
 
   /// Moves on every change of which item sits at which row (reload, expand, collapse, insert, remove, move), so the
   /// folder motion captures its rows again only then, never per frame (#603).
-  private(set) var rowsGeneration = 0
+  private(set) var rowsGeneration = 0 { didSet { onRowsChanged?() } }
+  /// Runs on every change of `rowsGeneration` (the sidebar banner checks whether the rows reach its fade, #648).
+  var onRowsChanged: (@MainActor () -> Void)?
 
   public override func reloadData() {
     reloadDataCount += 1
