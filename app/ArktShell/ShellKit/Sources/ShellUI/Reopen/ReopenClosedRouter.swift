@@ -1,9 +1,9 @@
 import AppKit
 
 /// The target of File > Reopen Closed Tab (Cmd-Shift-T, KB-010). The window the action reaches down the responder
-/// chain handles it as before: the key browser window (its own closes, then the last closed Little Arkt), a key
-/// Little Arkt window, or the main window behind a panel. With no window to reach (the only window was a Little Arkt
-/// and it closed), the last closed Little Arkt window comes back (#355).
+/// chain handles it as before: the key browser window (its own closes, then the last closed Little Arkt; a blank or
+/// incognito window only its own, #726), a key Little Arkt window, or the main window behind a panel. With no window
+/// to reach (the only window was a Little Arkt and it closed), the last closed Little Arkt window comes back (#355).
 ///
 /// An explicit target, so the action never reaches the end of the responder chain, which in the Engine build is
 /// Chromium's `AppController`. The menu item holds its target weakly: the app keeps the router alive.

@@ -354,6 +354,93 @@ final class LittleArktArchiveTests: XCTestCase {
     XCTAssertFalse(set.canReopenClosedLittleArkt)
   }
 
+  // MARK: Reopen in a blank or incognito window (#726)
+
+  /// Cmd-Shift-T in a blank or incognito window reopens only that window's own closes: with none, it reopens no
+  /// Little Arkt, takes back no Archive entry, and the menu item is off.
+  func testReopenInAPrivateWindowWithNothingOfItsOwnReopensNothing() throws {
+    for presentation in [SidebarPresentation.blank, .incognito] {
+      let (set, engine) = try makeSet()
+      let (little, _, _) = try openPopup(engine, set)
+      little.closeTab(nil)
+      little.finishMotion()
+      XCTAssertTrue(set.canReopenClosedLittleArkt, "\(presentation): a closed Little Arkt is there to reopen")
+      takenBack = []
+      let window = set.openPrivateWindow(privateURL, as: presentation, near: nil)
+      XCTAssertTrue(window.isPrivateWindow)
+      XCTAssertFalse(window.canReopenClosed, "\(presentation): nothing of its own")
+      XCTAssertFalse(window.validateMenuItem(reopenItem()), "\(presentation): the item is off")
+
+      window.reopenClosedTab(nil)
+
+      XCTAssertTrue(set.littleArkts.isEmpty, "\(presentation): no normal Little Arkt comes back")
+      XCTAssertTrue(takenBack.isEmpty, "\(presentation): no Archive entry is taken back")
+      XCTAssertTrue(set.canReopenClosedLittleArkt, "\(presentation): the closed Little Arkt stays for a normal window")
+      window.window?.performClose(nil)
+    }
+  }
+
+  /// A blank or incognito window with a close of its own reopens that close, and still leaves the Little Arkt alone.
+  func testReopenInAPrivateWindowReopensItsOwnClose() throws {
+    for presentation in [SidebarPresentation.blank, .incognito] {
+      let (set, engine) = try makeSet()
+      let (little, _, _) = try openPopup(engine, set)
+      little.closeTab(nil)
+      little.finishMotion()
+      takenBack = []
+      let window = set.openPrivateWindow(privateURL, as: presentation, near: nil)
+      window.peek.reduceMotion = { false }
+      let peekURL = URL(string: "arkt-test://page/PrivatePeek")!
+      window.rememberClosedPeek(ClosedPeek(parked: nil, sourceNode: nil, url: peekURL, linkOffset: .zero),
+                                withSource: false)
+      XCTAssertTrue(window.validateMenuItem(reopenItem()), "\(presentation): its own close is there to reopen")
+
+      window.reopenClosedTab(nil)
+
+      let session = try XCTUnwrap(window.peek.session, "\(presentation): its own close came back")
+      XCTAssertEqual(engine.snapshot(of: session.tab)?.url, peekURL)
+      XCTAssertTrue(set.littleArkts.isEmpty, "\(presentation): no normal Little Arkt comes back")
+      XCTAssertTrue(takenBack.isEmpty, "\(presentation): no Archive entry is taken back")
+      XCTAssertFalse(window.canReopenClosed)
+      XCTAssertFalse(window.validateMenuItem(reopenItem()), "\(presentation): nothing of its own is left")
+
+      window.reopenClosedTab(nil)
+
+      XCTAssertTrue(set.littleArkts.isEmpty, "\(presentation): a second Cmd-Shift-T does not fall through either")
+      XCTAssertTrue(takenBack.isEmpty)
+      window.peek.animator.settleNow()
+      window.window?.performClose(nil)
+    }
+  }
+
+  /// Control: a normal window with nothing of its own still reopens the last closed Little Arkt and takes back its
+  /// Archive entry (#355).
+  func testReopenInANormalWindowStillReopensTheLittleArktAndTakesBackItsEntry() throws {
+    let (set, engine) = try makeSet()
+    let main = set.openWindow()
+    XCTAssertFalse(main.isPrivateWindow)
+    let (little, _, _) = try openPopup(engine, set)
+    little.closeTab(nil)
+    little.finishMotion()
+    XCTAssertFalse(main.canReopenClosed)
+    XCTAssertTrue(main.validateMenuItem(reopenItem()))
+
+    main.reopenClosedTab(nil)
+
+    let reopened = try XCTUnwrap(set.littleArkts.first, "the last closed Little Arkt comes back")
+    let id = try XCTUnwrap(reopened.engineWindow)
+    XCTAssertEqual(engine.activeTab(in: id).flatMap { engine.snapshot(of: $0)?.url }, popupURL)
+    XCTAssertEqual(takenBack, [archiveIDs[0]], "its Archive entry is taken back")
+    XCTAssertFalse(main.validateMenuItem(reopenItem()))
+  }
+
+  private let privateURL = URL(string: "arkt-test://page/Private")!
+
+  private func reopenItem() -> NSMenuItem {
+    NSMenuItem(title: "Reopen Closed Tab", action: #selector(ShellWindowController.reopenClosedTab(_:)),
+               keyEquivalent: "t")
+  }
+
   // MARK: Reopen with no key window (the app's router)
 
   func testTheRouterReopensTheLastLittleArktWhenNoWindowTakesTheAction() throws {
