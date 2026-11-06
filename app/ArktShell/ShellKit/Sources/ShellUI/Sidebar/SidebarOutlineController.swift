@@ -114,6 +114,13 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   // asked, so the element a VoiceOver user is on survives it. The title/value notification comes from
   // `SidebarOutlineController.reload(node:)`, which knows the row.
 
+  /// A reload with `reloadChildren` lists the item's children again, which may put other items at its rows, so it
+  /// moves `rowsGeneration` (the folder motion captures again, #673). A plain reload of the item keeps its rows.
+  public override func reloadItem(_ item: Any?, reloadChildren: Bool) {
+    super.reloadItem(item, reloadChildren: reloadChildren)
+    if reloadChildren { rowsGeneration &+= 1 }
+  }
+
   public override func expandItem(_ item: Any?) {
     super.expandItem(item)
     rowsGeneration &+= 1
@@ -442,6 +449,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// the folders' changing rows or of the arrival's rows (#603). A frame reads no other row of the outline.
   private struct MotionRows {
     var rowsGeneration: Int
+    /// The outline's row count, so a change of the rows the overrides above never see still captures again (#673).
+    var numberOfRows: Int
     var changingGeneration: Int
     var arrivalNode: NodeID?
     var fadingOut: NodeID?
@@ -1486,14 +1495,16 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// folder's changing rows or the arrival changed since.
   private func currentMotionRows() -> MotionRows {
     let rowsGeneration = outlineView.rowsGeneration
+    let numberOfRows = outlineView.numberOfRows
     let changingGeneration = folderMotion.changingGeneration
-    if let motionRows, motionRows.rowsGeneration == rowsGeneration,
+    if let motionRows, motionRows.rowsGeneration == rowsGeneration, motionRows.numberOfRows == numberOfRows,
        motionRows.changingGeneration == changingGeneration,
        motionRows.arrivalNode == arrival?.node, motionRows.fadingOut == arrival?.fadingOut,
        motionRows.clearGeneration == todayClear.rowsGeneration {
       return motionRows
     }
-    var captured = MotionRows(rowsGeneration: rowsGeneration, changingGeneration: changingGeneration,
+    var captured = MotionRows(rowsGeneration: rowsGeneration, numberOfRows: numberOfRows,
+                              changingGeneration: changingGeneration,
                               arrivalNode: arrival?.node, fadingOut: arrival?.fadingOut,
                               clearGeneration: todayClear.rowsGeneration)
     for (folder, changing) in folderMotion.changing where row(for: folder) >= 0 {
