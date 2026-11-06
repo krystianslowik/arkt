@@ -95,15 +95,20 @@ extension ShellWindowController: LittleArktFlightDestination {
 extension ShellWindowController {
   /// A link activated with Option and Command held, while the setting is on: the engine drops it and a new Little
   /// Arkt window opens on its URL after the call returns (the engine is never called from inside its own decision).
+  /// From a blank or incognito window, a private window of the same kind opens instead (#710).
   func opensLinkInLittleArkt(_ activation: EngineLinkActivation) -> Bool {
     guard let open = onOpenLinkInLittleArkt,
           LittleArktRouting.opensInLittleArkt(activation, enabled: opensLittleArktOnOptionCommandClick()) else {
       return false
     }
     let url = activation.url
-    DispatchQueue.main.async { open(url) }
+    let kind = privateKind                       // #710: read now, so the hop cannot lose it with the window
+    DispatchQueue.main.async { open(url, kind) }
     return true
   }
+
+  /// This window's kind when it is a blank or incognito window; nil for a normal one.
+  private var privateKind: SidebarPresentation? { isPrivateWindow ? sidebarController.presentation : nil }
 
   /// Opt-Cmd-click on a tab's row or tile (BH-132; docs/design/little-arkt.md, When a Little Arkt window opens):
   /// - a Today tab's page moves into a new Little Arkt window (no reload when it is loaded) and the row leaves the
@@ -118,7 +123,7 @@ extension ShellWindowController {
       return onMoveToLittleArkt?(node, pageURL) ?? false
     case .pinned?, .favorites?:
       guard let open = onOpenLinkInLittleArkt else { return false }
-      open(pageURL)
+      open(pageURL, privateKind)
       return true
     default:
       return false

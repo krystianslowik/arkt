@@ -133,7 +133,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Opt-Cmd-click into Little Arkt (#356, BH-132): the Settings > Links switch, read on every click (on by default).
   public var opensLittleArktOnOptionCommandClick: @MainActor () -> Bool = { true }
   /// Opens a link in a new Little Arkt window (Opt-Cmd-click); set by the window set. Nil: the engine's own click.
-  var onOpenLinkInLittleArkt: (@MainActor (URL) -> Void)?
+  /// `privateKind` is this window's kind when it is a blank or incognito window, read at the click (#710): the link
+  /// then opens in a private window of that kind, even when this window is gone by the time it opens.
+  var onOpenLinkInLittleArkt: (@MainActor (_ url: URL, _ privateKind: SidebarPresentation?) -> Void)?
   /// Moves a Today tab's page into a new Little Arkt window (Opt-Cmd-click on its row): the live page from whichever
   /// window has it, else a new page on `url`. False when it did not (a close held behind a leave-site prompt); the
   /// row then stays. Set by the window set. Nil: the click activates the tab.
