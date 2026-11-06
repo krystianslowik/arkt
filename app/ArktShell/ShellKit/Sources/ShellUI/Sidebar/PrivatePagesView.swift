@@ -11,10 +11,10 @@ struct PrivatePageRowContent: Equatable {
   /// The row's sound: a mute button while the page plays or is muted.
   var audio: TabAudio = .silent
 
-  /// The row's text: the page title, else its address, else "Untitled".
+  /// The row's text: the page title, else its checked host or address (`HostDisplay`), else "Untitled".
   var displayTitle: String {
     if !title.isEmpty { return title }
-    if let url { return url.host() ?? url.absoluteString }
+    if let url { return HostDisplay.hostOrAddress(url) }
     return "Untitled"
   }
 }

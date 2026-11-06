@@ -109,7 +109,8 @@ final class PrivatePagesTests: XCTestCase {
     XCTAssertEqual(list(window).rows.first?.titleLabel.stringValue, "Your cart - Example Store")
     XCTAssertEqual(list(window).rows.first?.accessibilityLabel(), "Your cart - Example Store")
     f.engine.setDocumentTitle(page, "")
-    XCTAssertEqual(list(window).rows.first?.titleLabel.stringValue, f.engine.snapshot(of: page)?.url?.host())
+    XCTAssertEqual(list(window).rows.first?.titleLabel.stringValue,
+                   f.engine.snapshot(of: page)?.url.map(HostDisplay.hostOrAddress))
     window.window?.performClose(nil)
   }
 
