@@ -79,7 +79,8 @@ Apps" for global commands). An unset command shows a Set Shortcut pill. Clicking
 the system focus ring and reads "Press new shortcut"). A conflict uses the Settings pane's row-shaped notice: a neutral
 exclamation, "Cmd-Shift-E is already used by "Reopen Closed Tab"", **Keep Existing** (the one primary, the default:
 Return keeps the existing shortcut, #590) and a quiet **Use Cmd-Shift-E**. Kept, the extension's command stays
-unassigned until the user sets it in Settings, Shortcuts. Esc cancels recording; Delete clears. A shortcut set here survives updates to the extension.
+unassigned until the user sets it in Settings, Shortcuts. Esc cancels recording; Delete clears. A shortcut set here
+survives updates to the extension.
 
 ## The other Views surfaces (#122)
 
@@ -174,5 +175,5 @@ Notes:
 
 ### Answered questions (2026-11-06)
 
-3. Default button on a shortcut conflict? **Keep Existing** (Return); Use is the secondary. The extension's command
+1. Default button on a shortcut conflict? **Keep Existing** (Return); Use is the secondary. The extension's command
    stays unassigned until the user sets it in Settings, Shortcuts. `shortcuts-conflict` is redrawn that way.
