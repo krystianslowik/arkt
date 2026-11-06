@@ -19,6 +19,17 @@ struct PageInfoModelTests {
              ])
   }
 
+  /// The panel's host reads as the address bar's (#697): a real internationalized host in Unicode, a look-alike in
+  /// its encoded form, whichever form the engine gave.
+  @Test func theHostFollowsTheSharedDisplayRule() throws {
+    #expect(try #require(PageInfoModel(info(.secure, host: "xn--mnchen-3ya.de"))).host == "m\u{00FC}nchen.de")
+    #expect(try #require(PageInfoModel(info(.secure, host: "xn--80ak6aa92e.com"))).host == "xn--80ak6aa92e.com")
+    #expect(try #require(PageInfoModel(info(.secure, host: "\u{0430}pple.com"))).host == "xn--pple-43d.com")
+    let model = try #require(PageInfoModel(info(.secure, host: "xn--mnchen-3ya.de")))
+    #expect(model.accessibilityLabel == "Site controls for m\u{00FC}nchen.de")
+    #expect(model.origin == "https://xn--mnchen-3ya.de", "the per-site calls keep the engine's origin")
+  }
+
   // MARK: States
 
   @Test func secureSiteShowsTheHostTheConnectionAndEveryPermission() throws {
