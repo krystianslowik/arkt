@@ -305,8 +305,19 @@ final class SidebarBannerRowView: NSView {
   override var mouseDownCanMoveWindow: Bool { false }
 
   // An announcement's row is a button: Tab reaches it with Full Keyboard Access, like every button in macOS, and
-  // Space or Return opens the popover. A click never gives it focus.
-  override var acceptsFirstResponder: Bool { isAnnouncement }
+  // Space or Return opens the popover. A click never gives it focus: the window asks on mouse down, and it says no.
+  override var acceptsFirstResponder: Bool {
+    Self.acceptsFocus(isAnnouncement: isAnnouncement, during: NSApp.currentEvent?.type)
+  }
+
+  /// Focus only for an announcement, and never while a mouse down is being handled.
+  static func acceptsFocus(isAnnouncement: Bool, during event: NSEvent.EventType?) -> Bool {
+    guard isAnnouncement else { return false }
+    switch event {
+    case .leftMouseDown?, .rightMouseDown?, .otherMouseDown?: return false
+    default: return true
+    }
+  }
   override var canBecomeKeyView: Bool {
     isAnnouncement && !isHiddenOrHasHiddenAncestor && NSApp.isFullKeyboardAccessEnabled
   }

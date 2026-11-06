@@ -154,7 +154,7 @@ final class SidebarBannerWindowTests: XCTestCase {
     }
     XCTAssertTrue(banner.closeButton.isShown, "keyboard focus shows the close button")
     XCTAssertTrue(banner.hitTest(banner.convert(close, to: harness.container)) === banner.closeButton)
-    XCTAssertFalse(banner.closeButton.keyboardFocusRing.isHidden && window.isKeyWindow, "the ring shows with focus")
+    XCTAssertTrue(banner.closeButton.keyboardFocusRing.isFocused, "the close button draws the focus ring")
     if NSApp.isFullKeyboardAccessEnabled {
       XCTAssertTrue(window.makeFirstResponder(nil))
     } else {
@@ -168,13 +168,20 @@ final class SidebarBannerWindowTests: XCTestCase {
     let harness = makeHarness([Self.announcement], reduceMotion: true)
     let window = try XCTUnwrap(harness.controller.window)
     let row = harness.banner.row
+    // A click on the row opens the popover but never takes the keyboard: the window asks during the mouse down.
+    for type in [NSEvent.EventType.leftMouseDown, .rightMouseDown, .otherMouseDown] {
+      XCTAssertFalse(SidebarBannerRowView.acceptsFocus(isAnnouncement: true, during: type), "\(type)")
+    }
+    XCTAssertTrue(SidebarBannerRowView.acceptsFocus(isAnnouncement: true, during: .keyDown))
+    XCTAssertTrue(SidebarBannerRowView.acceptsFocus(isAnnouncement: true, during: nil))
+    XCTAssertFalse(SidebarBannerRowView.acceptsFocus(isAnnouncement: false, during: .keyDown), "an update row")
     let loop = keyViewLoop(window)
     XCTAssertTrue(loop.contains { $0 === row }, "the row is in the key view loop")
     XCTAssertTrue(loop.contains { $0 === harness.banner.closeButton })
     XCTAssertTrue(row.acceptsFirstResponder)
     XCTAssertEqual(row.canBecomeKeyView, NSApp.isFullKeyboardAccessEnabled, "Tab reaches it as it reaches buttons")
     XCTAssertTrue(window.makeFirstResponder(row))
-    XCTAssertFalse(row.keyboardFocusRing.isHidden && window.isKeyWindow)
+    XCTAssertTrue(row.keyboardFocusRing.isFocused, "the row draws the focus ring")
     let space = try XCTUnwrap(NSEvent.keyEvent(
       with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
       context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49))
@@ -432,11 +439,10 @@ final class SidebarBannerWindowTests: XCTestCase {
     let container = harness.container
     let pager = container.pager
     XCTAssertTrue(pager.layer?.mask === container.bannerSlot.fade, "the long page is in view")
+    // The pager reports each position to the sidebar controller, which hands it to the container.
     pager.setPositionForTesting(1)
-    container.bannerPagerMoved(to: 1)
     XCTAssertNil(pager.layer?.mask, "the short page alone needs none")
     pager.setPositionForTesting(0.5)
-    container.bannerPagerMoved(to: 0.5)
     XCTAssertTrue(pager.layer?.mask === container.bannerSlot.fade, "on while the long page is half in view")
   }
 
