@@ -97,6 +97,8 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public internal(set) var extensionCommands: [ExtensionCommand] = []
   /// Global shortcuts another application or the system holds: `.global` with one of these is rejected.
   public var heldGlobalShortcuts: Set<ExtensionShortcut> = []
+  /// Calls to `uninstallExtension`, in order, known ids or not (#720).
+  public internal(set) var uninstalledExtensions: [ExtensionUninstall] = []
   /// Context menu commands run through `performExtensionContextCommand`, in order.
   public internal(set) var performedExtensionContextCommands: [(command: EngineMenuCommand, actionID: String,
                                                                 window: EngineWindowID)] = []

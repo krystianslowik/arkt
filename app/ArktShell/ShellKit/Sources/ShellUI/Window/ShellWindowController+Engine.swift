@@ -336,6 +336,7 @@ extension ShellWindowController {
     let panel = ExtensionsPanelController(extensions: extensions, button: button) { [weak self] in self?.engineWindow }
     panel.onManage = { [weak self] in self?.onManageExtensions?() }
     panel.onBrowseWebStore = { [weak self] in self?.open(OnboardingController.Options.chromeWebStore, inNewTab: true) }
+    panel.onRemove = { [weak panel] action in panel?.presentRemoveSheet(for: action) }    // #720
     extensionsButton = button
     extensionsPanel = panel
     sidebarController.view.extensionsButton = button
