@@ -109,7 +109,8 @@ struct PageInfoModel: Equatable {
   init?(_ info: PageInfo, locale: Locale = .current, isReadOnly: Bool = false, favicon: Data? = nil) {
     tab = info.tab
     origin = info.origin
-    host = info.host
+    // The engine's host in either form, written as the address bar writes it (#697); a local file's name as it is.
+    host = info.connection == .localFile ? info.host : HostDisplay.text(forHost: info.host)
     connectionIsWarning = true
     note = nil
     siteDataText = ""
