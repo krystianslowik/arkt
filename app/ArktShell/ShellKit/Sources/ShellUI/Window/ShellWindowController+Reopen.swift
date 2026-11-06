@@ -15,10 +15,17 @@ extension ShellWindowController {
   public var canReopenClosed: Bool { peek.isClosing || !reopenStack.isEmpty }
 
   /// File > Reopen Closed Tab (Cmd-Shift-T, KB-010). With nothing of this window's to reopen, the last closed Little
-  /// Arkt window comes back (#355).
+  /// Arkt window comes back (#355), except in a blank or incognito window (#726): it reopens only its own closes and
+  /// never a page of normal browsing or its Archive entry.
   @objc public func reopenClosedTab(_ sender: Any?) {
-    if !reopenClosed() { reopenLittleArkt?() }
+    if !reopenClosed(), reopensLittleArkt { reopenLittleArkt?() }
   }
+
+  /// Whether Reopen Closed Tab is on: a close of this window's, or a closed Little Arkt it falls through to.
+  var canReopenClosedTab: Bool { canReopenClosed || (reopensLittleArkt && canReopenLittleArkt()) }
+
+  /// Whether Reopen Closed Tab falls through to the last closed Little Arkt: never in a blank or incognito window.
+  private var reopensLittleArkt: Bool { !isPrivateWindow }
 
   /// Takes the most recent close back. A Peek still closing turns around where it is; otherwise the top of the stack
   /// reopens, skipping items whose row is gone for good. True when something came back.
