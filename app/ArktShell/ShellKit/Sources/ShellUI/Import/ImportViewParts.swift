@@ -46,6 +46,8 @@ struct ImportViewStyle {
 
   var kind: Kind
   var palette: ImportPalette
+  /// The tone the palette was made for; the focus ring resolves from it.
+  var flavor: ThemeFlavor
   var reduceMotion: Bool
   /// The Hero entry in a window shorter than 700 pt.
   var compact = false
@@ -63,15 +65,17 @@ struct ImportViewStyle {
   var headingGap: CGFloat { isHero ? 6 : 6 }
 
   static func sheet(for view: NSView, reduceMotion: Bool? = nil) -> ImportViewStyle {
-    ImportViewStyle(
+    let flavor = ThemeFlavor(appearance: view.effectiveAppearance)
+    return ImportViewStyle(
       kind: .sheet,
-      palette: .sheet(flavor: ThemeFlavor(appearance: view.effectiveAppearance),
+      palette: .sheet(flavor: flavor,
                       increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast),
-      reduceMotion: reduceMotion ?? ArchiveMotion.reduceMotion())
+      flavor: flavor, reduceMotion: reduceMotion ?? ArchiveMotion.reduceMotion())
   }
 
   static func hero(_ appearance: OnboardingAppearance, compact: Bool) -> ImportViewStyle {
-    ImportViewStyle(kind: .hero, palette: .hero(appearance), reduceMotion: appearance.reduceMotion, compact: compact)
+    ImportViewStyle(kind: .hero, palette: .hero(appearance), flavor: appearance.flavor,
+                    reduceMotion: appearance.reduceMotion, compact: compact)
   }
 }
 
@@ -482,6 +486,8 @@ final class ImportBarView: NSView {
 @MainActor
 final class ImportCheckbox: NSView {
   var onToggle: (@MainActor (Bool) -> Void)?
+  /// The chrome's ink focus ring outside the box while it has keyboard focus (#687), in the style's tone.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: 4.5)
   private(set) var isOn = false
   private(set) var isEnabled = true
   private let box = CALayer()
@@ -497,7 +503,7 @@ final class ImportCheckbox: NSView {
     tick.lineCap = .round
     tick.lineJoin = .round
     box.addSublayer(tick)
-    focusRingType = .exterior
+    focusRingType = .none
     setAccessibilityElement(true)
     setAccessibilityRole(.checkBox)
     restyle()
@@ -544,6 +550,7 @@ final class ImportCheckbox: NSView {
       tick.opacity = isOn ? 1 : 0
       layer?.opacity = isEnabled ? 1 : 0.4
     }
+    keyboardFocusRing.flavor = style.flavor
   }
 
   override func layout() {
@@ -558,15 +565,18 @@ final class ImportCheckbox: NSView {
   /// A checkbox that takes focus scrolls into view (the Hero entry scrolls when the window is short).
   override func becomeFirstResponder() -> Bool {
     let accepted = super.becomeFirstResponder()
-    if accepted { scrollToVisible(bounds.insetBy(dx: -8, dy: -12)) }
+    if accepted {
+      keyboardFocusRing.setFocused(true)
+      scrollToVisible(bounds.insetBy(dx: -8, dy: -12))
+    }
     return accepted
   }
 
-  override func drawFocusRingMask() {
-    NSBezierPath(roundedRect: bounds, xRadius: 4.5, yRadius: 4.5).fill()
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
   }
-
-  override var focusRingMaskBounds: NSRect { bounds }
 
   private func toggle() {
     guard isEnabled else { return }

@@ -84,7 +84,8 @@ Transform and opacity only. Every motion is interruptible: a new update retarget
 - Buttons: "Cancel download", "Open", "Show in Finder", "Retry", "Remove from list", "Review". The Library button reads
   "Library, downloading 13 percent" or "Library, downloads finished".
 - The popover and the Library panel are dialogs; Esc closes them and focus returns to the button. The Library list is a
-  list with arrow-key selection. Focus rings are the system's, never mustard.
+  list with arrow-key selection. The rail items and the rows' icon buttons draw the ink focus ring
+  (`ShellTokens.focusRing`, 3 pt outside, #687); the search field keeps the system ring. Never mustard.
 - Color never carries state alone: the glyph and the words say failed or blocked. No contrast values appear anywhere.
 
 ## Light and dark
@@ -108,3 +109,7 @@ adds a 1 pt `separatorIncreasedContrast` edge to rows and cards.
 |---|---|
 | `prototype.html` | Single-file prototype, no network, synthetic data |
 | `screens/downloads-<state>-<light\|dark>.png` | 42 screenshots at 2x (1080 x 720 window): `a-`, `b-`, `c-` progress, multi, finished, danger, library, library-empty; `b-closed`; `location`, `location-ask` |
+
+Focus ring (#687): the ink ring of [`design/drag-hint-focus-ring`](../drag-hint-focus-ring/README.md). Screens of these
+controls, focused: [light](../drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-light.png),
+[dark](../drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-dark.png).
