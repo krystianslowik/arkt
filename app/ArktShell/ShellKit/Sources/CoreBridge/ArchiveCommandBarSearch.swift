@@ -56,7 +56,8 @@ public final class ArchiveCommandBarSearch {
     guard !Task.isCancelled else { return [] }
     listed = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     return items.map { item in
-      CommandBarResults.ArchivedMatch(id: item.id, title: item.title, subtitle: subtitle(for: item))
+      CommandBarResults.ArchivedMatch(id: item.id, title: ArchiveListModel.shownTitle(of: item),
+                                      subtitle: subtitle(for: item))
     }
   }
 

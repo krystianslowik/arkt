@@ -21,7 +21,7 @@ extension ShellWindowController: LittleArktFlightDestination {
   func beginReceiving(_ tab: TabID, in space: SpaceID?) -> NodeID? {
     guard let snapshot = engine.snapshot(of: tab) else { return nil }
     let url = snapshot.url ?? Self.blankPage
-    let title = snapshot.title.isEmpty ? HostDisplay.hostOrAddress(url) : snapshot.title
+    let title = snapshot.title.isEmpty ? HostDisplay.savedTitle(for: url) : snapshot.title
     guard let target = space ?? currentSpace ?? createSpace() else { return nil }
     let node: NodeID
     do {

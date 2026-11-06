@@ -45,7 +45,8 @@ extension ShellWindowController {
                               scale: window?.backingScaleFactor ?? 2)
     var isPane = false
     if case .split? = sidebar.parent(of: node) { isPane = true }
-    return TabSwitcherRow(node: node, title: title, favicon: favicon, spaceTitle: spaceInfo?.title,
+    return TabSwitcherRow(node: node, title: HostDisplay.title(title, for: url), favicon: favicon,
+                          spaceTitle: spaceInfo?.title,
                           spaceColor: spaceInfo?.theme.chipColor, isSplitPane: isPane)
   }
 
@@ -198,7 +199,7 @@ extension ShellWindowController {
   func sidebarAnnouncementText(for node: NodeID) -> String {
     let title: String?
     switch sidebar.node(node) {
-    case .tab(_, _, let tabTitle)?: title = tabTitle
+    case .tab(_, let url, let tabTitle)?: title = HostDisplay.title(tabTitle, for: url)
     case .folder(_, let folderTitle)?: title = folderTitle
     case .split?: title = "Split View"
     case nil: title = nil

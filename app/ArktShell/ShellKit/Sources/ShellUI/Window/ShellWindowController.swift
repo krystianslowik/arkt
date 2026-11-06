@@ -511,7 +511,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// tab in the current Space without changing the active tab (#81).
   private func openHistoryEntryInBackgroundTab(_ entry: HistoryEntry) {
     guard let space = sidebarController.currentSpace ?? createSpace() else { return }
-    let title = entry.title.isEmpty ? HostDisplay.hostOrAddress(entry.url) : entry.title
+    let title = entry.title.isEmpty ? HostDisplay.savedTitle(for: entry.url) : entry.title
     do {
       _ = try sidebar.addTab(url: entry.url, title: title, in: .today(space))
       announceCreation(.tab)                                        // BH-006
@@ -530,7 +530,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
           let space = sidebarController.currentSpace ?? createSpace() else { return }
     let fallbackTitle = nodeByTab[tab].flatMap({ sidebar.node($0) }).flatMap({
       if case .tab(_, _, let t) = $0 { return t }; return nil
-    }) ?? HostDisplay.hostOrAddress(url)
+    }) ?? HostDisplay.savedTitle(for: url)
     let title = snapshot.title.isEmpty ? fallbackTitle : snapshot.title
     do {
       let copyNode = try sidebar.addTab(url: url, title: title, in: .today(space))
@@ -694,7 +694,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       guard let space = sidebarController.currentSpace ?? createSpace() else { return }
       do {
         // New Today tabs go on top (BH-079, decision on #293).
-        let node = try sidebar.addTab(url: url, title: HostDisplay.hostOrAddress(url), in: .today(space), at: 0)
+        let node = try sidebar.addTab(url: url, title: HostDisplay.savedTitle(for: url), in: .today(space), at: 0)
         activate(node: node)
         announceCreation(.tab)                                      // BH-006
       } catch {

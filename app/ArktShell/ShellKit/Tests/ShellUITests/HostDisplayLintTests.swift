@@ -1,10 +1,15 @@
 import Foundation
 import Testing
 
-/// ShellUI and CoreBridge write a host for the user only through `HostDisplay` (#697, #732): a raw `url.host()`
-/// shown as text (`url.host() ?? url.absoluteString`, `url.host().map`, `host: url.host()`) would show the engine's
-/// `xn--` form on one surface and Unicode on another, or, with `percentEncoded: false`, Unicode that skipped the spoof
-/// check. A line that reads the raw host only to compare or search ends in `// not shown` and is let through.
+/// A regression guard (#697, #732): ShellUI and CoreBridge write a host for the user only through `HostDisplay`. A raw
+/// `url.host()` shown as text (`url.host() ?? url.absoluteString`, `url.host().map`, `host: url.host()`) would show
+/// the engine's `xn--` form on one surface and Unicode on another; `host(percentEncoded: false)` anywhere outside
+/// `HostDisplay` could show Unicode that skipped the spoof check. A line that reads the raw host only to compare,
+/// search or save ends in `// not shown` and is let through.
+///
+/// The window, Peek and drop code saves titles into the sidebar model, which keeps the raw host
+/// (`HostDisplay.savedTitle(for:)`) and is written by the rule only when shown (`HostDisplay.title(_:for:)`), so the
+/// checked form is never stored there: `hostOrAddress` is refused in those folders.
 struct HostDisplayLintTests {
   /// app/ArktShell/ShellKit/Sources, derived from this file's location:
   /// app/ArktShell/ShellKit/Tests/ShellUITests/HostDisplayLintTests.swift
@@ -18,7 +23,10 @@ struct HostDisplayLintTests {
   static let patterns = [
     #"\.host\((percentEncoded:\s*\w+)?\)\s*(\?\?|\.map\b|\.flatMap\b)"#,
     #"\bhost:\s*[^,)\n]*\.host\((percentEncoded:\s*\w+)?\)"#,
+    #"\.host\(percentEncoded:\s*false\)"#,
   ]
+  /// Folders whose code saves titles into the sidebar model.
+  static let savingFolders = ["ShellUI/Window/", "ShellUI/Peek/", "ShellUI/Sidebar/SidebarOutlineDrop.swift"]
 
   static func rawHostUses(in source: String) -> [String] {
     let regexes = patterns.compactMap { try? NSRegularExpression(pattern: $0) }
@@ -29,6 +37,21 @@ struct HostDisplayLintTests {
       return regexes.contains { $0.firstMatch(in: text, range: range) != nil }
         ? text.trimmingCharacters(in: .whitespaces) : nil
     }
+  }
+
+  static func storedCheckedTitles() throws -> [String: [String]] {
+    var result: [String: [String]] = [:]
+    let root = sources.path + "/"
+    guard let walker = FileManager.default.enumerator(at: sources.appending(path: "ShellUI"),
+                                                      includingPropertiesForKeys: nil) else { return [:] }
+    for case let url as URL in walker where url.pathExtension == "swift" {
+      let path = url.standardizedFileURL.path.replacingOccurrences(of: root, with: "")
+      guard savingFolders.contains(where: { path.hasPrefix($0) }) else { continue }
+      let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
+        .filter { $0.contains("HostDisplay.hostOrAddress") }.map { $0.trimmingCharacters(in: .whitespaces) }
+      if !lines.isEmpty { result[path] = lines }
+    }
+    return result
   }
 
   static func offendingLines() throws -> [String: [String]] {
@@ -55,12 +78,20 @@ struct HostDisplayLintTests {
     #expect(Self.rawHostUses(in: "return url.host() == \"newtab\"").isEmpty)
     #expect(Self.rawHostUses(in: "guard let host = url.host()?.lowercased() else { return false }").isEmpty)
     #expect(Self.rawHostUses(in: "let t = HostDisplay.hostOrAddress(url)").isEmpty)
+    #expect(Self.rawHostUses(in: "guard let h = url.host(percentEncoded: false)?.lowercased() else { return }")
+      .count == 1)
   }
 
   @Test func sourcesAreFound() {
     for module in Self.scanned {
       #expect(FileManager.default.fileExists(atPath: Self.sources.appending(path: module).path))
     }
+  }
+
+  @Test func theSidebarModelIsNeverGivenACheckedHostTitle() throws {
+    let offending = try Self.storedCheckedTitles()
+    #expect(offending.isEmpty,
+            "save HostDisplay.savedTitle(for:); show it through HostDisplay.title(_:for:): \(offending)")
   }
 
   @Test func noHostIsShownRaw() throws {

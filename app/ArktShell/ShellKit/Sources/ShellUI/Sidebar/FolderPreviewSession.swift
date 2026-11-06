@@ -6,19 +6,23 @@ import Foundation
 struct FolderPreviewSession {
   struct Item: Equatable, Sendable {
     var node: NodeID
+    /// The title as saved, matched by the search.
     var title: String
     var url: URL
     /// The URL's host as the engine gives it, matched by the search as well as the title.
     var host: String
     /// The host as the address bar writes it (`HostDisplay`, #732), matched too, so a host typed in Unicode finds it.
     var shownHost: String
+    /// The title as the rows show it (`HostDisplay.title(_:for:)`): one saved as the raw host is written by the rule.
+    var shownTitle: String
 
-    init(node: NodeID, title: String, url: URL, host: String, shownHost: String? = nil) {
+    init(node: NodeID, title: String, url: URL, host: String, shownHost: String? = nil, shownTitle: String? = nil) {
       self.node = node
       self.title = title
       self.url = url
       self.host = host
       self.shownHost = shownHost ?? host
+      self.shownTitle = shownTitle ?? title
     }
   }
 
@@ -85,7 +89,8 @@ struct FolderPreviewSession {
     let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
     return items.filter { $0.title.range(of: needle, options: options) != nil
       || $0.host.range(of: needle, options: options) != nil
-      || ($0.shownHost != $0.host && $0.shownHost.range(of: needle, options: options) != nil) }
+      // The shown host folds case, not diacritics: "paypal" must not find "pàypal-login.net" (#732).
+      || ($0.shownHost != $0.host && $0.shownHost.range(of: needle, options: .caseInsensitive) != nil) }
   }
 
   @MainActor
@@ -95,7 +100,8 @@ struct FolderPreviewSession {
     for child in source.children(of: location) {
       if case .tab(let id, let url, let title)? = source.node(child) {
         let host = url.host() ?? "" // not shown
-        tabs.append(Item(node: id, title: title, url: url, host: host, shownHost: HostDisplay.host(of: url) ?? ""))
+        tabs.append(Item(node: id, title: title, url: url, host: host, shownHost: HostDisplay.host(of: url) ?? "",
+                         shownTitle: HostDisplay.title(title, for: url)))
       } else {
         collectTabs(under: child, in: source, into: &tabs, depth: depth + 1)
       }

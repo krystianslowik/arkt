@@ -319,14 +319,15 @@ public enum CommandBarResults {
 
   private static func openTabsAll(_ input: Input) -> [OpenTab] { input.openTabs }
 
-  /// Whether the host the rows show for `url` (`HostDisplay`, #732) holds `query`, so a host typed in Unicode, or
-  /// without its diacritics, finds it as well as the encoded form the URL itself is matched by. Only a host with an
-  /// `xn--` label can read differently, so every other one costs a substring check; `HostDisplay` keeps the answer per
-  /// host, so each is decoded once however many rows and keystrokes ask.
+  /// Whether the host the rows show for `url` (`HostDisplay`, #732) holds `query`, so a host typed in Unicode finds it
+  /// as well as the encoded form the URL itself is matched by. Case is folded, diacritics are not: "paypal" must not
+  /// find "pàypal-login.net" through its shown host. Only a host with an `xn--` label can read differently, so every
+  /// other one costs a substring check; `HostDisplay` keeps the answer per host, so each is decoded once however many
+  /// rows and keystrokes ask. A title saved as the raw host (`HostDisplay.savedTitle(for:)`) is matched as saved.
   static func shownHost(of url: URL, contains query: String) -> Bool {
     guard let raw = url.host(), raw.range(of: "xn--", options: .caseInsensitive) != nil, // not shown
           let shown = HostDisplay.host(of: url), shown != raw else { return false }
-    return shown.localizedStandardContains(query)
+    return shown.range(of: query, options: .caseInsensitive) != nil
   }
 
   private static func actionRow(_ action: CommandBarAction, group: Group?) -> Result {
@@ -338,7 +339,8 @@ public enum CommandBarResults {
   }
 
   private static func tabRow(_ tab: OpenTab, group: Group?, now: Date) -> Result {
-    var row = Result(kind: .switchTo(tab.node), title: tab.title,
+    let title = HostDisplay.title(tab.title, for: tab.url)
+    var row = Result(kind: .switchTo(tab.node), title: title,
                      subtitle: HostDisplay.hostOrAddress(tab.url),
                      trailingHint: tab.isSplitPane ? switchToSplitHint : switchHint,
                      removalID: "tab:\(tab.node.uuidString)")
@@ -347,7 +349,7 @@ public enum CommandBarResults {
       row.timeText = CommandBarRelativeTime.text(from: viewed, to: now)
     }
     row.previewFacts = CommandBarPreviewFacts(
-      rowKind: .openTab, title: tab.title, host: HostDisplay.hostOrAddress(tab.url),
+      rowKind: .openTab, title: title, host: HostDisplay.hostOrAddress(tab.url),
       spaceTitle: tab.spaceTitle,
       timeText: tab.lastViewed.map { CommandBarRelativeTime.preview(from: $0, to: now) },
       isAlsoOpen: false, url: tab.url, node: tab.node)
@@ -356,14 +358,15 @@ public enum CommandBarResults {
 
   private static func historyRow(_ visit: HistoryVisit, now: Date) -> Result {
     let host = HostDisplay.hostOrAddress(visit.url)
-    var row = Result(kind: .history(visit.url), title: visit.title,
+    let title = HostDisplay.title(visit.title, for: visit.url)
+    var row = Result(kind: .history(visit.url), title: title,
                      subtitle: CommandBarTitleMatch.displayURL(HostDisplay.address(visit.url)),
                      trailingHint: nil, removalID: "history:\(visit.url.absoluteString)")
     if let visited = visit.visited {
       row.timeText = CommandBarRelativeTime.text(from: visited, to: now)
     }
     row.previewFacts = CommandBarPreviewFacts(
-      rowKind: .history, title: visit.title, host: host, spaceTitle: nil,
+      rowKind: .history, title: title, host: host, spaceTitle: nil,
       timeText: visit.visited.map { CommandBarRelativeTime.preview(from: $0, to: now) },
       isAlsoOpen: visit.openTab != nil, url: visit.url, node: visit.openTab)
     return row

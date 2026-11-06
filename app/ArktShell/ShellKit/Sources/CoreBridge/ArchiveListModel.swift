@@ -286,7 +286,8 @@ public final class ArchiveListModel: ArchiveListDataSource {
     for item in items where !item.snapshot.children.isEmpty {
       let tabs = ArchiveSearch.matchingTabs(in: item.snapshot, query: query).compactMap { node -> ArchiveChildRow? in
         guard case .tab(let tab) = node.kind else { return nil }
-        return ArchiveChildRow(id: node.id, title: tab.customTitle ?? tab.title, url: tab.url)
+        return ArchiveChildRow(id: node.id, title: HostDisplay.title(tab.customTitle ?? tab.title, for: tab.url),
+                               url: tab.url)
       }
       if !tabs.isEmpty { found[item.id] = tabs }
     }
@@ -327,6 +328,12 @@ public final class ArchiveListModel: ArchiveListDataSource {
 
   // MARK: - Row text
 
+  /// An item's title as shown: a tab's title saved as its raw host is written by `HostDisplay` (#732).
+  nonisolated static func shownTitle(of item: ArchivedItem) -> String {
+    guard case .tab(let tab) = item.snapshot.kind else { return item.title }
+    return HostDisplay.title(item.title, for: tab.url)
+  }
+
   /// Title; detail = host (or "Folder" / "Split View") - Space (or "Favorites", "Little Arc", "Unknown Space") -
   /// relative date; reason "Closed" (manual) or "Auto archived".
   func row(for item: ArchivedItem) -> ArchiveRow {
@@ -345,7 +352,8 @@ public final class ArchiveListModel: ArchiveListDataSource {
     case .folder: .folder(tabCount: Self.tabCount(item.snapshot))
     case .split: .split
     }
-    return ArchiveRow(id: item.id, title: item.title, detail: "\(what) - \(placeTitle(of: item)) - \(date)",
+    return ArchiveRow(id: item.id, title: Self.shownTitle(of: item),
+                      detail: "\(what) - \(placeTitle(of: item)) - \(date)",
                       reason: reason, kind: kind, place: place(of: item),
                       time: Self.compactTime(item.archivedAt, now: now(), calendar: calendar, locale: locale))
   }

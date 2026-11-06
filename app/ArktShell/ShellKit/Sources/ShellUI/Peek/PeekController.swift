@@ -689,7 +689,7 @@ public final class PeekController {
   private func pageInfo(_ session: PeekSession) -> (URL, String) {
     let snapshot = shell.engine.snapshot(of: session.tab)
     let url = snapshot?.url ?? session.url
-    let title = snapshot.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? HostDisplay.hostOrAddress(url)
+    let title = snapshot.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? HostDisplay.savedTitle(for: url)
     return (url, title)
   }
 
@@ -763,7 +763,7 @@ public final class PeekController {
     guard let space = node.flatMap({ shell.sidebar.spaceID(containing: $0) }) ?? shell.currentSpace else { return }
     if session != nil { teardown(closingTab: true) }
     do {
-      let created = try shell.sidebar.addTab(url: url, title: HostDisplay.hostOrAddress(url), in: .today(space),
+      let created = try shell.sidebar.addTab(url: url, title: HostDisplay.savedTitle(for: url), in: .today(space),
                                              at: 0)
       shell.activate(node: created)
     } catch {

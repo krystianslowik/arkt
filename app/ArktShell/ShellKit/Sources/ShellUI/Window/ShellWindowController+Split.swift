@@ -444,7 +444,7 @@ extension ShellWindowController {
     let focusIndex = split(holding: target).flatMap { sidebar.children(of: .split($0)).firstIndex(of: target) } ?? 0
     let index = side.isBeforeFocus ? focusIndex : focusIndex + 1
     do {
-      let added = try sidebar.addToSplit(.new(url: url, title: HostDisplay.hostOrAddress(url)), target: target,
+      let added = try sidebar.addToSplit(.new(url: url, title: HostDisplay.savedTitle(for: url)), target: target,
                                          at: index, orientation: side.orientation)
       activate(node: added.pane)
     } catch {

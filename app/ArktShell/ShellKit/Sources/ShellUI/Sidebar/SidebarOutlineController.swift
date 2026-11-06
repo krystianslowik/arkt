@@ -760,7 +760,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     case .tab(_, let url, let title)?:
       let image = faviconProvider?(id)
         ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.faviconSize, scale: scale)
-      return (title, image)
+      return (HostDisplay.title(title, for: url), image)
     case .folder?:
       let symbol = display.collapsed.contains(id) ? "folder" : "folder.fill"
       return (title(of: id), SidebarGlyphs.symbol(symbol, flavor: flavor, scale: scale))
@@ -775,11 +775,13 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// queries can read it cheaply.
   private func title(of id: NodeID) -> String {
     switch source.node(id) {
-    case .tab(_, _, let title)?, .folder(_, let title)?:
+    case .tab(_, let url, let title)?:
+      return HostDisplay.title(title, for: url)
+    case .folder(_, let title)?:
       return title
     case .split?:
       let titles = children(of: id).compactMap { child -> String? in
-        if case .tab(_, _, let title)? = source.node(child) { return title }
+        if case .tab(_, let url, let title)? = source.node(child) { return HostDisplay.title(title, for: url) }
         return nil
       }
       return titles.joined(separator: " | ")
