@@ -568,6 +568,43 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertTrue(a.scrolls.isEmpty)
   }
 
+  /// A page that does not take a scroll and passes it up its responder chain, as WebKit does with one it cannot use.
+  private final class PassingScrollPage: NSView {
+    private(set) var scrolls = 0
+    override func scrollWheel(with event: NSEvent) {
+      scrolls += 1
+      super.scrollWheel(with: event)
+    }
+  }
+
+  /// A scroll forwarded mid-flight that its page passes up comes back through the container and goes on up from there,
+  /// once; it is not forwarded round again. A closed pane's placeholder, which takes no scroll, does the same.
+  func testForwardedScrollThatThePagePassesUpIsNotForwardedAgain() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (PassingScrollPage(), PassingScrollPage(), PassingScrollPage())
+    show(container, [a, b, c])
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    let drawn = try onScreen(container.paneCards[1])
+    let onPage = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+
+    container.scrollWheel(with: try scrollEvent(at: onPage, in: container, phase: 1))
+
+    XCTAssertEqual(c.scrolls, 1)
+    XCTAssertEqual(a.scrolls, 0)
+    container.reflowDriver.tick(at: 105)
+    show(container, [a, nil, c], animated: true)          // the placeholder starts at its frame, c moves right
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    let placeholder = container.paneCards[1].frame
+    let onPlaceholder = NSPoint(x: placeholder.minX + 20, y: placeholder.midY)
+    XCTAssertEqual(container.paneIndex(forMouseDownAt: onPlaceholder), 1)
+
+    container.scrollWheel(with: try scrollEvent(at: onPlaceholder, in: container, phase: 1))
+
+    XCTAssertEqual(c.scrolls, 1)
+  }
+
   /// A mouse wheel click (no phase) mid-flight reaches the drawn pane's page.
   func testWheelClickMidFlightReachesTheDrawnPanesPage() throws {
     let (container, a, c, point) = try midFlightOnADrawnPane()
