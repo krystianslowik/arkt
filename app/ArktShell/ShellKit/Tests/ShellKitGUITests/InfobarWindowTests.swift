@@ -84,6 +84,103 @@ final class InfobarWindowTests: XCTestCase {
                              "the dialog starts 12 pt under the strip, not over it")
   }
 
+  // MARK: Panels below the rows (#581)
+
+  private func pageTop(of tab: TabID) throws -> CGFloat {
+    let page = try XCTUnwrap(engine.contentView(for: tab))
+    return try XCTUnwrap(page.window).convertToScreen(page.convert(page.bounds, to: nil)).maxY
+  }
+
+  /// The panel's top sits `anchorInset` below the rows, or below the page's top without any; it never overlaps a row.
+  private func assertBelowRows(_ panel: DialogPanel, of tab: TabID, rows: Int, _ message: String,
+                               file: StaticString = #filePath, line: UInt = #line) throws {
+    let expectedTop = try pageTop(of: tab) - CGFloat(rows) * InfobarMetrics.rowHeight - DialogPanel.anchorInset
+    XCTAssertEqual(panel.panel.frame.maxY, expectedTop, accuracy: 0.5, message, file: file, line: line)
+    if let strip = controller.infobarStrips.strip(for: tab) {
+      XCTAssertFalse(panel.panel.frame.intersects(strip.panel.frame), "\(message): it overlaps a row", file: file,
+                     line: line)
+    }
+  }
+
+  func testAPageDialogUpFirstMovesBelowZeroOneAndThreeRowsAndBackUp() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    controller.javaScriptDialogs.reduceMotion = { true }
+    engine.raiseDialog(in: tab, kind: .alert, message: "Hi")
+    let panel = try XCTUnwrap(controller.javaScriptDialogs.panel(for: tab))
+    try assertBelowRows(panel, of: tab, rows: 0, "no infobar")
+
+    let firstBar = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "One"))
+    try assertBelowRows(panel, of: tab, rows: 1, "an infobar arrived while the dialog was up")
+
+    engine.raiseInfobar(in: tab, message: "Two")
+    engine.raiseInfobar(in: tab, message: "Three")
+    XCTAssertEqual(controller.infobarStrips.strip(for: tab)?.rows.count, 3)
+    try assertBelowRows(panel, of: tab, rows: 3, "three infobars")
+
+    engine.removeInfobar(firstBar)
+    try assertBelowRows(panel, of: tab, rows: 2, "one infobar left")
+    for infobar in controller.infobarStrips.infobars[tab] ?? [] { engine.removeInfobar(infobar.id) }
+    try assertBelowRows(panel, of: tab, rows: 0, "every infobar left: back at the page's top")
+  }
+
+  func testAPermissionPanelUpFirstMovesBelowZeroOneAndThreeRows() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    controller.permissionPrompts.reduceMotion = { true }
+    controller.permissionPrompts.isOnScreen = { true }
+    _ = engine.askPermission(in: tab, kinds: [.notifications])
+    let panel = try XCTUnwrap(controller.permissionPrompts.panel(for: tab))
+    try assertBelowRows(panel, of: tab, rows: 0, "no infobar")
+
+    engine.raiseInfobar(in: tab, message: "One")
+    try assertBelowRows(panel, of: tab, rows: 1, "an infobar arrived while the prompt was up")
+
+    engine.raiseInfobar(in: tab, message: "Two")
+    engine.raiseInfobar(in: tab, message: "Three")
+    try assertBelowRows(panel, of: tab, rows: 3, "three infobars")
+  }
+
+  func testAPanelRaisedUnderThreeRowsStartsBelowThem() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    controller.javaScriptDialogs.reduceMotion = { true }
+    for message in ["One", "Two", "Three"] { engine.raiseInfobar(in: tab, message: message) }
+    engine.raiseDialog(in: tab, kind: .confirm, message: "Sure?")
+    try assertBelowRows(try XCTUnwrap(controller.javaScriptDialogs.panel(for: tab)), of: tab, rows: 3, "three rows")
+  }
+
+  func testHTMLFullscreenHidesTheRowsAndLeavingItBringsThemBack() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    controller.javaScriptDialogs.reduceMotion = { true }
+    engine.raiseInfobar(in: tab, message: "One")
+    engine.raiseInfobar(in: tab, message: "Two")
+    engine.raiseDialog(in: tab, kind: .alert, message: "Hi")
+    let panel = try XCTUnwrap(controller.javaScriptDialogs.panel(for: tab))
+
+    engine.setTabFullscreen(tab, true)
+    XCTAssertNil(controller.infobarStrips.strip(for: tab), "no row over a fullscreen element")
+    XCTAssertEqual(controller.infobarStrips.height(of: tab), 0)
+    XCTAssertEqual(controller.infobarStrips.infobars[tab]?.count, 2, "the tab keeps its list")
+    try assertBelowRows(panel, of: tab, rows: 0, "the dialog moves up to the page's top")
+
+    engine.setTabFullscreen(tab, false)
+    XCTAssertEqual(controller.infobarStrips.strip(for: tab)?.rows.map(\.infobar.message), ["One", "Two"])
+    try assertBelowRows(panel, of: tab, rows: 2, "the dialog goes back below the rows")
+  }
+
+  func testAnInfobarArrivingInHTMLFullscreenWaitsForTheTabToLeaveIt() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    engine.setTabFullscreen(tab, true)
+    engine.raiseInfobar(in: tab, message: "Later")
+    XCTAssertNil(controller.infobarStrips.strip(for: tab))
+
+    engine.setTabFullscreen(tab, false)
+    XCTAssertEqual(controller.infobarStrips.strip(for: tab)?.rows.map(\.infobar.message), ["Later"])
+  }
+
   func testAClosingWindowTakesItsStripsDown() throws {
     controller.activate(node: first)
     let tab = try XCTUnwrap(controller.currentTab)

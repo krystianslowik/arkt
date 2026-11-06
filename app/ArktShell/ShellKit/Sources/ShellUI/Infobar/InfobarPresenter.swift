@@ -4,7 +4,9 @@ import EngineAPI
 // A tab's infobars in the shell (#400, docs/design/alerts-sheets-toasts.md section 5): the engine reports each tab's whole
 // list, and the shell draws it as a strip flush with the top of the page view while the tab is on screen in this window.
 // The engine reserves the strip's height at the top of the tab's container, so the page sits below it; buttons, links and
-// the close button go to the engine, which decides whether an infobar goes.
+// the close button go to the engine, which decides whether an infobar goes. While an element of the tab's page is in
+// HTML fullscreen the strip is down and takes no height (#581), as Chromium hides its infobars then; the list stays and
+// the strip comes back when the page leaves fullscreen.
 
 /// Shows the infobars of the tabs the window shows, one strip per tab, and acts on them. A tab keeps its list while it
 /// is hidden (the strip leaves with the page and comes back when the tab is shown again) and across a move to another
@@ -32,22 +34,37 @@ public final class InfobarPresenter {
     host.refresh = { [weak self] in self?.refresh() }
   }
 
-  /// The height the strip takes at the top of `tab`'s page: 40 pt per infobar.
+  /// The height the strip takes at the top of `tab`'s page: 40 pt per infobar, none while the tab is in HTML
+  /// fullscreen. Dialogs and permission prompts point at the page below it.
   public func height(of tab: TabID) -> CGFloat {
-    CGFloat(infobars[tab]?.count ?? 0) * InfobarMetrics.rowHeight
+    guard !isFullscreen(tab) else { return 0 }
+    return CGFloat(infobars[tab]?.count ?? 0) * InfobarMetrics.rowHeight
   }
+
+  /// An element of `tab`'s page fills the screen (HTML fullscreen), as the engine reports it now.
+  private func isFullscreen(_ tab: TabID) -> Bool { engine.snapshot(of: tab)?.isTabFullscreen == true }
 
   /// The strip of `tab` while it is up, for tests and accessibility.
   func strip(for tab: TabID) -> InfobarPanel? { host.anyPanel(for: tab) as? InfobarPanel }
 
+  /// Takes a tab's new list, and its HTML fullscreen changes: the strip goes down while the tab is fullscreen and
+  /// comes back with the same rows when it leaves.
   public func handle(_ event: EngineEvent) {
-    guard case .infobarsChanged(let tab, let list) = event else { return }
-    infobars[tab] = list.isEmpty ? nil : list
-    if list.isEmpty {
-      host.dismiss(tab)
-    } else {
+    switch event {
+    case .infobarsChanged(let tab, let list):
+      infobars[tab] = list.isEmpty ? nil : list
+      if list.isEmpty {
+        host.dismiss(tab)
+      } else {
+        present(tab)
+        scheduleRetryIfNeeded()
+      }
+    case .tabFullscreenChanged(let tab, _):
+      guard infobars[tab] != nil else { return }
       present(tab)
       scheduleRetryIfNeeded()
+    default:
+      return
     }
   }
 
@@ -81,6 +98,10 @@ public final class InfobarPresenter {
 
   private func present(_ tab: TabID) {
     guard let list = infobars[tab] else { return }
+    guard !isFullscreen(tab) else {
+      host.dismiss(tab)
+      return
+    }
     strip(for: tab)?.update(list)
     host.place(tab, maxWidth: .greatestFiniteMagnitude, fullWidth: true) { width in
       let panel = InfobarPanel(infobars: list, width: width)

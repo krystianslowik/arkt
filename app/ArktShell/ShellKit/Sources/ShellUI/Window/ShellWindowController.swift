@@ -835,8 +835,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .permissionRequested, .permissionEnded:
       permissionPrompts.handle(event)
       return
-    case .infobarsChanged:
-      infobarStrips.handle(event)
+    case .infobarsChanged, .tabFullscreenChanged:
+      infobarStrips.handle(event)                                   // #581: rows hide in HTML fullscreen
+      javaScriptDialogs.refresh()                                   // the panels follow the rows' height
+      permissionPrompts.refresh()
       return
     case .targetURLChanged:
       statusPill.handle(event)                                      // #114: a Peek's page has no row, so before the map
@@ -899,7 +901,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .zoomChanged:
       zoomPill.handle(event)                                        // #579
     case .tabFullscreenChanged:
-      break                                                         // no shell surface yet (#581)
+      break                                                         // routed above, before the row lookup (#581)
     }
   }
 
