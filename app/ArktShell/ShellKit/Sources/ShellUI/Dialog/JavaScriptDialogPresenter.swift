@@ -2,9 +2,10 @@ import AppKit
 import EngineAPI
 
 // A page's `alert()`, `confirm()` and `prompt()` in the shell's dialog system (#400, docs/design/alerts-sheets-toasts.md
-// section 3.3): the engine reports the request with Chromium's own strings, and the shell draws it as the anchored
-// panel over the page that asked. A page's leave-site prompt (`beforeunload`, #584) is the same panel attached to the
-// card's top edge, with Stay as the primary (design/extensions, `surf-dialog`).
+// section 3.3): the engine reports the request with Chromium's own strings, and the shell draws it as a tab-modal
+// panel hung from the top edge of the page that asked, with the page dimmed under it while it is up (#693,
+// design/extensions, `surf-dialog`). A page's leave-site prompt (`beforeunload`, #584) is the same panel with Stay as
+// the primary.
 
 extension DialogContent {
   /// The dialog for a page's request. The title, message and button titles are the engine's. OK is the Return default;
@@ -45,22 +46,25 @@ extension JavaScriptDialog {
     return (accepted, accepted && kind == .prompt ? input : nil)
   }
 
-  /// Where the dialog's panel sits on the page: a leave-site prompt hangs from the card's top edge (#584), the others
-  /// sit inset from its top-leading corner.
-  var panelAttachment: DialogPanel.Attachment { kind == .beforeUnload ? .topEdge : .inset }
+  /// Where the dialog's panel sits on the page: every kind hangs from the card's top edge (#584, #693).
+  var panelAttachment: DialogPanel.Attachment { .topEdge }
 }
 
-/// Shows each pending JavaScript dialog of the tabs the window shows, one per tab, and answers the engine. A dialog
+/// Shows each pending JavaScript dialog of the tabs the window shows, one per tab, over its dimmed page, and answers
+/// the engine. The dim belongs to the panel, so it fades out whenever the panel goes: an answer, the engine's end, the
+/// tab leaving the screen, a release to another window, the window closing. A dialog
 /// of a tab that is not on screen stays pending without a panel and appears when the tab is shown (`refresh()`), as
 /// Chromium keeps a background tab's `alert()` pending. The engine ends a dialog on its own (a navigation, a later
 /// dialog, the tab closing); that closes the panel without an answer, and an answer that races the end is dropped by
 /// the engine.
 @MainActor
 public final class JavaScriptDialogPresenter {
-  /// The page view a tab's dialog points at: top-leading corner 12 pt inside it.
+  /// The page view a tab's dialog points at: the panel hangs from its top edge (below any infobar rows), 12 pt from
+  /// its leading edge.
   public typealias Anchor = NSView
 
   private let engine: any EngineClient
+  private let anchor: @MainActor (TabID) -> Anchor?
   let host: AnchoredPanelHost
   /// The unanswered dialog of each tab.
   public private(set) var pending: [TabID: JavaScriptDialog] = [:]
@@ -68,6 +72,8 @@ public final class JavaScriptDialogPresenter {
   var reduceMotion: (@MainActor () -> Bool)?
   /// The clock of a leave-site prompt's input protection, handed to each panel. Tests set it.
   var clock: (@MainActor () -> TimeInterval)?
+  /// How long a page's dim takes to leave, handed to each panel. Tests set 0 to end it at once.
+  var dimExitDuration: CFTimeInterval?
   /// Whether a panel's window is really visible (not occluded), handed to each panel. Tests set it.
   var isOnScreen: (@MainActor () -> Bool)?
 
@@ -75,6 +81,7 @@ public final class JavaScriptDialogPresenter {
   public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> Anchor?,
               windowIsVisible: @escaping @MainActor (NSWindow) -> Bool = { $0.isVisible }) {
     self.engine = engine
+    self.anchor = anchor
     host = AnchoredPanelHost(anchor: anchor, windowIsVisible: windowIsVisible)
     host.refresh = { [weak self] in self?.refresh() }
     host.willDismiss = { [weak self] tab, panel in
@@ -147,7 +154,9 @@ public final class JavaScriptDialogPresenter {
         self?.answered(tab, dialog, answer, input: panel?.inputText)
       }
       return panel
-    } show: { panel, window, frame in
+    } show: { [weak self] panel, window, frame in
+      panel.dimmedPage = self?.anchor(tab)
+      if let dimExitDuration = self?.dimExitDuration { panel.dimExitDuration = dimExitDuration }
       panel.show(over: window, anchoredTo: frame, takesFocus: true)
     }
   }

@@ -101,10 +101,12 @@ struct JavaScriptDialogContentTests {
     #expect(content.secondaryTitle == "Verlassen")
   }
 
-  @Test func leaveSiteAttachesToTheCardsTopEdgeAndOtherDialogsDoNot() {
+  /// Every page dialog hangs from the card's top edge (#693, design/extensions `surf-dialog`), as the leave-site
+  /// prompt did first (#584).
+  @Test func everyPageDialogAttachesToTheCardsTopEdge() {
     #expect(leaveSite().panelAttachment == .topEdge)
-    #expect(dialog(.alert).panelAttachment == .inset)
-    #expect(dialog(.confirm).panelAttachment == .inset)
-    #expect(dialog(.prompt).panelAttachment == .inset)
+    #expect(dialog(.alert).panelAttachment == .topEdge)
+    #expect(dialog(.confirm).panelAttachment == .topEdge)
+    #expect(dialog(.prompt).panelAttachment == .topEdge)
   }
 }
