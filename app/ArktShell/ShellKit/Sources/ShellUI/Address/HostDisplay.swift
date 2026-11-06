@@ -10,10 +10,9 @@ import Foundation
 ///
 /// 1. It is a valid encoding: canonical RFC 3492 Punycode that round trips, at most 63 octets encoded, NFC and
 ///    lowercase, with something outside ASCII in it, no hyphen at either end and none in the 3rd and 4th place.
-/// 2. Every character is a letter, a combining mark or a decimal digit of a script the table below knows. Symbols,
-///    punctuation, spaces and invisible characters (zero width joiners, soft hyphens, bidi controls, variation
-///    selectors, fillers) are refused, as are the deviation characters U+00DF and U+03C2, and the blocks Chromium
-///    removes from its allowed set (Latin Extended Additional below U+1E9C, pinyin, Greek Extended).
+/// 2. Every character is Allowed by UTS #39 (`IdentifierStatus.txt`), less the code points Chromium removes from its
+///    allowed set, and falls in a script the table knows (`SpoofCheck+AllowedTable.swift`). Of those, only letters,
+///    combining marks and decimal digits pass; the deviation characters U+00DF and U+03C2 are refused.
 /// 3. Scripts mix only as UTS #39 "Highly Restrictive" allows: one script, or Latin with Han and Kana (Japanese),
 ///    with Han and Bopomofo (Chinese) or with Han and Hangul (Korean), and then only ASCII Latin.
 /// 4. One numbering system per label; no label of only digits and digit look-alikes.
@@ -24,14 +23,21 @@ import Foundation
 /// 7. Whole-script confusables: a label whose letters all come from a script's Latin look-alike set (Cyrillic "аррӏе")
 ///    shows in Unicode only under that script's own TLD or one of the ccTLDs Chromium lists for it.
 ///
-/// Chromium also compares the host's skeleton with a list of top domains; that list is not shipped here, so a
-/// single-script look-alike that passes the checks above (a Latin label with diacritics) still shows in Unicode.
+/// Where this differs from Chromium. Stricter: one failing label keeps the whole host encoded (Chromium decides label
+/// by label); the deviation characters always stay encoded; Allowed punctuation and format characters (U+00B7,
+/// U+0375, U+05F3, U+05F4, U+0F0B, U+30FB, U+200C, U+200D) are refused; scripts outside the table are refused; the
+/// whole-script check runs on every label and has no exception words. Looser: there is no top-domain skeleton check,
+/// so a single-script look-alike that passes the rules above still shows in Unicode (a Latin label with dotless i,
+/// "lınkedın"); the bidi rule is checked per label, not across the domain. The Allowed table comes from Unicode 18.0,
+/// which may be newer than the ICU data a given Chromium release uses.
 public enum HostDisplay {
   /// `host` as the shell shows it: Unicode when it passes the spoof check, the encoded `xn--` form otherwise. The
   /// engine may give either form. A host with no internationalized label is returned exactly as given.
   public static func text(forHost host: String) -> String {
     let isASCII = host.unicodeScalars.allSatisfy(\.isASCII)
     if isASCII, !host.lowercased().split(separator: ".").contains(where: { $0.hasPrefix("xn--") }) { return host }
+    // No host of more than 253 code points can be valid: skip the codec and show it percent-encoded.
+    if host.unicodeScalars.count > 253 { return Label.percentEncoded(host.lowercased()) }
     var parts = host.lowercased().split(separator: ".", omittingEmptySubsequences: false).map(String.init)
     let fullyQualified = parts.count > 1 && parts.last == ""
     if fullyQualified { parts.removeLast() }
@@ -107,13 +113,18 @@ public enum HostDisplay {
           encoded = "xn--" + body
           unicode = scalars
         } else {
-          encoded = part.addingPercentEncoding(withAllowedCharacters: Self.asciiAlphanumerics) ?? "xn--"
+          encoded = Self.percentEncoded(part)
           unicode = nil
         }
       }
     }
 
-    private static let asciiAlphanumerics = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+    private static let asciiAlphanumerics = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-.")
+
+    /// `text` with everything but ASCII letters, digits, hyphens and dots percent-encoded: plain ASCII to show.
+    static func percentEncoded(_ text: String) -> String {
+      text.addingPercentEncoding(withAllowedCharacters: asciiAlphanumerics) ?? ""
+    }
 
     private static func isACECharacter(_ scalar: Unicode.Scalar) -> Bool {
       switch scalar {
@@ -140,33 +151,11 @@ enum SpoofCheck {
     case inherited
   }
 
-  /// The characters each script may use, by block. Anything outside these ranges is refused, so an unlisted script
-  /// keeps the encoded form. Within a range only letters, marks and decimal digits pass (see `kind(of:)`).
-  static let ranges: [(ClosedRange<UInt32>, Script)] = [
-    (0x00DF...0x00FF, .latin), (0x0100...0x017E, .latin), (0x01A0...0x01A1, .latin), (0x01AF...0x01B0, .latin),
-    (0x0218...0x021B, .latin), (0x0259...0x0259, .latin), (0x1EA0...0x1EF9, .latin),
-    (0x0390...0x0390, .greek), (0x03AC...0x03CE, .greek),
-    (0x0430...0x045F, .cyrillic), (0x048B...0x052F, .cyrillic),
-    (0x0559...0x0559, .armenian), (0x0561...0x0586, .armenian),
-    (0x0591...0x05C7, .hebrew), (0x05D0...0x05EA, .hebrew), (0x05EF...0x05F2, .hebrew),
-    (0x0610...0x061A, .arabic), (0x0620...0x06FF, .arabic), (0x0750...0x077F, .arabic), (0x08A0...0x08FF, .arabic),
-    (0x0780...0x07B1, .thaana),
-    (0x0900...0x097F, .devanagari), (0x0980...0x09FF, .bengali), (0x0A00...0x0A7F, .gurmukhi),
-    (0x0A80...0x0AFF, .gujarati), (0x0B00...0x0B7F, .oriya), (0x0B80...0x0BFF, .tamil), (0x0C00...0x0C7F, .telugu),
-    (0x0C80...0x0CFF, .kannada), (0x0D00...0x0D7F, .malayalam), (0x0D80...0x0DFF, .sinhala),
-    (0x0E00...0x0E7F, .thai), (0x0E80...0x0EFF, .lao), (0x0F00...0x0FFF, .tibetan), (0x1000...0x109F, .myanmar),
-    (0x10D0...0x10FF, .georgian), (0x1200...0x139F, .ethiopic), (0xAB01...0xAB2F, .ethiopic),
-    (0x1780...0x17FF, .khmer),
-    (0x3041...0x309F, .hiragana), (0x30A0...0x30FF, .katakana),
-    (0x3005...0x3007, .han), (0x3400...0x4DBF, .han), (0x4E00...0x9FFF, .han), (0x20000...0x2A6DF, .han),
-    (0x2A700...0x2EBEF, .han), (0x30000...0x323AF, .han),
-    (0x3105...0x312F, .bopomofo), (0x31A0...0x31BF, .bopomofo),
-    (0xAC00...0xD7A3, .hangul),
-  ]
+  /// Allowed by the table (`SpoofCheck+AllowedTable.swift`) but refused here: the deviation characters, which
+  /// IDNA 2003 and IDNA 2008 treat differently (Chromium decides them per TLD; this rule always keeps them encoded).
+  static let refused: Set<UInt32> = [0x00DF, 0x03C2]
 
-  /// Inside the ranges but refused: kra and the n with apostrophe (obsolete), the deviation characters, the Arabic
-  /// tatweel (a stretch with no meaning).
-  static let refused: Set<UInt32> = [0x0138, 0x0149, 0x00DF, 0x03C2, 0x0640]
+  // Copied from Chromium's idn_spoof_checker.cc (BSD-3-Clause, see THIRD_PARTY_NOTICES.md): the tables below.
 
   /// Chromium's `kWholeScriptConfusables`: each script's letters that look Latin, and the ccTLDs where a label of
   /// only those letters is still shown in Unicode (besides a TLD in the script itself).
@@ -191,11 +180,12 @@ enum SpoofCheck {
   ]
 
   /// Chromium's `digit_lookalikes_`: characters that read as digits.
-  static let digitLookalikes = set("θ२২੨੨૨೩೭շзҙӡउওਤ੩૩౩ဒვპੜკ੫丩ㄐճ৪੪୫૭୨౨")
+  static let digitLookalikes = set("θ२২੨૨೩೭շзҙӡउওਤ੩૩౩ဒვპੜკ੫丩ㄐճ৪੪୫૭୨౨")
 
-  /// Kana and CJK characters that read as a slash next to another script.
+  /// Kana and CJK characters that read as a slash next to another script (from Chromium's `kDangerousPattern`).
   static let slashLookalikes: Set<UInt32> = [0x30CE, 0x30F3, 0x30BD, 0x30BE, 0x4E36, 0x4E40, 0x4E41, 0x4E3F]
-  /// CJK characters and radicals that read as Latin letters or punctuation next to a non-CJK character.
+  /// CJK characters and radicals that read as Latin letters or punctuation next to a non-CJK character (from
+  /// Chromium's `kDangerousPattern`).
   static let cjkLookalikes: Set<UInt32> = [
     0x4E00, 0x3127, 0x4E28, 0x4E5B, 0x4E03, 0x4E05, 0x5341, 0x3007, 0x3112, 0x311A, 0x311F, 0x3128, 0x3129, 0x3108,
     0x31BA, 0x31B3, 0x5DE5, 0x31B2, 0x8BA0, 0x4E01, 0x4E36, 0x4E85, 0x4E8C, 0x4EA0, 0x5196, 0x5B80, 0x5DDB,
@@ -209,13 +199,34 @@ enum SpoofCheck {
     case "0"..."9", "-": return .common
     default: break
     }
-    guard !scalar.isASCII, !refused.contains(scalar.value) else { return nil }
+    guard !scalar.isASCII, !refused.contains(scalar.value), let kind = allowedKind(of: scalar.value) else { return nil }
+    // The Allowed set also holds a few punctuation and format characters (U+00B7, U+05F3, U+30FB, U+200C, U+200D);
+    // only letters, marks and decimal digits pass here.
     switch scalar.properties.generalCategory {
-    case .lowercaseLetter, .otherLetter, .modifierLetter, .nonspacingMark, .spacingMark, .decimalNumber: break
-    default: return nil
+    case .lowercaseLetter, .uppercaseLetter, .otherLetter, .modifierLetter, .nonspacingMark, .spacingMark,
+         .decimalNumber:
+      return kind
+    default:
+      return nil
     }
-    if (0x0300...0x0339).contains(scalar.value) { return .inherited }
-    return ranges.first { $0.0.contains(scalar.value) }.map { .script($0.1) }
+  }
+
+  /// The row of `allowedTable` holding `value`, by binary search.
+  private static func allowedKind(of value: UInt32) -> Kind? {
+    var low = 0
+    var high = allowedTable.count - 1
+    while low <= high {
+      let middle = (low + high) / 2
+      let row = allowedTable[middle]
+      if value < row.first {
+        high = middle - 1
+      } else if value > row.last {
+        low = middle + 1
+      } else {
+        return row.kind
+      }
+    }
+    return nil
   }
 
   private static func isMark(_ scalar: Unicode.Scalar) -> Bool {
@@ -291,6 +302,7 @@ enum SpoofCheck {
     return !label.contains("\u{0259}") || tld.encoded == "az"
   }
 
+  // Follows Chromium's kDangerousPattern in idn_spoof_checker.cc (BSD-3-Clause, see THIRD_PARTY_NOTICES.md).
   private static func hasDangerousPattern(_ label: [Unicode.Scalar], kinds: [Kind]) -> Bool {
     func isKana(_ i: Int) -> Bool { kinds[i] == .script(.hiragana) || kinds[i] == .script(.katakana) }
     func isJapanese(_ i: Int) -> Bool { isKana(i) || kinds[i] == .script(.han) }

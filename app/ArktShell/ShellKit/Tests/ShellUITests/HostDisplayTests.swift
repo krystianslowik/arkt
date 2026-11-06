@@ -74,6 +74,22 @@ struct HostDisplayTests {
     #expect(HostDisplay.text(forHost: encoded) == encoded, "\(unicode)")
   }
 
+  /// Characters outside UTS #39's Allowed set (or removed from it by Chromium) keep the host encoded, even inside an
+  /// otherwise plain Latin or Han label.
+  @Test(arguments: [
+    "xn--google-e7d.com",        // U+0332 combining low line
+    "xn--google-k5d.com",        // U+0329 combining vertical line below
+    "xn--paypal-y7d.com",        // U+0335 combining short stroke overlay
+    "xn--example-fte.com",       // U+0338 combining long solidus overlay
+    "xn--paypa-c7a.com",         // U+0140 l with middle dot
+    "xn--j50ic.com",             // CJK Unified Ideographs Extension B
+  ])
+  func aCharacterOutsideTheAllowedSetStaysEncoded(host: String) {
+    #expect(HostDisplay.text(forHost: host) == host)
+    let decoded = HostDisplay.Label(String(host.prefix { $0 != "." })).unicode
+    #expect(decoded != nil, "\(host) is a valid encoding, refused only by the allowed set")
+  }
+
   /// The engine's Unicode form of a look-alike is shown encoded too.
   @Test func aMixedScriptUnicodeHostFromTheEngineIsEncoded() {
     #expect(HostDisplay.text(forHost: "\u{0430}pple.com") == "xn--pple-43d.com")
@@ -202,6 +218,17 @@ struct HostDisplayTests {
     let host = String(repeating: "\u{0430}", count: 20_000) + ".com"
     let isASCII = HostDisplay.text(forHost: host).unicodeScalars.allSatisfy(\.isASCII)
     #expect(isASCII)
+  }
+
+  /// Many long CJK labels: the host is over 253 code points, so it is shown percent-encoded without running the
+  /// codec on every label.
+  @Test func manyLongCJKLabelsEndQuicklyAndStayASCII() {
+    let label = String(String.UnicodeScalarView((0..<200).map { Unicode.Scalar(0x4E00 + UInt32($0 * 37))! }))
+    let host = Array(repeating: label, count: 200).joined(separator: ".") + ".cn"
+    let shown = HostDisplay.text(forHost: host)
+    let isASCII = shown.unicodeScalars.allSatisfy(\.isASCII)
+    #expect(isASCII)
+    #expect(!shown.contains("xn--"), "the codec was skipped")
   }
 
   // MARK: Hosts that are not internationalized
