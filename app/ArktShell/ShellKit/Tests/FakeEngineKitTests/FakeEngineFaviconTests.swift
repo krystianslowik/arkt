@@ -97,13 +97,12 @@ struct FakeEngineFaviconTests {
     #expect(FakeEngine.contractFavicon(bigSVG) == nil)
   }
 
-  /// The conversion parses untrusted bytes, so it is nonisolated and runs off the main thread: FakeEngine awaits it
-  /// on the concurrent pool before it publishes a favicon.
+  /// The conversion parses untrusted bytes, so it is nonisolated and can run off the main thread. That FakeEngine's
+  /// fetch actually runs it there is checked at the call site (`FakeEngineFaviconFetchTests`).
   @Test func convertsOffTheMainThread() async throws {
     let svg = Self.svg
     let (onMain, png) = await Task.detached { (pthread_main_np() != 0, FakeEngine.contractFavicon(svg)) }.value
     #expect(!onMain, "control: the detached task is off the main thread")
     #expect(try pixelSize(try #require(png)) == (64, 64))
-    #expect(await FakeEngine.contractFaviconOffMain(svg) == png)
   }
 }

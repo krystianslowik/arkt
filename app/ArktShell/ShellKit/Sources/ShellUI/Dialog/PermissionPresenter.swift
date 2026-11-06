@@ -118,7 +118,7 @@ public final class PermissionPresenter {
       panel.onAnswer = { [weak self] answer in self?.answered(tab, request, PermissionChoice(answer)) }
       panel.onDismiss = { [weak self] in self?.answered(tab, request, .dismiss) }
       return panel
-    } show: { panel, window, frame in
+    } show: { panel, window, _, frame in
       panel.show(over: window, anchoredTo: frame)
     }
   }

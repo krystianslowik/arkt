@@ -64,7 +64,6 @@ public final class JavaScriptDialogPresenter {
   public typealias Anchor = NSView
 
   private let engine: any EngineClient
-  private let anchor: @MainActor (TabID) -> Anchor?
   let host: AnchoredPanelHost
   /// The unanswered dialog of each tab.
   public private(set) var pending: [TabID: JavaScriptDialog] = [:]
@@ -81,7 +80,6 @@ public final class JavaScriptDialogPresenter {
   public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> Anchor?,
               windowIsVisible: @escaping @MainActor (NSWindow) -> Bool = { $0.isVisible }) {
     self.engine = engine
-    self.anchor = anchor
     host = AnchoredPanelHost(anchor: anchor, windowIsVisible: windowIsVisible)
     host.refresh = { [weak self] in self?.refresh() }
     host.willDismiss = { [weak self] tab, panel in
@@ -154,8 +152,8 @@ public final class JavaScriptDialogPresenter {
         self?.answered(tab, dialog, answer, input: panel?.inputText)
       }
       return panel
-    } show: { [weak self] panel, window, frame in
-      panel.dimmedPage = self?.anchor(tab)
+    } show: { [weak self] panel, window, page, frame in
+      panel.dimmedPage = page
       if let dimExitDuration = self?.dimExitDuration { panel.dimExitDuration = dimExitDuration }
       panel.show(over: window, anchoredTo: frame, takesFocus: true)
     }

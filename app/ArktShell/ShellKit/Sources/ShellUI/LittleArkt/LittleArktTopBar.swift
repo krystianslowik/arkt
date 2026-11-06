@@ -201,12 +201,13 @@ final class LittleArktSegmentButton: NSButton {
   /// The window's one action works on the first click, also while another window is key.
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+  /// The glyph takes the text tone even without a title: the chooser segment is its chevron alone (#734).
   private func applyTitleColor() {
+    contentTintColor = textColor
     guard !title.isEmpty else { return }
     attributedTitle = NSAttributedString(string: title, attributes: [
       .font: font ?? .systemFont(ofSize: 12, weight: .semibold), .foregroundColor: textColor,
     ])
-    contentTintColor = textColor
   }
 
   override func updateTrackingAreas() {
