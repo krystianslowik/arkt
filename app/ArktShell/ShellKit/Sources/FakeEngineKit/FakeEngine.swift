@@ -830,35 +830,65 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     faviconFetches[id] = count - 1
   }
 
-  /// The side, in pixels, of a favicon drawn to PNG: the shell's largest decoded favicon (`FaviconDecoder.maxPixelSize`).
-  static let rasterFaviconPixels = 64
+  /// The longer side, in pixels, of a favicon drawn to PNG: the shell's largest decoded favicon
+  /// (`FaviconDecoder.maxPixelSize`).
+  nonisolated static let rasterFaviconPixels = 64
 
-  /// The favicon as the engine contract promises it, PNG or ICO (#675). PNG and ICO bytes pass through; any other
-  /// image AppKit reads (SVG, which ImageIO cannot decode, JPEG, GIF) is drawn to a `rasterFaviconPixels` square PNG,
-  /// so the shell shows the icon instead of the letter. Nil for bytes that are no image.
-  static func contractFavicon(_ data: Data) -> Data? {
+  /// The most favicon bytes taken; larger ones are dropped before they are parsed. Real favicons are a few KB.
+  nonisolated static let maxFaviconBytes = 512 * 1024
+
+  /// The favicon as the engine contract promises it, PNG or ICO (#675), or nil for bytes that are no image or are
+  /// larger than `maxFaviconBytes`. PNG and ICO bytes pass through. Bytes that start with 00 00 01 00 pass as ICO
+  /// unchecked; the shell's decoder drops any that are not one. Other raster images ImageIO reads (JPEG, GIF, TIFF)
+  /// are scaled down with ImageIO to fit `rasterFaviconPixels`, keeping their aspect ratio. SVG, which ImageIO cannot
+  /// read, is drawn by AppKit to fit the same square. Parses untrusted bytes: call it off the main actor
+  /// (`contractFaviconOffMain`).
+  nonisolated static func contractFavicon(_ data: Data) -> Data? {
+    guard data.count <= maxFaviconBytes else { return nil }
     let png: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
     let ico: [UInt8] = [0x00, 0x00, 0x01, 0x00]
     if data.starts(with: png) || data.starts(with: ico) { return data }
-    guard let image = NSImage(data: data), image.isValid, image.size.width > 0, image.size.height > 0,
-          let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: rasterFaviconPixels,
-                                     pixelsHigh: rasterFaviconPixels, bitsPerSample: 8, samplesPerPixel: 4,
-                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
-                                     bitsPerPixel: 0),
-          let context = NSGraphicsContext(bitmapImageRep: rep)
+    let side = rasterFaviconPixels
+    if let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+       CGImageSourceGetCount(source) > 0 {
+      let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: side,
+      ]
+      return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary).flatMap(pngData)
+    }
+    guard let image = NSImage(data: data), image.isValid, image.size.width > 0, image.size.height > 0 else {
+      return nil
+    }
+    let scale = CGFloat(side) / max(image.size.width, image.size.height)
+    let width = max(1, Int((image.size.width * scale).rounded()))
+    let height = max(1, Int((image.size.height * scale).rounded()))
+    guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     else { return nil }
-    let side = CGFloat(rasterFaviconPixels)
-    rep.size = NSSize(width: side, height: side)
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = context
-    image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
-    NSGraphicsContext.restoreGraphicsState()
-    return rep.representation(using: .png, properties: [:])
+    var rect = CGRect(x: 0, y: 0, width: width, height: height)
+    let graphics = NSGraphicsContext(cgContext: context, flipped: false)
+    guard let bitmap = image.cgImage(forProposedRect: &rect, context: graphics, hints: nil) else { return nil }
+    context.draw(bitmap, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return context.makeImage().flatMap(pngData)
+  }
+
+  /// `contractFavicon` on the concurrent pool, so parsing and drawing never run on the main actor.
+  @concurrent
+  nonisolated static func contractFaviconOffMain(_ data: Data) async -> Data? { contractFavicon(data) }
+
+  nonisolated private static func pngData(_ image: CGImage) -> Data? {
+    let data = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+    CGImageDestinationAddImage(destination, image, nil)
+    return CGImageDestinationFinalize(destination) ? data as Data : nil
   }
 
   /// Prototype favicon: <link rel=icon> or /favicon.ico, fetched with an ephemeral URLSession and
-  /// accepted only as an HTTP 200 image/* response, then given to the shell as PNG or ICO (`contractFavicon`). Real
-  /// engines push it.
+  /// accepted only as an HTTP 200 image/* response, then given to the shell as PNG or ICO (`contractFavicon`, off the
+  /// main actor). Real engines push it.
   private func fetchFavicon(_ id: TabID) {
     guard let web = entries[id]?.webView, let pageURL = web.url, !pageURL.isFileURL else { return }
     beginFaviconFetch(id)
@@ -876,7 +906,8 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
                 let http = response as? HTTPURLResponse, http.statusCode == 200,
                 http.mimeType?.lowercased().hasPrefix("image/") == true,
                 self?.entries[id]?.snapshot.url == pageURL,
-                let favicon = FakeEngine.contractFavicon(data) else {
+                let favicon = await FakeEngine.contractFaviconOffMain(data),
+                self?.entries[id]?.snapshot.url == pageURL else {         // the page may have moved on meanwhile
             self?.finishFaviconFetch(id)
             return
           }
