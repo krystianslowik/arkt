@@ -10,7 +10,7 @@ every state). States by hash, `#<a|b|c>-<pinned|reorder|install|install-long>[&d
 `#c-<empty|none-pinned|small>` and `#surf-<crashed|dialog|restore|pageinfo|zoom|sharing>`.
 
 Everyday chrome: the system font, the shell's tokens, neutral pills. Mustard is a fill and the one primary pill of a
-surface (Add Extension, Reload, OK, Restore, Use shortcut). Extension icons and names are synthetic. Pinned actions
+surface (Add Extension, Reload, OK, Restore, Keep Existing). Extension icons and names are synthetic. Pinned actions
 carry no mustard: a badge is a graphite capsule with porcelain text, "needs attention" is a graphite dot.
 
 ## Directions
@@ -77,8 +77,9 @@ section's first row is "Cycle through pinned extensions", Cmd-E. Each extension 
 icon, then one row per command: title, its description, the shortcut as keycaps, and a scope pop-up ("In Arkt" or "All
 Apps" for global commands). An unset command shows a Set Shortcut pill. Clicking the keycaps records (the field takes
 the system focus ring and reads "Press new shortcut"). A conflict uses the Settings pane's row-shaped notice: a neutral
-exclamation, "Cmd-Shift-E is already used by "Reopen Closed Tab"", **Use Cmd-Shift-E** (the one primary) and a quiet
-**Keep Existing**. Esc cancels recording; Delete clears. A shortcut set here survives updates to the extension.
+exclamation, "Cmd-Shift-E is already used by "Reopen Closed Tab"", **Keep Existing** (the one primary, the default:
+Return keeps the existing shortcut, #590) and a quiet **Use Cmd-Shift-E**. Kept, the extension's command stays
+unassigned until the user sets it in Settings, Shortcuts. Esc cancels recording; Delete clears. A shortcut set here survives updates to the extension.
 
 ## The other Views surfaces (#122)
 
@@ -132,8 +133,8 @@ letters in both. The menu uses the system's menu material. Increase Contrast add
 1. ~~Which direction for pinned actions and for the install sheet?~~ Answered: C for pinned actions, B for install.
 2. ~~Are new extensions pinned by default?~~ Answered 2026-11-05: no; the toast offers Pin.
 3. Does Cmd-E ship (KB-047) or stay deferred? The design is ready either way.
-4. Should "Keep Existing" be the default on a shortcut conflict (drawn: Use is primary because the user asked for it)?
-   **Still open** (#590).
+4. ~~Should "Keep Existing" be the default on a shortcut conflict?~~ Answered 2026-11-06 (#590): yes. Return keeps the
+   existing shortcut; Use is the secondary (`shortcuts-conflict`).
 5. Docked DevTools: confirm it is a known gap for the first release.
 6. ~~Global (All Apps) extension shortcuts?~~ Answered (#590): the Chrome model, In Arkt by default, each shortcut can
    opt in to All Apps (`shortcuts-record`).
@@ -171,7 +172,7 @@ Notes:
    for a new extension is pinned" under Pinned actions and question 2 above.
 2. Is the shipped engine-drawn install sheet (#244, #548) close enough to B? **Yes**, no restyle issue.
 
-### Still open
+### Answered questions (2026-11-06)
 
-- Default button on a shortcut conflict: Use or Keep Existing (`shortcuts-conflict`, drawn: Use is primary). Waiting
-  for the maintainer's clarification on #590.
+3. Default button on a shortcut conflict? **Keep Existing** (Return); Use is the secondary. The extension's command
+   stays unassigned until the user sets it in Settings, Shortcuts. `shortcuts-conflict` is redrawn that way.
