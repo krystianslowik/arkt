@@ -241,7 +241,7 @@ final class WindowLifecycleTests: XCTestCase {
     XCTAssertNil(blank.sidebarController.currentPage)
     XCTAssertTrue(blank.sidebarController.view.favorites.isHidden)
     XCTAssertTrue(blank.sidebarController.view.spaceDots.isHidden)
-    XCTAssertTrue(blank.sidebarController.view.incognitoLabel.isHidden)
+    XCTAssertEqual(blank.sidebarController.view.windowKindLabel.stringValue, "Blank", "#668: the footer names the kind")
     XCTAssertEqual(f.source.sidebar, before, "a blank window does not change the shared sidebar")
     XCTAssertEqual(first.sidebarController.spaces.count, 2, "the other window still shows its Spaces")
     XCTAssertFalse(visibleStrings(in: blank.sidebarController.view).contains { ["Work", "Other", "W0", "W1", "O0", "O1"].contains($0) })
@@ -748,7 +748,7 @@ final class WindowLifecycleTests: XCTestCase {
   private func assertIncognitoLabelOnlyInTheSidebar(_ controller: ShellWindowController,
                                                     file: StaticString = #filePath, line: UInt = #line) {
     let sidebar = controller.sidebarController.view
-    let label = sidebar.incognitoLabel
+    let label = sidebar.windowKindLabel
     XCTAssertEqual(label.stringValue, "Incognito", file: file, line: line)
     XCTAssertFalse(label.isHidden, file: file, line: line)
     XCTAssertEqual(label.accessibilityIdentifier(), AXID.Incognito.label, file: file, line: line)

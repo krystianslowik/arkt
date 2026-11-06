@@ -152,3 +152,4 @@ and Close Oldest, when shown, is a button.
 |---|---|
 | `prototype.html` | Single-file prototype of direction B, no network, synthetic titles |
 | `screens/<list\|audio\|cap\|cap-none\|small>-<light\|dark>.png` | 10 screenshots at 2x (5 light, 5 dark) |
+| `shots/private-pages-<state>-<light\|dark>.png` | The build drawn by `PrivatePagesScreenshotTests` (`ARKT_PRIVATE_PAGES_SHOTS_DIR`), synthetic titles |

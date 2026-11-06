@@ -261,7 +261,7 @@ public final class SidebarController {
     view.favorites.isHidden = hidesItems
     view.spaceDots.isHidden = hidesItems
     view.pager.isHidden = hidesItems
-    view.setIncognitoLabelVisible(presentation == .incognito)
+    view.setPrivateKind(presentation)
     if presentation == .standard, let first = spaces.first { showSpace(first) }
   }
 

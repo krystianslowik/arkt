@@ -425,10 +425,12 @@ public final class SidebarContainerView: NSView {
     }
   }
   public let favorites: FavoritesGridView
-  /// "Incognito", shown only while this window is incognito (BH-174). Hidden in every other window.
-  public let incognitoLabel: NSTextField = {
+  /// The window's kind, "Incognito" (BH-174) or "Blank", centered in the footer band of a blank or incognito window's
+  /// sidebar (#668). Hidden in a normal window.
+  public let windowKindLabel: NSTextField = {
     let label = NSTextField(labelWithString: "Incognito")
-    label.font = .systemFont(ofSize: SidebarMetrics.spaceTitleFontSize, weight: .medium)
+    label.font = .systemFont(ofSize: 11, weight: .semibold)
+    label.alignment = .center
     label.lineBreakMode = .byTruncatingTail
     label.usesSingleLineMode = true
     label.cell?.isScrollable = false
@@ -437,6 +439,15 @@ public final class SidebarContainerView: NSView {
     label.isHidden = true
     return label
   }()
+  /// The Pages list of a blank or incognito window (#668): its own pages, never the shared sidebar. Hidden in a
+  /// normal window.
+  let privatePages: PrivatePagesView = {
+    let view = PrivatePagesView(frame: .zero)
+    view.isHidden = true
+    return view
+  }()
+  /// The footer band holding `windowKindLabel` in a blank or incognito window, in place of the bottom bar.
+  static let privateFooterHeight: CGFloat = 40
   /// Every Space page of this profile side by side; swipes and Space switches move it.
   public let pager = SpacePagerView(frame: .zero)
   /// The pager (C3 name).
@@ -502,20 +513,30 @@ public final class SidebarContainerView: NSView {
       view.autoresizingMask = []
       addSubview(view)
     }
-    incognitoLabel.autoresizingMask = []
-    incognitoLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
-    addSubview(incognitoLabel)
+    windowKindLabel.autoresizingMask = []
+    windowKindLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
+    addSubview(windowKindLabel)
+    privatePages.autoresizingMask = []
+    addSubview(privatePages)
     banner.autoresizingMask = []
     addSubview(banner)
   }
 
-  /// Shows or hides the sidebar's Incognito label (BH-174). Nowhere else in the window carries it.
-  public func setIncognitoLabelVisible(_ visible: Bool) {
-    guard incognitoLabel.isHidden == visible else { return }
-    incognitoLabel.isHidden = !visible
-    incognitoLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
+  /// A blank or incognito window's sidebar (#668): the Pages list, and the window's kind in the footer band where the
+  /// bottom bar would be. Nowhere else in the window carries the kind (BH-174). A normal window shows neither.
+  public func setPrivateKind(_ presentation: SidebarPresentation) {
+    let isPrivate = presentation != .standard
+    let kind = presentation == .incognito ? "Incognito" : "Blank"
+    windowKindLabel.stringValue = kind
+    windowKindLabel.setAccessibilityLabel(kind)
+    windowKindLabel.isHidden = !isPrivate
+    windowKindLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
+    privatePages.isHidden = !isPrivate
+    bottomBar.isHidden = isPrivate
     needsLayout = true
   }
+
+  var isPrivate: Bool { !privatePages.isHidden }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -552,7 +573,7 @@ public final class SidebarContainerView: NSView {
     didSet {
       guard isDimmed != oldValue else { return }
       let alpha = isDimmed ? Self.dimmedAlpha : 1
-      for view in [urlBar, favorites, pager, bottomBar, incognitoLabel, banner.row] as [NSView] {
+      for view in [urlBar, favorites, pager, bottomBar, windowKindLabel, privatePages, banner.row] as [NSView] {
         view.alphaValue = alpha
       }
     }
@@ -573,7 +594,8 @@ public final class SidebarContainerView: NSView {
     spaceDots.flavor = flavor
     urlBar.flavor = flavor
     banner.flavor = flavor
-    incognitoLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
+    windowKindLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
+    privatePages.flavor = flavor
     applyButtonImages()
   }
 
@@ -632,9 +654,7 @@ public final class SidebarContainerView: NSView {
     let favoritesHeight = showsFavorites ? favorites.preferredHeight : 0
     let favoritesY = (showsURLBar ? urlBar.frame.maxY : topBarHeight) + (showsFavorites ? SidebarMetrics.favoritesTopGap : 0)
     favorites.frame = NSRect(x: padding, y: favoritesY, width: favoritesWidth, height: favoritesHeight)
-    let labelTop = (showsURLBar ? urlBar.frame.maxY : topBarHeight) + SidebarMetrics.favoritesTopGap
-    let labelHeight = ceil(incognitoLabel.intrinsicContentSize.height)
-    incognitoLabel.frame = NSRect(x: padding, y: labelTop, width: max(0, width - 2 * padding), height: labelHeight)
+    layoutPrivatePages()
     let pagesY = favoritesY + favoritesHeight + (favoritesHeight > 0 ? SidebarMetrics.favoritesBottomGap : 0)
     let pagerFrame = NSRect(x: 0, y: pagesY, width: width,
                             height: max(0, bounds.height - pagesY - bottomHeight - bannerSlot.reservedHeight))
@@ -656,6 +676,20 @@ public final class SidebarContainerView: NSView {
       dotsX = libraryButton.frame.maxX
     }
     spaceDots.frame = NSRect(x: dotsX, y: 0, width: max(0, trailing - dotsX), height: bottomHeight)
+  }
+
+  /// The Pages list from under the address bar down to the footer band, and the window's kind centered in that band.
+  /// The band never scrolls with the list.
+  private func layoutPrivatePages() {
+    guard isPrivate else { return }
+    let padding = SidebarMetrics.horizontalPadding
+    let footer = Self.privateFooterHeight
+    let top = showsURLBar ? urlBar.frame.maxY : topBarHeight
+    privatePages.frame = NSRect(x: padding, y: top, width: max(0, bounds.width - 2 * padding),
+                                height: max(0, bounds.height - footer - top))
+    let labelHeight = ceil(windowKindLabel.intrinsicContentSize.height)
+    windowKindLabel.frame = NSRect(x: padding, y: (bounds.height - footer + (footer - labelHeight) / 2).rounded(),
+                                   width: max(0, bounds.width - 2 * padding), height: labelHeight)
   }
 
   /// Trackpad swipes starting over the Favorites grid, bottom bar, or other sidebar chrome outside the outline page
