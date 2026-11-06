@@ -148,7 +148,7 @@ extension SidebarContainerView {
 
   /// The pager moved (a swipe or a settle frame): checks the fade again only when another page comes into view, so a
   /// frame costs one comparison.
-  func bannerPagerMoved(to position: CGFloat) {
+  func bannerPagerMoved() {
     guard bannerSlot.isShown, pagesInView != bannerSlot.pagesInView else { return }
     refreshBannerFade()
   }

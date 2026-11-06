@@ -104,6 +104,8 @@ public final class SidebarBannerView: NSView {
     setAccessibilityLabel(notice.title)
     row.isAnnouncement = !notice.isUpdate
     row.setAccessibilityLabel(notice.isUpdate ? nil : notice.title)
+    // A notice swapped in place can hide the focused Restart or turn the focused row into one that takes no focus.
+    resignFocusInside { $0.isHiddenOrHasHiddenAncestor || !$0.acceptsFirstResponder }
     restyle()
     needsLayout = true
   }
@@ -222,6 +224,7 @@ public final class SidebarBannerView: NSView {
   func animateOut(_ step: SidebarBannerMotion.Step, completion: @escaping @MainActor () -> Void) {
     motionGeneration &+= 1
     let generation = motionGeneration
+    resignFocusInside()                              // no focus ring on a fading banner (Dismiss from the keyboard)
     setHovered(false)
     guard let layer, window != nil else {
       finishOut(generation, completion)
@@ -246,14 +249,19 @@ public final class SidebarBannerView: NSView {
   /// Hides at once (no window, or a reset). Keyboard focus inside the banner goes back to the window.
   func hideNow() {
     motionGeneration &+= 1
-    if let window, let responder = window.firstResponder as? NSView, responder.isDescendant(of: self) {
-      window.makeFirstResponder(nil)
-    }
+    resignFocusInside()                              // AppKit does it too when the view hides; not left to that
     setHovered(false)
     layer?.removeAllAnimations()
     alphaValue = 1
     isHidden = true
     notice = nil
+  }
+
+  /// Gives keyboard focus back to the window when it is on a view inside the banner that `matches`.
+  private func resignFocusInside(where matches: (NSView) -> Bool = { _ in true }) {
+    guard let window, let responder = window.firstResponder as? NSView, responder.isDescendant(of: self),
+          matches(responder) else { return }
+    window.makeFirstResponder(nil)
   }
 
   private func finishOut(_ generation: Int, _ completion: @MainActor () -> Void) {

@@ -401,7 +401,7 @@ public final class SidebarController {
 
   private func pagerMoved(to position: CGFloat) {
     view.spaceDots.position = position
-    view.bannerPagerMoved(to: position)
+    view.bannerPagerMoved()
     // The chrome around the pages takes the flavor of the Space nearest the fingers.
     let nearest = min(max(Int(position.rounded()), 0), max(pagedFlavors.count - 1, 0))
     if pagedFlavors.indices.contains(nearest), pagedFlavors[nearest] != view.flavor {

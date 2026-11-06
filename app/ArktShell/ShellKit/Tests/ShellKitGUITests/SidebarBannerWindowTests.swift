@@ -190,6 +190,61 @@ final class SidebarBannerWindowTests: XCTestCase {
     harness.attachment?.popover.hide()
   }
 
+  /// Focuses the close button through the window when Full Keyboard Access lets it take focus; otherwise (CI) the
+  /// announcement's row, which takes focus either way. Returns the focused view.
+  private func focusInsideTheBanner(_ harness: Harness, _ window: NSWindow) throws -> NSView {
+    if window.makeFirstResponder(harness.banner.closeButton) { return harness.banner.closeButton }
+    let row = harness.banner.row
+    XCTAssertTrue(row.isAnnouncement, "without Full Keyboard Access the test needs the announcement's row")
+    XCTAssertTrue(window.makeFirstResponder(row))
+    return row
+  }
+
+  /// The banner leaving with motion hands keyboard focus back to the window as it starts to fade, so no ring sits on
+  /// the fading banner.
+  func testDismissingWithMotionGivesFocusBackToTheWindow() throws {
+    let harness = makeHarness([Self.announcement])
+    let window = try XCTUnwrap(harness.controller.window)
+    let focused = try focusInsideTheBanner(harness, window)
+    XCTAssertTrue(window.firstResponder === focused)
+    harness.source.notices = []
+    XCTAssertTrue(window.firstResponder === window, "focus goes back as the fade starts")
+    harness.container.finishBannerMotionForTesting()
+    XCTAssertTrue(window.firstResponder === window)
+  }
+
+  /// The banner taken away at once (no motion) hands keyboard focus back to the window.
+  func testHidingAtOnceGivesFocusBackToTheWindow() throws {
+    let harness = makeHarness([Self.announcement])
+    let window = try XCTUnwrap(harness.controller.window)
+    _ = try focusInsideTheBanner(harness, window)
+    harness.container.setBanner(nil, animated: false, reduceMotion: false)
+    harness.container.finishBannerMotionForTesting()
+    XCTAssertTrue(harness.banner.isHidden)
+    XCTAssertTrue(window.firstResponder === window, "focus is not left on a hidden control")
+  }
+
+  /// A notice swapped in place gives focus back when the focused control goes away: the announcement's row becomes
+  /// an update's (no focus), and Restart is hidden for an announcement.
+  func testANoticeSwappedInPlaceGivesUpFocusOnAControlThatGoes() throws {
+    let harness = makeHarness([Self.announcement], reduceMotion: true)
+    let window = try XCTUnwrap(harness.controller.window)
+    XCTAssertTrue(window.makeFirstResponder(harness.banner.row))
+    harness.source.notices = [Self.update]
+    XCTAssertEqual(harness.banner.notice, Self.update, "swapped in place")
+    XCTAssertTrue(window.firstResponder === window, "the update's row takes no focus")
+    if window.makeFirstResponder(harness.banner.restartButton) {      // Full Keyboard Access on
+      harness.source.notices = [Self.announcement]
+      XCTAssertTrue(harness.banner.restartButton.isHidden)
+      XCTAssertTrue(window.firstResponder === window, "no focus on the hidden Restart")
+    }
+    // The close button stays: a swap keeps its focus.
+    if window.makeFirstResponder(harness.banner.closeButton) {
+      harness.source.notices = [Self.update]
+      XCTAssertTrue(window.firstResponder === harness.banner.closeButton)
+    }
+  }
+
   func testRestartGoesToTheSource() {
     let harness = makeHarness([Self.update])
     harness.banner.restartButton.performClick(nil)
