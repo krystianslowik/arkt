@@ -293,13 +293,7 @@ final class DialogSheetView: NSView {
 
   private func place(_ field: NSTextField, x: CGFloat, y: CGFloat, width: CGFloat, maxLines: Int = 0) -> CGFloat {
     var height = ceil(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 1000)).height ?? 18)
-    if maxLines > 0 {
-      // The cell's own height for `maxLines` lines, so it draws the last one truncated instead of clipping it.
-      let probe = NSTextField(wrappingLabelWithString: Array(repeating: "X", count: maxLines).joined(separator: "\n"))
-      probe.font = field.font
-      let cap = probe.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 1000)).height ?? height
-      height = min(height, ceil(cap))
-    }
+    if maxLines > 0 { height = min(height, Self.cellHeight(lines: maxLines, font: field.font)) }
     field.frame = NSRect(x: x, y: y, width: width, height: height)
     return y + height
   }
@@ -307,6 +301,20 @@ final class DialogSheetView: NSView {
   override func layout() {
     super.layout()
     _ = layoutContent(width: bounds.width)
+  }
+
+  /// A wrapping label cell's height for `lines` lines of `font`, so a capped title draws its last line truncated instead
+  /// of clipping it. Measured once per font and line count.
+  private static var cellHeights: [String: CGFloat] = [:]
+
+  private static func cellHeight(lines: Int, font: NSFont?) -> CGFloat {
+    let key = "\(font?.fontName ?? "")-\(font?.pointSize ?? 0)-\(lines)"
+    if let height = cellHeights[key] { return height }
+    let probe = NSTextField(wrappingLabelWithString: Array(repeating: "X", count: lines).joined(separator: "\n"))
+    probe.font = font
+    let height = ceil(probe.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: 1000, height: 1000)).height ?? 18)
+    cellHeights[key] = height
+    return height
   }
 
   /// Whether the checkbox is checked now; false without one.
@@ -419,9 +427,12 @@ enum DialogMetrics {
 @MainActor
 final class DialogIconView: NSView {
   let icon: DialogContent.Icon
+  /// The decoded `.image` icon, decoded once here rather than on every draw.
+  private let image: NSImage?
 
   init(icon: DialogContent.Icon, size: CGFloat) {
     self.icon = icon
+    if case .image(let data) = icon { image = NSImage(data: data) } else { image = nil }
     super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
     wantsLayer = true
     setAccessibilityElement(false)
@@ -438,10 +449,10 @@ final class DialogIconView: NSView {
       return
     case .appIcon:
       NSApp.applicationIconImage?.draw(in: bounds)
-    case .image(let data):
+    case .image:
       NSGraphicsContext.saveGraphicsState()
       NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).addClip()
-      NSImage(data: data)?.draw(in: bounds)
+      image?.draw(in: bounds)
       NSGraphicsContext.restoreGraphicsState()
     case .symbol(let name):
       let flavor = archiveFlavor

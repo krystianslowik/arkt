@@ -152,11 +152,12 @@ public final class ExtensionsPanelController: NSObject {
     guard removeSheet == nil, let parent = button?.window, parent.attachedSheet == nil else { return }
     hide(keyboard: false)
     let sheet = ExtensionRemoveSheet(action: action)
+    let extensionID = sheet.extensionID              // not the sheet: it owns this closure
     sheet.onFinish = { [weak self] reportAbuse in
       guard let self else { return }
       self.removeSheet = nil
       guard let reportAbuse else { return }
-      self.extensions?.uninstallExtension(sheet.extensionID, reportAbuse: reportAbuse)
+      self.extensions?.uninstallExtension(extensionID, reportAbuse: reportAbuse)
     }
     removeSheet = sheet
     sheet.begin(on: parent)

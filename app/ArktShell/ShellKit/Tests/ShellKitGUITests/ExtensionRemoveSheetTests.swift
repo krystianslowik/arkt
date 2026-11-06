@@ -140,6 +140,50 @@ final class ExtensionRemoveSheetTests: XCTestCase {
     XCTAssertTrue(engine.uninstalledExtensions.isEmpty)
   }
 
+  func testTheEngineWindowGoingAwayClosesTheSheetWithoutACall() throws {
+    open([action("a", name: "A")])
+    let sheet = try openSheet("a")
+    engine.closeWindow(window)
+    XCTAssertNil(panel.removeSheet)
+    XCTAssertNil(sheet.window?.sheetParent)
+    XCTAssertTrue(engine.uninstalledExtensions.isEmpty)
+  }
+
+  /// The window's first responder once the sheet is up is Cancel.
+  func testFocusStartsOnCancel() throws {
+    open([action("a", name: "A")])
+    let sheet = try openSheet("a")
+    let cancel = try XCTUnwrap(sheet.sheet.view.cancelButton)
+    XCTAssertTrue(sheet.window?.firstResponder === cancel)
+  }
+
+  /// A real Return key event sent to the sheet presses nothing. The same event answers a sheet whose primary is the
+  /// Return default, so the event does reach the buttons.
+  func testReturnPressesNothing() throws {
+    open([action("a", name: "A")])
+    let sheet = try openSheet("a")
+    let sheetWindow = try XCTUnwrap(sheet.window)
+    sheetWindow.sendEvent(try Self.returnKey(in: sheetWindow))
+    XCTAssertTrue(panel.removeSheet === sheet, "the sheet stays up")
+    XCTAssertTrue(engine.uninstalledExtensions.isEmpty)
+    panel.closeRemoveSheet()
+
+    let control = DialogSheet(content: .quitWarning)
+    var answers: [DialogContent.Answer] = []
+    control.onAnswer = { answers.append($0) }
+    control.begin(on: try XCTUnwrap(harness.controller.window))
+    let controlWindow = try XCTUnwrap(control.window)
+    controlWindow.sendEvent(try Self.returnKey(in: controlWindow))
+    XCTAssertEqual(answers, [.primary], "Return reaches a sheet that has a default button")
+    control.dismiss()
+  }
+
+  private static func returnKey(in window: NSWindow) throws -> NSEvent {
+    try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                   windowNumber: window.windowNumber, context: nil, characters: "\r",
+                                   charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+  }
+
   // MARK: Worst case, accessibility, motion
 
   /// An 85-character name wraps to two lines and truncates; longer titles do not move the buttons further.
