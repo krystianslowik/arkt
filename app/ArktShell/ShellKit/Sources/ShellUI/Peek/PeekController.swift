@@ -264,6 +264,7 @@ public final class PeekController {
     moveAccessibilityFocus(page)
     refreshAccessibility()
     shell.refreshAddress()
+    shell.refreshCrashedTabs()                                  // #683: a page that crashed while hidden
     let title = shell.engine.snapshot(of: tab)?.title ?? ""
     announce(title.isEmpty ? "Peek opened" : "Peek opened, \(title)", overlay.card)
     return true

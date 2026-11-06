@@ -59,6 +59,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   private(set) lazy var javaScriptDialogs = makeJavaScriptDialogPresenter()
   /// The page's infobars as a strip at the top of its page (#400); the engine reserves the strip's height there.
   private(set) lazy var infobarStrips = makeInfobarPresenter()
+  /// The crashed tab view over the page when its process went away (#683).
+  private(set) lazy var crashedTabs = makeCrashedTabPresenter()
   /// The pending dialog of the page on its way to the main window (Open in), from the start of the fade or flight
   /// until the page lands (it goes with it) or stays (it comes back to this window's presenter).
   private var carriedDialog: JavaScriptDialog?
@@ -207,9 +209,14 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     case .infobarsChanged, .tabFullscreenChanged:
       infobarStrips.handle(event)                             // #400; rows hide in HTML fullscreen (#581)
       javaScriptDialogs.refresh()                             // the panel follows the rows' height
+    case .tabCrashed(let tab, _) where tab == shownTab:
+      refreshCrashedTab(crashed: tab)                         // #683
+    case .tabRecovered(let tab) where tab == shownTab:
+      refreshCrashedTab()
     case .tabClosed(let tab, _) where tab == shownTab:
       shownTab = nil
       if card.contentView?.isDescendant(of: rootView) == true { card.setContent(nil) }
+      refreshCrashedTab()
       flight?.abort(.pageClosed)                              // nothing left to land; the engine closes the window
     default:
       break
@@ -256,6 +263,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     card.setContent(view)
     window.title = engine.snapshot(of: tab)?.title ?? ""
     refreshTopBar()
+    refreshCrashedTab()
     if window.isKeyWindow { engine.focusPage(of: tab) }
   }
 
