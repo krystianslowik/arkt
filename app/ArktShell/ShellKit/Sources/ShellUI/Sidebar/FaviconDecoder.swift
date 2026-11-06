@@ -49,12 +49,23 @@ public struct FaviconDecoder: Sendable {
     return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
   }
 
+  /// The most the shared cache holds, in bytes of `cost(of:bitmap:)`: 512 icons at the largest decoded size are 8 MB of
+  /// pixels, which leaves as much again for their source bytes (#675).
+  public static let cacheCostLimit = 16 << 20
+
+  /// What a cached image costs: its source bytes, which the cache key keeps alive, plus its decoded pixels at 4 bytes
+  /// each (#675).
+  public nonisolated static func cost(of data: Data, bitmap: CGImage) -> Int {
+    data.count + bitmap.width * bitmap.height * 4
+  }
+
   /// Decoded favicons by their bytes, shared by every sidebar and the Archive: an icon decoded for one window shows at
-  /// once in another. Bounded by count; NSCache also drops entries under memory pressure.
+  /// once in another. Bounded by count and by `cacheCostLimit`; NSCache also drops entries under memory pressure.
   @MainActor
   static let sharedImages: NSCache<NSData, NSImage> = {
     let cache = NSCache<NSData, NSImage>()
     cache.countLimit = 512
+    cache.totalCostLimit = cacheCostLimit
     return cache
   }()
 

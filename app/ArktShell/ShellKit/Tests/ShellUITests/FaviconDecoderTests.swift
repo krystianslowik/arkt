@@ -54,6 +54,24 @@ enum FaviconFixtures {
   }
 }
 
+/// A cache that records the cost each image is stored with (#675). NSCache is thread-safe, so the record is too.
+final class CostRecordingCache: NSCache<NSData, NSImage>, @unchecked Sendable {
+  private let lock = NSLock()
+  private var recorded: [Int] = []
+
+  var costs: [Int] { lock.withLock { recorded } }
+
+  override func setObject(_ obj: NSImage, forKey key: NSData, cost g: Int) {
+    lock.withLock { recorded.append(g) }
+    super.setObject(obj, forKey: key, cost: g)
+  }
+
+  override func setObject(_ obj: NSImage, forKey key: NSData) {
+    lock.withLock { recorded.append(0) }
+    super.setObject(obj, forKey: key)
+  }
+}
+
 /// #605: favicons decode off the main actor, newest bytes win, dropped keys cancel their decode.
 @MainActor
 struct FaviconDecoderTests {
@@ -139,6 +157,60 @@ struct FaviconDecoderTests {
     #expect(again != nil, "applied before load returns")
     #expect(again === first)
     #expect(await gate.calls.count == 1)
+  }
+
+
+  /// #675: the shared cache is bounded by cost as well as count, and each image costs its source bytes (the key keeps
+  /// them alive) plus its decoded pixels.
+  @Test func theSharedCacheIsBoundedByCost() {
+    #expect(FaviconDecoder.sharedImages.totalCostLimit == FaviconDecoder.cacheCostLimit)
+    #expect(FaviconDecoder.cacheCostLimit > 0)
+  }
+
+  @Test func eachImageIsCachedAtTheCostOfItsBytesAndPixels() async {
+    let gate = GatedFaviconDecoder()
+    await gate.release()
+    let cache = CostRecordingCache()
+    let loader = FaviconImageLoader<Int>(decoder: gate.decoder, cache: cache)
+    let small = FaviconFixtures.png(1, pixels: 8), large = FaviconFixtures.png(2, pixels: 256)
+    loader.load([1: small, 2: large]) { _ in }
+    await loader.settle()
+    let side = FaviconDecoder.maxPixelSize
+    #expect(cache.costs.sorted() == [small.count + 8 * 8 * 4, large.count + side * side * 4].sorted())
+    #expect(FaviconDecoder.cost(of: small, bitmap: FaviconDecoder.decodeNow(small)!) == small.count + 8 * 8 * 4)
+  }
+
+  /// #675: bytes A, then B, then A again. The job for A is cancelled when B arrives, but the bitmap it had already
+  /// decoded is kept, so A shows at once the second time, with no second decode.
+  @Test func aCancelledJobStillCachesWhatItDecoded() async throws {
+    let gate = GatedFaviconDecoder()
+    let loader = FaviconImageLoader<Int>(decoder: gate.decoder, cache: NSCache())
+    let a = FaviconFixtures.png(1, pixels: 8), b = FaviconFixtures.png(2, pixels: 16)
+    var applied: [[Int: NSImage?]] = []
+    loader.load([1: a]) { applied.append($0) }
+    loader.load([1: b]) { applied.append($0) }
+    await gate.release()
+    await loader.settle()
+    #expect(await gate.cancelledCalls == 1, "the job for A was cancelled")
+    #expect(applied.count == 1, "the cancelled job applies nothing")
+    var again: NSImage?
+    loader.load([1: a]) { again = $0[1] ?? nil }
+    let image = try #require(again, "A is shown before load returns")
+    #expect(image.size == NSSize(width: 8, height: 8))
+    #expect(await gate.calls.count == 2, "no third decode")
+  }
+
+  /// A job cancelled because its only key was dropped keeps its bitmaps too.
+  @Test func aJobCancelledByDroppingItsKeyStillCachesWhatItDecoded() async {
+    let gate = GatedFaviconDecoder()
+    let cache = NSCache<NSData, NSImage>()
+    let loader = FaviconImageLoader<Int>(decoder: gate.decoder, cache: cache)
+    let a = FaviconFixtures.png(1, pixels: 8)
+    loader.load([1: a]) { _ in Issue.record("a dropped key gets nothing") }
+    loader.cancel(1)
+    await gate.release()
+    await loader.settle()
+    #expect(cache.object(forKey: a as NSData) != nil)
   }
 
   /// The guarantee behind #605, without a clock (#699): the images the loader hands out, through the real off-main

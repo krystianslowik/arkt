@@ -830,8 +830,35 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     faviconFetches[id] = count - 1
   }
 
+  /// The side, in pixels, of a favicon drawn to PNG: the shell's largest decoded favicon (`FaviconDecoder.maxPixelSize`).
+  static let rasterFaviconPixels = 64
+
+  /// The favicon as the engine contract promises it, PNG or ICO (#675). PNG and ICO bytes pass through; any other
+  /// image AppKit reads (SVG, which ImageIO cannot decode, JPEG, GIF) is drawn to a `rasterFaviconPixels` square PNG,
+  /// so the shell shows the icon instead of the letter. Nil for bytes that are no image.
+  static func contractFavicon(_ data: Data) -> Data? {
+    let png: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+    let ico: [UInt8] = [0x00, 0x00, 0x01, 0x00]
+    if data.starts(with: png) || data.starts(with: ico) { return data }
+    guard let image = NSImage(data: data), image.isValid, image.size.width > 0, image.size.height > 0,
+          let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: rasterFaviconPixels,
+                                     pixelsHigh: rasterFaviconPixels, bitsPerSample: 8, samplesPerPixel: 4,
+                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
+                                     bitsPerPixel: 0),
+          let context = NSGraphicsContext(bitmapImageRep: rep)
+    else { return nil }
+    let side = CGFloat(rasterFaviconPixels)
+    rep.size = NSSize(width: side, height: side)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.representation(using: .png, properties: [:])
+  }
+
   /// Prototype favicon: <link rel=icon> or /favicon.ico, fetched with an ephemeral URLSession and
-  /// accepted only as an HTTP 200 image/* response. Real engines push it.
+  /// accepted only as an HTTP 200 image/* response, then given to the shell as PNG or ICO (`contractFavicon`). Real
+  /// engines push it.
   private func fetchFavicon(_ id: TabID) {
     guard let web = entries[id]?.webView, let pageURL = web.url, !pageURL.isFileURL else { return }
     beginFaviconFetch(id)
@@ -848,11 +875,12 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
           guard let (data, response) = try? await session.data(from: iconURL),
                 let http = response as? HTTPURLResponse, http.statusCode == 200,
                 http.mimeType?.lowercased().hasPrefix("image/") == true,
-                self?.entries[id]?.snapshot.url == pageURL else {
+                self?.entries[id]?.snapshot.url == pageURL,
+                let favicon = FakeEngine.contractFavicon(data) else {
             self?.finishFaviconFetch(id)
             return
           }
-          self?.update(id) { $0.faviconData = data } event: { .faviconChanged(id, data) }
+          self?.update(id) { $0.faviconData = favicon } event: { .faviconChanged(id, favicon) }
           self?.finishFaviconFetch(id)
         }
       }
