@@ -553,4 +553,163 @@ final class EditPinTests: XCTestCase {
     XCTAssertFalse(overlay.isRevealed, "the abandoned sidebar goes back once the popover closed")
     harness.controller.close()
   }
+
+  // MARK: The keyboard after closing (#696)
+
+  /// Whether the window's keyboard is inside the open popover (a field's editor counts as its field).
+  private static func keyboardIsInPopover(_ harness: Harness) throws -> Bool {
+    let popover = try harness.popover()
+    let responder = harness.controller.window?.firstResponder
+    let owner = ((responder as? NSText)?.delegate as? NSView) ?? (responder as? NSView)
+    return owner?.isDescendant(of: popover) ?? false
+  }
+
+  /// `node`'s page view, shown and holding the keyboard.
+  private static func focusPage(of node: UUID, _ harness: Harness) throws -> NSView {
+    harness.controller.activate(node: node)
+    let tab = try XCTUnwrap(harness.controller.tabsByNode[node])
+    let page = try XCTUnwrap(harness.engine.contentView(for: tab))
+    XCTAssertTrue(harness.controller.window?.makeFirstResponder(page) ?? false)
+    return page
+  }
+
+  /// Save, Cancel, Escape (from the field and through the window), a click outside and the window resigning key each
+  /// give the keyboard back to the page that had it before the popover opened.
+  func testEveryWayOfClosingGivesTheKeyboardBackToThePage() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    let page = try Self.focusPage(of: world.p0, harness)
+    let closings: [(String, () throws -> Void)] = [
+      ("Save", { try harness.popover().saveButton.performClick(nil) }),
+      ("Cancel", { try harness.popover().cancelButton.performClick(nil) }),
+      ("Escape in the field", {
+        try harness.send(#selector(NSResponder.cancelOperation(_:)), from: try harness.popover().urlField)
+      }),
+      ("Escape through the window", { window.sendEvent(try harness.key(53, "\u{1b}")) }),
+      ("a click outside", {
+        let point = NSPoint(x: harness.root.bounds.maxX - 40, y: harness.root.bounds.midY)
+        try XCTUnwrap(harness.editPin).handleOutsideClick(try XCTUnwrap(NSEvent.mouseEvent(
+          with: .leftMouseDown, location: harness.root.convert(point, to: nil), modifierFlags: [], timestamp: 0,
+          windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+      }),
+      ("the window resigning key", {
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+      }),
+    ]
+    for (way, close) in closings {
+      try harness.choose("Edit Pinned URL\u{2026}", on: world.p0)
+      XCTAssertTrue(try Self.keyboardIsInPopover(harness), "\(way): the popover holds the keyboard while open")
+      try close()
+      XCTAssertNil(harness.editPin, "\(way) closes")
+      XCTAssertTrue(window.firstResponder === page, "\(way): the page has the keyboard again")
+    }
+    harness.controller.close()
+  }
+
+  /// Opened while a sidebar row had the keyboard (Ctrl-Space), it gives the keyboard back to that row.
+  func testClosingGivesTheKeyboardBackToTheSidebarRow() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: world.p1)
+    harness.controller.revealCurrentTab(nil)
+    let outline = try harness.outline()
+    let row = outline.row(for: world.p1)
+    XCTAssertTrue(window.firstResponder === outline.outlineView)
+    XCTAssertEqual(outline.outlineView.keyboardFocusRow, row)
+
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p1)
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness))
+    window.sendEvent(try harness.key(53, "\u{1b}"))
+    XCTAssertNil(harness.editPin)
+    XCTAssertTrue(window.firstResponder === outline.outlineView, "the sidebar has the keyboard again")
+    XCTAssertEqual(outline.outlineView.keyboardFocusRow, row, "on the same row")
+    harness.controller.close()
+  }
+
+  /// Opened while a Favorite tile had the keyboard (Ctrl-Space), it gives the keyboard back to that tile.
+  func testClosingGivesTheKeyboardBackToTheFavoriteTile() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    let grid = harness.sidebarController.view.favorites
+    harness.controller.activate(node: world.favorite)
+    harness.controller.revealCurrentTab(nil)
+    XCTAssertTrue(window.firstResponder === grid.collectionView)
+    XCTAssertEqual(grid.keyboardFocusID, world.favorite)
+
+    try harness.chooseOnTile("Rename\u{2026}", world.favorite)
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness))
+    XCTAssertNil(grid.keyboardFocusID)
+    try harness.popover().cancelButton.performClick(nil)
+    XCTAssertNil(harness.editPin)
+    XCTAssertTrue(window.firstResponder === grid.collectionView, "the Favorites have the keyboard again")
+    XCTAssertEqual(grid.keyboardFocusID, world.favorite, "on the same tile")
+    harness.controller.close()
+  }
+
+  /// When the page that had the keyboard left the window while the popover was open (another tab took its place),
+  /// the current tab's page takes the keyboard.
+  func testTheCurrentPageTakesTheKeyboardWhenTheOneThatHadItIsGone() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    let first = try Self.focusPage(of: world.p0, harness)
+
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p1)
+    harness.controller.activate(node: world.p1)
+    let tab = try XCTUnwrap(harness.controller.tabsByNode[world.p1])
+    let current = try XCTUnwrap(harness.engine.contentView(for: tab))
+    XCTAssertNil(first.window, "the first page left the window")
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness), "the popover still holds the keyboard")
+
+    try harness.popover().cancelButton.performClick(nil)
+    XCTAssertNil(harness.editPin)
+    XCTAssertTrue(window.firstResponder === current, "the current tab's page has the keyboard")
+    harness.controller.close()
+  }
+
+  /// The Space changes while the popover is open, which closes it: the row that had the keyboard is on a page that
+  /// left the screen, so the current tab's page takes the keyboard.
+  func testTheCurrentPageTakesTheKeyboardWhenTheSpaceChanged() throws {
+    var world = try Self.makeWorld()
+    let other = world.sidebar.addSpace(title: "Home")
+    _ = try world.sidebar.addTab(url: Self.url("home"), title: "Home", in: .pinned(other))
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: world.p1)
+    harness.controller.revealCurrentTab(nil)
+    let outline = try harness.outline().outlineView
+    XCTAssertTrue(window.firstResponder === outline)
+
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p1)
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness))
+    harness.sidebarController.showSpace(other)
+    XCTAssertNil(harness.editPin, "the Space change closes the popover")
+    let tab = try XCTUnwrap(harness.controller.currentTab, "the window shows a tab")
+    let current = try XCTUnwrap(harness.engine.contentView(for: tab))
+    XCTAssertTrue(current.window === window)
+    XCTAssertTrue(window.firstResponder === current, "the current tab's page has the keyboard")
+    harness.controller.close()
+  }
+
+  /// Opened while a text field in the window was being edited, it gives the keyboard back to that field.
+  func testClosingGivesTheKeyboardBackToATextField() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    let field = NSTextField(frame: NSRect(x: harness.root.bounds.maxX - 220, y: 20, width: 200, height: 22))
+    harness.root.addSubview(field)
+    XCTAssertTrue(window.makeFirstResponder(field))
+    XCTAssertNotNil(field.currentEditor(), "the field is being edited")
+
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p0)
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness))
+    window.sendEvent(try harness.key(53, "\u{1b}"))
+    XCTAssertNil(harness.editPin)
+    XCTAssertTrue((window.firstResponder as? NSText)?.delegate === field, "the field has the keyboard again")
+    field.removeFromSuperview()
+    harness.controller.close()
+  }
 }

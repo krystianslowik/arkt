@@ -29,6 +29,8 @@ final class EditPinController: NSObject, NSTextFieldDelegate {
   var onClose: (() -> Void)?
   private var outsideClickMonitor: Any?
   private var resignKeyObserver: (any NSObjectProtocol)?
+  /// The responder that had the keyboard before the popover opened; it gets it back on close (#696).
+  private var keyboardReturn = KeyboardReturn(from: nil)
   private(set) var isClosed = false
 
   /// Nil when `nodeID` is not a tab.
@@ -64,6 +66,7 @@ final class EditPinController: NSObject, NSTextFieldDelegate {
     place(in: host, anchor: anchor)
     host.addSubview(view, positioned: .above, relativeTo: nil)
     view.layoutSubtreeIfNeeded()
+    keyboardReturn = KeyboardReturn(from: host.window)
     let field = focus == .name ? view.nameField : view.urlField
     if host.window?.makeFirstResponder(field) == true { field.currentEditor()?.selectAll(nil) }
     animateOpen()
@@ -136,8 +139,9 @@ final class EditPinController: NSObject, NSTextFieldDelegate {
   /// Closes without storing anything.
   func cancel() { close(animated: true) }
 
-  /// Closes the popover (a 0.15 s fade when `animated`) and gives the keyboard back to the window.
-  func close(animated: Bool) {
+  /// Closes the popover (a 0.15 s fade when `animated`) and gives the keyboard back to the responder that had it
+  /// before the popover opened, unless that one is inside `leaving` (the page of the Space the sidebar leaves).
+  func close(animated: Bool, leaving: NSView? = nil) {
     guard !isClosed else { return }
     isClosed = true
     if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
@@ -150,8 +154,8 @@ final class EditPinController: NSObject, NSTextFieldDelegate {
     // A field's editing session belongs to the field editor, whose delegate is the field.
     let responder = window?.firstResponder
     if let owner = ((responder as? NSText)?.delegate as? NSView) ?? (responder as? NSView),
-       owner.isDescendant(of: view) {
-      window?.makeFirstResponder(nil)
+       owner.isDescendant(of: view), let window {
+      keyboardReturn.give(in: window, leaving: leaving)
     }
     defer { onClose?() }
     guard animated, let layer = view.layer, window != nil else {
