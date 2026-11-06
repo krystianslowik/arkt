@@ -51,10 +51,11 @@ struct EditPinForm {
   var title: String { kind == .favorite ? "Edit Favorite" : "Edit Pinned Tab" }
 
   /// The field's text for `url`: an https address without its scheme, as the address bar shows it; any other
-  /// address in full. Hosts read exactly as the address bar shows them: an internationalized host stays in its
-  /// encoded `xn--` form, so a look-alike host cannot pass for another; typed Unicode is encoded on Save.
+  /// address in full. Hosts read exactly as the address bar shows them (`HostDisplay`, #697): Unicode when the host
+  /// passes the spoof check, the encoded `xn--` form otherwise. Unicode in the field is encoded again on Save, and an
+  /// untouched field stores the address it was filled with.
   static func text(for url: URL) -> String {
-    let full = url.absoluteString
+    let full = HostDisplay.address(url)
     let prefix = "https://"
     guard url.scheme?.lowercased() == "https", full.lowercased().hasPrefix(prefix) else { return full }
     return String(full.dropFirst(prefix.count))

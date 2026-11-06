@@ -126,16 +126,37 @@ struct EditPinFormTests {
     #expect(form.submit() == .save(name: "Roadmap", url: nil))
   }
 
-  /// An internationalized host shows in its encoded form, as the address bar shows it; typed Unicode is encoded on
-  /// Save, and the stored address survives an untouched save.
-  @Test func anInternationalizedHostShowsEncodedAndTypedUnicodeIsEncoded() {
+  /// An internationalized host reads as the address bar shows it (#697): Unicode when it passes the spoof check.
+  /// Typed or shown Unicode is encoded again on Save, and an untouched field stores the address as it was.
+  @Test func anInternationalizedHostShowsInUnicodeAndIsEncodedOnSave() {
     let stored = URL(string: "https://xn--mnchen-3ya.de/plan")!
     var form = form(url: stored)
-    #expect(form.urlText == "xn--mnchen-3ya.de/plan")
+    #expect(form.urlText == "m\u{00FC}nchen.de/plan")
     #expect(form.submit() == .save(name: nil, url: nil), "untouched: the stored address stays")
-    form.edit(urlText: "münchen.de/plan2")
+    form.edit(urlText: "m\u{00FC}nchen.de/plan2")
     #expect(form.submit() == .save(name: nil, url: URL(string: "https://xn--mnchen-3ya.de/plan2")!))
     form.edit(urlText: "xn--mnchen-3ya.de/plan3")
     #expect(form.submit() == .save(name: nil, url: URL(string: "https://xn--mnchen-3ya.de/plan3")!))
+    form.edit(urlText: "m\u{00FC}nchen.de/plan")
+    #expect(form.submit() == .save(name: nil, url: nil), "the shown text typed back is the stored address")
+  }
+
+  /// A look-alike host keeps its encoded form in the field, and stays as it was on an untouched Save.
+  @Test func aLookAlikeHostStaysEncodedInTheField() {
+    let stored = URL(string: "https://xn--80ak6aa92e.com/login")!
+    var form = form(url: stored)
+    #expect(form.urlText == "xn--80ak6aa92e.com/login")
+    #expect(form.submit() == .save(name: nil, url: nil))
+    let mixed = self.form(url: URL(string: "https://xn--pple-43d.com/")!)
+    #expect(mixed.urlText == "xn--pple-43d.com/")
+  }
+
+  /// Use Current Page shows an internationalized page the same way and stores its address exactly.
+  @Test func useCurrentPageShowsAnInternationalizedHostInUnicode() {
+    let page = URL(string: "https://xn--e1afmkfd.xn--p1ai/news?id=7")!
+    var form = EditPinForm(kind: .pinnedTab, name: "N", url: pinned, currentPage: page)
+    form.useCurrentPage()
+    #expect(form.urlText == "\u{043F}\u{0440}\u{0438}\u{043C}\u{0435}\u{0440}.\u{0440}\u{0444}/news?id=7")
+    #expect(form.submit() == .save(name: nil, url: page))
   }
 }
