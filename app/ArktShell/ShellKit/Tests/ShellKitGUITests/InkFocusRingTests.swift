@@ -176,21 +176,26 @@ final class InkFocusRingTests: XCTestCase {
     let button = bar.openButton
     let image = try XCTUnwrap(button.image)
     let imageRect = try XCTUnwrap(button.cell?.imageRect(forBounds: button.bounds))
-    // The first column of the image that draws anything, measured from its pixels.
-    let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(image.size.width * 2),
-                                             pixelsHigh: Int(image.size.height * 2), bitsPerSample: 8,
-                                             samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+    let firstColumn = try XCTUnwrap(Self.firstDrawnColumn(image))
+    let swatchX = imageRect.minX + firstColumn * imageRect.width / image.size.width
+    XCTAssertGreaterThanOrEqual(swatchX, 3, "the swatch starts \(swatchX) pt in; the ring covers the first 3")
+  }
+
+  /// The first x, in points, at which `image` draws anything, measured from its pixels at 2x; nil if it draws nothing.
+  static func firstDrawnColumn(_ image: NSImage) -> CGFloat? {
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(image.size.width * 2),
+                                     pixelsHigh: Int(image.size.height * 2), bitsPerSample: 8, samplesPerPixel: 4,
+                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
+                                     bitsPerPixel: 0) else { return nil }
     rep.size = image.size
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     image.draw(in: NSRect(origin: .zero, size: image.size))
     NSGraphicsContext.restoreGraphicsState()
-    let firstColumn = try XCTUnwrap((0..<rep.pixelsWide).first { x in
+    let column = (0..<rep.pixelsWide).first { x in
       (0..<rep.pixelsHigh).contains { y in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.01 }
-    })
-    let swatchX = imageRect.minX + CGFloat(firstColumn) / 2 * imageRect.width / image.size.width
-    XCTAssertGreaterThanOrEqual(swatchX, 3, "the swatch starts \(swatchX) pt in; the ring covers the first 3")
+    }
+    return column.map { CGFloat($0) / 2 }
   }
 
   /// A click toggles the import checkbox without focusing it, so the ring shows only for the keyboard.

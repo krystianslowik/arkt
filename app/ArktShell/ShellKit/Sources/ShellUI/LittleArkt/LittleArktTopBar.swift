@@ -74,7 +74,7 @@ final class LittleArktTopBar: WindowDragView {
     openButton.toolTip = openHelp
     usesAccent = accent
     swatchColors = swatch
-    openButton.image = accent && !swatch.isEmpty ? Self.swatchImage(swatch) : nil
+    openButton.image = accent && !swatch.isEmpty ? Self.swatchImage(swatch, leadingInset: Self.swatchLeadingInset) : nil
     needsDisplay = true
     needsLayout = true
   }
@@ -134,14 +134,14 @@ final class LittleArktTopBar: WindowDragView {
     needsDisplay = true
   }
 
-  /// Clear space before the swatch: the cell draws a leading image flush with the segment's edge, where the focus ring
-  /// (3 pt, inside the segment) would cover it (#687).
+  /// Clear space before the "Open in" segment's swatch: the cell draws a leading image flush with the segment's edge,
+  /// where the focus ring (3 pt, inside the segment) would cover it (#687). The chooser menu's swatches have none.
   static let swatchLeadingInset: CGFloat = 5
 
   /// The target Space's theme as a 10 pt swatch with 3 pt corners and a hairline (the prototype's `.sw`), after
-  /// `swatchLeadingInset` of clear space.
-  static func swatchImage(_ colors: [RGBA]) -> NSImage {
-    let inset = swatchLeadingInset
+  /// `leadingInset` of clear space.
+  static func swatchImage(_ colors: [RGBA], leadingInset: CGFloat = 0) -> NSImage {
+    let inset = leadingInset
     let size = NSSize(width: inset + 10, height: 10)
     return NSImage(size: size, flipped: false) { _ in
       let swatch = NSRect(x: inset, y: 0, width: 10, height: 10)
