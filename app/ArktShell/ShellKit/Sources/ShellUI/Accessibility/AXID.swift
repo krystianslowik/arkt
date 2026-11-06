@@ -45,6 +45,8 @@ public enum AXID {
     public static let footerLink = "dialog.footerLink"
     /// The prompt's text field (a page's `prompt()`); value: the text.
     public static let input = "dialog.input"
+    /// The checkbox (the extension remove sheet's Report abuse); value: checked or not.
+    public static let checkbox = "dialog.checkbox"
   }
 
   /// The browser data import (#514): the sheet and the first run's Hero entry share these.

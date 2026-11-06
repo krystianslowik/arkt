@@ -6,7 +6,7 @@ import QuartzCore
 /// `ArktDialogSheetContent`, so Delete Space, the launch alerts and later confirmations share one look with the
 /// engine's prompts. One content model, three hosts (`DialogSheet`, `DialogPanel`, `DialogAlert`).
 ///
-/// Not mirrored from the engine model, because no shell dialog uses it yet: the checkbox. The text field and the
+/// The checkbox is for the extension remove sheet's Report abuse (#720). The text field and the
 /// capped, scrolling body are for a page's `prompt()` and long `alert()` messages (#400); stacked buttons, a neutral
 /// primary, Escape dismissing and the input protection are for a site's permission request (#400).
 public struct DialogContent: Equatable, Sendable {
@@ -18,6 +18,8 @@ public struct DialogContent: Equatable, Sendable {
     case spaceSwatch(colors: [RGBA], isDark: Bool, mark: SpaceIconInfo?)
     /// A neutral tile with an SF Symbol: the dangerous-file sheet's warning.
     case symbol(String)
+    /// An image (PNG or any format `NSImage` reads) in a rounded tile: an extension's icon (#720).
+    case image(Data)
   }
 
   /// Where the icon sits: beside the title (32 pt, body indented under the title) or stacked above it (the app-modal
@@ -38,6 +40,17 @@ public struct DialogContent: Equatable, Sendable {
   /// The button Return presses; `.none`: Return presses nothing.
   public enum DefaultButton: Equatable, Sendable { case none, primary, cancel }
 
+  /// A checkbox under the body (the remove sheet's Report abuse); its state is read when the dialog is answered.
+  public struct Checkbox: Equatable, Sendable {
+    public var title: String
+    public var isOn: Bool
+
+    public init(_ title: String, isOn: Bool = false) {
+      self.title = title
+      self.isOn = isOn
+    }
+  }
+
   /// How a dialog was answered.
   public enum Answer: Equatable, Sendable { case primary, secondary, cancel }
 
@@ -54,6 +67,8 @@ public struct DialogContent: Equatable, Sendable {
   }
 
   public var title: String
+  /// The most lines the title wraps to before it truncates; 0: as many as it needs.
+  public var titleMaxLines: Int
   public var icon: Icon
   public var iconPlacement: IconPlacement
   public var subtitle: String?
@@ -78,6 +93,7 @@ public struct DialogContent: Equatable, Sendable {
   public var primaryHelp: String?
   public var width: CGFloat
   public var input: Input?
+  public var checkbox: Checkbox?
   /// The body (all paragraphs) scrolls inside this height when it needs more; nil: it takes the height it needs.
   public var bodyMaxHeight: CGFloat?
   /// Full-width pills one above the other, primary first (a permission request: the answers carry equal weight).
@@ -94,9 +110,11 @@ public struct DialogContent: Equatable, Sendable {
               footerLink: String? = nil, footerLinkIsDestructive: Bool = false, primaryTitle: String, secondaryTitle: String? = nil,
               cancelTitle: String? = nil, defaultButton: DefaultButton = .primary, isDestructive: Bool = false,
               escapeAnswersCancel: Bool = true, primaryHelp: String? = nil, width: CGFloat = 420,
-              input: Input? = nil, bodyMaxHeight: CGFloat? = nil, stackedButtons: Bool = false,
+              input: Input? = nil, checkbox: Checkbox? = nil, titleMaxLines: Int = 0,
+              bodyMaxHeight: CGFloat? = nil, stackedButtons: Bool = false,
               neutralPrimary: Bool = false, escapeDismisses: Bool = false, inputProtection: TimeInterval = 0) {
     self.title = title
+    self.titleMaxLines = titleMaxLines
     self.icon = icon
     self.iconPlacement = iconPlacement
     self.subtitle = subtitle
@@ -115,6 +133,7 @@ public struct DialogContent: Equatable, Sendable {
     self.primaryHelp = primaryHelp
     self.width = width
     self.input = input
+    self.checkbox = checkbox
     self.bodyMaxHeight = bodyMaxHeight
     self.stackedButtons = stackedButtons
     self.neutralPrimary = neutralPrimary

@@ -46,6 +46,17 @@ public final class DialogSheet: NSWindowController {
     window.makeFirstResponder(view.initialFocus)
   }
 
+  /// Whether the content's checkbox is checked now; read it in `onAnswer`.
+  public var isCheckboxOn: Bool { view.isCheckboxOn }
+
+  /// Closes the sheet without an answer: what it asked about went away. `onAnswer` is not called.
+  public func dismiss() {
+    onAnswer = nil
+    guard let window else { return }
+    window.sheetParent?.endSheet(window)
+    window.orderOut(nil)
+  }
+
   private func finish(_ answer: DialogContent.Answer) {
     guard let window else { return }
     let callback = onAnswer

@@ -61,6 +61,12 @@ public protocol EngineExtensions: AnyObject {
   /// `.unknownCommand`.
   func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
                                    scope: ExtensionCommandScope, replacingConflict: Bool) -> ExtensionShortcutResult
+  /// Uninstalls the extension as the user's own choice, with no prompt of the engine's: the shell has asked already
+  /// (the remove sheet, #720). `reportAbuse`: the user checked Report abuse, so the engine also opens the Web Store's
+  /// report page for it. The removal arrives as `.extensionActionsChanged` for each window that listed its action
+  /// (its pin goes with it) and `.commandsChanged` when it had commands. An unknown id or an extension the user
+  /// cannot remove changes nothing. Default: a no-op (the Chromium side is #721).
+  func uninstallExtension(_ extensionID: String, reportAbuse: Bool)
   /// Profile-wide extension events, through the same FIFO as `observe`. Default: none are delivered.
   func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation
 }
@@ -76,6 +82,7 @@ extension EngineExtensions {
   public func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
                                           scope: ExtensionCommandScope,
                                           replacingConflict: Bool) -> ExtensionShortcutResult { .unknownCommand }
+  public func uninstallExtension(_ extensionID: String, reportAbuse: Bool) {}
   public func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation {
     EngineObservation {}
   }

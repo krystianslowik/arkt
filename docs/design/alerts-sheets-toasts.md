@@ -44,7 +44,7 @@ engine as the existing comments already do.
 | Auto-archive | toast "Auto archived 3 tabs" | toast / undo | as `toast-undo` |
 | Archive of several tabs (Clear, Archive Below, multi-selection) | no toast today | toast / undo (new) | `toast-undo` |
 | Recovery | persistent toast with Show Files, one line, truncates at 480 pt | toast / persistent, multi-line | `toast-recovery` |
-| Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn) | `ext-install`, `ext-remove` |
+| Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn); Remove from Arkt... in the Extensions panel is the shell's `DialogSheet` (#720) | `ext-install`, `ext-remove` |
 | Permission prompts | shell `DialogPanel` as an anchored panel (#400); the engine's `ArktDialogSheet` stays the fallback while no embedder presents it | dialog / anchored panel | `permission` |
 | Infobars | shell `InfobarPanel` strip, 40 pt per infobar, fade-in 0.14 s (#400); the engine's `ArktInfobarView` rows stay the fallback while no embedder presents them | infobar | `infobar` |
 
