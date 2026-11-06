@@ -171,7 +171,7 @@ final class ExtensionRemoveSheetTests: XCTestCase {
     let cancelIndex = try XCTUnwrap(order.firstIndex { $0 === cancel })
     XCTAssertLessThan(titleIndex, checkboxIndex)
     XCTAssertLessThan(checkboxIndex, cancelIndex)
-    XCTAssertEqual(checkbox.accessibilityLabel() ?? checkbox.title, "Report abuse")
+    XCTAssertEqual(checkbox.accessibilityLabel(), "Report abuse")
     XCTAssertEqual(view.accessibilityLabel(), "Remove \u{201C}A\u{201D}?")
     XCTAssertTrue(checkbox.nextKeyView === cancel)
     XCTAssertTrue(cancel.nextKeyView === view.primaryButton)
