@@ -9,10 +9,10 @@ struct PrivatePageRowContent: Equatable {
   var favicon: Data?
   var isShown: Bool
 
-  /// The row's text: the page title, else its address, else "Untitled".
+  /// The row's text: the page title, else its checked host or address (`HostDisplay`), else "Untitled".
   var displayTitle: String {
     if !title.isEmpty { return title }
-    if let url { return url.host() ?? url.absoluteString }
+    if let url { return HostDisplay.hostOrAddress(url) }
     return "Untitled"
   }
 }
