@@ -477,10 +477,14 @@ final class PeekDragHandleView: NSView {
 
 // MARK: - Controls
 
-/// One of the three 28 pt circles beside the card. Focus ring only from the keyboard; hover brightens the glyph.
+/// One of the three 28 pt circles beside the card. The chrome's ink focus ring around the circle, only from the
+/// keyboard (#687); hover brightens the glyph.
 @MainActor
 public final class PeekControlButton: NSButton {
   var flavor: ThemeFlavor = .light { didSet { refreshColors() } }
+  /// Shown while the button has keyboard focus, in the Peek's tone.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                          radius: PeekLayout.controlSize / 2)
   var opaqueFill = false { didSet { refreshColors() } }
   private var hovering = false { didSet { refreshColors() } }
   private var hoverArea: NSTrackingArea?
@@ -495,8 +499,8 @@ public final class PeekControlButton: NSButton {
     title = ""
     wantsLayer = true
     layer?.cornerRadius = PeekLayout.controlSize / 2
-    // The system focus ring, which AppKit draws only for keyboard focus; mustard is a fill only (hard rule).
-    focusRingType = .default
+    // The ink ring, never the system ring or mustard (a fill only, hard rule).
+    focusRingType = .none
     self.toolTip = toolTip
     setAccessibilityElement(true)
     setAccessibilityRole(.button)
@@ -511,12 +515,17 @@ public final class PeekControlButton: NSButton {
 
   public override var mouseDownCanMoveWindow: Bool { false }
 
-  /// The system focus ring follows the circle, not the glyph.
-  public override func drawFocusRingMask() {
-    NSBezierPath(ovalIn: bounds).fill()
+  public override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
   }
 
-  public override var focusRingMaskBounds: NSRect { bounds }
+  public override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
 
   public override var isEnabled: Bool { didSet { refreshColors() } }
 
@@ -546,5 +555,6 @@ public final class PeekControlButton: NSButton {
     var color = glyph.resolve(flavor)
     if !isEnabled { color.alpha *= 0.45 }
     contentTintColor = color.nsColor()
+    keyboardFocusRing.flavor = flavor
   }
 }

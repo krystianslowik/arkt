@@ -62,6 +62,9 @@ final class DownloadTileView: NSView {
 @MainActor
 final class DownloadIconButton: NSButton {
   let symbolName: String
+  /// The chrome's ink focus ring around the circle while the button has keyboard focus (#687).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                          radius: DownloadsMetrics.iconButton / 2)
   private var hovering = false
   private var tracking: NSTrackingArea?
   private let body = CALayer()
@@ -76,7 +79,7 @@ final class DownloadIconButton: NSButton {
     bezelStyle = .regularSquare
     setButtonType(.momentaryChange)
     imagePosition = .imageOnly
-    focusRingType = .default
+    focusRingType = .none
     wantsLayer = true
     layer?.addSublayer(body)
     body.cornerCurve = .continuous
@@ -90,6 +93,19 @@ final class DownloadIconButton: NSButton {
 
   override var mouseDownCanMoveWindow: Bool { false }
   override var wantsUpdateLayer: Bool { true }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
+
   /// Layer properties only: setting `image` here would invalidate the button and run `updateLayer` again.
   override func updateLayer() { restyleLayer() }
   override var intrinsicContentSize: NSSize {

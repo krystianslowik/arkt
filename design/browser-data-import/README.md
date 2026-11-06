@@ -146,7 +146,8 @@ read, not watched.
 - During progress each row is a status: "History, 30,854 of 48,210", "Cookies, waiting". Progress is announced when
   a type finishes, not per record.
 - Space toggles, Return activates the primary, Escape is Cancel (during progress it asks nothing and cancels). Tab
-  order: rows, then Cancel and the primary. Focus ring is the system's.
+  order: rows, then Cancel and the primary. A row's checkbox draws the ink focus ring (`ShellTokens.focusRing`, 3 pt
+  outside the box, #687).
 - Color is never the only signal: every state has a glyph and a word. The denied state is not red.
 - Both appearances, Reduce Motion, Reduce Transparency (nothing here is translucent in the sheet) and Increase
   Contrast (hairlines move to the `Increase Contrast` values already used by the other sheets).
@@ -180,3 +181,7 @@ read, not watched.
 
 After a direction is picked, the build issue (#514's build half) takes its acceptance criteria from the Spec above.
 The prototype's synthetic sets are the fixtures for the sheet's tests: normal, huge counts and every type at zero.
+
+Focus ring (#687): the ink ring of [`design/drag-hint-focus-ring`](../drag-hint-focus-ring/README.md). Screens of these
+controls, focused: [light](../drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-light.png),
+[dark](../drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-dark.png).

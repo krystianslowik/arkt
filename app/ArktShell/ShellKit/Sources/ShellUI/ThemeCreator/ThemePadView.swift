@@ -252,6 +252,7 @@ final class ThemeDotView: ThemeFocusableView {
     setAccessibilityRole(.slider)
     setAccessibilityLabel("Colour \(index + 1)")
     setAccessibilityIdentifier(AXID.ThemeCreator.dot)
+    applyFocusRingFlavor(.light)
   }
 
   @available(*, unavailable)
@@ -266,6 +267,11 @@ final class ThemeDotView: ThemeFocusableView {
   }
 
   override var focusRingRect: NSRect { disc.frame }
+
+  /// The dot sits on the user's colours, so its ring hugs the dot's white edge in graphite, whatever the appearance.
+  override func applyFocusRingFlavor(_ flavor: ThemeFlavor) {
+    keyboardFocusRing.flavor = .light
+  }
 
   // Pointer events belong to the pad.
   override func hitTest(_ point: NSPoint) -> NSView? { nil }

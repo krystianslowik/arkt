@@ -65,8 +65,8 @@ see Parity notes). Settings > Profiles: "Archive Little Arkts after:" with the s
 | Frame color | light `#FAF9F5`, dark `#202321` | `BrandTokens.surfaceBrand` |
 | Top bar | 40 pt, traffic lights at x 12, centered vertically | |
 | Host label | from x 80, 13 pt: lock glyph, then the host in `primaryText` semibold; the full URL in the tooltip | |
-| Copy Link | 26 pt icon button, `sidebarForeground`, hover fill `sidebarItemBackground` | |
-| Open in split button | 26 pt high, radius 8, 8 pt from the right edge; label 12 pt semibold; 10 pt Space swatch; chevron segment after a 1 pt divider (graphite 18 %) | `BrandTokens.accent`, `accentHighlight` (hover), `accentPressed`, `onAccent`; focus ring `BrandTokens.focusRing` |
+| Copy Link | 26 pt icon button, `sidebarForeground`, hover fill `sidebarItemBackground`; focus ring 3 pt outside it | `ShellTokens.focusRing` (#687) |
+| Open in split button | 26 pt high, radius 8, 8 pt from the right edge; label 12 pt semibold; 10 pt Space swatch; chevron segment after a 1 pt divider (graphite 18 %) | `BrandTokens.accent`, `accentHighlight` (hover), `accentPressed`, `onAccent`; focus ring `ShellTokens.focusRing`, 3 pt inside the focused segment (the split clips it), in the fill's text tone: graphite on mustard in both appearances, the window's tone on the quiet split (#687) |
 | Card | 10 pt continuous corners, hairline | `ShellMetrics.cardCornerRadius`, `ShellTokens.cardBorder`, `cardShadow` |
 | Inactive window | traffic lights gray; nothing else dims | system behavior |
 | Quick lookup bar | the command bar panel: 766 pt wide (narrower on small screens), 60 pt input, 50 pt rows, radius 12, at 34 % of the screen height; a "Little Arkt" tag before the input | `CommandBarGeometry`, `ShellTokens.commandBar*`; tag uses `accent` and `onAccent` |
@@ -329,3 +329,7 @@ Motion keyframes, light and dark: `la-kf-appear-{40,90,160}ms`, `la-kf-promote-{
 `la-kf-nudge-{60,140}ms`, `la-kf-close-60ms`, `la-kf-interrupt-220ms`.
 
 Reduce Motion keyframes, light and dark: `la-rm-appear-100ms`, `la-rm-promote-{80,240}ms`.
+
+Focus ring (#687): the ink ring of [`design/drag-hint-focus-ring`](../../design/drag-hint-focus-ring/README.md). Screens of these
+controls, focused: [light](../../design/drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-light.png),
+[dark](../../design/drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-dark.png).

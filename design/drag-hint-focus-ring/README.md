@@ -26,7 +26,11 @@ and 3 (ink fill only).
 
 ## Focus ring (#642): ink ring
 
-Drawn on a sidebar row, a Favorite tile, the split close button and Settings controls. Picked over 1 (system focus
+Drawn on a sidebar row, a Favorite tile, the split close button and Settings controls; since #687 also on the theme
+creator's controls, the Peek controls, the Little Arkt top bar, the find bar buttons, the Library's rail and row buttons
+and the import checkbox. Text fields keep the system ring. Screens of those controls, focused, as the app draws them:
+`screens/drag-hint-focus-ring-controls-<light|dark>.png` (written by `InkFocusRingScreenshotTests` with
+`ARKT_FOCUS_SHOTS_DIR` set). Picked over 1 (system focus
 color) and 2 (`BrandTokens.focusRing` as it is today).
 
 | Where | Value |

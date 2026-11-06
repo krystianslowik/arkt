@@ -305,6 +305,13 @@ final class LittleArktMenusTests: XCTestCase {
 
     XCTAssertEqual(titles.first, LittleArktCopy.chooserHeading)
     XCTAssertEqual(Array(titles.suffix(4)), ["-", LittleArktCopy.openInNewWindow, "-", LittleArktCopy.copyLink])
+    // The Space swatches start at the item's image edge: only the "Open in" segment's swatch is inset (#687).
+    let swatches = little.chooserMenu().items.filter { $0.representedObject is SpaceID }.compactMap(\.image)
+    XCTAssertFalse(swatches.isEmpty)
+    for image in swatches {
+      XCTAssertEqual(image.size, NSSize(width: 10, height: 10))
+      XCTAssertEqual(InkFocusRingTests.firstDrawnColumn(image), 0)
+    }
   }
 
   // MARK: Dock menu (BH-139, GS-041)

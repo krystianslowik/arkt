@@ -84,6 +84,79 @@ struct HintAndFocusTokensTests {
     #expect(ratio >= Contrast.minimumNonText, "focusRing on the toolbar material \(flavor): \(ratio)")
   }
 
+  // MARK: #687: the theme creator, Peek, Little Arkt, find bar, Library and import
+
+  /// Theme creator: the ring sits on the popover surface, and over the slider's track where it crosses it.
+  @Test(arguments: flavors)
+  func focusRingStandsOutOnTheThemeCreator(flavor: ThemeFlavor) {
+    let surface = ShellTokens.themePopoverSurface.resolve(flavor)
+    let track = ShellContrastProbe.over(ShellTokens.sidebarItemHovered.resolve(flavor), surface)
+    for (name, base) in [("surface", surface), ("track", track)] {
+      let ratio = ShellContrastProbe.ratio(ShellTokens.focusRing.resolve(flavor), onOpaque: base)
+      #expect(ratio >= Contrast.minimumNonText, "focusRing on the theme creator \(name) \(flavor): \(ratio)")
+    }
+  }
+
+  /// The selected texture swatch's ring (`primaryText`, in place of the system accent) on the popover surface.
+  @Test(arguments: flavors)
+  func theSelectedSwatchRingStandsOutOnThePopover(flavor: ThemeFlavor) {
+    let ratio = ShellContrastProbe.ratio(ShellTokens.primaryText.resolve(flavor),
+                                         onOpaque: ShellTokens.themePopoverSurface.resolve(flavor))
+    #expect(ratio >= Contrast.minimumNonText, "selected swatch \(flavor): \(ratio)")
+  }
+
+  /// A colour dot sits on the user's colours; its ring hugs the dot's white edge, so it is graphite in both
+  /// appearances and measured against that edge.
+  @Test func theColourDotRingStandsOutOnItsWhiteEdge() {
+    let ratio = ShellContrastProbe.ratio(ShellTokens.focusRing.resolve(.light), onOpaque: .white(1))
+    #expect(ratio >= Contrast.minimumNonText, "dot ring on white: \(ratio)")
+  }
+
+  /// Peek: the ring sits beside the card, over the scrim on the page (white in light, the dark page fill in dark),
+  /// and over a plain page.
+  @Test(arguments: flavors)
+  func focusRingStandsOutBesideThePeek(flavor: ThemeFlavor) {
+    let page = flavor == .light ? RGBA.white(1) : RGBA.srgb(hex: 0x1C1C20)
+    let scrimmed = ShellContrastProbe.over(ShellTokens.peekScrim.resolve(flavor), page)
+    for (name, base) in [("scrim", scrimmed), ("page", page)] {
+      let ratio = ShellContrastProbe.ratio(ShellTokens.focusRing.resolve(flavor), onOpaque: base)
+      #expect(ratio >= Contrast.minimumNonText, "focusRing beside the Peek, \(name) \(flavor): \(ratio)")
+    }
+  }
+
+  /// Little Arkt: Copy Link's ring on the bar (`surfaceBrand`); a segment's ring inside the mustard split in the
+  /// graphite tone (`onAccent`) over every accent state, and in the window's tone over the quiet split.
+  @Test(arguments: flavors)
+  func focusRingStandsOutOnTheLittleArktBar(flavor: ThemeFlavor) {
+    let bar = BrandTokens.surfaceBrand.resolve(flavor)
+    let barRatio = ShellContrastProbe.ratio(ShellTokens.focusRing.resolve(flavor), onOpaque: bar)
+    #expect(barRatio >= Contrast.minimumNonText, "Copy Link \(flavor): \(barRatio)")
+    for fill in [BrandTokens.accent, BrandTokens.accentHighlight, BrandTokens.accentPressed] {
+      let ratio = ShellContrastProbe.ratio(ShellTokens.focusRing.resolve(.light), onOpaque: fill.resolve(flavor))
+      #expect(ratio >= Contrast.minimumNonText, "segment on mustard \(flavor): \(ratio)")
+    }
+    let quiet = ShellContrastProbe.over(ShellTokens.sidebarItemBackground.resolve(flavor), bar)
+    let quietRatio = ShellContrastProbe.ratio(ShellTokens.focusRing.resolve(flavor), onOpaque: quiet)
+    #expect(quietRatio >= Contrast.minimumNonText, "quiet segment \(flavor): \(quietRatio)")
+  }
+
+  /// The find bar's pill, the Library window (rail, rows and their hover fill) and the import sheet's list field and
+  /// Hero entry all sit on `surfaceBrand`.
+  @Test(arguments: flavors)
+  func focusRingStandsOutOnTheFindBarLibraryAndImport(flavor: ThemeFlavor) {
+    let brand = BrandTokens.surfaceBrand.resolve(flavor)
+    let surfaces: [(String, RGBA)] = [
+      ("find bar", brand), ("library", AlertTokens.dialogSurface.resolve(flavor)),
+      ("download row", ShellContrastProbe.over(DownloadsTokens.rowFill.resolve(flavor), brand)),
+      ("current rail item", ShellContrastProbe.over(ShellTokens.tabCurrent.resolve(flavor), brand)),
+      ("import list", ShellContrastProbe.over(ArchiveTokens.listField.resolve(flavor), brand)),
+    ]
+    for (name, base) in surfaces {
+      let ratio = ShellContrastProbe.ratio(ShellTokens.focusRing.resolve(flavor), onOpaque: base)
+      #expect(ratio >= Contrast.minimumNonText, "focusRing on the \(name) \(flavor): \(ratio)")
+    }
+  }
+
   /// A toast's action pill: the ring sits outside the pill on the toast surface, tinted by each shipped Space.
   @Test func focusRingStandsOutOnEveryToastSurface() {
     for theme in ShellContrastProbe.shippedThemes() {

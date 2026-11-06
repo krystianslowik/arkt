@@ -7,13 +7,22 @@ import AppKit
 /// appearance from it), the window's on the page card and in Settings.
 ///
 /// Sidebar rows and Favorite tiles draw it inside their own fill (`frame` is the fill, so the clip view never cuts
-/// it). Controls draw it outside themselves with `attach(outside:radius:)`, toggled by their first responder state:
+/// it), as do controls a clipping parent would cut (`attach(inside:radius:)`, the Little Arkt split button). Controls
+/// draw it outside themselves with `attach(outside:radius:)`, or around a part of themselves (`place(around:radius:)`,
+/// the theme creator's knob, swatch and colour dot), toggled by their first responder state:
 /// AppKit's ring shows only for keyboard focus, and so does this one. Like the system ring it shows only while its
 /// window is key, and it appears and goes at once. Not hit-testable and not an accessibility element.
+/// While shown, a ring that reaches past its host turns the host's clipping off (a corner radius on the host's layer
+/// turns AppKit's `clipsToBounds` on), overriding the host's own `clipsToBounds` or `masksToBounds`; hiding the ring
+/// turns it back on.
 @MainActor
 final class KeyboardFocusRingView: NSView {
   static let lineWidth = ShellTokens.focusRingWidth
   var cornerRadius = SidebarMetrics.rowCornerRadius { didSet { needsDisplay = true } }
+  /// The tone to draw in, for hosts whose colors come from a model rather than their appearance (the theme creator,
+  /// the Peek controls, the import checkbox) or from the fill under the ring (the mustard split); nil follows
+  /// `effectiveAppearance`.
+  var flavor: ThemeFlavor? { didSet { if flavor != oldValue { needsDisplay = true } } }
   let ring = CAShapeLayer()
   /// The owner has keyboard focus. The ring shows while this is true and the window is key.
   private(set) var isFocused = false
@@ -22,6 +31,8 @@ final class KeyboardFocusRingView: NSView {
   /// over overlays it does not own (the split close button under the find bar and the zoom pill).
   private var raisesHost = false
   private weak var observedWindow: NSWindow?
+  /// This ring turned its host's clipping off while shown; it turns it back on when it hides.
+  private var unclippedHost = false
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -48,6 +59,24 @@ final class KeyboardFocusRingView: NSView {
     return ring
   }
 
+  /// A ring drawn inside `host`, on its edge, with corner `radius`: for a host whose parent clips its subviews.
+  static func attach(inside host: NSView, radius: CGFloat) -> KeyboardFocusRingView {
+    let ring = KeyboardFocusRingView(frame: host.bounds)
+    ring.cornerRadius = radius
+    ring.autoresizingMask = [.width, .height]
+    host.addSubview(ring, positioned: .above, relativeTo: nil)
+    return ring
+  }
+
+  /// Draws the ring just outside `rect` (the superview's coordinates), whose shape has corner `radius`; for a ring
+  /// around a part of its host. The host calls it again whenever that part moves.
+  func place(around rect: NSRect, radius: CGFloat) {
+    let lineWidth = Self.lineWidth
+    frame = rect.insetBy(dx: -lineWidth, dy: -lineWidth)
+    cornerRadius = radius + lineWidth
+    refreshVisibility()
+  }
+
   /// Keyboard focus came or went.
   func setFocused(_ focused: Bool) {
     isFocused = focused
@@ -57,6 +86,16 @@ final class KeyboardFocusRingView: NSView {
   private func refreshVisibility() {
     let shown = isFocused && window?.isKeyWindow == true
     if raisesHost { superview?.layer?.zPosition = shown ? 1 : 0 }
+    // A host whose layer has a corner radius clips its subviews (AppKit turns `clipsToBounds` on with it), which would
+    // cut a ring drawn outside it down to nothing: while shown, a ring that reaches past its host unclips it. This
+    // overrides a host's own `clipsToBounds` or `masksToBounds` for that time; hiding the ring restores the clipping.
+    if shown, let host = superview, host.clipsToBounds, !host.bounds.contains(frame) {
+      host.clipsToBounds = false
+      unclippedHost = true
+    } else if !shown, unclippedHost {
+      superview?.clipsToBounds = true
+      unclippedHost = false
+    }
     guard isHidden == shown else { return }
     isHidden = !shown
     needsDisplay = true
@@ -90,7 +129,7 @@ final class KeyboardFocusRingView: NSView {
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
   var strokeColor: CGColor {
-    ShellTokens.focusRing.resolve(ThemeFlavor(appearance: effectiveAppearance)).cgColor
+    ShellTokens.focusRing.resolve(flavor ?? ThemeFlavor(appearance: effectiveAppearance)).cgColor
   }
 
   override func updateLayer() {

@@ -785,9 +785,9 @@ final class PeekWindowTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// The controls take keyboard focus and draw AppKit's focus ring, which only a keyboard focus shows; the ring
-  /// follows the circle (the system ring, never a mustard stroke).
-  func testThePeekControlsUseTheSystemFocusRingOnlyForKeyboardFocus() throws {
+  /// The controls take keyboard focus and draw the chrome's ink ring (#687), which only a keyboard focus shows; the
+  /// ring follows the circle (never the system ring, never a mustard stroke).
+  func testThePeekControlsUseTheInkFocusRingOnlyForKeyboardFocus() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     _ = try openPeek(harness, world)
@@ -795,12 +795,15 @@ final class PeekWindowTests: XCTestCase {
     let overlay = try XCTUnwrap(harness.peek.overlay)
     let window = try XCTUnwrap(harness.controller.window)
     for control in overlay.controls {
-      XCTAssertEqual(control.focusRingType, .default, "the system focus ring")
-      XCTAssertEqual(control.focusRingMaskBounds, control.bounds, "the ring follows the circle")
+      XCTAssertEqual(control.focusRingType, .none, "not the system focus ring")
+      XCTAssertEqual(control.keyboardFocusRing.frame, control.bounds.insetBy(dx: -3, dy: -3), "outside the circle")
+      XCTAssertEqual(control.keyboardFocusRing.cornerRadius, PeekLayout.controlSize / 2 + 3, "follows the circle")
+      XCTAssertTrue(control.keyboardFocusRing.isHidden, "no ring without keyboard focus")
       XCTAssertTrue(control.acceptsFirstResponder)
     }
     XCTAssertTrue(window.makeFirstResponder(overlay.closeButton), "Tab reaches Close")
     XCTAssertTrue(window.firstResponder === overlay.closeButton)
+    XCTAssertTrue(overlay.closeButton.keyboardFocusRing.isFocused, "the ring follows the keyboard")
     harness.controller.close()
   }
 

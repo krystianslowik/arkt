@@ -2,10 +2,15 @@ import AppKit
 import EngineAPI
 
 /// One row of the Library's rail: the section's glyph, its name and, for Downloads, how many there are. The current one
-/// takes the `tabCurrent` fill. A real button, so the keyboard and VoiceOver reach it.
+/// takes the `tabCurrent` fill. A real button, so the keyboard and VoiceOver reach it. The ink focus ring sits outside
+/// it (#687); the items are 2 pt apart, so a focused one is raised above its neighbors.
 @MainActor
 final class LibraryRailItem: NSButton {
   let section: LibrarySection
+  /// Shown while the item has keyboard focus.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                          radius: DownloadsMetrics.rowCorner,
+                                                                          raisesHost: true)
   private let countField = NSTextField(labelWithString: "")
   var isCurrent = false { didSet { if isCurrent != oldValue { restyle(); needsDisplay = true } } }
   var count: Int? { didSet { if count != oldValue { restyle(); needsDisplay = true } } }
@@ -17,7 +22,7 @@ final class LibraryRailItem: NSButton {
     isBordered = false
     bezelStyle = .regularSquare
     setButtonType(.momentaryChange)
-    focusRingType = .default
+    focusRingType = .none
     wantsLayer = true
     layer?.cornerRadius = DownloadsMetrics.rowCorner
     layer?.cornerCurve = .continuous
@@ -36,6 +41,18 @@ final class LibraryRailItem: NSButton {
   override var mouseDownCanMoveWindow: Bool { false }
   override var wantsUpdateLayer: Bool { true }
   override func updateLayer() { restyle() }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
 
   private func restyle() {
     let flavor = archiveFlavor
