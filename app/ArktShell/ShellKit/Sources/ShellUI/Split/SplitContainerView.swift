@@ -428,6 +428,97 @@ public final class SplitContainerView: NSView {
     }
   }
 
+  /// The page view a scroll gesture that began on a drawn pane mid-reflow goes to (#677). AppKit keeps every event of
+  /// a gesture, momentum included, on the view it began on (this one, by `hitTest`), even after the reflow settles.
+  private weak var scrollGestureTarget: NSView?
+  /// The running gesture was targeted by its touch-down (may begin); its began keeps that target, even when the reflow
+  /// settled in between.
+  private var scrollGestureMayBegan = false
+  /// The view a right-click mid-reflow went to, and how far its location was moved, so its mouse-up follows it.
+  private weak var rightClickTarget: NSView?
+  private var rightClickOffset = CGVector.zero
+  /// An event is being forwarded: a target that does not take it passes it up its responder chain, back here, and
+  /// it then goes on up from this view instead of round again.
+  private var isForwardingEvent = false
+
+  /// A scroll on a drawn pane mid-reflow goes to the view of that pane's page under the pointer where it is drawn (the
+  /// event's own location is left as is: an event built from a scroll cannot be given a window). A gesture is
+  /// targeted at its touch-down (may begin), or when it begins without one, or for each wheel click, and keeps its
+  /// target to its end.
+  public override func scrollWheel(with event: NSEvent) {
+    guard !isForwardingEvent else { return super.scrollWheel(with: event) }
+    let phase = event.phase
+    if event.momentumPhase.isEmpty {
+      let retargets = phase.isEmpty || phase.contains(.mayBegin) || (phase.contains(.began) && !scrollGestureMayBegan)
+      if retargets {
+        scrollGestureTarget = reflow == nil ? nil : drawnTarget(at: convert(event.locationInWindow, from: nil))?.view
+      }
+      scrollGestureMayBegan = phase.contains(.mayBegin)
+    }
+    guard let target = scrollGestureTarget else { return super.scrollWheel(with: event) }
+    forward { target.scrollWheel(with: event) }
+  }
+
+  /// A right-click on a drawn pane mid-reflow ends the reflow at rest first, then goes to that pane's page at the spot
+  /// it was drawn under the pointer, which is now at the pane's real frame.
+  public override func rightMouseDown(with event: NSEvent) {
+    if !isForwardingEvent { rightClickTarget = nil }   // a menu loop that took the last mouse-up leaves no target
+    let point = convert(event.locationInWindow, from: nil)
+    guard !isForwardingEvent, reflow != nil, let (_, real) = drawnTarget(at: point) else {
+      return super.rightMouseDown(with: event)
+    }
+    endReflow()
+    applyFrames()
+    let offset = CGVector(dx: real.x - point.x, dy: real.y - point.y)
+    guard let target = hitTest(superview.map { convert(real, to: $0) } ?? real), target !== self,
+          let moved = Self.mouseEvent(event, movedBy: offset) else { return super.rightMouseDown(with: event) }
+    rightClickTarget = target
+    rightClickOffset = offset
+    forward { target.rightMouseDown(with: moved) }
+  }
+
+  public override func rightMouseDragged(with event: NSEvent) {
+    guard !isForwardingEvent, let target = rightClickTarget,
+          let moved = Self.mouseEvent(event, movedBy: rightClickOffset) else {
+      return super.rightMouseDragged(with: event)
+    }
+    forward { target.rightMouseDragged(with: moved) }
+  }
+
+  public override func rightMouseUp(with event: NSEvent) {
+    let target = isForwardingEvent ? nil : rightClickTarget
+    if !isForwardingEvent { rightClickTarget = nil }
+    guard let target, let moved = Self.mouseEvent(event, movedBy: rightClickOffset) else {
+      return super.rightMouseUp(with: event)
+    }
+    forward { target.rightMouseUp(with: moved) }
+  }
+
+  private func forward(_ send: () -> Void) {
+    isForwardingEvent = true
+    defer { isForwardingEvent = false }
+    send()
+  }
+
+  /// The view of the drawn pane under `point` (in this view) that is under it at the pane's real frame, and that
+  /// point: `point` moved back by the pane's translation.
+  private func drawnTarget(at point: CGPoint) -> (view: NSView, real: CGPoint)? {
+    guard let index = drawnPaneIndex(at: point) else { return nil }
+    let card = paneCards[index]
+    let move = SplitReflow.translation(drawing: presentedPaneFrames[index], in: card.frame, flipped: isFlipped)
+    let real = CGPoint(x: point.x - move.m41, y: point.y - move.m42)
+    guard let view = card.hitTest(real) else { return nil }
+    return (view, real)
+  }
+
+  /// `event` (a mouse event) with its window location moved by `offset`.
+  private static func mouseEvent(_ event: NSEvent, movedBy offset: CGVector) -> NSEvent? {
+    let location = CGPoint(x: event.locationInWindow.x + offset.dx, y: event.locationInWindow.y + offset.dy)
+    return NSEvent.mouseEvent(with: event.type, location: location, modifierFlags: event.modifierFlags,
+                              timestamp: event.timestamp, windowNumber: event.windowNumber, context: nil,
+                              eventNumber: event.eventNumber, clickCount: event.clickCount, pressure: event.pressure)
+  }
+
   // MARK: Building blocks
 
   private func makeCard() -> ContentCardView {
