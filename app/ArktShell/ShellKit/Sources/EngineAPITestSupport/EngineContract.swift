@@ -281,6 +281,15 @@ public struct EngineHarness {
 ///     one `.tabRecovered`, after the `.tabCrashed` and no later than the reload's `.loadingChanged(false)`. Needs
 ///     `crashTab` for the crash checks.
 ///
+/// 26. Page info and per-site permissions (#582). A settled page on a site has page info naming its tab, its site
+///     (two hosts are two origins) and its permissions, each listed once with a setting among its options; an unknown
+///     or closed tab has none. `setPermission` and `resetPermissions` change the profile of the tab they come from
+///     and apply at once: the next `pageInfo(of:)` and `sitesWithPermissions()` (the normal profile) read the change,
+///     it is announced with `.pageInfoChanged` on the site's tabs and no other site's, another site keeps its
+///     settings, and reset restores the default. Nothing is raised while the panel is open; `pageInfoDidClose(tab:)`
+///     after changes from that tab raises the reload infobar once, on that tab only. Not applicable to an engine whose
+///     `siteSettings` is nil.
+///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
 @MainActor

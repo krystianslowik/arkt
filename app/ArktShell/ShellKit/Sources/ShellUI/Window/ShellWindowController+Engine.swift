@@ -329,25 +329,20 @@ extension ShellWindowController {
 
   // MARK: Extensions (Decision 10)
 
-  /// The Extensions control, only for an engine that runs extensions.
+  /// The Extensions control and its panel (#595), only for an engine that runs extensions.
   func wireExtensions() {
-    guard engine is any EngineExtensions else { return }
+    guard let extensions = engine as? any EngineExtensions else { return }
     let button = ExtensionsButton()
-    button.onRun = { [weak self] id in self?.runExtensionAction(id) }
+    let panel = ExtensionsPanelController(extensions: extensions, button: button) { [weak self] in self?.engineWindow }
+    panel.onManage = { [weak self] in self?.onManageExtensions?() }
+    panel.onBrowseWebStore = { [weak self] in self?.open(OnboardingController.Options.chromeWebStore, inNewTab: true) }
     extensionsButton = button
+    extensionsPanel = panel
     sidebarController.view.extensionsButton = button
-    refreshExtensions()
   }
 
-  /// The window's actions; none before the engine window exists or after it closed.
+  /// The window's actions changed, or the engine window came or went: the open panel follows.
   func refreshExtensions() {
-    guard let button = extensionsButton, let extensions = engine as? any EngineExtensions else { return }
-    button.actions = engineWindow.map { extensions.extensionActions(in: $0) } ?? []
-  }
-
-  private func runExtensionAction(_ id: String) {
-    guard let engineWindow, let button = extensionsButton,
-          let extensions = engine as? any EngineExtensions else { return }
-    extensions.runExtensionAction(id, in: engineWindow, anchor: button)
+    extensionsPanel?.refresh()
   }
 }

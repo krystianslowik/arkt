@@ -81,6 +81,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public private(set) var isClosed = false
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
+  /// The Extensions panel the button opens (#595); nil with the button.
+  public internal(set) var extensionsPanel: ExtensionsPanelController?
+  /// Manage Extensions... in the Extensions panel: the app opens Settings, Extensions.
+  public var onManageExtensions: (@MainActor () -> Void)?
   /// Window > Downloads (Cmd-Shift-J) and Show All History (Cmd-Y) open the Library on a section (#132); set by
   /// `DownloadsCenter.attach(to:)`. While nil the engine's own commands run.
   public var onShowLibrary: (@MainActor (LibrarySection) -> Void)?
@@ -192,6 +196,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private(set) lazy var statusPill = makeStatusPillPresenter()
   /// The crashed tab view over a page whose process went away (#578).
   private(set) lazy var crashedTabs = makeCrashedTabPresenter()
+  /// The page info panel below the address pill (#582); see `+PageInfo`.
+  public private(set) lazy var pageInfo = makePageInfoPanel()
   /// The Ctrl-Tab switcher and this window's recent-tab list (#103).
   public let tabSwitcher = TabSwitcherController()
   /// Where the copy-link actions (#118) read and write; the app uses the general pasteboard, tests replace it.
@@ -240,7 +246,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.sessionStore = sessionStore
     self.engineHost = ShellEngineHost(window: window, cardView: root.card)
     super.init(window: window)
-    root.onSidebarStateChange = { [weak self] in self?.saveSidebarState() }
+    root.onSidebarStateChange = { [weak self] in
+      self?.saveSidebarState()
+      self?.extensionsPanel?.sidebarDidChange(isVisible: self?.isSidebarVisible ?? false)   // #595
+      self?.pageInfo.sidebarDidChange()                                              // #582
+    }
     root.onLayout = { [weak self] in
       self?.javaScriptDialogs.layoutDidFinish()                                      // #400
       self?.permissionPrompts.layoutDidFinish()
@@ -451,6 +461,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     for bar in [urlBar, toolbar.urlBar] {
       bar.onPress = { [weak self] in self?.openLocation(nil) }                        // same as Cmd-L, KB-002
       bar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
+      bar.onPressSiteGlyph = { [weak self, weak bar] in if let bar { self?.toggleSiteControls(from: bar) } }  // #582
     }
     wireToolbarActions(toolbar) { [weak self] in self?.toolbarTab }
     toolbarSetting.addObserver(self)
@@ -541,6 +552,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     urlBar.url = url
     rootView.card.toolbar.urlBar.url = url
     refreshToolbarHistory()
+    refreshPageInfo()                                                                // #582
   }
 
   /// The tab the Toolbar's Back, Forward and Reload act on and show the history of: the current tab, which in a split
@@ -823,8 +835,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     case .permissionRequested, .permissionEnded:
       permissionPrompts.handle(event)
       return
-    case .infobarsChanged:
-      infobarStrips.handle(event)
+    case .infobarsChanged, .tabFullscreenChanged:
+      infobarStrips.handle(event)                                   // #581: rows hide in HTML fullscreen
+      javaScriptDialogs.refresh()                                   // the panels follow the rows' height
+      permissionPrompts.refresh()
       return
     case .targetURLChanged:
       statusPill.handle(event)                                      // #114: a Peek's page has no row, so before the map
@@ -834,6 +848,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       return
     case .tabRecovered:
       refreshCrashedTabs()
+      return
+    case .pageInfoChanged(let tab):
+      if tab == currentTab { refreshPageInfo() }                    // #582: before the map, as a private page has no row
       return
     default:
       break
@@ -879,12 +896,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       findBar.handle(event)                                         // #134
     case .targetURLChanged:
       break                                                         // routed above, before the row lookup (#114)
-    case .tabCrashed, .tabRecovered:
-      break                                                         // routed above, before the row lookup (#578)
+    case .tabCrashed, .tabRecovered, .pageInfoChanged:
+      break                                                         // routed above, before the row lookup (#578, #582)
     case .zoomChanged:
       zoomPill.handle(event)                                        // #579
     case .tabFullscreenChanged:
-      break                                                         // no shell surface yet (#581)
+      break                                                         // routed above, before the row lookup (#581)
     }
   }
 
@@ -951,9 +968,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   // AppKit resets the standard buttons on each of these.
-  public func windowDidResize(_ notification: Notification) { reapplyTrafficLights() }
+  public func windowDidResize(_ notification: Notification) {
+    reapplyTrafficLights()
+    extensionsPanel?.windowDidResize()
+  }
   public func windowDidEndLiveResize(_ notification: Notification) { reapplyTrafficLights() }
-  public func windowWillEnterFullScreen(_ notification: Notification) { frameBeforeFullScreen = window?.frame }
+  public func windowWillEnterFullScreen(_ notification: Notification) {
+    frameBeforeFullScreen = window?.frame
+    extensionsPanel?.windowWillEnterFullScreen()
+  }
   public func windowWillExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidExitFullScreen(_ notification: Notification) { reapplyTrafficLights() }
   public func windowDidBecomeKey(_ notification: Notification) {

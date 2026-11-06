@@ -46,9 +46,9 @@ struct ChromiumEngineContractTests {
         names.insert(String(match.output.1))
       }
     }
-    #expect(names.count == 53)
+    #expect(names.count == 56)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
-    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...25))
-    #expect(Set(ContractCheck.chromiumChecks.map(\.rule)) == Set(1...24), "rule 25 joins with #577")
+    #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...26))
+    #expect(Set(ContractCheck.chromiumChecks.map(\.rule)) == Set(1...24), "rule 25 joins with #577, rule 26 with #583")
   }
 }
