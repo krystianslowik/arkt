@@ -500,6 +500,103 @@ final class WindowLifecycleTests: XCTestCase {
     }
   }
 
+  /// #669: a window the engine opens for a page of a blank or incognito window (a `window.open` popup, which would
+  /// go to Little Arkt, a `window.open` without window features, an extension's `chrome.windows.create`) is a private
+  /// window of the same kind. Its pages, the first one and any the engine opens there later, never reach the shared
+  /// sidebar or schedule a save, and it never takes over an open normal window.
+  func testEngineWindowsOpenedForAPrivatePageStayPrivate() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let spare = f.set.openWindow(opensFirstTab: false)       // a normal window with no engine window yet
+
+    for incognito in [false, true] {
+      let opener = f.set.openWindow(opensFirstTab: false)
+      if incognito { opener.makeIncognito() } else { opener.makeBlank() }
+      opener.commandBar.show(.newTab)
+      opener.commandBar.setQueryForTesting("private-opener.example")
+      opener.commandBar.commit()
+      let openerWindow = try XCTUnwrap(opener.engineWindow)
+
+      let requests: [(String, EngineWindowRequest)] = [
+        ("popup", EngineWindowRequest(kind: .page, openerWindow: openerWindow,
+                                      bounds: CGRect(x: 200, y: 200, width: 480, height: 360),
+                                      profile: EngineProfileID("default"), initialURL: EngineWorld.url("popup"),
+                                      isPopup: true)),
+        ("new window", EngineWindowRequest(kind: .reopen, openerWindow: openerWindow,
+                                           profile: EngineProfileID("default"),
+                                           initialURL: EngineWorld.url("new-window"))),
+        ("extension", EngineWindowRequest(kind: .extension, openerWindow: openerWindow,
+                                          profile: EngineProfileID("default"),
+                                          initialURL: EngineWorld.url("extension"))),
+      ]
+      for (name, request) in requests {
+        let id = try XCTUnwrap(f.engine.openEngineWindow(request), name)
+        XCTAssertTrue(f.set.littleArkts.isEmpty, "\(name): not a Little Arkt window, whose Open in writes a row")
+        XCTAssertNil(spare.engineWindow, "\(name): an open normal window is not taken over")
+        let window = try XCTUnwrap(f.set.controllers.first { $0.engineWindow == id }, name)
+        XCTAssertTrue(window.isPrivateWindow, name)
+        XCTAssertEqual(window.sidebarController.presentation, opener.sidebarController.presentation,
+                       "\(name): the same kind of window as its opener")
+        XCTAssertFalse(window.savesSession, name)
+        let page = try XCTUnwrap(window.currentTab, "\(name): the window shows its page")
+        XCTAssertEqual(window.privateTabs, [page], name)
+        XCTAssertEqual(f.engine.snapshot(of: page)?.url, request.initialURL, name)
+
+        let later = f.engine.engineCreateTab(url: EngineWorld.url("later"), in: id, opener: page)
+        XCTAssertEqual(window.privateTabs, [page, later], "\(name): a later engine tab is a private page too")
+        XCTAssertTrue(window.sidebarController.spaces.isEmpty, name)
+        XCTAssertEqual(saves, 0, "\(name): no save is scheduled")
+        XCTAssertEqual(f.source.sidebar, before, "\(name): the shared sidebar is unchanged")
+        window.window?.performClose(nil)
+      }
+      opener.window?.performClose(nil)
+    }
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+  }
+
+  /// #669: a window the engine marks as off the record is an incognito window even with no opener, and never takes
+  /// over saving the session (a Dock reopen would).
+  func testOffTheRecordEngineWindowIsAnIncognitoWindow() throws {
+    let f = try makeFixture()
+    var saves = 0
+    f.source.onDidChange = { _ in saves += 1 }
+    let before = f.source.sidebar
+    let request = EngineWindowRequest(kind: .reopen, profile: EngineProfileID("default"),
+                                      initialURL: EngineWorld.url("off-the-record"), isOffTheRecord: true)
+    let id = try XCTUnwrap(f.engine.openEngineWindow(request))
+    let window = try XCTUnwrap(f.set.controllers.first { $0.engineWindow == id })
+    XCTAssertTrue(window.isPrivateWindow)
+    XCTAssertEqual(window.sidebarController.presentation, .incognito)
+    XCTAssertFalse(window.savesSession, "an off-the-record window never saves the session")
+    let page = try XCTUnwrap(window.currentTab)
+    XCTAssertEqual(window.privateTabs, [page])
+    XCTAssertEqual(saves, 0)
+    XCTAssertEqual(f.source.sidebar, before)
+    window.window?.performClose(nil)
+  }
+
+  /// #669: the same requests from a normal window keep their normal routing: a popup goes to Little Arkt and an
+  /// extension window is a normal window.
+  func testEngineWindowsOpenedForANormalPageAreNotPrivate() throws {
+    let f = try makeFixture()
+    let opener = f.set.openWindow()
+    let openerWindow = try XCTUnwrap(opener.engineWindow)
+    let popup = try XCTUnwrap(f.engine.openEngineWindow(EngineWindowRequest(
+      kind: .page, openerWindow: openerWindow, profile: EngineProfileID("default"),
+      initialURL: EngineWorld.url("popup"), isPopup: true)))
+    XCTAssertNotNil(f.set.littleArkts.first { $0.engineWindow == popup })
+    let id = try XCTUnwrap(f.engine.openEngineWindow(EngineWindowRequest(
+      kind: .extension, openerWindow: openerWindow, profile: EngineProfileID("default"),
+      initialURL: EngineWorld.url("extension"))))
+    let window = try XCTUnwrap(f.set.controllers.first { $0.engineWindow == id })
+    XCTAssertFalse(window.isPrivateWindow)
+    XCTAssertEqual(window.sidebarController.presentation, .standard)
+    for little in f.set.littleArkts { little.window.orderOut(nil) }
+  }
+
   private func tabURLs(_ sidebar: SidebarModel.Sidebar) -> [String] {
     sidebar.nodes.values.compactMap { node in
       if case .tab(let tab) = node.kind { tab.url.absoluteString } else { nil }

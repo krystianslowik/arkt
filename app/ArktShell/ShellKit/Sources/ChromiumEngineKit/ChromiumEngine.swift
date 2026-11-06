@@ -330,6 +330,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
     return adapter
   }
 
+  /// `isOffTheRecord` stays false: the facade's request does not carry it yet (#705).
   func engineRequest(from request: any ArktWindowRequest) -> EngineWindowRequest {
     EngineWindowRequest(
       kind: EngineWindowRequestKind(facade: request.kind),

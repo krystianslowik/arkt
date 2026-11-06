@@ -169,8 +169,10 @@ public final class ShellWindowSet {
 
   /// The engine's host provider (`EngineWindowHostProvider`). A Dock reopen reuses an open window that has no engine
   /// window yet (no tab was shown, so the engine counts no window); every other request gets a new window in the
-  /// opener's Space, else the primary window's, with the requested frame.
+  /// opener's Space, else the primary window's, with the requested frame. A request for a page of a blank or
+  /// incognito window, or one the engine keeps off the record, gets a private window instead (#669).
   public func host(for request: EngineWindowRequest) -> any EngineWindowHosting {
+    if let presentation = privatePresentation(for: request) { return makePrivate(presentation, for: request) }
     if LittleArktRouting.opensInLittleArkt(request) { return makeLittleArkt(for: request).engineHost }
     if request.kind == .reopen, let reusable = controllers.first(where: { candidate in
       candidate.engineWindow == nil && !awaitingAdoption.contains { $0 === candidate }
@@ -182,6 +184,32 @@ public final class ShellWindowSet {
     let anchor = primary?.window
     let controller = make(opensFirstTab: false, origin: SessionWindowPolicy.origin(for: request))
     if let space { controller.sidebarController.showSpace(space) }
+    if let bounds = request.bounds {
+      controller.window?.setFrame(bounds, display: false)
+    } else {
+      place(controller, near: anchor)
+    }
+    awaitingAdoption.append(controller)
+    return controller.engineHost
+  }
+
+  /// How a window built for `request` is drawn when it must stay private (#669): as its opener when that is a blank
+  /// or incognito window, else incognito when the engine keeps it off the record. Nil for a normal window.
+  private func privatePresentation(for request: EngineWindowRequest) -> SidebarPresentation? {
+    if let opener = request.openerWindow,
+       let source = controllers.first(where: { $0.engineWindow == opener }), source.isPrivateWindow {
+      return source.sidebarController.presentation
+    }
+    return request.isOffTheRecord ? .incognito : nil
+  }
+
+  /// A blank or incognito window for an engine request (#669), never Little Arkt (its Open in writes a row) and never
+  /// a reused normal window. Every page the engine puts in it is a private page, and it never saves the session.
+  private func makePrivate(_ presentation: SidebarPresentation,
+                           for request: EngineWindowRequest) -> any EngineWindowHosting {
+    let anchor = primary?.window
+    let controller = make(opensFirstTab: false, origin: .engineRequested)
+    if presentation == .blank { controller.makeBlank() } else { controller.makeIncognito() }
     if let bounds = request.bounds {
       controller.window?.setFrame(bounds, display: false)
     } else {
