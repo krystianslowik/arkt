@@ -113,10 +113,12 @@ final class ManualOnboardingSchedule {
     }
   }
 
-  /// Runs everything scheduled so far, as if every delay had passed.
+  /// Runs everything scheduled so far, as if every delay had passed, and clears `delays` with it, so each batch of
+  /// delays reads on its own.
   func runAll() {
     let work = pending
     pending = []
+    delays = []
     for item in work { item() }
   }
 }
@@ -153,9 +155,12 @@ final class OnboardingTests: XCTestCase {
   }
 
   /// The finish scheduled its reveal and browser handoff: runs both as if their delays had passed, and checks the
-  /// window hands back to the browser. The overlay waits for them, never for wall time.
-  private func handOff(_ window: ShellWindowController, file: StaticString = #filePath, line: UInt = #line) {
-    XCTAssertEqual(handoff.delays.count, 2, "the finish scheduled the reveal and the handoff", file: file, line: line)
+  /// window hands back to the browser. The overlay waits for them, never for wall time. Under Reduce Motion the
+  /// reveal is at once and the handoff after 50 ms.
+  private func handOff(_ window: ShellWindowController, reduceMotion: Bool = false,
+                       file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertEqual(handoff.delays, reduceMotion ? [0, 0.05] : [0.65, 0.9],
+                   "the finish scheduled the reveal and the handoff", file: file, line: line)
     XCTAssertTrue(window.isShowingOnboarding, "the browser waits for its delay", file: file, line: line)
     handoff.runAll()
     XCTAssertFalse(window.isShowingOnboarding, "the browser shows", file: file, line: line)
@@ -287,7 +292,7 @@ final class OnboardingTests: XCTestCase {
     guard case .tab(_, _, let title)? = stub.node(row) else { return XCTFail("a New Tab row") }
     XCTAssertEqual(title, "New Tab")
     XCTAssertEqual(window.rowState(for: row), .current)
-    XCTAssertTrue(spin { window.commandBar.isVisible }, "the command bar opens")
+    XCTAssertTrue(window.commandBar.isVisible, "the command bar opens")
     XCTAssertFalse(window.rootView.card.isHidden)
     window.commandBar.hide()
     window.close()
@@ -344,7 +349,10 @@ final class OnboardingTests: XCTestCase {
     XCTAssertFalse(try stepView(onboarding).isHidden)
     XCTAssertEqual(try stepView(onboarding).primaryButton?.isEnabled, true)
     _ = Task { _ = await answer.value }
-    XCTAssertTrue(spin(timeout: 1) { hero.superview == nil }, "the hero leaves after its fade")
+    XCTAssertNotNil(hero.superview, "the hero stays for its fade")
+    XCTAssertEqual(handoff.delays, [0.22], "the hero leaves after its 200 ms fade")
+    handoff.runAll()
+    XCTAssertNil(hero.superview, "the hero leaves after its fade")
 
     onboarding.performPrimary()                                           // Import now, again
     let second = try XCTUnwrap(onboarding.view.importHero)
@@ -738,10 +746,12 @@ final class OnboardingTests: XCTestCase {
     XCTAssertEqual(onboarding.flow.step, .defaultBrowser)
     let footer: [NSView] = [onboarding.view.backButton, onboarding.view.progressLabel, onboarding.view.skipButton]
     let layers = try footer.map { try XCTUnwrap($0.layer) }
-    // The step change fades the footer in; the fold's fade starts from what is presented, so wait for the presented
-    // value to reach 1 instead of a fixed time that a loaded runner overruns.
-    XCTAssertTrue(spin { layers.allSatisfy { $0.presentation()?.opacity == 1 } }, "the footer finished fading in")
     XCTAssertEqual(layers.map(\.opacity), [1, 1, 1], "the whole footer shows before the finish")
+    // The step change fades the footer in, and the fold's fade starts from what is presented: the fade-in is run to
+    // its end by hand (and committed, so the presented value is the model's), so the fold starts from 1 without
+    // waiting on wall time.
+    for layer in layers { layer.removeAllAnimations() }
+    CATransaction.flush()
     let shownProgress = onboarding.view.progressLabel.text
     XCTAssertFalse(shownProgress.isEmpty)
     var seen: FooterAtFoldStart?
@@ -757,7 +767,7 @@ final class OnboardingTests: XCTestCase {
     onboarding.view.onSkipSetup?()
     let result = try XCTUnwrap(seen, "the fold began")
     XCTAssertEqual(result.progress, shownProgress, "the progress fades with its text, it does not blank first")
-    handOff(window)
+    handOff(window, reduceMotion: reduceMotion)
     window.commandBar.hide()
     window.close()
     return result
