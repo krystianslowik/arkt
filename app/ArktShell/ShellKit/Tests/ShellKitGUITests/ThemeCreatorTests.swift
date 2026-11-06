@@ -14,10 +14,14 @@ final class ThemeCreatorTests: XCTestCase {
     let source: ModelSidebarSource
     let controller: ShellWindowController
     let ids: [SpaceID]
+    let engine = InMemoryEngine()
+    /// One pinned tab per Space when the harness was made `withTabs`, in the order of `ids`.
+    private(set) var tabs: [NodeID] = []
     let performer = RecordingPerformer()
 
     /// Two Spaces; the first has a two-colour sand theme at 80 % ("Studio"), the second the default theme.
-    init(appearance: NSAppearance.Name = .aqua) {
+    /// `withTabs` adds a pinned tab to each.
+    init(appearance: NSAppearance.Name = .aqua, withTabs: Bool = false) throws {
       var sidebar = SidebarModel.Sidebar()
       let blue = ThemePad.color(ThemePadPoint(hue: 216, tone: 0.74))
       let copper = ThemePad.color(ThemePadPoint(hue: 27, tone: 0.34))
@@ -25,8 +29,14 @@ final class ThemeCreatorTests: XCTestCase {
         baseColors: [blue, copper].map { SidebarModel.RGBA(red: $0.red, green: $0.green, blue: $0.blue) },
         texture: "sand", noiseFactor: 0.4, opacity: 0.8, isDark: true)
       ids = [sidebar.addSpace(title: "Studio", theme: theme), sidebar.addSpace(title: "Plain")]
+      if withTabs {
+        for (index, space) in ids.enumerated() {
+          tabs.append(try sidebar.addTab(url: URL(string: "https://example.com/\(index)")!, title: "Tab \(index)",
+                                         in: .pinned(space)))
+        }
+      }
       source = ModelSidebarSource(sidebar: sidebar)
-      controller = ShellWindowController(engine: InMemoryEngine(), sidebar: source)
+      controller = ShellWindowController(engine: engine, sidebar: source)
       controller.window?.appearance = NSAppearance(named: appearance)
       controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1200, height: 800), display: false)
       controller.window?.orderFront(nil)
@@ -92,7 +102,7 @@ final class ThemeCreatorTests: XCTestCase {
   // MARK: - Opening and layout
 
   func testEditThemeOpensThePopoverBesideTheSpaceName() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     XCTAssertTrue(popover.isDescendant(of: harness.controller.rootView))
     XCTAssertEqual(popover.frame.size, NSSize(width: 300, height: ThemeCreatorMetrics.height))
@@ -112,7 +122,7 @@ final class ThemeCreatorTests: XCTestCase {
   }
 
   func testLayoutMatchesTheDesign() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     XCTAssertEqual(popover.pad.frame.size, NSSize(width: 272, height: 212))
     XCTAssertEqual(popover.pad.frame.minX, 14)
@@ -138,7 +148,7 @@ final class ThemeCreatorTests: XCTestCase {
   /// A dot drag re-tints the window on every event with no animation and stores nothing until it ends; the end
   /// stores the theme and the window does not crossfade.
   func testADotDragPreviewsLiveAndStoresOnRelease() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let background = harness.controller.themeBackground
     background.reducesMotion = { false }
     let popover = try harness.open()
@@ -159,7 +169,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// The sidebar text follows the drag: a pale colour in light mode draws dark text; a deep one light text.
   func testSidebarTextToneFollowsTheDrag() throws {
-    let harness = Harness(appearance: .aqua)
+    let harness = try Harness(appearance: .aqua)
     let popover = try harness.open()
     let pad = popover.pad
     harness.sidebarController.themeContext = ThemeContext(appearance: .light)
@@ -176,7 +186,7 @@ final class ThemeCreatorTests: XCTestCase {
   }
 
   func testTheColourCountButtonAddsAndRemovesTheSecondColour() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     XCTAssertEqual(popover.countButton.accessibilityLabel(), "Use one colour")
     popover.countButton.onPress?()
@@ -191,7 +201,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// Dragged more than 24 pt off the pad and let go, a dot is removed; the last one cannot be.
   func testDraggingADotOffThePadRemovesIt() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     let pad = popover.pad
     let outside = CGPoint(x: pad.bounds.maxX + 40, y: 20)
@@ -207,7 +217,7 @@ final class ThemeCreatorTests: XCTestCase {
   }
 
   func testADoubleClickOnThePadAddsTheSecondColourThere() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     popover.countButton.onPress?()
     let spot = ThemePad.location(of: ThemePadPoint(hue: 90, tone: 0.5), in: popover.pad.bounds.size)
@@ -220,7 +230,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// None disables the amount slider and keeps its value; a texture chosen again draws at it.
   func testTextureNoneKeepsTheAmount() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     popover.swatches.select(0, byPointer: true)
     XCTAssertNil(harness.stored?.texture)
@@ -236,7 +246,7 @@ final class ThemeCreatorTests: XCTestCase {
   }
 
   func testSlidersStoreOnReleaseAndKeysStepFivePercent() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     let slider = popover.opacitySlider
     let quarter = CGPoint(x: slider.bounds.width * 0.25, y: slider.bounds.midY)
@@ -253,7 +263,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// A preset picked from the header while the creator is open moves the dots to its colours.
   func testAPresetPickedWhileOpenMovesTheDots() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     harness.source.setTheme(harness.ids[0], to: SpaceThemeCatalog.paper)
     XCTAssertEqual(harness.creator?.model.theme, SpaceThemeCatalog.paper)
@@ -266,7 +276,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// Arrows move the focused dot (2 degrees, 2 %; Shift 10), Delete removes it; keyboard changes play no haptics.
   func testDotKeysMoveAndDeleteWithoutHaptics() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     let dot = try XCTUnwrap(popover.pad.dots.first)
     let start = dot.point
@@ -284,7 +294,7 @@ final class ThemeCreatorTests: XCTestCase {
   /// A pointer drag across a preset hue plays `.alignment`; onto the tone limit `.levelChange`; a texture click
   /// `.alignment`.
   func testPointerDragsPlayTheHapticMap() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     let pad = popover.pad
     let size = pad.bounds.size
@@ -312,7 +322,7 @@ final class ThemeCreatorTests: XCTestCase {
   }
 
   func testAccessibilityRolesLabelsAndValues() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     XCTAssertEqual(popover.accessibilityRole(), .group)
     XCTAssertEqual(popover.accessibilitySubrole(), .dialog)
@@ -346,7 +356,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// Escape closes; every change stays applied, and Edit > Undo reverts the whole session in one step.
   func testEscapeClosesAndOneUndoRevertsTheSession() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let window = try XCTUnwrap(harness.controller.window)
     let before = harness.stored
     let popover = try harness.open()
@@ -371,7 +381,7 @@ final class ThemeCreatorTests: XCTestCase {
   /// Real Tab and Escape key events through the window: Tab follows the key view loop (Shift-Tab back), Escape
   /// closes.
   func testTabAndEscapeThroughTheWindow() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let window = try XCTUnwrap(harness.controller.window)
     let popover = try harness.open()
     let dots = popover.pad.dots
@@ -391,7 +401,7 @@ final class ThemeCreatorTests: XCTestCase {
   /// window resigning key. A click on the Space's options button keeps it, so a preset can be picked while it is
   /// open. It stays level with the Space name when the window resizes.
   func testOutsideClickAndResignKeyCloseAndResizeKeepsItAnchored() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let window = try XCTUnwrap(harness.controller.window)
     let root = harness.controller.rootView
     var popover = try harness.open()
@@ -437,7 +447,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// The pad field and texture previews are built off the main thread; the popover shows them once they are ready.
   func testThePadFieldAndPreviewsArriveFromTheBackground() async throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open()
     let scale = harness.controller.window?.backingScaleFactor ?? 2
     await ThemeCreatorImages.prepare(scale: scale).value
@@ -449,7 +459,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// A Space on the default theme starts at 80 % and stores nothing until something changes.
   func testANewThemeStartsAtEightyPercentAndStoresOnlyAChange() throws {
-    let harness = Harness()
+    let harness = try Harness()
     let popover = try harness.open(harness.ids[1])
     XCTAssertEqual(popover.opacitySlider.value, 0.8, accuracy: 1e-9)
     XCTAssertEqual(harness.source.space(harness.ids[1])?.usesDefaultTheme, true)
@@ -461,7 +471,7 @@ final class ThemeCreatorTests: XCTestCase {
 
   /// The window draws through the automatic contrast rule in its own appearance.
   func testTheWindowAppearanceDrivesTheContrastRule() throws {
-    let harness = Harness(appearance: .darkAqua)
+    let harness = try Harness(appearance: .darkAqua)
     XCTAssertEqual(harness.sidebarController.themeContext.appearance, .dark)
     harness.controller.window?.appearance = NSAppearance(named: .aqua)
     waitUntil("the light appearance reaches the sidebar") {
@@ -470,6 +480,92 @@ final class ThemeCreatorTests: XCTestCase {
     let stored = try XCTUnwrap(harness.stored)
     XCTAssertEqual(harness.controller.themeBackground.themes.first,
                    ThemeContrast.drawn(stored, in: ThemeContext(appearance: .light)))
+    harness.controller.close()
+  }
+
+  // MARK: - The keyboard after closing (#696)
+
+  /// Whether the window's keyboard is inside the open creator.
+  private static func keyboardIsInPopover(_ harness: Harness) throws -> Bool {
+    let popover = try XCTUnwrap(harness.popover)
+    return (harness.controller.window?.firstResponder as? NSView)?.isDescendant(of: popover) ?? false
+  }
+
+  /// `node`'s page view, shown and holding the keyboard.
+  private static func focusPage(of node: NodeID, _ harness: Harness) throws -> NSView {
+    harness.controller.activate(node: node)
+    let tab = try XCTUnwrap(harness.controller.tabsByNode[node])
+    let page = try XCTUnwrap(harness.engine.contentView(for: tab))
+    XCTAssertTrue(harness.controller.window?.makeFirstResponder(page) ?? false)
+    return page
+  }
+
+  /// Escape, a click outside and the window resigning key each give the keyboard back to the page that had it.
+  func testEveryWayOfClosingGivesTheKeyboardBackToThePage() throws {
+    let harness = try Harness(withTabs: true)
+    let window = try XCTUnwrap(harness.controller.window)
+    let root = harness.controller.rootView
+    let page = try Self.focusPage(of: harness.tabs[0], harness)
+    let closings: [(String, () throws -> Void)] = [
+      ("Escape", { try XCTUnwrap(harness.popover?.pad.dots.first).keyDown(with: try harness.key(53)) }),
+      ("Escape through the window", { window.sendEvent(try harness.key(53)) }),
+      ("a click outside", {
+        let outside = NSPoint(x: root.bounds.maxX - 40, y: root.bounds.midY)
+        try XCTUnwrap(harness.creator).handleOutsideClick(try harness.event(.leftMouseDown, at: outside, in: root))
+      }),
+      ("the window resigning key", {
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+      }),
+    ]
+    for (way, close) in closings {
+      _ = try harness.open()
+      XCTAssertTrue(try Self.keyboardIsInPopover(harness), "\(way): the creator holds the keyboard while open")
+      try close()
+      XCTAssertNil(harness.creator, "\(way) closes")
+      XCTAssertTrue(window.firstResponder === page, "\(way): the page has the keyboard again")
+    }
+    harness.controller.close()
+  }
+
+  /// Opened while a sidebar row had the keyboard (Ctrl-Space), it gives the keyboard back to that row.
+  func testClosingGivesTheKeyboardBackToTheSidebarRow() throws {
+    let harness = try Harness(withTabs: true)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: harness.tabs[0])
+    harness.controller.revealCurrentTab(nil)
+    let outline = try XCTUnwrap(harness.page(harness.ids[0])?.outlineController)
+    let row = outline.row(for: harness.tabs[0])
+    XCTAssertTrue(window.firstResponder === outline.outlineView)
+    XCTAssertEqual(outline.outlineView.keyboardFocusRow, row)
+
+    _ = try harness.open()
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness))
+    window.sendEvent(try harness.key(53))
+    XCTAssertNil(harness.creator)
+    XCTAssertTrue(window.firstResponder === outline.outlineView, "the sidebar has the keyboard again")
+    XCTAssertEqual(outline.outlineView.keyboardFocusRow, row, "on the same row")
+    harness.controller.close()
+  }
+
+  /// The Space changes while the creator is open, which closes it: the row that had the keyboard is on a page off
+  /// screen, so the current tab's page takes the keyboard.
+  func testTheCurrentPageTakesTheKeyboardWhenTheSpaceChanged() throws {
+    let harness = try Harness(withTabs: true)
+    let window = try XCTUnwrap(harness.controller.window)
+    harness.controller.activate(node: harness.tabs[0])
+    harness.controller.revealCurrentTab(nil)
+    let outline = try XCTUnwrap(harness.page(harness.ids[0])?.outlineController.outlineView)
+    XCTAssertTrue(window.firstResponder === outline)
+
+    _ = try harness.open()
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness))
+    harness.sidebarController.showSpace(harness.ids[1])
+    XCTAssertEqual(harness.sidebarController.currentSpace, harness.ids[1], "the Space changed")
+    XCTAssertNil(harness.creator, "the Space change closes the creator")
+    let tab = try XCTUnwrap(harness.controller.currentTab, "the window shows a tab")
+    let current = try XCTUnwrap(harness.engine.contentView(for: tab))
+    XCTAssertTrue(current.window === window)
+    XCTAssertTrue(window.firstResponder === current, "the current tab's page has the keyboard")
     harness.controller.close()
   }
 }

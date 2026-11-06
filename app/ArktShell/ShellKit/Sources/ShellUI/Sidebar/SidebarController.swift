@@ -335,10 +335,14 @@ public final class SidebarController {
   private func commit(space id: SpaceID, info: SidebarSpaceInfo, index: Int) {
     guard let page = pages[id] else { return }
     let changed = currentSpace != id
-    if changed, let creator = themeCreator, creator.spaceID != id { creator.close(animated: true) }   // #410
+    // A popover leaving with the page does not give the keyboard back to a row on that page (#696).
+    let leaving = changed ? currentSpace.flatMap { pages[$0] } : nil
+    if changed, let creator = themeCreator, creator.spaceID != id {                 // #410
+      creator.close(animated: true, leaving: leaving)
+    }
     if changed, let old = currentSpace { pages[old]?.outlineController.clearSelection() }   // design 6
     if changed { folderPreview.hide(animated: false) }                              // BH-093: the page left
-    if changed { editPin?.close(animated: false) }                                  // #363: its row left
+    if changed { editPin?.close(animated: false, leaving: leaving) }                // #363: its row left
     // The page leaving the screen ends its folder springs, so no closed folder's rows wait there for its return.
     if changed, let old = currentSpace { pages[old]?.outlineController.folderMotion.settleNow() }
     currentSpace = id

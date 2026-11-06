@@ -281,6 +281,10 @@ final class FavoritesCollectionView: NSCollectionView {
   var onKeyboardReturn: (@MainActor () -> Void)?
   var onKeyboardEscape: (@MainActor () -> Void)?
   var onKeyboardFocusResigned: (@MainActor () -> Void)?
+  /// The tile holding the keyboard cursor, and putting it back on a tile (false when the tile is gone), for a popover
+  /// that gives the keyboard back when it closes (#696).
+  var keyboardCursor: (@MainActor () -> NodeID?)?
+  var restoreKeyboardCursor: (@MainActor (NodeID) -> Bool)?
   /// The context menu of the tile at an index path (design 3.3); nil: none.
   var menuProvider: (@MainActor (IndexPath) -> NSMenu?)?
 
@@ -498,6 +502,12 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
         onKeyboardFocusExit?()
       }
       favoritesCollectionView.onKeyboardFocusResigned = { [weak self] in self?.keyboardFocusID = nil }
+      favoritesCollectionView.keyboardCursor = { [weak self] in self?.keyboardFocusID }
+      favoritesCollectionView.restoreKeyboardCursor = { [weak self] id in
+        guard let self, nodeIDs.contains(id) else { return false }
+        keyboardFocusID = id
+        return true
+      }
     }
     collectionView.dataSource = self
     collectionView.delegate = self

@@ -31,6 +31,8 @@ final class ThemeCreatorController {
   private var outsideClickMonitor: Any?
   private var imagesObserver: (any NSObjectProtocol)?
   private var resignKeyObserver: (any NSObjectProtocol)?
+  /// The responder that had the keyboard before the popover opened; it gets it back on close (#696).
+  private var keyboardReturn = KeyboardReturn(from: nil)
   private(set) var isClosed = false
   /// Views a click may land on without closing the popover: the Space's options button, whose Theme submenu picks
   /// a preset while the creator is open.
@@ -87,6 +89,7 @@ final class ThemeCreatorController {
     host.addSubview(view, positioned: .above, relativeTo: nil)
     view.layoutSubtreeIfNeeded()
     view.updateKeyViewLoop()
+    keyboardReturn = KeyboardReturn(from: host.window)
     if let first = view.pad.dots.first { host.window?.makeFirstResponder(first) }
     animateOpen()
     outsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
@@ -114,8 +117,10 @@ final class ThemeCreatorController {
     if !passesThrough { close(animated: true) }
   }
 
-  /// Closes the popover (fade out 0.12 s), keeps every change and registers one undo step for the session.
-  func close(animated: Bool) {
+  /// Closes the popover (fade out 0.12 s), keeps every change and registers one undo step for the session. The
+  /// keyboard goes back to the responder that had it before the popover opened, unless that one is inside `leaving`
+  /// (the page of the Space the sidebar leaves).
+  func close(animated: Bool, leaving: NSView? = nil) {
     guard !isClosed else { return }
     isClosed = true
     if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
@@ -127,7 +132,9 @@ final class ThemeCreatorController {
     sidebar?.previewTheme(nil, for: spaceID)
     registerUndo()
     let window = view.window
-    if let first = window?.firstResponder as? NSView, first.isDescendant(of: view) { window?.makeFirstResponder(nil) }
+    if let window, let first = window.firstResponder as? NSView, first.isDescendant(of: view) {
+      keyboardReturn.give(in: window, leaving: leaving)
+    }
     guard animated, let layer = view.layer, view.window != nil else {
       view.removeFromSuperview()
       onClose?()
