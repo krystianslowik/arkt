@@ -186,4 +186,51 @@ final class JavaScriptDialogWindowTests: XCTestCase {
     XCTAssertLessThanOrEqual(dim.frame.maxY, card.toolbar.frame.minY + 0.5, "below the Toolbar")
     XCTAssertEqual(dim.layer?.cornerRadius, 0)
   }
+
+  private func screenFrame(of view: NSView) throws -> NSRect {
+    try XCTUnwrap(view.window).convertToScreen(view.convert(view.bounds, to: nil))
+  }
+
+  /// A row arriving while the dialog is up pushes the panel and the dim below it; the same dim stays.
+  func testARowArrivingWhileADialogIsUpMovesThePanelAndTheDimBelowIt() throws {
+    let (tab, page, dim) = try dimmedPage()
+    let panel = try XCTUnwrap(controller.javaScriptDialogs.panel(for: tab))
+    let pageTop = try screenFrame(of: page).maxY
+    XCTAssertEqual(try screenFrame(of: dim).maxY, pageTop, accuracy: 0.5, "no row: the dim reaches the page's top")
+
+    engine.raiseInfobar(in: tab, message: "One")
+    let strip = try XCTUnwrap(controller.infobarStrips.strip(for: tab))
+    let rowsBottom = pageTop - InfobarMetrics.rowHeight
+    XCTAssertEqual(strip.panel.frame.minY, rowsBottom, accuracy: 0.5)
+    XCTAssertEqual(panel.panel.frame.maxY, rowsBottom, accuracy: 0.5, "the panel hangs below the row")
+    XCTAssertEqual(try screenFrame(of: dim).maxY, rowsBottom, accuracy: 0.5, "the dim leaves the row clear")
+    XCTAssertTrue(panel.pageDim === dim, "the same dim, moved")
+    XCTAssertFalse(dim.isLeaving)
+  }
+
+  /// HTML fullscreen hides the rows: the panel and the dim go up to the page's top, and back below the rows after.
+  func testHTMLFullscreenWithADialogUpMovesThePanelAndTheDimToThePagesTop() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    engine.raiseInfobar(in: tab, message: "One")
+    engine.raiseInfobar(in: tab, message: "Two")
+    _ = try XCTUnwrap(engine.raiseDialog(in: tab, kind: .alert, message: "Dimmed"))
+    let panel = try XCTUnwrap(controller.javaScriptDialogs.panel(for: tab))
+    let dim = try XCTUnwrap(panel.pageDim)
+    let page = try XCTUnwrap(engine.contentView(for: tab))
+    let pageTop = try screenFrame(of: page).maxY
+    let rowsBottom = pageTop - 2 * InfobarMetrics.rowHeight
+    XCTAssertEqual(try screenFrame(of: dim).maxY, rowsBottom, accuracy: 0.5)
+
+    engine.setTabFullscreen(tab, true)
+    XCTAssertNil(controller.infobarStrips.strip(for: tab), "no row in HTML fullscreen")
+    XCTAssertEqual(panel.panel.frame.maxY, pageTop, accuracy: 0.5, "the panel at the page's top")
+    XCTAssertEqual(try screenFrame(of: dim).maxY, pageTop, accuracy: 0.5, "the dim covers the whole page")
+
+    engine.setTabFullscreen(tab, false)
+    XCTAssertNotNil(controller.infobarStrips.strip(for: tab))
+    XCTAssertEqual(panel.panel.frame.maxY, rowsBottom, accuracy: 0.5, "back below the rows")
+    XCTAssertEqual(try screenFrame(of: dim).maxY, rowsBottom, accuracy: 0.5)
+    XCTAssertTrue(panel.pageDim === dim)
+  }
 }

@@ -135,7 +135,7 @@ final class LittleArktDialogTests: XCTestCase {
     let panel = try XCTUnwrap(scene.little.javaScriptDialogs.panel(for: scene.tab))
     let card = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
     let page = try XCTUnwrap(card.window).convertToScreen(card.convert(card.bounds, to: nil))
-    let top = page.maxY - DialogPanel.anchorInset
+    let top = page.maxY                                     // a page dialog hangs from the top edge (#693)
 
     scene.engine.raiseInfobar(in: scene.tab, message: "One")
     XCTAssertEqual(panel.panel.frame.maxY, top - InfobarMetrics.rowHeight, accuracy: 0.5, "below the row (#581)")

@@ -94,14 +94,22 @@ final class InfobarWindowTests: XCTestCase {
     return try XCTUnwrap(page.window).convertToScreen(page.convert(page.bounds, to: nil)).maxY
   }
 
-  /// The panel's top sits `anchorInset` below the rows, or below the page's top without any; it never overlaps a row.
+  /// The panel's top sits on the rows' bottom edge (a page dialog, #693) or `anchorInset` below it (a permission
+  /// prompt), at the page's top without any rows; it never overlaps a row. A page dialog's dim starts there too.
   private func assertBelowRows(_ panel: DialogPanel, of tab: TabID, rows: Int, _ message: String,
                                file: StaticString = #filePath, line: UInt = #line) throws {
-    let expectedTop = try pageTop(of: tab) - CGFloat(rows) * InfobarMetrics.rowHeight - DialogPanel.anchorInset
-    XCTAssertEqual(panel.panel.frame.maxY, expectedTop, accuracy: 0.5, message, file: file, line: line)
+    let rowsBottom = try pageTop(of: tab) - CGFloat(rows) * InfobarMetrics.rowHeight
+    let inset = panel.attachment == .topEdge ? 0 : DialogPanel.anchorInset
+    XCTAssertEqual(panel.panel.frame.maxY, rowsBottom - inset, accuracy: 0.5, message, file: file, line: line)
     if let strip = controller.infobarStrips.strip(for: tab) {
       XCTAssertFalse(panel.panel.frame.intersects(strip.panel.frame), "\(message): it overlaps a row", file: file,
                      line: line)
+      XCTAssertEqual(strip.panel.frame.minY, rowsBottom, accuracy: 0.5, "\(message): the strip", file: file,
+                     line: line)
+    }
+    if let dim = panel.pageDim {
+      let dimFrame = try XCTUnwrap(dim.window).convertToScreen(dim.convert(dim.bounds, to: nil))
+      XCTAssertEqual(dimFrame.maxY, rowsBottom, accuracy: 0.5, "\(message): the dim's top", file: file, line: line)
     }
   }
 
