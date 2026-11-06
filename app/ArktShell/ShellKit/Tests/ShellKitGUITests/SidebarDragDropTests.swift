@@ -676,6 +676,63 @@ final class SidebarDragDropTests: XCTestCase {
     XCTAssertEqual(drop.preview.indicatorY, first, accuracy: 0.01)
   }
 
+  /// A fresh slot opens with the gap: frame by frame, it stays inside the opening, never over the row above's
+  /// background or the next row's, whether the drag comes from outside, from a folder target or from a split target.
+  func testAFreshSlotOpensWithTheGapAndNeverCoversARow() throws {
+    let world = try Self.makeWorld()
+    let inset = SidebarMetrics.rowBackgroundInsetY
+    for before in ["outside", "folder", "split"] {
+      let harness = Harness(world.sidebar)
+      let drop = try harness.drop()
+      let payload = harness.payload([world.today[0]])
+      let outline = try harness.outline().outlineView
+      switch before {
+      case "folder": drop.update(at: try harness.point(world.folder, y: 0.5), payload: payload)
+      case "split": drop.update(at: try harness.point(world.today[2], y: 0.5, x: 0.8), payload: payload)
+      default: break
+      }
+      harness.motionTime += 0.02
+      drop.preview.tick(at: harness.motionTime)
+      let gapRow = try harness.row(world.today[1])
+      drop.update(at: try harness.point(world.today[1], y: 0.1), payload: payload)
+      let above = outline.rect(ofRow: gapRow - 1).maxY - inset
+      for frame in 0...24 {
+        let t = harness.motionTime + Double(frame) / 120
+        drop.preview.tick(at: t)
+        let slot = slotRect(drop.preview)
+        let next = outline.rect(ofRow: gapRow).minY + CGFloat(drop.preview.offset(ofRow: gapRow, at: t)) + inset
+        XCTAssertLessThanOrEqual(slot.maxY, next + 0.01, "\(before), frame \(frame): over the next row")
+        XCTAssertGreaterThanOrEqual(slot.minY, above - 0.01, "\(before), frame \(frame): over the row above")
+        XCTAssertLessThanOrEqual(slot.height, SidebarDropCanvas.slotHeight + 0.01)
+      }
+      drop.preview.tick(at: harness.motionTime + 2)
+      XCTAssertEqual(slotRect(drop.preview).height, SidebarDropCanvas.slotHeight, accuracy: 0.01, before)
+      XCTAssertEqual(drop.preview.indicatorY, outline.rect(ofRow: gapRow).minY + SidebarMetrics.rowPitch / 2,
+                     accuracy: 0.01, before)
+    }
+  }
+
+  /// The slot's colors are set without an implicit animation: the first slot after launch or a theme change shows
+  /// its fill at once under the 0.12 s fade, not easing in over Core Animation's default 0.25 s.
+  func testTheSlotColorsDoNotAnimate() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    let payload = harness.payload([world.today[0]])
+    let point = try harness.point(world.today[1], y: 0.1)
+    drop.update(at: point, payload: payload)
+    drop.exit()
+    CATransaction.flush()                                             // the slot is on screen, as after a launch
+    for appearance in [NSAppearance.Name.darkAqua, .aqua] {           // the Space's text tone flips between drags
+      drop.preview.canvasView.appearance = NSAppearance(named: appearance)
+      drop.preview.slotLayer.removeAllAnimations()
+      drop.update(at: point, payload: payload)
+      XCTAssertEqual(drop.preview.slotLayer.animationKeys() ?? [], ["fade"], "\(appearance.rawValue)")
+      drop.exit()
+      CATransaction.flush()
+    }
+  }
+
   /// Reduce Motion variant, the boundary line: no gap opens, so no slot is drawn over the rows; the `dragHintEdge`
   /// line marks the row boundary instead.
   func testReduceMotionDrawsTheBoundaryLineInsteadOfTheSlot() throws {

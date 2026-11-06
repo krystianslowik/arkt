@@ -5,12 +5,15 @@ import Motion
 /// marks the insertion point, and a highlight marks a folder or tab the drop acts on.
 ///
 /// The insertion point (#686, design/drag-hint-focus-ring): a 30 pt slot in the open gap, in the drag hint fill and
-/// edge, riding the gap's spring. Reduce Motion variant, the boundary line: no gap opens, so nothing is drawn over the
-/// rows; a 2 pt `dragHintEdge` line marks the row boundary. Both fade in over `SidebarDropMotion.indicatorFade`.
+/// edge. A fresh slot opens with its gap (its middle and height follow the gap row's shift, so it never covers a
+/// row); moving to another gap, it travels on the gap's spring from where it is. Reduce Motion variant, the boundary
+/// line: no gap opens, so nothing is drawn over the rows; a 2 pt `dragHintEdge` line marks the row boundary.
+/// Both fade in over `SidebarDropMotion.indicatorFade`.
 ///
 /// Frame cost: nothing here lays out or moves a view. Rows move through their layer's `sublayerTransform`, the
 /// slot, the line and the highlight are layers of one view that covers the outline, and every frame sets them inside
-/// one transaction with actions disabled. The indicator's size is set once per target; a frame sets its position.
+/// one transaction with actions disabled. A frame sets the indicator's position, and its height only while a fresh
+/// slot opens with its gap; the width and colors are set once per target.
 /// Springs retarget only when the target changes; a frame only samples them.
 @MainActor
 public final class SidebarDropPreview {
@@ -48,6 +51,10 @@ public final class SidebarDropPreview {
   private var line = DropGapSprings<Int>()
   private var target: SidebarDropTarget?
   private var lineShown = false
+  /// A fresh slot opens with its gap: its middle and height come from the gap row's shift until the target moves.
+  private var slotFollowsGap = false
+  private var gapRow = 0
+  private var gapBoundary: Double = 0
   private var link: CADisplayLink?
 
   init(outline: SidebarOutlineView) {
@@ -79,10 +86,16 @@ public final class SidebarDropPreview {
       let style: IndicatorStyle = reduce ? .boundaryLine : .slot
       let y = reduce ? boundary : boundary + gap / 2
       if lineShown && style == .slot && indicatorStyle == .slot {
+        // Moving from one gap to another: the slot travels from where it is shown now.
+        if slotFollowsGap { line.place(0, at: Double(indicatorY), time: t) }
         line.retarget([0: y], at: t, parameters: SidebarDropMotion.makeRoom)
+        slotFollowsGap = false
       } else {
-        line.place(0, at: y, time: t)                 // appears in place; under Reduce Motion it never travels
+        line.place(0, at: y, time: t)                 // under Reduce Motion it never travels
+        slotFollowsGap = style == .slot               // a fresh slot opens with the gap instead of over the rows
       }
+      self.gapRow = gapRow
+      gapBoundary = boundary
       indicatorStyle = style
       switch style {
       case .slot:
@@ -160,8 +173,16 @@ public final class SidebarDropPreview {
       if !CATransform3DEqualToTransform(layer.sublayerTransform, transform) { layer.sublayerTransform = transform }
     }
     if lineShown {
-      indicatorY = CGFloat(line.offset(of: 0, at: t))
-      canvas.placeIndicator(atY: indicatorY)
+      var openness: CGFloat = 1
+      if slotFollowsGap {
+        let pitch = Double(SidebarMetrics.rowPitch)
+        let open = gapRow < outline.numberOfRows ? rows.offset(of: gapRow, at: t) : pitch   // past the last row: room
+        indicatorY = CGFloat(gapBoundary + open / 2)
+        openness = CGFloat(min(max(open / pitch, 0), 1))
+      } else {
+        indicatorY = CGFloat(line.offset(of: 0, at: t))
+      }
+      canvas.placeIndicator(atY: indicatorY, openness: openness)
     }
     CATransaction.commit()
     if rows.isSettled(at: t) { rows.prune(at: t) }
@@ -283,6 +304,7 @@ final class SidebarDropCanvas: NSView {
 
   private var style: SidebarDropPreview.IndicatorStyle = .slot
   private var indicatorMidX: CGFloat = 0
+  private var indicatorSize: CGSize = .zero
 
   private func layer(for style: SidebarDropPreview.IndicatorStyle) -> CALayer {
     style == .slot ? slot : line
@@ -302,18 +324,31 @@ final class SidebarDropCanvas: NSView {
     let size = CGSize(width: max(width, 0), height: style == .slot ? Self.slotHeight : Self.lineHeight)
     self.style = style
     indicatorMidX = x + size.width / 2
+    indicatorSize = size
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    if layer.bounds.size != size { layer.bounds = CGRect(origin: .zero, size: size) }
+    if layer.opacity == 0 { applyColors() }           // no implicit color animation under the fade
+    setSize(of: layer, height: size.height)
     CATransaction.commit()
-    if layer.opacity == 0 { applyColors() }
     fade(other, shown: false)
     fade(layer, shown: true)
   }
 
-  /// Puts the indicator's middle at `y` (view coordinates). Called every frame: it sets one position, nothing else.
-  func placeIndicator(atY y: CGFloat) {
-    layer(for: style).position = layerPoint(CGPoint(x: indicatorMidX, y: y))
+  /// Puts the indicator's middle at `y` (view coordinates). Called every frame inside the caller's transaction: it
+  /// sets a position, and while a fresh slot's gap opens (`openness` under 1) the slot's height, a layer property;
+  /// no view lays out.
+  func placeIndicator(atY y: CGFloat, openness: CGFloat = 1) {
+    let layer = layer(for: style)
+    if style == .slot { setSize(of: layer, height: indicatorSize.height * min(max(openness, 0), 1)) }
+    layer.position = layerPoint(CGPoint(x: indicatorMidX, y: y))
+  }
+
+  /// `layer` at the indicator's width and `height`, with the corner radius never over half the height.
+  private func setSize(of layer: CALayer, height: CGFloat) {
+    let size = CGSize(width: indicatorSize.width, height: height)
+    guard layer.bounds.size != size else { return }
+    layer.bounds = CGRect(origin: .zero, size: size)
+    if layer === slot { slot.cornerRadius = min(Self.slotCornerRadius, height / 2) }
   }
 
   /// Highlights `rect` (view coordinates), or hides the highlight for nil.
