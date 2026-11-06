@@ -23,7 +23,10 @@ extension ShellWindowController {
     isPrivateWindow = true
     commandBar.onOpen = { [weak self] url, _ in self?.openPrivately(url) }
     sidebarController.onPasteAndGo = { [weak self] url in self?.openPrivately(url) }
-    sidebarController.view.privatePages.onSelect = { [weak self] tab in self?.selectPrivatePage(tab) }
+    let pages = sidebarController.view.privatePages
+    pages.onSelect = { [weak self] tab in self?.selectPrivatePage(tab) }
+    pages.onClose = { [weak self] tab in self?.closePrivatePageFromRow(tab) }
+    pages.onToggleMute = { [weak self] tab in self?.toggleMute(ofPrivatePage: tab) }
     updateEmptyState()
     refreshPrivatePages()
   }
@@ -117,6 +120,18 @@ extension ShellWindowController {
     return true
   }
 
+  /// A row's close button: the page closes as Cmd-W closes it, the window with the last page.
+  func closePrivatePageFromRow(_ tab: TabID) {
+    guard privateTabs.contains(tab) else { return }
+    if !closePrivatePage(tab) { window?.performClose(nil) }
+  }
+
+  /// A row's mute button: mutes the page, or unmutes a muted one. The page keeps playing; the shown page stays.
+  func toggleMute(ofPrivatePage tab: TabID) {
+    guard privateTabs.contains(tab), let snapshot = engine.snapshot(of: tab) else { return }
+    engine.setMuted(tab, muted: !snapshot.isMuted)
+  }
+
   // MARK: The Pages list and the cap (#668)
 
   /// Hands the Pages list its rows: every private page in open order, the shown one current.
@@ -125,7 +140,8 @@ extension ShellWindowController {
     let rows = privatePageOrder.pages.compactMap { tab -> PrivatePageRowContent? in
       guard let snapshot = engine.snapshot(of: tab) else { return nil }
       return PrivatePageRowContent(tab: tab, title: snapshot.title, url: snapshot.url, favicon: snapshot.faviconData,
-                                   isShown: tab == currentTab)
+                                   isShown: tab == currentTab,
+                                   audio: TabAudio(isAudible: snapshot.isAudible, isMuted: snapshot.isMuted))
     }
     sidebarController.view.privatePages.setPages(rows)
   }

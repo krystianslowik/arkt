@@ -8,6 +8,8 @@ struct PrivatePageRowContent: Equatable {
   var url: URL?
   var favicon: Data?
   var isShown: Bool
+  /// The row's sound: a mute button while the page plays or is muted.
+  var audio: TabAudio = .silent
 
   /// The row's text: the page title, else its address, else "Untitled".
   var displayTitle: String {
@@ -43,6 +45,10 @@ final class PrivatePagesView: NSView {
   private(set) var contents: [PrivatePageRowContent] = []
   /// A click (or VoiceOver press) on a row: show its page.
   var onSelect: (@MainActor (TabID) -> Void)?
+  /// A row's close button: close its page.
+  var onClose: (@MainActor (TabID) -> Void)?
+  /// A row's mute button: mute or unmute its page.
+  var onToggleMute: (@MainActor (TabID) -> Void)?
   /// Reduce Motion, read when a shown row scrolls into view: the scroll jumps. Tests set it.
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   /// The last row scrolled into view and whether it animated; for tests.
@@ -95,14 +101,20 @@ final class PrivatePagesView: NSView {
 
   override func updateLayer() { orientFade() }
 
-  /// Replaces the rows with `contents`, in that order. Rows are reused by page. When the shown page changed (a click,
-  /// an activation, a new page) its row scrolls into view; a page added without being shown does not scroll.
+  /// Replaces the rows with `contents`, in that order. Rows are reused by page. A new row fades in and the rows that
+  /// moved (below an added or closed row) slide to their place on `firm`, or jump under Reduce Motion. When the shown
+  /// page changed (a click, an activation, a new page) its row scrolls into view; a page added without being shown
+  /// does not scroll.
   func setPages(_ contents: [PrivatePageRowContent]) {
     let previousShown = self.contents.first(where: \.isShown)?.tab
     let byTab = Dictionary(rows.map { ($0.tab, $0) }, uniquingKeysWith: { first, _ in first })
+    let before = Dictionary(rows.map { ($0.tab, $0.layer?.position) }, uniquingKeysWith: { first, _ in first })
     var next: [PrivatePageRowView] = []
+    var added: [PrivatePageRowView] = []
     for content in contents {
-      let row = byTab[content.tab] ?? makeRow(for: content.tab)
+      let existing = byTab[content.tab]
+      let row = existing ?? makeRow(for: content.tab)
+      if existing == nil { added.append(row) }
       row.flavor = flavor
       row.apply(content, favicon: faviconImages[content.tab])
       next.append(row)
@@ -110,11 +122,13 @@ final class PrivatePagesView: NSView {
     let kept = Set(contents.map(\.tab))
     for row in rows where !kept.contains(row.tab) { row.removeFromSuperview() }
     for tab in faviconImages.keys where !kept.contains(tab) { faviconImages[tab] = nil }
+    let changedOrder = rows.map(\.tab) != next.map(\.tab)
     rows = next
     self.contents = contents
     listView.setAccessibilityChildren(rows)
     loadFavicons()
     layoutRows()
+    if changedOrder { animateRows(added: added, from: before) }
     if let shown = contents.first(where: \.isShown)?.tab, shown != previousShown { reveal(shown) }
     refreshFade()
   }
@@ -122,6 +136,8 @@ final class PrivatePagesView: NSView {
   private func makeRow(for tab: TabID) -> PrivatePageRowView {
     let row = PrivatePageRowView(tab: tab)
     row.onPress = { [weak self] tab in self?.onSelect?(tab) }
+    row.onClose = { [weak self] tab in self?.onClose?(tab) }
+    row.onToggleMute = { [weak self] tab in self?.onToggleMute?(tab) }
     listView.addSubview(row)
     return row
   }
@@ -161,6 +177,23 @@ final class PrivatePagesView: NSView {
     for (index, row) in rows.enumerated() {
       let frame = NSRect(x: 0, y: CGFloat(index) * Self.rowHeight, width: width, height: Self.rowHeight)
       if row.frame != frame { row.frame = frame }
+    }
+  }
+
+  /// The rows' motion after a row was added or closed: the layers of rows that moved start from where they were and
+  /// slide to their new place; a new row fades in. Frames are already final.
+  private func animateRows(added: [PrivatePageRowView], from before: [TabID: CGPoint?]) {
+    let step = PrivatePagesMotion.rows(reduceMotion: reduceMotion())
+    for row in added { PrivatePagesMotion.fadeIn(row.layer, duration: step.fadeDuration) }
+    guard step.movesRows else { return }
+    for row in rows {
+      guard let layer = row.layer, let old = before[row.tab] ?? nil, old != layer.position else { continue }
+      let move = CABasicAnimation(keyPath: "position")
+      move.fromValue = NSValue(point: old)
+      move.toValue = NSValue(point: layer.position)
+      move.duration = step.duration
+      move.timingFunction = step.curve.timingFunction
+      layer.add(move, forKey: PrivatePagesMotion.moveKey)
     }
   }
 
@@ -250,128 +283,4 @@ final class PrivatePagesListView: NSView {
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
-/// A row of the Pages list: a 16 pt favicon, the title on one line truncating at the tail. The shown page's row is
-/// the current row (`tabCurrent`, the current tab row's shadow in light). VoiceOver reads it as a button named by the
-/// title; the shown page's row reads as selected.
-@MainActor
-final class PrivatePageRowView: NSView {
-  static let padding: CGFloat = 9
-  static let gap: CGFloat = 9
-  static let faviconRadius: CGFloat = 4
-
-  let tab: TabID
-  let faviconView = NSImageView()
-  let titleLabel: NSTextField = {
-    let label = NSTextField(labelWithString: "")
-    label.font = .systemFont(ofSize: 13)
-    label.lineBreakMode = .byTruncatingTail
-    label.usesSingleLineMode = true
-    label.cell?.truncatesLastVisibleLine = true
-    label.cell?.isScrollable = false
-    label.setAccessibilityElement(false)
-    return label
-  }()
-  private let background = CALayer()
-  var onPress: (@MainActor (TabID) -> Void)?
-  private(set) var content: PrivatePageRowContent?
-  private var favicon: NSImage?
-
-  var flavor: ThemeFlavor = .light {
-    didSet { if flavor != oldValue { applyStyle() } }
-  }
-
-  init(tab: TabID) {
-    self.tab = tab
-    super.init(frame: .zero)
-    wantsLayer = true
-    background.cornerRadius = SidebarMetrics.rowCornerRadius
-    background.cornerCurve = .continuous
-    background.shadowRadius = 2
-    background.shadowOffset = CGSize(width: 0, height: -1)
-    faviconView.imageScaling = .scaleProportionallyUpOrDown
-    faviconView.wantsLayer = true
-    faviconView.layer?.cornerRadius = Self.faviconRadius
-    faviconView.layer?.masksToBounds = true
-    faviconView.setAccessibilityElement(false)
-    addSubview(faviconView)
-    addSubview(titleLabel)
-    setAccessibilityElement(true)
-    setAccessibilityRole(.button)
-    setAccessibilityIdentifier(AXID.PrivatePages.row)
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-  override var isFlipped: Bool { true }
-  override var mouseDownCanMoveWindow: Bool { false }
-
-  var isShown: Bool { content?.isShown ?? false }
-
-  func apply(_ content: PrivatePageRowContent, favicon: NSImage?) {
-    let changed = content != self.content
-    self.content = content
-    if favicon != nil || content.favicon == nil { self.favicon = favicon }
-    guard changed else { return }
-    titleLabel.stringValue = content.displayTitle
-    setAccessibilityLabel(content.displayTitle)
-    setAccessibilitySelected(content.isShown)
-    applyStyle()
-  }
-
-  func setFavicon(_ image: NSImage?) {
-    favicon = image
-    applyFavicon()
-  }
-
-  private func applyFavicon() {
-    guard let content else { return }
-    faviconView.image = favicon ?? SidebarGlyphs.letter(for: content.title, url: content.url, flavor: flavor,
-                                                         size: SidebarMetrics.faviconSize, scale: shellBackingScale)
-  }
-
-  private func applyStyle() {
-    titleLabel.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
-    applyFavicon()
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    let shown = isShown
-    background.backgroundColor = shown ? ShellTokens.tabCurrent.resolve(flavor).cgColor : nil
-    let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
-    background.shadowColor = shadow.cgColor
-    background.shadowOpacity = shown && shadow.alpha > 0 ? 1 : 0
-    CATransaction.commit()
-  }
-
-  override func layout() {
-    super.layout()
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    // Below the subviews' layers, which AppKit adds after this one: the fill never covers the favicon or the title.
-    if let layer, layer.sublayers?.first !== background { layer.insertSublayer(background, at: 0) }
-    background.frame = bounds
-    background.shadowPath = CGPath(roundedRect: bounds, cornerWidth: SidebarMetrics.rowCornerRadius,
-                                   cornerHeight: SidebarMetrics.rowCornerRadius, transform: nil)
-    CATransaction.commit()
-    let icon = SidebarMetrics.faviconSize
-    faviconView.frame = NSRect(x: Self.padding, y: ((bounds.height - icon) / 2).rounded(), width: icon, height: icon)
-    let titleX = faviconView.frame.maxX + Self.gap
-    let titleHeight = ceil(titleLabel.intrinsicContentSize.height)
-    titleLabel.frame = NSRect(x: titleX, y: ((bounds.height - titleHeight) / 2).rounded(),
-                              width: max(0, bounds.width - Self.padding - titleX), height: titleHeight)
-  }
-
-  override func mouseDown(with event: NSEvent) {}
-
-  override func mouseUp(with event: NSEvent) {
-    guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-    onPress?(tab)
-  }
-
-  override func accessibilityPerformPress() -> Bool {
-    onPress?(tab)
-    return true
-  }
 }
