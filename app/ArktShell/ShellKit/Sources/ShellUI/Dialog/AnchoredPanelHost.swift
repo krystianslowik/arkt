@@ -105,9 +105,11 @@ final class AnchoredPanelHost {
   /// Puts the panel of `tab` in place. Down it goes, without an answer, when the tab has no page view or its window
   /// cannot show it, or when the tab moved to another window or page view; a panel already up follows its page's
   /// frame and width. Otherwise `makePanel` builds a new one for the page's width (at most `maxWidth`) and `show`
-  /// presents it. A page not laid out yet waits for its first frame change.
+  /// presents it, with the page view this placement resolved, so the presenter never asks `anchor` again. A page not
+  /// laid out yet waits for its first frame change.
   func place<Panel: AnchoredPanel>(_ tab: TabID, maxWidth: CGFloat, fullWidth: Bool = false,
-                                   makePanel: (CGFloat) -> Panel, show: (Panel, NSWindow, NSRect) -> Void) {
+                                   makePanel: (CGFloat) -> Panel,
+                                   show: (Panel, NSWindow, NSView, NSRect) -> Void) {
     guard let view = anchor(tab) else {
       retryOnLayout = true
       dismiss(tab)
@@ -158,7 +160,7 @@ final class AnchoredPanelHost {
                                              using: reposition),
     ]
     entries[tab] = Entry(panel: panel, observers: observers, anchorView: view)
-    show(panel, window, frame)
+    show(panel, window, view, frame)
   }
 
   /// Takes the tab's panel down at once, with no answer to the engine.
