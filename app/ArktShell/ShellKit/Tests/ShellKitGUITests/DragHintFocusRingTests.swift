@@ -208,6 +208,7 @@ final class DragHintFocusRingTests: XCTestCase {
         XCTAssertTrue(control.becomeFirstResponder(), name)
       }
       XCTAssertFalse(ring.isHidden, "\(name): shown with keyboard focus")
+      XCTAssertFalse(control.clipsToBounds, "\(name): the control does not cut the ring off")
       XCTAssertTrue(ring.superview === control, name)
       XCTAssertEqual(ring.frame, control.bounds.insetBy(dx: -3, dy: -3), "\(name): outside the control")
       XCTAssertTrue(throughWindow ? window.makeFirstResponder(nil) : control.resignFirstResponder(), name)
