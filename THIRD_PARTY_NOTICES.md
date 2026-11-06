@@ -19,7 +19,7 @@ The top-domain check in `HostDisplay.swift` follows `IDNSpoofChecker::GetSimilar
 `LookupSkeletonInTopDomains` in `idn_spoof_checker.cc`.
 
 ```
-Copyright 2017 The Chromium Authors
+Copyright 2015 The Chromium Authors
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are

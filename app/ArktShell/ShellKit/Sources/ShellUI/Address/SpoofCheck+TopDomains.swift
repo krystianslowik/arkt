@@ -23,9 +23,9 @@
 // 3. Each reading: apply Chromium's extra_confusable_mapper_ rules, then the UTS #39 skeleton (NFD, each code point
 //    replaced by its confusables.txt prototype, NFD). Keep the readings made only of the characters above, without
 //    repeats, the first reading first.
-// Top domains: the lines of domains.list before ###END_TOP_BUCKET###, less com.se (Chromium skips it: it has no
-// registrable part); each skeleton is the first readings of its characters joined, and equals the first column of
-// Chromium's domains.skeletons for every entry. `everyTopDomainSkeletonIsTheOneTheCheckBuilds` in HostDisplayTests
+// The top-domain list is used unedited, as Chromium ships it: every line of domains.list before ###END_TOP_BUCKET###
+// but com.se, which Chromium's own generator skips too (it has no registrable part). Each skeleton is the first
+// readings of its characters joined, and equals the first column of Chromium's domains.skeletons for every entry. `everyTopDomainSkeletonIsTheOneTheCheckBuilds` in HostDisplayTests
 // checks the two tables against each other.
 
 extension SpoofCheck {

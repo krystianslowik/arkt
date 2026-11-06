@@ -151,6 +151,13 @@ struct HostDisplayTests {
     #expect(HostDisplay.text(forHost: unicode) == encoded, "\(unicode) from the engine")
   }
 
+  /// "türkiye.gov.tr" stays encoded: its skeleton is that of "turkiye.gov.tr", a top domain of its own, as in Chromium.
+  @Test func aUnicodeSpellingOfAnASCIITopDomainStaysEncoded() {
+    let unicode = "t\u{00FC}rkiye.gov.tr"
+    #expect(SpoofCheck.similarTopDomain(Array(unicode.unicodeScalars), encoded: ace(unicode)) == "turkiye.gov.tr")
+    #expect(HostDisplay.text(forHost: ace(unicode)) == ace(unicode))
+  }
+
   /// The issue's example, spelled out.
   @Test func theDotlessILinkedInLookAlikeStaysEncoded() {
     #expect(HostDisplay.text(forHost: "xn--lnkedn-p9ae.com") == "xn--lnkedn-p9ae.com")
@@ -187,18 +194,31 @@ struct HostDisplayTests {
   }
 
   /// Characters that look like more than one letter give one skeleton per reading, as Chromium's skeleton generator
-  /// does, up to its limits; past them only the first reading is checked.
-  @Test func severalReadingsAreCappedAsInChromium() {
+  /// does, for up to five such characters; past that the host is not cleared and stays encoded.
+  @Test func severalReadingsAreCheckedOrTheHostStaysEncoded() {
     func skeletons(_ host: String) -> [String] { SpoofCheck.skeletons(of: Array(host.unicodeScalars)) }
     #expect(Set(skeletons("paypa\u{0131}.com")) == ["paypai.corn", "paypal.corn"])
     #expect(skeletons(String(repeating: "\u{0153}", count: 5) + ".com").count == 32)
-    #expect(skeletons(String(repeating: "\u{0153}", count: 6) + ".com").count == 1, "more than five such characters")
-    #expect(skeletons(String(repeating: "a", count: 30) + "\u{0131}.com").count == 1, "a host over 32 characters")
+    let six = String(repeating: "\u{0153}", count: 6) + ".com"
+    #expect(skeletons(six).isEmpty, "more than five such characters")
+    #expect(SpoofCheck.similarTopDomain(Array(six.unicodeScalars), encoded: ace(six)) == SpoofCheck.tooManyReadings)
+    #expect(HostDisplay.text(forHost: ace(six)) == ace(six))
+    #expect(skeletons(String(repeating: "a", count: 30) + "\u{0131}.com").count == 2, "a host over 32 characters")
     #expect(skeletons("\u{4E2D}\u{6587}.com").isEmpty, "Han maps to nothing a top domain holds")
     #expect(skeletons("\u{4E2D}\u{6587}.l\u{0131}nked\u{0131}n.com") == ["linkedin.corn", "linkedln.corn",
                                                                        "llnkedin.corn", "llnkedln.corn"],
             "only the labels after the last one that cannot match")
     #expect(skeletons("a.b.c.d.e.f.com") == ["d.e.f.corn"], "at most the last four labels")
+  }
+
+  /// A look-alike that needs a second reading cannot pass by padding the host: not with length (Chromium skips hosts
+  /// over 32 characters), and not with more characters that have several readings.
+  @Test(arguments: [
+    "secure-login-update-account.xn--paypa-r4a.com",                       // secure-login-update-account.paypaı.com
+    "xn--cfaaa.xn--cfaa.xn--paypa-r4a.com",                                // ııı.ıı.paypaı.com
+  ])
+  func aPaddedLookAlikeStaysEncoded(host: String) {
+    #expect(HostDisplay.text(forHost: host) == host)
   }
 
   /// A long look-alike is still caught: Chromium skips the check past 32 characters, this rule does not.
@@ -208,10 +228,11 @@ struct HostDisplayTests {
     #expect(HostDisplay.text(forHost: ace(unicode)) == ace(unicode))
   }
 
-  /// Not a gate in the required lane: prints the cost of the worst cases for the pull request, each a host that
-  /// passes every label check, so the top-domain check runs. Set `ARKT_HOST_DISPLAY_GATE=1` to also hold the check
-  /// under 50 microseconds of thread CPU time a call (in an optimized build: `swift test -Xswiftc -O`).
-  @Test func theTopDomainCheckCostIsMeasured() throws {
+  /// Not in the required lane: with `ARKT_HOST_DISPLAY_GATE=1`, prints the cost of the worst cases, each a host that
+  /// passes every label check so the top-domain check runs, and holds the check under 50 microseconds of thread CPU
+  /// time a call. Run it in an optimized build: `swift test -Xswiftc -O`.
+  @Test(.enabled(if: ProcessInfo.processInfo.environment["ARKT_HOST_DISPLAY_GATE"] == "1"))
+  func theTopDomainCheckCostIsMeasured() throws {
     let longLabel = String(repeating: "abcd\u{00E9}", count: 9)
     let cases: [(name: String, unicode: String)] = [
       ("five readings in four labels", "\u{0153}\u{0131}.\u{0142}\u{0131}.\u{0153}abcdefghijklmnop.com"),
@@ -232,9 +253,7 @@ struct HostDisplayTests {
       let check = microseconds { _ = SpoofCheck.similarTopDomain(scalars, encoded: host) }
       print(String(format: "hostdisplay.topdomain case=\"%@\" scalars=%d skeletons=%d textUs=%.2f checkUs=%.2f",
                    name, scalars.count, SpoofCheck.skeletons(of: scalars).count, text, check))
-      if ProcessInfo.processInfo.environment["ARKT_HOST_DISPLAY_GATE"] == "1" {
-        #expect(check < 50, "\(name)")
-      }
+      #expect(check < 50, "\(name)")
     }
   }
 

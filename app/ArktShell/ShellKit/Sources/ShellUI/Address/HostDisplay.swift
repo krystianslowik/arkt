@@ -29,10 +29,11 @@ import Foundation
 ///    (its last two to four labels), the host stays encoded unless it is that domain or a subdomain of it. So
 ///    "lınkedın.com" (dotless i) and "googlé.com" stay encoded, and "münchen.wikipedia.org" shows in Unicode. As in
 ///    Chromium's `IDNSpoofChecker::GetSimilarTopDomain`, a few characters are read more than one way (dotless i as i
-///    or l, thorn as b or p, U+0153 as ce or oe, U+0142 as l or t, U+04CF as l), each reading giving a skeleton, for
-///    at most five such characters in a host of at most 32 characters. The top domains and the skeleton pieces are
-///    precomputed in `SpoofCheck+TopDomains.swift`; a label with a character no top domain's skeleton holds (Han and
-///    most other non-Latin text) ends the comparison, and only the labels after it are checked.
+///    or l, thorn as b or p, U+0153 as ce or oe, U+0142 as l or t, U+04CF as l), each reading giving a skeleton; a
+///    host with more than five such characters in the labels compared stays encoded, a real one too. The top domains
+///    and the skeleton pieces are precomputed in `SpoofCheck+TopDomains.swift`; a label with a character no top
+///    domain's skeleton holds (Han and most other non-Latin text) ends the comparison, and only the labels after it
+///    are checked.
 ///
 /// The joiners U+200C and U+200D always stay encoded, as in Chromium: it converts with UTS #46 transitional
 /// processing, which refuses them in every context, even after a virama (Sinhala "Sri" with a joiner,
@@ -42,12 +43,13 @@ import Foundation
 /// by label); the deviation characters always stay encoded; Allowed punctuation characters (U+00B7, U+0375, U+05F3,
 /// U+05F4, U+0F0B, U+30FB) are refused; scripts outside the table are refused; the whole-script check runs on every
 /// label and has no exception words; the top-domain check runs on hosts of any length (Chromium builds no skeleton
-/// for a host over 32 characters, so "login.accounts.secure.lınkedın.com" would pass there), uses the first reading
-/// of each character past the limits above, removes diacritics in every host (Chromium only in a host of only Latin,
-/// Greek and Cyrillic) and keeps checking the other readings after one names the host's own top domain. Looser: the
-/// top domains are Chromium's top bucket (835 domains), not its whole list of about 8,500; a character whose skeleton
-/// holds a dot (U+0660, U+06F0) cannot match, so a skeleton's labels are the host's; the bidi rule is checked per
-/// label, not across the domain. The Allowed table and confusables.txt come from Unicode 18.0, which may be newer
+/// for a host over 32 characters, so "login.accounts.secure.lınkedın.com" would pass there); past five characters
+/// with several readings the host stays encoded (Chromium then checks no skeleton at all, so padding a look-alike
+/// with dotless i, "ııı.ıı.paypaı.com", would pass there); diacritics are removed in every host (Chromium only in a
+/// host of only Latin, Greek and Cyrillic); the other readings are still checked after one names the host's own top
+/// domain. Looser: the top domains are Chromium's top bucket (835 domains), not its whole list of about 8,500; a
+/// character whose skeleton holds a dot (U+0660, U+06F0) cannot match, so a skeleton's labels are the host's; the
+/// bidi rule is checked per label, not across the domain. The Allowed table and confusables.txt come from Unicode 18.0, which may be newer
 /// than the ICU data a given Chromium release uses.
 public enum HostDisplay {
   /// `host` as the shell shows it: Unicode when it passes the spoof check, the encoded `xn--` form otherwise. The
@@ -373,30 +375,32 @@ enum SpoofCheck {
 
   // MARK: Top domains (#731)
 
-  /// Chromium's skeleton generator limits: the most characters with several readings, the longest host they are
-  /// expanded for, and the most skeletons.
+  /// The most characters with several readings in the labels compared, and the most skeletons, as in Chromium's
+  /// skeleton generator. Past either limit the host is not checked reading by reading: it stays encoded.
   static let maxCharactersWithSeveralReadings = 5
-  static let maxHostLengthForSeveralReadings = 32
   static let maxSkeletons = 128
+  /// What `similarTopDomain` returns for a host past those limits: it cannot be cleared, so it stays encoded.
+  static let tooManyReadings = "(too many readings)"
   /// The most labels at the end of a host compared with the top domains (Chromium's `kNumberOfLabelsToCheck`).
   static let labelsToCheck = 4
 
-  /// The top domain `host` (Unicode, lowercased, no trailing dot) looks like but is not, or nil. `encoded` is the
-  /// host's ASCII form, which a top domain or its subdomain equals.
+  /// The top domain `host` (Unicode, lowercased, no trailing dot) looks like but is not, `tooManyReadings` when it has
+  /// too many characters with several readings to check, or nil. `encoded` is the host's ASCII form, which a top
+  /// domain or its subdomain equals.
   static func similarTopDomain(_ host: [Unicode.Scalar], encoded: String) -> String? {
     var found: String?
-    forEachSkeleton(of: host) { skeleton, labelStarts in
+    let checkedEveryReading = forEachSkeleton(of: host) { skeleton, labelStarts in
       guard let domain = topDomain(in: skeleton, labelStarts: labelStarts) else { return true }
       if encoded == domain || encoded.hasSuffix("." + domain) { return true }
       found = domain
       return false
     }
-    return found
+    return checkedEveryReading ? found : tooManyReadings
   }
 
   /// The skeletons `similarTopDomain` compares: of the host's last labels, at most four, after the last label holding
   /// a character that no top domain's skeleton holds; one per reading of its characters; none for fewer than two
-  /// labels.
+  /// labels, or past the limits on readings.
   static func skeletons(of host: [Unicode.Scalar]) -> [String] {
     var result: [String] = []
     forEachSkeleton(of: host) { skeleton, _ in
@@ -416,9 +420,11 @@ enum SpoofCheck {
   }
 
   /// Calls `body` with each skeleton of the end of `host` and the offsets where its labels start, until it returns
-  /// false. One buffer is reused for every skeleton.
+  /// false. One buffer is reused for every skeleton. Returns false, without calling `body`, when the labels compared
+  /// have more characters with several readings, or more combinations of readings, than the limits allow.
+  @discardableResult
   private static func forEachSkeleton(of host: [Unicode.Scalar],
-                                      _ body: (_ skeleton: [UInt8], _ labelStarts: [Int]) -> Bool) {
+                                      _ body: (_ skeleton: [UInt8], _ labelStarts: [Int]) -> Bool) -> Bool {
     // The readings of each character of the last labels, from the end, up to a label that cannot match.
     var labels: [[[String]]] = []
     var end = host.endIndex
@@ -434,17 +440,18 @@ enum SpoofCheck {
       labels.insert(label, at: 0)
       end = start - 1
     }
-    guard labels.count >= 2 else { return }
+    guard labels.count >= 2 else { return true }
 
-    // The characters read more than one way, within Chromium's limits; past them each keeps its first reading.
+    // The characters read more than one way. Every combination of their readings is checked; past the limits none is,
+    // so a look-alike cannot pass by padding the host with more such characters.
     var varying: [(label: Int, character: Int)] = []
+    var combinations = 1
     for (labelIndex, label) in labels.enumerated() {
       for (characterIndex, readings) in label.enumerated() where readings.count > 1 {
         varying.append((labelIndex, characterIndex))
+        combinations *= readings.count
+        if varying.count > maxCharactersWithSeveralReadings || combinations > maxSkeletons { return false }
       }
-    }
-    if varying.count > maxCharactersWithSeveralReadings || host.count > maxHostLengthForSeveralReadings {
-      varying = []
     }
     var chosen = labels.map { [Int](repeating: 0, count: $0.count) }
     var skeleton: [UInt8] = []
@@ -460,7 +467,7 @@ enum SpoofCheck {
           skeleton.append(contentsOf: readings[chosen[labelIndex][characterIndex]].utf8)
         }
       }
-      guard body(skeleton, labelStarts) else { return }
+      guard body(skeleton, labelStarts) else { return true }
       // The next combination of readings, counting through them like an odometer; done when it wraps around.
       var digit = varying.count - 1
       while digit >= 0 {
@@ -470,8 +477,9 @@ enum SpoofCheck {
         chosen[labelIndex][characterIndex] = 0
         digit -= 1
       }
-      if digit < 0 { return }
+      if digit < 0 { return true }
     }
+    return true
   }
 
   /// The top domain whose skeleton is `skeleton` from one of `labelStarts` to its end, trying all but the last start,
