@@ -32,8 +32,12 @@ private actor HeldDecoder {
 @MainActor
 final class SidebarFaviconDecodeTests: XCTestCase {
   private var windows: [NSWindow] = []
+  /// Decoders a test leaves held; released in tearDown so no decode stays suspended after the test (#675).
+  private var heldDecoders: [HeldDecoder] = []
 
   override func tearDown() async throws {
+    for decoder in heldDecoders { await decoder.release() }
+    heldDecoders = []
     for window in windows { window.close() }
     windows = []
   }
@@ -163,7 +167,8 @@ final class SidebarFaviconDecodeTests: XCTestCase {
     first.setFavicon(data, for: firstSidebar.children(of: .today(firstSidebar.spaceOrder[0]))[0])
     await first.settleFaviconDecodes()
 
-    let held = HeldDecoder()                                 // never released: any decode would leave the letter
+    let held = HeldDecoder()                                 // held for the test: any decode would leave the letter
+    heldDecoders.append(held)
     let secondSidebar = StubSidebar.sample()
     let second = makeSidebar(secondSidebar, decoder: held.decoder)
     second.faviconImageCache = cache

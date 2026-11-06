@@ -4,7 +4,7 @@ import AppKit
 /// (#605). Only the newest bytes per key count: bytes set again for a key, or a key cancelled, drop the older request,
 /// and a job whose keys are all dropped is cancelled. Images are cached by their bytes, process-wide by default, so tabs
 /// of one site, an icon reported again and a tab handed to another window (its bytes replayed there before the
-/// window first draws) are decoded once and shown at once.
+/// window first draws) are decoded once and shown at once. A cancelled job still caches what it decoded.
 @MainActor
 final class FaviconImageLoader<Key: Hashable & Sendable> {
   var decoder: FaviconDecoder
@@ -15,7 +15,7 @@ final class FaviconImageLoader<Key: Hashable & Sendable> {
   /// Every job's task until it ends, cancelled or not.
   private var tasks: [Int: Task<Void, Never>] = [:]
   private var nextJob = 0
-  /// Decoded images by their bytes.
+  /// Decoded images by their bytes, each at its `FaviconDecoder.cost(of:bitmap:)`.
   var decoded: NSCache<NSData, NSImage>
 
   /// The cache every loader shares unless given its own.
@@ -65,14 +65,16 @@ final class FaviconImageLoader<Key: Hashable & Sendable> {
 
   private func finish(job: Int, order: [Data], bitmaps: [CGImage?], apply: @MainActor ([Key: NSImage?]) -> Void) {
     tasks[job] = nil
-    guard let keys = jobs.removeValue(forKey: job) else { return }            // cancelled
+    // Cached even when the job was cancelled: bytes that come back (A, B, A) then show at once (#675). A cancelled
+    // decode stops early, so only what it finished is here.
     var images: [Data: NSImage] = [:]
     for (data, bitmap) in zip(order, bitmaps) {
       guard let bitmap else { continue }
       let image = FaviconDecoder.image(bitmap)
       images[data] = image
-      decoded.setObject(image, forKey: data as NSData)
+      decoded.setObject(image, forKey: data as NSData, cost: FaviconDecoder.cost(of: data, bitmap: bitmap))
     }
+    guard let keys = jobs.removeValue(forKey: job) else { return }            // cancelled
     var result: [Key: NSImage?] = [:]
     for key in keys {
       guard let request = wanted[key], request.job == job else { continue }

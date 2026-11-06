@@ -222,6 +222,19 @@ final class FakeEngineContractTests: XCTestCase {
     XCTAssertFalse(recorder.events(for: id).contains { if case .faviconChanged(_, .some) = $0 { return true }; return false })
   }
 
+  /// FakeEngine only (#675): an SVG favicon, which ImageIO cannot decode, reaches the shell as a PNG (the contract
+  /// promises PNG or ICO), so the row shows the icon instead of the letter.
+  func testAnSVGFaviconArrivesAsPNG() async throws {
+    let engine = FakeEngine()
+    let id = engine.createTab(url: URL(string: "http://127.0.0.1:\(server.port)/svg-icon.html")!)
+    try await harness.settle(engine, id)
+    await engine.waitForFaviconFetch(id)
+    let data = try XCTUnwrap(engine.snapshot(of: id)?.faviconData)
+    XCTAssertEqual(Array(data.prefix(4)), [0x89, 0x50, 0x4E, 0x47], "PNG bytes")
+    let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+    XCTAssertEqual(CGImageSourceGetCount(source), 1)
+  }
+
   /// FakeEngine only: pages see a Safari user agent. No network: a local page reports `navigator.userAgent`
   /// as its title. Without the Safari tokens sites serve WKWebView their legacy pages.
   func testPagesSeeSafariUserAgent() async throws {
@@ -248,6 +261,10 @@ final class FakeEngineContractTests: XCTestCase {
     "/bad-icon.html": .init(mime: "text/html",
                             body: Data("<!doctype html><title>Bad</title><link rel=icon href=/not-an-image><p>x".utf8)),
     "/not-an-image": .init(mime: "text/plain", body: Data("nope".utf8)),
+    "/svg-icon.html": .init(mime: "text/html",
+                            body: Data("<!doctype html><title>SVG</title><link rel=icon href=/icon.svg><p>x".utf8)),
+    "/icon.svg": .init(mime: "image/svg+xml", body: Data(
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='#2a7'/></svg>".utf8)),
     "/no-content": .init(status: 204, mime: "text/plain", body: Data()),
   ]
 }
