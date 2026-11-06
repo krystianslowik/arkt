@@ -127,7 +127,7 @@ extension ShellWindowController {
 
   private func addTodayRow(for tab: TabID, snapshot: TabSnapshot) {
     let url = snapshot.url ?? Self.blankPage
-    let title = snapshot.title.isEmpty ? (url.host() ?? url.absoluteString) : snapshot.title
+    let title = snapshot.title.isEmpty ? HostDisplay.savedTitle(for: url) : snapshot.title
     let node: NodeID
     do {
       guard let space = sidebarController.currentSpace ?? createFirstSpace() else {

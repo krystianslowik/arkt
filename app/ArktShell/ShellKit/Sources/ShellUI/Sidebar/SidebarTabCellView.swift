@@ -519,8 +519,7 @@ enum SidebarGlyphs {
 
   static func letter(for title: String, url: URL?, flavor: ThemeFlavor, size: CGFloat, scale: CGFloat,
                      cache: SymbolImageCache = .shared) -> NSImage {
-    let source = url?.host().map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 } ?? title
-    let letter = source.first.map { String($0).uppercased() } ?? "?"
+    let letter = letterText(title: title, url: url)
     let fill = letterFill.resolve(flavor)
     let ink = letterInk.resolve(flavor)
     return cache.bitmap(key: "letter-\(letter)-\(flavor)", size: size, scale: scale) { rect in
@@ -535,6 +534,13 @@ enum SidebarGlyphs {
       let textSize = text.size()
       text.draw(at: NSPoint(x: rect.midX - textSize.width / 2, y: rect.midY - textSize.height / 2))
     }
+  }
+
+  /// The tile's letter: the first of the host as the address bar writes it (`HostDisplay`, #732), less a leading
+  /// "www.", so a look-alike's tile reads "X" for its `xn--` form; else the title's first; else "?".
+  static func letterText(title: String, url: URL?) -> String {
+    let source = url.flatMap(HostDisplay.host(of:)).map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 } ?? title
+    return source.first.map { String($0).uppercased() } ?? "?"
   }
 
   /// The audio button's glyph (#364): `symbol` in the X's color, a little larger than the X.

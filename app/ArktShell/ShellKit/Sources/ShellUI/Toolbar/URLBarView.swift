@@ -131,7 +131,7 @@ public final class URLBarView: NSView {
     displayedText = text
     label.stringValue = text
     if !siteGlyph.isHidden { needsLayout = true }      // the Toolbar's glyph sits just before the text
-    toolTip = url?.absoluteString
+    toolTip = AddressText.full(url)
     refreshAccessibilityValue()
   }
 

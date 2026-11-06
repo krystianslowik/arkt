@@ -765,7 +765,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     case .tab(_, let url, let title)?:
       let image = faviconProvider?(id)
         ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.faviconSize, scale: scale)
-      return (title, image)
+      return (HostDisplay.title(title, for: url), image)
     case .folder?:
       let symbol = display.collapsed.contains(id) ? "folder" : "folder.fill"
       return (title(of: id), SidebarGlyphs.symbol(symbol, flavor: flavor, scale: scale))
@@ -780,11 +780,13 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// queries can read it cheaply.
   private func title(of id: NodeID) -> String {
     switch source.node(id) {
-    case .tab(_, _, let title)?, .folder(_, let title)?:
+    case .tab(_, let url, let title)?:
+      return HostDisplay.title(title, for: url)
+    case .folder(_, let title)?:
       return title
     case .split?:
       let titles = children(of: id).compactMap { child -> String? in
-        if case .tab(_, _, let title)? = source.node(child) { return title }
+        if case .tab(_, let url, let title)? = source.node(child) { return HostDisplay.title(title, for: url) }
         return nil
       }
       return titles.joined(separator: " | ")
@@ -1784,7 +1786,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     else { return false }
     renamingNode = id
     renameReloadPending = false
-    renameOriginalTitle = Self.shownTitle(of: source.node(id))
+    renameOriginalTitle = Self.renameText(of: source.node(id))
     let opened = cell.beginRename(flavor: flavor) { [weak self] typed in self?.finishRename(id, typed: typed) }
     if !opened { renamingNode = nil }
     return opened
@@ -1796,16 +1798,24 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     renameReloadPending = false
     let original = renameOriginalTitle
     renameOriginalTitle = nil
-    let changed = typed.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) != original } ?? false
+    let changed = Self.isRename(typed: typed, original: original)
     if changed { source.renameNode(id, to: typed) }     // persisted by the source (autosave); emits `.node`
     if pending || !changed { reload(node: id) }
   }
 
-  private static func shownTitle(of node: SidebarNodeInfo?) -> String? {
+  /// The text the rename field opens with: the row's title as shown, so a tab saved under its raw host reads checked
+  /// (`HostDisplay.title(_:for:)`, #732) and committing it unchanged saves no custom title.
+  static func renameText(of node: SidebarNodeInfo?) -> String? {
     switch node {
-    case .tab(_, _, let title)?, .folder(_, let title)?: title
+    case .tab(_, let url, let title)?: HostDisplay.title(title, for: url)
+    case .folder(_, let title)?: title
     default: nil
     }
+  }
+
+  /// Whether the committed text renames the row: nil is Esc; text equal to what the field opened with, trimmed, is not.
+  static func isRename(typed: String?, original: String?) -> Bool {
+    typed.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) != original } ?? false
   }
 
   // MARK: Context menu (design/tab-context-menus)

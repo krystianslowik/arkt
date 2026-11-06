@@ -132,9 +132,12 @@ public enum LittleArktCopy {
 
   static let menuTitleLimit = 60
 
-  /// The top bar's host: the URL's host, else the whole URL (about:blank, data:), else nothing.
+  /// The top bar's host: the URL's host as the address bar writes it (`HostDisplay`, #732), else the whole URL
+  /// (about:blank, data:), else nothing.
   public static func host(of url: URL?) -> String {
-    guard let url else { return "" }
-    return url.host() ?? url.absoluteString
+    url.map(HostDisplay.hostOrAddress) ?? ""
   }
+
+  /// The top bar's tooltip and VoiceOver help: the whole address, its host written by `HostDisplay`.
+  public static func fullAddress(of url: URL?) -> String { url.map(HostDisplay.address) ?? "" }
 }

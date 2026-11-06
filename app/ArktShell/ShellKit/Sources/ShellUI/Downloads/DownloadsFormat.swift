@@ -138,9 +138,10 @@ public enum DownloadsFormat {
     return DownloadFileKind(label: String(ext.uppercased().prefix(4)), fillHex: fill)
   }
 
-  /// The URL's host without a leading "www."; empty for a URL with none.
+  /// The URL's host as the address bar writes it (`HostDisplay`, #732), without a leading "www."; empty for a URL
+  /// with none.
   public static func host(of url: URL) -> String {
-    guard let host = url.host() else { return "" }
+    guard let host = HostDisplay.host(of: url) else { return "" }
     return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
   }
 

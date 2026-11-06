@@ -199,6 +199,26 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// #732: a tab saved under its raw host shows the host checked ("münchen.de"), and the field opens with that text;
+  /// committing it unchanged stores no custom title, so the model keeps the raw host.
+  func testCommittingTheShownHostOfAnUntitledTabStoresNoCustomTitle() throws {
+    var world = try Self.makeWorld()
+    let host = "xn--mnchen-3ya.de"
+    let node = try world.sidebar.addTab(url: try XCTUnwrap(URL(string: "https://\(host)/")), title: host,
+                                        in: .today(world.work))
+    let harness = Harness(world.sidebar)
+    XCTAssertTrue(try harness.outline().beginRename(node))
+    let field = try XCTUnwrap(try harness.cell(node).renameField)
+    XCTAssertEqual(field.stringValue, "m\u{00FC}nchen.de")
+    try XCTUnwrap(field.currentEditor() as? NSTextView).insertNewline(nil)
+
+    XCTAssertNil(try harness.cell(node).renameField, "Return closes the field")
+    guard case .tab(let item)? = harness.source.sidebar.nodes[node]?.kind else { return XCTFail("not a tab") }
+    XCTAssertNil(item.customTitle, "an unchanged name is not a rename")
+    XCTAssertEqual(harness.title(node), host, "the model keeps the raw host")
+    harness.controller.close()
+  }
+
   /// A page title arriving while the field is open leaves the field open (the row reload waits for it).
   func testAPageTitleDuringRenameDoesNotCloseTheField() throws {
     let world = try Self.makeWorld()

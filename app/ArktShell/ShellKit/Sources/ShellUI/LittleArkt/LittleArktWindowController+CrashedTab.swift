@@ -20,7 +20,7 @@ extension LittleArktWindowController {
     var placements: [CrashedTabPresenter.Placement] = []
     if let tab = shownTab, card.contentView != nil, card.contentView === engine.contentView(for: tab),
        let snapshot = engine.snapshot(of: tab), snapshot.crash != nil {
-      placements.append(.init(card: card, tab: tab, host: snapshot.url?.host()))
+      placements.append(.init(card: card, tab: tab, host: snapshot.url.flatMap(HostDisplay.host(of:))))
     }
     let made = crashedTabs.apply(cards: [card], placements: placements, crashedNow: crashed)
     guard let view = crashedTabs.view(on: card) else { return }
