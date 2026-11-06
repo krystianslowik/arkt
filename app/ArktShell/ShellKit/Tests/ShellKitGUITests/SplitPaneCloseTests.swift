@@ -376,7 +376,15 @@ final class SplitPaneCloseTests: XCTestCase {
   /// A page that records the mouse-downs it gets.
   private final class ClickRecordingPage: NSView {
     private(set) var mouseDowns = 0
+    /// Each scroll event's phase and momentum phase, in order.
+    private(set) var scrolls: [(phase: NSEvent.Phase, momentum: NSEvent.Phase)] = []
+    /// Each right mouse-down and -up, with its location in the container's window.
+    private(set) var rightMouseDowns: [NSPoint] = []
+    private(set) var rightMouseUps = 0
     override func mouseDown(with event: NSEvent) { mouseDowns += 1 }
+    override func scrollWheel(with event: NSEvent) { scrolls.append((event.phase, event.momentumPhase)) }
+    override func rightMouseDown(with event: NSEvent) { rightMouseDowns.append(event.locationInWindow) }
+    override func rightMouseUp(with event: NSEvent) { rightMouseUps += 1 }
   }
 
   /// Clicks at `point` (in `view`'s coordinates) the way the pointer does: the mouse-up is queued first, so a control
@@ -499,6 +507,126 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertEqual(focusRequests, [1])
     XCTAssertEqual(c.mouseDowns, 0)
     XCTAssertEqual(a.mouseDowns, 0)
+  }
+
+  // MARK: Scroll and right-click mid-flight (#677)
+
+  /// A trackpad scroll event at `point` (in `view`) with CGEvent's phase values (1 began, 2 changed, 4 ended, 128 may
+  /// begin; momentum 1 began, 2 changed, 3 ended). Built from a CGEvent, it has no window, so its window location is
+  /// the CG location flipped on the main screen; it is placed there so the window location is `point`'s.
+  private func scrollEvent(at point: NSPoint, in view: NSView, phase: Int64, momentum: Int64 = 0,
+                           continuous: Bool = true) throws -> NSEvent {
+    let location = view.convert(point, to: nil)
+    let cg = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                                   wheel1: -4, wheel2: 0, wheel3: 0))
+    cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: continuous ? 1 : 0)
+    cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+    cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
+    cg.location = CGPoint(x: location.x, y: try XCTUnwrap(NSScreen.screens.first).frame.maxY - location.y)
+    let event = try XCTUnwrap(NSEvent(cgEvent: cg))
+    XCTAssertEqual(event.locationInWindow.x, location.x, accuracy: 1e-3)
+    XCTAssertEqual(event.locationInWindow.y, location.y, accuracy: 1e-3)
+    return event
+  }
+
+  /// The view AppKit sends a scroll gesture at `point` (in the container) to: the one its window's content view
+  /// hit-tests when the gesture begins. The gesture's later events stay on that view, wherever the pointer is.
+  private func scrollTarget(at point: NSPoint, in container: SplitContainerView) throws -> NSView {
+    let content = try XCTUnwrap(container.window?.contentView)
+    let location = container.convert(point, to: nil)
+    return try XCTUnwrap(content.hitTest(content.superview?.convert(location, from: nil) ?? location))
+  }
+
+  /// Three panes, the middle one closed: mid-flight, pane 1 (page c) is drawn growing in from where pane 2 was, away
+  /// from its real frame, and the container takes every event on it (#602). The point is near its drawn leading edge.
+  /// Frozen clock, stepped by hand.
+  private func midFlightOnADrawnPane() throws
+    -> (SplitContainerView, a: ClickRecordingPage, c: ClickRecordingPage, point: NSPoint) {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, b, c])
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    let drawn = try onScreen(container.paneCards[1])
+    XCTAssertGreaterThan(drawn.minX - container.paneCards[1].frame.minX, 20, "drawn away from its real frame")
+    let point = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+    XCTAssertEqual(container.paneIndex(forMouseDownAt: point), 1, "drawn over pane 1")
+    XCTAssertTrue(try scrollTarget(at: point, in: container) === container, "taken by the container")
+    return (container, a, c, point)
+  }
+
+  /// A trackpad scroll that begins on a drawn pane mid-flight reaches that pane's page, not nobody.
+  func testScrollThatBeginsMidFlightReachesTheDrawnPanesPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    let target = try scrollTarget(at: point, in: container)
+
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 2))
+
+    XCTAssertEqual(c.scrolls.map(\.phase), [.began, .changed])
+    XCTAssertTrue(a.scrolls.isEmpty)
+  }
+
+  /// A mouse wheel click (no phase) mid-flight reaches the drawn pane's page.
+  func testWheelClickMidFlightReachesTheDrawnPanesPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+
+    try scrollTarget(at: point, in: container)
+      .scrollWheel(with: try scrollEvent(at: point, in: container, phase: 0, continuous: false))
+
+    XCTAssertEqual(c.scrolls.count, 1)
+    XCTAssertTrue(a.scrolls.isEmpty)
+  }
+
+  /// AppKit keeps a gesture on the view it began on: the rest of a scroll that began mid-flight, momentum included,
+  /// still reaches the same page after the reflow settles. A gesture that begins at rest is not forwarded.
+  func testScrollGestureThatBeganMidFlightStaysOnItsPageAfterTheReflowSettles() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    let target = try scrollTarget(at: point, in: container)
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
+
+    container.reflowDriver.tick(at: 105)
+    XCTAssertFalse(container.isReflowing)
+    for (phase, momentum) in [(2, 0), (4, 0), (0, 1), (0, 2), (0, 3)] as [(Int64, Int64)] {
+      target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: phase, momentum: momentum))
+    }
+
+    XCTAssertEqual(c.scrolls.map(\.phase), [.began, .changed, .ended, [], [], []])
+    XCTAssertEqual(c.scrolls.map(\.momentum), [[], [], [], .began, .changed, .ended])
+    XCTAssertTrue(a.scrolls.isEmpty)
+    container.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
+    container.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 2))
+    XCTAssertEqual(c.scrolls.count, 6, "a gesture that begins at rest is the container's own")
+  }
+
+  /// A right-click on a drawn pane mid-flight ends the reflow at rest first, then reaches that pane's page at the spot
+  /// it was drawn under the pointer, now at its real frame; the mouse-up follows it there.
+  func testRightClickMidFlightEndsTheReflowAndReachesTheDrawnPanesPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    let card = container.paneCards[1]
+    let shift = try onScreen(card).minX - card.frame.minX
+    let window = try XCTUnwrap(container.window)
+    let location = container.convert(point, to: nil)
+    func event(_ type: NSEvent.EventType) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+    let target = try scrollTarget(at: point, in: container)
+
+    target.rightMouseDown(with: try event(.rightMouseDown))
+
+    XCTAssertFalse(container.isReflowing)
+    try assertAtRest(container.paneCards)
+    XCTAssertEqual(c.rightMouseDowns.count, 1)
+    XCTAssertTrue(a.rightMouseDowns.isEmpty)
+    let atRest = container.convert(try XCTUnwrap(c.rightMouseDowns.first), from: nil)
+    XCTAssertEqual(atRest.x, point.x - shift, accuracy: 1e-6, "the same spot of the page")
+    XCTAssertEqual(atRest.y, point.y, accuracy: 1e-6)
+    target.rightMouseUp(with: try event(.rightMouseUp))
+    XCTAssertEqual(c.rightMouseUps, 1)
+    XCTAssertEqual(a.rightMouseUps, 0)
   }
 
   /// #602: each reflow is measured on its own pacing session, "split-reflow", ended when it settles.
