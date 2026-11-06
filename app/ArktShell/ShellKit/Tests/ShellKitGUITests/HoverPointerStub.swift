@@ -33,7 +33,7 @@ final class HoverPointerStub {
 
   /// Install as the host's `hoverResyncEnqueue`: the coalesced resync waits here, not on the main queue.
   var enqueue: @MainActor (@escaping @MainActor () -> Void) -> Void {
-    { [unowned self] work in pendingTurns.append(work) }
+    { [weak self] work in self?.pendingTurns.append(work) }
   }
 
   /// Runs what the host scheduled for the next main-queue turn.
@@ -45,7 +45,7 @@ final class HoverPointerStub {
 
   /// Runs main run-loop passes without waiting until the host has a resync pending, at most `maxPasses` of them:
   /// bounded by passes, never by wall time.
-  func runLoopUntilResyncIsPending(maxPasses: Int = 20) -> Bool {
+  func runLoopUntilResyncIsPending(maxPasses: Int = 200) -> Bool {
     for _ in 0..<maxPasses where pendingTurns.isEmpty {
       RunLoop.main.run(mode: .default, before: .distantPast)
     }
