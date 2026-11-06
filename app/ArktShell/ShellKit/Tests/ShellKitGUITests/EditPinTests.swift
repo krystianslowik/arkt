@@ -693,4 +693,23 @@ final class EditPinTests: XCTestCase {
     XCTAssertTrue(window.firstResponder === current, "the current tab's page has the keyboard")
     harness.controller.close()
   }
+
+  /// Opened while a text field in the window was being edited, it gives the keyboard back to that field.
+  func testClosingGivesTheKeyboardBackToATextField() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let window = try XCTUnwrap(harness.controller.window)
+    let field = NSTextField(frame: NSRect(x: harness.root.bounds.maxX - 220, y: 20, width: 200, height: 22))
+    harness.root.addSubview(field)
+    XCTAssertTrue(window.makeFirstResponder(field))
+    XCTAssertNotNil(field.currentEditor(), "the field is being edited")
+
+    try harness.choose("Edit Pinned URL\u{2026}", on: world.p0)
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness))
+    window.sendEvent(try harness.key(53, "\u{1b}"))
+    XCTAssertNil(harness.editPin)
+    XCTAssertTrue((window.firstResponder as? NSText)?.delegate === field, "the field has the keyboard again")
+    field.removeFromSuperview()
+    harness.controller.close()
+  }
 }

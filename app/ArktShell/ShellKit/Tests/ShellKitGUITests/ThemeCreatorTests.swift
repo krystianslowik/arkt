@@ -568,6 +568,25 @@ final class ThemeCreatorTests: XCTestCase {
     XCTAssertTrue(window.firstResponder === current, "the current tab's page has the keyboard")
     harness.controller.close()
   }
+
+  /// Opened while a text field in the window was being edited, it gives the keyboard back to that field.
+  func testClosingGivesTheKeyboardBackToATextField() throws {
+    let harness = try Harness(withTabs: true)
+    let window = try XCTUnwrap(harness.controller.window)
+    let root = harness.controller.rootView
+    let field = NSTextField(frame: NSRect(x: root.bounds.maxX - 220, y: 20, width: 200, height: 22))
+    root.addSubview(field)
+    XCTAssertTrue(window.makeFirstResponder(field))
+    XCTAssertNotNil(field.currentEditor(), "the field is being edited")
+
+    _ = try harness.open()
+    XCTAssertTrue(try Self.keyboardIsInPopover(harness))
+    window.sendEvent(try harness.key(53))
+    XCTAssertNil(harness.creator)
+    XCTAssertTrue((window.firstResponder as? NSText)?.delegate === field, "the field has the keyboard again")
+    field.removeFromSuperview()
+    harness.controller.close()
+  }
 }
 
 /// Records what the creator plays, in place of `NSHapticFeedbackManager.defaultPerformer`.

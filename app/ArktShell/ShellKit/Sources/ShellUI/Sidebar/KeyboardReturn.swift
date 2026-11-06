@@ -23,14 +23,16 @@ struct KeyboardReturn {
   }
 
   /// Gives `window`'s keyboard back to the noted responder, or to nobody when it is no longer on screen there or is
-  /// inside `leaving`, a view about to leave the screen (the page of a Space the sidebar moves away from).
+  /// inside `leaving`, a view about to leave the screen (the page of a Space the sidebar moves away from). A text
+  /// field gets it back as a click into it does: editing again, with all of its text selected.
   func give(in window: NSWindow, leaving: NSView? = nil) {
     if let view = responder, view.window === window, !view.isHiddenOrHasHiddenAncestor, !view.visibleRect.isEmpty,
        leaving.map({ !view.isDescendant(of: $0) }) ?? true {
       if let restoreCursor {
         if restoreCursor(window) { return }
-      } else if window.makeFirstResponder(view), window.firstResponder === view {
-        return
+      } else if window.makeFirstResponder(view),
+                window.firstResponder === view || (window.firstResponder as? NSText)?.delegate === view {
+        return                                // a field holds the keyboard through the field editor
       }
     }
     window.makeFirstResponder(nil)
