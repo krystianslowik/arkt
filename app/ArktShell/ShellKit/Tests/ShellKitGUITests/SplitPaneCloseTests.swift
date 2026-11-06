@@ -634,7 +634,24 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertTrue(a.scrolls.isEmpty)
     container.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
     container.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 2))
-    XCTAssertEqual(c.scrolls.count, 6, "a gesture that begins at rest is the container's own")
+    XCTAssertEqual(c.scrolls.count, 6, "a began at rest sent to the container is not forwarded to the old target")
+  }
+
+  /// A touch-down (may begin) mid-flight picks the page; when the reflow settles before the fingers move, the began
+  /// and the rest of that gesture still reach it.
+  func testScrollThatMayBeginMidFlightAndBeginsAtRestStaysOnItsPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    let target = try scrollTarget(at: point, in: container)
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 128))
+
+    container.reflowDriver.tick(at: 105)
+    XCTAssertFalse(container.isReflowing)
+    for phase in [1, 2, 4] as [Int64] {
+      target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: phase))
+    }
+
+    XCTAssertEqual(c.scrolls.map(\.phase), [.mayBegin, .began, .changed, .ended])
+    XCTAssertTrue(a.scrolls.isEmpty)
   }
 
   /// A right-click on a drawn pane mid-flight ends the reflow at rest first, then reaches that pane's page at the spot
@@ -664,6 +681,28 @@ final class SplitPaneCloseTests: XCTestCase {
     target.rightMouseUp(with: try event(.rightMouseUp))
     XCTAssertEqual(c.rightMouseUps, 1)
     XCTAssertEqual(a.rightMouseUps, 0)
+  }
+
+  /// A context menu's own loop can take the mouse-up of a right-click forwarded mid-flight; the next right-click does
+  /// not send its mouse-up to that old page.
+  func testRightClickWhoseMouseUpWasTakenLeavesNoStaleTarget() throws {
+    let (container, _, c, point) = try midFlightOnADrawnPane()
+    let window = try XCTUnwrap(container.window)
+    func event(_ type: NSEvent.EventType, at point: NSPoint) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: container.convert(point, to: nil), modifierFlags: [], timestamp: 0,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+    container.rightMouseDown(with: try event(.rightMouseDown, at: point))
+    XCTAssertEqual(c.rightMouseDowns.count, 1)
+
+    let gap = container.dividers[0].frame
+    let inGap = NSPoint(x: gap.midX, y: gap.midY)
+    container.rightMouseDown(with: try event(.rightMouseDown, at: inGap))
+    container.rightMouseUp(with: try event(.rightMouseUp, at: inGap))
+
+    XCTAssertEqual(c.rightMouseDowns.count, 1)
+    XCTAssertEqual(c.rightMouseUps, 0)
   }
 
   /// #602: each reflow is measured on its own pacing session, "split-reflow", ended when it settles.

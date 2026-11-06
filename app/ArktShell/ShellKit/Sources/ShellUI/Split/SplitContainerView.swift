@@ -431,6 +431,9 @@ public final class SplitContainerView: NSView {
   /// The page view a scroll gesture that began on a drawn pane mid-reflow goes to (#677). AppKit keeps every event of
   /// a gesture, momentum included, on the view it began on (this one, by `hitTest`), even after the reflow settles.
   private weak var scrollGestureTarget: NSView?
+  /// The running gesture was targeted by its touch-down (may begin); its began keeps that target, even when the reflow
+  /// settled in between.
+  private var scrollGestureMayBegan = false
   /// The view a right-click mid-reflow went to, and how far its location was moved, so its mouse-up follows it.
   private weak var rightClickTarget: NSView?
   private var rightClickOffset = CGVector.zero
@@ -440,12 +443,17 @@ public final class SplitContainerView: NSView {
 
   /// A scroll on a drawn pane mid-reflow goes to the view of that pane's page under the pointer where it is drawn (the
   /// event's own location is left as is: an event built from a scroll cannot be given a window). A gesture is
-  /// targeted when it begins (or for each wheel click) and keeps its target to its end.
+  /// targeted at its touch-down (may begin), or when it begins without one, or for each wheel click, and keeps its
+  /// target to its end.
   public override func scrollWheel(with event: NSEvent) {
     guard !isForwardingEvent else { return super.scrollWheel(with: event) }
     let phase = event.phase
-    if event.momentumPhase.isEmpty && (phase.isEmpty || phase.contains(.began) || phase.contains(.mayBegin)) {
-      scrollGestureTarget = reflow == nil ? nil : drawnTarget(at: convert(event.locationInWindow, from: nil))?.view
+    if event.momentumPhase.isEmpty {
+      let retargets = phase.isEmpty || phase.contains(.mayBegin) || (phase.contains(.began) && !scrollGestureMayBegan)
+      if retargets {
+        scrollGestureTarget = reflow == nil ? nil : drawnTarget(at: convert(event.locationInWindow, from: nil))?.view
+      }
+      scrollGestureMayBegan = phase.contains(.mayBegin)
     }
     guard let target = scrollGestureTarget else { return super.scrollWheel(with: event) }
     forward { target.scrollWheel(with: event) }
@@ -454,6 +462,7 @@ public final class SplitContainerView: NSView {
   /// A right-click on a drawn pane mid-reflow ends the reflow at rest first, then goes to that pane's page at the spot
   /// it was drawn under the pointer, which is now at the pane's real frame.
   public override func rightMouseDown(with event: NSEvent) {
+    if !isForwardingEvent { rightClickTarget = nil }   // a menu loop that took the last mouse-up leaves no target
     let point = convert(event.locationInWindow, from: nil)
     guard !isForwardingEvent, reflow != nil, let (_, real) = drawnTarget(at: point) else {
       return super.rightMouseDown(with: event)
@@ -477,11 +486,11 @@ public final class SplitContainerView: NSView {
   }
 
   public override func rightMouseUp(with event: NSEvent) {
-    guard !isForwardingEvent, let target = rightClickTarget,
-          let moved = Self.mouseEvent(event, movedBy: rightClickOffset) else {
+    let target = isForwardingEvent ? nil : rightClickTarget
+    if !isForwardingEvent { rightClickTarget = nil }
+    guard let target, let moved = Self.mouseEvent(event, movedBy: rightClickOffset) else {
       return super.rightMouseUp(with: event)
     }
-    rightClickTarget = nil
     forward { target.rightMouseUp(with: moved) }
   }
 
