@@ -3,7 +3,7 @@
 Switching, closing and muting the private pages of a Blank or Incognito window, and the per-window cap (#668, design
 issue #709). A private page is an engine tab with no row in the shared sidebar (`privateTabs` in
 `ShellWindowController`). The picked direction is B: the window's own sidebar, empty today, lists that window's
-pages. Prototype: [`prototype.html`](prototype.html), states by hash `#s=<list|audio|cap|small>[&theme=dark][&shot=1]`.
+pages. Prototype: [`prototype.html`](prototype.html), states by hash `#s=<list|audio|cap|cap-none|small>[&theme=dark][&shot=1]`.
 Screens: `screens/<state>-<light|dark>.png` (2x; 960 x 600 window, `small` at 640 x 420).
 
 Everyday chrome: the system font, the shell's tokens, tab-row shapes. The list never shows the shared sidebar, other
@@ -21,17 +21,13 @@ Not picked: A (the Ctrl-Tab switcher lists the pages; keyboard only).
 4. **Cmd-W on the last private page closes the window**, as Cmd-W does in these windows today.
 5. The mute key question was for direction A and does not apply.
 
-## Pending maintainer confirmation
+## Close Oldest (maintainer, 2026-11-06)
 
-These rules fill gaps in the decisions above. They stand in the spec until the maintainer confirms or changes them.
-
-- **Close Oldest spares the shown page.** "Oldest" is the earliest-opened page that is not the shown one: the top row
-  that is not the current row.
-- **The refused page does not open afterwards.** After Close Oldest the user repeats the click.
-- **The toast's action is the shared toast's neutral pill** (24 pt, `sidebarItemHovered`), not mustard. The cap toast
-  is a plain shared toast (`docs/design/alerts-sheets-toasts.md`, section 4).
-- **Whether a page playing sound is also spared** by Close Oldest is undecided. Until it is, the spec does not spare
-  it: Close Oldest closes the top row that is not shown, sound or not.
+1. Close Oldest **spares the shown page**.
+2. "Oldest" is the **earliest-opened page that is not shown**: the top row that is not the current row.
+3. The refused page **does not open afterwards**. After Close Oldest the user repeats the click.
+4. A page **playing sound is spared too**. Close Oldest closes the earliest-opened page that is neither shown nor
+   playing sound. If every page is shown or playing sound, the toast has no Close Oldest (see "Past the cap").
 
 ## The list
 
@@ -73,6 +69,9 @@ for the rows. A page enters the open-order list once, when it becomes a private 
 
 The 21st page of any kind is refused before it enters either list.
 
+Close Oldest walks the open-order list from the top and closes the first page that is neither the shown page nor
+playing sound. A muted page that is still playing counts as playing sound. `privateTabs` does not decide it.
+
 ## Scrolling and the smallest window
 
 - The list scrolls when its rows do not fit between "Pages" and the footer: at the default 960 x 600 window about 13
@@ -97,11 +96,15 @@ With 20 pages open, a 21st does not open. The window shows the shared toast (sec
 - Padding 12 pt leading, 6 pt trailing. A 16 pt glyph box with the 14 pt `rectangle.stack` symbol at `toastText` 64 %
   (light) or 72 % (dark), 8 pt to the text.
 - Text, 13 pt medium `toastText`: "This window has 20 pages open, the most it keeps."
-- Action, 8 pt after the text: **Close Oldest**, the shared 24 pt neutral pill (radius 12, padding 12, 12 pt semibold
+- Action, 8 pt after the text: **Close Oldest**, the shared 24 pt neutral pill, not mustard (radius 12, padding 12, 12 pt semibold
   `toastText`, fill `sidebarItemHovered`, hover `sidebarItemBackground`).
 - Surface `toastSurface` (these windows have no Space theme), shadow `toastShadow` and `toastEdge`.
 
-What Close Oldest closes, and what happens to the refused page, is under "Pending maintainer confirmation" above.
+Close Oldest closes the page the rules above pick ("Close Oldest") and the toast goes. The refused page does not open.
+
+**No page can be closed for the user.** When every page is shown or playing sound, there is no Close Oldest. The toast
+has no action (padding 14 pt trailing) and reads: "This window has 20 pages open. Close one to open another." The user
+closes a page from its row.
 
 ## States
 
@@ -109,7 +112,8 @@ What Close Oldest closes, and what happens to the refused page, is under "Pendin
 |---|---|
 | `list` | three pages, the first shown (current row), the second hovered (close button) |
 | `audio` | five pages, a hidden page playing sound with its mute button pressed (muted glyph) |
-| `cap` | 20 pages, the list scrolled to the top with its bottom edge faded, the cap toast over the card |
+| `cap` | 20 pages, the list scrolled to the top with its bottom edge faded, the cap toast over the card. Close Oldest would close the second row: the first is shown, and the second is neither shown nor playing sound |
+| `cap-none` | 20 pages, the first shown and every other one playing sound: the toast has no action and reads "This window has 20 pages open. Close one to open another." |
 | `small` | the smallest window (640 x 420, 150 pt sidebar), 20 pages, the list scrolling, the footer in its band, the cap toast truncating |
 
 Worst-case synthetic titles: an 80-character title, a one-letter title and 20 pages. No real browsing data.
@@ -140,11 +144,11 @@ only.
 
 The list is a list "Pages". Each row is a button with the page title; the shown page reads as selected. The mute
 button is "Mute <title>" or "Unmute <title>"; the close button is "Close <title>". The cap toast is announced once,
-and Close Oldest is a button.
+and Close Oldest, when shown, is a button.
 
 ## Files
 
 | Path | What it is |
 |---|---|
 | `prototype.html` | Single-file prototype of direction B, no network, synthetic titles |
-| `screens/<list\|audio\|cap\|small>-<light\|dark>.png` | 8 screenshots at 2x (4 light, 4 dark) |
+| `screens/<list\|audio\|cap\|cap-none\|small>-<light\|dark>.png` | 10 screenshots at 2x (5 light, 5 dark) |

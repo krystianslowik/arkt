@@ -9,8 +9,8 @@
   its own private pages. Direction A (the Ctrl-Tab switcher) was not picked and is not in this file.
   Single file, no network.
   Hash: #s=<state>[&theme=dark][&shot=1]
-    state: list | audio | cap | small
-    list, audio, cap: 960 x 600 window. small: the smallest window, 640 x 420 with a 150 pt sidebar.
+    state: list | audio | cap | cap-none | small
+    list, audio, cap, cap-none: 960 x 600 window. small: the smallest window, 640 x 420 with a 150 pt sidebar.
   1 CSS px = 1 pt. Colors are ShellTokens values. All titles are synthetic.
 -->
 <style>
@@ -98,7 +98,9 @@ body.shot .win { width: 100vw; height: 100vh; max-width: none; border-radius: 0;
   height: 36px; max-width: min(480px, calc(100% - 32px)); align-items: center; gap: 0;
   padding: 0 6px 0 12px; border-radius: 18px; background: var(--toast); box-shadow: var(--toast-shadow);
   white-space: nowrap; color: var(--toast-text); }
-.s-cap .toast, .s-small .toast { display: flex; }
+.s-cap .toast, .s-cap-none .toast, .s-small .toast { display: flex; }
+.s-cap-none .toast { padding-right: 14px; }
+.s-cap-none .toast .act { display: none; }
 .toast .g { width: 16px; height: 16px; flex: none; display: grid; place-items: center; opacity: var(--toast-glyph);
   margin-right: 8px; }
 .toast .g svg { width: 14px; height: 14px; }
@@ -150,7 +152,8 @@ if (q.get('shot')) document.body.classList.add('shot');
 const win = document.getElementById('win');
 win.classList.add('s-' + s);
 // Open order, newest last. The shown page is the current row; it can be anywhere in the list.
-const list = s === 'list' ? [base[0], base[1], base[3]] : s === 'audio' ? base : twenty;
+const list = s === 'list' ? [base[0], base[1], base[3]] : s === 'audio' ? base
+  : s === 'cap-none' ? twenty.map((p, i) => i === 0 ? p : Object.assign({}, p, { audio: true })) : twenty;
 const shown = 0;
 const hovered = s === 'list' ? 1 : -1;
 document.getElementById('srows').innerHTML = list.map((p, i) =>
@@ -161,9 +164,11 @@ document.getElementById('srows').innerHTML = list.map((p, i) =>
 const sc = document.getElementById('scroll');
 if (sc.scrollHeight > sc.clientHeight) sc.classList.add('over');
 document.getElementById('tg').innerHTML = STACK;
-document.getElementById('toastText').textContent = 'This window has 20 pages open, the most it keeps.';
+// Close Oldest spares the shown page and pages playing sound; with none left to close the toast has no action.
+document.getElementById('toastText').textContent = s === 'cap-none'
+  ? 'This window has 20 pages open. Close one to open another.' : 'This window has 20 pages open, the most it keeps.';
 const bar = document.getElementById('bar');
-for (const ss of ['list', 'audio', 'cap', 'small'])
+for (const ss of ['list', 'audio', 'cap', 'cap-none', 'small'])
   bar.insertAdjacentHTML('beforeend', `<a href="#s=${ss}${dark ? '&theme=dark' : ''}" onclick="setTimeout(()=>location.reload())">${ss}</a>`);
 bar.insertAdjacentHTML('beforeend', `<a href="#s=${s}${dark ? '' : '&theme=dark'}" onclick="setTimeout(()=>location.reload())">${dark ? 'Light' : 'Dark'}</a>`);
 </script>

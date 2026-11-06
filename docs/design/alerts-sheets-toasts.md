@@ -172,7 +172,7 @@ does today; a transient toast over a persistent one hides it only while it is up
 | Restore failed | Couldn't restore from the Archive. |
 | Import failed | Couldn't import browser data. |
 | Recovery | the four `RecoveryNotice` texts, unchanged; action Show Files |
-| Private page cap (Blank and Incognito windows, #668) | This window has 20 pages open, the most it keeps.; action Close Oldest (`design/private-pages`; pending maintainer confirmation) |
+| Private page cap (Blank and Incognito windows, #668) | This window has 20 pages open, the most it keeps.; action Close Oldest (`design/private-pages`). When every page is shown or playing sound: This window has 20 pages open. Close one to open another. (no action) |
 
 Counts and Space titles only, never a tab title or URL (the `ToastText` rule). The restore toast drops "Click to
 view." when the View button is shown: the button says it. PARITY(NEEDS-RUNTIME-CHECK BH-086): Arc's toast is
