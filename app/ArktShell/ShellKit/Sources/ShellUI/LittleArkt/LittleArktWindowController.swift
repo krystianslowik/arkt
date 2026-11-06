@@ -436,6 +436,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     guard moved else {
       phase = .open
       if let view = engine.contentView(for: tab) { card.setContent(view) }
+      refreshCrashedTab()                                   // #683: a crash during the handoff
       takeBackCarriedDialog()
       run(.appear) { _ in }
       return
@@ -564,6 +565,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     phase = .open
     window.ignoresMouseEvents = false
     if let view = engine.contentView(for: tab) { card.setContent(view) }
+    refreshCrashedTab()                                     // #683: a crash during the flight
     takeBackCarriedDialog()
     run(.appear) { _ in }
   }

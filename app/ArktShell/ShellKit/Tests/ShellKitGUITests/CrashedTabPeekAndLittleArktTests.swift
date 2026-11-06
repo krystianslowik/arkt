@@ -20,6 +20,8 @@ final class CrashedPeekTests: XCTestCase {
   private var pinned: NodeID!
   private var today: NodeID!
   private var spoken: [String] = []
+  /// "Peek closed" toasts the Peek scheduled; a test runs them by hand.
+  private var scheduledToasts: [@MainActor @Sendable () -> Void] = []
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -36,7 +38,8 @@ final class CrashedPeekTests: XCTestCase {
     controller.peek.animator.drivesDisplayLink = false
     controller.peek.linkSettings = { PeekLinkSettings() }
     controller.peek.announce = { _, _ in }
-    controller.peek.closedToastDelay = .infinity
+    scheduledToasts = []
+    controller.peek.scheduleClosedToast = { [unowned self] _, show in scheduledToasts.append(show) }
     controller.crashedTabs.reduceMotion = { true }
     controller.crashedTabs.announce = { [unowned self] text, _ in spoken.append(text) }
   }
@@ -120,6 +123,47 @@ final class CrashedPeekTests: XCTestCase {
     XCTAssertNotNil(engine.snapshot(of: source), "the source tab stays")
     XCTAssertEqual(controller.currentTab, source)
     XCTAssertNil(controller.crashedTabs.view(on: sourceCard))
+
+    XCTAssertEqual(scheduledToasts.count, 1, "the close schedules the Peek closed toast")
+    for show in scheduledToasts { show() }
+    XCTAssertEqual(controller.toasts.current?.spokenText, "Peek closed. Press Command-Z to reopen.")
+
+    XCTAssertTrue(controller.reopenClosed())
+    controller.peek.animator.settleNow()
+    XCTAssertTrue(controller.peek.isOpen, "Reopen brings the Peek back")
+    XCTAssertEqual(controller.peek.session?.source, source, "over its source")
+    XCTAssertNil(controller.toasts.current)
+  }
+
+  /// The page crashes while the Peek closes, then Reopen turns the close around: the view comes up on the Peek.
+  func testACrashDuringTheCloseShowsTheViewWhenReopenTurnsItAround() throws {
+    let (_, peek) = try openPeek()
+    controller.peek.close(.control)
+    XCTAssertTrue(controller.peek.isClosing)
+    engine.crash(peek, status: .crashed)
+    XCTAssertNil(try peekView(), "a closing Peek gets no view")
+
+    XCTAssertTrue(controller.reopenClosed())
+
+    XCTAssertEqual(controller.peek.session?.tab, peek, "the same Peek, turned around")
+    XCTAssertEqual(try peekView()?.tab, peek, "the crashed page is covered, not blank")
+    controller.peek.animator.settleNow()
+    XCTAssertEqual(controller.peek.session?.phase, .open)
+  }
+
+  /// The page recovers while the Peek closes, then Reopen turns the close around: the old view goes.
+  func testARecoveryDuringTheCloseTakesTheViewDownWhenReopenTurnsItAround() throws {
+    let (_, peek) = try openPeek()
+    engine.crash(peek, status: .crashed)
+    XCTAssertNotNil(try peekView())
+    controller.peek.close(.control)
+    engine.reload(peek)
+    XCTAssertNil(engine.snapshot(of: peek)?.crash)
+
+    XCTAssertTrue(controller.reopenClosed())
+
+    XCTAssertEqual(controller.peek.session?.tab, peek)
+    XCTAssertNil(try peekView(), "no stale view over the live page")
   }
 
   func testAHiddenPeekThatCrashedComesBackWithTheViewAndNoMotion() throws {
@@ -342,6 +386,24 @@ final class CrashedLittleArktTests: XCTestCase {
 
     XCTAssertFalse(engine.windowIDs.contains(id), "the window closed, as Cmd-W does there")
     XCTAssertNil(engine.snapshot(of: tab))
+  }
+
+  /// Open in fails after the page left the card, and the page crashed meanwhile: the page comes back covered.
+  func testAPageThatCrashedDuringAFailedOpenInComesBackWithTheView() throws {
+    _ = set.openWindow()
+    let (little, _, tab) = try openPopup()
+    little.flightDestination = { nil }                      // the fade-out path, not the flight
+    little.onOpenIn = { [engine] moving, _, _ in
+      engine?.crash(moving, status: .crashed)             // the page is off the card now
+      return false
+    }
+
+    little.openIn()
+    little.finishMotion()
+
+    let page = try XCTUnwrap(engine.contentView(for: tab))
+    XCTAssertTrue(little.card.contentView === page, "the page came back")
+    XCTAssertEqual(little.crashedTabs.view(on: little.card)?.tab, tab, "covered, not blank")
   }
 
   func testTheEntranceScalesAndFadesAndReduceMotionOnlyFades() throws {

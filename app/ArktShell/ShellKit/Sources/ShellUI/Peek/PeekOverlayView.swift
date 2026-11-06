@@ -311,7 +311,7 @@ public final class PeekCardView: NSView {
   }
 
   /// Covers the page inside `surface` while set: the crashed tab view of the Peek's page (#683).
-  public private(set) var pageOverlayView: NSView?
+  private(set) var pageOverlayView: NSView?
 
   /// Installs `view` over the page, inside the rounded surface, or removes the current one when nil.
   func setPageOverlay(_ view: NSView?) {
