@@ -617,8 +617,9 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.faviconView.image = faviconProvider?(id)
       ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.favoriteFaviconSize,
                               scale: collectionView.shellBackingScale)
-    tile.toolTip = url.map { HostDisplay.title(title, for: $0) } ?? title
-    tile.setAccessibilityLabel(title)
+    let shown = url.map { HostDisplay.title(title, for: $0) } ?? title
+    tile.toolTip = shown
+    tile.setAccessibilityLabel(shown)
     tile.nodeID = id
     let isLoaded = pageLoadedProvider?(id) == true
     tile.isLoaded = isLoaded

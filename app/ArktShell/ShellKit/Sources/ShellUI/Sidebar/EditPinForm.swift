@@ -38,7 +38,10 @@ struct EditPinForm {
   /// address the field cannot type back exactly (http, an IP address) is stored as it was.
   private var prefilled: (text: String, url: URL)
 
-  init(kind: EditPinKind, name: String, url: URL, currentPage: URL) {
+  /// `name` is the tab's saved title; one saved as the raw host of `url` shows checked (`HostDisplay.title(_:for:)`,
+  /// #732), and an untouched Save still stores no name.
+  init(kind: EditPinKind, name savedName: String, url: URL, currentPage: URL) {
+    let name = HostDisplay.title(savedName, for: url)
     self.kind = kind
     originalName = name
     originalURL = url

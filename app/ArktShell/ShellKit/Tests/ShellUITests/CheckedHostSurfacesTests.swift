@@ -197,6 +197,37 @@ struct CheckedHostSurfacesTests {
     #expect(session.matches.count == 1)
   }
 
+  /// The rename field opens with the row's text, the checked host; committing it unchanged is not a rename, so no
+  /// Unicode host is saved as a custom title.
+  @Test func renamingASavedHostTitleUnchangedIsNotARename() {
+    let tab = SidebarNodeInfo.tab(id: UUID(), url: Self.url("https://\(Self.real)/"), title: Self.real)
+    let original = SidebarOutlineController.renameText(of: tab)
+    #expect(original == Self.realShown)
+    #expect(!SidebarOutlineController.isRename(typed: Self.realShown, original: original))
+    #expect(!SidebarOutlineController.isRename(typed: " \(Self.realShown) ", original: original))
+    #expect(SidebarOutlineController.isRename(typed: "Stadt", original: original))
+    #expect(!SidebarOutlineController.isRename(typed: nil, original: original), "Esc")
+    let fake = SidebarNodeInfo.tab(id: UUID(), url: Self.url("https://\(Self.lookalike)/"), title: Self.lookalike)
+    #expect(SidebarOutlineController.renameText(of: fake) == Self.lookalike)
+    let folder = SidebarNodeInfo.folder(id: UUID(), title: Self.real)
+    #expect(SidebarOutlineController.renameText(of: folder) == Self.real, "a folder's title is its own")
+  }
+
+  /// Edit Pin's Name field shows a title saved as the raw host checked; an untouched Save stores no name.
+  @Test func editPinShowsASavedHostTitleCheckedAndAnUntouchedSaveWritesNothing() {
+    let real = Self.url("https://\(Self.real)/")
+    var form = EditPinForm(kind: .pinnedTab, name: Self.real, url: real, currentPage: real)
+    #expect(form.name == Self.realShown)
+    #expect(form.submit() == .save(name: nil, url: nil))
+    let fake = Self.url("https://\(Self.lookalike)/")
+    var fakeForm = EditPinForm(kind: .favorite, name: Self.lookalike, url: fake, currentPage: fake)
+    #expect(fakeForm.name == Self.lookalike)
+    #expect(fakeForm.submit() == .save(name: nil, url: nil))
+    var renamed = EditPinForm(kind: .pinnedTab, name: Self.real, url: real, currentPage: real)
+    renamed.edit(name: "Stadt")
+    #expect(renamed.submit() == .save(name: "Stadt", url: nil))
+  }
+
   // MARK: Downloads
 
   @Test func downloadsHostIsChecked() {
