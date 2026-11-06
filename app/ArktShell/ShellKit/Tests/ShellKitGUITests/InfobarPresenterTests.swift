@@ -182,6 +182,45 @@ final class InfobarPresenterTests: XCTestCase {
     XCTAssertEqual(try strip().rows.map(\.infobar.message), ["Later"])
   }
 
+  // MARK: HTML fullscreen (#581)
+
+  func testHTMLFullscreenTakesTheStripDownKeepsTheListAndLeavingItShowsTheStripAgain() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    engine.raiseInfobar(in: tab, message: "Two")
+    XCTAssertEqual(presenter.height(of: tab), 2 * InfobarMetrics.rowHeight)
+
+    engine.setTabFullscreen(tab, true)
+    XCTAssertNil(presenter.strip(for: tab), "no row over a fullscreen element")
+    XCTAssertEqual(presenter.height(of: tab), 0, "panels point at the page's top")
+    XCTAssertEqual(presenter.infobars[tab]?.map(\.message), ["One", "Two"])
+    presenter.refresh()
+    XCTAssertNil(presenter.strip(for: tab), "a refresh keeps it down while the tab is fullscreen")
+
+    engine.setTabFullscreen(tab, false)
+    XCTAssertEqual(try strip().rows.map(\.infobar.message), ["One", "Two"])
+    XCTAssertEqual(presenter.height(of: tab), 2 * InfobarMetrics.rowHeight)
+    XCTAssertEqual(try strip().panel.frame.maxY, anchor.maxY)
+  }
+
+  func testAListThatArrivesDuringHTMLFullscreenShowsWhenTheTabLeavesIt() throws {
+    engine.setTabFullscreen(tab, true)
+    engine.raiseInfobar(in: tab, message: "Later")
+    XCTAssertNil(presenter.strip(for: tab))
+    XCTAssertEqual(presenter.height(of: tab), 0)
+
+    engine.setTabFullscreen(tab, false)
+    XCTAssertEqual(try strip().rows.map(\.infobar.message), ["Later"])
+  }
+
+  func testTheRowsOfOtherTabsStayWhenOneTabEntersHTMLFullscreen() throws {
+    let engineWindow = try XCTUnwrap(engine.snapshot(of: tab)?.window)
+    let other = engine.createTab(url: URL(string: "arkt-test://example.com/Other")!, in: engineWindow)
+    engine.raiseInfobar(in: tab, message: "Mine")
+    engine.setTabFullscreen(other, true)
+    XCTAssertNotNil(presenter.strip(for: tab))
+    XCTAssertEqual(presenter.height(of: tab), InfobarMetrics.rowHeight)
+  }
+
   func testAMinimizedWindowShowsNoStripAndTheOneThatComesBackDoes() throws {
     windowVisible = false
     engine.raiseInfobar(in: tab, message: "Hello")

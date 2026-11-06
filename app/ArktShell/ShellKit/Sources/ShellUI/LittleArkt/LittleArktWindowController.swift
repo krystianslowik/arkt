@@ -204,8 +204,9 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       carriedDialog = nil
     case .dialogRequested, .dialogEnded:
       javaScriptDialogs.handle(event)                         // #471
-    case .infobarsChanged:
-      infobarStrips.handle(event)                             // #400
+    case .infobarsChanged, .tabFullscreenChanged:
+      infobarStrips.handle(event)                             // #400; rows hide in HTML fullscreen (#581)
+      javaScriptDialogs.refresh()                             // the panel follows the rows' height
     case .tabClosed(let tab, _) where tab == shownTab:
       shownTab = nil
       if card.contentView?.isDescendant(of: rootView) == true { card.setContent(nil) }

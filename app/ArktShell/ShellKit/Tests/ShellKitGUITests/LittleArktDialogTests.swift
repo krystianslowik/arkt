@@ -128,6 +128,27 @@ final class LittleArktDialogTests: XCTestCase {
     }
   }
 
+  func testThePanelFollowsTheInfobarRowsAndHTMLFullscreen() throws {
+    let scene = try makeScene(reduceMotion: true)
+    scene.little.infobarStrips.reduceMotion = { true }
+    _ = try XCTUnwrap(scene.engine.raiseDialog(in: scene.tab, kind: .alert, message: "Now?"))
+    let panel = try XCTUnwrap(scene.little.javaScriptDialogs.panel(for: scene.tab))
+    let card = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let page = try XCTUnwrap(card.window).convertToScreen(card.convert(card.bounds, to: nil))
+    let top = page.maxY - DialogPanel.anchorInset
+
+    scene.engine.raiseInfobar(in: scene.tab, message: "One")
+    XCTAssertEqual(panel.panel.frame.maxY, top - InfobarMetrics.rowHeight, accuracy: 0.5, "below the row (#581)")
+
+    scene.engine.setTabFullscreen(scene.tab, true)
+    XCTAssertNil(scene.little.infobarStrips.strip(for: scene.tab), "no row in HTML fullscreen")
+    XCTAssertEqual(panel.panel.frame.maxY, top, accuracy: 0.5, "at the page's top in HTML fullscreen")
+
+    scene.engine.setTabFullscreen(scene.tab, false)
+    XCTAssertNotNil(scene.little.infobarStrips.strip(for: scene.tab))
+    XCTAssertEqual(panel.panel.frame.maxY, top - InfobarMetrics.rowHeight, accuracy: 0.5, "below the row again")
+  }
+
   func testThePanelWidthFollowsTheLittleArktWindow() throws {
     let scene = try makeScene()
     scene.little.window.setFrame(NSRect(x: 100, y: 100, width: 360, height: 500), display: false)
