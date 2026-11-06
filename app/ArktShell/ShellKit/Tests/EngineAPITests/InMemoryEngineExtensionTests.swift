@@ -449,6 +449,71 @@ struct InMemoryEngineExtensionTests {
     #expect(pinned(engine, window) == ["a"])
     windows.cancel(); extensions.cancel()
   }
+
+  // MARK: - Uninstall (#720)
+
+  @Test func uninstallIsANoOpByDefault() {
+    let engine = ActionsOnlyEngine()
+    var events: [EngineExtensionEvent] = []
+    let token = engine.observeExtensions { events.append($0) }
+    engine.uninstallExtension("a", reportAbuse: true)
+    #expect(events.isEmpty)
+    token.cancel()
+  }
+
+  @Test func uninstallRemovesTheActionPinAndCommandsFromEveryWindow() {
+    let engine = commandsEngine()
+    let first = engine.createWindow(host: StubWindowHost())
+    let second = engine.createWindow(host: StubWindowHost())
+    for window in [first, second] { engine.setExtensionActions([action("a", "A"), action("b", "B")], in: window) }
+    engine.setExtensionPinned("a", pinned: true)
+    engine.setExtensionPinned("b", pinned: true)
+    var events: [EngineExtensionEvent] = []
+    let token = engine.observeExtensions { events.append($0) }
+    let recorder = EventRecorder(engine)
+
+    engine.uninstallExtension("a", reportAbuse: false)
+
+    #expect(listed(engine, first) == ["b"] && listed(engine, second) == ["b"])
+    #expect(engine.pinnedExtensionIDs == ["b"])
+    #expect(engine.extensionCommands.map(\.id.extensionID) == ["b"])
+    #expect(recorder.windowEvents == [.extensionActionsChanged(first), .extensionActionsChanged(second)])
+    #expect(events == [.commandsChanged])
+    #expect(engine.uninstalledExtensions == [.init(extensionID: "a", reportAbuse: false)])
+    token.cancel()
+  }
+
+  @Test func uninstallWithoutCommandsReportsNoCommandsChangeAndRecordsReportAbuse() {
+    let (engine, window) = engineWithActions(["a", "c"])
+    var events: [EngineExtensionEvent] = []
+    let token = engine.observeExtensions { events.append($0) }
+    let recorder = EventRecorder(engine)
+    engine.uninstallExtension("c", reportAbuse: true)
+    #expect(listed(engine, window) == ["a"])
+    #expect(recorder.windowEvents == [.extensionActionsChanged(window)])
+    #expect(events.isEmpty)
+    #expect(engine.uninstalledExtensions == [.init(extensionID: "c", reportAbuse: true)])
+
+    // Seen again later (a reinstall), it starts unpinned like any new extension.
+    engine.setExtensionActions([action("a", "A"), action("c", "C")], in: window)
+    #expect(pinned(engine, window).isEmpty)
+    engine.setExtensionPinned("c", pinned: true)
+    #expect(pinned(engine, window) == ["c"])
+    token.cancel()
+  }
+
+  @Test func uninstallingAnUnknownExtensionChangesNothing() {
+    let (engine, window) = engineWithActions(["a"])
+    var events: [EngineExtensionEvent] = []
+    let token = engine.observeExtensions { events.append($0) }
+    let recorder = EventRecorder(engine)
+    engine.uninstallExtension("zz", reportAbuse: false)
+    #expect(listed(engine, window) == ["a"])
+    #expect(recorder.windowEvents.isEmpty)
+    #expect(events.isEmpty)
+    #expect(engine.uninstalledExtensions == [.init(extensionID: "zz", reportAbuse: false)], "the call is recorded")
+    token.cancel()
+  }
 }
 
 /// An engine that implements only the two required `EngineExtensions` members.

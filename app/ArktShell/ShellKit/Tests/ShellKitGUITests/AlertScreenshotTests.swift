@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 import EngineAPITestSupport
 import XCTest
 @testable import ShellUI
@@ -25,7 +26,7 @@ final class AlertScreenshotTests: XCTestCase {
       : SpaceThemeInfo(baseColors: [.srgb(hex: 0xC9DBF5), .srgb(hex: 0xDCE7F7)], isDark: false)
   }
 
-  private func makeWindow(dark: Bool) -> ShellWindowController {
+  private func makeWindow(dark: Bool, engine: InMemoryEngine = InMemoryEngine()) -> ShellWindowController {
     let stub = StubSidebar()
     let space = stub.addSpace(title: "Work", theme: Self.workTheme(dark: dark))
     stub.setIcon(space, to: .symbol("diamond.fill"))
@@ -33,7 +34,7 @@ final class AlertScreenshotTests: XCTestCase {
       _ = stub.addTab(url: URL(string: "https://example.com/\(title.count)")!, title: title, in: .today(space),
                       at: nil)
     }
-    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: stub)
+    let controller = ShellWindowController(engine: engine, sidebar: stub)
     let window = controller.window
     window?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
     window?.setFrame(NSRect(x: 80, y: 80, width: 1080, height: 720), display: true)
@@ -89,6 +90,40 @@ final class AlertScreenshotTests: XCTestCase {
       try save(window, "delete-space-\(dark ? "dark" : "light")")
       if let sheet = window.attachedSheet { window.endSheet(sheet) }
       controller.close()
+    }
+  }
+
+  /// The extension remove sheet (#720, `ext-remove`), plus the 85-character worst case.
+  func testExtensionRemoveShots() throws {
+    let icon: Data = {
+      let image = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+        NSColor(srgbRed: 0x4A / 255, green: 0x5A / 255, blue: 0x4E / 255, alpha: 1).setFill()
+        rect.fill()
+        let text = NSAttributedString(string: "{}", attributes: [
+          .font: NSFont.systemFont(ofSize: 26, weight: .semibold), .foregroundColor: NSColor.white,
+        ])
+        let size = text.size()
+        text.draw(at: NSPoint(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2))
+        return true
+      }
+      let rep = NSBitmapImageRep(data: image.tiffRepresentation!)!
+      return rep.representation(using: .png, properties: [:])!
+    }()
+    let names = ["": "JSON Formatter",
+                 "-long": String(String(repeating: "Quiet Reader for Long Articles and ", count: 3).prefix(85))]
+    for dark in [false, true] {
+      for (suffix, name) in names {
+        let engine = InMemoryEngine()
+        let controller = makeWindow(dark: dark, engine: engine)
+        let window = try XCTUnwrap(controller.window)
+        let action = ExtensionAction(id: "json", name: name, iconPNG: icon)
+        engine.setExtensionActions([action], in: try XCTUnwrap(controller.engineWindow))
+        try XCTUnwrap(controller.extensionsPanel).presentRemoveSheet(for: action)
+        settle(1.2)
+        try save(window, "ext-remove\(suffix)-\(dark ? "dark" : "light")")
+        controller.extensionsPanel?.closeRemoveSheet()
+        controller.close()
+      }
     }
   }
 

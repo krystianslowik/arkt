@@ -25,8 +25,11 @@ public final class ExtensionsPanelController: NSObject {
   public var onManage: (@MainActor () -> Void)?
   /// Browse the Web Store, the empty state's one action.
   public var onBrowseWebStore: (@MainActor () -> Void)?
-  /// The context menu's Remove from Arkt...: the remove sheet. Nil until it exists.
+  /// The context menu's Remove from Arkt...: the window sets it to `presentRemoveSheet(for:)` (#720). While it is nil
+  /// the item is disabled.
   public var onRemove: (@MainActor (ExtensionAction) -> Void)?
+  /// The remove sheet while it is up.
+  public private(set) var removeSheet: ExtensionRemoveSheet?
 
   public var isShown: Bool { panel?.isVisible == true }
 
@@ -133,10 +136,46 @@ public final class ExtensionsPanelController: NSObject {
   /// The engine window went away (the window closes or waits for its next page): the panel closes instead of showing
   /// the empty state.
   func refresh() {
+    closeRemoveSheetIfGone()
     guard let view = contentView, let window = panel, let button, let parent = button.window else { return }
     guard engineWindow() != nil else { hide(keyboard: false); return }
     view.reload(ExtensionsPanelModel(actions: actions))
     place(window, view: view, in: parent, anchoredTo: button)
+  }
+
+  // MARK: Remove from Arkt... (#720)
+
+  /// Asks before removing `action`'s extension: the panel closes and the remove sheet hangs from the panel's window,
+  /// which it never blocks for other windows. Remove uninstalls through the engine with the Report abuse state; Cancel
+  /// and Escape do nothing. Nothing happens while a sheet is already up on the window.
+  public func presentRemoveSheet(for action: ExtensionAction) {
+    guard removeSheet == nil, let parent = button?.window, parent.attachedSheet == nil else { return }
+    hide(keyboard: false)
+    let sheet = ExtensionRemoveSheet(action: action)
+    let extensionID = sheet.extensionID              // not the sheet: it owns this closure
+    sheet.onFinish = { [weak self] reportAbuse in
+      guard let self else { return }
+      self.removeSheet = nil
+      guard let reportAbuse else { return }
+      self.extensions?.uninstallExtension(extensionID, reportAbuse: reportAbuse)
+    }
+    removeSheet = sheet
+    sheet.begin(on: parent)
+  }
+
+  /// The extension the sheet asks about went away (removed elsewhere, or the engine window closed): the sheet closes
+  /// without a call.
+  private func closeRemoveSheetIfGone() {
+    guard let sheet = removeSheet else { return }
+    if engineWindow() != nil, actions.contains(where: { $0.extensionID == sheet.extensionID }) { return }
+    closeRemoveSheet()
+  }
+
+  /// Closes the remove sheet, if it is up, without a call.
+  func closeRemoveSheet() {
+    let sheet = removeSheet
+    removeSheet = nil
+    sheet?.dismiss()
   }
 
   /// The browser window resized: the panel keeps its place above the bar and its height cap.

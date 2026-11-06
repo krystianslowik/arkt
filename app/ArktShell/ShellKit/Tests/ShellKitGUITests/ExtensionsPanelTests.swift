@@ -292,8 +292,10 @@ final class ExtensionsPanelTests: XCTestCase {
     XCTAssertTrue(engine.ranExtensionActions.isEmpty, "and does not run the action")
   }
 
-  func testRemoveIsDisabledUntilTheAppProvidesTheRemoveSheet() throws {
+  func testRemoveIsDisabledWithoutTheRemoveSheet() throws {
     open([action("a")])
+    XCTAssertNotNil(panel.onRemove, "the window wires the remove sheet (#720)")
+    panel.onRemove = nil
     let a = try row("a")
     let rightClick = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
                                                       timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
