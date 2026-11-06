@@ -737,7 +737,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     let (title, image) = presentation(of: id)
     let closing = closingProvider?(id) ?? false
     cell.configure(title: title, image: image, flavor: flavor,
-                   closeAction: closing ? nil : RowCloseAction.resolve(id, in: source), isClosing: closing,
+                   closeAction: closing ? nil : rowCloseAction(for: id), isClosing: closing,
                    audio: audio(of: id))
   }
 
@@ -1897,6 +1897,27 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     return audioProvider?(id) ?? .silent
   }
 
+  /// The action of a row's X: none on a pinned row with no loaded page, whose close would do nothing (#601). A
+  /// pinned split counts as loaded while one of its panes is; a pane row keeps its X, which takes it out of the split.
+  private func rowCloseAction(for id: NodeID) -> RowCloseAction? {
+    let action = RowCloseAction.resolve(id, in: source)
+    guard action == .closeKeepPinned else { return action }
+    return hasLoadedPage(id) ? action : nil
+  }
+
+  private func hasLoadedPage(_ id: NodeID) -> Bool {
+    guard let loadedProvider else { return false }
+    if case .split? = source.node(id) { return source.children(of: .split(id)).contains { loadedProvider($0) } }
+    return loadedProvider(id)
+  }
+
+  /// A tab's page opened or closed: a pinned row (and its split's row) gains or drops its X (#601). Other rows keep
+  /// their action, so they are not touched.
+  public func loadedChanged(node id: NodeID) {
+    guard case .pinned? = source.section(containing: id) else { return }
+    reload(node: id)
+  }
+
   /// Where a row's X (and its VoiceOver equivalent) goes: `onRemovePane` on a pane row, else `onClose`.
   private func closeAction(for id: NodeID) -> (@MainActor (NodeID) -> Void)? {
     RowCloseAction.resolve(id, in: source) == .removeFromSplit ? onRemovePane : onClose
@@ -1909,7 +1930,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   func accessibilityActions(for id: NodeID?) -> [NSAccessibilityCustomAction] {
     guard let id else { return [] }
     var actions: [NSAccessibilityCustomAction] = []
-    if let action = RowCloseAction.resolve(id, in: source) {
+    if let action = rowCloseAction(for: id) {
       actions.append(customAction(action.accessibilityName, id) { $0.closeAction(for: id) })
     }
     let sound = audio(of: id)

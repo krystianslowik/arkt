@@ -118,7 +118,7 @@ public final class SidebarController {
   /// Tabs whose page is loaded in this window: every activation shows the tab, which creates its page; pages the
   /// window creates without an activation (the other panes of a split) are added through `markLoaded(node:)`, and
   /// the window calls `deactivate(node:)` when any page closes; nodes that leave the source are dropped like
-  /// favicons. Decides whether a Favorite tile shows its X (#82).
+  /// favicons. Decides whether a Favorite tile (#82) or a pinned row (#601) shows its X.
   private(set) var loadedNodes: Set<NodeID> = []
   /// Loaded Favorites, least to most recently used (BH-049); activations append, closes and removals drop.
   private var favoriteLoadOrder: [NodeID] = []
@@ -647,6 +647,7 @@ public final class SidebarController {
     if let space, space != currentSpace { showSpace(space) }
     if let space { lastActive[space] = tab }
     let loadedNow = loadedNodes.insert(tab).inserted
+    if loadedNow { loadedChanged(tab) }
     let isFavorite = source.section(containing: tab).map {
       if case .favorites = $0 { true } else { false }
     } ?? false
@@ -698,7 +699,14 @@ public final class SidebarController {
 
   /// The window created `node`'s page without activating it (a background pane of a shown split, #156 review).
   public func markLoaded(node: NodeID) {
-    if loadedNodes.insert(node).inserted { view.favorites.reload(node: node) }
+    guard loadedNodes.insert(node).inserted else { return }
+    view.favorites.reload(node: node)
+    loadedChanged(node)
+  }
+
+  /// A page opened or closed: pinned rows show their X only while they have one (#601).
+  private func loadedChanged(_ node: NodeID) {
+    for page in pages.values { page.outlineController.loadedChanged(node: node) }
   }
 
   /// Rows whose page close is held behind a leave-site prompt (week-3 Decision 11).
@@ -733,6 +741,7 @@ public final class SidebarController {
     }
     favoriteLoadOrder.removeAll { $0 == node }
     let wasLoaded = loadedNodes.remove(node) != nil
+    if wasLoaded { loadedChanged(node) }
     guard node == current || node == previous else {
       if wasLoaded { view.favorites.reload(node: node) }   // a background Favorite drops its X
       return
