@@ -39,9 +39,10 @@ extension ShellWindowController {
   }
 
   /// Loads `url` in the shown private page: the first visit creates it, later ones navigate it. `inNewPage` (Paste
-  /// URL as New Tab) makes a new private page instead, shown over the others. The tab has no sidebar node, so nothing
-  /// is written to the shared sidebar. A page the engine closed is made again.
-  func openPrivately(_ url: URL, inNewPage: Bool = false) {
+  /// URL as New Tab) makes a new private page instead, shown over the others, its row at the bottom of the Pages list
+  /// or at `row` (a reopened page, #789). The tab has no sidebar node, so nothing is written to the shared sidebar. A
+  /// page the engine closed is made again.
+  func openPrivately(_ url: URL, inNewPage: Bool = false, atRow row: Int? = nil) {
     if !inNewPage, let shown = privateTab, engine.snapshot(of: shown) != nil {
       engine.navigate(shown, to: url)
       showPrivatePage(shown)
@@ -53,7 +54,7 @@ extension ShellWindowController {
     }
     let tab = engine.createTab(url: url, in: ensureEngineWindow())
     keepsWindowWithoutEngine = false
-    privatePageOrder.append(tab)
+    privatePageOrder.insert(tab, at: row ?? privatePageOrder.pages.count)
     privateTabs.append(tab)
     showPrivatePage(tab)
     activateEngineTab(tab)

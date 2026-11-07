@@ -40,6 +40,31 @@ struct PrivatePageOrderTests {
     #expect(!order.pages.contains(refused))
   }
 
+  /// #789: a reopened page goes back at the row it closed from, or at the bottom when the list is shorter now.
+  @Test func `a page inserted at a row goes there clamped to the list`() {
+    var order = PrivatePageOrder()
+    let tabs = pages(3)
+    for tab in tabs { order.append(tab) }
+    let (middle, top, past, negative) = (TabID(), TabID(), TabID(), TabID())
+    let added = [order.insert(middle, at: 1), order.insert(top, at: 0), order.insert(past, at: 99),
+                 order.insert(negative, at: -3)]
+    #expect(added == [true, true, true, true])
+    #expect(order.pages == [negative, top, tabs[0], middle, tabs[1], tabs[2], past],
+            "a row past the end is the bottom, one before the top is the top")
+    let again = order.insert(middle, at: 0)
+    #expect(!again, "a page enters the list once")
+    #expect(order.pages.count == 7)
+  }
+
+  @Test func `an insert at the cap is refused`() {
+    var order = PrivatePageOrder()
+    let tabs = pages(20)
+    for tab in tabs { order.append(tab) }
+    let added = order.insert(TabID(), at: 0)
+    #expect(!added)
+    #expect(order.pages == tabs)
+  }
+
   @Test func `close oldest picks the top row that is neither shown nor playing`() {
     var order = PrivatePageOrder()
     let tabs = pages(20)
