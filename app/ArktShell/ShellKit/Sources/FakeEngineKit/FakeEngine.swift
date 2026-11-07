@@ -295,6 +295,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     loadURL(url, in: entry.webView)
   }
 
+  /// #784: WebKit has no address-bar transition, typed-visit count or debug URLs; this loads as `navigate(_:to:)`.
+  public func navigateFromAddressBar(_ id: TabID, to url: URL) { navigate(id, to: url) }
+
   private func loadURL(_ url: URL, in web: WKWebView) {
     if url.isFileURL {
       web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())

@@ -23,7 +23,7 @@ extension ShellWindowController {
   /// of their own instead, one without a row. A tab the engine opens here (`engineDidCreateTab`) is one too (#559).
   private func keepVisitsOutOfTheSharedSidebar() {
     isPrivateWindow = true
-    commandBar.onOpen = { [weak self] url, _ in self?.openPrivately(url) }
+    commandBar.onOpen = { [weak self] url, _ in self?.openPrivately(url, fromAddressBar: true) }
     sidebarController.onPasteAndGo = { [weak self] url in self?.openPrivately(url) }
     let pages = sidebarController.view.privatePages
     pages.onSelect = { [weak self] tab in self?.selectPrivatePage(tab) }
@@ -40,10 +40,10 @@ extension ShellWindowController {
   /// Loads `url` in the shown private page: the first visit creates it, later ones navigate it. `inNewPage` (Paste
   /// URL as New Tab) makes a new private page instead, shown over the others, its row at the bottom of the Pages list
   /// or at `row` (a reopened page, #789). The tab has no sidebar node, so nothing is written to the shared sidebar. A
-  /// page the engine closed is made again.
-  func openPrivately(_ url: URL, inNewPage: Bool = false, atRow row: Int? = nil) {
+  /// page the engine closed is made again. `fromAddressBar`: the user typed `url` in the address field (Cmd-L, #784).
+  func openPrivately(_ url: URL, inNewPage: Bool = false, atRow row: Int? = nil, fromAddressBar: Bool = false) {
     if !inNewPage, let shown = privateTab, engine.snapshot(of: shown) != nil {
-      engine.navigate(shown, to: url)
+      if fromAddressBar { engine.navigateFromAddressBar(shown, to: url) } else { engine.navigate(shown, to: url) }
       showPrivatePage(shown)
       return
     }

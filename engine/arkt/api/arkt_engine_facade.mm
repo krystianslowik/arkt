@@ -89,7 +89,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/isolated_world_ids.h"
+#include "content/public/common/url_constants.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
+#include "third_party/blink/public/common/chrome_debug_urls.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -237,6 +239,51 @@ NSError* TestAPIError(NSString* message) {
 
 bool TestAPIEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(kTestAPISwitch);
+}
+
+// A browser debug URL (#784): one Chromium runs in the browser process when the
+// navigation comes from the address bar. The list mirrors IsDebugURL and
+// IsAsanDebugURL in content/browser/renderer_host/debug_urls.cc, which content
+// does not export. Renderer debug URLs (chrome://crash, chrome://kill,
+// chrome://hang) are not here: Chromium runs them for any transition.
+bool IsBrowserDebugURL(const GURL& url) {
+  if (!url.is_valid() || !url.SchemeIs(content::kChromeUIScheme)) {
+    return false;
+  }
+  std::string process;
+  std::string crash_type;
+  if (blink::ParseCrashURL(url, &process, &crash_type)) {
+    return process == blink::kAsanBrowserProcess ||
+           process == blink::kAsanGpuProcess;
+  }
+  static constexpr const char* kBrowserDebugURLs[] = {
+      blink::kChromeUIBrowserCrashURL,
+      blink::kChromeUIBrowserDcheckURL,
+      blink::kChromeUIBrowserUIHang,
+      blink::kChromeUIDelayedBrowserUIHang,
+      blink::kChromeUIGpuCleanURL,
+      blink::kChromeUIGpuCrashURL,
+      blink::kChromeUIGpuHangURL,
+      blink::kChromeUIMemoryPressureCriticalURL,
+      blink::kChromeUIMemoryPressureModerateURL,
+  };
+  for (const char* debug_url : kBrowserDebugURLs) {
+    if (url == GURL(debug_url)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The transition of a navigation the user typed in the shell's address field
+// (#784): Chrome's omnibox transition, except that a browser debug URL keeps
+// TYPED alone without the test API, so Chromium does not run it.
+ui::PageTransition AddressBarTransition(const GURL& url) {
+  if (IsBrowserDebugURL(url) && !TestAPIEnabled()) {
+    return ui::PAGE_TRANSITION_TYPED;
+  }
+  return ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
+                                   ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
 }
 
 const char* ReasonName(ArktCloseReason reason) {
@@ -3406,10 +3453,27 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 }
 
 - (void)navigateToURL:(NSURL*)url {
+  [self loadURL:arkt::ToGURL(url)
+      transition:ui::PAGE_TRANSITION_TYPED
+            call:"navigate"];
+}
+
+- (void)navigateFromAddressBarToURL:(NSURL*)url {
   GURL target = arkt::ToGURL(url);
-  [self runOrQueue:"navigate"
+  [self loadURL:target
+      transition:arkt::AddressBarTransition(target)
+            call:"navigateFromAddressBar"];
+}
+
+// navigateToURL: and navigateFromAddressBarToURL: differ only in the
+// transition (#784).
+- (void)loadURL:(const GURL&)target
+     transition:(ui::PageTransition)transition
+           call:(const char*)call {
+  [self runOrQueue:call
               work:base::BindOnce(
-                       [](ArktFacadeTab* that, GURL target) {
+                       [](ArktFacadeTab* that, GURL target,
+                          ui::PageTransition transition) {
                          [that unpark];
                          content::WebContents* contents = that.contents;
                          if (!contents) {
@@ -3417,10 +3481,10 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                          }
                          content::NavigationController::LoadURLParams params(
                              target);
-                         params.transition_type = ui::PAGE_TRANSITION_TYPED;
+                         params.transition_type = transition;
                          contents->GetController().LoadURLWithParams(params);
                        },
-                       self, target)];
+                       self, target, transition)];
 }
 
 - (void)reload {

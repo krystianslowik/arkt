@@ -150,6 +150,12 @@ final class TestTab: NSObject, ArktTabHandle {
     forwardEntries = []
     self.url = url
   }
+  /// #784: the address-bar transition is the engine's business; here it is a navigation that keeps a log.
+  private(set) var addressBarNavigations: [URL] = []
+  func navigate(fromAddressBarTo url: URL) {
+    addressBarNavigations.append(url)
+    navigate(to: url)
+  }
   func reload() { isLoading = true }
   func goBack() { goToHistory(offset: -1) }
   func goForward() { goToHistory(offset: 1) }
@@ -611,6 +617,17 @@ struct ConformanceTests {
     first.focus()
     first.reload()
     #expect(first.isLoading)
+  }
+
+  /// #784: the address-bar call keeps its Objective-C name, which the facade implements, and Swift calls it as
+  /// `navigate(fromAddressBarTo:)`.
+  @Test func addressBarNavigationIsItsOwnSelector() {
+    #expect(TestTab.instancesRespond(to: NSSelectorFromString("navigateFromAddressBarToURL:")))
+    #expect(TestTab.instancesRespond(to: NSSelectorFromString("navigateToURL:")))
+    let engine = TestEngine()
+    let tab = engine.createBrowser(host: TestWindowHost()).createTab(url: Self.url("a"), active: true)
+    tab.navigate(fromAddressBarTo: Self.url("b"))
+    #expect((tab as? TestTab)?.addressBarNavigations == [Self.url("b")] && tab.url == Self.url("b"))
   }
 
   /// The facade serves EngineClient's history(of:), goToHistory(_:offset:) and duplicateTab(_:) (contract rules 9

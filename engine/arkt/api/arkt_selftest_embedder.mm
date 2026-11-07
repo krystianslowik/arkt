@@ -938,6 +938,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     [self logStateOf:tab];
   } else if (command == "navigate") {
     [tab navigateToURL:[NSURL URLWithString:base::SysUTF8ToNSString(argument)]];
+  } else if (command == "navigate-typed") {
+    // #784: the address-bar call, as the shell sends what the user typed.
+    [tab navigateFromAddressBarToURL:
+             [NSURL URLWithString:base::SysUTF8ToNSString(argument)]];
   } else if (command == "reload") {
     // Of this tab, or of the tab with session id `argument` (a crashed page
     // cannot set its own title).
