@@ -45,14 +45,19 @@ struct ShadowDirectionTests {
   func theFloatingSidebarCastsDown(appearance: NSAppearance.Name) throws {
     let overlay = SidebarOverlayView(sidebar: SidebarContainerView(source: StubSidebar.sample()))
     overlay.frame = NSRect(x: 0, y: 0, width: 240, height: 600)
+    // Concealed under Reduce Motion means transparent rather than moved off; pin the slide so the runner's setting
+    // cannot hide the overlay.
+    overlay.reduceMotionForTesting = false
     overlay.appearance = NSAppearance(named: appearance)
     overlay.isDocked = false
     let host = Host(overlay, dark: appearance == .darkAqua)
     overlay.updateLayer()
     // The revealed rest state, without running the reveal spring: shown, no translation.
     overlay.isHidden = false
+    overlay.alphaValue = 1
     let layer = try #require(overlay.layer)
     layer.setAffineTransform(.identity)
+    #expect(layer.opacity == 1 && layer.shadowOpacity == 1, "the overlay and its shadow are drawn")
     // On screen the window joins the sidebar's views to this layer. The offscreen renderer draws no shadow for a
     // layer with no content of its own, so an opaque sublayer stands in for them.
     let content = CALayer()
