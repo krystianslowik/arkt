@@ -1209,7 +1209,8 @@ class Facade : public BrowserCollectionObserver,
       // made (#577); Chromium's own acknowledgement (the first tab of a window
       // made outside the startup flow, which every shell window is) does not
       // change it for this run, but it lets a clean quit record a clean exit.
-      // The unanswered marker (#785) keeps the prompt across such quits.
+      // The unanswered marker (#785) keeps the prompt across such quits. A
+      // profile without an exit type service and no marker reads clean.
       bool crashed = ExitTypeService::GetInstanceForProfile(profile) &&
                      ExitTypeService::GetLastSessionExitType(profile) ==
                          ExitType::kCrashed;

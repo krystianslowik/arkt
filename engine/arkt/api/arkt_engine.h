@@ -1230,9 +1230,10 @@ NS_SWIFT_UI_ACTOR
 // the next run, as Chrome does until its bubble is answered. Chromium's own
 // "restore pages" bubble needs a BrowserView, so it never shows on an engine
 // window: the shell is the only one that asks. NO for a profile without an
-// exit type service. Known limit: a run killed before the profile's first
-// Preferences write (about 10 s after start; 7 s in #577's runs, 12 to 16 s
-// in #785's) has no crash mark on disk, so the next run reports a clean exit.
+// exit type service and no marker. Known limit: a run killed before the
+// profile's first Preferences write (about 10 s after start; 7 s in #577's
+// runs, 12 to 16 s in #785's) has no crash mark on disk, so the next run
+// reports a clean exit.
 @property(nonatomic, readonly) BOOL lastSessionCrashed;
 // The shell answered the prompt: lastSessionCrashed is NO for the rest of the
 // run and for later runs until the next crash. A second call does nothing.
