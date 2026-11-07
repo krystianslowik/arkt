@@ -202,10 +202,6 @@ final class SpacePreviewView: NSView {
     gradient.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
     layer?.addSublayer(gradient)
     for sublayer in dots + favorites + rows + [nameLayer, page] { gradient.addSublayer(sublayer) }
-    layer?.shadowColor = BrandTokens.spacePreviewShadow.color.light.cgColor
-    layer?.shadowOpacity = 1
-    layer?.shadowRadius = BrandTokens.spacePreviewShadow.radius
-    layer?.shadowOffset = BrandTokens.spacePreviewShadow.unflippedOffset
     setAccessibilityElement(false)
   }
 
@@ -213,7 +209,37 @@ final class SpacePreviewView: NSView {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var isFlipped: Bool { true }
+  override var wantsUpdateLayer: Bool { true }
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  /// AppKit resets a backing layer's shadow to the view's (none) when the appearance changes; the next display puts the
+  /// drop back (#767).
+  override func updateLayer() {
+    applyShadow()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  /// The drop under the card, scaled with the card from its 340 pt reference. This view is flipped, so down is
+  /// positive y.
+  private func applyShadow() {
+    guard let layer else { return }
+    let token = BrandTokens.spacePreviewShadow
+    let s = bounds.width / 340
+    let inset = BrandTokens.spacePreviewShadowSpread * s
+    let shape = bounds.insetBy(dx: inset, dy: inset)
+    OnboardingMotion.set {
+      layer.shadowColor = token.color.resolve(ThemeFlavor(appearance: effectiveAppearance)).cgColor
+      layer.shadowOpacity = shape.isEmpty ? 0 : 1
+      layer.shadowRadius = token.radius * s
+      layer.shadowOffset = CGSize(width: 0, height: token.flippedOffset.height * s)
+      // CSS shrinks the corner radius by a negative spread too: 14 - 26 clamps to 0, so the shape is square.
+      layer.shadowPath = CGPath(rect: shape.isEmpty ? .zero : shape, transform: nil)
+    }
+  }
 
   func configure(theme: SpaceThemeInfo, name: String, animated: Bool) {
     self.theme = theme
@@ -258,7 +284,6 @@ final class SpacePreviewView: NSView {
     OnboardingMotion.set {
       gradient.frame = bounds
       gradient.cornerRadius = 14 * s
-      layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 14 * s, cornerHeight: 14 * s, transform: nil)
       for (index, dot) in dots.enumerated() {
         dot.frame = CGRect(x: (10 + CGFloat(index) * 12) * s, y: 10 * s, width: 7 * s, height: 7 * s)
         dot.cornerRadius = 3.5 * s
@@ -279,6 +304,7 @@ final class SpacePreviewView: NSView {
       page.borderWidth = 0.5
       page.borderColor = NSColor.black.withAlphaComponent(0.1).cgColor
     }
+    applyShadow()
   }
 }
 
