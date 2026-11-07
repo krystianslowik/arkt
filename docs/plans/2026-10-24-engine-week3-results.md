@@ -5394,7 +5394,9 @@ copies `cmp` identical.
   answer (design section 2.4).
 - **0004's subject** still says "normal windows" (design section 2.1); rewording it rewrites the `arkt` history under
   eight later commits, so it waits for the next rebase.
-- **Cast is off** with `MediaRouter` until E2 draws the device list (#653).
+- **Cast is off** with `MediaRouter` until E2 draws the device list (#653). The alternative from design section 2.3
+  (a guard of about 5 lines for a site no switch can stop): guard `media_remoting_dialog_view.cc:49` in 0013, one more
+  upstream file, and leave Cast on. For the maintainer to choose.
 - **Upstream unit tests** with a `TestBrowserWindow` and a real `CreateToast` now get the dropped-toast path instead of a
   toast that stays current; none were run (they are not part of `arkt_patch_unittests`).
 
