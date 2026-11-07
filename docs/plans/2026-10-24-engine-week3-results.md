@@ -4548,6 +4548,7 @@ Load average while building and running: 2 to 5 (other lanes' work; nothing adde
 |---|---|---|---|
 | card | Luhn-valid card, future expiry, submitted | no crash, nothing logged: save card finds no handler and gives up | `ARKT: autofill bubble SaveCreditCard not shown`, no crash |
 | card, same tab | a second card on the same tab | | not logged: the save-card controller still holds the no-op bubble |
+| IBAN, same tab | `DE89370400440532013000` on the tab of the two cards | | not logged |
 | tab switch and close | new tab opened, the card tab hidden and closed | | no crash (`Hide()` on the no-op bubble from `OnVisibilityChanged` and the controller destructor) |
 | IBAN | `DE89370400440532013000` on a fresh tab | | `ARKT: autofill bubble Iban not shown`, no crash |
 | card after IBAN | another card on that tab | | `ARKT: autofill bubble SaveCreditCard not shown`, no crash |
@@ -4557,8 +4558,9 @@ Load average while building and running: 2 to 5 (other lanes' work; nothing adde
 `FATAL`, `NOTREACHED` and `Check failed` lines in the card, IBAN and window runs: 0.
 
 Known limit: a controller that received the no-op bubble reports `IsShowingBubble()` until its tab is hidden or closed,
-so the next prompt of that kind on the same tab is skipped (the second card row). Accepted for a handler that shows
-nothing.
+and a later autofill prompt on that tab may be skipped, of the same kind or another: seen for a second card and for an
+IBAN after the cards (the two "same tab" rows), while a card after an IBAN on a fresh tab did log. Accepted for a handler
+that shows nothing.
 
 ### Patch budget
 
