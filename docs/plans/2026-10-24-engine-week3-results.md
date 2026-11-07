@@ -5445,3 +5445,111 @@ it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applicat
 - Cleanup: both runs and the loopback server stopped by exact PID; profiles and build log deleted; no crash report.
   The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
   earlier text was not restored.
+
+## #785: ask again about an unanswered crashed-session prompt
+
+Date 2026-11-07. Branch `engine/785-unanswered-crash-prompt` from `origin/main` (`e8380ee`). Facade only: no patch,
+no `EngineAPI` change.
+
+### Gate
+
+- Seam: the facade engine's crashed-session state (#577). A patch is not needed: the facade keeps its own marker.
+- Facade header: the doc comment on `lastSessionCrashed` and `dismissLastSession` only; no declaration changes. Both
+  copies `cmp` identical.
+- `.patches`: unchanged (14).
+- Build: `nice -n 15 autoninja -C out/Spike chrome -j 4`; 1.9 TB free on the Chromium disk, 29 GB on `/`, swap 3.8 of
+  5 GB used before the build.
+
+### Why Chromium's own mechanism cannot be used
+
+`ExitTypeService` keeps the last exit `Crashed` across runs only while it waits for the user to acknowledge the crash.
+The first tab added to a window made outside the startup flow acknowledges it (`BrowserTabObserverImpl`,
+`OnTabAddedToNonStartupBrowser`), and every shell window is one. A `CrashedLock` (what Chrome's bubble holds) does not
+help: `DidUserAckCrash` passes once the tab observer is gone, whatever the lock count. After the acknowledgement a
+clean quit writes `SessionEnded`, so the next run read a clean exit.
+
+### What landed
+
+- **Marker.** A file `Arkt Unanswered Crash` in the profile folder (next to `Preferences`). When the facade starts it
+  reads the last exit type as before; `lastSessionCrashed` is YES when that is `kCrashed` or the marker exists. A
+  crashed last session writes the marker at once, so a quit or a kill before the shell's prompt is answered keeps it.
+- **Answer.** `dismissLastSession` removes the marker (thread pool, `MayBlock`, `BLOCK_SHUTDOWN`, so an answer
+  followed at once by Quit is kept). It is the only thing that removes it. A dismiss when nothing is pending does
+  nothing, as before.
+- **Blocking.** The read and the write run when the facade is made, in `PostBrowserStart`, which is inside
+  `BrowserMainLoop::PreMainMessageLoopRun` before it calls `DisallowUnresponsiveTasks`; blocking is still allowed
+  there. Only the removal runs later, off the UI thread. `out/Spike` has DCHECKs off, so the runs below do not prove
+  the blocking rule; the ordering above does.
+- **Log.** `ARKT: facade last session crashed (unanswered from an earlier run)` when only the marker asks.
+- **#690.** The shell API is unchanged: `EngineSessionRecovery.lastSessionCrashed` and `dismissLastSession()` keep their
+  shape, and #690's `RestorePagesModel` and its doubles compile as they are. Its behaviour changes in the right way: an
+  offer that is neither restored nor dismissed comes back on the next launch. Two points for #690: its `.notice`
+  path (no pages to offer) dismisses at once, which also clears the marker; and the recovery pages must survive a
+  launch that did not answer, or the repeated prompt has nothing to offer.
+
+### Tests first
+
+The failing case is a smoke run, as the code is Chromium-side and the Swift doubles do not change. Before the change
+(`out/Spike` as built from `e8380ee`, profile `profiles/785-20261107/base`):
+
+| Run | Result |
+|---|---|
+| Start, SIGKILL once `exit_type` `Crashed` is on disk | `facade last session clean` (fresh profile) |
+| Relaunch, SIGTERM 4 s after `embedderReady` without answering | `embedderReady lastSessionCrashed=yes`; on disk `SessionEnded` |
+| Relaunch | `facade last session clean`, `lastSessionCrashed=no`: the bug |
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ArktEngineABITests\|ChromiumTabStateTests\|TabStateTests"` | 4 test runs, 3 + 23 + 15 + 33 = 74 passed, 0 failed; no Swift source changed, the header copy changed in comments only |
+| Full suite | not run locally (memory pressure on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 15 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 45 s; again after a comment and include-order edit, 41 s |
+
+### Self-test runs (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles under `profiles/785-20261107/`, `--use-mock-keychain`; the answer is the self-test's `session dismiss` command, set as the start page title through `--arkt-facade-selftest-url`)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Crash, relaunch | PASS | SIGKILL with `Crashed` on disk; relaunch: `facade last session crashed`, `embedderReady lastSessionCrashed=yes`, marker written |
+| Quit without answering, relaunch | PASS (was the bug) | SIGTERM, on disk `SessionEnded`, marker kept; relaunch: `crashed (unanswered from an earlier run)`, `lastSessionCrashed=yes` |
+| Quit unanswered again | PASS | same again on the next relaunch; the prompt stays until answered |
+| SIGKILL 2 s after a relaunch | PASS | marker kept (on disk `exit_type` still `SessionEnded`, the run's own write had not happened); next relaunch still asks |
+| Answer, quit | PASS | `embedderReady lastSessionCrashed=yes`, `session dismiss`: `crashed session dismissed`, `lastSessionCrashed=no`; SIGTERM about 0.3 s later; marker removed |
+| Relaunch after the answer | PASS | `facade last session clean`, `lastSessionCrashed=no` |
+| Final binary (after the last build), crash, two unanswered quits, answer, relaunch | PASS | `no`, `yes`, `yes`, `yes` then `no`, `no` |
+
+`FATAL` and `Check failed` lines: 0 in every run.
+
+### Known limit: the first Preferences write
+
+A run killed before the profile's first `Preferences` write leaves no `Crashed` mark on disk, so the next run reports
+a clean exit and no marker is written. Fresh profile, SIGKILL 2 s after start: no `Preferences` file; relaunch:
+`lastSessionCrashed=no`. Time to `exit_type` `Crashed` on disk from a fresh start, polled every 0.25 s: 15.7 s,
+12.4 s, 15.5 s (load average 6 to 9; #577 saw about 7 s). Chromium writes prefs through `ImportantFileWriter` on its
+commit interval, so this is Chromium's behaviour too; closing it would need the facade to write `Preferences` early,
+which this change does not do. Once a crash has been seen the marker is written at start, so a second early kill does
+not lose the prompt (row 4 above). Recorded in the header comment on `lastSessionCrashed`.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync; nothing exported. Facade header copies `cmp` identical.
+
+### Left open
+
+- The shell prompt itself is #690 (#580). Its `.notice` path and its recovery pages across an unanswered launch (above).
+
+### Cleanup
+
+Every run stopped by exact PID (SIGKILL or SIGTERM; `ps -p` printed nothing for each). The throwaway profiles under
+`profiles/785-20261107/` and the run logs were deleted. No clipboard use. Nothing under `~/Applications/ArktTest` or
+`/Applications/Arkt.app` was touched.

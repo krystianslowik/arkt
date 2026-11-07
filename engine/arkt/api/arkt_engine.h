@@ -1225,13 +1225,17 @@ NS_SWIFT_UI_ACTOR
 // The crashed-session prompt (#577), for the profile the engine started with.
 // YES when the previous run of that profile ended without a clean quit
 // (ExitTypeService's last session exit type is kCrashed, read once at start)
-// and the shell has not dismissed it in this run. Chromium's own "restore
-// pages" bubble needs a BrowserView, so it never shows on an engine window:
-// the shell is the only one that asks. NO for a profile without an exit type
-// service.
+// or an earlier run's prompt was never answered (#785), and the shell has not
+// dismissed it in this run. A run that quits without dismissing asks again on
+// the next run, as Chrome does until its bubble is answered. Chromium's own
+// "restore pages" bubble needs a BrowserView, so it never shows on an engine
+// window: the shell is the only one that asks. NO for a profile without an
+// exit type service. Known limit: a run killed before the profile's first
+// Preferences write (about 10 s after start; 7 s in #577's runs, 12 to 16 s
+// in #785's) has no crash mark on disk, so the next run reports a clean exit.
 @property(nonatomic, readonly) BOOL lastSessionCrashed;
 // The shell answered the prompt: lastSessionCrashed is NO for the rest of the
-// run. A second call does nothing.
+// run and for later runs until the next crash. A second call does nothing.
 - (void)dismissLastSession;
 
 // Every site with a permission exception (a user-set pattern for one origin)
