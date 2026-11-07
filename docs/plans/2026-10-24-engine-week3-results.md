@@ -5378,3 +5378,18 @@ killed-process validation, plus the documented SIGTERM and failed-flush limits, 
 `RestorePagesScreenshotTests` exports synthetic light and dark window captures with a long title and overflow when
 `ARKT_RESTORE_SHOTS_DIR` is set. The existing GUI CI job exports `restore-pages-screenshots` as a seven-day artifact.
 Rendering, visual inspection and the manually dispatched XCUITest workflow remain pending on the evidence head.
+
+### Restore pages final CI and screenshots (#580)
+
+CI run 42385504787 at `1c110df` passed all eight reported checks: ArktCore 579 tests in 47 suites, ShellKit pure
+2,508 tests in 282 suites, and GUI 2,077 executed with 54 skipped and zero failures. The cancellation regression
+and screenshot fixture passed; the app build, lint and required gate passed. Optional UI tests were skipped.
+The light/dark synthetic 1000 × 674 window-content PNGs are preserved in `docs/evidence/restore-pages/` and
+were visually inspected for the panel, long-title truncation, overflow and action count. This evidence applies
+to `1c110df`; the subsequent evidence commit changes documentation and images only.
+
+Manual XCUITest run 42382637990 at `dd8e937` built the app but did not complete: import/onboarding consent queries
+timed out and a command-bar accessibility snapshot was interrupted before the 40-minute job limit cancelled it.
+The preceding main nightly run 42357672719 has the same signature; #799 tracks the import/onboarding diagnosis.
+This is not a complete XCUITest pass. Real killed-process, VoiceOver, appearance and motion checks remain for
+maintainer validation, together with review of the documented SIGTERM and failed-flush limits. #580 remains open.
