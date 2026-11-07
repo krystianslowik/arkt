@@ -8,29 +8,32 @@ As recorded in PR #141 at `9bf54f2`: ArktCore 316 Swift Testing tests, ShellKit 
 
 ## S9: divider pacing (#59)
 
-- Initial red: `swift test -j 2 list` failed because the new pacing test could not access `FrameScript`, then the existing frame helpers were moved to `FrameTestSupport.swift` and the build succeeded.
-- `cd app/ArktCore && swift test -j 2`: 428 tests passed after merging main (S0 baseline 316; the difference includes intervening work).
-- `cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests`: 1,237 tests passed after merging main (S0 baseline 312; the difference includes intervening work).
-- `swift test --skip-build --filter SplitPacingTests` (before merging main): 5 executed, 3 skipped, 0 failures. The deterministic commit check and FakeEngine informational run passed. The three gated InMemoryEngine scenarios were NOT-MEASURABLE: load 22.83 on 12 cores.
-- `swift test --skip-build --filter SpacePagerTests` (before merging main): 22 executed, 1 skipped, 0 failures. The frame-pacing test was not measurable under load.
-- `swift test --skip-build --filter SplitPacingTests.testDividerDragCommitsOnce`, 20 consecutive runs under load: 20 passed; load immediately after was 17.62 on 12 cores. Removing the `onCommitFactors` call in `SplitContainerView.endDividerDrag` made that test fail (observed 0 writes, expected 1); restoring it made the test pass.
-- FakeEngine informational (`split-divider-webkit`): screen maximum 240 Hz, 29 intervals, 0 over 8.6 ms, max and p99 8.33 ms, load 22.83 on 12 cores. This is not a gated timing result.
-- Post-merge `swift test -j 2 --filter SplitPacingTests`: 5 executed, 3 skipped, 0 failures. The gated cases were NOT-MEASURABLE at load 22.20 on 12 cores; FakeEngine reported 29 intervals, 0 over 8.6 ms, max 8.33 ms, 240 Hz (informational only).
-- Post-merge `swift test -j 2 --filter ShellKitGUITests`: 1,088 executed, 20 skipped, 0 failures. The three divider gates were NOT-MEASURABLE at load 19.09 on 12 cores; the SpacePager timing test also skipped. These runs predate the merge of #665 and the gate convention below.
+### Final counts (2026-11-07, after merging main)
+
+Against the S0 baselines:
+
+- ArktCore, `cd app/ArktCore && swift test -j 2`: 576 passed, 0 failures (316 + 260; the difference includes intervening work).
+- ShellKit non-GUI, `cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests`: 2,432 Swift Testing tests passed, 0 failures, summed over the package's test runs (312 + 2,120; the difference includes intervening work).
+- ShellKit GUI: left to CI.
 
 ### Gate convention (after merging #665)
 
-The three gated cases follow the shared rule in `PacingEnvironment` (#602, #665, #671):
+The three gated cases follow the shared rule in `PacingEnvironment` and match `SplitReflowPacingTests` (#602, #665, #671):
 
-- `skipIfNotMeasurable` skips a case as NOT-MEASURABLE below 120 Hz or at a 1-minute load at or above the active core count. The pull request's own load check was removed.
-- Every case measures, prints its `split.pacing` summary line and attaches it. The hitch count (no frame over 8.6 ms, threshold unchanged) is asserted only when `PacingEnvironment.gateAsserts(for: SplitPacingTests.self)` is true: with `ARKT_PACING_GATE=1`, or when `SplitPacingTests` runs alone.
-- Since #665, `beginDividerDrag` ends a running reflow and closes its "split-reflow" pacing session into the same `lastPacing`. Each case now asserts that no reflow runs when the drag begins, that the pacer's session is "split-divider" during and after the drag, and that the drag changed `liveFactors`, so the stats read are the drag's own and the divider really moved. `testDividerDragCommitsOnce` asserts the same preconditions.
+- `skipIfNotMeasurable` skips a case as NOT-MEASURABLE below 120 Hz or at a 1-minute load at or above the active core count.
+- Every case measures, prints its `split.pacing` summary line and attaches it, and prints `split.pacing gate=asserts|reports`. After the drag the 1-minute load is read again. The hitch count (no frame over 8.6 ms, threshold unchanged) is asserted only when the case is gated (`PacingEnvironment.gateAsserts(for: SplitPacingTests.self)`: `ARKT_PACING_GATE=1`, or `SplitPacingTests` run alone) and that load is below the core count; the summary's `asserted` field says which.
+- The drag is a sine sweep across the divider's allowed range: the amplitude is half the two panes' combined length minus `SplitLayout.minimumPaneLength`, 1 pt inside the clamp, for two and a half periods over 60 frames.
+- Precondition guards: since #665, `beginDividerDrag` ends a running reflow into the same `lastPacing` (that takeover is covered by `SplitPaneCloseTests`). Each case asserts that no reflow runs when the drag begins, that the pacer's session is "split-divider" during and after the drag, and that the drag changed `liveFactors`. `testDividerDragCommitsOnce` asserts the reflow and movement preconditions.
 
-### After merging main again (2026-11-07, gate convention applied)
+### Local runs (2026-11-07)
 
-- `swift test -j 2 --filter SplitPacingTests` (the class alone, so `gateAsserts` is true): 5 executed, 0 failures, 0 skipped. Developer machine, screen maximum 120 Hz, 10 cores, 1-minute load 8.73 to 9.15 (other builds running, not idle): `split-divider-2`, `split-divider-4` and `split-divider-4-stacked` each 59 frames, 0 over 8.6 ms, max and p99 8.33 ms, `asserted=yes`; the stacked case was not skipped, so its container reached 990 pt, and its drag changed the factors. FakeEngine informational: 59 frames, 0 over 8.6 ms, max 8.33 ms. These are a local check, not the recorded gate result.
-- `swift test --skip-build --filter SplitPacingTests.testDividerDragCommitsOnce`, 20 consecutive runs: 20 passed, load 7.69 before and 6.40 after on 10 cores. Replacing the `onCommitFactors` call in `SplitContainerView.endDividerDrag` with nothing made it fail (0 writes, expected 1); restoring it made it pass.
-- `cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests`: 2,432 Swift Testing tests passed, 0 failures (sum of the package's test runs). `cd app/ArktCore && swift test -j 2`: 576 passed, 0 failures. The full GUI suite is left to CI.
+- `swift test -j 2 --filter SplitPacingTests` (the class alone, so the gated cases are gated): 5 executed, 0 failures, 0 skipped. Developer machine, screen maximum 120 Hz, 10 cores, 1-minute load 3.57 to 3.62 (not idle): `split-divider-2`, `split-divider-4` and `split-divider-4-stacked` each 59 frames, 0 over 8.6 ms, max and p99 8.33 ms, `asserted=yes`; the stacked case was not skipped, so its container reached 990 pt, and its drag changed the factors. FakeEngine informational: 59 frames, 0 over 8.6 ms, max 8.33 ms. These are a local check, not the recorded gate result.
+- `swift test --skip-build --filter SplitPacingTests.testDividerDragCommitsOnce`, 20 consecutive runs: 20 passed, load 2.90 before and 2.58 after on 10 cores. Replacing the `onCommitFactors` call in `SplitContainerView.endDividerDrag` with nothing made it fail (0 writes, expected 1); restoring it made it pass.
+
+### History (2026-10-26, before the merge of #665 and the gate convention)
+
+- Initial red: `swift test -j 2 list` failed because the new pacing test could not access `FrameScript`; the frame helpers then moved to `FrameTestSupport.swift`.
+- The three gated cases were NOT-MEASURABLE in every run (load 19 to 23 on 12 cores). `testDividerDragCommitsOnce` passed 20 consecutive runs, and the `onCommitFactors` break made it fail. FakeEngine informational at 240 Hz: 29 intervals, 0 over 8.6 ms.
 
 ### Measurement (pending)
 
@@ -51,7 +54,7 @@ Record each `split.pacing` line (`split-divider-2`, `split-divider-4`, `split-di
 
 ### Plan deviation
 
-Four stacked panes need at least 990 pt for four 240 pt minima plus three 10 pt gaps. The planned 1200 x 800 window cannot resize them: `SplitLayout.factors` returns equal shares. The stacked test requests a 1200 x 1100 window and skips if its split container stays under 990 pt; on the maintainer run, the stacked window should reach 990 pt (check that the case is not skipped for that reason). The other cases keep 1200 x 800. The case now fails if the scripted drag leaves the factors unchanged.
+Four stacked panes need at least 990 pt for four 240 pt minima plus three 10 pt gaps. The planned 1200 x 800 window cannot resize them: `SplitLayout.factors` returns equal shares. The stacked test requests a 1200 x 1100 window and skips if its split container stays under 990 pt; on the maintainer run, the stacked window should reach 990 pt (check that the case is not skipped for that reason). On a built-in ProMotion display the visible screen height can keep the window shorter; then run the stacked case on an external 120 Hz display, or record it as NOT-MEASURABLE. The other cases keep 1200 x 800. The case now fails if the scripted drag leaves the factors unchanged.
 
 ### Keys
 
@@ -70,7 +73,7 @@ S5 uses Ctrl-Shift-= to add (KB-070), Ctrl-Shift-- to close the pane (KB-071), C
 | BH-115 | Implemented: one sidebar item in Pinned, Today, a folder or Favorites, movable. Deferred: renaming a split (the Rename item is shown disabled) and drawing a split as a Favorites tile (`FavoritesGridView` draws tabs only); neither has an issue yet | S1, S2, S6 |
 | BH-116 | Implemented: a 5th pane does nothing and shows "Cannot Add New Pane" | S1, S2, S5, S7 |
 | BH-117 | Implemented: Ctrl-Shift-=, drag a sidebar tab onto the content, Opt-click the current tab (GS-032), Add Right / Left / Top / Bottom Split. Deferred: multi-select Open in Split View and the plus-menu New Split | S5, S6, S7 |
-| BH-118 | Implemented: drop a tab onto another sidebar tab (GS-010) | #104 |
+| BH-118 | Implemented: drop a tab onto another sidebar tab (GS-010) | #104 (PR #374) |
 | BH-119 | Implemented: a split made from a Pinned tab stays in Pinned | S1 |
 | BH-120 | Implemented: Convert to Horizontal / Vertical Split View | S1, S5, S6 |
 | BH-121 | Implemented: Separate All Tabs (menu, Opt-click on the split row) and Remove Tab from Split View | S1, S6 |

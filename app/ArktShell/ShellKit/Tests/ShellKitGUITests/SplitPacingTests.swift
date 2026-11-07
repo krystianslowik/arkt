@@ -62,11 +62,11 @@ final class SplitPacingTests: XCTestCase {
     defer { server.stop() }
     let url = URL(string: "http://127.0.0.1:\(server.port)/page")!
     try await measure(panes: 2, orientation: .horizontal, label: "split-divider-webkit",
-                      engine: FakeEngine(), page: url, gated: false)
+                      engine: FakeEngine(), page: url, timed: false)
   }
 
   private func measure(panes: Int, orientation: Orientation, label: String,
-                       engine: any EngineClient = InMemoryEngine(), page: URL? = nil, gated: Bool = true) async throws {
+                       engine: any EngineClient = InMemoryEngine(), page: URL? = nil, timed: Bool = true) async throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
     var sidebar = SidebarModel.Sidebar()
@@ -84,7 +84,7 @@ final class SplitPacingTests: XCTestCase {
     controller.showWindow(nil)
     controller.activate(node: nodes[0])
     controller.window?.contentView?.layoutSubtreeIfNeeded()
-    if gated { try PacingEnvironment.skipIfNotMeasurable(screen: controller.window?.screen) }
+    if timed { try PacingEnvironment.skipIfNotMeasurable(screen: controller.window?.screen) }
     if page != nil {
       for node in nodes {
         let id = try XCTUnwrap(controller.engineTab(of: node))
@@ -99,11 +99,17 @@ final class SplitPacingTests: XCTestCase {
     }
     let stable = await StableFrames.wait(on: split, count: 10, threshold: FrameStats().hitchThreshold)
     print("split.pacing warmup stableFrames=\(stable) of 10")
-    let divider = try XCTUnwrap(split.dividers.dropFirst((panes - 1) / 2).first)
+    let index = (panes - 1) / 2
+    let divider = try XCTUnwrap(split.dividers.dropFirst(index).first)
     let length = orientation == .horizontal ? split.bounds.width : split.bounds.height
-    let center = length / 2
-    // Since #665, beginning a drag ends a running reflow and closes its pacing session into `lastPacing`. Nothing may
-    // be reflowing here, so the stats read below are the drag's own.
+    // The sweep covers the divider's allowed range: its two panes share `pair` points, and `SplitLayout.factors` keeps
+    // each at `minimumPaneLength` or more. The amplitude stays 1 pt inside that clamp, so every frame moves the panes.
+    let pair = 2 * (length - split.gap * CGFloat(panes - 1)) / CGFloat(panes)
+    let center = split.dividerPosition(index)
+    let amplitude = pair / 2 - SplitLayout.minimumPaneLength - 1
+    XCTAssertGreaterThan(amplitude, 0, "\(label): the panes have room to move")
+    // Precondition guard: since #665 a drag ends a running reflow into the same `lastPacing` (that takeover is covered
+    // by `SplitPaneCloseTests`). Nothing may be reflowing here, so the stats read below are the drag's own.
     XCTAssertFalse(split.isReflowing, "\(label): no reflow is running when the drag begins")
     let startFactors = split.liveFactors
     var frame = 0
@@ -114,24 +120,25 @@ final class SplitPacingTests: XCTestCase {
     XCTAssertEqual(split.pacer.label, "split-divider", "\(label): the drag's own pacing session runs")
     _ = FrameScript(view: split, frames: 60, step: { _ in
       frame += 1
-      let position = center + 20 + 15 * sin(Double(frame) * .pi / 30)
+      // Two and a half periods over 60 frames: both ends of the range, ending at the trailing one.
+      let position = center + amplitude * sin(Double(frame) * .pi / 24)
       divider.drag(to: position)
     }, done: { divider.endDrag(); finished.fulfill() })
     await fulfillment(of: [finished], timeout: 3)
     XCTAssertEqual(split.pacer.label, "split-divider", "\(label): the stats come from the divider drag")
     XCTAssertNotEqual(split.liveFactors, startFactors, "\(label): the drag moved the divider")
     let stats = try XCTUnwrap(split.lastPacing)
-    let asserts = gated && PacingEnvironment.gateAsserts(for: Self.self)
-    // Printed for the record only; whether the machine can measure was decided by `skipIfNotMeasurable` above.
     var load = [0.0]
-    _ = getloadavg(&load, 1)
     let cores = ProcessInfo.processInfo.activeProcessorCount
+    let loaded = getloadavg(&load, 1) != 1 || load[0] >= Double(cores)
+    let gated = timed && PacingEnvironment.gateAsserts(for: Self.self)
+    print("split.pacing gate=\(gated ? "asserts" : "reports")")
     let fps = controller.window?.screen?.maximumFramesPerSecond ?? 0
     let hitches = stats.intervals.enumerated().filter { $0.element > stats.hitchThreshold }
       .map { String(format: "%d@%.2f", $0.offset, $0.element * 1000) }
     let summary = String(format: "split.pacing label=%@ screenMaxFPS=%d frames=%d over8.6=%d overBudgetPct=%.2f maxMs=%.2f p99Ms=%.2f leadInMs=%.2f load1=%.2f cores=%d asserted=%@ hitchesMs=[%@]",
       label, fps, stats.frameCount, stats.hitchCount, stats.overBudgetRatio * 100, stats.maxInterval * 1000,
-      stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, asserts ? "yes" : "no",
+      stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, loaded || !gated ? "no" : "yes",
       hitches.joined(separator: ","))
     print(summary)
     let attachment = XCTAttachment(string: summary)
@@ -140,10 +147,13 @@ final class SplitPacingTests: XCTestCase {
     add(attachment)
     XCTAssertGreaterThan(stats.frameCount, 10)
     XCTAssertEqual(changes, 1, "the completed drag commits exactly once")
-    if asserts {
+    if loaded {
+      print("split.pacing skipped assert: 1-minute load \(load[0]) >= \(cores) active cores")
+    } else if !gated {
+      print(timed ? "split.pacing reported only: set ARKT_PACING_GATE=1 or run SplitPacingTests alone"
+                  : "split.pacing informational: \(label) is not gated")
+    } else {
       XCTAssertEqual(stats.hitchCount, 0, "\(label): frames over 8.6 ms")
-    } else if gated {
-      print("split.pacing reported only: set ARKT_PACING_GATE=1 or run SplitPacingTests alone")
     }
   }
 }
