@@ -13,6 +13,7 @@ import EngineAPI
 /// meanwhile is never taken for one of them.
 @MainActor
 public final class ShellWindowSet {
+  public enum WindowKind { case regular, blank, incognito }
   /// The host an engine window was created with (`ChromiumEngine.host(of:)`); nil for a window this engine does not
   /// list.
   public typealias HostLookup = @MainActor (EngineWindowID) -> (any EngineWindowHosting)?
@@ -41,6 +42,10 @@ public final class ShellWindowSet {
   public var sidebarBanner: SidebarBannerCenter?
 
   private let hostLookup: HostLookup?
+  private let recoveryPageSource: (any RecoveryPageSource)?
+  private let priorRecoveryPages: [ShellRecoveryPage]
+  private var recoveryTabOrder: [TabID] = []
+  private var recoveryRecordingStopped = false
   private var windows: [ShellWindowController] = []
   /// True once the session's first window adopted the saved sidebar state (#331); later windows keep the defaults.
   private var adoptedSavedSidebarState = false
@@ -92,7 +97,8 @@ public final class ShellWindowSet {
   public init(engine: any EngineClient, sidebar: any SidebarSource, toolbarSetting: ToolbarSetting = .ephemeral(),
               sidebarStateStore: SidebarWindowStateStore = .ephemeral(),
               sessionStore: WindowSessionStore = .ephemeral(),
-              commandBarSettings: CommandBarSettings = .ephemeral(), hostLookup: HostLookup? = nil) {
+              commandBarSettings: CommandBarSettings = .ephemeral(), hostLookup: HostLookup? = nil,
+              recoveryPageSource: (any RecoveryPageSource)? = nil) {
     self.engine = engine
     self.sidebar = sidebar
     self.toolbarSetting = toolbarSetting
@@ -100,6 +106,8 @@ public final class ShellWindowSet {
     self.sessionStore = sessionStore
     self.commandBarSettings = commandBarSettings
     self.hostLookup = hostLookup
+    self.recoveryPageSource = recoveryPageSource
+    self.priorRecoveryPages = recoveryPageSource?.pages ?? []
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
       self?.windowOpened(id)
@@ -130,16 +138,129 @@ public final class ShellWindowSet {
     return open.first
   }
 
+  // Test observation after initial recovery routing, before the caller can change the window.
+  var didPresentPendingRecoveryForTesting: ((ShellWindowController) -> Void)?
+
+  private var recoveryStarted = false
+  private var pendingRecovery: RestorePagesModel?
+  private weak var recoveryWindow: ShellWindowController?
+
+  /// Starts the launch decision once, including when the engine has not supplied a window yet.
+  public func beginSessionRecovery(_ recovery: (any EngineSessionRecovery)?) {
+    guard !recoveryStarted else { return }
+    recoveryStarted = true
+    guard let recovery else { return }
+    let pages = eligibleRecoveryPages(priorRecoveryPages, sidebar: sidebar)
+    let model = RestorePagesModel(recovery: recovery, pages: pages) { [weak self] pages in
+      self?.restoreRecoveryPages(pages) ?? false
+    }
+    pendingRecovery = model
+    model.onAnswer = { [weak self] in
+      self?.pendingRecovery = nil
+      self?.recoveryWindow = nil
+    }
+    presentPendingRecovery()
+  }
+
+  /// A clean termination clears the persisted records; a cancelled quit keeps them.
+  public func finishSessionRecovery(cleanQuit: Bool) {
+    if cleanQuit {
+      recoveryRecordingStopped = true
+      recoveryTabOrder = []
+      if recoveryPageSource?.pages.isEmpty == false { recoveryPageSource?.pages = [] }
+    } else {
+      recoveryRecordingStopped = false
+    }
+  }
+
+  /// Rebuild from owned pages only; retain tab order across hide/restore and metadata changes.
+  private func recordRecoveryPages() {
+    guard !recoveryRecordingStopped, let source = recoveryPageSource else { return }
+    var live: [TabID: ShellRecoveryPage] = [:]
+    var discovered: [TabID] = []
+    func add(_ tab: TabID, kind: ShellRecoveryPage.Kind, node: NodeID? = nil) {
+      guard let snapshot = engine.snapshot(of: tab), let url = snapshot.url else { return }
+      if live[tab] == nil { discovered.append(tab) }
+      live[tab] = ShellRecoveryPage(title: snapshot.title, url: url, kind: kind, sourceNode: node)
+    }
+    for window in windows where !window.isClosed && !window.isPrivateWindow {
+      for (tab, node) in window.peek.recoveryTabs { add(tab, kind: .peek, node: node) }
+    }
+    for little in littleArktWindows where !little.isClosed {
+      if let tab = little.shownTab, let window = little.engineWindow, engine.snapshot(of: tab)?.window == window {
+        add(tab, kind: .littleArkt)
+      }
+    }
+    recoveryTabOrder.removeAll { live[$0] == nil }
+    for tab in discovered where !recoveryTabOrder.contains(tab) { recoveryTabOrder.append(tab) }
+    let pages = recoveryTabOrder.compactMap { live[$0] }
+    if pages != source.pages { source.pages = pages }
+  }
+
+  private func restoreRecoveryPages(_ pages: [ShellRecoveryPage]) -> Bool {
+    guard let host = recoveryWindow, !host.isWindowCloseRequested, !host.isPrivateWindow else { return false }
+    let eligible = controllers.filter { !$0.isPrivateWindow && !$0.isWindowCloseRequested }
+    var routes: [(ShellRecoveryPage, ShellWindowController, NodeID)] = []
+    for page in pages where page.kind == .peek {
+      guard let node = page.sourceNode, case .tab? = sidebar.node(node), sidebar.parent(of: node) != nil else {
+        return false
+      }
+      let target = eligible.first(where: { $0.visibleNodes.contains(node) }) ?? host
+      // Handoff must not close a hidden Peek belonging to this source in another window.
+      guard !controllers.contains(where: { window in
+        guard let tab = window.engineTab(of: node) else { return false }
+        return window.peek.hiddenPeeks[tab] != nil || window.peek.session?.source == tab
+      }) else { return false }
+      // Activating a source must not replace or restore an unrelated live Peek.
+      guard target.peek.session == nil,
+            target.engineTab(of: node).map({ target.peek.hiddenPeeks[$0] == nil }) ?? true else { return false }
+      routes.append((page, target, node))
+    }
+    var created: [(ShellWindowController, TabID)] = []
+    for (page, target, node) in routes {
+      if target.currentNode != node { target.activate(node: node) }
+      if let active = target.peek.session?.tab, created.contains(where: { $0.0 === target && $0.1 == active }) {
+        target.peek.hideRecoveryTab(active)
+      }
+      guard let source = target.engineTab(of: node), target.peek.session == nil,
+            target.peek.hiddenPeeks[source] == nil,
+            target.peek.reopen(ClosedPeek(parked: nil, sourceNode: node, url: page.url, linkOffset: .zero),
+                               over: source), let tab = target.peek.session?.tab else {
+        for (window, tab) in created.reversed() { window.peek.removeRecoveryTab(tab) }
+        return false
+      }
+      created.append((target, tab))
+    }
+    for page in pages where page.kind == .littleArkt { openLittleArkt(url: page.url) }
+    return true
+  }
+
+  private func presentPendingRecovery() {
+    let eligible = controllers.filter { !$0.isPrivateWindow && !$0.isWindowCloseRequested }
+    let window = primary.flatMap { candidate in eligible.first { $0 === candidate } } ?? eligible.first
+    guard recoveryWindow == nil, let model = pendingRecovery, let window else { return }
+    switch model.presentation {
+    case .none:
+      pendingRecovery = nil
+    case .notice:
+      window.presentRestorePages(model)
+      pendingRecovery = nil
+    case .offer:
+      recoveryWindow = window
+      window.presentRestorePages(model)
+    }
+  }
+
   // MARK: Shell-created windows
 
   /// Builds, wires and shows a window. `opensFirstTab` shows the current Space's tab at once (launch); New Window
   /// passes false, so the new window gets its engine window with the first tab the user picks (decision 4) and no
   /// row is shown in two windows. A window without a first tab opens on the Space of the most recently main window.
   @discardableResult
-  public func openWindow(opensFirstTab: Bool = true) -> ShellWindowController {
+  public func openWindow(opensFirstTab: Bool = true, kind: WindowKind = .regular) -> ShellWindowController {
     let opener = primary
     let anchor = opener?.window
-    let controller = make(opensFirstTab: opensFirstTab, origin: .shell)
+    let controller = make(opensFirstTab: opensFirstTab, origin: .shell, kind: kind)
     // New Window opens on the Space the window it was pressed in shows (BH-170); a launch window opens a tab of the
     // first Space instead.
     if !opensFirstTab, let space = opener?.currentSpace { controller.sidebarController.showSpace(space) }
@@ -232,8 +353,8 @@ public final class ShellWindowSet {
   /// A blank or incognito window, built as an engine-requested one so it never takes over saving the session.
   private func makePrivateWindow(_ presentation: SidebarPresentation, bounds: CGRect?,
                                  near anchor: NSWindow?) -> ShellWindowController {
-    let controller = make(opensFirstTab: false, origin: .engineRequested)
-    if presentation == .blank { controller.makeBlank() } else { controller.makeIncognito() }
+    let controller = make(opensFirstTab: false, origin: .engineRequested,
+                          kind: presentation == .blank ? .blank : .incognito)
     if let bounds {
       controller.window?.setFrame(bounds, display: false)
     } else {
@@ -378,7 +499,11 @@ public final class ShellWindowSet {
     }
     little.flightDestination = { [weak self] in self?.primary }        // #352: an open main window only
     little.onResize = { [weak self] size in self?.littleArktSize = size }
-    little.onClosed = { [weak self] closed in self?.littleArktWindows.removeAll { $0 === closed } }
+    little.onClosed = { [weak self] closed in
+      self?.littleArktWindows.removeAll { $0 === closed }
+      self?.recordRecoveryPages()
+    }
+    little.onRecoveryPageChanged = { [weak self] in self?.recordRecoveryPages() }
     little.onArchiveClose = { [weak self] closed in self?.littleArktClosed(closed) }
     little.onReopenClosed = { [weak self] in self?.reopenClosedLittleArkt() }
     little.canReopenClosed = { [weak self] in self?.canReopenClosedLittleArkt ?? false }
@@ -499,7 +624,7 @@ public final class ShellWindowSet {
 
   // MARK: Building
 
-  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin) -> ShellWindowController {
+  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin, kind: WindowKind = .regular) -> ShellWindowController {
     // #116: the first main window the shell opens restores the saved frame, Space and tabs and keeps them saved;
     // when it closes, the next one takes over saving (without restoring again).
     let isRestored = SessionWindowPolicy.takesSession(origin, ownerIsAlive: sessionWindow.map { !$0.isClosed } ?? false)
@@ -509,6 +634,11 @@ public final class ShellWindowSet {
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
                                            restoring: session, savesSession: isRestored,
                                            commandBarSettings: commandBarSettings, opensFirstTab: opensFirstTab)
+    switch kind {
+    case .regular: break
+    case .blank: controller.makeBlank()
+    case .incognito: controller.makeIncognito()
+    }
     controller.copyLinkEducation = copyLinkEducation
     if isRestored { sessionWindow = controller }
     if let session, controller.applySavedFrame(session, screens: screens()) { restoredFrameWindow = controller }
@@ -535,8 +665,27 @@ public final class ShellWindowSet {
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }
     windows.append(controller)
+    controller.peek.onRecoveryPagesChanged = { [weak self] in self?.recordRecoveryPages() }
+    controller.onRecoveryWindowClosed = { [weak self, weak controller] in
+      guard let self else { return }
+      self.recordRecoveryPages()
+      guard self.recoveryWindow === controller else { return }
+      self.recoveryWindow = nil
+      self.presentPendingRecovery()
+    }
+    controller.onRecoveryEligibilityChanged = { [weak self] in self?.presentPendingRecovery() }
+    controller.onBecomingPrivate = { [weak self, weak controller] in
+      guard let self, let controller else { return }
+      self.recordRecoveryPages()
+      guard self.recoveryWindow === controller else { return }
+      controller.rootView.subviews.filter { $0 is RestorePagesView }.forEach { $0.removeFromSuperview() }
+      self.recoveryWindow = nil
+      self.presentPendingRecovery()
+    }
     trackMain(controller)
     configure?(controller)
+    presentPendingRecovery()
+    didPresentPendingRecoveryForTesting?(controller)
     downloads?.attach(to: controller)
     sidebarBanner?.attach(to: controller)
     // #331: the session's first window is the one a relaunch restores; it opens on the saved sidebar state. Later

@@ -43,7 +43,7 @@ public struct TabZoom: Equatable, Sendable {
 
 /// The previous run of the engine ended without a clean quit (a crash, a force quit, a power loss). The shell asks once
 /// whether to bring the last session back. Dismissing acknowledges the crash, so it is not asked again; a second
-/// dismiss does nothing. Restore is not here yet: what it brings back, and so its signature, waits on #580.
+/// dismiss does nothing. Only non-private pages outside the sidebar are restored.
 @MainActor
 public protocol EngineSessionRecovery: AnyObject {
   /// The previous run ended without a clean quit and nobody has answered yet.
