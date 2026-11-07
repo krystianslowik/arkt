@@ -171,6 +171,12 @@ public final class LittleArktEngineHost: EngineWindowHosting {
     }
   }
 
+  /// An Esc the page did not use stops the page while it loads, unless another Esc owner of the window is open
+  /// (KB-055, #757).
+  public func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool {
+    controller?.stopLoadingOnEscape(event, in: tab) ?? false
+  }
+
   func dispatch(_ command: EngineCommand, disposition: EngineDisposition) {
     if claim(command) != nil {
       _ = perform(command, disposition: disposition)
