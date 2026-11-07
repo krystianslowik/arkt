@@ -5485,6 +5485,8 @@ is already stored, so the fix is there and the coordinator keeps resending.
 | After the fix, same filter plus `ChromiumImportTests` | passed: 5, 7, 31 (30 before) and 16 tests |
 | Deliberate break: the held-visit skip in `ImportRecording` disabled | the same three tests fail again; restored |
 | `EngineAPITests`, `FakeEngineKitTests`, `CoreBridgeTests`, `ChromiumEngineKitTests` | passed: four test runs of 29, 285, 343 and 170 tests |
+| Scripted facade: `aBatchTheHistoryAlreadyHoldsComesBackSkippedWithItsNewestVisit` (`ChromiumImportTests`) | passed: 17 tests (16 before); pins that a `written 0, skipped N` answer keeps its `lastVisitTime`. It passes without the engine change too: the facade only carries the answer, the dedupe itself runs in the engine (smoke below) |
+| `IsolationTests` | passed: 60 tests in 7 suites |
 
 ### Build
 
