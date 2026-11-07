@@ -29,6 +29,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | 0007 | extension dialogs as native sheets (#244, pull request #252) | exists | 4 | 0 |
 | 0008 | link activation throttle for Peek (#313, pull request #349) | exists | 1 | 0 |
 | 0009 | modified link clicks asked in `OpenURLFromTab` (#345) | exists | 2 | 0 |
+| 0012 | `FindBrowserWindowWithWebContents` finds a non-BrowserView window; no iOS address promo on it (#768) | exists | 2 | 0 |
 | - | Handshake (Decision 1) | ObjC runtime lookup, no patch (W3-0: lookup works) | 0 | 0 |
 | - | Framework name (Decision 7) | no patch unless open decision 1 changes | 0 (1-2) | 0 |
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
@@ -40,6 +41,7 @@ Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection a
 if the framework is renamed by patch.
 After #313: 8 patch files, 18 upstream files, 0 hot-file hunks.
 After #345: 9 patch files, 20 upstream files, 0 hot-file hunks.
+After #768: 12 patch files; 0012 adds 2 upstream files (`browser_view.cc`, `address_bubbles_controller.cc`), 0 hot-file hunks.
 
 ## W3-12: Results, patch budget, issue updates, housekeeping
 
@@ -4524,7 +4526,7 @@ Every `Show*` logs `ARKT: autofill bubble <name> not shown` on each call.
 | `omnibox_autofill_bubble_controller.cc:130` | `GetAutofillBubbleHandler()`, unchecked | null-checked | nullptr | no crash, not shown (by construction) |
 | `payments_churned_users_bubble_controller.cc:150`, :218 (bubble, confirmation) | `Get()`, unchecked | null-checked | nullptr | no crash, not shown (by construction) |
 | `wallet_reminder_notice_bubble_controller.cc:139` | `Get()`, null-checked | null-checked | nullptr | no crash, not shown (by construction) |
-| `address_bubbles_controller.cc:61`, :75, :86 (save, update, sign-in promo) | `FindBrowserWindowWithWebContents()`, unchecked | `*`, `CHECK` at :248, :344 | no-op bubble; save and update then post the owned controller's `OnBubbleClosed()` | **crashes before the handler** (smoke); needs a patch, #768 |
+| `address_bubbles_controller.cc:61`, :75, :86 (save, update, sign-in promo) | `FindBrowserWindowWithWebContents()`, unchecked | `*`, `CHECK` at :248, :344 | no-op bubble; save and update then post the owned controller's `OnBubbleClosed()` | crashed before the handler (smoke). Since #768 (patch 0012): save and update reach the handler, no crash, not shown, posted close runs (smoke); sign-in promo not reached (needs DICE sign-in) |
 
 "By construction" rows were not reached in a fresh profile: they need a signed-in account, server cards, offers,
 Autofill AI data or the omnibox autofill flow. The handler and the bubble are non-null for them, and the table records
@@ -4770,3 +4772,98 @@ In sync; nothing exported. Facade header copies `cmp` identical.
 
 Cleanup: the self-test and the loopback server stopped by PID; the profiles, the build log and the three crash dumps
 of the run deleted.
+
+## #768: address bubbles find the Arkt window (patch 0012)
+
+Date 2026-11-07. Branch `engine/768-address-bubble-window` from `origin/main` (`659a70d`). One Chromium patch (0012),
+option A as decided in the issue; overlay, facade header and Swift unchanged.
+
+### Gate
+
+- Why a patch: `BrowserWindow::FindBrowserWindowWithWebContents` (`browser_view.cc:1173-1190`) returned only a
+  `BrowserView`, and the address bubbles dereference its result before any handler is asked (`address_bubbles_controller.cc:61`,
+  :75, :86). No overlay seam changes that static lookup.
+- Facade header: unchanged (`cmp` identical). `.patches`: 11 to 12, number 0012 claimed in the issue; no open engine
+  pull request touches either file, and no earlier patch touches them.
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`; Chromium disk 1.9 TB free, internal 37 GB, swap 2.9 of 4 GB.
+  Overlay link checked: `$CR/arkt` points at this worktree's `engine/arkt`.
+
+### What landed
+
+Patch 0012 `Arkt: find a non-BrowserView window for a WebContents`, 2 files, 13 insertions, 4 deletions (after the
+review rework below; the first version had 14 and 8):
+
+- `FindBrowserWindowWithWebContents`, tab lookup: before the old return line, the tab's window from
+  `BrowserWindow::FromBrowser(browser)` is returned when it is not a `BrowserView` (the `browser` local is no longer
+  const). `FromBrowser` ends in `GetWindow()`, the Arkt window. A `BrowserView` window, including one being torn down
+  (when `FromBrowser` reaches it through `GetWindow()`), takes the old return line. A `WebUIBrowserWindow` also
+  changes: it was nullptr from the tab lookup and is now returned.
+- The widget branch is not patched. Arkt tabs sit in Arkt's own `NSWindow`, not in a Views widget, so their lookup
+  reaches the tab branch: the smoke below passes without a widget hunk. Contents that are not a tab (WebUI bubbles,
+  dialogs) in a non-`BrowserView` widget still get nullptr.
+- `MaybeShowIOSDektopAddressPromo`: returns when `AsBrowserView()` is nullptr instead of dereferencing it. Only reached
+  after the user accepts the save prompt (`OnUserDecision`, kAccepted), which the no-op handler never does, so it is
+  covered by construction, not by the smoke.
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 15 autoninja -j 4 -C out/Spike chrome` (first version) | `The build has finished successfully.`, `FAILED:` 0 | incremental |
+| Deliberate break 1: `browser_view.cc` back to the pinned version (`git checkout HEAD~1 --`), rebuilt | finished, `FAILED:` 0 | 47 s |
+| Deliberate break 2: patch in, overlay `PostAddressClosed` returning before it posts, rebuilt | finished, `FAILED:` 0 | 46 s |
+| Both restored, rebuilt | finished, `FAILED:` 0; `git status` clean in both trees | 30 s |
+| Review rework: tab-lookup hunk reworked, widget hunk dropped (arkt commit amended), rebuilt | finished, `FAILED:` 0 | 47 s |
+| Break 3: `browser_view.cc` back to the pinned version, rebuilt | finished, `FAILED:` 0 | 44 s |
+| Restored, rebuilt | finished, `FAILED:` 0; `git status` clean | 46 s |
+
+Load average 3 to 6 (other lanes' work; nothing added).
+
+### Smoke (run1, run2, break 1 and break 2 on the first version; run3 and break 3 on the reworked patch; `out/Spike/Chromium.app`, fresh profiles under `profiles/768-20261107/`, `--use-mock-keychain`, form on `127.0.0.1:8768`, fields typed with `Input.insertText` over the DevTools protocol)
+
+Every run starts with `ARKT: browsers normal=1 arkt=1 views=0`: the form tab is on an Arkt window. Saved addresses for
+the update rows are written through `chrome.autofillPrivate.saveAddress` on `chrome://settings/addresses` (no phone),
+then the form is submitted with the same name and address plus a phone. All submissions in one tab.
+
+| Run | Check | Result |
+|---|---|---|
+| run1, run2, run3 | full US address (name, street, city, state, ZIP, country, phone, email) | `ARKT: autofill bubble SaveAddressProfile not shown`, no crash |
+| run1, run2, run3 | second and third different addresses, same tab | `SaveAddressProfile not shown` each time: the posted `OnBubbleClosed()` ran and the controller let go of the no-op bubble |
+| run1, run2, run3 | stored address submitted again with a new phone | `ARKT: autofill bubble UpdateAddressProfile not shown`, no crash |
+| run2, run3 | the same update a second time, same tab | `UpdateAddressProfile not shown` again |
+| run1, run2, run3 | tab closed | `ARKT: native window destroyed`, no crash |
+| break 1 | first address submit | `Received signal 11 SEGV_ACCERR 000000000000`; crash report top frame `autofill::(anonymous namespace)::ShowSaveBubble`, then `AddressBubblesController::DoShowBubble` |
+| break 3 (tab-lookup change reverted) | first address submit | the same crash: `Received signal 11 SEGV_ACCERR 000000000000`, top frame `ShowSaveBubble`, then `AddressBubblesController::DoShowBubble` |
+| break 2 | three different addresses, same tab | only the first `SaveAddressProfile not shown`; the next two prompts are not shown: without the posted close the controller keeps the no-op bubble |
+
+`FATAL`, `NOTREACHED`, `Check failed` and `Received signal` lines in run1, run2 and run3: 0. In run1 and break 1 the submit was a
+synthetic mouse click; in the later runs the window was occluded (`visibilityState` hidden) and dropped synthetic
+clicks, so the button was clicked from script (`click()` with a user gesture); the typed values are the same.
+
+### Other callers of `FindBrowserWindowWithWebContents`
+
+The three unchecked callers named in the issue were not reachable in a fresh profile, and the patch helps them only
+when the contents are a tab of an Arkt window:
+
+| Caller | Needs | On an Arkt window |
+|---|---|---|
+| `managed_profile_required_navigation_throttle.cc:213-215` (`->Show()`) | an enterprise sign-in that creates a managed profile | the enterprise action tab now finds the Arkt window (by construction) |
+| `access_code_cast_dialog.cc:65-66` (`->GetBounds()`) | the access code Cast policy | if `web_contents` is a tab of an Arkt window, the lookup now finds the Arkt window; not checked (by construction) |
+| `webui_contents_wrapper.cc:195-196` (`->OpenEyeDropper()`) | a WebUI bubble with an eye dropper | still nullptr: bubble contents are not a tab |
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 12 |
+| `arkt` commits above `156.0.8078.48` | 12 |
+
+In sync. Export changed only `.patches` and the new patch (patches 0001 to 0011 byte-identical). Facade header copies
+`cmp` identical.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID or exited when its last tab closed, and the break 1 run crashed (`ps -p` prints
+nothing); the loopback server stopped by PID. Deleted: the throwaway profiles under `profiles/768-20261107/`, the build
+logs and the one crash report break 1 wrote. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was
+touched.

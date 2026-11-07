@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Sat, 7 Nov 2026 11:24:30 +0100
+Subject: [PATCH] Arkt: find a non-BrowserView window for a WebContents
+
+BrowserWindow::FindBrowserWindowWithWebContents only returned a BrowserView,
+so for an Arkt window it returned nullptr and the address save and update
+bubbles dereferenced it (#768). The tab lookup now returns the tab's window
+from BrowserWindow::FromBrowser when that window is not a BrowserView, which
+is the Arkt window from GetWindow(), and also a WebUIBrowserWindow. A
+BrowserView window, including one being torn down, takes the old path.
+MaybeShowIOSDektopAddressPromo skips the promo when the window is not a
+BrowserView instead of dereferencing AsBrowserView().
+---
+ .../browser/ui/autofill/address_bubbles_controller.cc  | 10 +++++++---
+ chrome/browser/ui/views/frame/browser_view.cc          |  7 ++++++-
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/ui/autofill/address_bubbles_controller.cc b/chrome/browser/ui/autofill/address_bubbles_controller.cc
+index 86828b91de..ada6a531ab 100644
+--- a/chrome/browser/ui/autofill/address_bubbles_controller.cc
++++ b/chrome/browser/ui/autofill/address_bubbles_controller.cc
+@@ -312,10 +312,14 @@ void AddressBubblesController::SetUpBubble(
+ }
+ 
+ void AddressBubblesController::MaybeShowIOSDektopAddressPromo() {
+-  BrowserWindowInterface* browser =
++  BrowserView* browser_view =
+       BrowserWindow::FindBrowserWindowWithWebContents(web_contents())
+-          ->AsBrowserView()
+-          ->browser();
++          ->AsBrowserView();
++  // A window that is not a BrowserView (Arkt) gets no promo.
++  if (!browser_view) {
++    return;
++  }
++  BrowserWindowInterface* browser = browser_view->browser();
+ 
+   // Verify if user is eligible for iOS promo, and attempt showing if they are.
+   ios_promos_utils::VerifyIOSPromoEligibility(
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index b68f089aeb..c82e091be7 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -1184,8 +1184,13 @@ BrowserWindow* BrowserWindow::FindBrowserWindowWithWebContents(
+     return BrowserView::GetBrowserViewForNativeWindow(
+         widget->GetNativeWindow());
+   }
+-  const auto* browser =
++  auto* browser =
+       GlobalBrowserCollection::GetInstance()->FindBrowserWithTab(web_contents);
++  // A window that is not a BrowserView (Arkt) is found through its tab.
++  if (BrowserWindow* window = BrowserWindow::FromBrowser(browser);
++      window && !window->AsBrowserView()) {
++    return window;
++  }
+   return browser ? BrowserView::GetBrowserViewForBrowser(browser) : nullptr;
+ }
+ 
