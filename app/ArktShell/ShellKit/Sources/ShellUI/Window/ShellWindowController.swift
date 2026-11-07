@@ -168,6 +168,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var onPrivateWindowClosed: (@MainActor (ClosedPrivateWindow) -> Void)?
   /// The private window's pages as its close began; handed over when the window closes, dropped when it stays.
   var closingPrivateWindow: ClosedPrivateWindow?
+  /// The last URL of each private page, as the Pages list last showed it: the engine forgets a closing page's URL
+  /// before it reports the close, so a window the engine closes on its own is noted from here (#746).
+  var privatePageURLs: [TabID: URL] = [:]
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
   /// The reopen batch the visible undo toast belongs to; nil without one.

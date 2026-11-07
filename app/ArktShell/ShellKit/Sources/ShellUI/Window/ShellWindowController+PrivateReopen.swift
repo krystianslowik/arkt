@@ -70,7 +70,9 @@ extension ShellWindowController {
   /// This window's pages as a closed private window; nil for a normal window or one without pages.
   private var closedPrivateWindowRecord: ClosedPrivateWindow? {
     guard isPrivateWindow, let window else { return nil }
-    let pages = privatePageOrder.pages.compactMap { tab in engine.snapshot(of: tab)?.url.map { (tab, $0) } }
+    let pages = privatePageOrder.pages.compactMap { tab in
+      (engine.snapshot(of: tab)?.url ?? privatePageURLs[tab]).map { (tab, $0) }
+    }
     guard !pages.isEmpty else { return nil }
     return ClosedPrivateWindow(presentation: sidebarController.presentation, pages: pages.map(\.1),
                                shownIndex: pages.firstIndex { $0.0 == currentTab }, frame: window.frame)

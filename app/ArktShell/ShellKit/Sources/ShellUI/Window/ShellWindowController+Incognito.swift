@@ -151,6 +151,7 @@ extension ShellWindowController {
                                    audio: TabAudio(isAudible: snapshot.isAudible, isMuted: snapshot.isMuted))
     }
     sidebarController.view.privatePages.setPages(rows)
+    privatePageURLs = rows.reduce(into: [:]) { urls, row in urls[row.tab] = row.url }    // #746
   }
 
   /// The page Close Oldest would close now: the earliest-opened page that is neither shown nor playing sound.
@@ -207,7 +208,7 @@ extension ShellWindowController {
   }
 
   private func privateTabClosed(_ tab: TabID, reason: CloseReason) {
-    if reason == .windowClosing { holdClosingPrivateWindow() }   // #746: also a close without `windowShouldClose`
+    if reason == .windowClosing { holdClosingPrivateWindow() }   // #746: also the engine's own Close Window
     privateTabs.removeAll { $0 == tab }
     privatePageOrder.remove(tab)
     if tab == engineActiveTab { engineActiveTab = nil }
