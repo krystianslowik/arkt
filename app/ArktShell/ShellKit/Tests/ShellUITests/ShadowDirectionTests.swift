@@ -27,17 +27,20 @@ struct ShadowDirectionTests {
     let host = Host(segments, dark: flavor == .dark)
     segments.layout()
     let thumb = try #require(host.layers().first { $0 is ShadowPathLayer }, "the thumb")
-    try host.expectCastsDown(thumb, band: 2)
+    try host.expectCastsDown(thumb, band: 1)
   }
 
   @Test(arguments: [false, true])
   func theFirstRunSpacePreviewCastsDown(dark: Bool) throws {
-    let preview = SpacePreviewView(frame: NSRect(x: 0, y: 0, width: 320, height: 220))
+    let preview = SpacePreviewView(frame: NSRect(x: 0, y: 0, width: 340, height: 196))
     let family = SpaceThemeCatalog.defaultFamily
     preview.configure(theme: dark ? family.dark : family.light, name: "Work", animated: false)
-    preview.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)   // AppKit resets the layer's shadow here
     let host = Host(preview, dark: dark)
     preview.layout()
+    // AppKit resets the backing layer's shadow on each change; the display pass the render runs puts it back. Going
+    // through the other appearance first makes it a change whatever the runner's own appearance is.
+    preview.appearance = NSAppearance(named: dark ? .aqua : .darkAqua)
+    preview.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
     try host.expectCastsDown(try #require(preview.layer), band: 16)
   }
 

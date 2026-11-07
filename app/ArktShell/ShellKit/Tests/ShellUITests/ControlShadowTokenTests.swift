@@ -48,8 +48,9 @@ struct ControlShadowTokenTests {
     let preview = BrandTokens.spacePreviewShadow
     #expect(preview.color == TokenPair(light: .black(0.45), dark: .black(0.45)))
     #expect(preview.radius == 24)
-    #expect(preview.offsetY == 14)
-    #expect(preview.flippedOffset == CGSize(width: 0, height: 14))
+    #expect(preview.offsetY == 24)
+    #expect(preview.flippedOffset == CGSize(width: 0, height: 24))
+    #expect(BrandTokens.spacePreviewShadowSpread == 26)
     for token in [thumb, preview] { expectNoContactShadow(token) }
   }
 
@@ -108,9 +109,12 @@ struct ControlShadowTokenTests {
   }
 
   @Test func theFirstRunSpacePreview() throws {
-    let preview = SpacePreviewView(frame: NSRect(x: 0, y: 0, width: 320, height: 220))
+    // At the prototype's 340 pt width the drop is the token as is; the card inset by the spread casts it.
+    let preview = SpacePreviewView(frame: NSRect(x: 0, y: 0, width: 340, height: 196))
+    preview.layout()
     let layer = try #require(preview.layer)
-    expectDraws(BrandTokens.spacePreviewShadow, .light, offset: CGSize(width: 0, height: 14), on: layer)
+    expectDraws(BrandTokens.spacePreviewShadow, .light, offset: CGSize(width: 0, height: 24), on: layer)
+    #expect(layer.shadowPath?.boundingBox == CGRect(x: 26, y: 26, width: 340 - 52, height: 196 - 52))
   }
 
   @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
