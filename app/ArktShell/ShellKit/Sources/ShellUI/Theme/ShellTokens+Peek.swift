@@ -21,7 +21,8 @@ extension ShadowToken {
   /// The `shadowOffset` for a layer whose y axis points up (AppKit's default), where down is negative.
   var unflippedOffset: CGSize { CGSize(width: 0, height: -offsetY) }
 
-  /// The `shadowOffset` for a layer whose y axis points down (a flipped view's sublayer), where down is positive.
+  /// The `shadowOffset` for a layer whose y axis points down (a flipped view's layer or sublayer), where down is
+  /// positive.
   var flippedOffset: CGSize { CGSize(width: 0, height: offsetY) }
 }
 

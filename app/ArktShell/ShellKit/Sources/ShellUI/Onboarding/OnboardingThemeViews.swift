@@ -202,10 +202,7 @@ final class SpacePreviewView: NSView {
     gradient.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
     layer?.addSublayer(gradient)
     for sublayer in dots + favorites + rows + [nameLayer, page] { gradient.addSublayer(sublayer) }
-    layer?.shadowColor = BrandTokens.spacePreviewShadow.color.light.cgColor
-    layer?.shadowOpacity = 1
-    layer?.shadowRadius = BrandTokens.spacePreviewShadow.radius
-    layer?.shadowOffset = BrandTokens.spacePreviewShadow.unflippedOffset
+    applyShadow()
     setAccessibilityElement(false)
   }
 
@@ -214,6 +211,21 @@ final class SpacePreviewView: NSView {
 
   override var isFlipped: Bool { true }
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  /// AppKit resets a backing layer's shadow to the view's (none) when the appearance changes, so the drop goes back on
+  /// each change (#767).
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    applyShadow()
+  }
+
+  /// The deep drop under the card: this view is flipped, so down is positive y.
+  private func applyShadow() {
+    layer?.shadowColor = BrandTokens.spacePreviewShadow.color.light.cgColor
+    layer?.shadowOpacity = 1
+    layer?.shadowRadius = BrandTokens.spacePreviewShadow.radius
+    layer?.shadowOffset = BrandTokens.spacePreviewShadow.flippedOffset
+  }
 
   func configure(theme: SpaceThemeInfo, name: String, animated: Bool) {
     self.theme = theme

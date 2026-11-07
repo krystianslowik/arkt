@@ -4,8 +4,9 @@ import Testing
 
 /// The theme creator's slider knob, pad and colour dots, first run's appearance thumb and Space preview, and the
 /// floating sidebar read their shadow geometry from named `ShadowToken`s (#764, after #622 and #762) instead of
-/// literals. The values are today's: the tests pin them, and check every site draws exactly its token, with the same
-/// offset it drew before, in light and dark.
+/// literals. The tests pin the values and check every site draws exactly its token, in light and dark. All of these
+/// sit on flipped views, so each draws the token's `flippedOffset`: positive y is down there (#767, which turned the
+/// knob, thumb, preview and floating sidebar from casting up; `ShadowDirectionTests` checks the drawn direction).
 @MainActor
 struct ControlShadowTokenTests {
   // MARK: The tokens keep today's look
@@ -15,7 +16,7 @@ struct ControlShadowTokenTests {
     #expect(token.color == TokenPair(light: .black(0.25), dark: .black(0.25)))
     #expect(token.radius == 3)
     #expect(token.offsetY == 2)
-    #expect(token.unflippedOffset == CGSize(width: 0, height: -2))
+    #expect(token.flippedOffset == CGSize(width: 0, height: 2))
     expectNoContactShadow(token)
   }
 
@@ -43,12 +44,12 @@ struct ControlShadowTokenTests {
     #expect(thumb.color == TokenPair(light: .black(0.12), dark: .black(0.12)))
     #expect(thumb.radius == 1)
     #expect(thumb.offsetY == 1)
-    #expect(thumb.unflippedOffset == CGSize(width: 0, height: -1))
+    #expect(thumb.flippedOffset == CGSize(width: 0, height: 1))
     let preview = BrandTokens.spacePreviewShadow
     #expect(preview.color == TokenPair(light: .black(0.45), dark: .black(0.45)))
     #expect(preview.radius == 24)
     #expect(preview.offsetY == 14)
-    #expect(preview.unflippedOffset == CGSize(width: 0, height: -14))
+    #expect(preview.flippedOffset == CGSize(width: 0, height: 14))
     for token in [thumb, preview] { expectNoContactShadow(token) }
   }
 
@@ -58,7 +59,7 @@ struct ControlShadowTokenTests {
     #expect(token.radius == SidebarRevealMotion.shadowRadius)
     #expect(token.radius == 12)
     #expect(token.offsetY == 2)
-    #expect(token.unflippedOffset == CGSize(width: 0, height: -2))
+    #expect(token.flippedOffset == CGSize(width: 0, height: 2))
     expectNoContactShadow(token)
   }
 
@@ -74,7 +75,7 @@ struct ControlShadowTokenTests {
     let knob = layers(in: slider).first { $0 is ShadowPathLayer }
     #expect(knob != nil, "the knob")
     if let knob {
-      expectDraws(ThemeCreatorTokens.sliderKnobShadow, .light, offset: CGSize(width: 0, height: -2), on: knob)
+      expectDraws(ThemeCreatorTokens.sliderKnobShadow, .light, offset: CGSize(width: 0, height: 2), on: knob)
     }
   }
 
@@ -102,14 +103,14 @@ struct ControlShadowTokenTests {
     let thumb = layers(in: view).first { $0 is ShadowPathLayer }
     #expect(thumb != nil, "the thumb")
     if let thumb {
-      expectDraws(BrandTokens.appearanceThumbShadow, flavor, offset: CGSize(width: 0, height: -1), on: thumb)
+      expectDraws(BrandTokens.appearanceThumbShadow, flavor, offset: CGSize(width: 0, height: 1), on: thumb)
     }
   }
 
   @Test func theFirstRunSpacePreview() throws {
     let preview = SpacePreviewView(frame: NSRect(x: 0, y: 0, width: 320, height: 220))
     let layer = try #require(preview.layer)
-    expectDraws(BrandTokens.spacePreviewShadow, .light, offset: CGSize(width: 0, height: -14), on: layer)
+    expectDraws(BrandTokens.spacePreviewShadow, .light, offset: CGSize(width: 0, height: 14), on: layer)
   }
 
   @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
@@ -121,7 +122,7 @@ struct ControlShadowTokenTests {
     overlay.updateLayer()
     let layer = try #require(overlay.layer)
     expectDraws(ShellTokens.sidebarOverlayLiftShadow, ThemeFlavor(appearance: overlay.effectiveAppearance),
-                offset: CGSize(width: 0, height: -2), on: layer)
+                offset: CGSize(width: 0, height: 2), on: layer)
   }
 
   // MARK: Helpers
@@ -131,8 +132,7 @@ struct ControlShadowTokenTests {
     Double(layer.shadowColor?.alpha ?? 0) * Double(layer.shadowOpacity)
   }
 
-  /// The layer casts `token` for `flavor`: its blur and visible alpha, at `offset`, the literal the site drew before
-  /// the token (#764 keeps every value, the direction included).
+  /// The layer casts `token` for `flavor`: its blur and visible alpha, at `offset` (y down on these flipped views).
   private func expectDraws(_ token: ShadowToken, _ flavor: ThemeFlavor, offset: CGSize, on layer: CALayer,
                            sourceLocation: SourceLocation = #_sourceLocation) {
     #expect(layer.shadowRadius == token.radius, "blur", sourceLocation: sourceLocation)

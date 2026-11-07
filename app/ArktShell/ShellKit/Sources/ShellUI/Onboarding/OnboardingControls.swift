@@ -389,7 +389,7 @@ final class AppearanceSegmentView: NSView {
       thumb.shadowColor = appearanceModel.color(BrandTokens.appearanceThumbShadow.color).cgColor
       thumb.shadowOpacity = 1
       thumb.shadowRadius = BrandTokens.appearanceThumbShadow.radius
-      thumb.shadowOffset = BrandTokens.appearanceThumbShadow.unflippedOffset
+      thumb.shadowOffset = BrandTokens.appearanceThumbShadow.flippedOffset   // a sublayer of this flipped view
       focus.strokeColor = appearanceModel.focusRing.cgColor
       focus.lineWidth = appearanceModel.focusRingWidth
     }

@@ -151,7 +151,7 @@ public final class SidebarOverlayView: NSView {
     layer.shadowOpacity = floating ? 1 : 0
     layer.shadowColor = ShellTokens.sidebarOverlayLiftShadow.color.resolve(flavor).cgColor
     layer.shadowRadius = ShellTokens.sidebarOverlayLiftShadow.radius
-    layer.shadowOffset = ShellTokens.sidebarOverlayLiftShadow.unflippedOffset
+    layer.shadowOffset = ShellTokens.sidebarOverlayLiftShadow.flippedOffset   // this view is flipped
     layer.shadowPath = CGPath(roundedRect: bounds, cornerWidth: cornerRadius, cornerHeight: cornerRadius,
                               transform: nil)
   }
