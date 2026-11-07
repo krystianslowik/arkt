@@ -2,9 +2,9 @@ import AppKit
 import XCTest
 @testable import ShellUI
 
-/// The #767 lifts cast down inside the host chain they ship in: a flipped container (as `OnboardingStepView` and
-/// `ShellRootView` are) in a window on screen, where AppKit itself joins the layers. `ShadowDirectionTests` covers the
-/// same sites offscreen; this checks the window's own layer tree, drawn from its root.
+/// The #767 and #773 lifts cast down inside the host chain they ship in: a flipped container (as `OnboardingStepView`
+/// and `ShellRootView` are) in a window on screen, where AppKit itself joins the layers. `ShadowDirectionTests` covers
+/// the same sites offscreen; this checks the window's own layer tree, drawn from its root.
 @MainActor
 final class ShadowDirectionInWindowTests: XCTestCase {
   private final class FlippedContainer: NSView {
@@ -47,6 +47,43 @@ final class ShadowDirectionInWindowTests: XCTestCase {
     let image = try render()
     try expectCastsDown(knob, in: image, band: 3)
     try expectCastsDown(try XCTUnwrap(preview.layer), in: image, band: 16)
+  }
+
+  /// #773: the Settings switch, segmented control and pane item, and the sidebar and Archive row lifts, as the
+  /// Settings content views and the outline and Archive tables host them. Light: the plates and rows draw no shadow in
+  /// dark.
+  func testTheSettingsControlsAndTheRowLiftsCastDownInAFlippedHost() throws {
+    window.appearance = NSAppearance(named: .aqua)
+    let toggle = SettingsSwitch(frame: NSRect(x: 40, y: 40, width: 32, height: 20))
+    container.addSubview(toggle)
+    let segments = SettingsSegmentedControl(segments: ["Light", "Dark", "Auto"], selected: 0)
+    segments.frame = NSRect(origin: NSPoint(x: 120, y: 40), size: segments.intrinsicContentSize)
+    container.addSubview(segments)
+    let item = SettingsPaneItemView(pane: .general)
+    item.frame.origin = NSPoint(x: 400, y: 30)
+    container.addSubview(item)
+    item.setSelected(true, animated: false)
+    let sidebarRow = SidebarRowView(frame: NSRect(x: 40, y: 120, width: 220, height: 41))
+    sidebarRow.state = .current
+    container.addSubview(sidebarRow)
+    let archiveRow = ArchiveRowView(frame: NSRect(x: 280, y: 120, width: 220, height: 37))
+    // Outside a table AppKit paints its own selection over a selected row; off, so the fill and its lift are drawn.
+    archiveRow.selectionHighlightStyle = .none
+    container.addSubview(archiveRow)
+    archiveRow.isSelected = true
+    window.orderFront(nil)
+    container.layoutSubtreeIfNeeded()
+    window.displayIfNeeded()
+
+    let image = try render()
+    // The knob and the plates sit 2 pt inside their tracks: the bands stay on the track.
+    for (control, band) in [(toggle, 1), (segments, 1.5), (item, 1.5)] as [(NSView, CGFloat)] {
+      let plate = try XCTUnwrap(layers(under: try XCTUnwrap(control.layer)).first { $0 is ShadowPathLayer })
+      try expectCastsDown(plate, in: image, band: band)
+    }
+    try expectCastsDown(sidebarRow.backgroundLayer, in: image, band: 1.5)
+    let fill = try XCTUnwrap(archiveRow.layer?.sublayers?.first { $0.shadowOpacity > 0 }, "the selected fill")
+    try expectCastsDown(fill, in: image, band: 1.5)
   }
 
   // MARK: Helpers

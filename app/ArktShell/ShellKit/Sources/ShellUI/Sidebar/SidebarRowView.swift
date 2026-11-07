@@ -74,7 +74,7 @@ public final class SidebarRowView: NSTableRowView {
     backgroundLayer.cornerRadius = SidebarMetrics.rowCornerRadius
     backgroundLayer.cornerCurve = .continuous
     backgroundLayer.shadowRadius = ShellTokens.rowLiftShadow.radius
-    backgroundLayer.shadowOffset = ShellTokens.rowLiftShadow.unflippedOffset
+    backgroundLayer.shadowOffset = ShellTokens.rowLiftShadow.flippedOffset   // table row views are flipped
     IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
 

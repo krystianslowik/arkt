@@ -205,7 +205,7 @@ final class ArchiveRowView: NSTableRowView {
     fillLayer.cornerRadius = SidebarMetrics.rowCornerRadius
     fillLayer.cornerCurve = .continuous
     fillLayer.shadowRadius = ShellTokens.rowLiftShadow.radius
-    fillLayer.shadowOffset = ShellTokens.rowLiftShadow.unflippedOffset
+    fillLayer.shadowOffset = ShellTokens.rowLiftShadow.flippedOffset   // table row views are flipped
     setAccessibilityElement(true)
     setAccessibilityRole(.row)
     setAccessibilityIdentifier(AXID.Archive.row)

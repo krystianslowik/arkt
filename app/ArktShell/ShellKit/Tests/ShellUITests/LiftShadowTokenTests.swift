@@ -54,7 +54,7 @@ struct LiftShadowTokenTests {
     row.state = .current
     row.layout()
     row.updateLayer()
-    expectDraws(ShellTokens.rowLiftShadow, flavor, on: row.backgroundLayer)
+    expectDraws(ShellTokens.rowLiftShadow, flavor, flipped: true, on: row.backgroundLayer)
     #expect(row.backgroundLayer.shadowPath != nil, "an explicit path, no offscreen pass")
   }
 
@@ -78,7 +78,7 @@ struct LiftShadowTokenTests {
     row.updateLayer()
     let fill = row.layer?.sublayers?.first { $0.cornerRadius == SidebarMetrics.rowCornerRadius }
     #expect(fill != nil, "the row's fill layer")
-    if let fill { expectDraws(ShellTokens.rowLiftShadow, row.archiveFlavor, on: fill) }
+    if let fill { expectDraws(ShellTokens.rowLiftShadow, row.archiveFlavor, flipped: true, on: fill) }
   }
 
   @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
@@ -103,7 +103,7 @@ struct LiftShadowTokenTests {
     if on && flavor == .dark {
       #expect(effectiveAlpha(knob) == 0, "an on knob in dark casts no shadow")
     } else {
-      expectDraws(SettingsTokens.switchKnobShadow, flavor, on: knob)
+      expectDraws(SettingsTokens.switchKnobShadow, flavor, flipped: true, on: knob)
     }
   }
 
@@ -115,7 +115,8 @@ struct LiftShadowTokenTests {
     let plate = layers(in: control).first { $0 is ShadowPathLayer }
     #expect(plate != nil, "the plate")
     if let plate {
-      expectDraws(SettingsTokens.segmentPlateShadow, ThemeFlavor(appearance: control.effectiveAppearance), on: plate)
+      expectDraws(SettingsTokens.segmentPlateShadow, ThemeFlavor(appearance: control.effectiveAppearance),
+                  flipped: true, on: plate)
     }
   }
 
@@ -127,7 +128,8 @@ struct LiftShadowTokenTests {
     let plate = layers(in: item).first { $0 is ShadowPathLayer }
     #expect(plate != nil, "the plate")
     if let plate {
-      expectDraws(SettingsTokens.paneItemPlateShadow, ThemeFlavor(appearance: item.effectiveAppearance), on: plate)
+      expectDraws(SettingsTokens.paneItemPlateShadow, ThemeFlavor(appearance: item.effectiveAppearance),
+                  flipped: true, on: plate)
     }
   }
 
@@ -139,10 +141,13 @@ struct LiftShadowTokenTests {
   }
 
   /// The layer casts `token` for `flavor`: the same blur, offset and visible alpha (none where the token is clear).
-  private func expectDraws(_ token: ShadowToken, _ flavor: ThemeFlavor, on layer: CALayer,
+  /// `flipped`: the layer's y axis points down (a flipped view's layer or sublayer), so down is a positive offset;
+  /// `ShadowDirectionTests` checks each site's direction on screen.
+  private func expectDraws(_ token: ShadowToken, _ flavor: ThemeFlavor, flipped: Bool = false, on layer: CALayer,
                            sourceLocation: SourceLocation = #_sourceLocation) {
     #expect(layer.shadowRadius == token.radius, "blur", sourceLocation: sourceLocation)
-    #expect(layer.shadowOffset == token.unflippedOffset, "offset", sourceLocation: sourceLocation)
+    #expect(layer.shadowOffset == (flipped ? token.flippedOffset : token.unflippedOffset), "offset",
+            sourceLocation: sourceLocation)
     let alpha = effectiveAlpha(layer)
     #expect(abs(alpha - token.color.resolve(flavor).alpha) < 1e-6,
             "alpha \(alpha) vs \(token.color.resolve(flavor).alpha)", sourceLocation: sourceLocation)
