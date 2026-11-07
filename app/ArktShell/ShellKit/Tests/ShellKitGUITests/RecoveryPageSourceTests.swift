@@ -305,7 +305,7 @@ final class RecoveryPageSourceTests: XCTestCase {
     XCTAssertTrue(repeated.rowLabels.contains { $0.stringValue.contains("Crashed window") })
     repeated.restorePressed()
     XCTAssertEqual(secondEngine.crashedSession.dismissals, 1)
-    XCTAssertEqual(nextHost.peek.session.flatMap { secondEngine.snapshot(of: $0.tab)?.url.path }, "/crashed-peek")
+    XCTAssertEqual(nextHost.peek.session.flatMap { secondEngine.snapshot(of: $0.tab)?.url?.path }, "/crashed-peek")
     XCTAssertEqual(second.littleArkts.count, 1)
   }
 
