@@ -307,14 +307,22 @@ final class DialogSheetView: NSView {
     return y + height + side
   }
 
-  /// The title label on the button's title rect: the same origin and baseline the cell draws its title at.
+  /// The title label on the button's title rect: the same origin and baseline the cell draws its title at, on the
+  /// title's leading edge in either layout direction. The dialog checkbox is never disabled (`DialogContent.Checkbox`
+  /// has no such state), so the label does not mirror `isEnabled`.
   private func placeCheckboxTitle(over button: NSButton) {
     guard let checkboxTitleLabel, let cell = button.cell else { return }
     let title = button.convert(cell.titleRect(forBounds: button.bounds), to: self)
+    let frame = button.frame
+    let rightToLeft = button.userInterfaceLayoutDirection == .rightToLeft
     // The cell's size, not `intrinsicContentSize`, which can lag the font and attributes set after creation.
     let size = checkboxTitleLabel.cell?.cellSize ?? checkboxTitleLabel.intrinsicContentSize
-    checkboxTitleLabel.frame = NSRect(x: title.minX - Self.labelTextInset, y: (title.midY - size.height / 2).rounded(),
-                                      width: min(ceil(size.width), max(0, bounds.width - title.minX)),
+    // No wider than the button's title, plus the label's own inset on both sides of its text.
+    let room = (rightToLeft ? title.maxX - frame.minX : frame.maxX - title.minX) + 2 * Self.labelTextInset
+    let width = min(ceil(size.width), max(0, room))
+    let x = rightToLeft ? title.maxX + Self.labelTextInset - width : title.minX - Self.labelTextInset
+    checkboxTitleLabel.alignment = rightToLeft ? .right : .left
+    checkboxTitleLabel.frame = NSRect(x: x, y: (title.midY - size.height / 2).rounded(), width: width,
                                       height: ceil(size.height))
   }
 

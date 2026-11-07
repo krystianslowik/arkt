@@ -187,6 +187,33 @@ final class DialogLabelColorTests: XCTestCase {
     }
   }
 
+  /// Right to left, the cell draws its title left of the box; the label's text lands where a plain checkbox's does.
+  func testTheCheckboxTitleFollowsARightToLeftCheckbox() throws {
+    let alert = makeAlert(Self.fullContent, .light)
+    let checkbox = try XCTUnwrap(alert.view.checkboxButton)
+    checkbox.userInterfaceLayoutDirection = .rightToLeft
+    _ = alert.view.layoutContent(width: alert.view.bounds.width)
+    alert.panel.display()
+    let reference = NSButton(checkboxWithTitle: "Report abuse", target: nil, action: nil)
+    reference.font = .systemFont(ofSize: 13)
+    reference.userInterfaceLayoutDirection = .rightToLeft
+    reference.frame = checkbox.frame
+    try XCTUnwrap(alert.panel.contentView).addSubview(reference, positioned: .below, relativeTo: nil)
+    defer { reference.removeFromSuperview() }
+    let label = try title(alert)
+    let labelShot = try Shot(label)
+    let plain = try Shot(reference)
+    let offset = label.frame.minX - checkbox.frame.minX
+    let labelStart = try XCTUnwrap(labelShot.inkOrigin(after: 0)).x + offset
+    let labelEnd = try XCTUnwrap(labelShot.inkEnd()) + offset
+    // The box is on the trailing (right) side: only ink left of it is the title.
+    let box = checkbox.frame.height
+    let plainStart = try XCTUnwrap(plain.inkOrigin(after: 0)).x
+    let plainEnd = try XCTUnwrap(plain.inkEnd(before: checkbox.frame.width - box))
+    XCTAssertEqual(labelStart, plainStart, accuracy: 1, "the title's left edge")
+    XCTAssertEqual(labelEnd, plainEnd, accuracy: 1, "the title's right edge, beside the box")
+  }
+
   private func title(_ alert: DialogAlert) throws -> TokenLabel {
     try XCTUnwrap(alert.view.checkboxTitleLabel)
   }
@@ -325,11 +352,12 @@ private struct Shot {
     return NSPoint(x: CGFloat(left) / scale, y: CGFloat(top) / scale)
   }
 
-  /// The right edge of the opaque pixels, in points from the view's leading edge.
-  func inkEnd() -> CGFloat? {
+  /// The right edge of the opaque pixels left of `maxX` points, in points from the view's left edge.
+  func inkEnd(before maxX: CGFloat? = nil) -> CGFloat? {
     var right = -1
+    let limit = maxX.map { min(rep.pixelsWide, Int($0 * scale)) } ?? rep.pixelsWide
     for y in 0..<rep.pixelsHigh {
-      for x in 0..<rep.pixelsWide {
+      for x in 0..<limit {
         guard let color = rep.colorAt(x: x, y: y), color.alphaComponent > 0.5 else { continue }
         right = max(right, x)
       }
