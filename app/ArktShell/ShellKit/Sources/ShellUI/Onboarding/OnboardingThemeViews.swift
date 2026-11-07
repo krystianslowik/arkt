@@ -233,11 +233,11 @@ final class SpacePreviewView: NSView {
     let shape = bounds.insetBy(dx: inset, dy: inset)
     OnboardingMotion.set {
       layer.shadowColor = token.color.resolve(ThemeFlavor(appearance: effectiveAppearance)).cgColor
-      layer.shadowOpacity = 1
+      layer.shadowOpacity = shape.isEmpty ? 0 : 1
       layer.shadowRadius = token.radius * s
       layer.shadowOffset = CGSize(width: 0, height: token.flippedOffset.height * s)
-      layer.shadowPath = shape.isEmpty ? nil
-        : CGPath(roundedRect: shape, cornerWidth: 14 * s, cornerHeight: 14 * s, transform: nil)
+      // CSS shrinks the corner radius by a negative spread too: 14 - 26 clamps to 0, so the shape is square.
+      layer.shadowPath = CGPath(rect: shape.isEmpty ? .zero : shape, transform: nil)
     }
   }
 

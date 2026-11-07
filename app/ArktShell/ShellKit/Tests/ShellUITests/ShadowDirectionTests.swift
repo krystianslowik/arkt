@@ -41,6 +41,8 @@ struct ShadowDirectionTests {
     // through the other appearance first makes it a change whatever the runner's own appearance is.
     preview.appearance = NSAppearance(named: dark ? .aqua : .darkAqua)
     preview.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    preview.displayIfNeeded()
+    #expect(preview.layer?.shadowOpacity == 1, "the display pass put the drop back")
     try host.expectCastsDown(try #require(preview.layer), band: 16)
   }
 

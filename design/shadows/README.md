@@ -9,8 +9,7 @@ Shots: `shots/flipped-shadows-after-<light|dark>.png` (2x, 900 x 340 window). `F
 ```zsh
 cd app/ArktShell/ShellKit
 ARKT_SHADOW_SHOTS_DIR=/tmp/shadow-shots swift test --filter FlippedShadowScreenshotTests
-pngquant --force --nofs --ext .png 32 /tmp/shadow-shots/*.png
+pngquant --force --nofs --ext .png 256 /tmp/shadow-shots/*.png
 ```
 
 The test draws the window's layer tree directly (`cacheDisplay` leaves out the floating sidebar's own shadow).
-Quantizing to 32 colors bands the soft blur of the Space preview's drop; the unquantized output is smooth.
