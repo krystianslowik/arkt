@@ -96,8 +96,16 @@ final class PrivatePagesScreenshotTests: XCTestCase {
     for dark in [false, true] {
       let suffix = dark ? "dark" : "light"
       var (controller, engine) = try makeWindow(dark: dark, size: NSSize(width: 960, height: 600), pages: 3)
+      controller.sidebarController.view.privatePages.rows[1].setHovered(true)
       settle()
       try save(try XCTUnwrap(controller.window), "list-\(suffix)")
+      controller.close()
+
+      (controller, engine) = try makeWindow(dark: dark, size: NSSize(width: 960, height: 600), pages: 5)
+      engine.setAudible(controller.privatePageOrder.pages[2], true)
+      engine.setMuted(controller.privatePageOrder.pages[2], muted: true)
+      settle()
+      try save(try XCTUnwrap(controller.window), "audio-\(suffix)")
       controller.close()
 
       (controller, engine) = try makeWindow(dark: dark, size: NSSize(width: 960, height: 600), pages: 20)
