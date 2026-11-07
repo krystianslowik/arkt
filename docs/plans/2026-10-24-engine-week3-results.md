@@ -4770,3 +4770,58 @@ In sync; nothing exported. Facade header copies `cmp` identical.
 
 Cleanup: the self-test and the loopback server stopped by PID; the profiles, the build log and the three crash dumps
 of the run deleted.
+### Restore pages Swift boundary (#580)
+
+The Swift recovery contract carries only non-private Little Arkt and Peek page titles, URLs and kinds, and supplies the list to the shell, which requests reopening outside the sidebar. The shell presents the offer after its own window
+session restoration; an empty offer acknowledges the crash and shows the status notice. The crashed-session state seam shipped in #577; recoverable-page data integration and
+feature-level killed-process validation remain unverified.
+
+Test-first CI run 42112475936 at 75b3800 failed to compile the missing model in ShellKit tests (job 127543462923)
+and GUI tests (job 127543462890); the Swift tests gate (job 127547434337) consequently failed. No tests executed in
+those jobs. Local builds and tests were not run: the installed toolchain cannot compile the baseline. Syntax parsing
+and diff checks are recorded in the pull request. GUI, accessibility, motion, app and real-engine validation remain
+pending.
+
+### Restore pages review fixes (#580)
+
+The window set retains an unanswered decision across regular-window closure and presents it when another window is
+available. The panel remains above the content in Split View. The shell requests the pages before acknowledging; an unavailable shell path retains the offer and crash. Crash-only providers expose no page capability. A persistent
+database-recovery notice remains underneath the six-second crash notice and reappears after dismissal or expiry.
+
+Regression coverage exercises the production window-set coordinator and window lifecycle, capability and unavailable shell paths,
+Split View, and notice ordering. These additions have not run locally because the installed toolchain cannot compile the
+baseline; syntax parsing alone does not validate behavior. Direct `AppSession.finishLaunch`, GUI, keyboard, accessibility,
+motion and real-engine killed-process validation remain pending. The crashed-session state seam shipped in #577; recoverable-page data integration remains unverified.
+
+### Restore pages privacy routing (#580)
+
+Only ordinary regular windows may host the decision. The window set selects an eligible window even when the primary
+window is private, retains the unanswered offer while only private windows exist, and classifies Blank and Incognito
+windows before considering presentation. A host changing to private mode relinquishes the offer before that mode is
+shown. Little Arkt and popup requests use separate hosts.
+
+New GUI regressions cover both private modes, transfer with a private primary, deferred presentation after the last
+regular host closes, private creation while an offer is pending, and a host changing mode. They were written before
+the fix but not run locally: the installed toolchain cannot compile the baseline. CI must validate compilation and
+behavior on the new head; syntax parsing and source checks do not establish test results.
+
+### Maintainer feedback on restore pages (#580)
+
+The provider supplies a list only; the shell reopens Little Arkt and Peek pages using the host's current tab for Peek.
+A missing source or multiple Peek pages retain the offer: the current Peek controller replaces an existing Peek from
+the same source, so multiple Peek recovery requires a further shell solution. Closing windows are ineligible and a
+cancelled close retries pending presentation. New regression tests and the private-routing suite are not run locally;
+CI must validate the merged head. Recoverable-page data integration and feature-level killed-process validation remain unverified; the crashed-session state seam shipped in #577.
+
+### Restore pages Peek preservation (#580)
+
+Recovery declines a Peek when the host has any live or hidden Peek, and attempts its one supported Peek before
+opening Little Arkt windows. A missing Peek content view closes the new tab and retains the unanswered offer. Ordinary
+link opening retains its replacement behavior. Little Arkt's API does not report presentation success; the shell
+can only report that its opening was requested. Multiple recovered Peeks remain unanswered pending the maintainer's
+routing decision. The crashed-session state seam shipped in #577; recoverable-page data integration and feature-level killed-process validation remain unverified.
+
+GUI regressions cover live and hidden Peek preservation, missing-view cleanup and retry, and Find closing on Escape.
+They were written before the fix but not run locally because the installed toolchain cannot compile the baseline.
+Syntax parsing is not a runtime test. CI on the new head, GUI appearance, VoiceOver, Reduce Motion and UI tests remain
+unverified.

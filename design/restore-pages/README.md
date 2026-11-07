@@ -63,3 +63,23 @@ The shared toast (`design/alerts-sheets-toasts`), shield glyph, no action, close
   Little Arkt windows and Peek pages; never private windows; nothing to offer means a toast, not a prompt.
 
 Rejected directions: B (one toast with Reopen) and C (a card in the sidebar).
+
+## Swift engine contract (#580)
+
+`EnginePageRecovery` refines the crash-only `EngineSessionRecovery` protocol and supplies only an ordered list of
+`recoveryPages`. Pages contain a title, URL and kind (`littleArkt` or `peek`). The backend must never persist or return
+private or sidebar data. The shell opens Little Arkt pages with `ShellWindowSet.openLittleArkt` and Peek pages via
+`PeekController`, using the host window's current tab as the Peek source. Recovery refuses to replace or close any
+existing live or hidden Peek in that host. It attempts the Peek first, closes a newly created tab if its page cannot
+be presented, and opens Little Arkt windows only after that succeeds. A missing source, existing Peek, failed Peek
+presentation or multiple recovered Peeks leaves the offer and crash unanswered for retry or dismissal. Little Arkt's
+opening API reports no presentation result, so acknowledgement confirms its opening was requested, not that its page
+loaded or appeared. The shell acknowledges once after the requests, dismissal, or an empty offer. Multi-Peek routing
+remains a product decision; crash-only legacy providers have no page capability.
+The crashed-session state seam shipped in #577. Recoverable-page list and source grouping integration, and
+feature-level killed-process validation, remain unverified; no full engine session is restored.
+
+The decision is hosted only by an ordinary regular window, never a Blank, Incognito, Little Arkt or Peek window.
+Its unanswered model stays with the window set if no eligible host exists and moves to a regular window when one
+becomes available. Closing or changing the host to a private mode does not acknowledge the crash. Private window
+creation establishes its final mode before the window set considers recovery presentation.
