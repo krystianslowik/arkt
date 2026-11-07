@@ -93,7 +93,8 @@ public final class ThemeBackgroundView: WindowDragView {
     overlay.opacity = 0
   }
 
-  private static let noActions: [String: CAAction] = ["colors": NSNull(), "locations": NSNull(), "opacity": NSNull(), "bounds": NSNull(),
+  private static let noActions: [String: CAAction] = ["colors": NSNull(), "locations": NSNull(),
+                                                       "opacity": NSNull(), "bounds": NSNull(),
                                                       "position": NSNull(), "backgroundColor": NSNull(),
                                                       "hidden": NSNull(), "contents": NSNull()]
 

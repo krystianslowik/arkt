@@ -40,18 +40,19 @@ public enum ThemeGradient {
     return out
   }
 
-  /// Composite a resolved opaque base and an already opacity-scaled overlay in their shared color space. The
+  /// Composite a resolved opaque base and an already opacity-scaled overlay in the first base color's space. The
   /// returned stops match the two expanded gradients at their union of locations; interpolation between those
   /// locations is an approximation when overlay alpha varies. Texture is applied separately by the renderer.
   public static func composite(base: [RGBA], overlay: [RGBA]) -> [(location: Double, color: RGBA)] {
-    let base = expand(base)
-    guard !base.isEmpty else { return [] }
+    guard let first = base.first else { return [] }
+    // Preserve the original expanded base exactly when there is no overlay.
+    let base = expand(overlay.isEmpty ? base : base.map { convert($0, to: first.space) })
     func locations(_ colors: [RGBA]) -> [Double] {
       colors.indices.map { Double($0) / Double(max(colors.count - 1, 1)) }
     }
     let baseLocations = locations(base)
     guard !overlay.isEmpty else { return zip(baseLocations, base).map { (location: $0.0, color: $0.1) } }
-    let overlay = expand(overlay)
+    let overlay = expand(overlay.map { convert($0, to: first.space) })
     let positions = Set(baseLocations + locations(overlay)).sorted()
     func interpolated(_ colors: [RGBA], at position: Double) -> RGBA {
       guard colors.count > 1 else { return colors[0] }
@@ -114,6 +115,16 @@ public enum ThemeGradient {
     let x = 1.2270138511 * l - 0.5577999807 * m + 0.2812561490 * s
     let y = -0.0405801784 * l + 1.1122568696 * m - 0.0716766787 * s
     let z = -0.0763812845 * l - 0.4214819784 * m + 1.5861632204 * s
+    return rgba(x: x, y: y, z: z, space: space, alpha: alpha)
+  }
+
+  private static func convert(_ color: RGBA, to space: RGBA.Space) -> RGBA {
+    guard color.space != space else { return color }
+    let value = xyz(color)
+    return rgba(x: value.x, y: value.y, z: value.z, space: space, alpha: color.alpha)
+  }
+
+  private static func rgba(x: Double, y: Double, z: Double, space: RGBA.Space, alpha: Double) -> RGBA {
     let linear: (r: Double, g: Double, b: Double)
     switch space {
     case .sRGB:

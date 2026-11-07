@@ -15,11 +15,6 @@ on:
     # Nightly on main: every job, including the UI tests and the GUI tests.
     - cron: "23 2 * * *"
   workflow_dispatch:
-    inputs:
-      theme_overlay_evidence:
-        description: Run the opt-in issue 534 overlay evidence job
-        type: boolean
-        default: false
 
 # A newer push cancels the run it supersedes, on a pull request and on main. A cancelled main run leaves its areas
 # untested on main until the next push that touches them; the nightly run covers everything. Nightly and manual runs
@@ -384,54 +379,6 @@ jobs:
           path: ${{ runner.temp }}/ui-attachments
           retention-days: 7
           if-no-files-found: ignore
-
-  theme-overlay-evidence:
-    name: Theme overlay evidence (opt-in)
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.theme_overlay_evidence }}
-    runs-on: macos-26
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          path: after
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: a4009de5bbd2bc70def89fe05b62dec0faf9bfa3
-          persist-credentials: false
-          path: before
-      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
-      - name: Record revisions and install identical fixture
-        run: |
-          mkdir -p $RUNNER_TEMP/theme-evidence
-          print "before $(git -C before rev-parse HEAD)" | tee $RUNNER_TEMP/theme-evidence/revisions.txt
-          print "after $(git -C after rev-parse HEAD)" | tee -a $RUNNER_TEMP/theme-evidence/revisions.txt
-          swift --version | tee -a $RUNNER_TEMP/theme-evidence/revisions.txt
-          cp after/app/ArktShell/ShellKit/Tests/ShellKitGUITests/ThemeOverlayScreenshotTests.swift \
-            before/app/ArktShell/ShellKit/Tests/ShellKitGUITests/ThemeOverlayScreenshotTests.swift
-      - name: Render before and after
-        run: |
-          for revision in before after; do
-            (cd $revision/app/ArktShell/ShellKit && \
-              ARKT_THEME_SHOTS_DIR=$RUNNER_TEMP/theme-evidence ARKT_THEME_SHOTS_PREFIX=$revision \
-              swift test --filter ThemeOverlayScreenshotTests) 2>&1 | tee $RUNNER_TEMP/theme-evidence/$revision-render.log
-          done
-      - name: Crossfade under load
-        working-directory: after
-        run: scripts/theme-evidence/stress.sh $RUNNER_TEMP/theme-evidence
-      - name: Deliberate guard break and restore
-        working-directory: after
-        run: scripts/theme-evidence/break.sh $RUNNER_TEMP/theme-evidence
-      - name: Upload evidence
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: theme-overlay-evidence
-          path: ${{ runner.temp }}/theme-evidence
-          retention-days: 7
-          if-no-files-found: error
 
   # The one check to require on main. "Changes" and the isolation job always run and must pass; the macOS jobs pass or
   # are skipped because none of their inputs changed. A failed or cancelled job fails the gate, so a docs-only change

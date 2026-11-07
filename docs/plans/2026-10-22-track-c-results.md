@@ -2900,7 +2900,8 @@ Written first. Each failed to compile before the code existed.
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
-stop locations in their shared color space. Each Space uses one opaque gradient below the separate texture layers.
+stop locations in the first base color's space. Mixed-space stops are converted through D65 XYZ and clamped to the
+destination gamut before expansion and blending. Each Space uses one opaque gradient below the separate texture layers.
 The view caches both colors and explicit locations for the current drawn themes, reuses them across swipes and drops
 entries when those themes change, including appearance or contrast changes. An empty base falls back to white before
 compositing; a single stop is duplicated for Core Animation. Finite stops approximate the continuous result between
@@ -2917,13 +2918,15 @@ Local full builds and tests were not run because the available SDK/toolchain can
 At `ed9dcb77dab149675a54269c7746a0289c5990f7`, manual CI run 41919150446 passed the required gate,
 1,969 ShellKit tests in 230 suites, 574 ArktCore tests in 45 suites, app build and lint; GUI ran 1,528 tests,
 39 skipped, zero failures. The workflow was cancelled only because the optional UI job was cancelled. Its
-[theme-overlay-evidence artifact](https://github.com/krystianslowik/arkt/actions/runs/41919150446/artifacts/13366018748)
-contains light and dark before/after PNGs (baseline production `a4009de5bbd2bc70def89fe05b62dec0faf9bfa3`),
-20 loaded crossfade runs of seven tests each, and the intended stale-completion failure after guard removal followed
-by a restored pass. These results apply to that revision; CI must verify the merge head.
+[Repository-backed screenshots on #534](https://github.com/krystianslowik/arkt/issues/534#issuecomment-6705310586)
+show light and dark before/after images (baseline production `a4009de5bbd2bc70def89fe05b62dec0faf9bfa3`).
+The evidence run also recorded 20 loaded crossfade runs of seven tests each and the intended stale-completion failure
+after guard removal followed by a restored pass. These results apply to that revision; CI must verify the new head.
+The one-off evidence job and scripts were removed after the screenshots were preserved. Mixed-space regression cases
+compare against Core Graphics in both directions at fractional and full alpha; the full suite awaits CI.
 
-The quiet physical 120 Hz swipe frame-time gate with overlay themes remains required before merge and cannot be
-run on the available 60 Hz display or hosted CI. No frame-time improvement is claimed. Merged PR #551 supplies
+The quiet physical 120 Hz swipe frame-time gate with overlay themes was not measured and is deferred to #704 for
+maintainer hardware after landing. No frame-time improvement is claimed. Merged PR #551 supplies
 the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
 remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
 opacity-scaling limitation remains unchanged.
