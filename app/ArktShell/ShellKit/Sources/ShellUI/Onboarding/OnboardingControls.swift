@@ -386,10 +386,10 @@ final class AppearanceSegmentView: NSView {
       thumb.backgroundColor = appearanceModel.surface.cgColor
       thumb.borderColor = appearanceModel.hairline.cgColor
       thumb.borderWidth = 1
-      thumb.shadowColor = NSColor.black.cgColor
-      thumb.shadowOpacity = 0.12
-      thumb.shadowRadius = 1
-      thumb.shadowOffset = CGSize(width: 0, height: -1)
+      thumb.shadowColor = appearanceModel.color(BrandTokens.appearanceThumbShadow.color).cgColor
+      thumb.shadowOpacity = 1
+      thumb.shadowRadius = BrandTokens.appearanceThumbShadow.radius
+      thumb.shadowOffset = BrandTokens.appearanceThumbShadow.unflippedOffset
       focus.strokeColor = appearanceModel.focusRing.cgColor
       focus.lineWidth = appearanceModel.focusRingWidth
     }

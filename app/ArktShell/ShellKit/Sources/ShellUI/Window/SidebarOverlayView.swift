@@ -149,9 +149,9 @@ public final class SidebarOverlayView: NSView {
     clipLayer.borderWidth = floating ? 1 / max(window?.backingScaleFactor ?? 2, 1) : 0
     clipLayer.borderColor = ShellTokens.cardBorder.resolve(flavor).cgColor
     layer.shadowOpacity = floating ? 1 : 0
-    layer.shadowColor = ShellTokens.sidebarOverlayShadow.resolve(flavor).cgColor
-    layer.shadowRadius = SidebarRevealMotion.shadowRadius
-    layer.shadowOffset = CGSize(width: 0, height: -2)
+    layer.shadowColor = ShellTokens.sidebarOverlayLiftShadow.color.resolve(flavor).cgColor
+    layer.shadowRadius = ShellTokens.sidebarOverlayLiftShadow.radius
+    layer.shadowOffset = ShellTokens.sidebarOverlayLiftShadow.unflippedOffset
     layer.shadowPath = CGPath(roundedRect: bounds, cornerWidth: cornerRadius, cornerHeight: cornerRadius,
                               transform: nil)
   }
