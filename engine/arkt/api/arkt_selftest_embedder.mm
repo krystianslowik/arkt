@@ -761,7 +761,9 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << (action.iconPNG
                          ? base::NumberToString(action.iconPNG.length) + " bytes"
                          : std::string("none"))
-                 << " png=" << (__bridge void*)action.iconPNG;
+                 << " png=" << (__bridge void*)action.iconPNG
+                 << " canUninstall=" << (action.canUninstall ? "1" : "0")
+                 << " canReportAbuse=" << (action.canReportAbuse ? "1" : "0");
   }
 }
 
@@ -1161,6 +1163,32 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " setting=" << permission.setting;
       }
     }
+  } else if (command == "uninstall") {
+    // #721: "uninstall <extension id> [abuse] [nowin] [@<session id>]", as
+    // the shell's remove sheet: the report page goes to the window of the
+    // tab that runs the command (or of the "@" tab); "nowin" names none.
+    const bool report_abuse =
+        std::find(words.begin(), words.end(), "abuse") != words.end();
+    const bool no_window =
+        std::find(words.begin(), words.end(), "nowin") != words.end();
+    id<ArktBrowserHandle> window = no_window ? nil : tab.browser;
+    LOG(WARNING) << "ARKT selftest uninstall " << argument
+                 << " reportAbuse=" << (report_abuse ? "yes" : "no")
+                 << " window=" << (window ? window.windowId : -1);
+    __block bool returned = false;
+    [_engine uninstallExtension:base::SysUTF8ToNSString(argument)
+                    reportAbuse:report_abuse
+                      inBrowser:window
+                     completion:^(BOOL uninstalled, NSString* reason) {
+                       LOG(WARNING)
+                           << "ARKT selftest uninstall answered "
+                           << (uninstalled ? "uninstalled" : "failed")
+                           << " reason="
+                           << (reason ? base::SysNSStringToUTF8(reason)
+                                      : std::string("none"))
+                           << " insideCall=" << (returned ? "no" : "yes");
+                     }];
+    returned = true;
   } else if (command == "devtools") {
     id<ArktWindowHost> host = tab.browser.host;
     if (host.executeCommand) {

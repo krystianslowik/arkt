@@ -104,12 +104,19 @@ struct InMemoryEngineContractTests {
     try await EngineContract.dangerousDownloadIsHeldUntilDecided(harness)
   }
   @Test func savePreferenceDecidesTheFolder() async throws { try await EngineContract.savePreferenceDecidesTheFolder(harness) }
+  // Rule 27 (#721)
+  @Test func uninstallRemovesTheExtensionFromEveryWindow() async throws {
+    try await EngineContract.uninstallRemovesTheExtensionFromEveryWindow(harness)
+  }
 
   /// A harness without engine drivers reports rules 13, 14, 16 and 17's audible check as not applicable, never as passed.
   @Test func missingDriversAreNotApplicable() async throws {
     let bare = EngineHarness(makeEngine: harness.makeEngine, pageURL: harness.pageURL, settle: harness.settle,
                              retitle: harness.retitle, pagesOnTwoHosts: harness.pagesOnTwoHosts)
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.engineCreatedTabIsAnnounced(bare) }
+    await #expect(throws: ContractNotApplicable.self) {
+      try await EngineContract.uninstallRemovesTheExtensionFromEveryWindow(bare)
+    }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.engineCloseIsTerminal(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.heldCloseKeepsTheTabUntilAnswered(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.skipUnloadHandlersNeverHolds(bare) }
