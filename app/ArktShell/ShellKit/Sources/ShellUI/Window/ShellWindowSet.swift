@@ -139,17 +139,14 @@ public final class ShellWindowSet {
       guard let self, let host = self.recoveryWindow, !host.isWindowCloseRequested, !host.isPrivateWindow else {
         return false
       }
-      // Preflight before opening anything, so a missing Peek source leaves the whole offer intact.
+      // A batch cannot be retried safely after opening only some of its pages.
       let peeks = pages.filter { $0.kind == .peek }
-      let source = host.currentTab
-      // Peek currently permits one page per source; never acknowledge a batch that would replace one.
-      guard peeks.count <= 1, peeks.isEmpty || source != nil else { return false }
-      for page in pages {
-        switch page.kind {
-        case .littleArkt: self.openLittleArkt(url: page.url)
-        case .peek:
-          if let source { host.peek.open(page.url, from: source) }
-        }
+      guard peeks.count <= 1 else { return false }
+      if let peek = peeks.first {
+        guard let source = host.currentTab, host.peek.openForRecovery(peek.url, from: source) else { return false }
+      }
+      for page in pages where page.kind == .littleArkt {
+        self.openLittleArkt(url: page.url)
       }
       return true
     }

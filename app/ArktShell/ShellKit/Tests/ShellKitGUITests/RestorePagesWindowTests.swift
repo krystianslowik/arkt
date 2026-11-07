@@ -351,15 +351,108 @@ final class RestorePagesWindowTests: XCTestCase {
     window.isReleasedWhenClosed = false
     defer { host.close() }
     set.beginSessionRecovery(engine.crashedSession)
+    let tab = try XCTUnwrap(host.currentTab)
     XCTAssertTrue(host.engineHost.perform(.find, disposition: .currentTab))
+    XCTAssertTrue(host.findBar.isOpen(tab))
     XCTAssertTrue(window.firstResponder is NSTextView)
     let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
       timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
       charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
     XCTAssertFalse(window.performKeyEquivalent(with: event))
     window.sendEvent(event)
+    XCTAssertFalse(host.findBar.isOpen(tab))
     XCTAssertNotNil(host.rootView.subviews.first { $0 is RestorePagesView })
     XCTAssertEqual(engine.crashedSession.dismissals, 0)
+  }
+
+  func testRecoveryPreservesExistingPeekForAnySource() throws {
+    _ = NSApplication.shared
+    for sameSource in [true, false] {
+      let engine = InMemoryEngine()
+      let recovered = URL(string: "https://example.invalid/recovered")!
+      let original = URL(string: "https://example.invalid/original")!
+      engine.crashedSession.recoveryPages = [RecoveryPage(title: "Window", url: recovered, kind: .littleArkt),
+                                               RecoveryPage(title: "Peek", url: recovered, kind: .peek)]
+      engine.crashedSession.simulateCrashedExit()
+      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      let host = set.openWindow()
+      host.window?.isReleasedWhenClosed = false
+      defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
+      set.beginSessionRecovery(engine.crashedSession)
+      let source = try XCTUnwrap(host.currentTab)
+      let other = sameSource ? source : engine.createTab(url: original)
+      host.peek.open(original, from: other)
+      let existing = try XCTUnwrap(host.peek.session)
+      let page = try XCTUnwrap(engine.contentView(for: existing.tab))
+      let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+      panel.restorePressed()
+      XCTAssertEqual(host.peek.session, existing)
+      XCTAssertEqual(engine.snapshot(of: existing.tab)?.url, original)
+      XCTAssertTrue(engine.contentView(for: existing.tab) === page)
+      XCTAssertTrue(set.littleArkts.isEmpty)
+      XCTAssertNotNil(panel.superview)
+      XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    }
+  }
+
+  func testRecoveryDoesNotCloseHiddenPeekForSource() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    let url = URL(string: "https://example.invalid/page")!
+    let sidebar = StubSidebar()
+    let space = sidebar.addSpace(title: "Test")
+    let first = sidebar.addTab(url: url, title: "First", in: .today(space))
+    let second = sidebar.addTab(url: url, title: "Second", in: .today(space))
+    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Peek", url: url, kind: .peek)]
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar)
+    let host = set.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    defer { host.close() }
+    host.activate(node: first)
+    let source = try XCTUnwrap(host.currentTab)
+    host.peek.open(url, from: source)
+    let existing = try XCTUnwrap(host.peek.session)
+    host.peek.animator.settleNow()
+    host.activate(node: second)
+    let hidden = try XCTUnwrap(host.peek.hiddenPeeks[source])
+    XCTAssertEqual(hidden.tab, existing.tab)
+    // A hidden Peek can coexist with a different visible source; it must remain live.
+    set.beginSessionRecovery(engine.crashedSession)
+    let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    panel.restorePressed()
+    XCTAssertEqual(host.peek.hiddenPeeks[source], hidden)
+    XCTAssertNotNil(engine.snapshot(of: existing.tab))
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    XCTAssertNotNil(panel.superview)
+  }
+
+  func testMissingPeekViewLeavesNoPartialRecovery() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    let recovered = URL(string: "https://example.invalid/recovered")!
+    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Window", url: recovered, kind: .littleArkt),
+                                             RecoveryPage(title: "Peek", url: recovered, kind: .peek)]
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let host = set.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
+    set.beginSessionRecovery(engine.crashedSession)
+    let before = Set(engine.tabIDs)
+    engine.unavailableContentURLs = [recovered]
+    let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    panel.restorePressed()
+    XCTAssertEqual(Set(engine.tabIDs), before)
+    XCTAssertNil(host.peek.session)
+    XCTAssertTrue(set.littleArkts.isEmpty)
+    XCTAssertNotNil(panel.superview)
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    engine.unavailableContentURLs = []
+    panel.restorePressed()
+    XCTAssertNotNil(host.peek.session)
+    XCTAssertEqual(set.littleArkts.count, 1)
+    XCTAssertEqual(engine.crashedSession.dismissals, 1)
   }
 
   func testMultiplePeeksAreNotAcknowledgedOrPartiallyOpened() throws {

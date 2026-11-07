@@ -68,11 +68,14 @@ Rejected directions: B (one toast with Reopen) and C (a card in the sidebar).
 
 `EnginePageRecovery` refines the crash-only `EngineSessionRecovery` protocol and supplies only an ordered list of
 `recoveryPages`. Pages contain a title, URL and kind (`littleArkt` or `peek`). The backend must never persist or return
-private or sidebar data. The shell opens Little Arkt pages with `ShellWindowSet.openLittleArkt` and Peek pages with
-`PeekController.open`, using the host window's current tab as the Peek source. It acknowledges once after the shell
-requests the pages, dismissal, or an empty offer. If there is no Peek source the offer remains unacknowledged.
-The current Peek controller permits one Peek per source; a batch with multiple Peeks remains unacknowledged until that
-boundary is resolved, rather than replacing earlier pages. Crash-only legacy providers have no page capability.
+private or sidebar data. The shell opens Little Arkt pages with `ShellWindowSet.openLittleArkt` and Peek pages via
+`PeekController`, using the host window's current tab as the Peek source. Recovery refuses to replace or close any
+existing live or hidden Peek in that host. It attempts the Peek first, closes a newly created tab if its page cannot
+be presented, and opens Little Arkt windows only after that succeeds. A missing source, existing Peek, failed Peek
+presentation or multiple recovered Peeks leaves the offer and crash unanswered for retry or dismissal. Little Arkt's
+opening API reports no presentation result, so acknowledgement confirms its opening was requested, not that its page
+loaded or appeared. The shell acknowledges once after the requests, dismissal, or an empty offer. Multi-Peek routing
+remains a product decision; crash-only legacy providers have no page capability.
 The Chromium list implementation and killed-process validation remain with #577; no full engine session is restored.
 
 The decision is hosted only by an ordinary regular window, never a Blank, Incognito, Little Arkt or Peek window.

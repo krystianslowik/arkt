@@ -4652,3 +4652,16 @@ A missing source or multiple Peek pages retain the offer: the current Peek contr
 the same source, so multiple Peek recovery requires a further shell solution. Closing windows are ineligible and a
 cancelled close retries pending presentation. New regression tests and the private-routing suite are not run locally;
 CI must validate the merged head. Chromium and killed-process validation remain pending #577.
+
+### Restore pages Peek preservation (#580)
+
+Recovery declines a Peek when the host has any live or hidden Peek, and attempts its one supported Peek before
+opening Little Arkt windows. A missing Peek content view closes the new tab and retains the unanswered offer. Ordinary
+link opening retains its replacement behavior. Little Arkt's API does not report presentation success; the shell
+can only report that its opening was requested. Multiple recovered Peeks remain unanswered pending the maintainer's
+routing decision. Chromium delivery and killed-process validation remain with #577.
+
+GUI regressions cover live and hidden Peek preservation, missing-view cleanup and retry, and Find closing on Escape.
+They were written before the fix but not run locally because the installed toolchain cannot compile the baseline.
+Syntax parsing is not a runtime test. CI on the new head, GUI appearance, VoiceOver, Reduce Motion and UI tests remain
+unverified.
