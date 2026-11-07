@@ -12,6 +12,8 @@ ARKT_SHADOW_SHOTS_DIR=/tmp/shadow-shots swift test --filter FlippedShadowScreens
 pngquant --force --nofs --ext .png 256 /tmp/shadow-shots/*.png
 ```
 
+That filter matches the whole class, so it also writes the settings and row shots of the next section.
+
 The test draws the window's layer tree directly (`cacheDisplay` leaves out the floating sidebar's own shadow).
 
 ## Settings controls and row lifts (#773)
