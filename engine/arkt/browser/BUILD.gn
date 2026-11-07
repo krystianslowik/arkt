@@ -78,6 +78,8 @@ source_set("browser") {
 # Arkt's native browser window and its parts (week 2).
 source_set("window") {
   sources = [
+    "arkt_autofill_bubble_handler.cc",
+    "arkt_autofill_bubble_handler.h",
     "arkt_browser_window.h",
     "arkt_browser_window.mm",
     "arkt_browser_window_parts.h",
@@ -126,6 +128,8 @@ source_set("window") {
     "//chrome/browser/permissions/system",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/themes",
+    "//chrome/browser/ui/autofill",
+    "//chrome/browser/ui/autofill/payments",
     "//chrome/browser/ui:browser_command_controller",
     "//chrome/browser/ui:browser_commands",
     "//chrome/browser/ui:browser_init_state",
@@ -147,6 +151,7 @@ source_set("window") {
     "//chrome/browser/ui/views:bubble_anchor_util_views",
     "//chrome/browser/ui/views/new_tab_footer",
     "//chrome/common:constants",
+    "//components/autofill/core/browser",
     "//components/bookmarks/common",
     "//components/constrained_window",
     "//components/content_settings/core/common",
@@ -158,6 +163,7 @@ source_set("window") {
     "//components/prefs",
     "//components/search",
     "//components/sessions",
+    "//components/signin/public/base:signin_buildflags",
     "//components/strings",
     "//components/tabs:public",
     "//components/web_modal",
