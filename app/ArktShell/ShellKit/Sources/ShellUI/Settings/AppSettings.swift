@@ -34,6 +34,8 @@ public final class AppSettings {
     /// The preferences the panes edit, the Toolbar's and the Peek switches' keys included: what Reset all settings
     /// (#617) removes. Not here: window state (`lastPane`, `windowTopLeft`, `libraryLastSection`) and the one-time
     /// crash ask (`crashReportAskAnswered`), which are state, not preferences (docs/design/settings.md, section 2).
+    /// A new pane setting must be added both here and in the test helper `changeEveryPreference`
+    /// (`AppSettingsTests`), or the reset and its tests miss it.
     @MainActor public static let preferences = [
       excludeFavoritesInSwitchToNthTab, switchToNinthSidebarItemEnabled, globalLittleBrowserHotkeyEnabled,
       optionCommandClickLittleArcEntryPointEnabled, sendsCrashReports, shouldWarnBeforeQuitting,

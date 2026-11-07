@@ -11,10 +11,10 @@ extension SettingsWindowController {
   /// The sheet's content: the row's caption as the reassurance, "Reset Settings" as the destructive answer.
   static var resetSettingsContent: DialogContent {
     DialogContent(title: "Reset all settings?",
-                  paragraphs: [.init("Every setting returns to its default. Your Spaces, tabs and the Archive stay "
-                    + "as they are.")],
+                  paragraphs: [.init("Every setting returns to its default. Your Spaces, tabs and archived items "
+                    + "stay as they are.")],
                   primaryTitle: "Reset Settings", cancelTitle: "Cancel", defaultButton: .none, isDestructive: true,
-                  width: resetSettingsWidth)
+                  primaryHelp: "Returns every setting to its default", width: resetSettingsWidth)
   }
 
   /// Reset...: shows the confirmation on the Settings window; one at a time.

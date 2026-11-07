@@ -118,9 +118,10 @@ final class SettingsResetTests: XCTestCase {
     let view = sheet.view
     XCTAssertEqual(view.titleField.stringValue, "Reset all settings?")
     XCTAssertEqual(view.paragraphFields.map(\.stringValue), [
-      "Every setting returns to its default. Your Spaces, tabs and the Archive stay as they are.",
+      "Every setting returns to its default. Your Spaces, tabs and archived items stay as they are.",
     ])
     XCTAssertEqual(view.primaryButton.title, "Reset Settings")
+    XCTAssertEqual(view.primaryButton.accessibilityHelp(), "Returns every setting to its default")
     XCTAssertEqual(view.primaryButton.style, .destructive)
     XCTAssertEqual(view.cancelButton?.title, "Cancel")
     XCTAssertEqual(sheet.content.defaultButton, DialogContent.DefaultButton.none)
