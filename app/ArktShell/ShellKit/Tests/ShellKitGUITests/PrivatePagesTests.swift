@@ -170,6 +170,26 @@ final class PrivatePagesTests: XCTestCase {
     XCTAssertFalse(normal.isShowingEmptyState, "a normal window with Spaces shows no welcome either")
   }
 
+  /// An update or announcement banner (#648) in a private window sits above the footer band and the Pages list ends
+  /// above the banner: it covers no row and not the footer label.
+  func testABannerLeavesTheRowsAndTheFooterUncovered() throws {
+    let container = SidebarContainerView(source: StubSidebar.sample())
+    container.frame = NSRect(x: 0, y: 0, width: ShellMetrics.standard.sidebarMinWidth, height: 420)
+    container.setPrivateKind(.incognito)
+    container.setBanner(SidebarNotice.update(version: "1.4.2"), animated: false, reduceMotion: true)
+    container.layoutSubtreeIfNeeded()
+    let banner = container.convert(container.banner.row.bounds, from: container.banner.row)
+    XCTAssertGreaterThan(banner.height, 0)
+    XCTAssertLessThanOrEqual(container.privatePages.frame.maxY, banner.minY, "the list ends above the banner")
+    XCTAssertLessThanOrEqual(banner.maxY, container.windowKindLabel.frame.minY, "the banner is above the footer label")
+    XCTAssertFalse(banner.intersects(container.windowKindLabel.frame))
+
+    container.setBanner(nil, animated: false, reduceMotion: true)
+    container.layoutSubtreeIfNeeded()
+    XCTAssertEqual(container.privatePages.frame.maxY, 420 - SidebarContainerView.privateFooterHeight,
+                   "without a banner the list reaches the footer band")
+  }
+
   // MARK: The cap
 
   /// The 21st page of any kind does not open: Paste URL as New Tab, a foreground `window.open` and a background

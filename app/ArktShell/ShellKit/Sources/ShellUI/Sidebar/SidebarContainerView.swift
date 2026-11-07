@@ -679,14 +679,17 @@ public final class SidebarContainerView: NSView {
   }
 
   /// The Pages list from under the address bar down to the footer band, and the window's kind centered in that band.
-  /// The band never scrolls with the list.
+  /// The band never scrolls with the list. A banner (#648) keeps its place above the bottom bar's band, which is
+  /// taller than the footer: while it reserves space, the list ends above it, as the row list of a normal window does.
   private func layoutPrivatePages() {
     guard isPrivate else { return }
     let padding = SidebarMetrics.horizontalPadding
     let footer = Self.privateFooterHeight
     let top = showsURLBar ? urlBar.frame.maxY : topBarHeight
+    let reserved = bannerSlot.reservedHeight
+    let bottomInset = reserved > 0 ? SidebarMetrics.bottomBarHeight + reserved : footer
     privatePages.frame = NSRect(x: padding, y: top, width: max(0, bounds.width - 2 * padding),
-                                height: max(0, bounds.height - footer - top))
+                                height: max(0, bounds.height - bottomInset - top))
     let labelHeight = ceil(windowKindLabel.intrinsicContentSize.height)
     windowKindLabel.frame = NSRect(x: padding, y: (bounds.height - footer + (footer - labelHeight) / 2).rounded(),
                                    width: max(0, bounds.width - 2 * padding), height: labelHeight)
