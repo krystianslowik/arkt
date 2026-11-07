@@ -64,20 +64,43 @@ The shared toast (`design/alerts-sheets-toasts`), shield glyph, no action, close
 
 Rejected directions: B (one toast with Reopen) and C (a card in the sidebar).
 
-## Swift engine contract (#580)
+## Recovery contract and implementation plan (#580)
 
-`EnginePageRecovery` refines the crash-only `EngineSessionRecovery` protocol and supplies only an ordered list of
-`recoveryPages`. Pages contain a title, URL and kind (`littleArkt` or `peek`). The backend must never persist or return
-private or sidebar data. The shell opens Little Arkt pages with `ShellWindowSet.openLittleArkt` and Peek pages via
-`PeekController`, using the host window's current tab as the Peek source. Recovery refuses to replace or close any
-existing live or hidden Peek in that host. It attempts the Peek first, closes a newly created tab if its page cannot
-be presented, and opens Little Arkt windows only after that succeeds. A missing source, existing Peek, failed Peek
-presentation or multiple recovered Peeks leaves the offer and crash unanswered for retry or dismissal. Little Arkt's
-opening API reports no presentation result, so acknowledgement confirms its opening was requested, not that its page
-loaded or appeared. The shell acknowledges once after the requests, dismissal, or an empty offer. Multi-Peek routing
-remains a product decision; crash-only legacy providers have no page capability.
-The crashed-session state seam shipped in #577. Recoverable-page list and source grouping integration, and
-feature-level killed-process validation, remain unverified; no full engine session is restored.
+The engine's `EngineSessionRecovery` supplies only `lastSessionCrashed` and `dismissLastSession` (#577).
+The shell owns the list: URL, title, kind and, for a Peek, the sidebar `NodeID` of its source. Node IDs survive
+sidebar persistence; engine tab and window IDs do not. No window identity is persisted. Only App imports
+Persistence: expose a small `RecoveryPageSource` in ShellUI, inject it into `ShellWindowSet`, and implement the
+adapter in App. Store durable records through Persistence; map the shell value to its storage representation in App.
+Remove `EnginePageRecovery` and its page transport from EngineAPI when migrating the existing restore tests; keep
+`EngineSessionRecovery` and unrelated engine protocols intact.
+
+Record Little Arkt and Peek open, URL and title changes, and actual close, including hidden Peeks. Never record
+Blank or Incognito pages. Clear live records on successful clean quit, not a cancelled quit. Capture the previous
+records for the launch offer before live-session writes can replace them; keep that immutable offer until Restore,
+Dismiss, or an empty-offer notice acknowledges the crash. An unsuccessful restore keeps the offer and does not
+acknowledge. Persist updates off the main actor in order; a quit must wait for the clearing write.
+
+Restore one Peek per source: deduplicate records by source, keeping the last. Prefer an open regular window showing
+the node; otherwise activate it in the host. Use `PeekController.reopen(_:over:)` with a `ClosedPeek` whose parked
+copy is nil. Do not replace a live or hidden Peek. Distinct sources can coexist, including as hidden Peeks. Preserve
+the existing private-window and held-close safeguards. Little Arkt's opening API reports requests, not successful
+page loads. These seams are test-first: ShellKit GUI tests exercise real window routing and the injected record
+boundary; Persistence tests exercise storage across database reopen. `project.yml` has an XCUITest bundle but no
+unit test target for App, and ShellKit does not link Persistence, so these tests do not claim to exercise AppSession
+or its adapter. Feature-level killed-process validation remains necessary.
+
+The test-first seam is a main-actor `RecoveryPageSource.pages` snapshot of `ShellRecoveryPage` values, injected into
+`ShellWindowSet` as `recoveryPageSource`. `beginSessionRecovery` captures that snapshot before starting live writes;
+`finishSessionRecovery(cleanQuit:)` expresses the quit outcome at the shell boundary, with the App adapter flushing
+a successful clear before termination. Persistence's `RecoveryPageState` settings group contains `RecoveryPageRecord`
+values and is mapped by the App adapter. The tests deliberately name these proposed APIs; they do not exist yet.
+Keep failed writes and their retry/quit handling visible rather than claiming a durable clear before it completes.
+During migration update existing `RestorePagesModelTests` and `RestorePagesWindowTests` to supply the shell source,
+replace their old assertion that multiple Peeks must be rejected, and leave their private and held-close cases intact.
+The old source-less cases do not decide the pending #776 edge.
+
+Pending maintainer question (#776): whether a Peek with no source node, or a source that was archived or deleted,
+is excluded from the offer. Do not choose a fallback until answered.
 
 The decision is hosted only by an ordinary regular window, never a Blank, Incognito, Little Arkt or Peek window.
 Its unanswered model stays with the window set if no eligible host exists and moves to a regular window when one
