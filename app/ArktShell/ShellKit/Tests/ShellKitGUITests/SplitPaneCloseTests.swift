@@ -626,7 +626,8 @@ final class SplitPaneCloseTests: XCTestCase {
   }
 
   /// AppKit keeps a gesture on the view it began on: the rest of a scroll that began mid-flight, momentum included,
-  /// still reaches the same page after the reflow settles. A gesture that begins at rest is not forwarded.
+  /// still reaches the same page after the reflow has ended (the scroll ends it, #716). A gesture that begins at rest
+  /// is not forwarded.
   func testScrollGestureThatBeganMidFlightStaysOnItsPageAfterTheReflowSettles() throws {
     let (container, a, c, point) = try midFlightOnADrawnPane()
     let target = try scrollTarget(at: point, in: container)
@@ -646,8 +647,8 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertEqual(c.scrolls.count, 6, "a began at rest sent to the container is not forwarded to the old target")
   }
 
-  /// A touch-down (may begin) mid-flight picks the page; when the reflow settles before the fingers move, the began
-  /// and the rest of that gesture still reach it.
+  /// A touch-down (may begin) mid-flight picks the page and ends the reflow (#716); the began that follows at rest,
+  /// and the rest of that gesture, still reach it.
   func testScrollThatMayBeginMidFlightAndBeginsAtRestStaysOnItsPage() throws {
     let (container, a, c, point) = try midFlightOnADrawnPane()
     let target = try scrollTarget(at: point, in: container)
@@ -661,6 +662,107 @@ final class SplitPaneCloseTests: XCTestCase {
 
     XCTAssertEqual(c.scrolls.map(\.phase), [.mayBegin, .began, .changed, .ended])
     XCTAssertTrue(a.scrolls.isEmpty)
+  }
+
+  /// A page with two nested scrollers, as a web page with a scrollable column along its edge: a 30-point one at its
+  /// leading edge and one filling the rest. Each records the window location of the scrolls it gets.
+  private final class NestedScrollersPage: NSView {
+    final class Scroller: NSView {
+      private(set) var scrolls: [NSPoint] = []
+      override func scrollWheel(with event: NSEvent) { scrolls.append(event.locationInWindow) }
+    }
+    let edge = Scroller()
+    let body = Scroller()
+
+    override init(frame frameRect: NSRect) {
+      super.init(frame: frameRect)
+      addSubview(edge)
+      addSubview(body)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+      super.setFrameSize(newSize)
+      edge.frame = NSRect(x: 0, y: 0, width: 30, height: newSize.height)
+      body.frame = NSRect(x: 30, y: 0, width: max(0, newSize.width - 30), height: newSize.height)
+    }
+  }
+
+  /// Three panes, the middle one closed, pane 1 showing `page`: mid-flight (frozen clock, stepped by hand) it is drawn
+  /// growing in from where pane 2 was, away from its real frame.
+  private func midFlight(showing page: NSView) throws -> (SplitContainerView, a: ClickRecordingPage) {
+    let container = makeClickableContainer()
+    let (a, b) = (ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, b, page])
+    show(container, [a, page], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    return (container, a)
+  }
+
+  /// A scroll that begins on a drawn pane mid-flight reaches the nested scroller drawn under the pointer, and that
+  /// scroller is also the one the event's own location points at, which is where an engine page places it (#716). A
+  /// scroll event cannot be moved, so the reflow ends at rest first and the pane is drawn at its real frame.
+  func testScrollThatBeginsMidFlightReachesTheNestedScrollerItsLocationPointsAt() throws {
+    let c = NestedScrollersPage()
+    let (container, a) = try midFlight(showing: c)
+    let card = container.paneCards[1]
+    let drawn = try onScreen(card)
+    let shift = drawn.minX - card.frame.minX
+    XCTAssertGreaterThan(shift, 20, "drawn away from its real frame")
+    let point = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+    let drawnSpot = c.edge.convert(NSPoint(x: point.x - shift, y: point.y), from: container)
+    XCTAssertTrue(c.edge.bounds.contains(drawnSpot), "mid-flight the edge scroller is drawn under the pointer")
+    let target = try scrollTarget(at: point, in: container)
+    XCTAssertTrue(target === container, "taken by the container")
+
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 2))
+
+    XCTAssertFalse(container.isReflowing)
+    try assertAtRest(container.paneCards)
+    XCTAssertTrue(try scrollTarget(at: point, in: container) === c.body, "drawn under the pointer at rest")
+    XCTAssertEqual(c.body.scrolls.count, 2)
+    XCTAssertTrue(c.edge.scrolls.isEmpty)
+    for location in c.body.scrolls {
+      XCTAssertTrue(c.body.bounds.contains(c.body.convert(location, from: nil)), "its own location is on it")
+    }
+    XCTAssertTrue(a.scrolls.isEmpty)
+  }
+
+  /// A mouse wheel click mid-flight ends the reflow the same way and reaches the scroller its location points at.
+  func testWheelClickMidFlightReachesTheNestedScrollerItsLocationPointsAt() throws {
+    let c = NestedScrollersPage()
+    let (container, _) = try midFlight(showing: c)
+    let drawn = try onScreen(container.paneCards[1])
+    let point = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+
+    try scrollTarget(at: point, in: container)
+      .scrollWheel(with: try scrollEvent(at: point, in: container, phase: 0, continuous: false))
+
+    XCTAssertFalse(container.isReflowing)
+    XCTAssertTrue(c.edge.scrolls.isEmpty)
+    let location = try XCTUnwrap(c.body.scrolls.first)
+    XCTAssertTrue(c.body.bounds.contains(c.body.convert(location, from: nil)), "its own location is on it")
+  }
+
+  /// A scroll mid-flight off every drawn pane (in the gap a moving pane leaves) does not cut the reflow short.
+  func testScrollMidFlightOffTheDrawnPanesKeepsTheReflowRunning() throws {
+    let c = ClickRecordingPage()
+    let (container, a) = try midFlight(showing: c)
+    let leading = try onScreen(container.paneCards[0])
+    let trailing = try onScreen(container.paneCards[1])
+    XCTAssertGreaterThan(trailing.minX - leading.maxX, 4)
+    let gap = NSPoint(x: trailing.minX - 2, y: trailing.midY)
+    XCTAssertNil(container.paneIndex(forMouseDownAt: gap))
+
+    container.scrollWheel(with: try scrollEvent(at: gap, in: container, phase: 1))
+
+    XCTAssertTrue(container.isReflowing)
+    XCTAssertTrue(a.scrolls.isEmpty)
+    XCTAssertTrue(c.scrolls.isEmpty)
   }
 
   /// A right-click on a drawn pane mid-flight ends the reflow at rest first, then reaches that pane's page at the spot
