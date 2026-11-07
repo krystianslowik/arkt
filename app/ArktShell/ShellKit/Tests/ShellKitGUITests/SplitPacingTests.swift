@@ -7,8 +7,11 @@ import SidebarModel
 import XCTest
 @_spi(Smoke) @testable import ShellUI
 
-/// The shell's divider is driven once per display frame, like a real drag. Timing is meaningful only on a quiet
-/// 120 Hz display; the commit count is checked after each completed drag.
+/// Frame-time gate for the split divider drag (#59): the shell's divider is driven once per display frame, like a real
+/// drag, in a real shell window with `InMemoryEngine`, so the panes are plain views and the test measures the shell's
+/// own frame work. NOT-MEASURABLE below 120 Hz or under load (`PacingEnvironment`); the hitch count is asserted only
+/// with `ARKT_PACING_GATE=1` or when this class runs alone (`PacingEnvironment.gateAsserts`). The commit count and the
+/// divider's movement are checked after every completed drag.
 @MainActor
 final class SplitPacingTests: XCTestCase {
   func testSplitDividerTwoPanes() async throws {
@@ -38,6 +41,8 @@ final class SplitPacingTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
     let split = controller.rootView.split
     let divider = try XCTUnwrap(split.dividers.first)
+    XCTAssertFalse(split.isReflowing, "no reflow is running when the drag begins")
+    let startFactors = split.liveFactors
     var changes = 0
     source.onDidChange = { _ in changes += 1 }
     divider.beginDrag()
@@ -45,6 +50,7 @@ final class SplitPacingTests: XCTestCase {
       divider.drag(to: split.bounds.width * (0.5 + 0.1 * Double(frame) / 60))
     }
     XCTAssertEqual(changes, 0, "a drag does not write during frames")
+    XCTAssertNotEqual(split.liveFactors, startFactors, "the drag moved the divider")
     divider.endDrag()
     XCTAssertEqual(changes, 1, "the completed drag commits exactly once")
   }
@@ -96,35 +102,48 @@ final class SplitPacingTests: XCTestCase {
     let divider = try XCTUnwrap(split.dividers.dropFirst((panes - 1) / 2).first)
     let length = orientation == .horizontal ? split.bounds.width : split.bounds.height
     let center = length / 2
+    // Since #665, beginning a drag ends a running reflow and closes its pacing session into `lastPacing`. Nothing may
+    // be reflowing here, so the stats read below are the drag's own.
+    XCTAssertFalse(split.isReflowing, "\(label): no reflow is running when the drag begins")
+    let startFactors = split.liveFactors
     var frame = 0
     var changes = 0
     source.onDidChange = { _ in changes += 1 }
     let finished = expectation(description: "divider drag finished")
     divider.beginDrag()
+    XCTAssertEqual(split.pacer.label, "split-divider", "\(label): the drag's own pacing session runs")
     _ = FrameScript(view: split, frames: 60, step: { _ in
       frame += 1
       let position = center + 20 + 15 * sin(Double(frame) * .pi / 30)
       divider.drag(to: position)
     }, done: { divider.endDrag(); finished.fulfill() })
     await fulfillment(of: [finished], timeout: 3)
+    XCTAssertEqual(split.pacer.label, "split-divider", "\(label): the stats come from the divider drag")
+    XCTAssertNotEqual(split.liveFactors, startFactors, "\(label): the drag moved the divider")
     let stats = try XCTUnwrap(split.lastPacing)
+    let asserts = gated && PacingEnvironment.gateAsserts(for: Self.self)
+    // Printed for the record only; whether the machine can measure was decided by `skipIfNotMeasurable` above.
     var load = [0.0]
+    _ = getloadavg(&load, 1)
     let cores = ProcessInfo.processInfo.activeProcessorCount
-    let loaded = getloadavg(&load, 1) != 1 || load[0] >= Double(cores)
     let fps = controller.window?.screen?.maximumFramesPerSecond ?? 0
     let hitches = stats.intervals.enumerated().filter { $0.element > stats.hitchThreshold }
       .map { String(format: "%d@%.2f", $0.offset, $0.element * 1000) }
     let summary = String(format: "split.pacing label=%@ screenMaxFPS=%d frames=%d over8.6=%d overBudgetPct=%.2f maxMs=%.2f p99Ms=%.2f leadInMs=%.2f load1=%.2f cores=%d asserted=%@ hitchesMs=[%@]",
       label, fps, stats.frameCount, stats.hitchCount, stats.overBudgetRatio * 100, stats.maxInterval * 1000,
-      stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, (loaded || !gated) ? "no" : "yes",
+      stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, asserts ? "yes" : "no",
       hitches.joined(separator: ","))
     print(summary)
     let attachment = XCTAttachment(string: summary)
     attachment.name = "split.pacing.\(label)"
-    attachment.lifetime = .deleteOnSuccess
+    attachment.lifetime = .keepAlways
     add(attachment)
     XCTAssertGreaterThan(stats.frameCount, 10)
     XCTAssertEqual(changes, 1, "the completed drag commits exactly once")
-    if gated && !loaded { XCTAssertEqual(stats.hitchCount, 0, "\(label): frames over 8.6 ms") }
+    if asserts {
+      XCTAssertEqual(stats.hitchCount, 0, "\(label): frames over 8.6 ms")
+    } else if gated {
+      print("split.pacing reported only: set ARKT_PACING_GATE=1 or run SplitPacingTests alone")
+    }
   }
 }
