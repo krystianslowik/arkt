@@ -5592,3 +5592,16 @@ and the noted Swift declarations and expressions are wrapped. Main is merged wit
 main's sections first. Source parsing and diff checks validate syntax and whitespace only; fresh CI must validate the
 integrated revision. The GUI screenshot upload step and committed PNGs remain unchanged pending the maintainer's
 answer. Manual killed-process, VoiceOver and motion checks, and the documented quit limits, remain outstanding.
+
+### Unanswered restore offer contract tests (#580)
+
+The maintainer follow-up requires retaining the crashed snapshot through live page changes and a clean quit until the
+offer is answered, matching the marker behavior proposed in [#803](https://github.com/krystianslowik/arkt/pull/803).
+The test-first GUI cases cover repeated offers using the same record store and persisted sidebar NodeID with fresh fake
+engines, independent overwrite and clear assertions, and resumed recording and clearing after Restore or Dismiss. This
+is a Shell contract test, not a real Chromium or database roundtrip; Core Persistence already tests database reopening.
+The existing empty filtered offer notice remains covered. Production behavior is unchanged in this stage.
+
+The new GUI assertions are expected to fail against the current implementation; their runtime result is unobserved.
+Swift 6.2.4 source parsing and scoped diff checks passed. Local full builds and tests were not run because the baseline
+does not compile with the installed toolchain.

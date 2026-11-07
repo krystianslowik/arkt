@@ -70,11 +70,14 @@ The engine's `EngineSessionRecovery` supplies only crash state and dismissal. Th
 Peek source `NodeID` records through an injected `RecoveryPageSource`; only the App imports Persistence. The App
 adapter writes ordered snapshots off the main actor. Engine tab and window identities are not persisted.
 
-The window set captures the prior snapshot at initialization, before live writes. The launch offer uses that immutable
-snapshot even as Little Arkt and Peek lifecycle events update the live records. Open, navigation, title and actual
-close are tracked, including hidden Peeks. Blank, Incognito and sidebar pages are excluded. Unchanged snapshots do
-not write. A confirmed clean quit clears records and stops lifecycle writes; a cancelled quit resumes tracking. The
-App suspends writes during a potentially cancelled teardown to preserve the pre-quit snapshot.
+The window set captures the prior snapshot at initialization, before live writes. While the crash marker is set and
+an offer is unanswered, live Little Arkt and Peek events must not overwrite the crashed snapshot, and even a confirmed
+clean quit must not clear it. [#803](https://github.com/krystianslowik/arkt/pull/803) retains the engine marker across
+launches until the decision is answered. After Restore, Dismiss, or the empty-offer notice acknowledges it, the shell
+refreshes records from current live pages and resumes tracking opens, navigation, titles and actual closes, including
+hidden Peeks. Blank, Incognito and sidebar pages are excluded. Unchanged snapshots do not write. A confirmed clean
+quit then clears records and stops lifecycle writes; a cancelled quit resumes tracking. The App suspends writes during
+a potentially cancelled teardown to preserve the pre-quit snapshot.
 
 At offer time, Peeks without an existing, non-archived sidebar source are excluded. Duplicate Peeks per source keep
 the last record. An empty offer shows the notice and acknowledges the crash. Restore prefers a regular window showing

@@ -250,10 +250,132 @@ final class RecoveryPageSourceTests: XCTestCase {
     defer { little.window.close(); host.close() }
     let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
     XCTAssertTrue(panel.rowLabels.contains { $0.stringValue.contains("Old") })
-    XCTAssertFalse(records.pages.contains(old))
+    XCTAssertEqual(records.pages, [old])
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
     panel.dismissPressed()
     panel.dismissPressed()
     XCTAssertEqual(engine.crashedSession.dismissals, 1)
+  }
+
+  // Shell contract only: reuse the record store and model #803's persistent marker on a fresh fake engine.
+  // This does not exercise a Chromium or database roundtrip; persistence has its own reopen test.
+  func testUnansweredOfferSurvivesLiveChangesAndCleanQuitAcrossLaunches() throws {
+    _ = NSApplication.shared
+    let sidebar = StubSidebar()
+    let space = sidebar.addSpace(title: "Test")
+    let node = sidebar.addTab(url: URL(string: "https://example.invalid/source")!, title: "Source", in: .today(space))
+    let crashed = [page("crashed-peek", source: node),
+      ShellRecoveryPage(title: "Crashed window", url: URL(string: "https://example.invalid/crashed-window")!,
+                        kind: .littleArkt)]
+    let records = RecordingRecoveryPages(crashed)
+    let firstEngine = InMemoryEngine()
+    firstEngine.crashedSession.simulateCrashedExit()
+    let first = ShellWindowSet(engine: firstEngine, sidebar: sidebar, recoveryPageSource: records)
+    let host = first.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    host.peek.animator.drivesDisplayLink = false
+    first.beginSessionRecovery(firstEngine.crashedSession)
+    let offer = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    XCTAssertTrue(offer.rowLabels.contains { $0.stringValue.contains("crashed-peek") })
+    XCTAssertTrue(offer.rowLabels.contains { $0.stringValue.contains("Crashed window") })
+    host.activate(node: node)
+    host.peek.open(URL(string: "https://example.invalid/live-peek")!, from: try XCTUnwrap(host.currentTab))
+    let little = first.openLittleArkt(url: URL(string: "https://example.invalid/live-window")!)
+    let liveTab = try XCTUnwrap(little.shownTab)
+    firstEngine.navigate(liveTab, to: URL(string: "https://example.invalid/changed")!)
+    XCTAssertEqual(firstEngine.crashedSession.dismissals, 0)
+    XCTAssertEqual(records.pages, crashed, "Live events must not overwrite the unanswered snapshot")
+    first.finishSessionRecovery(cleanQuit: true)
+    XCTAssertEqual(records.pages, crashed, "A clean quit must not clear the unanswered snapshot")
+    XCTAssertEqual(firstEngine.crashedSession.dismissals, 0)
+    little.window.close()
+    host.close()
+
+    let secondEngine = InMemoryEngine()
+    secondEngine.crashedSession.simulateCrashedExit() // #803 retains the unanswered marker across launch.
+    let second = ShellWindowSet(engine: secondEngine, sidebar: sidebar, recoveryPageSource: records)
+    let nextHost = second.openWindow()
+    nextHost.window?.isReleasedWhenClosed = false
+    defer { second.littleArkts.forEach { $0.window.close() }; nextHost.close() }
+    second.beginSessionRecovery(secondEngine.crashedSession)
+    XCTAssertTrue(secondEngine.crashedSession.lastSessionCrashed)
+    XCTAssertEqual(secondEngine.crashedSession.dismissals, 0)
+    let repeated = try XCTUnwrap(nextHost.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    XCTAssertTrue(repeated.rowLabels.contains { $0.stringValue.contains("crashed-peek") })
+    XCTAssertTrue(repeated.rowLabels.contains { $0.stringValue.contains("Crashed window") })
+    repeated.restorePressed()
+    XCTAssertEqual(secondEngine.crashedSession.dismissals, 1)
+    XCTAssertEqual(nextHost.peek.session.flatMap { secondEngine.snapshot(of: $0.tab)?.url.path }, "/crashed-peek")
+    XCTAssertEqual(second.littleArkts.count, 1)
+  }
+
+  func testUnansweredOfferIsNotClearedByCleanQuitWithoutLiveWrites() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    engine.crashedSession.simulateCrashedExit()
+    let old = ShellRecoveryPage(title: "Old", url: URL(string: "https://example.invalid/old")!, kind: .littleArkt)
+    let records = RecordingRecoveryPages([old])
+    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample(), recoveryPageSource: records)
+    let host = set.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    defer { host.close() }
+    set.beginSessionRecovery(engine.crashedSession)
+    _ = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    set.finishSessionRecovery(cleanQuit: true)
+    XCTAssertEqual(records.pages, [old])
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+  }
+
+  func testAnsweredOfferRefreshesLiveRecordsAndCleanQuitClears() throws {
+    _ = NSApplication.shared
+    for restore in [false, true] {
+      let engine = InMemoryEngine()
+      engine.crashedSession.simulateCrashedExit()
+      let old = ShellRecoveryPage(title: "Old", url: URL(string: "https://example.invalid/old")!, kind: .littleArkt)
+      let records = RecordingRecoveryPages([old])
+      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample(), recoveryPageSource: records)
+      let host = set.openWindow()
+      host.window?.isReleasedWhenClosed = false
+      defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
+      set.beginSessionRecovery(engine.crashedSession)
+      let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+      let live = set.openLittleArkt(url: URL(string: "https://example.invalid/live")!)
+      XCTAssertEqual(records.pages, [old])
+      XCTAssertEqual(engine.crashedSession.dismissals, 0)
+      if restore { panel.restorePressed() } else { panel.dismissPressed() }
+      XCTAssertEqual(engine.crashedSession.dismissals, 1)
+      XCTAssertFalse(engine.crashedSession.lastSessionCrashed)
+      XCTAssertTrue(records.pages.contains { $0.url.path == "/live" }, "Answer must refresh current live pages")
+      let tab = try XCTUnwrap(live.shownTab)
+      engine.navigate(tab, to: URL(string: "https://example.invalid/after-answer")!)
+      XCTAssertTrue(records.pages.contains { $0.url.path == "/after-answer" })
+      set.finishSessionRecovery(cleanQuit: true)
+      XCTAssertTrue(records.pages.isEmpty)
+    }
+  }
+
+  func testEmptyFilteredOfferAcknowledgesAndResumesRecording() {
+    _ = NSApplication.shared
+    let sidebar = StubSidebar()
+    let space = sidebar.addSpace(title: "Test")
+    let deleted = sidebar.addTab(url: URL(string: "https://example.invalid/source")!, title: "Source", in: .today(space))
+    sidebar.removeNode(deleted)
+    let records = RecordingRecoveryPages([page("orphan", source: deleted)])
+    let engine = InMemoryEngine()
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
+    let host = set.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
+    set.beginSessionRecovery(engine.crashedSession)
+    XCTAssertEqual(engine.crashedSession.dismissals, 1)
+    XCTAssertFalse(engine.crashedSession.lastSessionCrashed)
+    XCTAssertFalse(host.rootView.subviews.contains { $0 is RestorePagesView })
+    _ = set.openLittleArkt(url: URL(string: "https://example.invalid/live")!)
+    XCTAssertEqual(records.pages.map(\.url.path), ["/live"])
+    set.finishSessionRecovery(cleanQuit: true)
+    XCTAssertTrue(records.pages.isEmpty)
   }
 
   func testCancelledQuitRebuildsRecordsAfterSuspendedChanges() throws {
