@@ -31,6 +31,32 @@ final class FlippedShadowScreenshotTests: XCTestCase {
     for flavor in [ThemeFlavor.light, .dark] { try settingsAndRowShot(flavor) }
   }
 
+  /// #796: the Archive window's own table with its second row selected from the keyboard, focused (light) and as
+  /// drawn in dark. Writes `archive-selected-row-<light|dark>.png`: the `tabCurrent` fill and, in light, its lift.
+  func testArchiveTableShots() async throws {
+    for flavor in [ThemeFlavor.light, .dark] { try await archiveTableShot(flavor) }
+  }
+
+  private func archiveTableShot(_ flavor: ThemeFlavor) async throws {
+    let controller = ArchiveWindowController(dataSource: ArchiveRowsStub(count: 3))
+    let window = try XCTUnwrap(controller.window)
+    defer { window.close() }
+    window.appearance = NSAppearance(named: flavor == .dark ? .darkAqua : .aqua)
+    await controller.reload()
+    window.orderFront(nil)
+    let table = controller.tableView
+    table.selectRowIndexes([1], byExtendingSelection: false)
+    table.rowView(atRow: 1, makeIfNecessary: false)?.isEmphasized = true
+    window.contentView?.layoutSubtreeIfNeeded()
+    window.displayIfNeeded()
+
+    var root = try XCTUnwrap(window.contentView?.layer)
+    while let up = root.superlayer { root = up }
+    let folder = try XCTUnwrap(folder)
+    let data = try render(root, size: root.bounds.size)
+    try data.write(to: folder.appendingPathComponent("archive-selected-row-\(flavor == .dark ? "dark" : "light").png"))
+  }
+
   private final class FlippedContainer: NSView {
     override var isFlipped: Bool { true }
   }
@@ -130,9 +156,13 @@ final class FlippedShadowScreenshotTests: XCTestCase {
   /// `content`'s layer tree drawn by Core Animation at 2x. `cacheDisplay` leaves out a view's own layer shadow when
   /// the layer has no content of its own (the floating sidebar's), so the tree is rendered directly.
   private func render(_ content: NSView) throws -> Data {
-    let layer = try XCTUnwrap(content.layer)
+    try render(try XCTUnwrap(content.layer), size: content.bounds.size)
+  }
+
+  /// `layer`'s tree drawn by Core Animation at 2x.
+  private func render(_ layer: CALayer, size: CGSize) throws -> Data {
     let scale: CGFloat = 2
-    let width = Int(content.bounds.width * scale), height = Int(content.bounds.height * scale)
+    let width = Int(size.width * scale), height = Int(size.height * scale)
     let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
                                              bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                              colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
