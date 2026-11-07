@@ -48,6 +48,10 @@ final class ImportCheckRunner {
         try await installExtensions(through: engine)
         return 0
       }
+      if phase == "history-shutdown" {
+        try await importHistoryThenQuit(into: engine)
+        return 0
+      }
       if phase == "import" { try await importFixture(into: engine) }
       if phase == "verify" {
         // An empty batch writes nothing; the engine logs how many logins its store holds.
@@ -130,6 +134,26 @@ final class ImportCheckRunner {
     print("ARKT_IMPORT read bookmarks \(bookmarks.bookmarks.count) skipped \(bookmarks.skippedNodes)")
     print("ARKT_IMPORT bookmarks \(describe(await engine.importBookmarks(bookmarks.bookmarks)))")
     print("ARKT_IMPORT bookmarks again \(describe(await engine.importBookmarks(bookmarks.bookmarks)))")
+  }
+
+  /// `=history-shutdown` (#531): queues a large synthetic history batch and quits while the history thread is still
+  /// writing it, so the profile's history service is deleted before the import's barrier answers. The engine logs
+  /// the visits that got no answer; the answer itself may arrive after the run loop has stopped.
+  private static func importHistoryThenQuit(into engine: ChromiumEngine) async throws {
+    let now = Date()
+    let entries = (0..<4_000).map { index in
+      ImportedHistoryEntry(
+        url: "https://shutdown-\(index).example/", title: "Shutdown \(index)", visitCount: 10, typedCount: 0,
+        lastVisit: nil,
+        visits: (0..<10).map { HistoryVisit(time: now.addingTimeInterval(-Double(index * 10 + $0 + 60)), transition: .link) })
+    }
+    Task { @MainActor in
+      let result = await engine.importHistory(entries, after: nil)
+      print("ARKT_IMPORT history before quit \(describe(result))")
+    }
+    // Long enough for the batch to reach the history service, too short for the history thread to write 40000 visits.
+    try await Task.sleep(for: .milliseconds(200))
+    print("ARKT_IMPORT quitting with the history batch queued")
   }
 
   private static func installExtensions(through engine: ChromiumEngine) async throws {

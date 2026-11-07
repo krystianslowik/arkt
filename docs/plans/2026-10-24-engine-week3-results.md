@@ -4335,3 +4335,147 @@ Not taken: a window capture of the sheet (the text above was read from the windo
 Cleanup (both rounds of checks): every app process exited by itself and the local hanging socket was stopped by its PID, confirmed with `ps -p`; `lsregister -u` on the embed copy (4 records for `dev.arkt.Arkt.try513`
 before, 0 after); the two profiles, the embed folder with its 518 dylib copies, derived data, build logs and the two defaults suites were
 deleted. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+## #531: history import always answers (PR #565)
+
+Date 2026-11-07. Branch `engine/531-history-import-drop`, `origin/main` merged in at `06275a6`. Overlay and Swift only: no Chromium
+patch, `.patches` unchanged.
+
+### What landed
+
+- `HistoryBarrier` answers `false` from its destructor when it is destroyed without having run its reply; `HistoryImport` also
+  observes `HistoryServiceBeingDeleted`. Either way the pending visits are counted failed ("no answer from the history store"),
+  `done` runs once, posted, and the engine logs `history import: <n> visits got no answer from the history store` (warning).
+- `written` and `latestVisit` are counted when the barrier answers, not when the visits are submitted.
+- Swift: the continuation in `ChromiumEngine+Importing.swift` resumes for the first answer only.
+- Runner phase `--arkt-import-check=history-shutdown` (Engine configuration only): queues 4000 URLs with 10 visits each and quits
+  200 ms later, while the history thread is still writing.
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 4 h 16 min (15385 s), 63939 steps: an almost full rebuild after `out/Spike` had last been built on 2026-10-23; swap flat at 3.0 GB, at least 49 GB free on `/` |
+| Same command again | `ninja: no work to do.` | 12 s; `arkt_import_writer.o` holds the new warning string |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try531 -jobs 2` (`nice -n 20`) | `BUILD SUCCEEDED` | 174 s; the 518 component dylibs cloned next to the bundle (`cp -c`) |
+| ChromiumEngineKit `swift test --filter ChromiumEngineKitTests` after the merge (`nice -n 20`, `-j 2`) | passed | 130 tests in 18 suites (127 in 16 before the merge) |
+
+### Real engine (`dev.arkt.Arkt.try531`, Engine app on `out/Spike`, throwaway profiles under `profiles/531-*`, `ARKT_DATA_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`, `FakeChromiumProfile` fixture)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Normal import, counted on confirmation | PASS | `--arkt-import-check=import`: `history written=5 skipped=1 failed=0` (the stale visit skipped), `latest` set; same as #511 |
+| Re-import with the watermark | PASS | `history again written=0 skipped=5`, `latest=none` |
+| Counts in the profile | PASS | read-only `sqlite3` on `History`: `urls` 4, `visits` 6, `visit_source` 5 rows with source 7 (`SOURCE_OS_MIGRATION_IMPORTED`) |
+| Service deleted mid-import | PASS | `--arkt-import-check=history-shutdown`: engine log `history import: 40000 visits got no answer from the history store` during shutdown; exit 0 after 5 s, no hang |
+| Dropped barrier alone | not run | no shell-reachable way to drop the barrier without the service going away; covered by the scripted-facade double-answer test only |
+| Stderr | PASS | 0 hits of `FATAL`, `NOTREACHED`, `Check failed` in both runs |
+
+Finding: in the shutdown run all 40000 visits were on disk afterwards (`visits` 40000, `visit_source` 40000), although the
+answer counted them failed. "No answer" means "not confirmed", not "not written". A retry after such a failure has no watermark
+from it (`latestVisit` stays nil), so it would write those visits again. The coordinator (#515) has to decide whether to retry;
+the answer may also never reach the shell when the run loop has already stopped (it did not print in this run).
+
+Cookies in the same `import` run: `written=0 skipped=3`. The default fixture has no unexpired 127.0.0.1 cookie (the #512 run used
+`Options.extraCookies`); not part of this change.
+
+### History sync (#566)
+
+Checked in the pinned sources: `HistorySyncBridge::MaybeCommit` (`components/history/core/browser/sync/history_sync_bridge.cc`)
+skips only `SOURCE_ACTOR` visits, a redirect-chain middle and visits from another device. A `SOURCE_OS_MIGRATION_IMPORTED` visit
+written by `AddPage` with no redirects is a chain end, so it would be committed when history sync is active. #566 stays open for
+the fix.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 10 |
+| `arkt` commits above `156.0.8078.48` | 10 |
+
+In sync. Facade header copies `cmp` identical.
+
+### Cleanup
+
+Every app run exited by itself (PIDs checked with `ps -p`). `lsregister -u` on the embed copy and its helpers: 0 records for
+`dev.arkt.Arkt.try531` and 0 paths under the embed folder after. Deleted: the embed folder with its 518 dylib clones, derived data,
+the four throwaway profiles, the fixture, the two defaults suites and the bundle's empty preferences file, the run and build logs.
+Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+## #566: imported visits stay out of history sync
+
+Date 2026-11-07. Branch `engine/566-imported-visits-sync` from `origin/main` (`d323a55`). One Chromium patch (0011), one
+overlay test target; facade header and Swift unchanged.
+
+### Why a patch
+
+`HistorySyncBridge::MaybeCommit` is reached from `OnURLVisited`, `OnURLsModified` and `OnVisitUpdated` and skips only
+`SOURCE_ACTOR`, a redirect-chain middle and foreign visits. Seams checked in the pinned sources:
+
+| Seam | Why it does not work |
+|---|---|
+| Write imports as `SOURCE_ACTOR` | actor visits are left out of history queries and the NTP (`visit_database.cc`), so imports would vanish from the History page |
+| Write them without `PAGE_TRANSITION_CHAIN_END` | `AddPage` always sets it for a visit with no redirects; `TransitionIsVisible` needs it, so the visits would be hidden too |
+| Mark them foreign (`originator_cache_guid`, `AddSyncedVisit`) | turning history sync off runs `DeleteAllForeignVisitsAndResetIsKnownToSync`: the imported history would be deleted |
+| Write rows into `HistoryDatabase` from a DB task | no `OnURLVisited`, but `OnURLsModified` still commits the URL's most recent visit later; the omnibox indexes (`InMemoryURLIndex`, `InMemoryHistoryBackend`) see the URLs only after a relaunch; `AddPageVisit`'s URL-row bookkeeping would be duplicated |
+
+### What landed
+
+- Patch 0011 `Arkt: keep imported visits out of history sync`: `MaybeCommit` also returns for
+  `SOURCE_OS_MIGRATION_IMPORTED`, right after the `SOURCE_ACTOR` check (4 lines), so all three entry points are covered.
+  Not guarded by `IS_MAC`: the upstream importer (`stable_portability_data_importer.cc`) writes the same source.
+  Only source 7 is skipped. The older `SOURCE_FIREFOX_IMPORTED`, `SOURCE_IE_IMPORTED` and `SOURCE_SAFARI_IMPORTED`
+  (3 to 5) still sync; Arkt never writes them.
+  `GetDataForCommit` only serves keys that were tracked, so it needs nothing.
+- Test `HistorySyncBridgeTest.ImportedVisitsNotSynced` in the same patch: an imported visit through `OnURLVisited`,
+  `OnURLsModified` and `OnVisitUpdated` leaves the processor empty. `NonActorInitiatedVisitsAreSynced` still checks that
+  browsed and extension visits are committed.
+- Overlay: `//arkt/browser:arkt_patch_unittests` links `//components/history/core/browser:unit_tests` with
+  `run_all_unittests`, so the check does not need `components_unittests` (never built in `out/Spike`). It lives in
+  `arkt/browser/BUILD.gn` because GN never loads `arkt/BUILD.gn` (nothing depends on `//arkt:arkt`).
+
+### Build and tests
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 autoninja -C out/Spike arkt_patch_unittests -j 4` (first) | `The build has finished successfully.`, `FAILED:` 0 | 234 s |
+| `arkt_patch_unittests --gtest_filter='HistorySyncBridgeTest.*' --test-launcher-jobs=2` | `SUCCESS: all tests passed.` | 37 tests, 9 s |
+| Deliberate break: bridge change reverted, test target rebuilt | `HistorySyncBridgeTest.ImportedVisitsNotSynced` FAILED: `processor()->GetEntities().empty()` is false | 13 s build |
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` (fix restored) | `The build has finished successfully.`, `FAILED:` 0 | 28 s; `history_sync_bridge.o` recompiled |
+| Same command again with the test target | nothing to rebuild | 11 s; the 37 bridge tests pass again |
+| `gn check out/Spike //arkt/browser:arkt_patch_unittests` | `Header dependency check OK` | `gn check '//arkt/*'` reports 5 include errors in `arkt/api/arkt_engine_facade.mm` and `arkt/browser/arkt_extension_batch_install.mm`, files this change does not touch |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try566 -jobs 2` (`nice -n 20`) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` | 176 s; 522 component dylibs cloned next to the bundle (`cp -c`) |
+
+Load average while building: 5 to 8 (other lanes' work; nothing added).
+
+### Real engine, sync off (`dev.arkt.Arkt.try566`, embed folder on `out/Spike`, throwaway profile `profiles/566-20261107/run1`, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`, `FakeChromiumProfile` fixture)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Import with sync off | PASS | `--arkt-import-check=import`: `history written=5 skipped=1 failed=0`, `latest` set; again `written=0 skipped=5` |
+| Visits stored | PASS | read-only `sqlite3` on `History`: `urls` 4, `visits` 6, `visit_source` 5 rows with source 7 |
+| Nothing tracked for sync | PASS | `history_sync_metadata` 0 rows, 0 visits with `is_known_to_sync` |
+| Run | PASS | exit 0 by itself after about 110 s; 0 hits of `FATAL`, `NOTREACHED`, `Check failed` |
+
+Not run: an upload with history sync active. That needs a signed-in account, which test runs never use; the bridge test
+is the evidence that an imported visit is not committed.
+
+Limit: visits imported with history sync on before this patch keep their server copies. They are not retracted, and
+later updates to them are skipped, so those copies go stale. Accepted, since no build has shipped sync-on imports.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 11 |
+| `arkt` commits above `156.0.8078.48` | 11 |
+
+In sync. Export changed only the new patch (patches 0001 to 0010 byte-identical). Facade header copies `cmp` identical.
+
+### Cleanup
+
+The run exited by itself (`ps -p`). `lsregister -u` on the embed copy and its helpers: 0 records for `try566` and 0 paths
+under the embed folder after. Deleted: the embed folder with its dylib clones, derived data, the throwaway profile and
+fixture, the bundle's preferences file (`dev.arkt.Arkt.try566.plist`) and the logs; the defaults suite had never been
+written. Nothing under `~/Applications/ArktTest` or
+`/Applications/Arkt.app` was touched.

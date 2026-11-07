@@ -1040,6 +1040,10 @@ final class ScriptedFacade: NSObject, ArktEngine {
   /// The answer to an import: every record written, unless a test sets this.
   var importAnswer: (written: Int?, skipped: Int, failed: Int, failureReason: String?) = (nil, 0, 0, nil)
 
+  /// When true, a history answer is delivered twice, as a facade that answers a dropped barrier and then the barrier
+  /// itself would.
+  var importHistoryAnswersTwice = false
+
   private func importResult(count: Int) -> any ArktImportResult {
     let written = importAnswer.written ?? count - importAnswer.skipped - importAnswer.failed
     return ScriptedImportResult(written: written, skipped: importAnswer.skipped, failed: importAnswer.failed,
@@ -1087,7 +1091,11 @@ final class ScriptedFacade: NSObject, ArktEngine {
         url: entry.url, title: entry.title, visitTimes: entry.visitTimes, visitTransitions: entry.visitTransitions.map(\.intValue))
     })
     let result = importResult(count: entries.reduce(0) { $0 + $1.visitTimes.count })
-    Task { @MainActor in completion(result) }
+    let twice = importHistoryAnswersTwice
+    Task { @MainActor in
+      completion(result)
+      if twice { completion(result) }
+    }
   }
 
   func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {

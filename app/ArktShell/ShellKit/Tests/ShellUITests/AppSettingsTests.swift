@@ -126,6 +126,119 @@ struct AppSettingsTests {
     #expect(UserDefaults.standard.object(forKey: "settingsEphemeralProbe") == nil)
   }
 
+  // MARK: Reset all settings (#617)
+
+  private final class ToolbarRecorder: ToolbarSettingObserver {
+    var count = 0
+    func toolbarSettingDidChange(_ setting: ToolbarSetting) { count += 1 }
+  }
+
+  /// Every preference a pane edits, set away from its default.
+  private func changeEveryPreference(_ settings: AppSettings) {
+    settings.tabNavigation.countsFavorites = false
+    settings.tabNavigation.ninthOpensNinth = true
+    settings.peekLinks.opensCrossSiteLinks = false
+    settings.peekLinks.opensShiftClickedLinks = false
+    settings.opensLittleArktWithHotKey = true
+    settings.opensLittleArktOnOptionCommandClick = false
+    settings.warnsBeforeQuitting = true
+    settings.sendsCrashReports = true
+    settings.downloadLocation = DownloadLocationSetting(
+      asksWhereToSave: true, folder: URL(filePath: "/Volumes/Media/", directoryHint: .isDirectory))
+    settings.toolbar.isVisible = true
+    settings.toolbar.showsFullURL = false
+  }
+
+  @Test func resetReturnsEveryPreferenceToItsDefault() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    changeEveryPreference(settings)
+
+    settings.resetToDefaults()
+
+    #expect(settings.tabNavigation == TabNavigationSettings())
+    #expect(settings.peekLinks == PeekLinkSettings())
+    #expect(!settings.opensLittleArktWithHotKey)
+    #expect(settings.opensLittleArktOnOptionCommandClick)
+    #expect(!settings.warnsBeforeQuitting)
+    #expect(!settings.sendsCrashReports)
+    #expect(settings.downloadLocation == DownloadLocationSetting())
+    #expect(!settings.toolbar.isVisible)
+    #expect(settings.toolbar.showsFullURL)
+    for key in AppSettings.Key.preferences {
+      #expect(suite.defaults.object(forKey: key) == nil, "\(key) is removed, so a later default applies")
+    }
+    let reread = AppSettings(defaults: suite.defaults)
+    #expect(reread.tabNavigation == TabNavigationSettings())
+    #expect(!reread.toolbar.isVisible)
+    #expect(reread.toolbar.showsFullURL)
+  }
+
+  /// The list names exactly the preference keys the store writes, the Toolbar's and the Peek switches' included.
+  @Test func thePreferenceListIsEveryPreferenceKey() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    changeEveryPreference(settings)
+    let written = Set(suite.defaults.persistentDomain(forName: suite.name)?.keys.map { $0 } ?? [])
+    #expect(written == Set(AppSettings.Key.preferences))
+  }
+
+  /// Reset touches only the preferences: window state, the one-time crash ask and every other key in the suite (the
+  /// window sessions that hold the tabs, the command bar's notice) stay.
+  @Test func resetKeepsEverythingThatIsNotAPreference() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    changeEveryPreference(settings)
+    settings.lastPane = .advanced
+    settings.windowTopLeft = CGPoint(x: 40, y: 900)
+    settings.libraryLastSection = .history
+    settings.crashReportAskAnswered = true
+    suite.defaults.set(Data([1, 2, 3]), forKey: "windowSessions")
+    suite.defaults.set(true, forKey: CommandBarSettings.noticeDismissedDefaultsKey)
+    suite.defaults.set(false, forKey: CommandBarSettings.searchSuggestionsDefaultsKey)
+
+    settings.resetToDefaults()
+
+    #expect(settings.lastPane == .advanced)
+    #expect(settings.windowTopLeft == CGPoint(x: 40, y: 900))
+    #expect(settings.libraryLastSection == .history)
+    #expect(settings.crashReportAskAnswered)
+    #expect(suite.defaults.data(forKey: "windowSessions") == Data([1, 2, 3]))
+    #expect(suite.defaults.object(forKey: CommandBarSettings.noticeDismissedDefaultsKey) as? Bool == true)
+    #expect(suite.defaults.object(forKey: CommandBarSettings.searchSuggestionsDefaultsKey) as? Bool == false)
+  }
+
+  /// One notification for the whole reset, and the Toolbar's own observers hear its change.
+  @Test func resetNotifiesOnceAndTellsTheToolbarObservers() throws {
+    let suite = try Suite()
+    let settings = AppSettings(defaults: suite.defaults)
+    changeEveryPreference(settings)
+    let recorder = Recorder()
+    let toolbarRecorder = ToolbarRecorder()
+    settings.addObserver(recorder)
+    settings.toolbar.addObserver(toolbarRecorder)
+
+    settings.resetToDefaults()
+
+    #expect(recorder.count == 1)
+    #expect(toolbarRecorder.count >= 1)
+  }
+
+  @Test func resetOfAnEphemeralStoreStaysInMemory() {
+    let settings = AppSettings.ephemeral()
+    changeEveryPreference(settings)
+    settings.lastPane = .privacy
+
+    settings.resetToDefaults()
+
+    #expect(settings.tabNavigation == TabNavigationSettings())
+    #expect(settings.peekLinks == PeekLinkSettings())
+    #expect(!settings.warnsBeforeQuitting)
+    #expect(settings.downloadLocation == DownloadLocationSetting())
+    #expect(!settings.toolbar.isVisible)
+    #expect(settings.lastPane == .privacy)
+  }
+
   // MARK: Crash reports (#129)
 
   @Test func crashReportsAreOffAndUnansweredByDefault() throws {

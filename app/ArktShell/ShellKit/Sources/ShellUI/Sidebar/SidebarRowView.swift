@@ -73,8 +73,8 @@ public final class SidebarRowView: NSTableRowView {
     clipsToBounds = false            // the drop gap moves the content a full row down (SidebarDropPreview)
     backgroundLayer.cornerRadius = SidebarMetrics.rowCornerRadius
     backgroundLayer.cornerCurve = .continuous
-    backgroundLayer.shadowRadius = 2
-    backgroundLayer.shadowOffset = CGSize(width: 0, height: -1)
+    backgroundLayer.shadowRadius = ShellTokens.rowLiftShadow.radius
+    backgroundLayer.shadowOffset = ShellTokens.rowLiftShadow.unflippedOffset
     IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
 
@@ -91,7 +91,7 @@ public final class SidebarRowView: NSTableRowView {
     CATransaction.setDisableActions(true)
     backgroundLayer.frame = bounds.insetBy(dx: 0, dy: SidebarMetrics.rowBackgroundInsetY)
     applyFill()
-    let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
+    let shadow = ShellTokens.rowLiftShadow.color.resolve(flavor)
     let showsShadow = isInteractive && state == .current && shadow.alpha > 0
     backgroundLayer.shadowColor = shadow.cgColor
     backgroundLayer.shadowOpacity = showsShadow ? 1 : 0

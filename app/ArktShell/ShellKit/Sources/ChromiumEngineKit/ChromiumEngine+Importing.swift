@@ -89,13 +89,27 @@ extension ImportWriteResult {
   }
 }
 
+/// Resumes `continuation` with the first answer only. The facade answers once per call; if it ever answers again (a
+/// dropped callback and then the real one), the second answer is ignored instead of trapping the process.
+@MainActor
+private func answerOnce(
+  _ continuation: CheckedContinuation<ImportWriteResult, Never>
+) -> (any ArktImportResult) -> Void {
+  var answered = false
+  return { result in
+    guard !answered else { return }
+    answered = true
+    continuation.resume(returning: ImportWriteResult(result))
+  }
+}
+
 /// Import writes over the facade (#512). The secrets of the batch are zeroed once the facade answered.
 extension ChromiumEngine: EngineImporting {
   public func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult {
     defer { for cookie in batch { cookie.value.wipe() } }
     let records = batch.map(FacadeImportCookie.init)
     return await withCheckedContinuation { continuation in
-      facade.importCookies(records) { continuation.resume(returning: ImportWriteResult($0)) }
+      facade.importCookies(records, completion: answerOnce(continuation))
     }
   }
 
@@ -103,21 +117,21 @@ extension ChromiumEngine: EngineImporting {
     defer { for login in batch { login.password.wipe() } }
     let records = batch.map(FacadeImportLogin.init)
     return await withCheckedContinuation { continuation in
-      facade.importPasswords(records) { continuation.resume(returning: ImportWriteResult($0)) }
+      facade.importPasswords(records, completion: answerOnce(continuation))
     }
   }
 
   public func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
     let records = batch.map(FacadeImportHistoryEntry.init)
     return await withCheckedContinuation { continuation in
-      facade.importHistory(records, after: watermark) { continuation.resume(returning: ImportWriteResult($0)) }
+      facade.importHistory(records, after: watermark, completion: answerOnce(continuation))
     }
   }
 
   public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult {
     let records = batch.map(FacadeImportBookmark.init)
     return await withCheckedContinuation { continuation in
-      facade.importBookmarks(records) { continuation.resume(returning: ImportWriteResult($0)) }
+      facade.importBookmarks(records, completion: answerOnce(continuation))
     }
   }
 

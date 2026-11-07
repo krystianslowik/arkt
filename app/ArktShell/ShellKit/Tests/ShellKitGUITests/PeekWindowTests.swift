@@ -240,6 +240,25 @@ final class PeekWindowTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// KB-055 (#614): Esc stops a loading page only when no Peek is on screen. The Peek takes the first Esc; one that
+  /// comes while the card is still closing (the Peek declines it) stops nothing either, though its page is loading.
+  func testAPeekKeepsEscBeforeStopEvenWhileClosing() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar, steppedMotion: true)
+    let session = try openPeek(harness, world)
+    XCTAssertEqual(harness.engine.snapshot(of: session.tab)?.isLoading, true, "fixture: the Peek page is loading")
+    XCTAssertEqual(harness.controller.engineWindow.flatMap { harness.engine.latestActiveTab(in: $0) }, session.tab,
+                   "fixture: the Peek page is the window's active tab, the one Stop acts on")
+    XCTAssertTrue(harness.engine.simulateUnhandledKeyDown(try Self.key(53), in: session.tab))
+    XCTAssertEqual(harness.peek.session?.phase, .closing)
+    XCTAssertFalse(harness.engine.simulateUnhandledKeyDown(try Self.key(53), in: session.tab), "Esc while closing")
+    XCTAssertFalse(harness.engine.simulateUnhandledKeyDown(try Self.key(53), in: session.source), "Esc from the source")
+    XCTAssertFalse(harness.engine.executedCommands.contains { $0.command == .stop })
+    harness.settle()
+    XCTAssertNil(harness.peek.session)
+    harness.controller.close()
+  }
+
   /// Every transition is interruptible: an Esc during the open closes from where the card is.
   func testAnEscDuringTheOpenRetargetsTheClose() throws {
     let world = try Self.makeWorld()

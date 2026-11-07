@@ -80,6 +80,11 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     if let window { panel.beginSheetModal(for: window) { response in MainActor.assumeIsolated { finish(response) } } }
     else { finish(panel.runModal()) }
   }
+  /// Settings > Spaces and Profiles > Archive (#448): the two pop-ups, refreshed after Reset all settings.
+  var archiveTabsPopUp: SettingsPopUpButton?
+  var archiveLittleArktPopUp: SettingsPopUpButton?
+  /// The Reset all settings confirmation while it shows (#617).
+  var resetSheet: DialogSheet?
   /// Closure targets of the pills (an action's target is weak).
   var actionTargets: [NSObject] = []
 

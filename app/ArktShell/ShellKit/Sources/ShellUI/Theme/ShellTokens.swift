@@ -52,6 +52,11 @@ public enum ShellTokens {
   public static let tabPreviousHovered = TokenPair(light: .white(0.50), dark: .p3(hex: 0xFAFBFF, alpha: 0.12))
   public static let tabPressed = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.065), dark: .p3(hex: 0xFAFBFF, alpha: 0.065))
   public static let tabCurrentShadow = TokenPair(light: .black(0.20), dark: .black(0))
+  /// The lift under the current tab row, the current Favorite tile and the selected Archive row. Arc's geometry is
+  /// not known (#77); this is the one place to change it.
+  public static let rowLiftShadow = ShadowToken(color: tabCurrentShadow, radius: 2, offsetY: 1)
+  /// The content card's lift, which Little Arkt's flight carries too. Arc's geometry is not known (#77).
+  public static let cardLiftShadow = ShadowToken(color: cardShadow, radius: 3, offsetY: 1)
   // Command bar, hybrid design (#371, design/command-bar/README.md): a glass bar in both appearances. Text pairs are
   // measured against the opaque surface (`commandBarSurfaceOpaque`, the lightest and darkest fill the glass takes),
   // not the blurred backdrop (`ShellTokensContrastTests`).
