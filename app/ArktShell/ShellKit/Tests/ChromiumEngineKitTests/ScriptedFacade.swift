@@ -455,6 +455,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     isInitialBlank = false
     endFindAndHover()
     setTabFullscreen(false)       // a navigation leaves HTML fullscreen
+    recoverIfCrashed()            // the frame host is live again (RenderFrameCreated) before the URL and load start
     url = target
     loadingTitle = title
     record(.urlChanged) { $0.url = target }
@@ -462,7 +463,6 @@ final class ScriptedTab: NSObject, ArktTabHandle {
       isLoading = true
       record(.loadingChanged) { $0.isLoading = true }
     }
-    recoverIfCrashed()            // the navigation's frame host is live before it commits
     reportHistory()
   }
 
@@ -529,9 +529,9 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   func reload() {
     whenInserted { [self] in
       guard owner != nil, url != nil, !isLoading else { return }
+      recoverIfCrashed()
       isLoading = true
       record(.loadingChanged) { $0.isLoading = true }
-      recoverIfCrashed()
     }
   }
 
@@ -687,13 +687,15 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   // MARK: Engine side
 
-  /// `kReplaced` (crash recovery, prerender): new contents in the same container, a new session id.
-  func replaceContents() {
+  /// `kReplaced` (crash recovery, prerender): new contents in the same container, a new session id. Live new
+  /// contents end an earlier crash, as the facade's `ReportAll` reports it (`TabRecovered` after `TabReplaced`).
+  func replaceContents(live: Bool = true) {
     contentsView.removeFromSuperview()
     contentsView = NSView()
     containerView.addSubview(contentsView)
     sessionId = facade.nextId()
     record(.tabReplaced)
+    if live { recoverIfCrashed() }
   }
 
   /// The dialog's answer (`answerDialogInTab:accept:`).

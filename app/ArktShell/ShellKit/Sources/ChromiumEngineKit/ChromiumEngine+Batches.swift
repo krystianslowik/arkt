@@ -10,6 +10,13 @@ extension ChromiumEngine {
   /// queues what that emits behind the current event, and the rest of the batch re-reads the tables, so events for a
   /// tab closed meanwhile are dropped.
   func receive(_ batch: [any ArktEngineEvent]) {
+    // Zoom (#577): the change reported for a tab carries the last ZoomChanged's user flag in the batch.
+    let previousInitiator = batchZoomInitiator
+    batchZoomInitiator = [:]
+    for event in batch where event.kind == .zoomChanged {
+      if let tab = event.tab { batchZoomInitiator[ObjectIdentifier(tab)] = event.zoomIsUserInitiated }
+    }
+    defer { batchZoomInitiator = previousInitiator }
     for event in Self.reordered(batch) {
       apply(event)
     }

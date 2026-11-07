@@ -62,6 +62,8 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
 
   let facade: any ArktEngine
   let hub = EngineEventHub()
+  /// Per tab handle, the `zoomIsUserInitiated` of the last `ZoomChanged` in the batch being received (#577).
+  var batchZoomInitiator: [ObjectIdentifier: Bool] = [:]
   /// The crashed-session prompt over the facade (#577), one object for the engine's life.
   lazy var chromiumSessionRecovery = ChromiumSessionRecovery(facade: facade)
   /// Downloads (#132, `ChromiumEngine+Downloads.swift`): the list kept from the facade's download events, and the

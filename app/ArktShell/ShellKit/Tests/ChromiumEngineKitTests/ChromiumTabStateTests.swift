@@ -45,9 +45,30 @@ struct ChromiumTabStateTests {
     facade.flush()
 
     let events = recorder.events.dropFirst(2)
-    #expect(Array(events.prefix(2)) == [.loadingChanged(id, isLoading: true), .tabRecovered(id)])
+    #expect(Array(events.prefix(2)) == [.tabRecovered(id), .loadingChanged(id, isLoading: true)])
     #expect(events.filter { $0 == .tabRecovered(id) }.count == 1)
     #expect(engine.snapshot(of: id)?.crash == nil)
+  }
+
+  @Test func liveReplacedContentsEndTheCrashSoTheNextCrashIsReported() {
+    let (engine, id, tab) = makeEngine()
+    let recorder = EventRecorder(engine)
+    tab.crash(status: .crashed)
+    tab.replaceContents(live: true)
+    tab.crash(status: .killed)
+    facade.flush()
+
+    #expect(recorder.events == [.tabCrashed(id, .crashed), .tabRecovered(id), .tabCrashed(id, .killed)])
+    #expect(engine.snapshot(of: id)?.crash == .killed)
+  }
+
+  @Test func crashedReplacedContentsKeepTheCrash() {
+    let (engine, id, tab) = makeEngine()
+    let recorder = EventRecorder(engine)
+    tab.crash(status: .crashed)
+    tab.replaceContents(live: false)
+    facade.flush()
+    #expect(recorder.events == [.tabCrashed(id, .crashed)])
   }
 
   @Test(arguments: [(ArktTerminationStatus.crashed, TabTerminationStatus.crashed), (.killed, .killed),
@@ -120,6 +141,17 @@ struct ChromiumTabStateTests {
 
     #expect(recorder.events == [.zoomChanged(id, TabZoom(percent: 150, isDefault: false), userInitiated: false)])
     #expect(engine.snapshot(of: id)?.zoom == TabZoom(percent: 150, isDefault: false))
+  }
+
+  /// Batch rule: the last event wins. One change is reported, with the user flag of the batch's last `ZoomChanged`.
+  @Test(arguments: [(true, false), (false, true)])
+  func theLastZoomEventOfABatchDecidesUserInitiated(_ first: Bool, _ last: Bool) {
+    let (engine, id, tab) = makeEngine()
+    let recorder = EventRecorder(engine)
+    tab.setZoom(125, userInitiated: first)
+    tab.setZoom(150, userInitiated: last)
+    facade.flush()
+    #expect(recorder.events == [.zoomChanged(id, TabZoom(percent: 150, isDefault: false), userInitiated: last)])
   }
 
   @Test func aCrashedTabDoesNotZoom() {

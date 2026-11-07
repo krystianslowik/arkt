@@ -1996,7 +1996,10 @@ class TabObserver : public content::WebContentsObserver,
                       ? FaviconPNG(driver->GetFavicon())
                       : nil);
     ReportFullscreen(contents->IsFullscreen());
+    // New contents may be crashed or live: a crash is reported, and live
+    // contents clear an earlier crash, so the next real crash is not lost.
     ReportCrash(CrashStatusOf(contents));
+    ReportRecovery();
     ReportZoom(/*user_initiated=*/false);
   }
 
@@ -3703,9 +3706,7 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
   }
 }
 
-// Closes the tab's pending JavaScript dialog (alert, confirm, prompt,
-// beforeunload) through its TabModalDialogManager. A prompt is answered with
-// an empty string.
+// The crashed-session prompt (#577): the facade's state for the run.
 - (BOOL)lastSessionCrashed {
   arkt::CheckFacadeEntry();
   return arkt::g_facade->last_session_crashed();
@@ -3716,6 +3717,9 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
   arkt::g_facade->DismissLastSession();
 }
 
+// Closes the tab's pending JavaScript dialog (alert, confirm, prompt,
+// beforeunload) through its TabModalDialogManager. A prompt is answered with
+// an empty string.
 - (BOOL)answerDialogInTab:(id<ArktTabHandle>)tab accept:(BOOL)accept {
   arkt::CheckFacadeEntry();
   if (!arkt::TestAPIEnabled()) {

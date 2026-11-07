@@ -40,13 +40,15 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case pageInfoNamesTheSiteItShows, permissionChangeIsReadBackAndResetRestoresTheDefault
   case permissionChangeRaisesTheReloadInfobarOnce
 
-  /// The checks the Chromium engine runs: every rule but 26, which waits for the facade's page info seam (#583) to add
-  /// it here.
-  public static var chromiumChecks: [ContractCheck] { allCases.filter { $0.rule < 26 } }
+  /// The rules the Chromium engine does not run yet, each with the issue that adds it here.
+  public static let chromiumDeferredRules: [Int: Int] = [26: 583]  // page info seam
+
+  /// The checks the Chromium engine runs: every rule not in `chromiumDeferredRules`.
+  public static var chromiumChecks: [ContractCheck] { allCases.filter { chromiumDeferredRules[$0.rule] == nil } }
 
   /// The checks the Chromium engine does not run yet, and the issue each waits for.
   public static var chromiumDeferred: [(check: ContractCheck, issue: Int)] {
-    allCases.filter { !chromiumChecks.contains($0) }.map { ($0, 583) }
+    allCases.compactMap { check in chromiumDeferredRules[check.rule].map { (check, $0) } }
   }
 
   /// The contract rule (1-26) the check belongs to, as numbered in `EngineContract`'s documentation.

@@ -4684,7 +4684,7 @@ removed, a self-test reload of a crashed tab logs no `tabRecovered`. Both restor
 
 | Command | Result |
 |---|---|
-| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` | 141 + 28 + 279 passed, 0 failed: ChromiumEngineKitTests (14 new `ChromiumTabStateTests`, the rule 25 contract cases over both facade scripts, 1 defaults test removed), ArktEngineABITests (3 new `TabStateABITests`), EngineAPITests (1 new `TabStateTests` case: the snapshot inside the `.tabFullscreenChanged` handler) |
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (first version) | 141 + 28 + 279 passed, 0 failed: ChromiumEngineKitTests (14 new `ChromiumTabStateTests`, the rule 25 contract cases over both facade scripts, 1 defaults test removed), ArktEngineABITests (3 new `TabStateABITests`), EngineAPITests (1 new `TabStateTests` case: the snapshot inside the `.tabFullscreenChanged` handler) |
 | Full suite (`swift test --skip ShellKitGUITests`) | not run locally (several lanes building on this Mac); CI's Swift tests job |
 
 ### Build
@@ -4741,3 +4741,32 @@ In sync; nothing exported. Facade header copies `cmp` identical.
 - `chrome://gpucrash` from the shell, and the unanswered crashed session across runs (maintainer questions in the pull
   request).
 - The shell side: #578 (crash panel), #579 (zoom), #581 (fullscreen), #580 / #690 (restore).
+
+### #577 review fixes (PR #770)
+
+- **Replaced contents clear a crash.** `ReportAll` (new contents after `TabReplaced`) now calls `ReportRecovery()` after
+  `ReportCrash`: live new contents end the crash, so the tab's next real crash is reported. The scripted facade models
+  it (`replaceContents(live:)` records `TabRecovered` after `TabReplaced`); `ChromiumTabStateTests` checks crash,
+  live replacement, crash again (`tabCrashed`, `tabRecovered`, `tabCrashed`) and that crashed replacement contents
+  keep the crash. Deliberate break: without the recovery in `replaceContents`, the second crash is lost and the test
+  fails (2 issues); restored. A replacement of a crashed tab's contents was not reachable in the self-test, so the
+  real path is covered by the scripted model only.
+- **Scripted order.** The scripted facade reports `TabRecovered` before the URL and the load start of the reload or
+  navigation, as the real facade does (`RenderFrameCreated` comes first, seen in the self-test runs above).
+- **Zoom batch rule: the last event wins.** ChromiumEngine reports one change per tab and batch, from the live zoom,
+  with the user flag of the batch's last `ZoomChanged` for that tab (the event that set the live zoom). Tested both
+  ways; with the event's own flag instead, both cases fail; restored.
+- **Header:** the `ZoomChanged` comment notes that in an isolated or manual zoom mode a navigation can report user
+  initiated (both copies, `cmp` identical).
+- `ContractCheck.chromiumDeferred` reads a rule-to-issue map (`chromiumDeferredRules`, `[26: 583]`); doc comments moved
+  to the members they describe (`lastSessionCrashed`, `isFiltered`).
+
+| Check | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (`nice -n 20`, `-j 2`) | 144 + 28 + 279 passed, 0 failed (3 new ChromiumTabStateTests cases plus the 2-argument batch test) |
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | finished successfully, `FAILED:` 0; `gn check` only the pre-existing errors |
+| Self-test, fresh profile: zoom in, then `chrome://crash`, reload, `chrome://crash`, reload | `zoomChanged 110 user=yes`; `tabCrashed`, `tabRecovered`, `tabCrashed`, `tabRecovered`; 0 `FATAL` |
+| `.patches` | 11 = 11, in sync |
+
+Cleanup: the self-test and the loopback server stopped by PID; the profiles, the build log and the three crash dumps
+of the run deleted.

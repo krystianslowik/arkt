@@ -19,10 +19,11 @@ final class EngineContractRunner {
   static var isRequested: Bool { CommandLine.arguments.contains { $0 == switchName || $0.hasPrefix(switchName + "=") } }
   static let switchName = "--arkt-engine-contract"
 
-  /// `--arkt-engine-contract=<check>,<check>` runs only the named checks (diagnostics); the plain switch runs all.
-  /// A name that is not a check, or an empty list, is an error: a typo must never run nothing and pass.
+  /// The run names its checks (`--arkt-engine-contract=<check>,...`), so the deferred checks are not listed.
   static var isFiltered: Bool { CommandLine.arguments.contains { $0.hasPrefix(switchName + "=") } }
 
+  /// `--arkt-engine-contract=<check>,<check>` runs only the named checks (diagnostics); the plain switch runs all.
+  /// A name that is not a check, or an empty list, is an error: a typo must never run nothing and pass.
   static func selectedChecks() throws -> [ContractCheck] {
     guard let argument = CommandLine.arguments.first(where: { $0.hasPrefix(switchName + "=") }) else {
       return ContractCheck.chromiumChecks

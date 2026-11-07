@@ -206,8 +206,10 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // through this tab's zoom controller (zoomIn, zoomOut and resetZoom here,
   // Chromium's zoom commands, an extension's chrome.tabs.setZoom). A site's
   // saved zoom applied on navigation, another tab of the same host zoomed, or
-  // a new default zoom are not. Only changes of percent or default are
-  // reported.
+  // a new default zoom are not. Exception: in an isolated or manual zoom mode
+  // (an extension's chrome.tabs.setZoomSettings) the controller sets the
+  // tab's own level on navigation, so that change can report user initiated.
+  // Only changes of percent or default are reported.
   ArktEngineEventKindZoomChanged = 28,
   // An element of the page entered or left HTML fullscreen (#577), from
   // WebContentsObserver::DidToggleFullscreenModeForTab. Values:

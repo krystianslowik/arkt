@@ -39,8 +39,11 @@ extension ChromiumEngine {
       hub.emit(.tabRecovered(id))
     case .zoomChanged:
       // The handle's live zoom, not the recorded one: a batch holding two changes, or a change this client already
-      // reported from its own call, then reports only what is new.
-      zoomChanged(id, to: Self.zoom(of: handle), userInitiated: event.zoomIsUserInitiated)
+      // reported from its own call, then reports only what is new. Batch rule: the last event wins. The one change
+      // reported for the tab carries the user flag of the batch's last ZoomChanged for it, the event that set the
+      // live zoom.
+      let userInitiated = batchZoomInitiator[ObjectIdentifier(handle)] ?? event.zoomIsUserInitiated
+      zoomChanged(id, to: Self.zoom(of: handle), userInitiated: userInitiated)
     case .tabFullscreenChanged:
       guard tabs[id]?.snapshot.isTabFullscreen != event.isTabFullscreen else { break }
       tabs[id]?.snapshot.isTabFullscreen = event.isTabFullscreen
