@@ -196,6 +196,17 @@ public final class PeekController {
     }
   }
 
+  /// Recovery must not replace any live or hidden Peek. Report whether the new page was presented.
+  func openForRecovery(_ url: URL, from source: TabID) -> Bool {
+    guard shell.window != nil, session == nil, hiddenPeeks.isEmpty else { return false }
+    let tab = shell.engine.createTab(url: url, in: shell.ensureEngineWindow())
+    guard present(tab, url: url, from: source, motion: .open(at: nil)) else {
+      shell.engine.closeTab(tab, mode: .skipUnloadHandlers)
+      return false
+    }
+    return true
+  }
+
   /// A tab the engine opened on its own from `snapshot.opener` (#345: a `target=_blank` link, `window.open` without
   /// window features) becomes the Peek when the link rules say so: the engine's tab itself, with its page, history and
   /// opener, never a second load. True when it did; the window then adds no row for it.

@@ -190,14 +190,12 @@ final class AppSession {
   /// extension's `chrome.windows.create`) opened one already.
   func finishLaunch(opensWindow: Bool) {
     let window = opensWindow ? windows.openWindow() : windows.primary
-    if let window { presentOnboardingIfNeeded(on: window) }
-    askAboutCrashIfNeeded()
-    if let notice = launchNotice, let window {
-      launchNotice = nil
-      window.toasts.show(notice.toast) { [location] in
-        NSWorkspace.shared.activateFileViewerSelecting([location.directory])
-      }
+    if let window {
+      presentOnboardingIfNeeded(on: window)
     }
+    askAboutCrashIfNeeded()
+    if let window { presentLaunchNotice(on: window) }
+    windows.beginSessionRecovery(engine.sessionRecovery)
     startAutoArchive()
   }
 
@@ -210,9 +208,18 @@ final class AppSession {
     }
   }
 
+  private func presentLaunchNotice(on window: ShellWindowController) {
+    guard let notice = launchNotice else { return }
+    launchNotice = nil
+    window.toasts.show(notice.toast) { [location] in
+      NSWorkspace.shared.activateFileViewerSelecting([location.directory])
+    }
+  }
+
   /// The app's hooks on every browser window, before it is shown. Its stored favicons load off the main actor
   /// (each window has its own sidebar views); ids the engine reports meanwhile keep the newer one (#91).
   private func wire(_ window: ShellWindowController) {
+    presentLaunchNotice(on: window)
     window.onImportFromArc = { [weak self] in self?.importFromArc() }
     window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
     window.onReopenArchived = { [weak self, weak window] id in                                // Cmd-Shift-T, BH-074
