@@ -284,8 +284,8 @@ public final class ShellWindowSet {
   /// A blank or incognito window, built as an engine-requested one so it never takes over saving the session.
   private func makePrivateWindow(_ presentation: SidebarPresentation, bounds: CGRect?,
                                  near anchor: NSWindow?) -> ShellWindowController {
-    let controller = make(opensFirstTab: false, origin: .engineRequested)
-    if presentation == .blank { controller.makeBlank() } else { controller.makeIncognito() }
+    let controller = make(opensFirstTab: false, origin: .engineRequested,
+                          kind: presentation == .blank ? .blank : .incognito)
     if let bounds {
       controller.window?.setFrame(bounds, display: false)
     } else {

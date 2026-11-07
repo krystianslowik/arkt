@@ -5127,3 +5127,11 @@ the installed toolchain cannot compile baseline ShellKit. Swift source parsing a
 for this integration is attributable only to `22d4906e12ddb3cd053b4f836e3be00810c0e1d1`: 2,454 pure tests in 278
 suites, 2,038 GUI tests executed, 51 skipped, zero failures, and all eight reported checks passed. Those results do not
 validate this test-first merge. The PR stays draft while #776 awaits the maintainer; maximum-one-Peek safety remains.
+
+### Private reopen creation routing (#777)
+
+Blank and Incognito reopen windows now receive their final kind during construction, before recovery routing runs.
+The private-window handover still precedes `isClosed`, and recovery reassignment follows it. The existing synchronous
+GUI regressions were not run locally because the installed toolchain cannot compile baseline ShellKit. Swift source
+parsing and `git diff --check` passed; they do not establish compilation or runtime behavior. The shell-owned
+recovery migration remains incomplete and the test-first APIs at `781c729` remain missing.
