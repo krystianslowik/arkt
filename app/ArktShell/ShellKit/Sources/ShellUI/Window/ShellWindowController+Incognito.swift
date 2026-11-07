@@ -162,9 +162,6 @@ extension ShellWindowController {
   /// The toast for a page refused at the cap, with Close Oldest while a page can be closed. Close Oldest picks again
   /// when pressed (a page may have started playing since) and does not open the refused page.
   func showPrivatePageCapToast() {
-    if rootView.themeBackground.themes.isEmpty {      // these windows have no Space theme
-      toasts.view?.theme = ToastView.plainTheme(sidebarController.view.flavor)
-    }
     let toast = PrivatePageOrder.capToast(canCloseOldest: privatePageToCloseOldest != nil)
     guard toast.actionTitle != nil else {
       toasts.show(toast)

@@ -39,10 +39,10 @@ final class PrivatePagesScreenshotTests: XCTestCase {
     "Translation of a long paragraph from the original text", "Parking near the station", "Q",
   ]
 
-  /// The design's backdrop (`prototype.html`, `--theme-a` and `--theme-b`).
-  static func neutralTheme(dark: Bool) -> SpaceThemeInfo {
-    dark ? SpaceThemeInfo(baseColors: [.srgb(hex: 0x34343B), .srgb(hex: 0x222227)], isDark: true)
-      : SpaceThemeInfo(baseColors: [.srgb(hex: 0xE7E6EA), .srgb(hex: 0xD6D5DB)], isDark: false)
+  /// A strong Space theme of the other tone than the shot, so the shot shows the window ignores it (#766).
+  static func spaceTheme(dark: Bool) -> SpaceThemeInfo {
+    dark ? SpaceThemeInfo(baseColors: [.srgb(hex: 0xFF3B30), .srgb(hex: 0xFF9500)], isDark: false)
+      : SpaceThemeInfo(baseColors: [.srgb(hex: 0x0A1A6B), .srgb(hex: 0x1D1838)], isDark: true)
   }
 
   static let hosts = ["checkout.example.org", "accounts.example.com", "radio.example.net", "search.example.org",
@@ -50,9 +50,9 @@ final class PrivatePagesScreenshotTests: XCTestCase {
 
   private func makeWindow(dark: Bool, size: NSSize, pages: Int) throws -> (ShellWindowController, InMemoryEngine) {
     let engine = InMemoryEngine()
-    // The window opens on a Space, as from a normal window; its theme is the design's neutral backdrop.
+    // The window opens on a strongly themed Space, as from a normal window; it draws its own neutral backdrop.
     let source = StubSidebar()
-    _ = source.addSpace(title: "Work", theme: Self.neutralTheme(dark: dark))
+    _ = source.addSpace(title: "Work", theme: Self.spaceTheme(dark: dark))
     let set = ShellWindowSet(engine: engine, sidebar: source, hostLookup: { [engine] in engine.host(of: $0) })
     engine.windowHostProvider = { [weak set] request in
       guard let set else { preconditionFailure("the set outlives the test") }
@@ -60,10 +60,10 @@ final class PrivatePagesScreenshotTests: XCTestCase {
     }
     sets.append(set)
     let controller = set.openWindow(opensFirstTab: false)
-    controller.makeIncognito()
     let window = try XCTUnwrap(controller.window)
     window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-    controller.sidebarController.view.setFlavor(dark ? .dark : .light)
+    controller.themeContextObserver?.notify()
+    controller.makeIncognito()
     controller.sidebarController.view.privatePages.reduceMotion = { true }
     controller.toasts.view?.reduceMotion = { true }
     window.setFrame(NSRect(origin: NSPoint(x: 80, y: 80), size: size), display: true)

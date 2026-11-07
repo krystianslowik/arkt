@@ -356,11 +356,14 @@ final class PrivatePagesTests: XCTestCase {
     window.window?.performClose(nil)
   }
 
-  /// The cap toast takes the window's flavor: these windows have no Space theme.
+  /// The cap toast takes the window's flavor: these windows have no Space theme, and their backdrop follows the
+  /// appearance (#766).
   func testTheCapToastFollowsTheWindowFlavor() throws {
     let f = try makeFixture()
     let window = try privateWindow(f)
-    window.sidebarController.view.setFlavor(.dark)
+    window.window?.appearance = NSAppearance(named: .darkAqua)
+    window.themeContextObserver?.notify()
+    XCTAssertEqual(window.sidebarController.view.flavor, .dark)
     fill(window, to: 20)
     window.openPrivately(EngineWorld.url("refused"), inNewPage: true)
     XCTAssertEqual(window.toasts.view?.flavor, .dark)

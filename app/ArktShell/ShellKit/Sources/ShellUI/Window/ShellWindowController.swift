@@ -386,8 +386,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   /// Toasts follow the theme of the Space the pager is nearest to: its flavor and its first color stop (BH-190,
-  /// alerts design decision 2).
+  /// alerts design decision 2). A blank or incognito window has no Space theme: its toasts keep the untinted surface
+  /// in the backdrop's flavor (design/private-pages, "Past the cap").
   private func refreshToastFlavor() {
+    if let backdrop = sidebarController.privateBackdrop {
+      toasts.view?.theme = ToastView.plainTheme(backdrop.flavor)
+      return
+    }
     let themes = rootView.themeBackground.themes
     guard !themes.isEmpty else { return }
     let index = min(max(Int(pager.position.rounded()), 0), themes.count - 1)
