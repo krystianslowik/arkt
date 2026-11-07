@@ -73,11 +73,14 @@ public struct ClosedPrivatePage: Equatable, Sendable {
   /// then reopens its URL without history).
   public var parked: TabID?
   public var url: URL?
+  /// Its row in the window's Pages list when it closed, so it comes back there (#789); nil when it had none.
+  public var row: Int?
 
-  public init(tab: TabID, parked: TabID?, url: URL?) {
+  public init(tab: TabID, parked: TabID?, url: URL?, row: Int? = nil) {
     self.tab = tab
     self.parked = parked
     self.url = url
+    self.row = row
   }
 }
 
