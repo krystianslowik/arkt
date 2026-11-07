@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Sat, 7 Nov 2026 04:27:09 +0100
+Subject: [PATCH] Arkt: keep imported visits out of history sync
+
+HistorySyncBridge::MaybeCommit skips SOURCE_OS_MIGRATION_IMPORTED visits next to SOURCE_ACTOR ones, so history imported from another browser stays on this device (#566). The check is the one place that OnURLVisited, OnURLsModified and OnVisitUpdated all pass through. No overlay seam works: writing the visits as actor visits or without the chain end hides them from the History page, marking them foreign gets them deleted when history sync is turned off, and writing rows behind the backend still commits them through OnURLsModified and keeps them out of the omnibox until the next launch. HistorySyncBridgeTest.ImportedVisitsNotSynced covers all three entry points.
+---
+ .../core/browser/sync/history_sync_bridge.cc  |  4 ++++
+ .../sync/history_sync_bridge_unittest.cc      | 23 +++++++++++++++++++
+ 2 files changed, 27 insertions(+)
+
+diff --git a/components/history/core/browser/sync/history_sync_bridge.cc b/components/history/core/browser/sync/history_sync_bridge.cc
+index 496acabd9d..21ea7ff7ce 100644
+--- a/components/history/core/browser/sync/history_sync_bridge.cc
++++ b/components/history/core/browser/sync/history_sync_bridge.cc
+@@ -966,6 +966,10 @@ void HistorySyncBridge::MaybeCommit(const VisitRow& visit_row) {
+       visit_source == VisitSource::SOURCE_ACTOR) {
+     return;
+   }
++  // Arkt: visits imported from another browser stay on this device.
++  if (visit_source == VisitSource::SOURCE_OS_MIGRATION_IMPORTED) {
++    return;
++  }
+ 
+   // If this visit is not the end of a redirect chain, ignore it. Note that
+   // visits that are not part of a redirect chain are considered to be both
+diff --git a/components/history/core/browser/sync/history_sync_bridge_unittest.cc b/components/history/core/browser/sync/history_sync_bridge_unittest.cc
+index 73ddd52c66..0a5c487948 100644
+--- a/components/history/core/browser/sync/history_sync_bridge_unittest.cc
++++ b/components/history/core/browser/sync/history_sync_bridge_unittest.cc
+@@ -1945,6 +1945,29 @@ TEST_F(HistorySyncBridgeTest, ActorInitiatedVisitsNotSynced) {
+   EXPECT_TRUE(processor()->GetEntities().empty());
+ }
+ 
++TEST_F(HistorySyncBridgeTest, ImportedVisitsNotSynced) {
++  // Start syncing (with no data yet).
++  ApplyInitialSyncChanges({});
++
++  // Import a visit.
++  auto [url_row, visit_row] = AddVisitToBackendAndAdvanceClock(
++      GURL("https://www.url.com"), ui::PAGE_TRANSITION_LINK);
++  backend()->AddOrReplaceVisitSource(
++      visit_row.visit_id, VisitSource::SOURCE_OS_MIGRATION_IMPORTED);
++
++  // Neither the visit itself nor a later change to its URL or the visit may
++  // reach the processor.
++  bridge()->OnURLVisited(
++      /*history_backend=*/nullptr, url_row, visit_row);
++  bridge()->OnURLsModified(/*history_backend=*/nullptr, {url_row},
++                           /*is_from_expiration=*/false);
++  bridge()->OnVisitUpdated(visit_row,
++                           VisitUpdateReason::kUpdateVisitDuration);
++
++  // The data should *not* have been uploaded to Sync.
++  EXPECT_TRUE(processor()->GetEntities().empty());
++}
++
+ TEST_F(HistorySyncBridgeTest, NonActorInitiatedVisitsAreSynced) {
+   // Start syncing (with no data yet).
+   ApplyInitialSyncChanges({});
